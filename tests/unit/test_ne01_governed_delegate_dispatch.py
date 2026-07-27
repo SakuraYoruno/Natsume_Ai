@@ -8,6 +8,7 @@ import pytest
 
 from host_brain.app.governed_delegate_dispatch import (
     GOVERNED_DELEGATE_AUTHORITY_INVALID,
+    GOVERNED_DELEGATE_OUTPUT_INVALID,
     GOVERNED_DELEGATE_TARGET_UNAVAILABLE,
     GovernedDelegateDispatchError,
     GovernedDelegateInvocation,
@@ -15,11 +16,16 @@ from host_brain.app.governed_delegate_dispatch import (
     GovernedDelegateDispatcher,
     build_governed_delegate_dispatcher,
 )
+from host_brain.app.handlers.pentest_agent_handler import pentest_agent_handler
 from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     READONLY_DELEGATE_EXECUTION_MODE,
     ReadonlyDelegateUsageAttestationError,
     build_readonly_delegate_usage_attestation,
     validate_readonly_delegate_usage_attestation,
+)
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GovernedDelegateTargetPolicyError,
+    validate_governed_delegate_target_policy,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
@@ -94,6 +100,16 @@ async def test_readonly_pentest_delegate_revalidates_the_full_frozen_authority_t
     assert outcome.success is True
     assert outcome.target_id == "pentest_agent"
     assert outcome.audit_refs["delegate_execution_mode"] == "PORT_FREE_READ_ONLY"
+    target_policy = dispatcher.require_target("pentest_agent")
+    assert outcome.audit_refs["delegate_target_policy_ref"] == (
+        target_policy["policy_ref"]
+    )
+    assert outcome.audit_refs["delegate_review_mode"] == (
+        "DURABLE_PRE_EXECUTION_REQUIRED"
+    )
+    assert outcome.audit_refs["delegate_effect_mode"] == (
+        "GRAPH_ACCEPTANCE_RESULT_ONLY"
+    )
     assert outcome.audit_refs["side_effects_executed"] is False
     usage = validate_readonly_delegate_usage_attestation(
         outcome.audit_refs["delegate_runtime_usage_attestation"]
@@ -149,6 +165,54 @@ async def test_unregistered_or_effectful_delegate_target_is_rejected_before_gran
 
     assert raised.value.reason_code == GOVERNED_DELEGATE_TARGET_UNAVAILABLE
     assert verifier.calls == []
+
+
+@pytest.mark.asyncio
+async def test_readonly_delegate_rejects_effect_descriptor_instead_of_discarding_it() -> None:
+    verifier = _Verifier()
+
+    def effect_claiming_handler(payload, context):  # noqa: ANN001
+        result = dict(pentest_agent_handler(payload, context))
+        result["acceptance_effect_intents"] = [
+            {
+                "effect_type": "gateway.reply",
+                "payload": {"message": "must not escape"},
+            }
+        ]
+        return result
+
+    dispatcher = GovernedDelegateDispatcher(
+        node_grants=verifier,
+        targets={
+            "pentest_agent": GovernedDelegateTarget(
+                target_id="pentest_agent",
+                handler=effect_claiming_handler,
+                adapter_id="test-readonly",
+                execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+            )
+        },
+    )
+    invocation = GovernedDelegateInvocation.from_frozen(
+        frozen=_frozen(),
+        user_message="prepare a read-only threat model for example.test",
+        context={},
+    )
+
+    with pytest.raises(GovernedDelegateDispatchError) as raised:
+        await dispatcher.dispatch(invocation)
+
+    assert raised.value.reason_code == GOVERNED_DELEGATE_OUTPUT_INVALID
+
+
+def test_delegate_target_policy_reopens_exact_content_address() -> None:
+    dispatcher = build_governed_delegate_dispatcher(node_grants=_Verifier())
+    policy = dispatcher.require_target("pentest_agent")
+
+    assert validate_governed_delegate_target_policy(policy) == policy
+    tampered = dict(policy)
+    tampered["effect_mode"] = "DIRECT_EFFECT_ALLOWED"
+    with pytest.raises(GovernedDelegateTargetPolicyError):
+        validate_governed_delegate_target_policy(tampered)
 
 
 @pytest.mark.asyncio

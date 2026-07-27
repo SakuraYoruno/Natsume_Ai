@@ -3,9 +3,40 @@
 
 # 测试与验收目录
 
-版本：v2.28
+版本：v2.30
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Plan/Delegate 执行政策与审批恢复当前切片
+
+- `test_ne02_capability_plan_search.py` 覆盖 Plan policy 冻结/重开、Graph
+  Budget digest、Registry risk/Review/execution policy、policy tamper、缺失
+  Skill 和非 result node Effect 拒绝。
+- `test_gr04_planning_execution.py` 约束 policy binder 只能扩展 WorkOrder
+  metadata，不能改写 TaskGraph、domain、预算、输入或 planning lineage。
+- `test_gr05_direct_host_route_contracts.py`、`test_aw02_governed_host_runtime.py`
+  与 `test_ne01_governed_delegate_dispatch.py` 覆盖 Delegate content address、
+  pre-execution Review、exact-zero budget mode、未登记 target、policy drift 和
+  effect/outbox/delivery claim 拒绝。
+- `test_gr05_frozen_route_executors.py` 在 COMMIT 前重验 admitted policy 与
+  dispatcher audit 的 adapter/mode/ref 一致性，不能只相信 URI 前缀。
+- Operator/Scheduler 的 `route=delegate` 是已认证控制传输，不是 child-agent
+  Delegate：target allowlist 仍须精确命中，但它不携带 pentest target policy，
+  使用有限非零预算。`test_aw02_governed_host_runtime.py` 与真实
+  `test_ne01_governed_operator_sys_mode.py` 共同覆盖该边界，回归集合为
+  `21 passed in 41.62s`；Scheduler 的同边界另由下述定向集合覆盖。
+- 当前 Plan/Delegate 定向单元/合同集合为 `89 passed`；它与上述
+  Operator 集合存在重叠，数字分别报告、不相加。
+- `test_gr05_universal_host_runtime.py` 使用真实文件型 SQLite，Delegate 首次
+  返回 `WAITING_APPROVAL` 且零 Attempt；Review approve/resume 后由
+  `ReviewContinuationWorker` claim exact checkpoint，最终 `ACCEPTED` 且
+  continuation 消失。Chat/Skill/Delegate/Plan 集成为
+  `1 passed in 26.40s`。
+- 干净实现 SHA `3db60ff1` 已重跑同库七路线 v3 收据：
+  `ne01_plan_delegate_route_acceptance_20260727.json` 的七路均为 `PASS`，
+  Plan 三节点与 Delegate Review continuation 均有提交绑定证据。当前启用
+  Plan/Delegate 范围为 `COMPLETE`；真实 provider、Docker 与完整服务栈未运行，
+  远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Skill 预算与副作用 policy 当前切片
 
@@ -85,8 +116,8 @@
 - `UniversalRouteAcceptanceReader` 只读打开真实文件型 SQLite，在一个事务中读取 Command、Graph、Node、Attempt、Lease、Operation、父子 Budget、Verification、Acceptance、Artifact、WorkerProjection、Effect、Outbox、recovery、reconciliation 与 cancellation 投影；内存数据库、缺表/缺列和迁移不一致均失败关闭。
 - `UniversalRouteAcceptanceBuilder` 要求干净 Git HEAD、仓库/数据库 migration head 一致、每个 request 只证明一条路线，并输出经过字段白名单和总 receipt digest 保护的隐私边界收据。
 - GR05 已加入 Direct Skill，真实 Host Runtime 的单项集成 `1 passed`，共同证明 Chat、Skill、Delegate、Plan。`test_ne01_universal_remaining_route_acceptance.py` 另以同一真实 SQLite 运行 Scheduler、Internal 和带 Review/outer outcome 的 Operator，单项集成 `1 passed`。
-- 最新串联运行绑定干净提交 `c68850f859048be955c15366e33ada3a917d9b12`；GR05 单项为 `1 passed in 25.45s`，剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 得到七路全部 `PASS`、reason code 全空，migration head 为 0135。正式收据为 [ne01_skill_policy_route_acceptance_20260727.json](test_reports/ne01_skill_policy_route_acceptance_20260727.json)，receipt digest=`sha256:eee1b416d6de71a92df07d57a5c8cf84f4788ed3d9d74b4365fa99d571e6f13e`。
-- 机器矩阵中七路 `commit_bound_acceptance` 已全部为 `PASS`；Chat 的模型预算控制与 Skill 当前启用范围的 Budget/transactional Effect 控制也为 `PASS`，因此 Chat 和 Skill 达到 `COMPLETE`。49 个 blocked Skill 不计完成；其它 `PARTIAL` 控制仍使其余五路和 NE-01 保持 `INCOMPLETE / IN_PROGRESS`。受控 terminal provider 不具备真实 provider 质量、PlanningSearch 收益或 NE-07 资格，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+- 最新串联运行绑定干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35`；GR05 单项为 `1 passed in 26.36s`，剩余路线 CLI 为 `PASS`。v3 validator 对同一文件型 SQLite 得到七路全部 `PASS`、reason code 全空，migration head 为 0135。当前正式收据为 [ne01_plan_delegate_route_acceptance_20260727.json](test_reports/ne01_plan_delegate_route_acceptance_20260727.json)，receipt digest=`sha256:ac275b0854d6ef56c9fe685ee99dad965556009363e92fb9105ed2788f57beab`。
+- 机器矩阵中七路 `commit_bound_acceptance` 已全部为 `PASS`；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 和只读 `pentest_agent` Delegate 达到 `COMPLETE`。Scheduler/Internal/Operator 的其它 `PARTIAL` 控制仍使 NE-01 保持 `IN_PROGRESS`。受控 terminal provider 不具备真实 provider 质量、PlanningSearch 收益或 NE-07 资格，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Review 拒绝原子终态当前切片
 

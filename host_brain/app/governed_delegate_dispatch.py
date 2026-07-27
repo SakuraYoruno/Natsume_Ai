@@ -29,6 +29,13 @@ from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     READONLY_DELEGATE_EXECUTION_MODE,
     build_readonly_delegate_usage_attestation,
 )
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_DELEGATE_BUDGET_MODE,
+    GOVERNED_DELEGATE_EFFECT_MODE,
+    GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION,
+    GOVERNED_DELEGATE_REVIEW_MODE,
+    freeze_governed_delegate_target_policy,
+)
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
 
@@ -210,6 +217,28 @@ class GovernedDelegateTarget:
     handler: ReadOnlyDelegateHandler
     adapter_id: str
     execution_mode: str
+    review_mode: str = GOVERNED_DELEGATE_REVIEW_MODE
+    budget_mode: str = GOVERNED_DELEGATE_BUDGET_MODE
+    effect_mode: str = GOVERNED_DELEGATE_EFFECT_MODE
+
+    def policy_projection(self) -> dict[str, Any]:
+        return freeze_governed_delegate_target_policy(
+            {
+                "schema_version": GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION,
+                "target_id": _required_identifier(
+                    self.target_id,
+                    "delegate target_id",
+                ),
+                "adapter_id": _required_identifier(
+                    self.adapter_id,
+                    "delegate adapter_id",
+                ),
+                "execution_mode": str(self.execution_mode or "").strip(),
+                "review_mode": str(self.review_mode or "").strip(),
+                "budget_mode": str(self.budget_mode or "").strip(),
+                "effect_mode": str(self.effect_mode or "").strip(),
+            }
+        )
 
 
 class GovernedDelegateDispatcher:
@@ -234,11 +263,21 @@ class GovernedDelegateDispatcher:
                 raise ValueError(
                     "delegate target must declare the port-free read-only execution mode"
                 )
+            policy = target.policy_projection()
+            if (
+                policy["review_mode"] != GOVERNED_DELEGATE_REVIEW_MODE
+                or policy["budget_mode"] != GOVERNED_DELEGATE_BUDGET_MODE
+                or policy["effect_mode"] != GOVERNED_DELEGATE_EFFECT_MODE
+            ):
+                raise ValueError(
+                    "delegate target must declare durable Review, exact-zero "
+                    "Budget and graph-Acceptance-only effects"
+                )
             normalized[resolved] = target
         self._node_grants = node_grants
         self._targets = normalized
 
-    def require_target(self, target_id: str) -> None:
+    def require_target(self, target_id: str) -> dict[str, Any]:
         """Reject a target before a HostCommand or TaskGraph is persisted."""
 
         target = _required_identifier(target_id, "delegate target_id")
@@ -247,6 +286,7 @@ class GovernedDelegateDispatcher:
                 GOVERNED_DELEGATE_TARGET_UNAVAILABLE,
                 "delegate target is not enabled for the governed runtime",
             )
+        return self._targets[target].policy_projection()
 
     async def dispatch(self, invocation: GovernedDelegateInvocation) -> GovernedDelegateOutcome:
         if not isinstance(invocation, GovernedDelegateInvocation):
@@ -383,6 +423,7 @@ def _project_readonly_outcome(
     result: Mapping[str, Any],
 ) -> GovernedDelegateOutcome:
     payload = dict(result)
+    _require_effect_free_result_payload(payload)
     trace = payload.get("pentest_agent_trace")
     execution = payload.get("pentest_execution")
     audit = payload.get("sub_agent_audit_refs")
@@ -416,6 +457,10 @@ def _project_readonly_outcome(
             "delegate_invocation_ref": invocation.invocation_ref,
             "delegate_adapter": target.adapter_id,
             "delegate_execution_mode": target.execution_mode,
+            "delegate_target_policy_ref": target.policy_projection()["policy_ref"],
+            "delegate_review_mode": target.review_mode,
+            "delegate_budget_mode": target.budget_mode,
+            "delegate_effect_mode": target.effect_mode,
             "side_effects_executed": False,
             "delegate_runtime_usage_attestation": (
                 build_readonly_delegate_usage_attestation(
@@ -438,6 +483,42 @@ def _project_readonly_outcome(
             },
         },
     )
+
+
+def _require_effect_free_result_payload(payload: Mapping[str, Any]) -> None:
+    """Reject effect or delivery claims instead of silently discarding them."""
+
+    nested = payload.get("payload")
+    containers = (
+        dict(payload),
+        dict(nested) if isinstance(nested, Mapping) else {},
+    )
+    for value in containers:
+        side_effects_executed = value.get("side_effects_executed")
+        if side_effects_executed is not None and side_effects_executed is not False:
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_OUTPUT_INVALID,
+                "read-only delegate claimed an executed side effect",
+            )
+        delivery_authorized = value.get("delivery_authorized")
+        if delivery_authorized is not None and delivery_authorized is not False:
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_OUTPUT_INVALID,
+                "read-only delegate claimed delivery authority",
+            )
+        if any(
+            value.get(key) not in (None, (), [])
+            for key in (
+                "acceptance_effect_intents",
+                "effect_intents",
+                "outbox",
+                "outbox_messages",
+            )
+        ):
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_OUTPUT_INVALID,
+                "read-only delegate returned an effect or Outbox descriptor",
+            )
 
 
 def _public_result_text(payload: Mapping[str, Any]) -> str:
@@ -548,6 +629,10 @@ def _json_copy_text(value: Mapping[str, Any], *, field_name: str) -> str:
 
 
 __all__ = [
+    "GOVERNED_DELEGATE_BUDGET_MODE",
+    "GOVERNED_DELEGATE_EFFECT_MODE",
+    "GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION",
+    "GOVERNED_DELEGATE_REVIEW_MODE",
     "GOVERNED_DELEGATE_AUTHORITY_INVALID",
     "GOVERNED_DELEGATE_INVOCATION_INVALID",
     "GOVERNED_DELEGATE_OUTPUT_INVALID",

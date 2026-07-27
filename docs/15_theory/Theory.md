@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.26
+版本：v2.28
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -37,7 +37,7 @@ typed Effect/Workspace handler 完成。没有这条分界，Worker 的“成功
 
 模型预算不能由 worker 自报一个总数。一次可验收调用必须从 canonical ModelAttempt 生命周期重开 provider、model、route、prompt/output digest 和 provider usage，再把它与不可变 WorkerProjection 中的测量证明、Graph aggregate usage 和 Attempt-bound child usage 做精确等值校验。执行所需的额度 guard 属于瞬时内部 authority，不能流入 Life、Memory、Effect 或公开收据；对外只允许暴露经白名单约束的标识、digest 和实际用量。exact replay 只能重开原有用量与结果，不能再请求 provider 或二次扣费。受控 terminal transport 可以证明这条治理链，但不能替代真实外部 provider、质量和成本收益验收。
 
-当前正式实例已在干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，Chat/Plan 的模型预算 lineage 也被独立重开，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。Chat 与当前 44 个启用 Skill 因各自声明控制均为 `PASS` 成为两条 `COMPLETE` 路线；49 个 blocked Skill、其余五路、真实模型质量或全栈 canary 都不能由此推导为完成。
+当前正式实例已在干净提交 `3db60ff170a085056d7fd9ba792cb7064de14d35` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，Chat/Plan 的模型预算 lineage、Plan 三节点政策与 Delegate Review continuation 都被独立重开，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。Chat、当前 44 个启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 因各自声明控制均为 `PASS` 成为四条 enabled-scope `COMPLETE` 路线；其它能力、其余三路、真实模型质量或全栈 canary 都不能由此推导为完成。
 
 恢复治理遵循“先持久化不确定性，再由精确证据消解”的不变量。未知副作用不能被 timeout、异常类型或操作者意图直接解释为未发生；Operation 首次进入待恢复状态时，状态 mutation、恢复 case 与各自 Outbox 必须同成同败，不能把 case 留给下一次请求补写。运行时冻结当前 Graph/Node/Attempt/Operation/Budget/Lease 与取消事实后，再让签名证据精确绑定该 recovery case。未决 case 的存续应跟随真正待消解的 Operation version 与取消身份，不能因后续预算计量、租约到期或生命周期围栏而从恢复清单意外消失；这些变化仍保留在不可变 subject 中供审计。证据只能收紧既有 authority，不能创建新的执行权；对账完成后还必须证明同一 case 已退出 current projection。无法证明时继续隔离，绝不盲目重放 worker。
 
@@ -54,6 +54,25 @@ Review 的终态同样必须是一个不可分割事实。拒绝、过期或取�
 审批属于节点 authority，而不是整张图的模糊布尔开关。规划搜索可以发现需要人工确认的能力，但必须把该要求连同来源冻结进候选，再由编译器绑定到不可变 TaskNode ID；每个节点都要有显式策略，缺失不能继承“无需审批”。长时间审批会使旧 grant 过期，因此续跑可续签尚未执行节点的时限，但不能改写审批前已经提交的 projection authority，也不能重跑已验收 worker。续签解决的是时间围栏，不是扩大目标、风险或能力。
 
 零用量也是需要证明的事实，不能从 measurement 缺失推断。对于被限制为只读、无端口的执行 adapter，外层 runtime 可以预先记账 canonical dispatch，但 adapter 内部的 token、工具、重试和成本必须由 server 生成、digest-bound 且绑定完整 Task lineage 的 attestation 明确证明为零；缺失、非零或身份漂移都应失败关闭。未使用的 authority 也不能因此预授予：只读 Delegate 没有模型、工具、嵌套派发或 Effect 端口，未来需要这些能力时必须形成新的受治理图和预算边界。
+
+规划结果的“可执行性”也必须成为不可变事实。搜索轨迹回答为何选择一条路径，
+但不能替代执行政策；在 TaskGraph 准入前还必须冻结一份 content-addressed
+政策，精确绑定 Graph revision、完成策略、总预算、每个节点的当前 Registry
+政策、Review 要求和副作用所有权。重放、审批续跑、启动恢复与 Effect 编译都
+必须重开同一政策。中间候选节点只可产生待验证结果，不能拥有 Graph
+Acceptance 后的副作用；唯一结果节点才可提交 Effect。这样“执行器不二次
+规划”不仅是代码约定，也是恢复时可机械复验的 authority。
+
+同理，Delegate 的目标登记不能只是一个进程内 handler 映射。每个启用目标
+需要把 adapter、执行模式、预算模式、Review 模式与 Effect 模式冻结为
+content-addressed policy，并同时写入 WorkOrder 的输入与 metadata。执行点
+必须重算 digest 并与 dispatcher 的实际 audit 对齐；否则所谓“只读、零预算、
+需审批”会在准入后因配置漂移失效。路由标签也不能替代能力身份：
+Operator/Scheduler 即使复用 `route=delegate` 的传输形态，仍应使用自己的
+app-local allowlist 与有限预算，不能借此取得 child-agent policy；普通
+Delegate 则不能退回仅验证字符串 target。当前实现已按这些不变量收口
+`CAPABILITY_SEARCH_V1` 和只读 `pentest_agent`，并由干净提交收据机械复验
+当前启用范围；其它 target 与通用搜索仍需新合同和新证据。
 
 ---
 

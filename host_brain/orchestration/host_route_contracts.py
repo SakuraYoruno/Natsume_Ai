@@ -21,6 +21,11 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetExceededAction,
     BudgetPolicy,
 )
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_DELEGATE_BUDGET_MODE,
+    GovernedDelegateTargetPolicyError,
+    validate_governed_delegate_target_policy,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphCompletionPolicy,
@@ -141,6 +146,7 @@ def build_direct_host_route_contracts(
     ingress_audit_ref: str | None = None,
     operator_command_id: str | None = None,
     frozen_context: Mapping[str, Any] | None = None,
+    delegate_target_policy: Mapping[str, Any] | None = None,
 ) -> HostRouteContracts:
     if not isinstance(surface, HostCommandSurface):
         raise HostRouteContractError(HOST_ROUTE_CONTRACT_INVALID, "surface must be HostCommandSurface")
@@ -205,6 +211,19 @@ def build_direct_host_route_contracts(
         else _text(intent_draft.get("target_id") or intent_draft.get("agent_id"))
     )
     target = _identifier(target_id, "target_id")
+    delegate_policy = (
+        _validated_delegate_target_policy(
+            delegate_target_policy,
+            target_id=target,
+        )
+        if route == "delegate" and delegate_target_policy is not None
+        else None
+    )
+    if route != "delegate" and delegate_target_policy is not None:
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            "delegate target policy is restricted to the Delegate route",
+        )
     message = _text(sanitized_message)[:_MAX_TEXT]
     if not message:
         raise HostRouteContractError(HOST_ROUTE_CONTRACT_INVALID, "sanitized_message is required")
@@ -260,6 +279,7 @@ def build_direct_host_route_contracts(
                 if route == "tool"
                 else {}
             ),
+            "delegate_target_policy": delegate_policy or {},
         }
     )
     durable_review_required = False
@@ -285,8 +305,16 @@ def build_direct_host_route_contracts(
                 HOST_ROUTE_AUTHORITY_INVALID,
                 "Tool durable Review flag differs from Governor route authority",
             )
+    elif route == "delegate" and delegate_policy is not None:
+        durable_review_required = True
+        caller_review_flag = intent_draft.get("durable_review_required")
+        if caller_review_flag is not None and caller_review_flag is not True:
+            raise HostRouteContractError(
+                HOST_ROUTE_AUTHORITY_INVALID,
+                "Delegate durable Review flag differs from target policy",
+            )
     review_ref = (
-        f"review-required://tool/{suffix}"
+        f"review-policy://task-node/{route}/{suffix}"
         if durable_review_required
         else f"review-waiver://governor-grant/{suffix}"
     )
@@ -298,7 +326,17 @@ def build_direct_host_route_contracts(
         "worker_route": route,
         "target_id": target,
     }
-    port_free_delegate = route == "delegate" and target == "pentest_agent"
+    port_free_delegate = (
+        route == "delegate"
+        and (
+            (
+                delegate_policy is not None
+                and delegate_policy["budget_mode"]
+                == GOVERNED_DELEGATE_BUDGET_MODE
+            )
+            or (delegate_policy is None and target == "pentest_agent")
+        )
+    )
     budget = BudgetPolicy(
         scope=f"work-order:{root_id}",
         limits=(
@@ -313,8 +351,8 @@ def build_direct_host_route_contracts(
             "fail_closed": True,
             **(
                 {
-                    "measurement_mode": "PORT_FREE_READ_ONLY_ATTESTED_ZERO",
-                    "enabled_target": "pentest_agent",
+                    "measurement_mode": GOVERNED_DELEGATE_BUDGET_MODE,
+                    "enabled_target": target,
                 }
                 if port_free_delegate
                 else {}
@@ -364,6 +402,7 @@ def build_direct_host_route_contracts(
         "intent_draft",
         "emotion_context",
         "render_target_lang",
+        "delegate_target_policy",
     }
     overlap = sorted(reserved_frozen_keys.intersection(frozen))
     if overlap:
@@ -392,6 +431,11 @@ def build_direct_host_route_contracts(
             "intent_draft": intent_projection,
             "emotion_context": _safe_json(dict(emotion_context or {}), path="emotion_context"),
             "render_target_lang": _text(render_target_lang or "zh")[:16],
+            **(
+                {"delegate_target_policy": delegate_policy}
+                if delegate_policy is not None
+                else {}
+            ),
         },
         allowed_actions=(
             ("render_reply",)
@@ -412,10 +456,26 @@ def build_direct_host_route_contracts(
             {
                 "review_required": True,
                 "durable_review_required": True,
-                "mode": "pre_execution_durable_review",
-                "reason": "governor_airlock_tool_requires_operator_review",
+                "mode": "task_node_pre_execution_review",
+                "reason": (
+                    "delegate_target_policy_requires_operator_review"
+                    if route == "delegate"
+                    else "governor_airlock_tool_requires_operator_review"
+                ),
                 "review_ref": review_ref,
-                "frozen_tool_binding": intent_projection.get("tool_binding"),
+                **(
+                    {
+                        "frozen_delegate_policy_ref": delegate_policy[
+                            "policy_ref"
+                        ]
+                    }
+                    if delegate_policy is not None
+                    else {
+                        "frozen_tool_binding": intent_projection.get(
+                            "tool_binding"
+                        )
+                    }
+                ),
             }
             if durable_review_required
             else {
@@ -433,6 +493,11 @@ def build_direct_host_route_contracts(
             **(
                 {"operator_command_id": operator_command}
                 if operator_command
+                else {}
+            ),
+            **(
+                {"delegate_target_policy": delegate_policy}
+                if delegate_policy is not None
                 else {}
             ),
             "planning_lineage": {
@@ -503,6 +568,26 @@ def build_direct_host_route_contracts(
     contracts = HostRouteContracts(command=command, work_order=work_order, graph=graph)
     contracts.validate()
     return contracts
+
+
+def _validated_delegate_target_policy(
+    value: Mapping[str, Any],
+    *,
+    target_id: str,
+) -> dict[str, Any]:
+    try:
+        policy = validate_governed_delegate_target_policy(value)
+    except GovernedDelegateTargetPolicyError as exc:
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            exc.detail,
+        ) from exc
+    if policy["target_id"] != target_id:
+        raise HostRouteContractError(
+            HOST_ROUTE_AUTHORITY_INVALID,
+            "Delegate target policy differs from the admitted target",
+        )
+    return policy
 
 
 def _delegate_domain(intent: Mapping[str, Any], target: str) -> str:

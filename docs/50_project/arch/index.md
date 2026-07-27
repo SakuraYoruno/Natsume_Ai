@@ -3,11 +3,19 @@
 
 # Natsume AI 架构文档目录
 
-版本：v4.6
+版本：v4.8
 维护日期：2026-07-27
 状态：`CURRENT_ARCHITECTURE_CATALOG`
 
 本目录只保留当前结构说明、稳定目标、差距、专项架构和可维护图册。旧路线图、混写完成报告、旧 Agentic RAG/Gateway 方案和按文件行数生成的模块快照已删除；Git 历史承担追溯。
+
+当前 Plan/Delegate 政策边界：Plan 在 admission 前冻结 Graph、Budget、
+Registry/Review 和唯一 result effect owner；Delegate 冻结 target/adapter、
+durable Review、exact-zero inner budget 与无直接 Effect。initial、replay、
+Review continuation、startup recovery 和 frozen execution 都重开 content
+address。定向单元 `89 passed`、真实 SQLite 四路线 `1 passed`；正式
+clean-SHA `3db60ff1` 的同库 v3 收据已验证七路，并把当前启用 Plan/Delegate
+范围提升为 `COMPLETE`。Scheduler/Internal/Operator 与 NE-01 保持未完成。
 
 当前 Skill 执行边界：canonical Host Registry 的 93 个条目按 exact descriptor 分为 28 个只读、
 13 个 proposal-only、3 个 post-Acceptance Workspace 和 49 个 blocked。

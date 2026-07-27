@@ -29,6 +29,10 @@ from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     ReadonlyDelegateUsageAttestationError,
     validate_readonly_delegate_usage_attestation,
 )
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GovernedDelegateTargetPolicyError,
+    validate_governed_delegate_target_policy,
+)
 from host_brain.contracts.agent_runtime.node_input_attestation import (
     NodeInputArtifactAttestationError,
     build_node_input_artifact_attestation,
@@ -112,11 +116,17 @@ class FrozenDelegateRouteExecutor:
         outcome = await dispatched if inspect.isawaitable(dispatched) else dispatched
         projected = _project_outcome(outcome)
         _assert_no_route_drift(projected, frozen=frozen)
+        _assert_delegate_effect_free_outcome(projected)
 
         decision = _decision_from_outcome(projected)
         narrative = _outcome_narrative(projected, decision=decision)
         reason_code = _outcome_reason_code(projected, decision=decision)
         audit_refs = _outcome_audit_refs(projected)
+        _assert_delegate_target_policy(
+            frozen=frozen,
+            input_pack=input_pack,
+            audit_refs=audit_refs,
+        )
         yield _terminal_commit(
             frozen=frozen,
             decision=decision,
@@ -569,6 +579,83 @@ def _outcome_audit_refs(outcome: Mapping[str, Any]) -> dict[str, Any]:
     direct["governed_frozen_route"] = True
     direct["delivery_authorized"] = False
     return direct
+
+
+def _assert_delegate_effect_free_outcome(outcome: Mapping[str, Any]) -> None:
+    nested = outcome.get("payload")
+    direct_audit = outcome.get("audit_refs")
+    nested_audit = (
+        nested.get("audit_refs")
+        if isinstance(nested, Mapping)
+        else None
+    )
+    for value in (
+        dict(outcome),
+        dict(nested) if isinstance(nested, Mapping) else {},
+        dict(direct_audit) if isinstance(direct_audit, Mapping) else {},
+        dict(nested_audit) if isinstance(nested_audit, Mapping) else {},
+    ):
+        side_effects = value.get("side_effects_executed")
+        delivery = value.get("delivery_authorized")
+        if side_effects is not None and side_effects is not False:
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                "frozen Delegate claimed an executed side effect",
+            )
+        if delivery is not None and delivery is not False:
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                "frozen Delegate claimed delivery authority",
+            )
+        if any(
+            value.get(key) not in (None, (), [])
+            for key in (
+                "acceptance_effect_intents",
+                "effect_intents",
+                "outbox",
+                "outbox_messages",
+            )
+        ):
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                "frozen Delegate returned an effect or Outbox descriptor",
+            )
+
+
+def _assert_delegate_target_policy(
+    *,
+    frozen: FrozenNodeInput,
+    input_pack: Mapping[str, Any],
+    audit_refs: Mapping[str, Any],
+) -> None:
+    try:
+        policy = validate_governed_delegate_target_policy(
+            _safe_mapping(input_pack.get("delegate_target_policy"))
+        )
+    except GovernedDelegateTargetPolicyError as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_ROUTE_DRIFT,
+            exc.detail,
+        ) from exc
+    if policy["target_id"] != frozen.target_id:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_ROUTE_DRIFT,
+            "frozen Delegate target policy differs from its worker route",
+        )
+    audit_expected = {
+        "delegate_target_policy_ref": policy["policy_ref"],
+        "delegate_adapter": policy["adapter_id"],
+        "delegate_execution_mode": policy["execution_mode"],
+        "delegate_review_mode": policy["review_mode"],
+        "delegate_budget_mode": policy["budget_mode"],
+        "delegate_effect_mode": policy["effect_mode"],
+        "side_effects_executed": False,
+    }
+    if {key: audit_refs.get(key) for key in audit_expected} != audit_expected:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_ROUTE_DRIFT,
+            "Delegate execution evidence differs from its admitted target policy",
+        )
 
 
 def _terminal_commit(

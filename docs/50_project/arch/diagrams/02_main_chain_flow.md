@@ -3,7 +3,7 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.15
+版本：v2.16
 核对日期：2026-07-27
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
@@ -23,9 +23,12 @@ flowchart TD
     BUILD["HostCommand + WorkOrderV3 + BudgetPolicy"]
     PLAN{"route=plan?"}
     SEARCH["registry capability search\n+ graph compiler"]
+    KIND{"direct route"}
+    XPOL["Freeze content-addressed\nPlan / Delegate policy"]
     SPOL{"Skill execution policy"}
     DIRECT["direct route graph builder"]
     ADMIT["HostCommandRepository admission"]
+    REOPEN["Reopen frozen policy\ninitial / replay / Review / recovery"]
     TASK["GovernedTaskCoordinator"]
     NODE["Node + Attempt + Lease + Budget + Grant"]
     WORK["Frozen worker"]
@@ -43,11 +46,14 @@ flowchart TD
 
     REQ --> ROUTE --> AIR --> INTENT --> GOV --> CORTEX --> SUPPORT
     SUPPORT -->|"yes"| GR --> BUILD --> PLAN
-    PLAN -->|"yes"| SEARCH --> SPOL
-    PLAN -->|"no"| DIRECT --> SPOL
+    PLAN -->|"yes"| SEARCH --> XPOL --> ADMIT
+    PLAN -->|"no"| DIRECT --> KIND
+    KIND -->|"skill"| SPOL
+    KIND -->|"delegate"| XPOL
+    KIND -->|"chat / tool"| ADMIT
     SPOL -->|"read / proposal / workspace"| ADMIT
     SPOL -->|"pending typed Effect"| REJECT
-    ADMIT --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> ADEC
+    ADMIT --> REOPEN --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> ADEC
     ADEC -->|"ACCEPT"| EFFECT --> DISPATCH --> SSE
     ADEC -->|"non-ACCEPT"| REVIEW
     REVIEW -->|"REJECTED / EXPIRED / CANCELLED"| DENIAL --> SSE
@@ -63,6 +69,13 @@ flowchart TD
 Plan 的合成节点还有一条不能省略的数据边：已验收 predecessor Node 先生成 canonical TaskResult artifact，TaskStore 解析其 payload，`NodeInputArtifactAttestation` 再绑定 artifact/receipt/payload digest bundle，final Chat 只消费这组证据。仅有拓扑依赖而没有该数据流不能通过固定结构验收。任意未被固定 predicate 覆盖的自然语言验收条件进入 durable Review，不会自动写成 `PASS`。
 
 Plan 中 registry 标记 `require_confirm` 的 Skill 还有一条节点审批边：search 保留该候选并冻结 catalog provenance，compiler 将其重绑定到实际 Node ID，Scheduler 只让该节点进入 `WAITING_APPROVAL`。一次性 Review 消费后，0096 continuation 保留已 accepted predecessor 的历史 grant，并为未执行节点提供 claim-fenced 续签 grant；不会重新执行前驱。
+
+当前 Plan policy 还冻结 Graph Budget digest、每个节点的 Registry
+execution/budget/review/effect mode，并要求只有 final Chat 能编译 Graph
+Acceptance Effect。当前 Delegate policy 则强制只读 `pentest_agent` 在
+Attempt 创建前进入 durable Review，恢复后仍重验 target/adapter/mode
+content address；其 adapter 返回的 Effect、Outbox 或 delivery claim 会在
+COMMIT 前拒绝。
 
 Skill policy gate 先把 canonical Host Registry 的 93 个条目分成 28 个只读、13 个 proposal-only、
 3 个 post-Acceptance Workspace 和 49 个 blocked。只有前三类进入候选与

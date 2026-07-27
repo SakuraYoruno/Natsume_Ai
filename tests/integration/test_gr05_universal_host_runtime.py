@@ -77,6 +77,9 @@ from host_brain.skills.agent_runtime_registry import build_agent_runtime_skill_r
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
+from host_brain.task_runtime.review_continuation_worker import (
+    ReviewContinuationWorker,
+)
 from natsume_contracts.edge.transport_v1 import EdgeTransportResult
 from natsume_contracts.task import HostCommandSurface
 
@@ -248,6 +251,28 @@ async def _execute(
             command_authority=command_authority,
         )
     ]
+
+
+class _HostReviewContinuationRuntime:
+    def __init__(self, *, runtime, command_repository) -> None:  # noqa: ANN001
+        self._runtime = runtime
+        self._commands = command_repository
+        self.results: list[dict] = []
+        self.errors: list[BaseException] = []
+
+    async def continue_review_continuation(self, claim: dict) -> dict:
+        try:
+            record = self._commands.get_by_graph(
+                graph_id=str(claim.get("graph_id") or ""),
+                graph_revision=int(claim.get("graph_revision") or 0),
+            )
+            assert record is not None
+            result = await self._runtime.continue_review_admission(record, claim)
+        except BaseException as exc:
+            self.errors.append(exc)
+            raise
+        self.results.append(dict(result))
+        return dict(result)
 
 
 def _gateway_ingress_authority(
@@ -679,6 +704,51 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 governor=governor,
                 **execution_kwargs,
             )
+
+        delegate_waiting = results["delegate"][-1]["execution_receipt"]
+        assert delegate_waiting["status"] == "WAITING_APPROVAL"
+        assert delegate_waiting["attempt_id"] is None
+        delegate_review = delegate_waiting["projection"]["review"]
+        assert delegate_review["review_status"] == "PENDING"
+        approved_delegate_review = container.review_store.approve_review(
+            delegate_review["review_id"],
+            actor_id="gr05-universal-delegate-reviewer",
+            expected_subject_ref=delegate_review["subject_ref"],
+            expected_subject_version=delegate_review["subject_version"],
+            expected_resume_phase=delegate_review["resume_phase"],
+            expected_checkpoint_id=delegate_review["checkpoint_id"],
+        )
+        container.review_store.resume_review(
+            delegate_review["review_id"],
+            resume_token_ref=approved_delegate_review["resume_token_ref"],
+            subject_ref=delegate_review["subject_ref"],
+            subject_version=delegate_review["subject_version"],
+            resume_phase=delegate_review["resume_phase"],
+            checkpoint_id=delegate_review["checkpoint_id"],
+        )
+        delegate_continuation_runtime = _HostReviewContinuationRuntime(
+            runtime=runtime,
+            command_repository=container.command_repository,
+        )
+        delivered_delegate_continuations = await ReviewContinuationWorker(
+            store=container.review_continuation_store,
+            runtime=delegate_continuation_runtime,
+            worker_id="gr05-universal-delegate-continuation",
+            claim_lease_ms=30_000,
+            poll_interval_ms=60_000,
+            retry_delay_ms=0,
+            batch_limit=1,
+        ).run_once()
+        assert delivered_delegate_continuations == 1
+        if delegate_continuation_runtime.errors:
+            raise delegate_continuation_runtime.errors[0]
+        results["delegate"].append(delegate_continuation_runtime.results[-1])
+        assert (
+            container.review_continuation_store.get_review_continuation(
+                delegate_review["review_id"]
+            )
+            is None
+        )
 
         plan_replay = await _execute(
             runtime,

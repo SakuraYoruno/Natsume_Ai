@@ -10,8 +10,16 @@ from collections.abc import Mapping
 from typing import Any
 
 from host_brain.contracts.agent_runtime.budget_policy import BudgetExceededAction
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_DELEGATE_BUDGET_MODE,
+    GOVERNED_DELEGATE_EFFECT_MODE,
+    GOVERNED_DELEGATE_EXECUTION_MODE,
+    GOVERNED_DELEGATE_REVIEW_MODE,
+    GovernedDelegateTargetPolicyError,
+    validate_governed_delegate_target_policy,
+)
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
-from natsume_contracts.task import HostCommand
+from natsume_contracts.task import HostCommand, HostCommandSurface
 
 
 GOVERNED_HOST_AUTHORITY_INVALID = "GOVERNED_HOST_AUTHORITY_INVALID"
@@ -269,10 +277,27 @@ def require_fail_closed_governed_work_order(
         or approval_policy.get("grant_ref")
         or ""
     ).strip()
+    is_child_agent_delegate = (
+        command.route_type == "delegate"
+        and command.surface
+        not in {
+            HostCommandSurface.OPERATOR,
+            HostCommandSurface.SCHEDULER,
+        }
+    )
+    budget_invalid = (
+        _port_free_delegate_budget_invalid(
+            work_order,
+            command=command,
+            limits=limits,
+        )
+        if is_child_agent_delegate
+        else any(int(value) <= 0 for value in limits.values())
+    )
     if (
         policy is None
         or policy.on_exceeded != BudgetExceededAction.BLOCK
-        or any(int(value) <= 0 for value in limits.values())
+        or budget_invalid
         or work_order.root_work_order_id != work_order.work_order_id
         or work_order.parent_work_order_id is not None
         or work_order.root_work_order_id != command.root_work_order_id
@@ -296,6 +321,58 @@ def require_fail_closed_governed_work_order(
             GOVERNED_HOST_AUTHORITY_INVALID,
             "governed WorkOrderV3 differs from durable HostCommand/planning lineage",
         )
+
+
+def _port_free_delegate_budget_invalid(
+    work_order: WorkOrderV3,
+    *,
+    command: HostCommand,
+    limits: Mapping[str, Any],
+) -> bool:
+    """Allow exact-zero model dimensions only for the frozen read-only target."""
+
+    input_policy = mapping(
+        work_order.input_pack.get("delegate_target_policy")
+    )
+    metadata_policy = mapping(
+        work_order.metadata.get("delegate_target_policy")
+    )
+    budget_metadata = mapping(
+        getattr(work_order.budget_policy, "metadata", {})
+    )
+    try:
+        input_policy = validate_governed_delegate_target_policy(input_policy)
+        metadata_policy = validate_governed_delegate_target_policy(
+            metadata_policy
+        )
+    except GovernedDelegateTargetPolicyError:
+        return True
+    if (
+        input_policy != metadata_policy
+        or input_policy.get("target_id") != command.target_id
+        or input_policy.get("execution_mode")
+        != GOVERNED_DELEGATE_EXECUTION_MODE
+        or input_policy.get("review_mode") != GOVERNED_DELEGATE_REVIEW_MODE
+        or input_policy.get("budget_mode") != GOVERNED_DELEGATE_BUDGET_MODE
+        or input_policy.get("effect_mode") != GOVERNED_DELEGATE_EFFECT_MODE
+        or budget_metadata.get("measurement_mode")
+        != GOVERNED_DELEGATE_BUDGET_MODE
+        or budget_metadata.get("enabled_target") != command.target_id
+    ):
+        return True
+    try:
+        return any(
+            (
+                int(limits.get("token_count", -1)) != 0,
+                int(limits.get("model_cost_micros", -1)) != 0,
+                int(limits.get("tool_call_count", 0)) < 1,
+                int(limits.get("time_ms", 0)) < 1,
+                int(limits.get("concurrency", 0)) < 1,
+                int(limits.get("retry_count", 0)) < 1,
+            )
+        )
+    except (TypeError, ValueError):
+        return True
 
 
 def require_fail_closed_direct_skill_work_order(work_order: WorkOrderV3) -> None:

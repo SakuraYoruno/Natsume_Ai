@@ -15,6 +15,10 @@ from host_brain.app.governed_task_adapter import (
     GovernedHostAdapterError,
     GovernedHostRuntime,
 )
+from host_brain.app.governed_delegate_dispatch import GovernedDelegateTarget
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    READONLY_DELEGATE_EXECUTION_MODE,
+)
 from host_brain.orchestration.failure_replan_intent import (
     FAILURE_REPLAN_SCHEMA_VERSION,
 )
@@ -113,6 +117,15 @@ def _echo_skill_registry() -> SkillRegistry:
     return registry
 
 
+def _delegate_target_policy(target_id: str) -> dict:
+    return GovernedDelegateTarget(
+        target_id=target_id,
+        handler=lambda _payload, _context: {},
+        adapter_id="test-port-free-readonly.v1",
+        execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+    ).policy_projection()
+
+
 @pytest.mark.asyncio
 async def test_close_admission_rejects_new_work_and_drain_waits_for_in_flight() -> None:
     application = _BlockingApplication()
@@ -169,7 +182,7 @@ async def test_chat_and_delegate_exact_replay_use_route_aware_authority_validati
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=repository,
         supported_routes=frozenset({"chat", "delegate"}),
-        delegate_target_validator=lambda _target: None,
+        delegate_target_validator=_delegate_target_policy,
     )
     await runtime.activate()
     intent = {
@@ -250,7 +263,7 @@ async def test_secure_ingress_direct_routes_preserve_surface_principal_and_diges
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=repository,
         supported_routes=frozenset({"chat", "delegate"}),
-        delegate_target_validator=lambda _target: None,
+        delegate_target_validator=_delegate_target_policy,
     )
     intent = {
         "schema_version": "Natsume.intent.v1",
@@ -304,6 +317,84 @@ async def test_secure_ingress_direct_routes_preserve_surface_principal_and_diges
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("input_source", "expected_surface"),
+    (
+        ("OPERATOR", HostCommandSurface.OPERATOR),
+        ("SCHEDULER", HostCommandSurface.SCHEDULER),
+    ),
+)
+async def test_control_delegate_keeps_target_allowlist_without_child_policy(
+    input_source: str,
+    expected_surface: HostCommandSurface,
+) -> None:
+    repository = _ReplayCommandRepository()
+    target_id = "operator_sys_mode_switch"
+    source_id = input_source.lower()
+    runtime = GovernedHostRuntime(
+        application=_CapturingApplication(repository),
+        runtime_router=CanonicalRuntimeRouter(),
+        command_repository=repository,
+        supported_routes=frozenset({"delegate"}),
+        delegate_target_validator=lambda candidate: (
+            candidate if candidate == target_id else None
+        ),
+    )
+    intent = {
+        "schema_version": "Natsume.intent.v1",
+        "id": f"intent-{source_id}-control-delegate",
+        "session_id": f"session-{source_id}-control-delegate",
+        "seq": 1,
+        "nonce": "nonce-operator-control-delegate",
+        "route": "delegate",
+        "target_id": target_id,
+        "task": "switch the governed system mode",
+        "args": {"operator_command_id": "sys_mode.switch"},
+    }
+    governor = {
+        "request_id": f"request-{source_id}-control-delegate",
+        "intent_id": intent["id"],
+        "decision": "APPROVE",
+        "risk_level": 2,
+        "tokens": {},
+        "ts_ms": 1_800_000_000_000,
+    }
+    authority = {
+        "principal_id": f"{source_id}.local",
+        "claim_ref": f"secure-ingress-claim://aw02/{source_id}",
+        "audit_ref": f"secure-ingress-audit://aw02/{source_id}",
+        "body_sha256": "b" * 64,
+        "operator_command_id": "sys_mode.switch",
+    }
+    await runtime.activate()
+    try:
+        events = await _collect(
+            runtime.execute_stream(
+                request_body={"input_source": input_source},
+                request_id=governor["request_id"],
+                session_id=intent["session_id"],
+                ts_ms=governor["ts_ms"],
+                intent_draft=intent,
+                governor_result=governor,
+                person_id=authority["principal_id"],
+                sanitized_message=intent["task"],
+                command_authority=authority,
+            )
+        )
+        assert events[-1]["decision"] == "APPROVE"
+        command = repository.record["command"]
+        work_order = repository.record["work_order"]
+        assert command.surface is expected_surface
+        assert "delegate_target_policy" not in work_order.input_pack
+        assert all(
+            value > 0
+            for value in work_order.budget_policy.limits.to_dict().values()
+        )
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_direct_delegate_rejects_unenabled_target_before_application_admission() -> None:
     repository = _ReplayCommandRepository()
     application = _CapturingApplication(repository)
@@ -339,6 +430,11 @@ async def test_direct_delegate_rejects_unenabled_target_before_application_admis
 async def test_secure_ingress_catalog_plan_preserves_surface_principal_and_digest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        GovernedHostRuntime,
+        "_require_plan_execution_policy",
+        lambda _self, **_kwargs: None,
+    )
     captured: list[object] = []
 
     class _PlanService:
@@ -347,7 +443,13 @@ async def test_secure_ingress_catalog_plan_preserves_surface_principal_and_diges
 
         async def prepare_initial(self, _request, *, authority, created_at):  # noqa: ANN001
             captured.extend((authority, created_at))
-            return object()
+            return SimpleNamespace(
+                admission=SimpleNamespace(
+                    command=None,
+                    work_order=None,
+                    graph=None,
+                )
+            )
 
         async def execute_stream(self, _prepared):  # noqa: ANN001
             yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
@@ -496,6 +598,11 @@ async def test_legacy_plan_steps_are_rejected_before_context_or_admission(
 async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        GovernedHostRuntime,
+        "_require_plan_execution_policy",
+        lambda _self, **_kwargs: None,
+    )
     captured: dict[str, object] = {}
 
     class _PlanService:
@@ -505,7 +612,13 @@ async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
         async def prepare_initial(self, _request, *, authority, created_at):  # noqa: ANN001
             captured["authority"] = authority
             captured["created_at"] = created_at
-            return object()
+            return SimpleNamespace(
+                admission=SimpleNamespace(
+                    command=None,
+                    work_order=None,
+                    graph=None,
+                )
+            )
 
         async def execute_stream(self, _prepared):  # noqa: ANN001
             yield {"phase": "COMMIT", "done": True, "decision": "APPROVE"}
@@ -586,6 +699,11 @@ async def test_capability_plan_route_uses_registry_search_without_legacy_steps(
 async def test_capability_plan_failure_replan_uses_durable_recovery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        GovernedHostRuntime,
+        "_require_plan_execution_policy",
+        lambda _self, **_kwargs: None,
+    )
     captured: dict[str, object] = {}
 
     class _PlanService:
@@ -607,7 +725,13 @@ async def test_capability_plan_failure_replan_uses_durable_recovery(
         async def prepare_failure_replan(self, request, **kwargs):  # noqa: ANN001, ANN003
             captured["request"] = request
             captured["replan_kwargs"] = dict(kwargs)
-            prepared = object()
+            prepared = SimpleNamespace(
+                admission=SimpleNamespace(
+                    command=None,
+                    work_order=None,
+                    graph=None,
+                )
+            )
             captured["prepared"] = prepared
             return prepared
 

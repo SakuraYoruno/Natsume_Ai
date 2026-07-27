@@ -55,6 +55,11 @@ from host_brain.app.governed_tool_runtime import (
 from host_brain.app.governed_delegate_dispatch import (
     GovernedDelegateDispatchError,
 )
+from host_brain.app.governed_plan_execution_policy import (
+    GovernedPlanExecutionPolicyError,
+    bind_governed_plan_execution_policy,
+    require_governed_plan_execution_policy,
+)
 from host_brain.app.host_startup_graph_continuation import (
     HostStartupGraphContinuation,
 )
@@ -626,6 +631,11 @@ class GovernedHostRuntime:
                             else 1
                         ),
                     )
+                    self._require_plan_execution_policy(
+                        command=existing_request["command"],
+                        work_order=existing_request["work_order"],
+                        graph=existing_request["graph"],
+                    )
                     async for event in self._application.execute_stream(
                         command=existing_request["command"],
                         work_order=existing_request["work_order"],
@@ -669,13 +679,21 @@ class GovernedHostRuntime:
                     skill_requires_durable_review=skill_requires_review,
                 )
             else:
-                if route == "delegate":
-                    self._validate_delegate_target(intent_draft)
                 authority = dict(command_authority or {})
                 surface = _resolve_host_command_surface(
                     request_body=request_body,
                     authority=authority,
                 )
+                delegate_target_policy: Mapping[str, Any] | None = None
+                if route == "delegate":
+                    delegate_target_policy = self._validate_delegate_target(
+                        intent_draft,
+                        immutable_policy_required=surface
+                        not in {
+                            HostCommandSurface.OPERATOR,
+                            HostCommandSurface.SCHEDULER,
+                        },
+                    )
                 ingress_claim_ref, ingress_audit_ref = _ingress_references(authority)
                 # Older admitted Chat/Delegate intents predate the explicit
                 # action/target projection.  Preserve their established Host
@@ -710,6 +728,7 @@ class GovernedHostRuntime:
                         or None
                     ),
                     frozen_context=frozen_context,
+                    delegate_target_policy=delegate_target_policy,
                 )
                 candidate_command = contracts.command
                 candidate_work_order = contracts.work_order
@@ -847,6 +866,11 @@ class GovernedHostRuntime:
                     GOVERNED_HOST_AUTHORITY_INVALID,
                     "Review continuation Host admission is incomplete or misrouted",
                 )
+            self._require_plan_execution_policy(
+                command=command,
+                work_order=work_order,
+                graph=graph,
+            )
             operation = self._application.execute_review_continuation(
                 command=command,
                 work_order=work_order,
@@ -935,6 +959,11 @@ class GovernedHostRuntime:
         the shared app-local dispatcher.
         """
 
+        self._require_plan_execution_policy(
+            command=command,
+            work_order=work_order,
+            graph=graph,
+        )
         terminal: dict[str, Any] | None = None
         terminal_count = 0
         async for event in self._application.execute_stream(
@@ -1022,6 +1051,12 @@ class GovernedHostRuntime:
             command_application=self._application,
             delegate_target_validator=self._delegate_target_validator,
             compilation_context_resolver=compilation_context_resolver,
+            compiled_execution_policy_binder=(
+                lambda compiled: bind_governed_plan_execution_policy(
+                    compiled,
+                    skill_registry=self._planning_skill_registry,
+                )
+            ),
         )
         replan = failure_replan_reference_from_intent(intent_draft)
         if replan is None:
@@ -1049,10 +1084,42 @@ class GovernedHostRuntime:
                 previous_revision=replan.previous_revision,
                 created_at=int(ts_ms),
             )
+        self._require_plan_execution_policy(
+            command=prepared.admission.command,
+            work_order=prepared.admission.work_order,
+            graph=prepared.admission.graph,
+        )
         async for event in service.execute_stream(prepared):
             yield await self._dispatch_accepted_effects(event)
 
-    def _validate_delegate_target(self, intent_draft: Mapping[str, Any]) -> None:
+    def _require_plan_execution_policy(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        graph: Any,
+    ) -> None:
+        if command.route_type != "plan":
+            return
+        try:
+            require_governed_plan_execution_policy(
+                command=command,
+                work_order=work_order,
+                graph=graph,
+                skill_registry=self._planning_skill_registry,
+            )
+        except GovernedPlanExecutionPolicyError as exc:
+            raise GovernedHostAdapterError(
+                exc.reason_code,
+                exc.detail,
+            ) from exc
+
+    def _validate_delegate_target(
+        self,
+        intent_draft: Mapping[str, Any],
+        *,
+        immutable_policy_required: bool,
+    ) -> dict[str, Any] | None:
         validator = self._delegate_target_validator
         target_id = str(
             intent_draft.get("target_id")
@@ -1086,6 +1153,23 @@ class GovernedHostRuntime:
                 GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
                 "delegate target validator must be synchronous before admission",
             )
+        if not isinstance(result, Mapping):
+            if (
+                not immutable_policy_required
+                and str(result or "").strip() == target_id
+            ):
+                # Operator and Scheduler commands reuse the direct ``delegate``
+                # worker route as an internal control transport.  Their exact
+                # target allowlist is already frozen by the app-local control
+                # composition, and they carry a finite non-zero graph budget.
+                # They are not child-agent Delegates and therefore must not be
+                # forced into the pentest target-policy contract.
+                return None
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
+                "delegate target validator returned no immutable policy",
+            )
+        return dict(result)
 
     async def _dispatch_accepted_effects(
         self,

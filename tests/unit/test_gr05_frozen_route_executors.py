@@ -14,12 +14,14 @@ from host_brain.app.governed_route_executors import (
     FrozenDelegateRouteExecutor,
     GovernedRouteExecutorError,
 )
+from host_brain.app.governed_delegate_dispatch import GovernedDelegateTarget
+from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
+    READONLY_DELEGATE_EXECUTION_MODE,
+    build_readonly_delegate_usage_attestation,
+)
 from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
 from host_brain.contracts.agent_runtime.node_input_attestation import (
     build_node_input_artifact_attestation,
-)
-from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
-    build_readonly_delegate_usage_attestation,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
@@ -69,6 +71,17 @@ def _frozen(
     budget: dict[str, Any] | None = None,
 ) -> FrozenNodeInput:
     artifacts = list(input_artifacts or [])
+    frozen_pack = dict(input_pack or {"user_message": "hello"})
+    if route == "delegate":
+        frozen_pack.setdefault(
+            "delegate_target_policy",
+            GovernedDelegateTarget(
+                target_id=target_id,
+                handler=lambda _payload, _context: {},
+                adapter_id="test-port-free-readonly.v1",
+                execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+            ).policy_projection(),
+        )
     artifact_refs = tuple(
         str(item.get("artifact_ref") or "").strip()
         for item in artifacts
@@ -92,7 +105,7 @@ def _frozen(
         target_id=target_id,
         objective="answer only this frozen objective",
         input_refs=artifact_refs or ("artifact://frozen/input",),
-        _input_pack_json=json.dumps(input_pack or {"user_message": "hello"}),
+        _input_pack_json=json.dumps(frozen_pack),
         _input_artifacts_json=json.dumps(artifacts),
         node_grant_ref="governor-grant://child/frozen-route",
         parent_grant_ref="governor-grant://parent/frozen-route",
@@ -105,11 +118,16 @@ def _readonly_delegate_audit(
     **extra: Any,
 ) -> dict[str, Any]:
     invocation_ref = "governed-delegate://sha256/" + "d" * 64
+    policy = dict(frozen.input_pack["delegate_target_policy"])
     return {
         **extra,
         "delegate_invocation_ref": invocation_ref,
         "delegate_adapter": "test-port-free-readonly.v1",
         "delegate_execution_mode": "PORT_FREE_READ_ONLY",
+        "delegate_target_policy_ref": policy["policy_ref"],
+        "delegate_review_mode": policy["review_mode"],
+        "delegate_budget_mode": policy["budget_mode"],
+        "delegate_effect_mode": policy["effect_mode"],
         "side_effects_executed": False,
         "delegate_runtime_usage_attestation": (
             build_readonly_delegate_usage_attestation(
@@ -206,17 +224,18 @@ async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit()
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "mode",
+    ("mode", "expected_reason_code"),
     (
-        "missing",
-        "nonzero",
-        "attempt_drift",
-        "adapter_drift",
-        "execution_mode_drift",
+        ("missing", GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED),
+        ("nonzero", GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED),
+        ("attempt_drift", GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED),
+        ("adapter_drift", GOVERNED_ROUTE_ROUTE_DRIFT),
+        ("execution_mode_drift", GOVERNED_ROUTE_ROUTE_DRIFT),
     ),
 )
 async def test_delegate_executor_rejects_missing_or_drifted_usage_attestation(
     mode: str,
+    expected_reason_code: str,
 ) -> None:
     async def dispatch(**kwargs):  # noqa: ANN003
         audit = _readonly_delegate_audit(kwargs["frozen"])
@@ -253,10 +272,7 @@ async def test_delegate_executor_rejects_missing_or_drifted_usage_attestation(
                 _frozen(route="delegate", target_id="research_agent")
             )
         ]
-    assert (
-        raised.value.reason_code
-        == GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED
-    )
+    assert raised.value.reason_code == expected_reason_code
 
 
 @pytest.mark.asyncio
