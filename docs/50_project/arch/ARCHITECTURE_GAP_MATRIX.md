@@ -346,6 +346,20 @@ bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
 清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
 Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
 
+## cleanup Guardian 与通用多节点 Budget 增量
+
+| 缺口 | 本切片前 | 当前证据 | 仍缺 |
+|---|---|---|---|
+| cleanup 故障持久性 | health 只在 worker 内存，替换进程看不到故障 | 单个连续 incident 写入 runtime-scoped Guardian；replacement process 成功后恢复，exact replay no-op | OS/process supervisor 自动拉起与部署 canary |
+| cleanup 隐私与降级 | 公开 health 已脱敏，但 durable observer 未接线 | opaque random digest 不由 path/error/credential 派生；projection 失败强制 DEGRADED | 完整运行栈故障注入 |
+| 多节点时间预算 | 单节点 guard 与特定 Plan 交叉终态已有证据 | 一般两节点后继只取得实际剩余时间；timeout 写 rejected usage + recovery hold | DEGRADE/REVIEW、任意 batch/unknown-effect |
+| 多节点并发预算 | graph claim 有并发调度证据，child ledger 断言不足 | 首个 ready claim 持有 `concurrency=1` child reservation，第二节点保持 READY | 全路线取消/释放与生产 canary |
+| Composition root | `asgi.py` 再次逼近 1400 行 Gate | Agent immune health handler 抽入聚焦 wiring，Gate 不放宽 | 继续拆除其它混合职责 |
+
+定向回归为 `48 passed in 21.13s`，无 migration。该表只移除“本地一般
+time/concurrency 基础证据”和“Guardian durable cleanup incident”两个具体
+缺口，不把 program-wide Budget、Workspace 或 NE-01 提升为完成。
+
 ## 13. Workspace cleanup 监督缺口修正
 
 | 能力 | 修正前 | 当前证据 | 仍缺 |
@@ -383,8 +397,9 @@ Workspace、NE-01 和整体架构继续为 `PARTIAL / INCOMPLETE`。
 
 本批关闭一个真实 Plan writer 子集，并修复可在干净 `dev` 复现的多 owner
 恢复竞态；去重定向证据为 `53 passed in 138.76s`，Workspace authority
-合同集另为 `24 passed in 67.50s`。一般 time/concurrency
-预算、其它失败/取消/unknown-effect、wave integration 与 NE-07 仍缺，所以
+合同集另为 `24 passed in 67.50s`。后续切片已补一般两节点
+time/concurrency 基础证据；完整 DEGRADE/REVIEW、其它失败/取消/
+unknown-effect、wave integration 与 NE-07 仍缺，所以
 Budget、Workspace、Universal Runtime 和整体架构继续为
 `PARTIAL / INCOMPLETE`。
 
@@ -393,7 +408,7 @@ Budget、Workspace、Universal Runtime 和整体架构继续为
 | 能力 | 修正前 | 当前证据 | 仍缺 |
 |---|---|---|---|
 | 双 authority 终态 | 签名节点失败只识别 0090 `FAILURE + FAILED`，预算已 `EXCEEDED` 时无法重开 | 稳定 node-failure kind 精确组合 signed failure 与 0090 `BUDGET + BLOCKED`，不改变既有 receipt identity | 其它 route/terminal 交叉组合 |
-| Budget winner 绑定 | Graph/Node 状态可见，但不足以证明同一 Attempt 导致超额 | selected outcome 同时绑定失败 `error_ref`、唯一 `usage_id`、child reservation 和父/子 usage | 一般 time/concurrency policy |
+| Budget winner 绑定 | Graph/Node 状态可见，但不足以证明同一 Attempt 导致超额 | selected outcome 同时绑定失败 `error_ref`、唯一 `usage_id`、child reservation 和父/子 usage；后续已补一般两节点 time/concurrency 基础证据 | 完整 DEGRADE/REVIEW 与 program-wide coverage |
 | Workspace 最终删除 | 上层即使识别组合终态，仓储 CAS 仍不认识 Graph `BLOCKED` | repository 在最终事务独立重开 0090/winner/child usage，篡改 Outbox 时不调用 abandoner | 多 Workspace 原子提交 |
 | route 隔离 | 放宽 Graph `BLOCKED` 可能误放行 Direct Skill | artifact classifier 仅允许 Plan 的已验证 BLOCKED 形状；单节点 Direct Skill 继续强制 Graph `FAILED` | 其它受控写 Skill |
 

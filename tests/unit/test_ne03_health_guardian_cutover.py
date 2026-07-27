@@ -217,6 +217,8 @@ def test_app_factory_forwards_app_local_degradation_provider(monkeypatch) -> Non
             "error_type": "WorkspaceRepositoryError",
         },
         "last_report_count": 1,
+        "guardian_projection_status": "UNBOUND",
+        "guardian_projection_error_type": None,
         "reason_code": None,
         "shutdown_retry_required": False,
     }
@@ -272,10 +274,50 @@ def test_workspace_cleanup_health_degrades_without_exposing_failure_detail(
             "error_type": "WorkspaceRepositoryError",
         },
         "last_report_count": 2,
+        "guardian_projection_status": "UNBOUND",
+        "guardian_projection_error_type": None,
         "reason_code": None,
         "shutdown_retry_required": False,
     }
     assert "secret physical path" not in response.text
+
+
+def test_workspace_cleanup_guardian_projection_failure_is_not_healthy(
+    monkeypatch,
+) -> None:
+    _patch_health_report_dependencies(monkeypatch)
+    app = FastAPI()
+    app.include_router(
+        health_routes.create_health_router(
+            degradation_state_provider=lambda: _guardian_state(
+                "scope-workspace-guardian-failure"
+            ),
+            ledger_provider=_ledger_provider,
+            workspace_cleanup_health_provider=lambda: {
+                "status": "HEALTHY",
+                "configured": True,
+                "running": True,
+                "consecutive_failures": 0,
+                "last_report_count": 1,
+                "guardian_projection_status": "FAILED",
+                "guardian_projection_error_type": "PrivateStoreError",
+            },
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health?skip_dependency_probes=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "DEGRADED"
+    cleanup = payload["details"]["runtime_components"][
+        "agent_workspace_cleanup"
+    ]
+    assert cleanup["status"] == "DEGRADED"
+    assert cleanup["reason_code"] == (
+        "AGENT_WORKSPACE_CLEANUP_GUARDIAN_PROJECTION_FAILED"
+    )
 
 
 def test_two_production_health_routers_keep_guardian_authority_app_local(

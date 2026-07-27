@@ -670,7 +670,7 @@ flowchart LR
 - direct `skill` 与 selected `plan` 中的登记 production target 都会在 admission 内把 `codex_production` adapter payload（含 profile/default 展开）冻结到 `WorkOrderV3.input_pack.frozen_node_executor_payloads[node_id]`。Plan 只从 immutable node binding 对应的 approved candidate input 生成该 payload；任意 caller-supplied frozen payload、candidate route/target/objective/args 漂移都会在 admission 前拒绝，replan 则按新 graph revision 生成新的 node-bound payload。payload digest、V2 adapter work-order identity 与 root/graph/node/revision/scope/fingerprint/Review/approval lineage 都在 Frozen Skill Worker 中重验；通过后才可进入 Broker，且一律同步执行，不能恢复旧 background daemon。replay comparison 只将该嵌套载荷中的轮换 Review/approval ref 和派生 digest 归一化，runtime 仍只消费 durable 首次准入载荷，其他任一字段漂移均拒绝。此切片不把 legacy adapter 形状提升为第二份 TaskGraph authority；signed multi-node node failure 已有独立恢复证据，但其它恢复类别和全路线 acceptance 仍未完成。
 
 - Plan 已能编译为多节点 TaskGraph，但当前只排序 Governor 已批准的 steps，不会从目标生成多个竞争方案。
-- Task Runtime 当前为 `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS`。新生产 Graph 已使用 0090/0091 原子终态；Budget 高竞争唯一 winner、single-node canonical COMMITTED checkpoint continuation、scheduler-owned 多节点 exact COMMITTED checkpoint continuation、signed multi-node `NO_SIDE_EFFECT` node failure→0090 settlement、exact operation-free persisted Attempt takeover、ACCEPTED→Effect restart 和 0099 窄 terminal reconciliation已有证据。正数 `time_ms` 只从 durable remaining projection 取得当前单节点 worker 截止：零剩余会在 Operation reservation 前写 `TIME_GUARD` 拒绝，超时则将测得时间至少结算到剩余额度以上并保留 Operation，返回 `RECOVERY_REQUIRED` 供 reconciliation；`time_ms=0` 仍表示未设截止。多节点 checkpoint continuation 只接受 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING` 并复用同 Attempt 的更高 fence，accepted 回到 READY sibling、rejected 进入并行结算，worker 不重跑。bounded fan-out/cancellation仍 OFF；其它 general/unknown-effect/failure/cancellation batch recovery、跨节点时间预算、外部 deployment inventory/remediation、现实 resolver、部署凭据、完整 key lifecycle和真实 canary仍缺。
+- Task Runtime 当前为 `PARTIAL_ATOMIC_DEFAULT / NE01_IN_PROGRESS`。新生产 Graph 已使用 0090/0091 原子终态；Budget 高竞争唯一 winner、single-node canonical COMMITTED checkpoint continuation、scheduler-owned 多节点 exact COMMITTED checkpoint continuation、signed multi-node `NO_SIDE_EFFECT` node failure→0090 settlement、exact operation-free persisted Attempt takeover、ACCEPTED→Effect restart 和 0099 窄 terminal reconciliation已有证据。正数 `time_ms` 从 durable remaining projection 取得 worker 截止：零剩余会在 Operation reservation 前写 `TIME_GUARD` 拒绝；一般两节点 Graph 已证明前驱 elapsed usage 会缩减后继截止，后继 timeout 写 rejected usage 并保留 Operation=`RECOVERY_REQUIRED`，Graph 不伪造终态。`time_ms=0` 仍表示未设截止。多节点 checkpoint continuation 只接受 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING` 并复用同 Attempt 的更高 fence，accepted 回到 READY sibling、rejected 进入并行结算，worker 不重跑。bounded fan-out/cancellation仍 OFF；其它 general/unknown-effect/failure/cancellation batch recovery、完整 DEGRADE/REVIEW、外部 deployment inventory/remediation、现实 resolver、部署凭据、完整 key lifecycle和真实 canary仍缺。
 - Chat 的 frozen model budget guard 属于执行约束，不是公开投影数据：route executor 先精确验证 terminal 携带的 guard 和 measurement，worker 再从公开 `audit_refs.trace_stage_meta` 移除已消费 guard，只把 typed `budget_usage.measurements` 写入 WorkerProjection。这样既保留 fail-closed Budget 证据，也不会让 `max_output_tokens/max_token_count` 绕过 projection 的敏感 token 字段门禁。
 - Preview 数据流固定为 `canonical WorkOrder → Runtime Context projection → Scene sha256 identity → Guardian exact authority → issue → terminal reopen`。同 Guardian lease 续租只能单调延长 expiry；terminal proof 的 boundary 使用独立 `action_args` 副本，再把 proof 注入 handler payload，因而不会形成 `payload → proof → boundary → payload` 循环。
 - focused 拆分后的数据方向仍是 `聚焦 helper/wiring/mixin → 原 authority owner`：Acceptance common/Surface 与独立 sys-mode/general-Effect handlers 不取得第二 writer；general Effect evidence/proof 两个 Store mixin 和 Runtime service/dispatcher/port 都复用 canonical TaskStore connection/UoW；Internal/runtime-context wiring 不取得 ASGI lifespan/task owner，Scheduler retry mixin 复用原 repository connection/UoW。共享合同流固定为 `SQLite feature-canary repository → contracts/task_runtime_feature_canary ← Task Runtime` 与 `Host Composition → contracts/host_lifecycle ← App lifecycle`；旧路径仅同对象重导出，不能形成第二合同 authority。Acceptance 当前为966+368行，general Effect persistence为1426+716行、Runtime为793+88+34行；ASGI/Scheduler保持1389/2942行。967行 Budget rejection Store只拥有受约束的 C mutation，444行 terminal resolver只读重开exact internal/canonical终态，93行 route helper只做纯authority绑定。当前独立 Gate 1～14=`PASS`、Gate 1 SCC=`[]`；NE-01保持`PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
@@ -1107,7 +1107,7 @@ Host 跨进程安全恢复分两条数据流。PRE-OPERATION：旧进程提交 `
 
 拒绝性 Review continuation 的数据流独立于 worker re-entry：`REJECTED/EXPIRED/CANCELLED` claim → immutable `denied_review_node_id`（无 node grant）→ scheduler 读取同一 TaskGraph snapshot → 精确等待节点/无活跃 sibling 检查 → ReviewStore 重开 `REVIEW_DENIED` → 既有 terminal release、Verification/Acceptance receipt 与 outbox 路径。claim 指向未知节点、携带 grant、节点已离开等待 checkpoint、sibling 正在执行或 Review disposition 变化时，流程在任何状态 mutation 前以 durable-state conflict 失败关闭；不得把拒绝当成可重跑 worker 的许可。
 
-Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。concurrency charge 和超限后的完整 `DEGRADE` / `REVIEW` 分支还没有闭环。
+Budget 的 token/cost 在 provider 没有返回真实计量时保持 `UNMEASURED`，不做伪精确估算。一般两节点 ready claim 已证明 `concurrency=1` 进入 Attempt-bound child reservation；完整取消释放、`DEGRADE` / `REVIEW` 与 program-wide coverage 仍没有闭环。
 
 ### 5.3 Scheduler Clock/Effect 与 Internal result 边界
 
@@ -2109,3 +2109,30 @@ flowchart TD
 health/readiness 是只读投影，不会运行 cleanup 或修改 repository。关停重试复用
 同一 container，不重建 Runtime、不重新分配 lease，也不把 close exception
 解释为 cleanup 成功。
+
+## cleanup Guardian 与多节点 Budget 流
+
+```mermaid
+flowchart TD
+    A["Workspace cleanup pass"] --> B{"repository / Git success?"}
+    B -->|"no"| C["reuse one opaque incident id"]
+    C --> D["app-local Guardian observer"]
+    D --> E["runtime-scoped SLO breach"]
+    B -->|"yes"| F["reopen durable Guardian history"]
+    F --> G{"owned active breach?"}
+    G -->|"yes"| H["append SLO resolution"]
+    G -->|"no"| I["exact no-op"]
+    D -->|"append fails"| J["worker DEGRADED\nhealth/readiness fail closed"]
+
+    K["Graph Budget ACTIVE"] --> L["claim root + child concurrency"]
+    L --> M["root ACCEPTED\nelapsed usage persisted"]
+    M --> N["claim final with remaining time"]
+    N --> O{"worker finishes before remaining time?"}
+    O -->|"no"| P["rejected time usage"]
+    P --> Q["Operation RECOVERY_REQUIRED"]
+    Q --> R["Graph stays ACTIVE\nno blind replay or fake terminal"]
+```
+
+cleanup flow 不把异常正文或物理 identity 写入 journal；成功轮询也不制造心跳
+事件。Budget flow 使用已有 graph/child ledger，而不是新建路由专用计数器。
+两者都只增加可恢复证据，不代替 OS supervisor 或一般 reconciliation。

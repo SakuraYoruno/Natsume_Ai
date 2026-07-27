@@ -62,6 +62,9 @@ _support_router = APIRouter()
 _WORKSPACE_CLEANUP_UNHEALTHY = frozenset(
     {"DEGRADED", "STOPPED", "RETRY_REQUIRED", "UNAVAILABLE"}
 )
+_WORKSPACE_GUARDIAN_PROJECTION_STATUSES = frozenset(
+    {"READY", "FAILED", "UNBOUND"}
+)
 
 
 def _read_workspace_cleanup_health(
@@ -139,6 +142,22 @@ def _read_workspace_cleanup_health(
             "ts_ms": failure_ts_ms,
             "error_type": str(last_failure.get("error_type") or "")[:120] or None,
         }
+    guardian_projection_status = str(
+        raw.get("guardian_projection_status") or "UNBOUND"
+    ).strip().upper()
+    if guardian_projection_status not in _WORKSPACE_GUARDIAN_PROJECTION_STATUSES:
+        return {
+            "status": "UNAVAILABLE",
+            "configured": True,
+            "reason_code": "AGENT_WORKSPACE_CLEANUP_HEALTH_INVALID",
+        }
+    reason_code = str(raw.get("reason_code") or "").strip() or None
+    if guardian_projection_status == "FAILED":
+        status_value = "DEGRADED"
+        reason_code = (
+            reason_code
+            or "AGENT_WORKSPACE_CLEANUP_GUARDIAN_PROJECTION_FAILED"
+        )
     return {
         "status": status_value,
         "configured": configured,
@@ -148,7 +167,11 @@ def _read_workspace_cleanup_health(
         "last_success_ts_ms": last_success_ts_ms,
         "last_failure": safe_last_failure,
         "last_report_count": last_report_count,
-        "reason_code": str(raw.get("reason_code") or "").strip() or None,
+        "guardian_projection_status": guardian_projection_status,
+        "guardian_projection_error_type": (
+            str(raw.get("guardian_projection_error_type") or "")[:120] or None
+        ),
+        "reason_code": reason_code,
         "shutdown_retry_required": bool(raw.get("shutdown_retry_required", False)),
     }
 

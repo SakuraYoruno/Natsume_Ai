@@ -743,7 +743,23 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     class RuntimeGuardian:
         @staticmethod
         def snapshot():
-            return SimpleNamespace(revision=1, snapshot_digest="sha256:" + "a" * 64)
+            return SimpleNamespace(
+                revision=1,
+                snapshot_digest="sha256:" + "a" * 64,
+                slo_breaches=(),
+            )
+
+        @staticmethod
+        def event_history():
+            return []
+
+        @staticmethod
+        def record_slo_breach(**_kwargs):
+            return RuntimeGuardian.snapshot()
+
+        @staticmethod
+        def resolve_slo_breach(**_kwargs):
+            return RuntimeGuardian.snapshot()
 
         @staticmethod
         def observe_startup_batch(*_args, **_kwargs):
@@ -1036,6 +1052,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         task_runtime_arg,
         runtime_settings_arg,
         runtime_owner_arg,
+        *,
+        cleanup_observer,
     ):
         assert task_runtime_arg is task_runtime_container
         assert runtime_settings_arg.agent_workspace_managed_root == (
@@ -1049,6 +1067,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             == "w" * 32
         )
         assert runtime_owner_arg == "test-canonical-owner::runtime::test-boot"
+        assert callable(cleanup_observer)
         events.append("workspace-built")
         workspace_container.start()
         application.state.agent_workspace_container = workspace_container
