@@ -411,6 +411,9 @@ class ResearchModelExecutionReceiptV1:
             and self.attestation_ref is not None
             and self.prompt_digest is not None
             and self.tool_call_count is not None
+            and self.attestation is not None
+            and self.attestation.transport_identity_digest is not None
+            and self.attestation.transport_external is True
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -449,6 +452,8 @@ class ExternalProviderRunAttestationV1:
     cost_micros: int
     provider_latency_ms: int
     total_latency_ms: int
+    transport_identity_digest: str | None = None
+    transport_external: bool | None = None
     fresh_request: bool = True
 
     def __post_init__(self) -> None:
@@ -464,11 +469,38 @@ class ExternalProviderRunAttestationV1:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ResearchBenchmarkContractError(f"{name} must be a non-negative integer")
+        transport_identity = (
+            None
+            if self.transport_identity_digest is None
+            else _digest(
+                self.transport_identity_digest,
+                "transport_identity_digest",
+            )
+        )
+        transport_external = self.transport_external
+        if transport_external is not None and not isinstance(transport_external, bool):
+            raise ResearchBenchmarkContractError(
+                "transport_external must be a boolean when present"
+            )
+        if (transport_identity is None) != (transport_external is None):
+            raise ResearchBenchmarkContractError(
+                "transport identity and external decision must be supplied together"
+            )
+        if transport_external is False:
+            raise ResearchBenchmarkContractError(
+                "external provider attestation cannot certify a local transport"
+            )
+        object.__setattr__(
+            self,
+            "transport_identity_digest",
+            transport_identity,
+        )
+        object.__setattr__(self, "transport_external", transport_external)
         if not self.fresh_request:
             raise ResearchBenchmarkContractError("external model attestation requires a fresh request")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema": "natsume.research.external-provider-attestation.v1",
             "execution_id": self.execution_id,
             "provider": self.provider,
@@ -481,6 +513,10 @@ class ExternalProviderRunAttestationV1:
             "total_latency_ms": self.total_latency_ms,
             "fresh_request": True,
         }
+        if self.transport_identity_digest is not None:
+            result["transport_identity_digest"] = self.transport_identity_digest
+            result["transport_external"] = True
+        return result
 
     @property
     def attestation_digest(self) -> str:

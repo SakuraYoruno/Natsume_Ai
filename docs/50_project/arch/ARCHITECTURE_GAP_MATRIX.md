@@ -3,8 +3,8 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.30
-核对日期：2026-07-27
+版本：v3.32
+核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
@@ -133,7 +133,7 @@ Host 情感连续状态和回复形态额度的 module-global authority 也已�
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 
-当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0135_task_review_denial_settlement.sql`。0132 的 Attempt-bound child Budget 语义保持不变；0133 增加 durable Verification，0134 增加 durable Acceptance/Review 创建，0135 增加 Review denial 原子终态。0130/0131 schema 与 signed reconciliation 保持不变；known interruption marker、0130 case 和两类 Outbox 已合并为同一事务，未决 case不会因后续 Budget/Lease/lifecycle 变化从 current inventory 消失。五节点菱形与八根节点已证明精确 `COMMITTED` checkpoint 的依赖释放和跨 owner 恢复，worker 各调用一次；无限规模、其它 failure/cancellation 组合、自动归因、Workspace 终态和部署 fan-out 仍未完成。
+当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0136_planning_search_cohort_ledger.sql`。0132～0135 的 Task Budget/Verification/Acceptance/Review denial 语义保持不变；0136 新增 PlanningSearch cohort evidence/proposal，不改变 Task execution authority。
 
 Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：每个写请求冻结 Secure Ingress method/path/body、definition head 和 claim，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，只有 post-Acceptance `operator.state_control` Effect 可以写 canonical repository；不可变 admin operation receipt 与 claim 之间的崩溃可由新实例精确恢复。路由中的直接 Scheduler writer 为 0，read 路由保持只读，trigger 保持既有 governed occurrence。
 
@@ -198,9 +198,10 @@ Edge command 的旧全局 client owner、startup 注册和 Tribe/内部直推调
 | Host 候选方案生成 | `PARTIAL_RULED_OBJECTIVE_CAPABILITY_SEARCH_V1` | `tribe/thalamus_agent.py`、`governor/schemas.py`、`orchestration/capability_plan_search.py`、`planning_search/capability_domain.py`、`app/governed_task_adapter.py` | 明确 Research/调研和 Frontend/可用性计划由 server-owned rule 填入 mode/tag/risk，Thalamus 编译与 Governor 严格 schema 都保留并绑定它们；Host 再读取 app-composed Registry 的非执行 metadata，拒绝 legacy steps、少于两项竞争能力、确认型/越风险/越标签候选和伪造 selected path；搜索在虚拟态中选择两项不同能力，第二项依赖第一项，综合节点依赖两项并以 immutable `skill → skill → chat` 图入场；显式 failure-replan 使用 canonical durable recovery 创建同 root revision `+1` | 仅建议/禁止工具、通用目标/Chat、Code/Pentest 仍不切流；自动或 failure-adaptive replan、真实模型/收益证据和 production promotion 仍未完成 | NE-02 |
 | Host 能力规划风险 authority | `LOCAL_TARGETED_PASS / NE-02_PARTIAL` | `orchestration/capability_plan_search.py`、`governor_grant.py`、`test_ne02_capability_plan_search.py` | 请求风险只能收紧：effective ceiling=`min(intent, Governor approved binding)`；grant ref 被冻结到 capability virtual state，缺失/畸形 binding risk 在纯搜索前失败关闭 | 当前仅约束 Research/Frontend capability catalog；不代表一般 Plan、跨域候选、真实收益或 promotion | NE-02 |
 | Pentest L1/L2 | `WIRED` | `pentest/agent/agent_loop.py` | 仍需与 durable outcome/calibration 对齐 | NE-02 |
-| Pentest Conditional MCTS | `SHADOW` | `planning_search_adapter.py`、virtual world | 根候选固定；不能生成 capability-unlocking 后继；校准非 durable | NE-02 |
-| Research 真实收益 | `D20C_ACCEPTANCE_PENDING_EXTERNAL / BENEFIT_UNPROVEN` | D20a `ResearchTaskSnapshot`、`ResearchSuccessorCatalog`、`FrozenResearchCorpusLoader`、D20b `ResearchCitationVerifier`、D20c `AttestedExternalResearchAdapter`、`ResearchPairedExecutionRunner`、canonical `model_attempt_log` lookup、0107/0121 ledger owner | 公开规划状态没有 dedicated locator/source-body/answer-key/verifier-decision 字段，constraints 拒绝这些命名 key，但任务文字不是内容级 DLP；loader 只可读取可信实验根+manifest 列出的 repository-relative 普通文件并公开 metadata receipt。D20b 对 snapshot/manifest/source id/ref/digest/tier 做 exact handshake，并用每次新建的 loader 校验 citation 的 UTF-8 byte span/digest；D20c 新 RunSpec 的 order 只由 owner 在事务内 CSPRNG 生成，raw cohort key 不入账本，历史规格只读；runner 只按这份实际顺序运行、保存 private prompt/output 于进程内并在 fresh verifier 后写 0107 evidence；prompt digest、工具/token/成本/时延与 aggregate budget 均需精确匹配。外呼前 adapter 要求 execution ID 的 audit 为空，已有审计或 lookup 故障均 fail-closed 至 reconciliation，随后才接受 complete canonical model result 的非缓存单 attempt、精确 route/output，并重开 audit started/terminal pair 后把完整 attestation 嵌入 receipt。0107 terminal receipt/replay 重新对齐 registration、RunSpec、两条 arm 的 plan/model/verifier/evidence digest。D20c 没有真实 provider credential execution、production prompt/workload、来源获取、网页抓取、生产 route/TaskGraph/Host/BrowserWorker 接线、独立信任域 verifier、paired cohort、成本/延迟对照、收益统计或 promotion authority；本地 model double 不算 provider evidence，也不是 OS/tenant/sandbox | NE-02 |
-| Code 真实收益 | `UNPROVEN` | D16 catalog + D17 trusted-process private-bare paired-worktree + D18 0106 ledger + D19 controlled pytest receipt | D17/D18 已证明正常受信 adapter 流程会在 private clone/双 arm detached worktree 中运行，私有物料清理和 source fingerprint 一致后才产生 `VERIFIED_CLEAN`，并把 preregistration、两臂 evidence/outcome 和 terminal receipt 以 immutable/replay-safe SQLite 账本保存。D19 还实际执行预注册的 shell-free pytest argv，硬拒 paired test-command/wall 超限，且将 PASS/exit 与 run/arm/plan/budget/aggregate-bound 固定到 restart replay；同一主机 child 仍不是 hidden-oracle、网络或 OS 隔离或 hermetic Python，且模型/工具/token/cost 不受该预算治理。仍缺真实历史 cohort/statistical comparison、真实模型/工具、独立信任域 verifier 与 promotion gate | NE-02 |
+| Pentest Conditional MCTS | `SHADOW_DYNAMIC_SUCCESSOR_LOCAL_TARGETED_PASS` | `l1_graph_search.py`、`planning_search_adapter.py`、`virtual_planning_world.py`、0105 calibration | executable root 只含当前真实 gate 通过动作；同一 current-state policy 生成但缺 capability 的已登记动作进入 virtual-only successor catalog，并仅在纯 transition 解锁后展开。catalog digest/count 写入可选 durable shadow prediction，L3 仍不能影响真实选择。30 次授权实验、verified execution receipt、安全统计和 promotion Gate 尚未完成 | NE-02 |
+| Research 真实收益 | `D20C_ACCEPTANCE_PENDING_EXTERNAL / BENEFIT_UNPROVEN` | D20a `ResearchTaskSnapshot`、`ResearchSuccessorCatalog`、`FrozenResearchCorpusLoader`、D20b `ResearchCitationVerifier`、D20c `AttestedExternalResearchAdapter`、`ResearchPairedExecutionRunner`、`ResearchBenefitCohortEvaluator`、生产 transport identity、canonical `model_attempt_log` lookup、0107/0121 ledger owner | 公开规划状态没有 dedicated locator/source-body/answer-key/verifier-decision 字段，constraints 拒绝这些命名 key，但任务文字不是内容级 DLP；loader 只可读取可信实验根+manifest 列出的 repository-relative 普通文件并公开 metadata receipt。D20b 对 snapshot/manifest/source id/ref/digest/tier 做 exact handshake，并用每次新建的 loader 校验 citation 的 UTF-8 byte span/digest；D20c 新 RunSpec 的 order 只由 owner 在事务内 CSPRNG 生成，raw cohort key 不入账本，历史规格只读；runner 只按这份实际顺序运行、保存 private prompt/output 于进程内并在 fresh verifier 后写 0107 evidence；prompt digest、工具/token/成本/时延与 aggregate budget 均需精确匹配。真实 provider adapter 在实际调用点生成不含原始 URL 的 endpoint digest 和 external-HTTPS decision；D20c 要求 result 与重开的 audit 同时绑定该 identity，本地/私网/CLI/未知 transport 及历史无 identity receipt 都不能计收益。新增纯 cohort 协议固定 24 项、三主题、本地/Web、独立 hidden verifier、10,000 次 paired bootstrap，以及质量/citation/严重错误/含 verifier 成本/p95 门槛；失败保留原因，通过也只 proposal-only。仍没有 cohort SQLite owner、真实 provider credential execution、production prompt/workload、来源获取、网页抓取、生产 route/TaskGraph/Host/BrowserWorker 接线、真实 24 项运行、收益报告持久化或 promotion authority；本地 model double 和纯 evaluator 都不算收益证据，也不是 OS/tenant/sandbox | NE-02 |
+| Code 真实收益 | `FIXED_20_PROTOCOL_LOCAL_TARGETED_PASS / REAL_COHORT_UNPROVEN` | D16 catalog + D17 private-bare paired-worktree + D18/D19 terminal evidence + `code_benefit_cohort*` | 固定 20 项合同要求同 source/model/provider/profile/budget、owner-randomized 两臂、独立 fresh worktree/模型/hidden/static execution；收益为通过率 +10pp，或非劣 5pp 且成本 -15%，并强制 hidden/static/diff-risk 非退化。D19 失败 pytest 现与 PASS 一样在 verified cleanup 后持久化真实 terminal observation，避免选择偏差。定向 15 项通过；仍没有 cohort owner/migration、真实外部模型、20 项 evidence、独立部署 verifier 或 promotion gate | NE-02 |
+| Pentest 30 次校准与 L3 promotion | `FIXED_30_PROTOCOL_LOCAL_TARGETED_PASS / REAL_COHORT_AND_ACTIVATION_MISSING` | 动态 successor adapter + `pentest_calibration_cohort*` + `promotion_gate.py` | 纯合同已固定 30 项授权/验证 evidence、当前 environment/scope/manifest/facts/policy/state/candidate 派生 catalog、MAE/容差/成本/p95 与三类零违规 Gate；跨域 Gate 必须再有 Research/Code 至少一域收益且只产生强制 Review proposal。定向 7 项通过。仍缺统一 append-only owner/migration、真实 30 次运行、真实非 Pentest 收益、Review/version activation/rollback；L3 继续 shadow | NE-02 |
 
 0094 lifecycle 已按 fail-closed 收紧：activation rollback 或 `aclose` quiescence 未完成统一返回 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED`，锁死 bind/activate 并只允许 `aclose` 重试。Coordinator admission close、drain、`aclose` 任一失败都不关 Store；只有 Coordinator 与 worker 均静默后才 drain Outbox/关 infrastructure。这改善了故障关闭正确性，不改变 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF` 定级。
 
@@ -352,6 +353,21 @@ multi-node/batch failure、其它 unknown-effect/cancellation、多 Workspace、
 bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
 清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
 Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
+
+## 13. NE-02 固定 cohort authority 差距
+
+| 能力 | 当前证据 | 仍缺 | 状态 |
+|---|---|---|---|
+| 统一持久 owner | 0136 单一 SQLite UoW 持有 24/20/30 registration、member、report、proposal | 部署 namespace/canary | `CODE_COMPLETE_LOCAL` |
+| 来源真实性 | Research/Code 重开 0107/0106 terminal；Pentest 重开 0105 与三类 receipt authority | 真实 provider transport、授权 lab、独立 verifier 部署 | `ACCEPTANCE_PENDING_EXTERNAL` |
+| exact replay | response loss/restart 不再次调用 resolver 或执行 arm | 跨主机存储故障演练 | `LOCAL_PASS` |
+| 收益 Gate | 固定统计、完整 evidence-set digest、失败报告保留 | 24 Research、20 Code、30 Pentest 真实 cohort | `UNPROVEN` |
+| L3 promotion | 仅生成 Review-required、无 activation/prod influence proposal | Review、版本 activation、rollback、生产 canary | `SHADOW_ONLY` |
+
+因此“durable cohort owner missing”已从缺口中删除，但“真实收益已证明”和
+“L3 已生产启用”仍是明确缺口。最终波次集合
+`169 passed, 1 Windows privilege skip` 只关闭本地代码/持久化阶段；远程 CI
+因账户额度为 `NOT_RUN_ACCOUNT_QUOTA`，不能冒充 PASS。
 
 ### 当前结构门禁纠偏
 

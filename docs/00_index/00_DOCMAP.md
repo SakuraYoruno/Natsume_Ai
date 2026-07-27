@@ -38,7 +38,7 @@ typed Effect。只有 44 个启用项进入运行 manifest；blocked 能力保�
 独立 Personality Registry 的 19 项 metadata 与动态 MCP Skill 没有
 governed manifest 入口。
 
-当前文档基线为 migration head `0135_task_review_denial_settlement.sql`：0130/0131 继续负责未决 Operation hold 与 exact signed reconciliation；0132 负责 Attempt-bound child Budget；0133 把 VerificationResult 与 Node transition 持久绑定；0134 把 AcceptanceJudgement、自动接纳 artifact/effect 或 Review waiting bundle 与 Node transition 原子绑定；0135 再把 terminal Review、Node、Graph、graph Budget 和三条 Outbox 收进一个不可变 settlement。多节点 Graph 的普通成功/失败仍由 0090/0091 既有外层 authority 唯一终结。一般 cancellation/release、一般恢复、七路线 commit-bound acceptance 和 NE-01 仍未收口。
+当前文档基线为 migration head `0136_planning_search_cohort_ledger.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal，不改变 Task execution authority。多节点 Graph 的普通成功/失败仍由 0090/0091 既有外层 authority 唯一终结。
 
 当前 Chat 文档基线为 exact Life projection barrier：assistant turn 与 LifeMemory admission 的 durable receipts是 external reply的必要前置条件；首次调用可完成 exact pending intent，reclaimed reconciliation只读。该项只关闭 Chat 的 `transactional_side_effects` 控制，不改变七路线 `INCOMPLETE`、external eventual delivery、wave integration或 NE-07状态。
 

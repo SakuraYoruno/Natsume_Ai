@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.33
+版本：v2.35
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-27
+维护日期：2026-07-28
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -775,11 +775,31 @@ Transition 必须：
   → promotion proposal
 ```
 
-未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。模型证据还必须由唯一模型 authority 生成：D20c 只能接受一个 canonical `ModelAttemptService` request 的非缓存、单成功 attempt，且将 target/输出摘要、provider 与总延迟、token、成本一起封入不可分离的 attestation。适配器在 provider 调用前必须确认该 execution ID 没有任何 canonical audit row；只要已有 started/terminal 行或 audit lookup 失败，就必须先 reconciliation，不能以同一 ID 盲目重放。签发时还必须重开同一 request 的 canonical audit started/terminal pair，并核对 provider latency；cache、多 attempt、缺测量或 audit drift 都不能转换为外部收益证据。单纯的 URI、fixture 或调用者自报字段永远不是批准证据；请求参数也不能覆盖路由自己的 retry authority。D20a～D20c 只建立后续实验的输入和结构化证据边界，尚无真实 credential/provider execution、production prompt/workload、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research 是 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
+未执行替代路径的 reward 只能标记为估计；不能将 baseline 的真实结果归因给未执行候选。模型证据还必须由唯一模型 authority 生成：D20c 只能接受一个 canonical `ModelAttemptService` request 的非缓存、单成功 attempt，且将 target/输出摘要、provider 与总延迟、token、成本一起封入不可分离的 attestation。仅凭 provider/model 名称不能证明发生了外部调用；实际 transport 边界还必须产生不含原始 URL 的 endpoint identity digest，并保守证明它是外部 HTTPS。适配器在 provider 调用前必须确认该 execution ID 没有任何 canonical audit row；只要已有 started/terminal 行或 audit lookup 失败，就必须先 reconciliation，不能以同一 ID 盲目重放。签发时还必须重开同一 request 的 canonical audit started/terminal pair，并核对 provider latency、transport identity 与 external decision；cache、多 attempt、本地/私网/未知 transport、缺测量或 audit drift 都不能转换为外部收益证据。单纯的 URI、fixture 或调用者自报字段永远不是批准证据；请求参数也不能覆盖路由自己的 retry authority。D20a～D20c 只建立后续实验的输入和结构化证据边界，尚无真实 credential/provider execution、production prompt/workload、独立 verifier、paired cohort、cost/latency 对照或 promotion authority，因此 Research 是 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
+
+收益协议本身也不能由实验调用方临时调参。Research cohort 固定为 24 个唯一双臂 workload、至少三个主题并同时含本地文件与 Web 来源；quality verifier 必须使用独立 execution/attempt，精确绑定被评估 response digest、隐藏 rubric/profile 和自身外部 transport attestation。统计器以 preregistered spec digest 与 seed digest 驱动固定 10,000 次 paired bootstrap，次序变化不能改变结果。门槛同时约束均值提升、95% 下界、citation、严重错误、包含 verifier 的成本和 p95 时延；任一失败都只生成 append-only 失败证据。即使全部通过，报告也只能成为 `EvolutionProposal` 的输入，不能直接切换生产。当前代码冻结了纯合同与确定性 evaluator，但还没有 durable cohort owner 或真实 24 项执行，所以不能把“算法可计算”写成“收益已证明”。
+
+图搜索中的 successor 也不能等同于“把根候选再跑一遍”。Pentest 当前真实状态只决定哪些动作可作为 executable root；同一授权策略产生、但因缺少 capability 而暂不可执行的已登记动作，应进入独立的 virtual-only catalog。纯 transition 提供新 capability 后，expander 再按新的 virtual state 计算适用后继。catalog 不携带 executor/args/callback，不能绕过最终真实 PreActionGate；其 digest、初始 fact/capability state 和 trace 必须进入校准证据。这样可以评估 capability-unlocking 路径，同时保持真实执行仍由 L1/L2 baseline 控制。若 outcome 只是未验证运行记录，这种更真实的搜索空间仍不能成为 production promotion 依据。
+
+Code 的 pass-rate 实验不能把失败 arm 当作“没有结果”。测试失败本身是终态观察；只要实际退出状态、受控命令、工作区 diff、预算和 cleanup receipt 精确绑定，就必须 append-only 保存，否则 20 项 cohort 会产生幸存者偏差。固定收益 Gate 同时比较通过率、总成本和三个非退化护栏：hidden test、static check 与 diff risk。模型响应、hidden verifier 和 static verifier 必须使用不同 execution identity；只有 fresh external transport attestation 可计收益。通过 Gate 也只能形成 proposal evidence，不能直接让搜索结果获得生产执行权。
 
 持久证据的“唯一写 owner”不要求把所有序列化、类型和数据库职责塞进同一文件。Research shadow ledger 的 SQLite 连接、事务和 append-only UoW 继续只属于 repository owner；canonical JSON 编解码与篡改校验属于无连接 codec，snapshot/error 属于 typed projection 模块。对外 repository import 与 replay 语义保持稳定，而 codec/models 不得获得连接、事务或第二写 authority。这样的拆分降低物理复杂度，却不改变证据归属，也不能被解读为 Research 收益或生产 promotion 已完成。
 
 跨层共享类型也遵循同一原则：合同的物理归属应由“谁共同消费”决定，而不是由最早实现它的应用模块决定。Task Runtime feature-canary receipt 同时被持久层与运行时消费，Host lifecycle ports 同时被 Composition 与 App 消费，因此 canonical type 必须位于中立 `contracts` 层；旧路径只能重导出同一个 Python 对象，不能复制 dataclass/Protocol 或改变序列化形状。这样才能同时消除 persistence→application、composition→app 回边，并避免兼容层制造第二套类型身份。静态 SCC 归零只证明依赖方向正确，不证明七路线执行、持久恢复或生产验收完成。
+
+#### 搜索升级需要“安全校准”和“跨域收益”两把钥匙
+
+Pentest 搜索空间更真实，不等于它已经更安全。每个校准运行必须先固定授权
+环境、scope、capability manifest、当前 facts、policy 和 virtual state，再由
+这些输入及候选 ID 派生 successor catalog identity；固定根候选换一个摘要不
+构成动态搜索证据。实际 outcome 必须由独立、内容寻址的 Task、授权和验证
+receipt 支撑，并保存失败与违规，不能只保留漂亮样本。
+
+校准只回答“预测与安全事实是否一致”，不回答“通用算法是否值得上线”。
+因此 L3 promotion 同时要求 Pentest 的 30 次安全校准和至少一个非 Pentest
+领域的固定队列收益；两者满足也只能生成 Review-bound proposal。proposal
+不是 activation authority，执行器仍消费既有批准图，生产 influence 必须由
+后续持久 Review、版本激活和回滚边界另行授予。
 
 ### 10.5 编译是规划与执行之间的防火墙
 
@@ -1477,3 +1497,24 @@ writer UoW、exact replay 和行为测试审计，再更新结构基线；直接
 证据。反过来，文件越过既有职责上限时也不能只提高阈值，应把无连接的纯
 identity、facade 或 validator 从唯一 writer 中抽离，同时保持 writer、连接和
 事务 owner 不变。
+
+## 29. 收益报告必须由可重开的 cohort authority 派生
+
+统计 evaluator 能重算指标，不等于它拥有证据。可用于演化决策的 cohort
+必须先冻结 domain、cohort version、成员数和每个 workload/run identity，
+再逐项从更低层的 terminal authority 重开执行事实。Research 的模型与
+citation terminal、Code 的 cleanup-gated terminal、Pentest 的 calibration
+prediction/outcome 及 Task/Authorization/Verification receipt 不能由 cohort
+调用者重新自报；任何缺失或 digest 漂移都必须在写入成员前失败关闭。
+
+cohort owner 自身只保存 append-only registration、成员、authority proof 和
+派生报告。响应丢失时先按成员 identity 重开，不能重新运行模型、verifier 或
+实验。报告必须绑定按 workload 排序的完整 evidence-set digest，不能从不完整
+集合产生；Research/Code/Pentest 的固定成员数分别是 24/20/30。
+
+跨域收益只是 promotion 的输入，不是生产激活权。安全 Pentest calibration 与
+至少一个非 Pentest 收益报告同时存在时，系统最多生成要求人工 Review 的
+content-addressed proposal；proposal 不得拥有 activation authority 或直接
+改变 L3 production influence。真实 provider、授权实验环境和隐藏 verifier
+缺失时，正确状态是 `ACCEPTANCE_PENDING_EXTERNAL`，不是用本地构造出的合格
+数字填补证据。

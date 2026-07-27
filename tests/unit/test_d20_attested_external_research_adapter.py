@@ -62,7 +62,9 @@ def _result(*, cached: bool = False, provider_latency: int | None = 87) -> Model
     }
     if provider_latency is not None:
         metadata["provider_transport_measurements"] = {
-            "provider_latency_ms": provider_latency
+            "provider_latency_ms": provider_latency,
+            "transport_identity_digest": "d" * 64,
+            "transport_external": True,
         }
     attempt = ModelAttemptRecord(
         attempt_id="model-attempt-1",
@@ -136,6 +138,8 @@ async def test_d20c_adapter_builds_attested_receipt_from_one_fresh_canonical_att
     assert run.model_receipt.attestation_ref == run.attestation.attestation_ref
     assert run.model_receipt.prompt_digest == "a" * 64
     assert run.model_receipt.tool_call_count == 0
+    assert run.attestation.transport_identity_digest == "d" * 64
+    assert run.attestation.transport_external is True
     assert service.requests[0].request_id == "research-execution-1"
     assert service.requests[0].foreground is True
     assert service.requests[0].max_attempts == 1
@@ -188,6 +192,36 @@ async def test_d20c_adapter_rejects_cached_and_incomplete_transport_evidence() -
         )
     with pytest.raises(AttestedExternalResearchError, match="provider_latency_ms"):
         await missing_latency.execute(
+            execution_id="research-execution-1",
+            arm_id="baseline",
+            prompt_id="research.prompt",
+            messages=({"role": "user", "content": "x"},),
+            deadline_ms=1_000,
+        )
+
+
+async def test_d20c_adapter_rejects_local_or_unidentified_transport() -> None:
+    local_result = _result()
+    terminal = replace(
+        local_result.attempts[0],
+        metadata={
+            **local_result.attempts[0].metadata,
+            "provider_transport_measurements": {
+                "provider_latency_ms": 87,
+                "transport_identity_digest": "d" * 64,
+                "transport_external": False,
+            },
+        },
+    )
+    local_result = replace(local_result, attempts=(terminal,))
+    audit = _AuditLookup(())
+    adapter = AttestedExternalResearchAdapter(
+        model_attempt_service=_AttemptService(local_result, audit=audit),
+        attempt_audit_lookup=audit,
+    )
+
+    with pytest.raises(AttestedExternalResearchError, match="local or untrusted"):
+        await adapter.execute(
             execution_id="research-execution-1",
             arm_id="baseline",
             prompt_id="research.prompt",

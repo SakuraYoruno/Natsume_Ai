@@ -3,9 +3,9 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.59
-核对日期：2026-07-27
-原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
+版本：v5.61
+核对日期：2026-07-28
+合并基线：`origin/dev@a407e73e`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
@@ -197,7 +197,7 @@ reconciler 与 repository 重开唯一 Acceptance/artifact/Operation/projection
 路径、源分支不变与第二次重启零重放。多个写 owner、其它
 failure/cancellation/unknown-effect 组合及强隔离仍未完成。
 
-当前连续 migration head 为 `0135_task_review_denial_settlement.sql`。0132 在 Attempt/Lease/READY claim 的同一 `BEGIN IMMEDIATE` 中创建 immutable child Budget Reservation；Graph Budget 保持唯一 aggregate ceiling。0133 在 Verification transition 同一 UoW 固化 exact decision，0134 在 Acceptance transition 同一 UoW 固化 exact decision 并原子提交 artifact/effect 或 Review waiting bundle，0135 再原子提交 Review denial 的 Node/Graph/graph Budget、三 Outbox 和 settlement。0130/0131 schema 与签名 reconciliation 保持不变；当前 Store 已把 known interruption 的 `RECOVERY_REQUIRED` marker、0130 case 和两类 Outbox 收进同一事务，并按 exact Operation version/取消身份维护未决 current case。该局部证据仍不覆盖其它 failure/cancellation、自动副作用归因、Workspace 全终态、部署 fan-out 或七路线验收。
+当前连续 migration head 为 `0136_planning_search_cohort_ledger.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal，不改变 Task execution authority。
 
 无 cancellation intent 的 signed `RELEASE + NO_SIDE_EFFECT` 已从单节点整图终态扩展为通用节点终态。`TaskOperationFailureReconciliationStoreMixin` 的第一事务只释放 Operation、失败目标 Attempt/Node、过期原 Lease并写四条 Outbox；只有单节点兼容路径在同一事务关闭 Graph/Budget。多节点 Graph/Budget 保持 ACTIVE，重启后的 `DurableDagSchedulingRuntime` 先重建 failed outcome，再让现有 0090 writer 原子提交 Graph/Budget 失败终态。Acceptance v4 receipt 不摘要会变化的 Graph settlement 字段，因此 `PENDING→COMMITTED` 后仍精确重放；0090 decision 或 Graph/Budget Outbox 漂移会失败关闭。双根、并发额度1的真实 SQLite 测试证明 READY sibling 未执行；并发额度2的双失败测试证明非 selected 失败节点仍由同一 decision outcome 精确覆盖并可重开。该链不自动判定副作用，也不覆盖其它 failure/cancellation。
 
@@ -219,7 +219,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
-| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0135_task_review_denial_settlement.sql`。0126～0132 的 Operation、Effect、mode-policy、recovery 与节点预算边界保持不变；0133 增加 durable Verification，0134 增加 durable Acceptance/Review 创建，0135 增加 Review denial 原子 settlement。这些资产都不代表七路线或 NE-01 已生产封板 |
+| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0136_planning_search_cohort_ledger.sql`。0133～0135 收口 Task Verification/Acceptance/Review denial；0136 增加 proposal-only PlanningSearch cohort evidence。这些资产不代表外部收益或生产激活 |
 | Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`2a88f56e` 同库收据使七路 commit binding、三控制 policy 和当前 Plan/Delegate enabled-scope 其余控制通过。Scheduler/Internal/Operator 仍有独立缺口；Operator active inventory 为 14 |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`workspace_write_promotion.py` 密封 bounded safe-path manifest 与 binary patch并确定性生成 accepted HEAD；源 branch 不移动。`internal_startup_checkpoint_continuation.py` 提供 exact scan，`periodic_durable_continuation.py` 只托管 timer/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 仍以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 除精确 sealed abandon/cleanup 外，只对 finalized cancellation 且符合共享中立合同两类 exact signed terminal 的未封存单节点先关闭 claim、再 cleanup/discard；失败顺序不会删除证据。一般 unknown effect、其它 crash-left/取消 closeout 与 general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、OS/container isolation、canary与七路线验收也未完成 |
@@ -227,8 +227,8 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 | 原生多节点 Durable TaskGraph | `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / SIGNED_NODE_FAILURE_0090_LOCAL_PROVEN / PRODUCTION_FANOUT_OFF` | 0102+GR06 已把 exact NODE Effect、immutable artifact、`ACCEPTED` 与 Attempt-bound Outbox 合为 canonical 应用 Store UoW。TaskStore 的 public graph/effect staging 写入 API 已删除；生产 Graph 只能从 HostCommand admission 同一 UoW 进入，Effect 只能从 canonical Acceptance UoW 进入。0124/0125 封闭新准入。signed multi-node `NO_SIDE_EFFECT` 失败只关闭目标节点，重启后由 0090 唯一终结 Graph/Budget；READY sibling 零执行且 receipt 稳定。其它运行期 mutation、其它 general/batch/pre-budget recovery、部署 inventory/key/canary 仍缺 |
 | 通用 PlanningSearch | `PARTIAL_EXPLICIT_HOST_CAPABILITY_SEARCH / D20C_ACCEPTANCE_PENDING_EXTERNAL` | 公共 L1/L2/L3 内核、不可变 Goal/VirtualStateSnapshot、纯 GoalPlanningService 与 context-owned compiler 已存在；唯一 Host Plan 入口是 registry-derived capability mode，顶层或 `args` 的 legacy `planned_steps/steps` 在上下文构造和 admission 前拒绝。D16～D20c 是 Code/Research shadow 基础资产；D20c 只将满足严格条件的 canonical 模型结果封成外部 provider attestation，尚无真实外部 cohort、独立 verifier 或 promotion 结论 |
 | Host 智能候选规划 | `PARTIAL_RULED_OBJECTIVE_CAPABILITY_SEARCH_V1` | Thalamus 仅对明确的 Research/调研与 Frontend/可用性计划生成 server-owned `route=plan + args.planning_mode=CAPABILITY_SEARCH_V1`；编译器保留 `task/tag/risk`，Governor 严格绑定后才进入 app-composed `SkillRegistry`。该路径需要至少两项 host scope、免确认、风险不高于上限且标签匹配的冻结能力；L1/L2/条件 L3 在虚拟态中选择两项不同能力的有界顺序路径，选中后才重建 node 输入并编译 `skill → skill → chat` immutable TaskGraph，节点输出统一为 `receipt_ref + narrative`。显式 `failure_replan` 仅在 TaskStore 证明 predecessor 为 `FAILED` 且 evidence 完整后创建 revision `+1`；自动/按失败自适应的 replan、真实 provider/cohort 和收益仍未完成 |
-| Pentest L3 | `WIRED_SHADOW_ONLY_DURABLE_INJECTION_PARTIAL` | Conditional MCTS 可运行，adapter 强制选择 L1/L2 baseline；0105 的通用 append-only calibration repository 可被显式注入并跨重启重放，physical schema drift 失败关闭，但默认兼容路径仍是内存 ledger；注入库故障只留可观察事件、不改变 baseline，且无 receipt-bound counterfactual/promotion authority |
-| Code/Research 收益 | `UNPROVEN` | Code 已有冻结 ref/digest 驱动的动态 pure catalog、trusted-process private-bare 双 worktree、`VERIFIED_CLEAN`/0106 restart replay，以及 D19 受控 pytest 子进程回执；没有 durable historical cohort、受控模型/工具、OS/container sandbox、独立信任域 verifier 或成对收益结论 |
+| Pentest L3 | `WIRED_SHADOW_ONLY_FIXED_30_PROTOCOL_LOCAL_PASS_DURABLE_OWNER_AND_REAL_RUN_PENDING` | Conditional MCTS 可运行；当前真实 gate 通过动作只形成 root，同一 policy 产生但缺 capability 的已登记动作进入 virtual-only successor catalog，纯 transition 解锁后才展开。固定 30 项纯合同要求 successor identity 由授权 environment/scope、capability manifest、facts、policy、virtual state 与 candidate IDs 派生，并绑定独立 Task/Authorization/Verification receipt、校准误差和三类零违规统计。跨域 Gate 还要求 Code/Research 至少一域收益合格，但只生成 Review proposal。默认兼容路径仍是内存 ledger，没有统一 durable cohort owner 或真实 30 次运行；adapter 强制选择 L1/L2 baseline，L3 production influence=false |
+| Code/Research 收益 | `FIXED_PROTOCOLS_LOCAL_PASS / REAL_BENEFIT_UNPROVEN` | Research 固定 24 项、三主题与本地/Web、hidden verifier、bootstrap/质量/citation/成本/时延门槛；Code 固定 20 项、同 source/model/provider/profile/budget、fresh worktree、+10pp 或非劣 5pp 且成本 -15%、hidden/static/diff-risk 非退化。D19 PASS/FAIL 终态都保留。两域均无统一 cohort owner/migration、真实完整队列、独立部署 verifier 或 promotion 结论 |
 | Budget | `BLOCK_RUNTIME_FAIL_CLOSED / ATTEMPT_CHILD_RESERVATION_AND_PARENT_CONTENTION_LOCAL_PROVEN / PROGRAM_PARTIAL` | 0132 为每个 Attempt 创建 child reservation；父级仍是唯一 aggregate ceiling。8/16/32 线程及跨进程只产生一个 EXCEEDED winner/Outbox，其他 sibling 引用 winner；parent/child usage、retry 与 terminal observation 同事务，重启和升级回填不恢复已消费容量。并发作为 active Lease + `concurrency=1` child reservation 的可释放容量执行，不作为累计 usage。`BudgetPolicy` 合同仍能表达 DEGRADE/REVIEW，但 runtime support matrix 当前只有 BLOCK；两者在任何 Store/Outbox mutation 前稳定拒绝，不能静默降级。全部 cancellation/release 组合、真实 DEGRADE/REVIEW state machine 与七路线 policy 未完整执行 |
 | Governed Chat Surface 模型预算 | `PASS_FORMAL_MODELATTEMPT_WORKERPROJECTION_PARENT_CHILD_BUDGET_LINEAGE` | 已 admission 的 Host Chat 把冻结剩余预算传给 Surface 主模型调用；canonical ModelAttempt、provider usage、WorkerProjection 与父子账本由 `c68850f8` 正式收据重开并精确匹配，replay 不再调用 provider。受控 terminal provider 不证明外部模型质量；其它路线仍需各自预算闭环 |
 | Governed Agent Runtime 模型端口 | `PARTIAL_D15_GOVERNED_AGENT_MODEL_PORT_BRIDGE / REACT_SKILL_DELEGATE_FAIL_CLOSED` | 仅在 CapabilityBroker 已重验 sealed governed authority 后，`codex_runtime` 从 composed `ModelAttemptService` 派生同一 `PromptRegistry` 并交给 `AgentRuntimeExecutor`；缺端口/authority 直接关闭。前一 ReAct 切片只把 `run_skill` / `dispatch_sub_agent` 从发现面移除，并令注入的旧 ToolSpec 在低层执行器前拒绝；它不证明普通 ReAct Tool authority、文件/Web/Browser 路线或完整 Agent executor 已退役。ReAct 模型调用仍未受 `ModelBudgetGuard` 约束，也没有把上述提案编译为新 TaskGraph revision，因此只是窄安全封口，不是 Code/Research 工具能力 |
@@ -546,6 +546,8 @@ Task Runtime Outbox 已由 0093 建立跨进程 durable claim/CAS，0095 则把 
 
 这仍主要是通用接口与 immutable compilation foundation：Host 现在只有由 Thalamus server-owned rule 产生的明确 Research/调研与 Frontend/可用性计划会经 Governor 绑定进入 `GoalPlanningService`；仅建议、禁止工具、普通 Chat、通用目标、Code/Pentest 都不走这条执行入口。没有 Code/Research/Pentest 领域 production cutover、实际成对 outcome receipt，也没有 MCTS 对真实用户任务的收益或 promotion influence。
 
+Pentest 的生产选择调用点现在同时冻结两类数据：真实 PreActionGate 已通过的 executable roots，以及同一次 current-state policy 产生、具有 ToolContract、仅因缺 capability 暂不可执行的 virtual successors。`PentestVirtualExpander` 的 depth 0 永远只返回 roots；后续 depth 才依据 `PentestVirtualState.capabilities` 动态过滤包含 roots 与 successors 的不可变 catalog。实际 args、executor、callback 不进入 descriptor，实际 selected action 始终来自 baseline root；catalog digest/count 会与 initial virtual-state digest、trace 一起进入 0105 shadow calibration。该结构使 capability-unlocking 路径可被评估，但没有把虚拟 capability 写回 AgentState，也没有授予 deferred action 执行权。
+
 ### 5.1.2 D16 Code dynamic shadow catalog
 
 `host_brain/planning_search/code_domain_models.py` 把一个 Code 任务冻结为只含 opaque governed ref、digest、目标 artifact、失败测试 ref、预注册 patch 和验证 profile 的 `CodeTaskSnapshot`；`host_brain/planning_search/code_domain.py` 只保留动态 catalog、排序和编译绑定。`CodeSuccessorCatalog` 不读取 `planned_steps`：它从根状态生成 `inspect`，再从已检查状态生成预注册 `patch`，最后生成 `unit verify / rollback`。L2 是确定性虚拟证据排序；只有冻结 `virtual_model_ready=true` 时才向公共内核暴露 transition/reward，因而即使外部要求 `MCTSMode.ALWAYS`，未就绪快照也没有可运行的 L3 端口。编译绑定还会拒绝任意 `execute` root、真实 workspace 字段、未知 root action 或缺失的 `write_files/network` 禁令；唯一允许的 root 策略是 `inspect + generate_report + {strategy: temp_workspace}`。
@@ -564,9 +566,11 @@ workload isolation 是精确六字段 manifest：`sandbox_mode`、`source_ref`�
 
 D18 将成功路径收口为：先以 `CodeBenchmarkWorkloadRegistration` 冻结 workload、六字段 isolation 和**声明性** execution budget；再以 `CodeBenchmarkRunSpec` 冻结 baseline/selected 两条 candidate path。这两项 preregistration 是各自独立、append-only 的提交，不承诺与后续运行同一事务。D17 runner 只有在 `finally` 删除 private bare、两个 worktree 和 run root，且受保护 source fingerprint 前后一致时才返回路径无关的 `CodeBenchmarkCleanupReceipt(status=VERIFIED_CLEAN)`。随后 0106 的**terminal-evidence transaction** 才在一个 SQLite transaction 写入两个 arm evidence/outcome、cleanup 和 terminal receipt；所有行不可更新/删除，FK/role/source/policy/cleanup gate 在 SQL 中复核，JSON/digest/对象重放和物理 schema drift 也 fail closed。terminal receipt 只是 `EXPERIMENT_EVIDENCE_ONLY`，不能选 winner 或影响 production。
 
-D19 只在 registration 显式绑定同一 `CodeBenchmarkVerificationPlan` 时生效：计划只接受冻结的 `python -m pytest -q <小写仓库相对测试路径>` argv；两 arm 的最坏测试次数与命令 timeout 总和必须先被 registration 的 `max_test_commands` / `max_wall_time_ms` 覆盖。`ControlledCodeBenchmarkVerifier` 在每个 detached worktree 根目录以 `shell=False` 启动受限子进程，去掉 `PYTHONPATH`、关闭 pytest 自动插件加载和 cache provider，并将执行 argv digest、exit/status、受限 stdout/stderr digest/长度与耗时封为 path-free verifier receipt；策略实际解析的当前 Python 解释器会先被核验，再持久化回冻结的 portable argv digest，因此 receipt 不携带主机路径。`PASS` 必须等于 exit code `0`；同一 arm 会在第一个 child 可能启动前预留冻结 command count，因此 timeout/policy error 也不能在该 pair 内重试并绕过 `max_test_commands`。每条 receipt 都精确绑定 run/arm/plan/budget，D18 terminal reader 不只重验两 arm 合计 test/wall 不超过预注册 paired limit，也要求两个受控 arm/outcome 都成功；不能绕过专用 service 直接把 FAIL 写成 `COMPLETED_CLEAN`。只有持有这样的 receipt 才能在 D17 的 executor/verifier cost 精确相等合同之外加入这两个 D19 server-observed counter。`ControlledCodeBenchmarkExperimentService` 只在两个受控 verifier 都 PASS 且 cleanup verified 时才写 terminal receipt。
+D19 只在 registration 显式绑定同一 `CodeBenchmarkVerificationPlan` 时生效：计划只接受冻结的 `python -m pytest -q <小写仓库相对测试路径>` argv；两 arm 的最坏测试次数与命令 timeout 总和必须先被 registration 的 `max_test_commands` / `max_wall_time_ms` 覆盖。`ControlledCodeBenchmarkVerifier` 在每个 detached worktree 根目录以 `shell=False` 启动受限子进程，去掉 `PYTHONPATH`、关闭 pytest 自动插件加载和 cache provider，并将执行 argv digest、exit/status、受限 stdout/stderr digest/长度与耗时封为 path-free verifier receipt；策略实际解析的当前 Python 解释器会先被核验，再持久化回冻结的 portable argv digest，因此 receipt 不携带主机路径。`PASS` 必须等于 exit code `0`；同一 arm 会在第一个 child 可能启动前预留冻结 command count，因此 timeout/policy error 也不能在该 pair 内重试并绕过 `max_test_commands`。每条 receipt 都精确绑定 run/arm/plan/budget，D18 terminal reader 重验两 arm 合计 test/wall 不超过预注册 paired limit，并要求 outcome、verifier 与 controlled receipt 的 PASS/FAIL 完全一致。verified cleanup 后，成功与失败都形成 terminal experiment observation；这避免固定 cohort 丢弃失败样本，但 `COMPLETED_CLEAN` 只表示证据完整和环境已清理，不表示测试通过。
 
 它依然未接 Host、TaskGraph、AgentExecutor、WorkspaceGrant 或生产 route；D19 的 child 只是同一主机受信 workspace 的 subprocess，不是 hidden-oracle 或独立信任域。没有 process-tree kill、CPU/内存、container、OS 文件系统、tenant 或网络隔离；本地 source、pytest 测试及用户 site 依赖仍是受信输入，且为了 Windows user-site discovery 保留 `APPDATA`，没有设置 `PYTHONNOUSERSITE`，因此更不能误称 hermetic Python 环境。`max_model_calls`、provider/tool/token/model-cost 和通用 Durable Budget Ledger 没有接入，且没有 durable benchmark lease、crash cleanup recovery/retry worker、真实历史 cohort、统计比较或收益结论，因此仍不能宣称已跑真实模型修复或完成 Code production shadow。
+
+固定 Code 收益层位于 `contracts/planning_search/code_benefit_cohort*`。它要求恰好 20 个唯一 workload/run/terminal receipt，同 source commit/path policy、相同 execution provider/model/profile/budget，且 baseline/selected 使用独立模型 execution、fresh worktree、hidden-test verifier 和 static verifier。evaluator 只接受 +10pp pass-rate，或 -5pp 非劣且至少 15% 成本下降，同时 hidden/static rate 和 mean diff-risk 均不退化。当前只有纯合同与本地定向证据，没有 cohort SQLite owner、真实 provider/model、20 项运行或 promotion，因此状态仍为 `UNPROVEN`。
 
 ### 5.1.4 D20a～D20c Research frozen-corpus、citation 与外部模型证据边界
 
@@ -578,9 +582,11 @@ D19 只在 registration 显式绑定同一 `CodeBenchmarkVerificationPlan` 时�
 
 0107 `SQLiteResearchShadowLedger` 也不再只依赖“两个 arm 行已经存在”的 SQL trigger：普通 repository path 在 append 时只接受完全相同的 arm replay；terminal insert/replay 会重开 canonical registration、RunSpec 和两个 arm row，交叉核验 registration digest、实际 `BASELINE/SELECTED` arm order、baseline/selected plan、model/verifier JSON 与 evidence digest。任一漂移失败关闭，完全相同的 terminal replay 才返回原 receipt ref。新 paired RunSpec 不再接收调用方给出的 order 或“已随机化”标记：owner 在 SQLite 写事务中以 cohort key digest 建稳定 identity，精确 replay 在调用 CSPRNG 前返回原规格，只有新 identity 才以 `secrets.randbelow(2)` 决定实际 order；raw key 不持久化。旧规格和既有 terminal receipt 保持只读重开，但不能产生新的外呼或 terminal receipt。0121 另以 immutable operation/event chain 为每个 `run_id + arm_role` 预留 deterministic execution ID：fenced claim 才能落 `EXTERNAL_CALL_STARTED`；重启时 canonical audit 为空才可显式授权重试，存在 audit 而没有 0107 evidence 必须落 `RECONCILIATION_REQUIRED`，已经持久 evidence 才能落 `EVIDENCE_PERSISTED`。`ResearchPairedExecutionRunner` 只读取这份 owner-randomized RunSpec，不接收调用方替换的 plan、budget 或执行顺序；它保留 raw prompt/model output 在内存，且在外呼前要求 `ResearchCitationOutputParserV1` 的固定 JSON envelope digest 精确匹配 profile，parser 丢弃 answer 正文、只向每臂 fresh verifier 提供 citation span。最终回执还会重新核验 profile prompt digest、工具调用数、token 与单臂/成对时延预算。已有 evidence 只重开不再外呼，started-but-no-evidence 必须先按审计状态恢复或冻结。这仍是 owner-side shadow evidence 防线；旧 schema 的 append-only 触发器没有因此变成生产 promotion authority。
 
-`attested_external_research_adapter.py` 是 D20c 唯一的模型边界 adapter：它不能接收 caller 指定的 provider、model、base URL 或 cache 控制，并会先经 `AttemptAuditLookup` 重开 execution ID；任意已有 canonical audit row 或 lookup 异常都视为未知外部效果，拒绝再次调用并要求 reconciliation。只有空审计的 ID 才能向已 composition 的 `ModelAttemptService` 发起带 execution/arm identity 的前台请求。返回结果必须为一个非缓存成功 attempt，且 final target 与 attempt 的 adapter/provider/model、输出摘要、rendered prompt digest、canonical tool/token/成本、provider latency 和总 latency 全部精确一致；随后它再重开同一 request 的 canonical started/terminal pair，要求 terminal row 与结果完全一致且 audit 也包含 provider latency，才会构造 `ExternalProviderRunAttestationV1`。该对象作为完整值嵌入 `ResearchModelExecutionReceiptV1`，而非由字符串 URI 代替。多 attempt、cache、route/output/audit drift 或任何缺测量均失败关闭。请求字段本身不能覆盖 route-owned retry ceiling，因此这里仍是结构化代码边界，不是已验证的外部调用事实。
+`attested_external_research_adapter.py` 是 D20c 唯一的模型边界 adapter：它不能接收 caller 指定的 provider、model、base URL 或 cache 控制，并会先经 `AttemptAuditLookup` 重开 execution ID；任意已有 canonical audit row 或 lookup 异常都视为未知外部效果，拒绝再次调用并要求 reconciliation。只有空审计的 ID 才能向已 composition 的 `ModelAttemptService` 发起带 execution/arm identity 的前台请求。生产 `VaultBackedSingleAttemptAdapter` 在实际 transport 调用点解析 server-owned endpoint，生成脱敏 identity digest，并只把调用耗时、digest 和保守 external-HTTPS decision 交给 canonical audit；原始 endpoint、query、userinfo 与凭据均不持久化。返回结果必须为一个非缓存成功 attempt，且 final target 与 attempt 的 adapter/provider/model、输出摘要、rendered prompt digest、canonical tool/token/成本、provider latency、transport identity 和总 latency全部精确一致；随后它再重开同一 request 的 canonical started/terminal pair，要求 terminal row 与结果完全一致且 audit 也包含同一 provider latency/transport identity/external decision，才会构造 `ExternalProviderRunAttestationV1`。该对象作为完整值嵌入 `ResearchModelExecutionReceiptV1`，而非由字符串 URI 代替。多 attempt、cache、本地/私网/Codex CLI/未知 transport、route/output/audit drift 或任何缺测量均失败关闭。历史无 transport identity 的 V1 attestation 可只读重开但不再 benefit-eligible。请求字段本身不能覆盖 route-owned retry ceiling，因此这里仍是结构化代码边界，不是已验证的外部调用事实。
 
 这不是生产 Research route、TaskGraph、Host、BrowserWorker 或网页抓取接线；没有 production prompt/workload、真实 provider credential execution、独立信任域 verifier、paired cohort、成本/延迟对照、收益统计、winner/promotion authority，也没有 OS/tenant/sandbox。成对 runner 的 in-process canonical-model double 只覆盖本地恢复机械链，绝不能作为 external provider attestation 或 cohort evidence。adapter 的 SQLite audit 重开只证明本地持久审计可对照，不是外部 transport 或 production composition 证据。loader 的根目录和 manifest 都是受信实验输入，其 before/open/after 检查不是 hostile concurrent replacement 的原子 TOCTOU 防线；byte-span validity 也不能据此推导事实正确性或来源独立性。因此 D20c 为 `ACCEPTANCE_PENDING_EXTERNAL`，Research benefit 仍为 `UNPROVEN`。
+
+`contracts/planning_search/research_benefit_cohort.py` 现承载后续真实验收的中立协议和纯 evaluator。它把单臂质量判断从 citation receipt 分离：hidden verifier 拥有不同 execution/attempt，绑定 arm response digest、profile/rubric 和自身 provider attestation。本协议不接受调用方调整 cohort 数或阈值，固定 24 项、三类主题、本地/Web 覆盖、10,000 次 deterministic paired bootstrap、质量/citation/严重错误/总成本/p95 时延 Gate；模型和 verifier 成本/时延一起计入。结构或身份漂移抛错，实验性能失败则生成不可 eligible 的 reason-code report。即使 report 通过也仅能进入 proposal，不能直接影响生产。目前没有 SQLite cohort owner、真实 workload/provider 或报告持久化，因此这一模块是可执行验收算法，不是已完成验收。
 
 ### 5.2 Host Plan
 
@@ -972,3 +978,28 @@ scheduler 出现三次独立 lifecycle 写；Plan writer 的
 只借用 `TaskRetryScheduleFacadeMixin` 与纯 identity builder，仍独占
 `_schedule_retry()` 事务；Operation checkpoint Store 保留单一 snapshot，
 只把纯 Outbox evidence 校验下沉。没有新增连接、writer、阈值例外或 allowlist。
+
+## 12. NE-02 固定 cohort authority 当前事实
+
+当前 migration head 为 `0136_planning_search_cohort_ledger.sql`。新增
+`SQLitePlanningSearchCohortLedger` 是三个固定 cohort 的唯一本地 writer：
+它持有 registration、member proof、report 与 promotion proposal；连接和
+`BEGIN IMMEDIATE` 仍只在 repository owner 中。support 模块仅做无连接的
+canonical、digest、registration/report 重开校验。
+
+来源不是由调用者自证。Research resolver 从
+`SQLiteResearchShadowLedger.get_terminal_receipt()` 重开 0107 receipt；
+Code 从 `CodeHistoricalBenchmarkLedger.get_completed()` 重开 0106 receipt；
+Pentest 从 `CalibrationRepository.get()` 重开 0105 prediction/outcome，并
+要求注入的 `PentestExperimentReceiptAuthority` 对 Task、Authorization、
+Verification refs 逐项返回 exact digest。不存在 permissive default。
+
+本地集成实际写入 3 个 registration、74 个 member、3 个 report、3 个
+promotion evidence 和 1 个 proposal；重启后使用拒绝所有调用的 resolver
+仍可 exact replay 已有成员和 proposal。proposal 在合同与 SQL 两层固定为
+Review-required、无 activation authority、无 production influence。
+
+这些是本地机械证据，不是实际收益。当前没有执行 24 个真实 Research、
+20 个真实 Code、30 次授权 Pentest cohort，也没有 Review/activation；
+NE-02 因而是 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，L3
+仍为 shadow。

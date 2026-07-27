@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.33
+版本：v3.35
 
-核对日期：2026-07-27
+核对日期：2026-07-28
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -1034,6 +1034,10 @@ owner-randomized 0107 RunSpec (CSPRNG order + cohort key digest only)
 
 `FrozenResearchCorpusLoader` 在稳定受信输入中拒绝绝对/遍历/ADS colon/case-alias 语法、link/symlink 和 Windows reparse component、非普通文件、root escape 及任何未列入 manifest 的来源。它有意与 planner 分离：planner 只看公开 metadata，公开 receipt 也同时省略本机 locator 与正文 bytes。D20b 的 verifier 在构造和验证两阶段分别精确比较 snapshot、manifest、binding 及新打开 document 的 corpus/source id/ref/digest/tier；调用方不能交入 executor loader 或未经核验的有效率。D20c 的 paired runner 不接收可替换的 plan、budget 或 arm order，而是重开 0107 RunSpec；新 RunSpec 先在 SQLite 写事务内由 ledger owner 对 cohort key 的 digest 建稳定 identity，精确 replay 在取熵前返回已有规格，只有新 identity 才以 CSPRNG 选择 `BASELINE/SELECTED` 顺序。raw cohort key、prompt 和 response 都不进入账本；旧 RunSpec 与 terminal receipt 只能只读重开，不能生成新的外呼或 terminal receipt。profile 的 output-schema digest 必须在任何模型调用前等于 `ResearchCitationOutputParserV1` 的固定 JSON envelope digest；parser 严格拒绝额外字段、非 JSON、越界或重复 span，并丢弃 answer 正文后只交出 citation span。它要求每个新 arm 使用 fresh verifier，且 profile prompt digest、工具调用数、单臂/成对 token 与时延超过预算均失败关闭。已有 evidence 只重开，`EXTERNAL_CALL_STARTED` 后只有空 canonical audit 才会落 retry authorization；有 audit 而无 evidence 必须冻结 reconciliation。adapter 不能从 caller 获得 provider/model/base URL/cache 控制；它在调用前先经 `AttemptAuditLookup` 确认该 execution ID 不存在 canonical audit row，任何已有行或 lookup 故障均阻断外呼并要求 reconciliation。随后只向已 composition 的模型 authority 发出一个 request，并拒绝 cache、多 attempt、route/output 漂移、缺 prompt digest/工具/token/成本或 provider/总延迟的结果。签发前它还必须重开同一 request 的 canonical audit started/terminal rows，要求 terminal record 和 provider latency 精确一致。普通 request 仍不能自行压低 route-owned retry ceiling；本地 SQLite audit reopen 与 in-process model double 都不等于已经验收的真实 provider 调用。D20a～D20c 未接入生产 Research route、TaskGraph、Host、BrowserWorker、网页抓取、真实 credential/provider execution、独立信任域 verifier 或 paired cohort；它不提供 benefit/promotion authority 或 OS/tenant/sandbox 隔离。Research 为 `ACCEPTANCE_PENDING_EXTERNAL`，benefit 仍为 `UNPROVEN`。
 
+本轮 transport 数据流改为 `Vault-backed adapter → server-owned endpoint classification → ProviderResponse metadata → ModelAttempt terminal audit → D20c attestation`。分类器只持久化 SHA-256 identity digest 和 `transport_external`，不会把 URL、query、userinfo 或 credential 带入账本；HTTPS 域名以外的 localhost、`.local`、非全局 IP、无 endpoint 的 Codex CLI 和未知 transport 都是非外部。D20c 必须在 result terminal row 与重新读取的 audit row 上同时得到相同 digest 和 `true`，否则不能进入 `benefit_eligible`。这只是阻断伪外部证据，真实 endpoint 可达性和 cohort 收益仍待外部验收。
+
+后续 Research 收益流已冻结为 `24 项 preregistered spec → 48 条 paired arm terminal receipt → 48 条独立 hidden-verifier quality receipt → deterministic paired bootstrap/report → EvolutionProposal`。每条 quality receipt 绑定 run/role/arm execution、被评估 response digest、独立 verifier execution/attempt、隐藏 profile/rubric 和外部 transport attestation。evaluator 会重验 workload/run/terminal identity、owner-randomized 标记、双臂相同 provider/model、verifier profile，再计算包含 verifier 请求的成本与时延。阈值失败保留 reason code，通过也只开放 proposal；不得出现 `report → production policy` 直连。当前只落地 spec/receipt/evaluator，虚线中的 SQLite cohort owner、真实 provider 执行和 proposal repository 尚未接线。
+
 ### 4.10 D17–D19 Code historical trusted-process experiment, controlled pytest and durable evidence flow
 
 ```text
@@ -1058,12 +1062,13 @@ registered clean protected source (unshared non-link .git; local Git config is t
   → 0106 preregistration transaction B: exact RunSpec
   → D19 terminal-evidence transaction only after both arms + VERIFIED_CLEAN:
      BASELINE/SELECTED evidence/outcome + cleanup + terminal receipt
-  → terminal reader requires two successful run/arm/plan/budget-bound controlled arms;
+  → terminal reader requires two run/arm/plan/budget-bound controlled arms whose
+     outcome/verifier/controlled PASS-or-FAIL states agree exactly;
      a started arm has already reserved its frozen command budget even on timeout/error
   → EXPERIMENT_EVIDENCE_ONLY (no production influence, winner or promotion)
 ```
 
-该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。D19 的 verifier 把同主机 child 仅用作受控仓库测试命令：它实际强制冻结 argv、paired `max_test_commands` / `max_wall_time_ms`、worktree cwd、`shell=False`、无 `PYTHONPATH` 与关闭自动插件加载，并只持久化无路径摘要；实际解释器路径先被同次 child 核验，持久化的是无主机路径的冻结 portable argv digest。`PASS` 必须对应 exit code `0`，receipt 还会绑定 exact run/arm/plan/budget，并在 terminal replay 重验两个 arm 的 aggregate test/wall limit及两个成功 outcome；没有受控 receipt 的 D17 verifier 仍必须与 executor cost 完全相等。arm 在 child 可能启动前就预留冻结 command count，所以 timeout/policy error 也不能同一 pair 内重试规避预算。它不能强杀子进程树，也没有 CPU/内存、container、tenant、文件系统或网络隔离。本地 source、pytest 测试及 user-site 依赖仍是受信输入；为 Windows user-site discovery 会保留 `APPDATA`，且未设 `PYTHONNOUSERSITE`。0106 先独立 append-only preregister workload/plan，再独立 preregister RunSpec；只有正常 runner cleanup 成功后的 terminal-evidence transaction 才写两 arm evidence/outcome、cleanup 和 terminal receipt。SQL/Python 会再验证 registration/spec 绑定、两个 arm、source/commit/policy 一致性及 cleanup gate，并以 immutable trigger、canonical JSON/digest 和 restart replay 拒绝漂移。它是真实本地 Git + durable experiment evidence 机械链，但口径仍仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：模型/provider/tool/token/cost 不受 D19 预算治理，也没有隐藏 oracle、durable cleanup lease/retry、cohort/statistical comparison 或收益/promotion 结论。
+该 adapter 与 D16 compiler、W2 WorkspaceRuntime、Host、TaskGraph、AgentExecutor 都没有接线。路径 API 会在文件 I/O 前拒绝 padding、case alias、Windows trailing-dot/space、reserved device、`.git`、absolute path、`..`、ACL 外和 symlink component；不可信 model、skill/plugin 或 hidden-oracle 绝不能传入。D19 的 verifier 把同主机 child 仅用作受控仓库测试命令：它实际强制冻结 argv、paired `max_test_commands` / `max_wall_time_ms`、worktree cwd、`shell=False`、无 `PYTHONPATH` 与关闭自动插件加载，并只持久化无路径摘要；实际解释器路径先被同次 child 核验，持久化的是无主机路径的冻结 portable argv digest。`PASS` 必须对应 exit code `0`，receipt 还会绑定 exact run/arm/plan/budget，并在 terminal replay 重验两个 arm 的 aggregate test/wall limit 及 outcome/verifier/controlled status 一致性；FAIL 也是必须保留的终态观察，不代表 `COMPLETED_CLEAN` 变成通过。没有受控 receipt 的 D17 verifier 仍必须与 executor cost 完全相等。arm 在 child 可能启动前就预留冻结 command count，所以 timeout/policy error 也不能同一 pair 内重试规避预算。它不能强杀子进程树，也没有 CPU/内存、container、tenant、文件系统或网络隔离。本地 source、pytest 测试及 user-site 依赖仍是受信输入；为 Windows user-site discovery 会保留 `APPDATA`，且未设 `PYTHONNOUSERSITE`。0106 先独立 append-only preregister workload/plan，再独立 preregister RunSpec；只有正常 runner cleanup 成功后的 terminal-evidence transaction 才写两 arm evidence/outcome、cleanup 和 terminal receipt。SQL/Python 会再验证 registration/spec 绑定、两个 arm、source/commit/policy 一致性及 cleanup gate，并以 immutable trigger、canonical JSON/digest 和 restart replay 拒绝漂移。它是真实本地 Git + durable experiment evidence 机械链，但口径仍仅为 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` / `network_isolation=NOT_ENFORCED`：模型/provider/tool/token/cost 不受 D19 预算治理，也没有隐藏 oracle、durable cleanup lease/retry、真实 20 项 cohort 或收益/promotion 结论。
 
 ## 5. TaskGraph 状态流与回执
 
@@ -1765,6 +1770,22 @@ All ingress sources
 4. 将可证明无副作用的现实 resolver 瞬态来源映射到现有 safe-retry marker；持续守护已完成的 Budget unique-winner 与无前置 Review 到期 retry 的 promotion+claim 单事务，完成历史半状态 reconciliation，以及 exact operation-free Attempt 窄窗之外的 general/multi-node/batch recovery。两类 takeover 都不得被泛化。
 5. 对已接通的 0096 Resume continuation 做跨进程故障矩阵和 canary：原子 enqueue、到期 sweep、claim takeover/stale fence、精确 surface 路由、POST no-rerun、grant renewal 与关闭 quiescence。
 6. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
+
+Pentest 的对应数据流现为 `current AgentState + manifest/policy → L1 executable roots + contract-deferred successor catalog → descriptor-only virtual transition → capability-filtered deeper successors → L3 shadow trace → 0105 prediction/outcome`。depth 0 不读取 deferred catalog；只有前一虚拟节点提供所需 capability 后，后续 expander 才返回该 descriptor。AgentLoop 实际执行仍只消费 L1/L2 baseline root。catalog digest/count 与 state digest 一并进入 shadow calibration，未知 Store 故障只产生可观察降级，不能改变真实选择。
+
+固定校准协议把后续 Pentest 数据流冻结为
+`30 项 preregistration → 当前 authority 派生 successor catalog → shadow
+prediction → 授权 Task terminal → independent Verification → receipt-bound
+outcome → calibration/safety report → cross-domain promotion proposal`。catalog
+digest 必须同时绑定 environment/scope、capability manifest、facts、policy、
+virtual state 与排序去重 candidate IDs；30 项必须逐项拥有不同 Task receipt、
+Verification receipt、verifier execution 和 prediction identity。promotion
+Gate 还要重验内容寻址的 Pentest report 与至少一个合格的 Research/Code
+benefit report。最后一条边只到 Review proposal，不存在
+`proposal → production L3` 直连；当前虚线中的统一 SQLite cohort owner、真实
+实验、Review 和 activation 尚未接线。
+
+Code 固定收益数据流为 `20 项 preregistration → owner-randomized baseline/selected → 同 commit 独立 fresh worktree → fresh external model execution → hidden/static verifier → PASS 或 FAIL terminal observation → cleanup receipt → paired evaluator → proposal-only report`。测试失败不能在 terminal 前被过滤；`COMPLETED_CLEAN` 表示证据与清理完整，不等于测试 PASS。evaluator 不写生产策略，也不能将 report 直接变成 L3 influence。
 7. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。
 8. 所有 Gateway、Edge、Memory、Knowledge、Persona 写操作统一从 Acceptance Effect Outbox 获取 authority 与幂等身份。
 9. 保持 Persona 中央围栏，把无副作用 candidate 接入 proposal、shadow、Review、版本激活和可回滚流程，禁止恢复 direct writer。
@@ -2184,3 +2205,31 @@ node-only 参数，随后仍只进入同一个 `_schedule_retry()` writer transa
 Operation checkpoint 仍在 Store 的单一 SQLite read snapshot 中读取四类记录，
 再把已读取的 Outbox/Reservation 映射交给纯 validator；validator 不重新查询
 数据库，也不能拼装另一份 authority。
+
+## NE-02 cohort evidence 与 promotion 数据流
+
+```mermaid
+sequenceDiagram
+    participant O as Cohort Owner
+    participant S as Lower Source Ledger
+    participant L as 0136 Cohort Ledger
+    participant R as Review
+
+    O->>L: preregister exact 24/20/30 spec
+    loop each frozen workload
+        O->>S: reopen terminal/calibration/receipt facts
+        S-->>O: content-addressed authority proof
+        O->>L: append member + proof
+    end
+    O->>L: seal complete evidence set
+    L-->>O: immutable report
+    O->>L: safe Pentest + non-Pentest benefit
+    L-->>R: Review-required proposal only
+    Note over L,R: activation=false, production influence=false
+```
+
+同一 `(domain, cohort, version, workload)` 重放先从 0136 重开 canonical
+evidence/proof，不再次访问来源 ledger。报告写入前由 SQL trigger 和 repository
+共同要求精确成员数，重开时重新计算 evidence-set digest。promotion evidence
+和 proposal 在一个事务中写入；任何报告缺失、eligibility 不足或 digest 漂移
+均整体回滚。真实模型/实验没有在本流中被 fixture 替代。

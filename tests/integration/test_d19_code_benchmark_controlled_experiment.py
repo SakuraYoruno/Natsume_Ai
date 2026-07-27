@@ -21,7 +21,6 @@ from host_brain.planning_search import (
     SearchBudget,
 )
 from host_brain.planning_search.code_benchmark_experiment import (
-    CodeBenchmarkExperimentError,
     ControlledCodeBenchmarkExperimentService,
 )
 from host_brain.planning_search.code_benchmark_ledger import (
@@ -339,15 +338,17 @@ def test_controlled_experiment_persists_path_free_receipt_and_replays_after_rest
             receipt_ref="",
         ),
     )
-    with pytest.raises(CodeBenchmarkLedgerContractError, match="successful controlled arm"):
-        CodeBenchmarkRunReceipt(
-            spec=receipt.spec,
-            run=_run_with_evidence(
-                receipt,
-                baseline=failed_baseline,
-                selected=receipt.run.selected_evidence,
-            ),
-        )
+    failed_terminal = CodeBenchmarkRunReceipt(
+        spec=receipt.spec,
+        run=_run_with_evidence(
+            receipt,
+            baseline=failed_baseline,
+            selected=receipt.run.selected_evidence,
+        ),
+    )
+    assert failed_terminal.run.report.baseline_outcome.success is False
+    assert failed_terminal.status == "COMPLETED_CLEAN"
+    assert failed_terminal.production_influence_enabled is False
 
     over_budget_baseline = _evidence_with_controlled_receipt(
         receipt.run.baseline_evidence,
@@ -405,7 +406,7 @@ def test_controlled_experiment_persists_path_free_receipt_and_replays_after_rest
     assert tampered.value.reason_code == CODE_BENCHMARK_DURABLE_DATA_INVALID
 
 
-def test_failed_controlled_verification_never_records_terminal_experiment_receipt(
+def test_failed_controlled_verification_records_cleanup_gated_terminal_observation(
     tmp_path: Path,
 ) -> None:
     (
@@ -423,16 +424,17 @@ def test_failed_controlled_verification_never_records_terminal_experiment_receip
     ledger = SQLiteCodeHistoricalBenchmarkLedger(path, clock=lambda: NOW + 1)
     service = ControlledCodeBenchmarkExperimentService(sandbox=sandbox, ledger=ledger)
 
-    with pytest.raises(CodeBenchmarkExperimentError, match="failed controlled selected"):
-        service.run_and_record(
-            registration=registration,
-            spec=spec,
-            path_policy=policy,
-            baseline_executor=_Writer(),
-            selected_executor=_Writer(),
-            verifier=ControlledCodeBenchmarkVerifier(plan=plan, execution_budget=budget),
-        )
+    receipt = service.run_and_record(
+        registration=registration,
+        spec=spec,
+        path_policy=policy,
+        baseline_executor=_Writer(),
+        selected_executor=_Writer(),
+        verifier=ControlledCodeBenchmarkVerifier(plan=plan, execution_budget=budget),
+    )
 
-    assert ledger.get_completed(spec.run_id) is None
+    assert receipt.run.report.baseline_outcome.success is True
+    assert receipt.run.report.selected_outcome.success is False
+    assert ledger.get_completed(spec.run_id).receipt_ref == receipt.receipt_ref
     assert list(private_root.iterdir()) == []
     assert list(worktree_root.iterdir()) == []

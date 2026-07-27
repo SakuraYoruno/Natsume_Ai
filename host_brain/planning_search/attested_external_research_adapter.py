@@ -212,10 +212,14 @@ def _attest_result(
         field="provider_latency_ms",
     )
     total_latency_ms = _non_negative_int(attempt.latency_ms, field="total_latency_ms")
+    transport_identity_digest, transport_external = _transport_identity_from_attempt(
+        attempt
+    )
     _assert_durable_attempt_audit(
         execution_id=execution_id,
         attempt=attempt,
         provider_latency_ms=provider_latency_ms,
+        transport_identity_digest=transport_identity_digest,
         lookup=attempt_audit_lookup,
     )
     route_digest = sha256_digest(
@@ -224,6 +228,7 @@ def _attest_result(
             "execution_id": execution_id,
             "route_decision_id": result.route_decision.decision_id,
             "attempt_id": attempt.attempt_id,
+            "transport_identity_digest": transport_identity_digest,
             "target": {
                 "adapter_id": target.adapter_id,
                 "provider": target.provider,
@@ -241,6 +246,8 @@ def _attest_result(
         cost_micros=cost_micros,
         provider_latency_ms=provider_latency_ms,
         total_latency_ms=total_latency_ms,
+        transport_identity_digest=transport_identity_digest,
+        transport_external=transport_external,
     )
     model_receipt = ResearchModelExecutionReceiptV1(
         execution_id=execution_id,
@@ -281,6 +288,7 @@ def _assert_durable_attempt_audit(
     execution_id: str,
     attempt: ModelAttemptRecord,
     provider_latency_ms: int,
+    transport_identity_digest: str,
     lookup: AttemptAuditLookup,
 ) -> None:
     """Reopen canonical audit rows before certifying external-model evidence."""
@@ -324,10 +332,37 @@ def _assert_durable_attempt_audit(
     ):
         raise AttestedExternalResearchError("durable started attempt does not bind result")
     transport = durable_terminal.metadata.get("provider_transport_measurements")
-    if not isinstance(transport, Mapping) or transport.get("provider_latency_ms") != provider_latency_ms:
+    if (
+        not isinstance(transport, Mapping)
+        or transport.get("provider_latency_ms") != provider_latency_ms
+        or transport.get("transport_identity_digest")
+        != transport_identity_digest
+        or transport.get("transport_external") is not True
+    ):
         raise AttestedExternalResearchError(
-            "canonical model attempt audit is missing provider latency"
+            "canonical model attempt audit is missing external transport identity"
         )
+
+
+def _transport_identity_from_attempt(
+    attempt: ModelAttemptRecord,
+) -> tuple[str, bool]:
+    transport = attempt.metadata.get("provider_transport_measurements")
+    if not isinstance(transport, Mapping):
+        raise AttestedExternalResearchError(
+            "external model result is missing transport identity"
+        )
+    digest = str(transport.get("transport_identity_digest") or "").strip().lower()
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise AttestedExternalResearchError(
+            "external model result is missing transport identity"
+        )
+    external = transport.get("transport_external")
+    if external is not True:
+        raise AttestedExternalResearchError(
+            "external model result used a local or untrusted transport"
+        )
+    return digest, True
 
 
 def _assert_no_prior_attempt_audit(

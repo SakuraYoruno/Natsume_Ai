@@ -132,6 +132,8 @@ def test_d20c_external_attestation_requires_fresh_real_usage() -> None:
         cost_micros=42,
         provider_latency_ms=120,
         total_latency_ms=180,
+        transport_identity_digest="d" * 64,
+        transport_external=True,
     )
     assert attestation.to_dict()["fresh_request"] is True
     with pytest.raises(ResearchBenchmarkContractError):
@@ -159,6 +161,8 @@ def test_d20c_attested_model_receipt_requires_exact_provider_attestation() -> No
         cost_micros=42,
         provider_latency_ms=120,
         total_latency_ms=180,
+        transport_identity_digest="d" * 64,
+        transport_external=True,
     )
     receipt = ResearchModelExecutionReceiptV1(
         execution_id="external-run",
@@ -188,3 +192,32 @@ def test_d20c_attested_model_receipt_requires_exact_provider_attestation() -> No
             attestation_ref=attestation.attestation_ref,
             attestation=attestation,
         )
+
+
+def test_d20c_historical_attestation_without_transport_identity_is_ineligible() -> None:
+    historical = ExternalProviderRunAttestationV1(
+        execution_id="historical-run",
+        provider="openai",
+        model="research-model",
+        route_digest="a" * 64,
+        response_digest="b" * 64,
+        total_tokens=10,
+        cost_micros=2,
+        provider_latency_ms=4,
+        total_latency_ms=5,
+    )
+    receipt = ResearchModelExecutionReceiptV1(
+        execution_id="historical-run",
+        arm_id="baseline",
+        evidence_class="ATTESTED_EXTERNAL",
+        attempt_ids=("attempt::historical-run",),
+        total_tokens=10,
+        cost_micros=2,
+        prompt_digest="c" * 64,
+        tool_call_count=0,
+        attestation_ref=historical.attestation_ref,
+        attestation=historical,
+    )
+
+    assert receipt.benefit_eligible is False
+    assert "transport_identity_digest" not in historical.to_dict()

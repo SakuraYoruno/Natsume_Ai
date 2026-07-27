@@ -3,8 +3,8 @@
 
 # 测试与验收目录
 
-版本：v2.37
-维护日期：2026-07-27
+版本：v2.39
+维护日期：2026-07-28
 状态：当前证据
 
 ## NE-01 代码波次封口
@@ -426,7 +426,7 @@
 - 当前新增/受影响 focused 集合为 `69 passed in 15.29s`；既有 signed REACQUIRE 回归独立为 `1 passed in 2.65s`，online takeover 中 response-loss/reopen/heartbeat/interruption/reservation 五项为 `5 passed in 13.36s`。集合可能共享底层 fixture，不把数字相加成全量结论。
 - 运行时、真实 SQLite、迁移、Composition、文档 authority/freshness、交付元数据和 release coverage 的最终合并 Gate 为 `114 passed in 25.32s`；它包含上述 69 项，不与任何批次相加。
 - Bond、Persona、规则降级、NLE boundary 与 Edge contracts 五类统一静态扫描均为零违规；fresh Core Architecture Gate 1～14=`PASS`、`failed_gates=[]`。`task_repository.py` 为 4583 行，仍低于既有 4600 上限，没有增加或扩大 allowlist。
-- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0135。该证据使用本地临时 key、单节点和进程内 route continuation；0130/0131 的 hold/reconciliation、0132 的 child Budget、0133 的 Verification decision、0134 的 Acceptance decision 与 0135 的 Review denial settlement 证据由各自切片单独记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- 该历史 checkpoint 切片当时的 migration head 为 `0127_worker_projection_immutability.sql`；现行仓库 head 已推进到 0136。该证据使用本地临时 key、单节点和进程内 route continuation；0130～0135 的 Task 证据与 0136 的 cohort evidence 分别记录，不能反向扩展本历史切片。部署 key/HTTP/network canary、七路线波次与 NE-07 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 受治理签名 Operation 重获与原图续跑当前切片
 
@@ -980,3 +980,107 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   `39 passed in 6.56s`，文档/交付合同 `79 passed in 42.49s`，架构 Gate
   1～14 与统一 static/doc Gate 通过。各组有重叠风险，不累加为伪总数；NE-01
   wave integration、production canary、真实 provider 和 NE-07 仍未运行。
+
+### NE-02 D20c 外部 transport identity
+
+- 生产 Vault-backed provider adapter 以 server-owned base-url resolver 计算
+  脱敏 transport identity、外部 HTTPS 决策和实际调用时延；原始 URL 与凭据
+  不进入 ModelAttempt audit。
+- canonical terminal audit 保留 provider latency、transport digest、
+  `transport_external` 以及 tool/token/cost measurement；D20c result 与审计
+  重开值不一致时失败关闭。
+- localhost、`.local`、单标签/内部域名、非全局 IP、CLI/未知 transport 和历史无 identity
+  receipt 不得 `benefit_eligible`。
+- 受影响生产 adapter、ModelAttempt、Research contract/codec、D20c adapter、
+  paired runner、历史 V1 降级重开与真实 SQLite audit 回归为
+  `60 passed in 26.89s`；无
+  migration。统一 `static_scan,doc_gate` 为 `PASS / failures=[]`
+  （108.4 秒）；当前环境未安装 Ruff，记为
+  `NOT_RUN_TOOL_UNAVAILABLE`。本组使用受控 transport，不是外部
+  provider、24 项 cohort 或收益 PASS，状态仍为
+  `ACCEPTANCE_PENDING_EXTERNAL`。
+
+### NE-02 Research 固定 cohort 统计协议
+
+- `tests/unit/test_d20_research_benefit_cohort.py` 定向结果为 `9 passed in
+  0.62s`。
+- 正向用例固定 24 个唯一 paired workload、三个主题、本地/Web 来源，
+  验证输入倒序不改变 report，并要求均值提升、paired bootstrap 下界、
+  citation、含 hidden verifier 的成本与 p95 时延全部通过。
+- 负向用例覆盖 23 项 cohort、单主题、缺 Web、terminal/response digest
+  漂移、verifier 与 arm 共用 execution、未 attested verifier、非 owner
+  randomized 顺序、质量/严重错误/成本/时延门槛失败。
+- 本组只验证纯合同与确定性统计器；append-only cohort repository、真实
+  provider、24 项运行与 promotion 均为 `NOT_RUN`，不得提升收益状态。
+
+### NE-02 Pentest capability-derived successor
+
+- `test_gr01_pentest_planning_search_adapter.py`、
+  `test_gr01_pentest_virtual_planning_world.py`、
+  `test_pentest_agent_loop_contracts.py` 与
+  `test_pentest_strategic_planning.py` 合计 `38 passed in 7.86s`。
+- L1 必须把缺少当前 capability 的 policy 动作放入 successor-only catalog，
+  而不是 executable roots；纯 transition 提供 capability 前不得展开。
+- successor catalog 的 digest/count 必须进入 durable shadow prediction；
+  descriptor 不含 args、executor 或 callback，真实选择仍是 L1/L2 baseline。
+- 本组未运行 30 次授权实验，runtime outcome 仍为
+  `UNVERIFIED_RUNTIME_RECORD`；安全、收益和 promotion 均不得标记通过。
+
+### NE-02 Code 固定 20 项收益协议
+
+- `test_ne02_code_benefit_cohort.py` 与 D18/D19 受影响合同合计
+  `15 passed in 4.96s`。
+- 正向用例分别覆盖 pass-rate 提升 10 个百分点，以及 pass-rate 非劣
+  5 个百分点且含 verifier 成本降低至少 15%；evidence 倒序不改变报告。
+- 每项必须绑定同 source commit/path policy、相同 provider/model/profile/
+  budget、owner-randomized 两臂、独立 fresh worktree 和独立模型/hidden/static
+  execution；hidden/static rate 与 mean diff-risk 不得退化。
+- D19 cleanup-gated terminal 现在同时保留 PASS 与 FAIL 观察，三层状态必须
+  精确一致；失败不能在统计前被丢弃。真实 D19 集成在本波 integration
+  统一运行，本切片未重复执行。
+- 本组没有 cohort repository/migration、外部模型或真实 20 项执行，Code
+  benefit 保持 `UNPROVEN`。
+
+### NE-02 Pentest 固定 30 次校准与跨域 proposal Gate
+
+- `tests/unit/test_ne02_pentest_calibration_cohort.py` 定向结果为
+  `7 passed in 0.40s`。
+- 正向用例固定 30 个唯一 workload/run，倒序 evidence 不改变报告；每项绑定
+  授权环境/scope、capability manifest、facts、policy、算法/adapter/budget、
+  Task/Authorization/Verification receipt、独立 verifier 与动态 successor
+  candidate IDs。
+- 负向用例覆盖 29 项队列、预注册 identity 漂移、固定根 catalog 摘要、
+  未授权/未验证终态、adapter/budget/verifier 漂移、校准误差以及三类安全
+  违规；报告不得省略由指标必然产生的 reason code。
+- 跨域 Gate 只有在 Pentest calibration 合格且 Code/Research 至少一域
+  benefit report 合格时生成 proposal；content-addressed report ref 漂移直接
+  拒绝。即使正向通过，`review_required=true`、
+  `activation_authority=false`、`production_influence_enabled=false`。
+- 本协议切片当时没有 migration/durable cohort owner；后续 0136 已补 owner。
+  真实 30 次实验、真实非 Pentest 收益或 Review/激活仍未执行，Pentest L3
+  保持 shadow。
+
+### NE-02 统一 cohort 持久 authority
+
+- `0136_planning_search_cohort_ledger.sql` 建立 Research/Code/Pentest 共用的
+  append-only registration、member evidence、report、promotion evidence
+  与 proposal 表，并以不可变 trigger 拒绝 UPDATE/DELETE。
+- `SQLitePlanningSearchCohortAuthorityResolver` 分别重开 0107 Research
+  terminal、0106 Code cleanup-gated terminal、0105 Pentest calibration；
+  Pentest 还要求独立 Task/Authorization/Verification receipt authority。
+- `tests/integration/test_ne02_planning_search_cohort_ledger.py` 使用一个真实文件型
+  SQLite 跑完 24+20+30 共 74 个成员，证明 source rejection 不落库、完整报告、
+  Review-only promotion、response-loss exact replay、重启、checksum drift 与
+  append-only 篡改失败关闭。
+- NE-02 最终波次集合覆盖 26 个 contract/unit/integration 文件，结果为
+  `169 passed, 1 skipped in 104.80s`；skip 是 Windows symlink 权限不足，
+  不计 PASS。首轮为 `165 passed / 4 failed / 1 skipped`，修正后完整重跑通过。
+- 收口发布合同首轮为 `58 passed / 1 failed`；唯一失败是 Core Release
+  manifest 仍固定 0135。同步为 0136 后完整复跑
+  `59 passed in 8.75s`。统一 `static_scan,doc_gate` 为
+  `PASS / failures=[] in 109.4s`；fresh 架构 Gate 1～14 为
+  `PASS / failed_gates=[] in 25.6s`。
+- 这不是 24/20/30 个真实实验。真实 provider、授权 lab、隐藏 verifier、
+  Review/activation 尚未执行，状态为
+  `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`，
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

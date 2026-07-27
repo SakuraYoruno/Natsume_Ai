@@ -7,12 +7,16 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.persistence.research_shadow_ledger_codec import (
+    research_model_receipt_from_dict,
+)
 from host_brain.persistence.research_shadow_ledger_repository import (
     ResearchArmOperationState,
     ResearchShadowLedgerError,
     SQLiteResearchShadowLedger,
 )
 from host_brain.planning_search.research_benchmark_contracts import (
+    ExternalProviderRunAttestationV1,
     PairedResearchRunReceiptV1,
     ResearchArmPlanV1,
     ResearchCorpusBindingV1,
@@ -51,6 +55,50 @@ def _verifier(execution_id: str) -> ResearchVerifierReceiptV1:
         citation_validity=1.0,
         evidence_digest="c" * 64,
     )
+
+
+def test_d20c_legacy_identity_free_model_receipt_reopens_as_ineligible() -> None:
+    raw = {
+        "execution_id": "legacy-execution",
+        "arm_id": "legacy-arm",
+        "evidence_class": "ATTESTED_EXTERNAL",
+        "attempt_ids": ["attempt::legacy-execution"],
+        "prompt_digest": "d" * 64,
+        "tool_call_count": 0,
+        "total_tokens": 10,
+        "cost_micros": 2,
+        "attestation_ref": "",
+        "benefit_eligible": True,
+        "attestation": {
+            "schema": "natsume.research.external-provider-attestation.v1",
+            "execution_id": "legacy-execution",
+            "provider": "openai",
+            "model": "legacy-model",
+            "route_digest": "a" * 64,
+            "response_digest": "b" * 64,
+            "total_tokens": 10,
+            "cost_micros": 2,
+            "provider_latency_ms": 4,
+            "total_latency_ms": 5,
+            "fresh_request": True,
+        },
+    }
+    historical = ExternalProviderRunAttestationV1(
+        execution_id="legacy-execution",
+        provider="openai",
+        model="legacy-model",
+        route_digest="a" * 64,
+        response_digest="b" * 64,
+        total_tokens=10,
+        cost_micros=2,
+        provider_latency_ms=4,
+        total_latency_ms=5,
+    )
+    raw["attestation_ref"] = historical.attestation_ref
+
+    receipt = research_model_receipt_from_dict(raw)
+
+    assert receipt.benefit_eligible is False
 
 
 def test_d20b_research_ledger_replays_registration_and_persists_paired_receipt(

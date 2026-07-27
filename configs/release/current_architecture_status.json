@@ -1,16 +1,16 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-27",
+  "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "27b032f1ebc408c8456a7182d456cb98b441a260",
+    "dev_commit": "a407e73ebd1df59b52a3664d1c1f342238d41564",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE01_CURRENT_DEV_COMMIT_BOUND_SEVEN_ROUTE_ACCEPTANCE_AND_DEDUPLICATED_RECOVERY_WAVE_LOCAL_PASS_WITH_PRODUCTION_ACTIVATION_RESERVED_FOR_NE07"
+    "evaluated_source": "NE02_MIGRATION_0136_DURABLE_COHORT_AUTHORITY_AND_FIXED_24_20_30_PROTOCOLS_LOCAL_WAVE_PASS_REAL_EXTERNAL_EXPERIMENT_ACCEPTANCE_PENDING"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-02",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_CURRENT_DEV_SEVEN_ROUTE_CANONICAL_SQLITE_RECEIPT_PASS_DEDUPLICATED_24_CASE_REAL_SQLITE_WINDOWS_PROCESS_AND_GIT_WORKSPACE_RECOVERY_WAVE_PASS_NO_WORKER_REPLAY_BUDGET_BLOCK_IS_THE_ONLY_ENABLED_RUNTIME_ACTION_DEGRADE_REVIEW_REMAIN_PROPOSAL_ONLY_UNKNOWN_EFFECT_REQUIRES_SIGNED_RECONCILIATION_BY_DESIGN_BOUNDED_FANOUT_DEPLOYMENT_PROMOTION_REAL_NETWORK_PROVIDER_AND_DOCKER_FULL_STACK_RESERVED_FOR_NE07_NE02_REAL_PLANNING_SEARCH_PRODUCTION_COMPOSITION_AND_BENEFIT_EVIDENCE_NOW_ACTIVE_PROGRAM_REMAINS_INCOMPLETE",
+  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_MIGRATION_0136_SINGLE_DURABLE_COHORT_AUTHORITY_REAL_LOWER_LEDGER_REOPEN_AND_FIXED_24_20_30_LOCAL_WAVE_PASS_REAL_PROVIDER_WORKLOAD_AUTHORIZED_LAB_REVIEW_AND_ACTIVATION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
   "next_wave": "NE-03",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -26,6 +26,153 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne02_durable_cohort_authority_current_validation": {
+      "status": "CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_EXTERNAL",
+      "migration_head": "0136_planning_search_cohort_ledger.sql",
+      "authority": "ONE_APPEND_ONLY_SQLITE_OWNER_FOR_RESEARCH_24_CODE_20_PENTEST_30_REPORTS_AND_CROSS_DOMAIN_PROMOTION_PROPOSALS",
+      "source_reopen": "RESEARCH_0107_TERMINAL_CODE_0106_TERMINAL_PENTEST_0105_CALIBRATION_PLUS_INJECTED_TASK_AUTHORIZATION_VERIFICATION_RECEIPT_AUTHORITY",
+      "exact_replay": "EXISTING_MEMBER_AND_PROPOSAL_REOPEN_WITHOUT_CALLING_SOURCE_RESOLVER_OR_REEXECUTING_ARMS",
+      "promotion_boundary": "SAFE_PENTEST_PLUS_AT_LEAST_ONE_NON_PENTEST_BENEFIT_REPORT_CREATES_REVIEW_REQUIRED_PROPOSAL_ONLY_ACTIVATION_AND_PRODUCTION_INFLUENCE_FALSE",
+      "migration_recovery": "0131_CHECKSUM_BOUND_PHYSICAL_DDL_RECEIPT_LOSS_REPLAY_REPAIRED_WITH_STRICT_COLUMN_INDEX_TRIGGER_POSTCONDITION",
+      "integration": "169_PASSED_1_SKIPPED_IN_104_80_SECONDS",
+      "integration_skip": "WINDOWS_SYMLINK_PRIVILEGE_UNAVAILABLE_NOT_COUNTED_AS_PASS",
+      "transparent_first_wave_run": "165_PASSED_4_FAILED_1_SKIPPED;_REMOVED_UNUSED_PENTEST_COMPAT_FACADE_ADDED_0131_RECEIPT_LOSS_RECOVERY_AND_ALIGNED_D19_FAILED_ARM_TERMINAL_ASSERTION",
+      "release_contracts": "59_PASSED_IN_8_75_SECONDS_AFTER_58_PASSED_1_STALE_0135_MANIFEST_ASSERTION_FAILED",
+      "static_and_doc_gate": "PASS_FAILURES_EMPTY_IN_109_4_SECONDS",
+      "architecture_static_gates": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_IN_25_6_SECONDS",
+      "static_checks": "COMPILEALL_JSON_AND_GIT_DIFF_CHECK_PASS_RUFF_NOT_INSTALLED",
+      "real_research_24": "NOT_RUN_ACCEPTANCE_PENDING_EXTERNAL",
+      "real_code_20": "NOT_RUN_ACCEPTANCE_PENDING_EXTERNAL",
+      "real_pentest_30": "NOT_RUN_AUTHORIZED_LAB_REQUIRED",
+      "review_activation": "NOT_RUN_PROPOSAL_HAS_NO_ACTIVATION_AUTHORITY",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "evidence_refs": [
+        "host_brain/audit/migrations/0136_planning_search_cohort_ledger.sql",
+        "host_brain/contracts/planning_search/cohort_ledger.py",
+        "host_brain/persistence/planning_search_cohort_authority_resolver.py",
+        "host_brain/persistence/planning_search_cohort_ledger_repository.py",
+        "host_brain/persistence/planning_search_cohort_ledger_support.py",
+        "tests/integration/test_ne02_planning_search_cohort_ledger.py"
+      ]
+    },
+    "ne02_code_fixed_benefit_protocol": {
+      "status": "LOCAL_PROTOCOL_AND_DURABLE_OWNER_PASS_REAL_20_WORKLOAD_COHORT_PENDING",
+      "cohort": "EXACTLY_20_UNIQUE_PAIRED_WORKLOADS_SAME_SOURCE_MODEL_PROVIDER_PROFILE_AND_BUDGET",
+      "execution_identity": "OWNER_RANDOMIZED_INDEPENDENT_FRESH_WORKTREES_AND_DISTINCT_MODEL_HIDDEN_STATIC_EXECUTIONS",
+      "benefit_gate": "PASS_RATE_GAIN_AT_LEAST_10_PERCENTAGE_POINTS_OR_NONINFERIOR_5_POINTS_WITH_COST_REDUCTION_AT_LEAST_15_PERCENT",
+      "guardrails": "HIDDEN_TEST_RATE_STATIC_CHECK_RATE_AND_MEAN_DIFF_RISK_MUST_NOT_REGRESS",
+      "failure_evidence": "D19_CLEANUP_GATED_PASS_AND_FAIL_TERMINAL_OBSERVATIONS_RETAINED_WITH_EXACT_STATUS_BINDING",
+      "influence": "REPORT_IS_PROPOSAL_ONLY_AND_PRODUCTION_INFLUENCE_FALSE",
+      "local_validation": "15_PASSED_IN_4_96_SECONDS",
+      "migration": "0136_PLANNING_SEARCH_COHORT_LEDGER",
+      "not_run": [
+        "20 real external model Code workloads",
+        "independent deployed hidden and static verifiers",
+        "benefit or promotion acceptance",
+        "changed D19 integration deferred to NE02 wave integration"
+      ],
+      "evidence_refs": [
+        "host_brain/contracts/planning_search/code_benefit_cohort.py",
+        "host_brain/contracts/planning_search/code_benefit_cohort_models.py",
+        "host_brain/contracts/planning_search/code_benefit_cohort_evaluator.py",
+        "host_brain/planning_search/code_benefit_cohort.py",
+        "host_brain/contracts/planning_search/code_benchmark_ledger.py",
+        "host_brain/planning_search/code_benchmark_experiment.py",
+        "tests/unit/test_ne02_code_benefit_cohort.py",
+        "tests/integration/test_d19_code_benchmark_controlled_experiment.py"
+      ]
+    },
+    "ne02_pentest_dynamic_successor": {
+      "status": "LOCAL_TARGETED_PASS_SHADOW_ONLY_REAL_EXPERIMENT_PENDING",
+      "root_authority": "ONLY_CURRENT_AGENT_STATE_TOOL_CONTRACT_AND_PRE_ACTION_GATE_PASSED_ACTIONS_ENTER_EXECUTABLE_ROOT_BEAM",
+      "successor_authority": "CURRENT_STATE_SERVER_POLICY_ACTIONS_WITH_REGISTERED_CONTRACT_AND_MISSING_CAPABILITY_ENTER_VIRTUAL_ONLY_CATALOG",
+      "expansion": "DEPTH_ZERO_ROOT_ONLY_DEEPER_LEVELS_REQUIRE_VIRTUAL_CAPABILITY_PRECONDITION",
+      "durable_binding": "SUCCESSOR_CATALOG_DIGEST_COUNT_INITIAL_STATE_AND_TRACE_ENTER_OPTIONAL_0105_SHADOW_PREDICTION",
+      "production_influence": "FALSE_L1_L2_BASELINE_SELECTION_UNCHANGED",
+      "local_validation": "38_PASSED_IN_7_86_SECONDS",
+      "migration": "REUSES_0105_CALIBRATION_AND_0136_COHORT_AUTHORITY_CURRENT_HEAD_0136",
+      "not_run": [
+        "30 authorized environment experiments",
+        "verified Task or Run outcome receipts",
+        "zero-violation cohort statistics",
+        "durable promotion proposal review and activation"
+      ],
+      "evidence_refs": [
+        "host_brain/pentest/agent/l1_graph_search.py",
+        "host_brain/pentest/agent/planning_search_adapter.py",
+        "host_brain/pentest/agent/virtual_planning_world.py",
+        "host_brain/pentest/agent/agent_loop.py",
+        "tests/unit/test_gr01_pentest_virtual_planning_world.py"
+      ]
+    },
+    "ne02_pentest_fixed_calibration_protocol": {
+      "status": "LOCAL_PROTOCOL_AND_DURABLE_OWNER_PASS_SHADOW_ONLY_REAL_EXPERIMENT_PENDING",
+      "cohort": "EXACTLY_30_UNIQUE_PREREGISTERED_AUTHORIZED_RUNS",
+      "authority_binding": "ENVIRONMENT_SCOPE_CAPABILITY_MANIFEST_FACTS_POLICY_ALGORITHM_ADAPTER_BUDGET_TASK_AUTHORIZATION_VERIFICATION_AND_INDEPENDENT_VERIFIER",
+      "successor_identity": "CATALOG_DIGEST_DERIVED_FROM_CURRENT_AUTHORITY_VIRTUAL_STATE_AND_SORTED_UNIQUE_CANDIDATE_IDS",
+      "calibration_gate": "ALL_30_AUTHORIZED_AND_TERMINAL_VERIFIED_MAE_AT_MOST_0_20_WITHIN_0_25_RATE_AT_LEAST_0_75",
+      "safety_gate": "FORBIDDEN_UNAUTHORIZED_AND_POLICY_BYPASS_COUNTS_ALL_ZERO",
+      "cross_domain_gate": "PENTEST_CALIBRATION_PLUS_AT_LEAST_ONE_ELIGIBLE_RESEARCH_OR_CODE_BENEFIT_REPORT",
+      "influence": "REVIEW_REQUIRED_PROPOSAL_ONLY_ACTIVATION_AUTHORITY_FALSE_PRODUCTION_INFLUENCE_FALSE",
+      "local_validation": "7_PASSED_IN_0_40_SECONDS",
+      "combined_contract_and_document_gates": "40_PASSED_IN_8_66_SECONDS",
+      "static_checks": "COMPILEALL_JSON_AND_GIT_DIFF_CHECK_PASS_RUFF_NOT_INSTALLED",
+      "migration": "0136_PLANNING_SEARCH_COHORT_LEDGER",
+      "not_run": [
+        "30 real authorized Pentest experiments",
+        "real non-Pentest benefit cohort",
+        "durable Review, version activation and rollback"
+      ],
+      "evidence_refs": [
+        "host_brain/contracts/planning_search/pentest_calibration_cohort.py",
+        "host_brain/contracts/planning_search/pentest_calibration_cohort_models.py",
+        "host_brain/contracts/planning_search/pentest_calibration_cohort_evaluator.py",
+        "host_brain/contracts/planning_search/promotion_gate.py",
+        "host_brain/planning_search/pentest_calibration_cohort.py",
+        "host_brain/planning_search/promotion_gate.py",
+        "tests/unit/test_ne02_pentest_calibration_cohort.py"
+      ]
+    },
+    "ne02_research_fixed_benefit_protocol": {
+      "status": "LOCAL_PROTOCOL_AND_DURABLE_OWNER_PASS_EXTERNAL_ACCEPTANCE_PENDING",
+      "cohort": "EXACTLY_24_UNIQUE_PAIRED_WORKLOADS_AT_LEAST_THREE_TOPICS_LOCAL_FILE_AND_WEB",
+      "quality_authority": "INDEPENDENT_HIDDEN_VERIFIER_EXECUTION_BINDS_ARM_RESPONSE_PROFILE_RUBRIC_AND_EXTERNAL_TRANSPORT_ATTESTATION",
+      "statistics": "DETERMINISTIC_10000_ITERATION_PAIRED_BOOTSTRAP_PLUS_QUALITY_CITATION_SEVERE_ERROR_TOTAL_COST_AND_P95_LATENCY_GATES",
+      "influence": "REPORT_IS_PROPOSAL_ONLY_AND_PRODUCTION_INFLUENCE_FALSE",
+      "local_validation": "9_PASSED_IN_0_62_SECONDS",
+      "migration": "0136_PLANNING_SEARCH_COHORT_LEDGER",
+      "not_run": [
+        "24 real external Research workloads",
+        "independent deployed hidden verifier",
+        "benefit or promotion acceptance"
+      ],
+      "evidence_refs": [
+        "host_brain/contracts/planning_search/research_benefit_cohort.py",
+        "host_brain/contracts/planning_search/research_benefit_cohort_models.py",
+        "host_brain/contracts/planning_search/research_benefit_cohort_evaluator.py",
+        "host_brain/planning_search/research_benefit_cohort.py",
+        "tests/unit/test_d20_research_benefit_cohort.py"
+      ]
+    },
+    "ne02_external_transport_identity_current_validation": {
+      "status": "LOCAL_TARGETED_PASS_ACCEPTANCE_PENDING_EXTERNAL",
+      "base_commit": "a407e73ebd1df59b52a3664d1c1f342238d41564",
+      "production_boundary": "VAULT_BACKED_PROVIDER_TRANSPORT_GENERATES_REDACTED_ENDPOINT_IDENTITY_EXTERNAL_HTTPS_DECISION_AND_MEASURED_LATENCY",
+      "canonical_audit": "MODEL_ATTEMPT_TERMINAL_PERSISTS_PROVIDER_LATENCY_TRANSPORT_DIGEST_EXTERNAL_DECISION_AND_TOOL_TOKEN_COST_MEASUREMENTS",
+      "research_attestation": "RESULT_AND_REOPENED_AUDIT_MUST_BIND_SAME_EXTERNAL_TRANSPORT_IDENTITY",
+      "rejected": "LOCALHOST_DOT_LOCAL_SINGLE_LABEL_INTERNAL_DOMAIN_PRIVATE_OR_NON_GLOBAL_IP_CODEX_CLI_UNKNOWN_TRANSPORT_AND_HISTORICAL_V1_WITHOUT_IDENTITY",
+      "targeted_validation": "60_PASSED_IN_26_89_SECONDS",
+      "static_and_doc_gate": "PASS_FAILURES_EMPTY_IN_108_4_SECONDS",
+      "ruff": "NOT_RUN_TOOL_UNAVAILABLE",
+      "migration": "NONE_CURRENT_HEAD_0136",
+      "real_provider": "NOT_RUN_ACCEPTANCE_PENDING_EXTERNAL",
+      "research_cohort": "NOT_RUN_24_REQUIRED",
+      "code_cohort": "NOT_RUN_20_REQUIRED",
+      "pentest_cohort": "NOT_RUN_30_REQUIRED",
+      "wave_integration": "169_PASSED_1_WINDOWS_SYMLINK_PRIVILEGE_SKIP_IN_104_80_SECONDS",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "program_status": "INCOMPLETE"
+    },
     "ne01_code_wave_closeout_current_validation": {
       "status": "CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07",
       "base_commit": "27b032f1ebc408c8456a7182d456cb98b441a260",
@@ -4562,15 +4709,15 @@
     },
     "planning_search_goal_foundation": {
       "status": "PARTIAL_D20C_CODE_COMPLETE_EXTERNAL_ACCEPTANCE_PENDING",
-      "implemented": "PlanningGoal and VirtualStateSnapshot are immutable, state digest is bound into pure SearchResult and immutable compiled TaskGraph lineage, SuccessorCatalogPort is the public L1 name, GoalPlanningService has no execution/admission dependency, and PlanningCompilationContext prevents dynamic candidates from carrying graph-wide budget/review/workspace/idempotency authority. The explicit Host CAPABILITY_SEARCH_V1 adapter freezes eligible Registry metadata, requires genuine competition, uses the same Governor/budget/review binding as approved Plan projection, then revalidates a server-owned two-distinct-Skill virtual path and rebuilds selected-only node inputs after search and before compiler/admission. Its immutable graph is `skill -> skill -> chat`: the second selected skill depends on the first and the synthesized Chat node depends on both; the worker has no planner callback. It rejects legacy planned_steps, pre-approved candidate inputs and forged successors; an explicit Governor-bound failure_replan now reuses canonical durable recovery, where only a same-root FAILED predecessor with validated evidence/quiescence can create graph_revision + 1. This is not automatic or failure-adaptive candidate selection. D16 adds a Code catalog that regenerates inspect -> registered patch -> unit/rollback candidates from frozen opaque refs/digests; selected Agent inputs are regenerated from that catalog, not caller arguments. Its root compilation context is fail-closed to inspect + generate_report + empty temp_workspace and must forbid write_files/network. D17 adds an explicit experiment-only trusted-in-process Code runner. D18 adds a server-owned 0106 append-only ledger: registration and frozen paired RunSpec are independently preregistered, then one terminal-evidence transaction writes both arm evidence/outcomes, VERIFIED_CLEAN receipt and terminal experiment receipt; replay/schema validation is identity-bound. D19 optionally preregisters a frozen Python pytest argv plan, invokes it in each detached worktree through a restricted subprocess policy, and persists path-free command/exit/output-digest/duration evidence. D20a adds ResearchTaskSnapshot, whose pure catalog derives competing query/quick-answer/primary/independent/cross-check/conflict/stop paths only from public source ids/refs/digests and bounded hints. D20b independently constructs a frozen loader for each citation verification, recomputes the snapshot/manifest/source id/ref/digest/tier handshake, and accepts only UTF-8 boundary-aligned span digests from freshly reopened documents. Before 0107 terminal receipt insert or exact replay, the repository reopens the registration, RunSpec and both arm rows, then rejects any drift in binding/profile/budget, preregistered plan, model or verifier JSON/evidence digest. D20c's AttestedExternalResearchAdapter first reopens the exact execution ID and refuses a provider call if the canonical audit already has any row or cannot be read; only a fresh ID calls canonical ModelAttemptService. It turns exactly one foreground, non-cached successful attempt into an attestation after validating final target identity, output digest, rendered prompt digest, tool/token/cost measurements and provider/total latency; it must then reopen the same request's canonical started/terminal audit pair and bind terminal row plus provider latency before ModelReceipt can embed the exact attestation instead of an arbitrary ref. ResearchPairedExecutionRunner consumes only that preregistered RunSpec's actual arm order, operation identity and evidence; it keeps raw prompts/responses outside 0107, uses one fresh verifier per new arm, and enforces arm/pair budget before exact terminal replay. A controlled D19 receipt binds exact run/arm/plan/budget, PASS equals exit code zero, its frozen command set is reserved before a child starts so timeout/error cannot retry the arm, and durable replay requires two successful controlled arms within the aggregate test/wall bound before any terminal receipt exists.",
+      "implemented": "PlanningGoal and VirtualStateSnapshot remain immutable and selected SearchResult paths compile into immutable TaskGraph lineage without worker replanning. The narrow Host CAPABILITY_SEARCH_V1 route freezes eligible Registry metadata, enforces Governor risk/review/budget bindings, searches a server-owned two-distinct-Skill path, rebuilds selected-only inputs and compiles `skill -> skill -> chat`; explicit failure replan requires the canonical FAILED predecessor and creates revision + 1. Code D16-D19 provide a pure dynamic catalog, private-bare paired worktrees, append-only cleanup-gated evidence and frozen pytest command receipts. D19 now preserves both PASS and FAIL terminal observations after verified cleanup, requiring outcome, verifier and controlled receipt status to agree exactly, so failed tasks are not discarded before cohort statistics. The fixed Code 20-workload protocol additionally binds same source/model/provider/profile/budget, independent fresh worktrees and model/hidden/static executions, two fixed benefit alternatives and non-regression guardrails. Research D20a-D20c provide public-metadata dynamic planning, fresh-loader citation verification, owner-randomized paired execution and strict external ModelAttempt attestation; the fixed Research 24-workload protocol adds hidden-verifier quality, citation, severe-error, cost, latency and paired-bootstrap gates. Pentest separates executable roots from contract-deferred virtual successors; its fixed 30-run protocol binds current environment/scope/manifest/facts/policy-derived successor identity, Task/Authorization/Verification receipts, calibration and zero-violation metrics. A cross-domain gate requires safe Pentest calibration plus at least one eligible Research or Code benefit report, but emits only a Review-required proposal with no activation authority or production influence. These are still pure proposal-only experiment assets: durable cross-domain cohort ownership, real Research/Code/Pentest runs, Review and production promotion are not complete.",
       "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome structurally force SHADOW_ONLY and production_influence_enabled=false. D18 records cleanup-gated trusted-process experiment evidence: a terminal receipt requires a preregistration, both exact arms, verifier-bound outcome/diff evidence and a VERIFIED_CLEAN source/private-artifact receipt. D19 enforces only the preregistered paired max_test_commands and max_wall_time_ms through its own frozen pytest-command adapter; ModelAttempt, provider, tool, token and model-cost fields remain unconsumed declarations, not runtime authority. D20b's loader/verifier pair is an experiment input guard and mechanical citation validator, not a source capture, BrowserWorker, model executor or independent trust-domain verifier: root and manifest are trusted inputs, it is not a hostile concurrent-TOCTOU barrier, and it has no real paired outcome or benefit conclusion. The child is a same-host trusted-workspace subprocess with shell-free argv, sanitized environment and plugin autoload disabled; APPDATA/user-site remains a trusted host input because PYTHONNOUSERSITE is not set. None of these assets is a hidden oracle, container/OS/tenant/filesystem/network sandbox or benefit result.",
       "not_completed": [
         "Host chat or generic Plan production cutover to GoalPlanningService beyond the narrow rule-derived Research/Frontend CAPABILITY_SEARCH_V1 slice",
         "automatic or failure-adaptive capability replanning beyond the explicit durable FAILED-predecessor replacement route",
         "composed production Research prompt/workload, real credential/provider execution, paired real readonly workload, WorkOrder/Browser, independent trust-domain claim verification, source capture and benefit cohort",
         "actual historical cohort selection/statistical comparison, independent-trust-domain verifier, controlled model/tool/token/cost execution budget and WorkspaceGrant-bound write path",
-        "Pentest capability/fact-driven successor catalog",
-        "receipt-bound baseline-versus-search comparison and promotion gate",
+        "single append-only owner for the fixed Research, Code and Pentest cohort reports plus authoritative report resolution",
+        "real receipt-bound baseline-versus-search comparison and durable promotion Review/activation",
         "any production influence from MCTS"
       ]
     },
@@ -4638,7 +4785,7 @@
     },
     "code_benchmark_controlled_verification": {
       "status": "PARTIAL_D19_ALLOWLISTED_SUBPROCESS_VERIFICATION_EXPERIMENT",
-      "scope": "Only an explicitly preregistered Code benchmark plan may run its fixed `python -m pytest -q <repo-relative-test>` argv in each disposable detached worktree. PASS is bound to exit code zero; each receipt is bound to its run/arm/plan/budget, a started arm reserves its frozen commands even on timeout/error, and the terminal reader requires two successful controlled arms within the paired aggregate test/wall limit. The experiment service requires VERIFIED_CLEAN before it records a terminal receipt.",
+      "scope": "Only an explicitly preregistered Code benchmark plan may run its fixed `python -m pytest -q <repo-relative-test>` argv in each disposable detached worktree. PASS is bound to exit code zero; each receipt is bound to its run/arm/plan/budget, a started arm reserves its frozen commands even on timeout/error, and the terminal reader requires exact outcome/verifier/controlled PASS-or-FAIL agreement within the paired aggregate test/wall limit. The experiment service requires VERIFIED_CLEAN before it records either terminal observation, so failed tasks remain measurable instead of being discarded.",
       "enforced": [
         "paired max_test_commands",
         "paired max_wall_time_ms",
@@ -4722,15 +4869,18 @@
       ]
     },
     "pentest_conditional_mcts": {
-      "status": "SHADOW_ONLY_DURABLE_INJECTION_PARTIAL",
+      "status": "SHADOW_ONLY_FIXED_30_PROTOCOL_LOCAL_PASS_DURABLE_OWNER_AND_REAL_RUN_PENDING",
       "production_influence": "DISABLED_UNTIL_DURABLE_PROMOTION",
       "durable_evidence": "AVAILABLE_BY_EXPLICIT_INJECTION_ONLY",
-      "reason": "Adapter always selects the L1/L2 baseline. Migration 0105 provides an append-only generic calibration repository with restart replay, physical-schema semantic verification, and identity/outcome drift rejection, but default compatibility remains in-memory; injected-store failure is observable and skips only optional shadow evidence, Pentest outcomes are UNVERIFIED_RUNTIME_RECORD projections, candidate expansion is root-fixed, and no durable promotion authority exists.",
+      "reason": "Adapter always selects the L1/L2 baseline. Migration 0105 provides an append-only generic calibration repository with restart replay, physical-schema semantic verification, and identity/outcome drift rejection, but default compatibility remains in-memory; injected-store failure is observable and skips only optional shadow evidence. Current gate-passed actions form executable roots while current-policy registered actions missing capability form a virtual-only successor catalog. The fixed 30-run pure protocol now requires each catalog identity to derive from exact environment/scope/capability manifest/facts/policy/virtual state/candidate ids, binds independent Task/Authorization/Verification receipts and enforces calibration plus zero-violation metrics. Its cross-domain gate requires an eligible Research or Code benefit report but can only emit a Review-required proposal with activation_authority=false and production_influence=false. No unified durable cohort owner or real 30-run evidence exists, so no durable promotion authority exists.",
       "evidence_refs": [
         "host_brain/planning_search/calibration.py",
         "host_brain/persistence/planning_search_calibration_repository.py",
         "host_brain/pentest/agent/planning_search_adapter.py",
-        "tests/integration/test_d13_planning_search_calibration_sqlite.py"
+        "host_brain/contracts/planning_search/pentest_calibration_cohort.py",
+        "host_brain/contracts/planning_search/promotion_gate.py",
+        "tests/integration/test_d13_planning_search_calibration_sqlite.py",
+        "tests/unit/test_ne02_pentest_calibration_cohort.py"
       ]
     },
     "research_production_planning_benefit": {
@@ -4739,7 +4889,16 @@
     },
     "code_production_planning_benefit": {
       "status": "UNPROVEN",
-      "existing_evidence_level": "PRIVATE_BARE_CLEANUP_GATED_DURABLE_CONTROLLED_PYTEST_EXPERIMENT_NO_BENEFIT"
+      "existing_evidence_level": "PRIVATE_BARE_CLEANUP_GATED_PASS_AND_FAIL_TERMINAL_EVIDENCE_PLUS_FIXED_20_PURE_BENEFIT_PROTOCOL_NO_REAL_COHORT",
+      "fixed_protocol": "PASS_RATE_GAIN_10_POINTS_OR_NONINFERIOR_5_POINTS_AND_COST_REDUCTION_15_PERCENT_WITH_HIDDEN_STATIC_DIFF_RISK_NONREGRESSION",
+      "durable_cohort_owner": "NOT_IMPLEMENTED",
+      "real_20_workload_execution": "NOT_RUN",
+      "production_influence": false,
+      "evidence_refs": [
+        "host_brain/contracts/planning_search/code_benefit_cohort_models.py",
+        "host_brain/contracts/planning_search/code_benefit_cohort_evaluator.py",
+        "tests/unit/test_ne02_code_benefit_cohort.py"
+      ]
     },
     "budget_enforcement": {
       "status": "PARTIAL",

@@ -1,8 +1,8 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.34
-日期：2026-07-27
+版本：v0.36
+日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
@@ -523,10 +523,36 @@
 - T-PLAN-RESEARCH-D20C-01：`AttestedExternalResearchAdapter` 只能以 execution/arm identity 调用 composition 注入的 canonical `ModelAttemptService`，不得接收 caller 指定的 provider、model、base URL 或 cache 控制。外呼前必须经 `AttemptAuditLookup` 确认该 ID 没有任何 canonical audit row；已有 started/terminal 行或 lookup 故障必须 `RECONCILIATION_REQUIRED` 且服务不得收到请求。只有 returned result 恰有一个非缓存 `SUCCEEDED` attempt，且 attempt/final target 的 adapter/provider/model、输出摘要、rendered prompt digest、canonical tool/token/成本以及 provider/总延迟全部精确绑定时，才可把完整 `ExternalProviderRunAttestationV1` 嵌入 `ResearchModelExecutionReceiptV1`；cache、多 attempt、route/output drift、缺 usage 或延迟均失败关闭。签发前还必须再次通过 `AttemptAuditLookup` 重开同一 request 的 canonical started/terminal pair，terminal record、provider latency 与 result 任一漂移都失败关闭。普通 request 的 `max_attempts` 不能覆盖 route-owned retry ceiling，所以该 Gate 仍只验证结构化证据链，不能充当真实 provider 调用、paired cohort、独立 verifier、收益或 `T-PLAN-PROD-01` 结论。没有真实凭据/production prompt/workload 时，状态必须为 `ACCEPTANCE_PENDING_EXTERNAL`。
 - T-PLAN-RESEARCH-D20C-02：0121 的 `SQLiteResearchShadowLedger` 必须先以 `run_id + arm_role + plan + execution_id` 的 immutable reservation 建立 arm operation；只有有效、未过期的 fenced claim 能写 `EXTERNAL_CALL_STARTED`。重启后已有 audit 而没有 0107 arm evidence 必须写 `RECONCILIATION_REQUIRED`，不得再 claim/call；仅在 canonical audit 已由调用方确认为空时，才允许写 `RETRY_AUTHORIZED_NO_AUDIT` 并取得更高 fence 的新 claim。`EVIDENCE_PERSISTED` 必须重开同 run/role/arm 的 0107 evidence，并精确绑定 model execution ID；operation/event 的 update、delete、乱序状态与 evidence-before-row 都必须由 SQLite 拒绝。
 - T-PLAN-RESEARCH-D20C-03：只有账本 owner 能以同一 SQLite 写事务内的 CSPRNG draw 创建新 RunSpec；调用方只交 cohort key，账本只持久化其 digest，先按稳定 identity 重开 exact replay、再决定是否取熵，调用方不得提供 arm order 或自报随机化。旧 RunSpec/terminal receipt 可只读重开，但旧规格不得形成新的外呼或 terminal receipt。`ResearchPairedExecutionRunner` 只能重开 owner-randomized 的 registration/RunSpec，不得接受调用方替换 plan、budget 或 arm order；RunSpec 必须保存 `BASELINE/SELECTED` 的实际顺序，runner 从 `run_id + role + arm_id` 推导 deterministic execution ID。每个新 arm 必须经 concrete `AttestedExternalResearchAdapter`、profile-bound `ResearchCitationOutputParserV1`、一个 fresh verifier；parser 的固定 JSON envelope digest 必须等于 profile、拒绝额外字段并丢弃 answer 正文，raw prompt/messages/model output 不得写入 0107。模型 receipt 的 rendered prompt digest、工具调用数、token、单臂延迟以及双臂 aggregate token/latency 必须与已登记 profile/budget 精确匹配。已有 `EVIDENCE_PERSISTED` 只能重开不得再外呼；`EXTERNAL_CALL_STARTED` 有 audit 而缺 evidence 必须冻结，空 audit 才可写 retry authorization。定向测试中的 in-process canonical-model double 只证明恢复机械链，不是 provider attestation、独立 verifier、paired cohort 或收益证据。
+- T-PLAN-RESEARCH-D20C-04：生产 `VaultBackedSingleAttemptAdapter` 必须在 server-owned transport 调用点生成脱敏 endpoint identity digest、保守 external-HTTPS decision 与调用时延，原始 URL、query、userinfo 和 credential 不得进入 ModelAttempt metadata。`ModelAttemptService` 只可把合法 SHA-256 digest、布尔 external decision、provider latency 和 canonical tool/token/cost measurement 写入 terminal audit。`AttestedExternalResearchAdapter` 必须要求 result terminal 与经 `AttemptAuditLookup` 重开的 terminal row 拥有相同 transport identity 且 `transport_external=true`；localhost、`.local`、非全局 IP、无 endpoint 的 CLI、未知 transport 以及历史无 identity 的 receipt 均不得 `benefit_eligible`。本 Gate 的受控 transport 只验证生产接线，不是外部 provider 或 cohort 通过。
+- T-PLAN-RESEARCH-D20C-05：Research benefit spec 必须恰好冻结 24 个唯一 workload/run/terminal receipt、至少三个主题并同时覆盖 `LOCAL_FILE/WEB`；调用方不能放宽 cohort 数、bootstrap 次数或阈值。每臂 quality receipt 必须绑定不同于 arm 的 verifier execution/attempt、被评估 response digest、hidden profile/rubric 与 verifier result；只有 fresh `ATTESTED_EXTERNAL` 且具有 external transport identity 的 verifier 可计收益。evaluator 必须与 evidence 输入顺序无关，使用 spec/seed 驱动的固定 10,000 次 paired bootstrap，并同时检查均值提升≥0.05、95% 下界>0、selected citation validity≥0.95、均值退化≤0.02、selected 严重政策/冲突错误为0、含 verifier 总成本≤1.5倍、含 verifier p95 时延≤1.75倍。失败须返回稳定 reason code 且 benefit/proposal 均 false；通过也只能 proposal-only、production influence=false。本切片定向 `9 passed`，没有 cohort migration/repository 或真实 24 项外部运行，不提升 `UNPROVEN / ACCEPTANCE_PENDING_EXTERNAL`。
+- T-PLAN-PENTEST-DYNAMIC-SUCCESSOR-01：`L1GraphSearch` 必须把 current AgentState 下真实 ToolContract 已通过的动作与同一 policy 生成但缺 capability 的已登记动作分开；后者只能进入 `successor_candidates`，不得进入 executable root beam。`PentestVirtualExpander` depth 0 只能返回 roots，后续 depth 才可在纯 transition 已提供所需 capability 时返回 successor descriptor。descriptor 不得携带 args/executor/callback；catalog digest/count、initial virtual-state digest 与 trace 必须进入可选 durable shadow prediction。Store 故障、in-memory calibration threshold 或 successor path 均不能改变真实 L1/L2 selected action。定向 Pentest 集合 `38 passed in 7.86s`；30 次授权环境、verified runtime receipt、安全零违规和 promotion Gate 未运行，L3 保持 `SHADOW_ONLY`。
 - T-NE01-RESEARCH-LEDGER-SPLIT-01：`SQLiteResearchShadowLedger` 必须继续独占 SQLite connection、transaction 和 0107/0121 append-only UoW；canonical codec 与 typed projection/error 模块不得创建连接或写数据库。原 repository 的公共导入、类型 identity、exact replay 与 `secrets.randbelow` 注入点必须保持兼容。文件库存必须为 repository 1271 行、codec 512 行、models 108 行且不扩 mixed/cohesive allowlist；Research ledger、paired execution 与 persistence contract（含 split authority guards）集中回归为 `18 passed in 22.38s`，文档/机器状态合同为 `62 passed`。fresh full architecture static 必须为 `FAIL [1]`、Gate 3 `PASS`、新增失败为 0；该结果不构成 Research 收益、promotion、NE-01 或 NE-07 验收。
 - T-NE01-RUNTIME-CONTRACT-LAYERING-01：feature-canary 与 Host lifecycle 的 canonical shared types 必须分别由 `contracts/task_runtime_feature_canary.py`、`contracts/host_lifecycle.py` 唯一拥有；旧 Task Runtime/App 路径必须保持同对象重导出。feature-canary repository 不得导入 Task Runtime，Host Composition 不得导入 App lifecycle composition。受影响 feature-canary/lifecycle/ASGI/HardState 集合为 `74 passed in 21.79s`；fresh full architecture static 必须为 Gate 1～14 `PASS`、`failed_gates=[]`、Gate 1 issues/SCC=`[]`、Gate 3 PASS 且不扩 allowlist。该静态证据不构成七路线 acceptance、NE-01 wave integration、production canary 或 Full Architecture 完成。
 - T-NE01-EDGE-AUTHORITY-RETIREMENT-01：`edge_command_pusher.py` 必须不再定义 `_PUSHER/_PUSHER_LOCK/get/init/set_edge_command_pusher`；Host startup、Motor、Limbic、Cortex、内部 routes 与 Obs domain 不得引用这些符号。Motor 无显式 executor 对 Edge plan 固定返回 `GOVERNED_EDGE_COMMAND_REQUIRED`；Limbic/Cortex 事件不得触发网络。`/internal/edge_command/status` 固定返回 `enabled=false + GOVERNED_TASKGRAPH_ONLY`，旧 POST 与 blocked `edge.command.push` 必须在 I/O 前返回 `ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED`。低层 adapter 仍须覆盖 exact proof 正例、缺 proof、篡改和失租零网络。受影响 Python 集合为 `171 passed in 63.37s`，统一 static scan 与 fresh Gate 1～14=`PASS`、`failed_gates=[]`，Monitor UI production build 通过；npm 审计的 2 moderate/6 high 依赖漏洞不得被静默忽略或用破坏性 force fix 掩盖。该 Gate 不证明正向 Edge TaskNode、Acceptance Effect、receipt/reconciliation、production canary、NE-07 或 NE-01 完成。
-- T-PLAN-CODE-D19-01：Code 实验的预注册 pytest argv 只能在 disposable detached worktree 中以 shell-free child 执行；必须拒绝 argv/path/budget drift，核验实际解释器后持久化 portable argv digest，强制 `PASS ↔ exit_code=0`，并把 command/exit/受限输出 digest/耗时与 exact run/arm/plan/budget、两 arm aggregate test/wall limit 和 `VERIFIED_CLEAN` 绑定。child 可能启动前必须预留其冻结 command budget，timeout/error 后同一 arm 不能重试；带 D19 plan 的通用 terminal ledger 也必须拒绝任何 FAIL arm。restart replay 必须拒绝损坏 receipt。该 Gate 不等于独立安全域、hermetic Python、模型/工具预算、crash cleanup recovery 或 `T-PLAN-PROD-01` 的收益验收。
+- T-PLAN-CODE-D19-01：Code 实验的预注册 pytest argv 只能在 disposable detached worktree 中以 shell-free child 执行；必须拒绝 argv/path/budget drift，核验实际解释器后持久化 portable argv digest，强制 `PASS ↔ exit_code=0`，并把 command/exit/受限输出 digest/耗时与 exact run/arm/plan/budget、两 arm aggregate test/wall limit 和 `VERIFIED_CLEAN` 绑定。child 可能启动前必须预留其冻结 command budget，timeout/error 后同一 arm 不能重试；verified cleanup 后 PASS 与 FAIL 都必须形成 terminal observation，且 outcome、verifier、controlled receipt 三者状态必须完全一致。`COMPLETED_CLEAN` 不得解释为测试 PASS。restart replay 必须拒绝损坏 receipt。该 Gate 不等于独立安全域、hermetic Python、模型/工具预算、crash cleanup recovery 或 `T-PLAN-PROD-01` 的收益验收。
+- T-PLAN-CODE-BENEFIT-01：Code benefit spec 必须恰好冻结 20 个唯一 workload/run/terminal receipt，并精确绑定同 source commit/path policy、execution provider/model/profile/budget。两臂必须 owner-randomized，使用独立 fresh worktree、独立模型 execution、hidden-test verifier 和 static verifier；只有带 external transport identity 的 fresh attestation 可计收益。evaluator 必须与 evidence 输入顺序无关；通过条件固定为 pass-rate 提升至少 10 个百分点，或 pass-rate 非劣 5 个百分点且含 verifier 成本降低至少 15%，同时 hidden-test rate、static-check rate 与 mean diff-risk 不得退化。失败保留稳定 reason code，通过也仅 proposal-only、production influence=false。当前 Code 相关定向 `15 passed`，没有 cohort owner/migration、真实模型或 20 项运行，状态保持 `UNPROVEN`。
+
+- T-PLAN-PENTEST-CALIBRATION-01：Pentest cohort spec 必须恰好冻结 30 个
+  唯一 workload/run；每项 evidence 必须绑定授权 environment/scope、
+  capability manifest、facts、policy、algorithm/adapter/budget、
+  Task/Authorization/Verification receipt、独立 verifier execution 与
+  shadow prediction/outcome。
+- T-PLAN-PENTEST-CALIBRATION-02：successor catalog digest 必须从当前
+  authority digests、virtual state 和排序去重的 candidate IDs 确定性派生；
+  prediction search cost 必须绑定同 digest/count/context，固定根自报摘要或
+  identity drift 必须失败关闭。
+- T-PLAN-PENTEST-CALIBRATION-03：evaluator 必须与 evidence 输入顺序无关，
+  要求 30/30 授权和 terminal verification、MAE `<=0.20`、误差 `<=0.25`
+  覆盖率 `>=0.75`，且 forbidden/unauthorized/policy-bypass 均为 0；失败
+  report 必须保留稳定 reason code，不能省略指标必然产生的原因。
+- T-PLAN-PROMOTION-01：只有 Pentest calibration/proposal input 合格且
+  Research 或 Code 至少一域 benefit/proposal report 合格，内容寻址 ref
+  全部匹配时，才生成 L3 promotion proposal；该对象固定
+  `review_required=true`、`activation_authority=false`、
+  `production_influence_enabled=false`。
+- 当前纯合同定向结果为 `7 passed in 0.40s`；没有 migration/durable owner、
+  真实 30 次实验、真实跨域收益或 Review/activation，不能提升 production
+  状态。
 - T-PLAN-CAL-01：Pentest/通用 L3 必须按虚拟状态动态生成后继，prediction/baseline/candidate/actual outcome/cost 跨 run durable；达到预注册样本、误差、安全与 uplift 门槛前 production influence 为 0。
 - T-NE-FINAL-01：NE-07 聚合所有 Target Architecture Gate；任一 Target Gate 未满足时只能 `FAIL` 或精确的 `ACCEPTANCE_PENDING_EXTERNAL`，历史 receipt、shadow 完成或早期 wave 状态不能产生 `PASS`。
 
@@ -736,7 +762,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
 - T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0135，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0136，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 
@@ -1240,7 +1266,8 @@ static/doc Gate 和架构 Gate 1～14 通过。无 migration，NE-01 保持
 - T-NE01-RPQ-06：Guardian projection 抛错时 worker health 必须保持
   `DEGRADED/FAILED` 且不泄漏异常正文；不得因此删除 coordination evidence。
 - T-NE01-RPQ-07：`review_continuation_store.py` 必须继续小于 1,500 行，
-  poison helper 不得拥有连接或 Review/Task writer；migration head 保持 0135。
+  poison helper 不得拥有连接或 Review/Task writer；该历史切片绑定 0135，
+  当前 0136 只增加 PlanningSearch cohort evidence，不改变本测试边界。
 
 当前最终受影响集合为 `88 passed in 116.19s`；文档、交付元数据与 coverage
 合同为 `39 passed in 7.58s`，fresh 架构静态 Gate 1～14 全部通过。该 Gate 关闭有界扫描饥饿和 durable
@@ -1298,3 +1325,33 @@ Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更
   `39 passed in 6.56s`，文档/交付合同为 `79 passed in 42.49s`；架构
   Gate 1～14 与统一 static/doc Gate 通过。各组不累加。该 Gate 不证明
   NE-01 wave、production canary 或 NE-07。
+
+## T-NE02-COHORT-AUTHORITY：固定收益 cohort 的单一持久证据 owner
+
+- T-NE02-CA-01：fresh 0001→0136 必须创建 Research/Code/Pentest 共用的
+  registration、member、report、promotion evidence/proposal 表；0136 asset
+  checksum、五张表、全部 append-only trigger 与 foreign key 必须通过 readiness。
+- T-NE02-CA-02：registration 的成员数只能为 Research=24、Code=20、
+  Pentest=30；不完整成员集合不能 seal report。
+- T-NE02-CA-03：Research member 必须从 0107 exact terminal receipt 重开；
+  Code member 必须从 0106 cleanup-gated terminal receipt 重开；Pentest member
+  必须从 0105 exact prediction/outcome 及 Task/Authorization/Verification
+  receipt authority 重开。resolver 缺失、拒绝或 digest 漂移均不得写入成员。
+- T-NE02-CA-04：成员、报告和 proposal exact replay 不重新调用来源 resolver、
+  不重新执行 arm，也不改变 created timestamp 或产生第二行。
+- T-NE02-CA-05：报告必须绑定按 workload 排序的完整 evidence-set digest；
+  restart reader、SQL tamper、非 canonical JSON、proof/report digest 漂移均
+  fail closed。
+- T-NE02-CA-06：promotion 必须同时存在合格 Pentest report 和至少一个合格
+  Research/Code report；输出固定为 Review-required proposal，
+  activation/prod influence=false，不能自行提升 L3。
+- T-NE02-CA-07：0131 非幂等 DDL 在“物理 schema 已完整提交但 catalog receipt
+  丢失”时，只能在 exact checksum 及 column/index/trigger postcondition 全部
+  成立后回填 `APPLIED_WITH_COMPAT`；不完整 schema 不得跳过。
+- T-NE02-CA-08：最终波次集合为 `169 passed, 1 skipped in 104.80s`；唯一
+  skip 是 Windows symlink privilege 不可用且不计 PASS。首轮四项失败必须在
+  证据中保留，不得从报告删除。收口发布合同首次因旧 0135 manifest 断言得到
+  `58 passed / 1 failed`，更新为 0136 后完整复跑
+  `59 passed in 8.75s`；统一 static/doc Gate 与架构 Gate 1～14 均通过且
+  失败清单为空。真实 24/20/30 实验、Review、activation 和
+  NE-07 不由本地 fixture 提升。

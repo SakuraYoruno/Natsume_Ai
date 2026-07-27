@@ -490,9 +490,15 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
                 "completion_tokens": 5,
                 "total_tokens": 12,
                 "model_cost_micros": 31,
+                "tool_call_count": 2,
                 "untrusted_estimate": 999,
             },
-            metadata={"provider_latency_ms": 13, "untrusted_latency_estimate": 99},
+            metadata={
+                "provider_latency_ms": 13,
+                "transport_identity_digest": "d" * 64,
+                "transport_external": True,
+                "untrusted_latency_estimate": 99,
+            },
         )
 
     audit = InMemoryAttemptAuditRepository()
@@ -533,8 +539,13 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
             "completion_tokens": 5,
             "token_count": 12,
             "model_cost_micros": 31,
+            "tool_call_count": 2,
         },
-        "provider_transport_measurements": {"provider_latency_ms": 13},
+        "provider_transport_measurements": {
+            "provider_latency_ms": 13,
+            "transport_identity_digest": "d" * 64,
+            "transport_external": True,
+        },
     }
     assert "private_context" not in terminal.metadata
     assert "untrusted_estimate" not in terminal.metadata[
