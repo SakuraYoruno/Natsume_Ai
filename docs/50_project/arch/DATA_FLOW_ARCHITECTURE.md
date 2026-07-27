@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.33
+版本：v3.34
 
-核对日期：2026-07-27
+核对日期：2026-07-28
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -1772,6 +1772,18 @@ All ingress sources
 6. 从 objective/context 生成多个可比较计划，为 L1/L2/L3 提供真实虚拟 successor 与 durable calibration。
 
 Pentest 的对应数据流现为 `current AgentState + manifest/policy → L1 executable roots + contract-deferred successor catalog → descriptor-only virtual transition → capability-filtered deeper successors → L3 shadow trace → 0105 prediction/outcome`。depth 0 不读取 deferred catalog；只有前一虚拟节点提供所需 capability 后，后续 expander 才返回该 descriptor。AgentLoop 实际执行仍只消费 L1/L2 baseline root。catalog digest/count 与 state digest 一并进入 shadow calibration，未知 Store 故障只产生可观察降级，不能改变真实选择。
+
+固定校准协议把后续 Pentest 数据流冻结为
+`30 项 preregistration → 当前 authority 派生 successor catalog → shadow
+prediction → 授权 Task terminal → independent Verification → receipt-bound
+outcome → calibration/safety report → cross-domain promotion proposal`。catalog
+digest 必须同时绑定 environment/scope、capability manifest、facts、policy、
+virtual state 与排序去重 candidate IDs；30 项必须逐项拥有不同 Task receipt、
+Verification receipt、verifier execution 和 prediction identity。promotion
+Gate 还要重验内容寻址的 Pentest report 与至少一个合格的 Research/Code
+benefit report。最后一条边只到 Review proposal，不存在
+`proposal → production L3` 直连；当前虚线中的统一 SQLite cohort owner、真实
+实验、Review 和 activation 尚未接线。
 
 Code 固定收益数据流为 `20 项 preregistration → owner-randomized baseline/selected → 同 commit 独立 fresh worktree → fresh external model execution → hidden/static verifier → PASS 或 FAIL terminal observation → cleanup receipt → paired evaluator → proposal-only report`。测试失败不能在 terminal 前被过滤；`COMPLETED_CLEAN` 表示证据与清理完整，不等于测试 PASS。evaluator 不写生产策略，也不能将 report 直接变成 L3 influence。
 7. 失败重规划必须自动生成同一 graph ID 的 revision + 1，而不修改旧图或在 worker 内偷偷重规划。

@@ -579,6 +579,18 @@ Pentest L3 不再把当前可执行根动作复制成唯一搜索全集。`L1Gra
 
 Code 收益协议现固定为 20 个唯一 paired workload：两臂必须来自同一 source commit、path policy、模型/provider/profile/budget，并使用独立 fresh worktree、独立模型 execution、hidden-test 与 static verifier。收益必须满足“通过率至少提升 10 个百分点”，或“通过率非劣 5 个百分点且成本至少降低 15%”；hidden-test rate、static-check rate 和 mean diff-risk 任一退化都会拒绝。D19 也不再丢弃失败 pytest：只要两臂身份、实际 PASS/FAIL、预算与 cleanup 可验证，失败任务同样写入 terminal experiment receipt，避免 cohort 只保留成功样本。当前仅完成纯合同/evaluator 与失败终态语义，未建立 cohort owner、未跑真实 20 项模型任务，Code benefit 仍为 `UNPROVEN`。
 
+Pentest 校准协议现固定为 30 个预注册授权实验。每次 evidence 都必须把
+environment、authorization scope、capability manifest、当前 facts、policy、
+算法/adapter/budget、Task/Authorization/Verification receipt 和独立 verifier
+身份绑定到同一 shadow prediction/outcome；successor catalog 还必须由上述
+当前上下文、virtual state 与排序去重后的 candidate IDs 派生，不能只提交固定
+根候选的自报数量。evaluator 统一计算校准误差、容差覆盖、成本、p95 时延和
+forbidden/unauthorized/policy-bypass 零违规。只有 Pentest 校准合格且
+Research 或 Code 至少一域已有合格收益报告时，跨域 Gate 才生成强制 Review 的
+L3 promotion proposal；proposal 本身没有 activation authority，生产 influence
+继续为 false。当前仅完成纯合同和 `7 passed` 定向验证，30 次真实运行、统一
+durable cohort owner、真实非 Pentest 收益、Review 与激活均未完成。
+
 ### 状态与副作用
 
 Task Acceptance 会原子登记 effect intent，随后由 durable dispatcher 分别应用对话、Memory、Life、Gateway、Edge 等副作用。正确语义是“验收后可恢复的最终一致”，不是“所有外部系统处在同一个数据库事务”。

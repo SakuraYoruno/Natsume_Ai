@@ -1,16 +1,16 @@
 {
   "schema_version": "natsume.current-architecture-status.v1",
-  "as_of_date": "2026-07-27",
+  "as_of_date": "2026-07-28",
   "source_baseline": {
     "dev_commit": "a407e73ebd1df59b52a3664d1c1f342238d41564",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE02_RESEARCH_AND_CODE_FIXED_BENEFIT_PROTOCOL_PLUS_PENTEST_DYNAMIC_SUCCESSOR_LOCAL_TARGETED_PASS_DURABLE_COHORT_AND_REAL_EXPERIMENT_ACCEPTANCE_PENDING"
+    "evaluated_source": "NE02_RESEARCH_24_CODE_20_AND_PENTEST_30_FIXED_PROTOCOLS_PLUS_CROSS_DOMAIN_PROPOSAL_GATE_LOCAL_TARGETED_PASS_DURABLE_COHORT_AND_REAL_EXPERIMENT_ACCEPTANCE_PENDING"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-02",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_RESEARCH_24_AND_CODE_20_FIXED_BENEFIT_PROTOCOLS_PLUS_PENTEST_CAPABILITY_DERIVED_SUCCESSOR_LOCAL_TARGETED_PASS_DURABLE_COHORT_REAL_PROVIDER_REAL_WORKLOAD_VERIFIED_OUTCOME_AND_PROMOTION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
+  "active_wave_detail": "NE01_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07_NE02_RESEARCH_24_CODE_20_PENTEST_30_FIXED_PROTOCOLS_AND_CROSS_DOMAIN_PROPOSAL_GATE_LOCAL_TARGETED_PASS_DURABLE_COHORT_REAL_PROVIDER_REAL_WORKLOAD_VERIFIED_OUTCOME_REVIEW_AND_ACTIVATION_PENDING_PROGRAM_REMAINS_INCOMPLETE",
   "next_wave": "NE-03",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -67,7 +67,7 @@
         "30 authorized environment experiments",
         "verified Task or Run outcome receipts",
         "zero-violation cohort statistics",
-        "promotion proposal review"
+        "durable promotion proposal review and activation"
       ],
       "evidence_refs": [
         "host_brain/pentest/agent/l1_graph_search.py",
@@ -75,6 +75,35 @@
         "host_brain/pentest/agent/virtual_planning_world.py",
         "host_brain/pentest/agent/agent_loop.py",
         "tests/unit/test_gr01_pentest_virtual_planning_world.py"
+      ]
+    },
+    "ne02_pentest_fixed_calibration_protocol": {
+      "status": "LOCAL_TARGETED_PASS_SHADOW_ONLY_DURABLE_OWNER_AND_REAL_EXPERIMENT_PENDING",
+      "cohort": "EXACTLY_30_UNIQUE_PREREGISTERED_AUTHORIZED_RUNS",
+      "authority_binding": "ENVIRONMENT_SCOPE_CAPABILITY_MANIFEST_FACTS_POLICY_ALGORITHM_ADAPTER_BUDGET_TASK_AUTHORIZATION_VERIFICATION_AND_INDEPENDENT_VERIFIER",
+      "successor_identity": "CATALOG_DIGEST_DERIVED_FROM_CURRENT_AUTHORITY_VIRTUAL_STATE_AND_SORTED_UNIQUE_CANDIDATE_IDS",
+      "calibration_gate": "ALL_30_AUTHORIZED_AND_TERMINAL_VERIFIED_MAE_AT_MOST_0_20_WITHIN_0_25_RATE_AT_LEAST_0_75",
+      "safety_gate": "FORBIDDEN_UNAUTHORIZED_AND_POLICY_BYPASS_COUNTS_ALL_ZERO",
+      "cross_domain_gate": "PENTEST_CALIBRATION_PLUS_AT_LEAST_ONE_ELIGIBLE_RESEARCH_OR_CODE_BENEFIT_REPORT",
+      "influence": "REVIEW_REQUIRED_PROPOSAL_ONLY_ACTIVATION_AUTHORITY_FALSE_PRODUCTION_INFLUENCE_FALSE",
+      "local_validation": "7_PASSED_IN_0_40_SECONDS",
+      "combined_contract_and_document_gates": "40_PASSED_IN_8_66_SECONDS",
+      "static_checks": "COMPILEALL_JSON_AND_GIT_DIFF_CHECK_PASS_RUFF_NOT_INSTALLED",
+      "migration": "NONE_DURABLE_COHORT_OWNER_DEFERRED_TO_SINGLE_NE02_NEXT_FREE_MIGRATION",
+      "not_run": [
+        "append-only Pentest cohort repository",
+        "30 real authorized Pentest experiments",
+        "real non-Pentest benefit cohort",
+        "durable Review, version activation and rollback"
+      ],
+      "evidence_refs": [
+        "host_brain/contracts/planning_search/pentest_calibration_cohort.py",
+        "host_brain/contracts/planning_search/pentest_calibration_cohort_models.py",
+        "host_brain/contracts/planning_search/pentest_calibration_cohort_evaluator.py",
+        "host_brain/contracts/planning_search/promotion_gate.py",
+        "host_brain/planning_search/pentest_calibration_cohort.py",
+        "host_brain/planning_search/promotion_gate.py",
+        "tests/unit/test_ne02_pentest_calibration_cohort.py"
       ]
     },
     "ne02_research_fixed_benefit_protocol": {
@@ -4654,14 +4683,15 @@
     },
     "planning_search_goal_foundation": {
       "status": "PARTIAL_D20C_CODE_COMPLETE_EXTERNAL_ACCEPTANCE_PENDING",
-      "implemented": "PlanningGoal and VirtualStateSnapshot remain immutable and selected SearchResult paths compile into immutable TaskGraph lineage without worker replanning. The narrow Host CAPABILITY_SEARCH_V1 route freezes eligible Registry metadata, enforces Governor risk/review/budget bindings, searches a server-owned two-distinct-Skill path, rebuilds selected-only inputs and compiles `skill -> skill -> chat`; explicit failure replan requires the canonical FAILED predecessor and creates revision + 1. Code D16-D19 provide a pure dynamic catalog, private-bare paired worktrees, append-only cleanup-gated evidence and frozen pytest command receipts. D19 now preserves both PASS and FAIL terminal observations after verified cleanup, requiring outcome, verifier and controlled receipt status to agree exactly, so failed tasks are not discarded before cohort statistics. The fixed Code 20-workload protocol additionally binds same source/model/provider/profile/budget, independent fresh worktrees and model/hidden/static executions, two fixed benefit alternatives and non-regression guardrails. Research D20a-D20c provide public-metadata dynamic planning, fresh-loader citation verification, owner-randomized paired execution and strict external ModelAttempt attestation; the fixed Research 24-workload protocol adds hidden-verifier quality, citation, severe-error, cost, latency and paired-bootstrap gates. Pentest separates executable roots from contract-deferred virtual successors and records successor catalog identity in shadow calibration. These are still proposal-only experiment assets: durable cross-domain cohort ownership, real Research/Code/Pentest runs and production promotion are not complete.",
+      "implemented": "PlanningGoal and VirtualStateSnapshot remain immutable and selected SearchResult paths compile into immutable TaskGraph lineage without worker replanning. The narrow Host CAPABILITY_SEARCH_V1 route freezes eligible Registry metadata, enforces Governor risk/review/budget bindings, searches a server-owned two-distinct-Skill path, rebuilds selected-only inputs and compiles `skill -> skill -> chat`; explicit failure replan requires the canonical FAILED predecessor and creates revision + 1. Code D16-D19 provide a pure dynamic catalog, private-bare paired worktrees, append-only cleanup-gated evidence and frozen pytest command receipts. D19 now preserves both PASS and FAIL terminal observations after verified cleanup, requiring outcome, verifier and controlled receipt status to agree exactly, so failed tasks are not discarded before cohort statistics. The fixed Code 20-workload protocol additionally binds same source/model/provider/profile/budget, independent fresh worktrees and model/hidden/static executions, two fixed benefit alternatives and non-regression guardrails. Research D20a-D20c provide public-metadata dynamic planning, fresh-loader citation verification, owner-randomized paired execution and strict external ModelAttempt attestation; the fixed Research 24-workload protocol adds hidden-verifier quality, citation, severe-error, cost, latency and paired-bootstrap gates. Pentest separates executable roots from contract-deferred virtual successors; its fixed 30-run protocol binds current environment/scope/manifest/facts/policy-derived successor identity, Task/Authorization/Verification receipts, calibration and zero-violation metrics. A cross-domain gate requires safe Pentest calibration plus at least one eligible Research or Code benefit report, but emits only a Review-required proposal with no activation authority or production influence. These are still pure proposal-only experiment assets: durable cross-domain cohort ownership, real Research/Code/Pentest runs, Review and production promotion are not complete.",
       "benchmark_boundary": "DomainBenchmarkWorkload/Arm/Outcome structurally force SHADOW_ONLY and production_influence_enabled=false. D18 records cleanup-gated trusted-process experiment evidence: a terminal receipt requires a preregistration, both exact arms, verifier-bound outcome/diff evidence and a VERIFIED_CLEAN source/private-artifact receipt. D19 enforces only the preregistered paired max_test_commands and max_wall_time_ms through its own frozen pytest-command adapter; ModelAttempt, provider, tool, token and model-cost fields remain unconsumed declarations, not runtime authority. D20b's loader/verifier pair is an experiment input guard and mechanical citation validator, not a source capture, BrowserWorker, model executor or independent trust-domain verifier: root and manifest are trusted inputs, it is not a hostile concurrent-TOCTOU barrier, and it has no real paired outcome or benefit conclusion. The child is a same-host trusted-workspace subprocess with shell-free argv, sanitized environment and plugin autoload disabled; APPDATA/user-site remains a trusted host input because PYTHONNOUSERSITE is not set. None of these assets is a hidden oracle, container/OS/tenant/filesystem/network sandbox or benefit result.",
       "not_completed": [
         "Host chat or generic Plan production cutover to GoalPlanningService beyond the narrow rule-derived Research/Frontend CAPABILITY_SEARCH_V1 slice",
         "automatic or failure-adaptive capability replanning beyond the explicit durable FAILED-predecessor replacement route",
         "composed production Research prompt/workload, real credential/provider execution, paired real readonly workload, WorkOrder/Browser, independent trust-domain claim verification, source capture and benefit cohort",
         "actual historical cohort selection/statistical comparison, independent-trust-domain verifier, controlled model/tool/token/cost execution budget and WorkspaceGrant-bound write path",
-        "receipt-bound baseline-versus-search comparison and promotion gate",
+        "single append-only owner for the fixed Research, Code and Pentest cohort reports plus authoritative report resolution",
+        "real receipt-bound baseline-versus-search comparison and durable promotion Review/activation",
         "any production influence from MCTS"
       ]
     },
@@ -4813,15 +4843,18 @@
       ]
     },
     "pentest_conditional_mcts": {
-      "status": "SHADOW_ONLY_DURABLE_INJECTION_PARTIAL",
+      "status": "SHADOW_ONLY_FIXED_30_PROTOCOL_LOCAL_PASS_DURABLE_OWNER_AND_REAL_RUN_PENDING",
       "production_influence": "DISABLED_UNTIL_DURABLE_PROMOTION",
       "durable_evidence": "AVAILABLE_BY_EXPLICIT_INJECTION_ONLY",
-      "reason": "Adapter always selects the L1/L2 baseline. Migration 0105 provides an append-only generic calibration repository with restart replay, physical-schema semantic verification, and identity/outcome drift rejection, but default compatibility remains in-memory; injected-store failure is observable and skips only optional shadow evidence. Current gate-passed actions form executable roots while current-policy registered actions missing capability form a virtual-only successor catalog whose digest/count enter shadow evidence. Pentest outcomes remain UNVERIFIED_RUNTIME_RECORD projections and no durable promotion authority exists.",
+      "reason": "Adapter always selects the L1/L2 baseline. Migration 0105 provides an append-only generic calibration repository with restart replay, physical-schema semantic verification, and identity/outcome drift rejection, but default compatibility remains in-memory; injected-store failure is observable and skips only optional shadow evidence. Current gate-passed actions form executable roots while current-policy registered actions missing capability form a virtual-only successor catalog. The fixed 30-run pure protocol now requires each catalog identity to derive from exact environment/scope/capability manifest/facts/policy/virtual state/candidate ids, binds independent Task/Authorization/Verification receipts and enforces calibration plus zero-violation metrics. Its cross-domain gate requires an eligible Research or Code benefit report but can only emit a Review-required proposal with activation_authority=false and production_influence=false. No unified durable cohort owner or real 30-run evidence exists, so no durable promotion authority exists.",
       "evidence_refs": [
         "host_brain/planning_search/calibration.py",
         "host_brain/persistence/planning_search_calibration_repository.py",
         "host_brain/pentest/agent/planning_search_adapter.py",
-        "tests/integration/test_d13_planning_search_calibration_sqlite.py"
+        "host_brain/contracts/planning_search/pentest_calibration_cohort.py",
+        "host_brain/contracts/planning_search/promotion_gate.py",
+        "tests/integration/test_d13_planning_search_calibration_sqlite.py",
+        "tests/unit/test_ne02_pentest_calibration_cohort.py"
       ]
     },
     "research_production_planning_benefit": {

@@ -3,8 +3,8 @@
 
 # 当前架构程序注册表
 
-版本：v4.1
-维护日期：2026-07-27
+版本：v4.2
+维护日期：2026-07-28
 状态：`ONE_ACTIVE_PROGRAM`
 
 ## 唯一活动程序
@@ -40,8 +40,13 @@ Pentest L3 已把固定根全集改为两层 catalog：当前 ToolContract/PreAc
 通过的动作只作为 executable roots；同一 server policy 生成但缺 capability
 的已登记动作只作为 virtual successors，待纯 transition 的新 capability
 满足后才可展开。successor catalog digest/count 已进入 durable shadow
-calibration，生产选择仍强制使用 L1/L2 baseline。下一步仍是 30 次授权实验、
-receipt-bound outcome、安全零违规统计和 proposal Gate。
+calibration，生产选择仍强制使用 L1/L2 baseline。固定 30 次协议和跨域
+proposal Gate 的纯合同现已落地：每次运行绑定授权环境、facts/capability/
+policy 派生 successor、独立 Task/Authorization/Verification receipt 和
+校准指标；Pentest 合格且 Research/Code 至少一域证明收益后也只生成强制
+Review、无 activation authority 的 proposal。下一步仍是统一 migration/
+owner、30 次真实授权实验、真实非 Pentest 收益与 Review；当前不得升级
+L3 production influence。
 
 Code 20 项收益协议已冻结：同 source/model/provider/profile/budget、独立 fresh
 worktree 与 execution；通过率提升至少 10 个百分点，或非劣 5 个百分点且成本

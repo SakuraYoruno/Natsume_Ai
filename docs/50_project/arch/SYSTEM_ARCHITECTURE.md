@@ -3,8 +3,8 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.32
-核对日期：2026-07-27
+版本：v2.33
+核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
@@ -261,6 +261,16 @@ Host 现有两条 Plan 入口：遗留 `planned_steps/steps` 只校验并拓扑�
 能力规划的 risk authority 位于纯搜索边界而不是 worker：`CapabilityPlanningSnapshot` 只接受 `min(intent.planning_max_risk_level, Governor approved binding.risk_level)` 的 effective ceiling，并把 Governor decision ref 与 server-owned 两项执行步数纳入 virtual-state source refs/digest。这样已绑定的计划参数只能收紧候选，不能把较宽 request 字段解释为更高能力权限或任意 fan-out；binding 缺失、布尔值、非整数或越界时拒绝进入搜索。该限制只覆盖当前 Research/Frontend 的窄 Host adapter，不等于一般 Plan 或多领域搜索完成。
 
 当前 D19/Code cohort 口径以本段为准，并取代上文“仅两 arm PASS 才登记 terminal”的历史描述：verified cleanup 后，PASS 与 FAIL 都必须形成 terminal observation，且 outcome、verifier、controlled receipt 的状态完全一致；`COMPLETED_CLEAN` 只表示证据完整与工作区清理完成。`contracts/planning_search/code_benefit_cohort*` 在此基础上固定 20 项同 source/model/provider/profile/budget 的 paired workload，要求独立 fresh worktree 与模型/hidden/static execution；收益仅在 +10pp pass-rate，或非劣 5pp 且成本至少下降 15% 时成立，hidden/static/diff-risk 均不得退化。当前没有 durable cohort owner、真实 20 项模型运行或 promotion authority，故仍为 `UNPROVEN`。
+
+Pentest 的 promotion 输入现也有独立纯合同边界：
+`pentest_calibration_cohort*` 固定 30 项授权运行，将 environment/scope、
+capability manifest、facts、policy 与 virtual state/candidate IDs 派生的
+successor catalog 绑定到 Task、Authorization、Verification receipt 和
+shadow prediction/outcome。evaluator 只输出校准、安全、成本与时延报告。
+`promotion_gate.py` 再要求该报告合格且 Research/Code 至少一域收益合格，
+输出仍是 Review-bound proposal，不是 activation authority。当前没有统一
+SQLite owner、真实 30 次运行或生产 activation；AgentLoop 继续使用 L1/L2
+baseline，L3 influence=false。
 
 ### 3.4 Durable 执行层
 

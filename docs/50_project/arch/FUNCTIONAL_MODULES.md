@@ -3,8 +3,8 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.39
-核对日期：2026-07-27
+版本：v2.40
+核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
@@ -234,6 +234,7 @@ Agent Skill Workspace 模块由 route-bound 窄 owner 组成：`governed_skill_w
 | 授权渗透测试 | `/v1/pentest/*`、secure-run | `pentest` | Governor、Capability/Tool adapter、PlanningSearch、Pentest Store | 大型独立领域实现可用；L3 MCTS 仍为未校准 shadow |
 | Pentest Dynamic Successor Catalog | 从同一 current-state policy 输出中分离 executable roots 与 contract-deferred virtual successors；后续纯 transition 仅按 virtual capability 解锁 successor，catalog digest/count 进入 durable shadow calibration | [`pentest/agent/l1_graph_search.py`](../../../host_brain/pentest/agent/l1_graph_search.py)、[`pentest/agent/planning_search_adapter.py`](../../../host_brain/pentest/agent/planning_search_adapter.py)、[`pentest/agent/virtual_planning_world.py`](../../../host_brain/pentest/agent/virtual_planning_world.py) | AgentState capability/fact、manifest policy、ToolContract registry、0105 calibration | deferred action 实际执行、虚拟 capability 写回、自动 production promotion | `LOCAL_TARGETED_PASS / SHADOW_ONLY`；38 项定向通过，30 次授权实验与 verified outcome 未运行 |
 | Code Benefit Cohort | 固定 20 项 paired task、外部模型身份、hidden/static/diff-risk 护栏、两种收益门槛与失败终态保留 | `contracts/planning_search/code_benefit_cohort*`、D17～D19 benchmark | 0106 Code terminal receipt、fresh model attestation、独立 verifier | durable cohort owner、真实 20 项运行、proposal Review | `PURE_PROTOCOL_LOCAL_TARGETED_PASS / UNPROVEN`；15 项定向通过，无 migration |
+| Pentest Calibration Cohort | 固定 30 项授权实验、当前 authority 派生 successor、receipt-bound outcome、校准/安全统计与跨域 proposal Gate | `contracts/planning_search/pentest_calibration_cohort*`、`promotion_gate.py`、Pentest Planning adapter | environment/scope、manifest/facts/policy、Task/Authorization/Verification receipt、独立 verifier、Research/Code benefit report | 单一 durable cohort owner、真实 30 次运行、真实跨域收益、Review/activation | `PURE_PROTOCOL_LOCAL_TARGETED_PASS / SHADOW_ONLY`；7 项定向通过，无 migration，proposal 无 activation authority |
 | 运维、观测与审批 | Obs API、Monitor UI、Scheduler Admin API | `observability`、`app/obs_*`、Operator Gateway、Scheduler routes | 读模型、Review Store、受治理命令 | 主要读链 `WIRED`；Operator 写面已有十四条 governed command，`23/37` 条仍阻断；Scheduler 双前缀 CRUD HTTP 已作为独立 surface 进入相同 TaskGraph/Acceptance Effect 边界，Obs 与 Host composition 仍未完全隔离 |
 
 ## 4. 后端模块边界

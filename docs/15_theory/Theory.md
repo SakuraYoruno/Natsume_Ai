@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.33
+版本：v2.34
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-27
+维护日期：2026-07-28
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -786,6 +786,20 @@ Code 的 pass-rate 实验不能把失败 arm 当作“没有结果”。测试�
 持久证据的“唯一写 owner”不要求把所有序列化、类型和数据库职责塞进同一文件。Research shadow ledger 的 SQLite 连接、事务和 append-only UoW 继续只属于 repository owner；canonical JSON 编解码与篡改校验属于无连接 codec，snapshot/error 属于 typed projection 模块。对外 repository import 与 replay 语义保持稳定，而 codec/models 不得获得连接、事务或第二写 authority。这样的拆分降低物理复杂度，却不改变证据归属，也不能被解读为 Research 收益或生产 promotion 已完成。
 
 跨层共享类型也遵循同一原则：合同的物理归属应由“谁共同消费”决定，而不是由最早实现它的应用模块决定。Task Runtime feature-canary receipt 同时被持久层与运行时消费，Host lifecycle ports 同时被 Composition 与 App 消费，因此 canonical type 必须位于中立 `contracts` 层；旧路径只能重导出同一个 Python 对象，不能复制 dataclass/Protocol 或改变序列化形状。这样才能同时消除 persistence→application、composition→app 回边，并避免兼容层制造第二套类型身份。静态 SCC 归零只证明依赖方向正确，不证明七路线执行、持久恢复或生产验收完成。
+
+#### 搜索升级需要“安全校准”和“跨域收益”两把钥匙
+
+Pentest 搜索空间更真实，不等于它已经更安全。每个校准运行必须先固定授权
+环境、scope、capability manifest、当前 facts、policy 和 virtual state，再由
+这些输入及候选 ID 派生 successor catalog identity；固定根候选换一个摘要不
+构成动态搜索证据。实际 outcome 必须由独立、内容寻址的 Task、授权和验证
+receipt 支撑，并保存失败与违规，不能只保留漂亮样本。
+
+校准只回答“预测与安全事实是否一致”，不回答“通用算法是否值得上线”。
+因此 L3 promotion 同时要求 Pentest 的 30 次安全校准和至少一个非 Pentest
+领域的固定队列收益；两者满足也只能生成 Review-bound proposal。proposal
+不是 activation authority，执行器仍消费既有批准图，生产 influence 必须由
+后续持久 Review、版本激活和回滚边界另行授予。
 
 ### 10.5 编译是规划与执行之间的防火墙
 

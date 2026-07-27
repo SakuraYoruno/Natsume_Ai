@@ -3,8 +3,8 @@
 
 # 测试与验收目录
 
-版本：v2.37
-维护日期：2026-07-27
+版本：v2.38
+维护日期：2026-07-28
 状态：当前证据
 
 ## NE-01 代码波次封口
@@ -1040,3 +1040,21 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   统一运行，本切片未重复执行。
 - 本组没有 cohort repository/migration、外部模型或真实 20 项执行，Code
   benefit 保持 `UNPROVEN`。
+
+### NE-02 Pentest 固定 30 次校准与跨域 proposal Gate
+
+- `tests/unit/test_ne02_pentest_calibration_cohort.py` 定向结果为
+  `7 passed in 0.40s`。
+- 正向用例固定 30 个唯一 workload/run，倒序 evidence 不改变报告；每项绑定
+  授权环境/scope、capability manifest、facts、policy、算法/adapter/budget、
+  Task/Authorization/Verification receipt、独立 verifier 与动态 successor
+  candidate IDs。
+- 负向用例覆盖 29 项队列、预注册 identity 漂移、固定根 catalog 摘要、
+  未授权/未验证终态、adapter/budget/verifier 漂移、校准误差以及三类安全
+  违规；报告不得省略由指标必然产生的 reason code。
+- 跨域 Gate 只有在 Pentest calibration 合格且 Code/Research 至少一域
+  benefit report 合格时生成 proposal；content-addressed report ref 漂移直接
+  拒绝。即使正向通过，`review_required=true`、
+  `activation_authority=false`、`production_influence_enabled=false`。
+- 本组没有 migration/durable cohort owner、真实 30 次实验、真实非 Pentest
+  收益或 Review/激活；Pentest L3 保持 shadow。

@@ -1,8 +1,8 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.34
-日期：2026-07-27
+版本：v0.35
+日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
@@ -531,6 +531,28 @@
 - T-NE01-EDGE-AUTHORITY-RETIREMENT-01：`edge_command_pusher.py` 必须不再定义 `_PUSHER/_PUSHER_LOCK/get/init/set_edge_command_pusher`；Host startup、Motor、Limbic、Cortex、内部 routes 与 Obs domain 不得引用这些符号。Motor 无显式 executor 对 Edge plan 固定返回 `GOVERNED_EDGE_COMMAND_REQUIRED`；Limbic/Cortex 事件不得触发网络。`/internal/edge_command/status` 固定返回 `enabled=false + GOVERNED_TASKGRAPH_ONLY`，旧 POST 与 blocked `edge.command.push` 必须在 I/O 前返回 `ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED`。低层 adapter 仍须覆盖 exact proof 正例、缺 proof、篡改和失租零网络。受影响 Python 集合为 `171 passed in 63.37s`，统一 static scan 与 fresh Gate 1～14=`PASS`、`failed_gates=[]`，Monitor UI production build 通过；npm 审计的 2 moderate/6 high 依赖漏洞不得被静默忽略或用破坏性 force fix 掩盖。该 Gate 不证明正向 Edge TaskNode、Acceptance Effect、receipt/reconciliation、production canary、NE-07 或 NE-01 完成。
 - T-PLAN-CODE-D19-01：Code 实验的预注册 pytest argv 只能在 disposable detached worktree 中以 shell-free child 执行；必须拒绝 argv/path/budget drift，核验实际解释器后持久化 portable argv digest，强制 `PASS ↔ exit_code=0`，并把 command/exit/受限输出 digest/耗时与 exact run/arm/plan/budget、两 arm aggregate test/wall limit 和 `VERIFIED_CLEAN` 绑定。child 可能启动前必须预留其冻结 command budget，timeout/error 后同一 arm 不能重试；verified cleanup 后 PASS 与 FAIL 都必须形成 terminal observation，且 outcome、verifier、controlled receipt 三者状态必须完全一致。`COMPLETED_CLEAN` 不得解释为测试 PASS。restart replay 必须拒绝损坏 receipt。该 Gate 不等于独立安全域、hermetic Python、模型/工具预算、crash cleanup recovery 或 `T-PLAN-PROD-01` 的收益验收。
 - T-PLAN-CODE-BENEFIT-01：Code benefit spec 必须恰好冻结 20 个唯一 workload/run/terminal receipt，并精确绑定同 source commit/path policy、execution provider/model/profile/budget。两臂必须 owner-randomized，使用独立 fresh worktree、独立模型 execution、hidden-test verifier 和 static verifier；只有带 external transport identity 的 fresh attestation 可计收益。evaluator 必须与 evidence 输入顺序无关；通过条件固定为 pass-rate 提升至少 10 个百分点，或 pass-rate 非劣 5 个百分点且含 verifier 成本降低至少 15%，同时 hidden-test rate、static-check rate 与 mean diff-risk 不得退化。失败保留稳定 reason code，通过也仅 proposal-only、production influence=false。当前 Code 相关定向 `15 passed`，没有 cohort owner/migration、真实模型或 20 项运行，状态保持 `UNPROVEN`。
+
+- T-PLAN-PENTEST-CALIBRATION-01：Pentest cohort spec 必须恰好冻结 30 个
+  唯一 workload/run；每项 evidence 必须绑定授权 environment/scope、
+  capability manifest、facts、policy、algorithm/adapter/budget、
+  Task/Authorization/Verification receipt、独立 verifier execution 与
+  shadow prediction/outcome。
+- T-PLAN-PENTEST-CALIBRATION-02：successor catalog digest 必须从当前
+  authority digests、virtual state 和排序去重的 candidate IDs 确定性派生；
+  prediction search cost 必须绑定同 digest/count/context，固定根自报摘要或
+  identity drift 必须失败关闭。
+- T-PLAN-PENTEST-CALIBRATION-03：evaluator 必须与 evidence 输入顺序无关，
+  要求 30/30 授权和 terminal verification、MAE `<=0.20`、误差 `<=0.25`
+  覆盖率 `>=0.75`，且 forbidden/unauthorized/policy-bypass 均为 0；失败
+  report 必须保留稳定 reason code，不能省略指标必然产生的原因。
+- T-PLAN-PROMOTION-01：只有 Pentest calibration/proposal input 合格且
+  Research 或 Code 至少一域 benefit/proposal report 合格，内容寻址 ref
+  全部匹配时，才生成 L3 promotion proposal；该对象固定
+  `review_required=true`、`activation_authority=false`、
+  `production_influence_enabled=false`。
+- 当前纯合同定向结果为 `7 passed in 0.40s`；没有 migration/durable owner、
+  真实 30 次实验、真实跨域收益或 Review/activation，不能提升 production
+  状态。
 - T-PLAN-CAL-01：Pentest/通用 L3 必须按虚拟状态动态生成后继，prediction/baseline/candidate/actual outcome/cost 跨 run durable；达到预注册样本、误差、安全与 uplift 门槛前 production influence 为 0。
 - T-NE-FINAL-01：NE-07 聚合所有 Target Architecture Gate；任一 Target Gate 未满足时只能 `FAIL` 或精确的 `ACCEPTANCE_PENDING_EXTERNAL`，历史 receipt、shadow 完成或早期 wave 状态不能产生 `PASS`。
 
