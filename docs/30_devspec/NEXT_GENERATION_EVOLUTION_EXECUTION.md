@@ -880,3 +880,35 @@ NE-07 全栈尚未验收，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 去重受影响集为 `58 passed in 128.70s`。一般并行写、其它多节点/batch
 failure、unknown effect、多 Workspace、NE-01 wave integration 与 NE-07
 真实服务栈仍待完成，远程 CI 保持 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## 15. 当前实施进展：Plan 写节点 post-COMMIT Budget rejection
+
+本批补齐 reviewed Plan writer 在 `COMMITTED` checkpoint 之后才被实际用量
+拒绝的恢复链：
+
+1. writer 在真实 Git worktree 写入并密封 stage，持久化
+   WorkerProjection/Operation；
+2. graph-level BudgetUsage 以唯一 `TASK_STORE_BUDGET_EXCEEDED` winner
+   拒绝，节点关闭为 `FAILED`，不进入 Verification/Acceptance；
+3. 0090 `BUDGET` decision 独占 Graph=`BLOCKED` 与 Budget=`RELEASED`
+   mutation；child terminal 与共享 terminal 使用不同但可组合的 Outbox；
+4. 多 owner 恢复不再要求 winner 必须出现在当前进程的 outcome tuple：
+   exact durable FAILED terminal 可重建；仍在恢复的 winner 或 sibling 会使
+   settlement 延后；
+5. `TaskCheckpointBudgetTerminalReadStoreMixin` 在一个 SQLite snapshot
+   重开 current 0090、唯一 winner、父/子 usage、Operation、Lease 与 child
+   Outbox；Skill artifact reconciler 只消费该 authority；
+6. `workspace_terminal_budget_authority.py` 在 Workspace repository 最终
+   CAS 的同一事务重新验证全部 child/0090/Budget authority；fresh Workspace
+   lifecycle 只有在零 downstream authority 且 current 0090 Outbox 完整时
+   执行 `ABANDONED → CLEANED`，不能依赖上层先验检查。
+
+真实 SQLite/Git/Review/fresh-Runtime 的去重受影响集为
+`53 passed in 138.76s`，Workspace authority 合同集另为
+`24 passed in 67.50s`；其中既有 2/4 节点多 owner recovery 回归证明该修复
+不是仅为新 fixture 定制。删除 0090 Budget Outbox 会在上层与仓储最终 CAS
+两处阻断清理，writer 与
+result 调用数保持不变，源 HEAD 不移动。本批无 migration，基线为
+`origin/dev@c7984d9e0bb95a5b0176360c39b2e405e247f63e`。NE-01 仍为
+`IN_PROGRESS`；一般 Budget policy、其它 recovery/Workspace 矩阵、波次
+integration 与 NE-07 服务栈不在本批完成口径内。

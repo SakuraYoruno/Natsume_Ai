@@ -607,6 +607,33 @@ provider、NE-01 wave integration、七路线 commit-bound acceptance 或
 NE-07 Docker/前后端全栈。远程 CI 保持
 `NOT_RUN_ACCOUNT_QUOTA`。
 
+## NE-01 Plan writer 提交后预算拒绝证据
+
+- 新场景先完成真实 Review continuation、Git Workspace 写入与 stage seal，
+  再持久化 WorkerProjection/Operation，最后用实际 token usage 触发
+  graph Budget rejection；断言 terminal 为 `BUDGET_BLOCKED`。
+- fresh application 重开同一 Graph 时，writer、已完成 read sibling 和 result
+  sibling 均不得再次调用；current 0090 必须是 `BUDGET`，Graph=`BLOCKED`、
+  Budget=`RELEASED`。
+- TaskStore reader 必须返回
+  `PARALLEL_CHECKPOINT_BUDGET_REJECTED`，并逐项验证唯一 winner、父/子
+  BudgetUsage、FAILED Node/Attempt、COMMITTED Operation、released Lease、
+  child Outbox 与 0090 Outbox。
+- 复制数据库并删除 current 0090 Budget Outbox 后，terminal reconciler 必须
+  返回 durable-data invalid，Workspace 保持 `ACTIVE` 且 worktree 存在；
+  同一篡改副本绕过 reconciler 直调 Workspace runtime 时，仓储最终 CAS
+  也必须在 artifact abandoner 前拒绝。未篡改副本才允许
+  `ABANDONED/CLEANED`，第二次重启 inventory 为零。
+- 既有 2 节点、4 节点、winner 先/后于 sibling 以及两个 owner 并发接管用例
+  一并复跑，证明 settlement 会等待全部 child fence，并能从 exact durable
+  terminal 重建不在本地 outcome tuple 中的 winner。
+
+代码去重受影响集为 `53 passed in 138.76s`，Workspace lifecycle authority
+合同集另为 `24 passed in 67.50s`，两组不相加。无 migration，基线为
+`origin/dev@c7984d9e0bb95a5b0176360c39b2e405e247f63e`。本结果不是
+NE-01 wave integration，也没有启动 Docker 或真实外部 provider；
+`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## NE-01 Plan 写节点多节点签名失败证据
 
 - 使用真实 capability PlanningSearch 编译三节点 immutable TaskGraph；

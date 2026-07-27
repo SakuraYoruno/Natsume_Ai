@@ -836,3 +836,31 @@ failure error ref；Budget ID/version 必须一致。
 合法共存。生产 TaskStore 仍是唯一 mutation authority，Workspace reader
 只做同事务快照的结构证明。本地真实 Plan/SQLite/Git 测试证明结果节点不
 执行、Graph/Budget fresh-runtime 结算、Outbox 篡改阻断与零 replay。
+
+### Plan writer post-COMMIT Budget rejection
+
+`task_checkpoint_budget_terminal_read_store.py` 现在除 single-node canonical
+terminal 外，还能只读重开 0090-owned multi-node terminal。它先确定 current
+`BUDGET` decision，再验证 selected Node/Attempt、唯一
+`TASK_STORE_BUDGET_EXCEEDED` usage、graph-level Reservation、node child usage
+bridge、`COMMITTED` Operation、released Lease、三条 child terminal Outbox
+和 0090 Graph/Budget Outbox。direct 与 parallel authority 同时出现会被判为
+冲突。
+
+`ParallelSettlementProjection` 不再把“当前进程 outcome tuple 未包含 winner”
+当作 durable corruption。winner 已由另一个 owner 精确关闭时，projection
+从 FAILED Node/Attempt、COMMITTED Operation、无 active Lease 和 canonical
+usage 重建 replayed outcome；winner 仍在恢复时返回 deferred。Runtime 还会
+等待其它 sibling fence 全部关闭，并丢弃 `ALREADY_EXCEEDED` sibling 的伪
+selected status，只有唯一 winner 能成为 0090 selected outcome。
+
+`GovernedSkillArtifactTerminalReconciler` 仅在 route-specific authority、
+零 Verification/Acceptance/Artifact/Effect/cancellation 和完整 projection
+descriptor 成立时返回 `TERMINAL_BUDGET_REJECTED`。因此 Workspace lifecycle
+可以在 fresh Runtime 中清理未验收 stage；最终 repository CAS 还会调用
+`workspace_terminal_budget_authority.py`，在同一写事务独立重开 exact
+child/0090/Budget authority，不能以 Graph/Node 的裸状态或上层先验检查作为
+删除依据。真实 SQLite/Git 及多 owner 回归的去重集合为
+`53 passed in 138.76s`，Workspace authority 合同集另为
+`24 passed in 67.50s`，无 migration；一般 Budget/Workspace recovery 与
+NE-01 仍未完成。

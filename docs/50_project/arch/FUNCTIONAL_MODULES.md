@@ -672,3 +672,18 @@ multi-node、batch、unknown-effect 或 Workspace 事务完成。
 没有新增迁移或第二套 mutation Store。新增 reader 不能选择“最后一行”，也
 不能删除历史 Review decision；任何历史 codec/Outbox 漂移、当前版本不唯一、
 Node snapshot、Attempt/error ref 或 Budget binding 漂移都失败关闭。
+
+## 18. Plan post-COMMIT Budget rejection 职责
+
+| 模块 | 当前职责 |
+|---|---|
+| `task_runtime/parallel_settlement_projection.py` | 查找唯一 durable EXCEEDED winner；必要时从精确终态重建，未终态则 defer |
+| `task_runtime/parallel_settlement_runtime.py` | 等待全部 child fence，规范化非 winner `ALREADY_EXCEEDED` outcome，唯一写入 0090 Graph/Budget terminal |
+| `persistence/task_checkpoint_budget_terminal_read_store.py` | 在只读事务内组合 child checkpoint authority 与 current 0090 authority |
+| `agent_runtime/skill_artifact_terminal_reconciliation.py` | 校验 route、projection 与零 downstream authority，分类 `TERMINAL_BUDGET_REJECTED` |
+| `persistence/workspace_terminal_budget_authority.py` | 在 Workspace 最终写 CAS 内独立重开 winner、父/子 usage、child Outbox、Lease 和 current 0090，防止绕过上层验证 |
+| Workspace lifecycle repository/runtime | 同事务消费仓储级证明后执行 abandon，再写 stage tombstone 与 cleanup；不写 Task terminal |
+
+模块间没有新增第二个 Budget 或 Task writer，也没有新增 migration。该职责表
+只覆盖已提交 Plan writer 的实际用量拒绝；一般模型/工具计量、其它 routes、
+多 Workspace 事务和跨主机 canary 仍不属于完成项。

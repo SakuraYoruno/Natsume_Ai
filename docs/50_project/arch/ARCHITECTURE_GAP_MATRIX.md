@@ -345,3 +345,19 @@ multi-node/batch failure、其它 unknown-effect/cancellation、多 Workspace、
 bounded fan-out、并行 writer、一般 multi-node/batch recovery、Composition
 清零、NE-01 wave integration 和真实服务栈仍缺。因此 Universal Runtime、
 Workspace 和整体架构继续为 `PARTIAL / INCOMPLETE`。
+
+## 10. Plan post-COMMIT Budget rejection 缺口修正
+
+| 能力 | 修正前 | 当前证据 | 仍缺 |
+|---|---|---|---|
+| committed writer 超预算 | child 已有 checkpoint，但 Workspace terminal 不识别 0090 Budget rejection | exact FAILED child + unique rejected usage + current 0090 BUDGET 可重开并清理 | 其它 route/terminal matrix |
+| 多 owner winner 恢复 | settlement 要求 winner 必须出现在当前进程 outcome tuple | winner 已终态时从 durable facts 重建；未终态时等待其 graph-order recovery | 跨主机/部署压力 canary |
+| 部分 Graph 结算 | winner 先于后续 sibling 关闭时会尝试提前写 0090 | 任一 in-flight Node/Attempt/Lease 使共享 settlement 延后 | 一般 unbounded fan-out |
+| Workspace 防篡改 | child terminal 与 Graph/Budget authority 未组合 | 上层 reader 与 repository 最终 CAS 都重开 exact authority；删除 current 0090 Outbox 后绕过 reconciler 直调也保持 `BLOCKED + ACTIVE`，abandoner 零调用 | 多 Workspace 原子提交 |
+
+本批关闭一个真实 Plan writer 子集，并修复可在干净 `dev` 复现的多 owner
+恢复竞态；去重定向证据为 `53 passed in 138.76s`，Workspace authority
+合同集另为 `24 passed in 67.50s`。一般 time/concurrency
+预算、其它失败/取消/unknown-effect、wave integration 与 NE-07 仍缺，所以
+Budget、Workspace、Universal Runtime 和整体架构继续为
+`PARTIAL / INCOMPLETE`。

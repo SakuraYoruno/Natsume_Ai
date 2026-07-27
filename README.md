@@ -791,6 +791,35 @@ terminal matrix、Domain Pack、OS/container isolation、NE-01 wave
 integration 和 NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`，
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## 当前 NE-01 边界：Plan 写节点提交后预算拒绝
+
+Plan 的 reviewed 写节点现在还覆盖了另一个真实失败窗口：worker 已写入并密封
+Git Workspace，`WorkerProjection` 与 Operation 已经 `COMMITTED`，但该节点
+上报的实际用量随后使共享 graph Budget 超限。Runtime 不会回滚成“未执行”，
+也不会重跑 writer；节点先以 exact rejected usage 关闭为
+Node/Attempt=`FAILED`、Lease=`RELEASED`，再由 0090 唯一结算者原子提交
+Graph=`BLOCKED` 与 Budget=`RELEASED`。
+
+fresh Runtime 只接受两类互斥 authority：单节点 canonical checkpoint
+budget terminal，或多节点 `PARALLEL_CHECKPOINT_BUDGET_REJECTED`。后者必须
+同时重开唯一 `TASK_STORE_BUDGET_EXCEEDED` winner、父/子 BudgetUsage、
+`COMMITTED` Operation、三条 child terminal Outbox，以及 current 0090
+Graph/Budget Outbox。若 winner 尚在恢复或任一 sibling 仍持有执行 fence，
+共享结算会等待，不会生成部分 decision；若 winner 已被另一 owner 关闭，则
+只能从精确 durable terminal 重建 outcome。
+
+真实 SQLite、真实 Git worktree、Review continuation 和两个 fresh Runtime
+已证明：writer/result 均不重跑，正常路径 `ABANDONED → CLEANED`，源 HEAD
+不变；Workspace 仓储最终 CAS 会在同一事务内独立重开上述证明，删除 current
+0090 Budget Outbox 后即使绕过上层 reconciler 直接请求 abandon，也会在
+artifact 删除回调前拒绝并保持 `BLOCKED + ACTIVE Workspace`。
+去重受影响集合为 `53 passed in 138.76s`，Workspace authority 合同集另为
+`24 passed in 67.50s`；两组不相加。无 migration，基线为
+`origin/dev@c7984d9e0bb95a5b0176360c39b2e405e247f63e`。这只关闭单一 Plan
+writer 的 post-COMMIT Budget rejection 与既有多 owner winner 恢复竞态；
+一般时间/并发预算、其它 terminal matrix、多 Workspace、NE-01 波次集成和
+NE-07 全栈仍未完成，状态保持 `IN_PROGRESS`。
+
 ## 当前 NE-01 边界：Plan 写节点签名失败后的多节点结算
 
 Direct Skill 的单节点失败围栏现已扩展到一个真实 Plan 多节点 Graph：前置

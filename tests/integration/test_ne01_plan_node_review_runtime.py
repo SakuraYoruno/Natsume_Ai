@@ -82,6 +82,7 @@ from host_brain.persistence.task_repository import (
 from host_brain.persistence.workspace_terminal_failure_authority import (
     finalized_no_effect_failure_allows_workspace_abandonment,
 )
+from host_brain.persistence.workspace_repository import WorkspaceRepositoryError
 from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
     WorkerProjectionStore,
@@ -245,6 +246,7 @@ class _GrantCheckingWorker:
         self.protected_stages: list[dict[str, Any]] = []
         self.interrupt_after_stage_node_id: str | None = None
         self.interrupted_context: dict[str, Any] | None = None
+        self.token_count_overrides: dict[str, int] = {}
 
     async def execute_stream(
         self,
@@ -315,7 +317,10 @@ class _GrantCheckingWorker:
                     f"{execution_context['node_id']}"
                 ),
                 "measurements": {
-                    "token_count": 1,
+                    "token_count": self.token_count_overrides.get(
+                        str(execution_context["node_id"]),
+                        1,
+                    ),
                     "retry_count": 0,
                     "model_cost_micros": 1,
                 },
@@ -565,6 +570,7 @@ class _ContinuationRuntime:
         "downstream-failure",
         "downstream-cancellation",
         "writer-signed-failure",
+        "writer-budget-rejection",
     ),
 )
 async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acceptance(
@@ -796,6 +802,8 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
         required_node_id = next(iter(required_nodes))
         if terminal_outcome == "writer-signed-failure":
             worker.interrupt_after_stage_node_id = required_node_id
+        elif terminal_outcome == "writer-budget-rejection":
+            worker.token_count_overrides[required_node_id] = 10_000_000
         assert order.review_policy[NODE_REVIEW_POLICIES_KEY][required_node_id][
             "reason_code"
         ] == "SKILL_REGISTRY_CONFIRM_REQUIRED"
@@ -838,6 +846,7 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             "downstream-failure": "VERIFICATION_FAILED",
             "downstream-cancellation": "WAITING_ACCEPTANCE_REVIEW",
             "writer-signed-failure": "RECOVERY_REQUIRED",
+            "writer-budget-rejection": "BUDGET_BLOCKED",
         }[terminal_outcome], continuation_runtime.results[-1]
         if terminal_outcome == "writer-signed-failure":
             assert worker.interrupted_context is not None
@@ -1070,6 +1079,270 @@ async def test_plan_workspace_node_waits_then_stages_effect_only_after_graph_acc
             ).run_once()
             assert replay_reports == ()
             assert worker.calls == calls_before_settlement
+            return
+        if terminal_outcome == "writer-budget-rejection":
+            assert worker.calls == [
+                node.node_id
+                for node in graph.nodes
+                if node.node_id != graph.result_node_id
+            ]
+            assert len(worker.protected_stages) == 1
+            snapshot_store = DurableTaskStore(
+                db_path,
+                clock=clock,
+                reconciliation_proof_verifier=proof_verifier,
+            )
+            snapshot = snapshot_store.read_scheduler_snapshot(
+                graph.graph_id,
+                graph.revision,
+            )
+            node_statuses = {
+                item["node_id"]: item["status"]
+                for item in snapshot["graph_record"]["nodes"]
+            }
+            assert snapshot["graph_record"]["status"] == "BLOCKED"
+            assert snapshot["budgets"][0]["status"] == "RELEASED"
+            assert node_statuses[required_node_id] == "FAILED"
+            assert node_statuses[graph.result_node_id] == "BLOCKED"
+            attempt = next(
+                item
+                for item in snapshot["attempts"]
+                if item["node_id"] == required_node_id
+            )
+            terminal = (
+                snapshot_store.try_resolve_checkpoint_budget_rejection_terminal(
+                    attempt["attempt_id"]
+                )
+            )
+            assert terminal is not None
+            assert terminal["authority_kind"] == (
+                "PARALLEL_CHECKPOINT_BUDGET_REJECTED"
+            )
+            assert str(terminal["parallel_settlement_ref"]).startswith(
+                "taskbatch://sha256/"
+            )
+            calls_before_replay = list(worker.calls)
+            reopened_application = GovernedCommandApplication(
+                command_repository=HostCommandRepository(
+                    db_path,
+                    clock=clock,
+                ),
+                coordinator=GovernedTaskCoordinator(
+                    task_store=snapshot_store,
+                    internal_agent_checkpoint_uow=(
+                        DurableInternalAgentCheckpointUnitOfWork(
+                            task_store=snapshot_store,
+                            worker_projection_store=projection_store,
+                        )
+                    ),
+                    outbox_publisher=_Publisher(),
+                    outbox_factory=OutboxMessage,
+                    worker_resolver=_PlanResolver(worker),
+                    verifier=selective_verifier,
+                    acceptance=selective_acceptance,
+                    projection_reader=projection_store,
+                    review_runtime=TaskNodeReviewRuntime(
+                        reviews,
+                        clock=clock,
+                    ),
+                    node_grant_verifier=grant_verifier,
+                    acceptance_effects_enabled=True,
+                    atomic_graph_success_enabled=True,
+                    owner_id=(
+                        "ne01-plan-node-review-budget-replay-runtime"
+                    ),
+                    lease_ttl_ms=20,
+                    operation_ttl_ms=20,
+                ),
+                node_grant_service=grant_service,
+                cancellation_authority_verifier=(
+                    SecureIngressGraphCancellationAuthorityVerifier(
+                        cancellation_claims
+                    )
+                ),
+            )
+            replayed_events = [
+                event
+                async for event in reopened_application.execute_stream(
+                    command=prepared.admission.command,
+                    work_order=prepared.admission.work_order,
+                    assignment=prepared.admission.assignment,
+                    graph=prepared.admission.graph,
+                )
+            ]
+            assert replayed_events[-1]["execution_receipt"]["status"] == (
+                "BUDGET_BLOCKED"
+            )
+            assert worker.calls == calls_before_replay
+
+            protected = worker.protected_stages[0]
+            seal = artifacts.inspect_governed_stage(
+                stage_ref=protected["ref"],
+                seal_digest=protected["digest"],
+            )
+            tampered_path = tmp_path / "tampered-budget-settlement.sqlite3"
+            with sqlite3.connect(db_path) as source_db:
+                with sqlite3.connect(tampered_path) as tampered_db:
+                    source_db.backup(tampered_db)
+            with sqlite3.connect(tampered_path) as tampered_db:
+                decision_row = tampered_db.execute(
+                    """
+                    SELECT budget_outbox_id
+                    FROM task_runtime_parallel_settlement_decision
+                    WHERE decision_ref = ?
+                    """,
+                    (terminal["parallel_settlement_ref"],),
+                ).fetchone()
+                assert decision_row is not None
+                tampered_db.execute(
+                    "DELETE FROM task_runtime_outbox WHERE outbox_id = ?",
+                    (str(decision_row[0]),),
+                )
+                tampered_db.commit()
+            tampered_workspace = _workspace_runtime(
+                tmp_path,
+                db_path=tampered_path,
+                source=source,
+                now_ms=clock.value + 6_000,
+                runtime_owner_id=(
+                    "ne01-plan-node-review-budget-tamper-runtime"
+                ),
+            )
+            abandoner_called = False
+
+            def _unexpected_abandoner() -> str:
+                nonlocal abandoner_called
+                abandoner_called = True
+                raise AssertionError(
+                    "tampered 0090 authority must fail before artifact deletion"
+                )
+
+            with pytest.raises(WorkspaceRepositoryError):
+                tampered_workspace.abandon_terminal_artifact(
+                    workspace_id=seal.workspace_id,
+                    execution_authority=dict(seal.execution_authority),
+                    stage_ref=str(seal.stage_ref),
+                    seal_digest=str(seal.seal_digest),
+                    reason_code="TERMINAL_BUDGET_REJECTED",
+                    artifact_planner=lambda: (
+                        artifacts.plan_governed_abandonment(
+                            stage_ref=str(seal.stage_ref),
+                            seal_digest=str(seal.seal_digest),
+                            reason_code="TERMINAL_BUDGET_REJECTED",
+                        )
+                    ),
+                    artifact_abandoner=_unexpected_abandoner,
+                )
+            assert abandoner_called is False
+            assert tampered_workspace.repository.get_lifecycle(
+                seal.workspace_id
+            ).state.value == "ACTIVE"
+            tampered_reports = GovernedSkillArtifactTerminalReconciler(
+                artifact_store=artifacts,
+                workspace_runtime=tampered_workspace,
+                task_store=DurableTaskStore(
+                    tampered_path,
+                    clock=clock,
+                    reconciliation_proof_verifier=proof_verifier,
+                ),
+                command_repository=HostCommandRepository(
+                    tampered_path,
+                    clock=clock,
+                ),
+                projection_store=projection_store,
+            ).run_once()
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "BLOCKED"
+                and item["reason_code"] == "TASK_STORE_DURABLE_DATA_INVALID"
+                for item in tampered_reports
+            ), tampered_reports
+            assert tampered_workspace.repository.get(
+                seal.workspace_id
+            ).status == "ACTIVE"
+            assert (
+                tmp_path
+                / "managed"
+                / tampered_workspace.repository.get(
+                    seal.workspace_id
+                ).workspace_relpath
+            ).exists()
+
+            restarted_workspace = _workspace_runtime(
+                tmp_path,
+                db_path=db_path,
+                source=source,
+                now_ms=clock.value + 12_000,
+                runtime_owner_id=(
+                    "ne01-plan-node-review-budget-recovery-runtime"
+                ),
+            )
+            reports = AgentArtifactTerminalReconcilerGroup(
+                GovernedSkillArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=restarted_workspace,
+                    task_store=snapshot_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+                InternalArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=restarted_workspace,
+                    task_store=snapshot_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+            ).run_once()
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "ABANDONED"
+                and item["reason_code"] == "TERMINAL_BUDGET_REJECTED"
+                for item in reports
+            ), reports
+            assert any(
+                item["workspace_id"] == seal.workspace_id
+                and item["action"] == "CLEANED"
+                for item in reports
+            ), reports
+            assert _git(source, "rev-parse", "main") == source_head
+            assert not (source / "src" / "plan-generated.txt").exists()
+            cleaned = restarted_workspace.repository.get(seal.workspace_id)
+            assert cleaned.status == "CLEANED"
+            assert not (
+                tmp_path / "managed" / cleaned.workspace_relpath
+            ).exists()
+
+            replay_workspace = _workspace_runtime(
+                tmp_path,
+                db_path=db_path,
+                source=source,
+                now_ms=clock.value + 18_000,
+                runtime_owner_id=(
+                    "ne01-plan-node-review-budget-recovery-runtime"
+                ),
+            )
+            replay_reports = AgentArtifactTerminalReconcilerGroup(
+                GovernedSkillArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=replay_workspace,
+                    task_store=snapshot_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+                InternalArtifactTerminalReconciler(
+                    artifact_store=artifacts,
+                    workspace_runtime=replay_workspace,
+                    task_store=snapshot_store,
+                    command_repository=command_repository,
+                    projection_store=projection_store,
+                ),
+            ).run_once()
+            assert replay_reports == ()
+            assert worker.calls == [
+                node.node_id
+                for node in graph.nodes
+                if node.node_id != graph.result_node_id
+            ]
             return
         assert worker.calls == [node.node_id for node in graph.nodes]
         assert len(worker.grants) == len(graph.nodes)

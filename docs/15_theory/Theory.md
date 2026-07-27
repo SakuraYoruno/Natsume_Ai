@@ -1306,3 +1306,34 @@ Workspace abandonment 位于这两层之后：它既要重开节点签名失败�
 Outbox，也要重开 0090 自己拥有的 Graph/Budget Outbox，并证明当前完整
 Node snapshot 与 failure outcome 一致。这样 sibling 不会因 cleanup 被重跑，
 历史也不会为迁就终态而被改写。
+
+---
+
+## 26. checkpoint 后预算拒绝是提交事实，不是可重试失败
+
+当 worker 的 Operation 已经 `COMMITTED`，随后实际用量被 Budget ledger
+拒绝时，系统同时面对两个不可抹除的事实：外部/Workspace 工作已经形成
+checkpoint，预算又禁止该结果进入 Verification 与 Acceptance。正确语义不是
+回滚 Operation 或再次执行 worker，而是：
+
+```text
+committed worker checkpoint
++ unique rejected BudgetUsage
+→ child FAILED terminal
+→ all sibling fences closed
+→ one graph-level 0090 BUDGET decision
+→ Graph BLOCKED + Budget RELEASED
+```
+
+共享 Budget 的唯一 `EXCEEDED` winner 可能由另一个进程先关闭，也可能在
+graph-order recovery 中晚于当前 sibling。前者只能从 exact durable
+Node/Attempt/Lease/Operation/Usage 终态重建，后者必须等待 winner 自己完成，
+不能由 sibling 合成。0090 还必须等待所有 sibling 离开 in-flight 状态，否则
+decision 只描述部分 Graph。
+
+Workspace 删除位于该两层终态之后。上层分类器的只读证明与 Workspace
+repository 最终写 CAS 必须分别把 child terminal Outbox 与 0090
+Graph/Budget Outbox 一起重开，并确认 Verification、Acceptance、Artifact、
+Effect 和 cancellation 均未取得 authority。最终 CAS 不能信任调用者已经
+检查过的布尔结果，否则检查与删除之间仍存在 authority 漂移窗口。这样
+Budget 拒绝既不吞掉已提交事实，也不会把未验收文件误晋升为 accepted HEAD。

@@ -2003,3 +2003,32 @@ reader 验证所有历史 rows 与 Outbox，只选择绑定当前 Graph version 
 `FAILURE`。节点失败阶段的 Attempt/Node/Lease/Operation Outbox 与 0090
 阶段的 Graph/Budget Outbox分别由各自 UoW 负责；两组证据都完整时才删除
 worktree。结果节点在失败后不会被调度。
+
+## Plan 写节点 post-COMMIT Budget rejection 流
+
+```mermaid
+flowchart LR
+    A["reviewed writer"] --> B["Workspace write + sealed stage"]
+    B --> C["WorkerProjection + Operation COMMITTED"]
+    C --> D["actual BudgetUsage rejected"]
+    D --> E["unique EXCEEDED winner"]
+    E --> F["child Node/Attempt FAILED + Lease RELEASED"]
+    F --> G{"all sibling fences closed?"}
+    G -->|"no"| H["defer shared settlement"]
+    H --> G
+    G -->|"yes"| I["0090 BUDGET decision"]
+    I --> J["Graph BLOCKED + Budget RELEASED"]
+    J --> K["fresh terminal authority reopen"]
+    K --> L{"current Outboxes + zero downstream authority?"}
+    L -->|"yes"| C2["repository CAS\nindependent proof reopen"]
+    C2 --> M["Workspace ABANDONED → CLEANED"]
+    L -->|"no"| N["BLOCKED + ACTIVE Workspace"]
+    C2 -->|"drift"| N
+```
+
+另一个 owner 已关闭 winner 时，可以从 exact durable terminal 重建
+replayed outcome；winner 尚在执行时不得由 sibling 合成。`ALREADY_EXCEEDED`
+usage 只引用 winner Outbox，不拥有 Graph terminal selection。整个流不重跑
+writer/result，也不移动 source HEAD。repository CAS 在同一写事务重新查询
+而不是接收上层布尔结论；删除 current 0090 Budget Outbox 后，直调 Workspace
+runtime 也会在 artifact abandoner 前失败关闭。
