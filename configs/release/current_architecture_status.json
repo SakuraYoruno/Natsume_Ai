@@ -43,7 +43,7 @@
       "migration": "NONE_CURRENT_HEAD_0135",
       "wave_integration": "NOT_RUN_PER_WAVE_POLICY",
       "docker_full_stack": "NOT_RUN_NE07",
-      "remote_ci": "NOT_RUN_PENDING_PR",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA_VERIFIED_9_FAILED_JOBS_ZERO_STEPS_ONE_SKIPPED_PR_175",
       "boundary": "NO_CROSS_PROCESS_SUPERVISOR_RESTART_RUNTIME_GUARDIAN_DURABLE_INCIDENT_OR_NE07_PROCESS_TEST"
     },
     "runtime_repo_readonly_snapshot_current_validation": {
@@ -5521,7 +5521,7 @@
         "health_and_readiness": "APP_LOCAL_SANITIZED_DEGRADE_FAIL_CLOSED",
         "shutdown_retry": "ONE_RETRY_THEN_PRESERVE_ON_EXHAUSTION",
         "migration": "NONE_CURRENT_HEAD_0135",
-        "remote_ci": "NOT_RUN_PENDING_PR"
+        "remote_ci": "NOT_RUN_ACCOUNT_QUOTA_VERIFIED_9_FAILED_JOBS_ZERO_STEPS_ONE_SKIPPED_PR_175"
       },
       "tool_authority": "REACT_SKILL_DELEGATE_AND_VISUAL_HTTP_DIRECT_ENTRIES_RETIRED_FAIL_CLOSED_GENERAL_AGENT_TOOL_AUTHORITY_SEPARATE_NO_PRODUCTION_TOOL_EXECUTION",
       "subprocess_python": "DENIED_AS_WORKSPACE_ISOLATION",

@@ -624,7 +624,8 @@ NE-07 Docker/前后端全栈。远程 CI 保持
 去重定向集为 `25 passed`；文档与机器状态合同为 `39 passed`，统一
 `static_scan,doc_gate` 和架构 Gate 1～14 均通过且未扩大白名单。无
 migration。该 Gate 未执行 process kill、Host 真机重启或 NE-07 服务栈；
-远程 CI 在 PR 创建前为 `NOT_RUN_PENDING_PR`，不得提前写成额度失败。
+PR #175 的 9 个失败 job 已逐项确认均为零步骤且没有 runner，另有 1 项按
+设计跳过，远程 CI 因而记为 `NOT_RUN_ACCOUNT_QUOTA`，不是代码 PASS。
 
 ## NE-01 runtime_repo 只读快照验证
 
