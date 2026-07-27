@@ -508,6 +508,17 @@ HTTP Tool runtime 已改为 app-local application 捕获 Secure Ingress、Govern
 
 当前切片的 full architecture static 仍必须以本提交 fresh Gate 为准，不能沿用历史 `PASS`。Gate 1 的 application/persistence 与 app/composition SCC、生产 locator 和 Tribe fallback 已归零。0115/0129 分别持久化 mode 与 mode-policy，0137 持久化长期目标；当前 Operator 为 `16 active / 23 retired / 39 known / blocked=0`，旧 Obs sys-mode mutation helper 为 0；Scheduler CRUD HTTP 的双前缀 direct writer 也已归零。首次 Gate 3 对 `acceptance_effects.py:1511` 失败，state-control route predicate 下沉后主 owner 为 1500 行，未扩白名单，最近一次 Gate 1～14=`PASS`、`failed_gates=[]`，但当前提交仍须 fresh 复跑。易失 Endocrine 事件缓冲/last state、易失 Tribe bus、其它恢复边界与真实 executor 仍未完成。Scheduler Admin 历史受影响批次为 `34 passed in 139.12s`，不包含真实 HTTP/network、完整 Host 进程重启、production canary 或 NE-01 wave integration；远程 CI 保持 `NOT_RUN_ACCOUNT_QUOTA`。
 
+NE-04 的持久边界已扩展到 0138：历史 0108/0122 继续只读，新的 trusted
+ledger 独占 sandbox operation head、不可变 event chain、可信 run/report、
+proposal、redaction 与 golden-suite receipt。外部容器执行采用先预留后调用；
+首次 claim 才带执行权，活租约重复请求只读重放，过期或未知终态进入
+reconciliation，完成后 exact replay 不再次启动容器。可信合同要求
+digest-pinned image 与可重新检查的 Docker engine/container/command/inspect
+事实，同时冻结禁网、只读 rootfs/dataset、临时 output、security option、
+capability 和资源上限。该边界当前只完成合同、迁移、repository 与 SQLite
+定向验证；production Docker executor、三类 Golden Experiment 和 Operator
+只读投影未接线，故系统状态仍是 `PARTIAL_TRUSTED_LEDGER_NO_DOCKER_CALLER`。
+
 ## 5. Command 与 Task 架构
 
 ```mermaid

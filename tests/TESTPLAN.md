@@ -1381,3 +1381,34 @@ Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更
   `59 passed in 8.75s`；统一 static/doc Gate 与架构 Gate 1～14 均通过且
   失败清单为空。真实 24/20/30 实验、Review、activation 和
   NE-07 不由本地 fixture 提升。
+
+## T-NE04-TRUSTED-LEDGER：可信隔离实验的持久操作权威
+
+- T-NE04-TL-01：fresh migration catalog 必须从既有 head 前向应用到
+  `0138_evolution_lab_trusted_sandbox`；0108/0122 表和 receipt 不得重写、
+  backfill 或获得 promotion eligibility。
+- T-NE04-TL-02：每个 exact `(spec digest, variant)` 只有首次 reserve 返回
+  `execution_authorized=true`；活租约重复请求必须返回不可执行 replay，
+  不得因 owner 不同而复制 fence 或启动第二个容器。
+- T-NE04-TL-03：租约过期必须 append `RECONCILIATION_REQUIRED` 并推进 fence；
+  旧 claim 不得提交 receipt。已完成 operation 的 response-loss replay 只能
+  重开同一 receipt，operation/head/event/run 行数不得增长。
+- T-NE04-TL-04：可信 sandbox receipt 必须绑定 digest-pinned image、
+  Docker engine/container/command、sanitized inspect evidence、禁网、只读
+  rootfs/dataset、临时 output、`no-new-privileges`、`cap-drop ALL`、
+  PID/内存上限和零 effect audit；tag-only image、inspect/effect drift 或弱化
+  任一隔离条件均失败关闭。
+- T-NE04-TL-05：trusted report 必须覆盖注册 spec 的全部 variants，并由
+  baseline 对每个 alternative 形成 outcome/evidence/cost/latency/risk/
+  verification 比较。report、proposal 和 golden suite 固定
+  `production_influence_enabled=false`。
+- T-NE04-TL-06：event/run/report/proposal/redaction/golden-suite 均 append-only；
+  普通 SQLite connection 无 repository UDF 时不能写，event/head/receipt
+  篡改必须失败关闭。
+- T-NE04-TL-07：本切片定向合同与 ledger 为 `22 passed in 22.07s`，
+  fresh 0001→0138 migration smoke 通过。它只证明 0138 持久 authority，
+  不证明真实 Docker executor、三条 Golden Experiment、production
+  composition、Operator projection、波次集成或 NE-04 完成；
+  fresh architecture Gate 1～14 全部通过且未扩大 allowlist，统一
+  `static_scan,doc_gate` 为 `PASS / failures=[] in 112.6s`；
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

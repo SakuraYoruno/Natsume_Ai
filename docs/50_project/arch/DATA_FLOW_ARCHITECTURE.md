@@ -2253,3 +2253,39 @@ evidence/proof，不再次访问来源 ledger。报告写入前由 SQL trigger �
 共同要求精确成员数，重开时重新计算 evidence-set digest。promotion evidence
 和 proposal 在一个事务中写入；任何报告缺失、eligibility 不足或 digest 漂移
 均整体回滚。真实模型/实验没有在本流中被 fixture 替代。
+
+## NE-04 可信隔离实验操作与证据流
+
+```mermaid
+sequenceDiagram
+    participant R as "Trusted Lab Runner"
+    participant L as "0138 Operation Ledger"
+    participant D as "Docker Sandbox"
+    participant V as "Independent Verifier"
+    participant O as "Operator / Review"
+
+    R->>L: reserve(spec digest, variant, owner, lease)
+    alt 首次 claim
+        L-->>R: RUNNING + fence + execution_authorized
+        R->>D: create digest-pinned isolated container
+        D-->>R: output + sanitized inspect facts
+        R->>V: frozen dataset + output digest
+        V-->>R: verification receipt
+        R->>L: atomic trusted run + COMPLETED event/head
+    else 活租约重复请求
+        L-->>R: replayed RUNNING, execution_authorized=false
+    else 租约过期或外部终态未知
+        L-->>R: RECONCILIATION_REQUIRED + new fence
+    else 已完成响应丢失
+        L-->>R: exact durable receipt
+    end
+    R->>L: append report + proposal only
+    L-->>O: read-only evidence, production influence=false
+```
+
+0138 不会把 0108/0122 记录升级成可信证据。operation head 与 append-only
+event chain 同事务 CAS；只有新 claim 能启动容器。可信 receipt 重新绑定
+image digest、engine、container、command、sanitized inspect、只读 dataset/rootfs、
+临时 output、禁网、security option、cap drop、资源限制、零 effect audit 与
+独立 verifier。当前图中 Ledger 路径已有真实 SQLite 定向证据；Docker、Verifier
+和 Operator 的生产接线仍待本波后续，因而不能把这张目标流图解读为 NE-04 已完成。

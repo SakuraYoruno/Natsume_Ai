@@ -577,7 +577,7 @@ ReAct 与 Visual 的退役结论、历史 inventory 和测试批次保持各自�
 
 完成条件：Research planning、主动行为、记忆写入三类实验可重复；同 seed/dataset digest 结果稳定；Lab 外部副作用为 0。
 
-当前边界：0122 已并行新增 `ExperimentSpecV2`、frozen `DatasetManifestV1`、sandbox/effect-audit/verifier receipt 与 append-only V2 evidence ledger。runner 会重算 dataset digest，拒绝 verifier identity/evidence 或 sandbox profile 漂移；evidence 与 run receipt 在同一 SQLite 事务写入。该切片仅是本地结构性证据边界，`promotion_eligible=false`，没有真实隔离 worker/container、外部模型、三条 Golden Experiment、Review 或 activation，不能当作 NE-04 完成或生产副作用为零的实测证明。
+当前边界：0108 V1 与 0122 structural V2 保持只读且永久 `benefit_eligible=false`。0138 新增独立 trusted operation/event owner 和 append-only run/report/proposal/redaction/golden-suite 账本；只有首次 fenced claim 可启动 sandbox，活租约重复调用只返回不可执行 replay，过期租约进入 reconciliation，完成后只重开 exact receipt。trusted contract 要求 digest-pinned image、Docker engine/container/command、sanitized inspect evidence、只读 dataset/rootfs、临时 output、禁网、`no-new-privileges`、`cap-drop ALL`、资源上限、零 effect audit 与独立 verifier，并保持 proposal-only。合同/ledger 定向当前为 `22 passed in 22.07s`，fresh migration catalog 已到 0138。真实 Docker executor、三条 Golden Experiment、production composition、Operator 只读投影和本波集成尚未完成，因而 NE-04 仍为 `IN_PROGRESS`。
 
 ### NE-05：Skill Compiler、成熟度与签名供应链
 

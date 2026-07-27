@@ -979,6 +979,8 @@ flowchart LR
 
 Evolution Lab 只能读取脱敏快照与可重放 trace，不能持有生产写口、真实设备 actuator 或生产凭证。
 
+“无副作用”不能由实验 runner 自报。可用于晋级评审的证据必须来自具体隔离运行时：冻结 dataset 只读挂载、临时输出、禁网、只读根文件系统、最小 capability、资源上限与独立 verifier 都要能从运行时事实重新打开。外部 sandbox operation 先持久预留再执行；响应丢失、活租约重复请求或未知终态只能重开原结果或进入 reconciliation，不能盲目再跑。即便这些证据全部成立，Lab 的最高权限仍只是生成 proposal，production activation 必须由后续 Review 与版本 authority 独立完成。
+
 ### 13.2 可演化对象的不同门槛
 
 | 对象 | 允许的自动化程度 | 必要门槛 |

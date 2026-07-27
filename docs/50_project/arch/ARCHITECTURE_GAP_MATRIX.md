@@ -268,8 +268,8 @@ Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界�
 运行得到 `271 passed, 2 warnings in 332.52s`。部署多实例 canary、
 Windows graceful stop 与 NE-07 真实服务栈尚未运行，因此本表保持
 `PARTIAL / IN_PROGRESS`。
-| Evolution Lab | `SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER` | 0108 V1 ledger、runner | dataset digest 未独立重算、verifier 可补 hash、隔离可绕过且无 production composition | NE-04 |
-| Counterfactual | `LEDGER_CONTRACT_ONLY` | V1 ExperimentReport | 没有可信独立双臂、sandbox/effect audit 或 promotion authority | NE-04 |
+| Evolution Lab | `PARTIAL_TRUSTED_LEDGER_NO_DOCKER_CALLER` | 0108/0122 只读资产；0138 fenced operation/event、trusted run/report/proposal/redaction/golden-suite ledger | 持久 fence、exact replay、reconciliation 与强 Docker attestation 合同已落地；真实 digest-pinned container executor、三条 Golden Experiment、production composition 和 Operator 投影未完成 | NE-04 |
+| Counterfactual | `PARTIAL_TRUSTED_REPORT_LEDGER_NO_REAL_ARMS` | 0138 trusted report + `CounterfactualPairV2` | outcome/evidence/cost/latency/risk/verification 比较可持久化且 proposal-only；尚无真实隔离双臂结果 | NE-04 |
 | Capability Maturity | `PARTIAL_NE05_PRODUCTION_FAIL_CLOSED` | scorecard/provider/Governor adapter + production IntentDecisionEngine wiring | 生产门禁默认开启且缺失/伪造 scorecard 最高风险；仍缺 durable promotion/degradation authority | NE-05 |
 | Capability Forge | `PARTIAL_LEGACY_RUNTIME_OVERRIDE_REMAINS` | `app/capability_forge.py`、Obs `runtime-match` route | Executive 内 call site 已删除，但服务仍能生成/批准 blueprint、维护 canary 状态并输出 runtime route override；这违反 Forge 仅生成 EvolutionProposal 的目标，必须在 NE-05 退役/改为 proposal-only | NE-05 |
 | Skill Compiler | `PARTIAL_NE05_DETERMINISTIC_DRAFT` | `host_brain/skills/skill_compiler.py`、`SkillDraftV1`、NE-05 tests | typed draft 与确定性 digest 已有；SBOM/signature request、sandbox、activation 全链由独立 lifecycle 继续补齐 | NE-05 |

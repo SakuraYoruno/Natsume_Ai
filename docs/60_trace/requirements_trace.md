@@ -309,8 +309,8 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 | TRACE-EVO-03 | FR-NLE-004 | user/task/life/relationship/authority 仲裁 | `ProductionIntentAuthorityPort`、`DurableIntentAdmissionVerifier` | `PARTIAL_PRODUCTION_ADMISSION_WIRED_RESTRICT_ONLY` | NE-03 本地 Gate；长周期 goal owner 后续 |
 | TRACE-EVO-04 | FR-NLE-004 | 高风险 action 统一 preview/shadow | `ProductionActionPreviewAuthorityResolver`、Action Preview RuntimeEvent、terminal transport gates | `PARTIAL_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED` | Operator Governed route 属 NE-01 |
 | TRACE-EVO-05 | FR-NLE-005 | 统一 health/degradation/recovery/SLO 与 Catalog rollout | RuntimeGuardian、0112、0113、Host Service Catalog startup | `PARTIAL_HOST_LIFESPAN_AND_ENFORCE_TARGET_WIRED_LOCAL_ACCEPTANCE_PASSED` | Windows graceful stop 与部署 canary 后续 |
-| TRACE-EVO-06 | FR-ARCH-010 | Scenario/Experiment Lab | 0108 V1 ledger + self-attested runner | `SHADOW_UNTRUSTED_EVIDENCE` | NE-04 |
-| TRACE-EVO-07 | FR-ARCH-010 | Counterfactual replay | V1 report contract | `CONTRACT_ONLY_NO_TRUSTED_RUNNER` | NE-04 |
+| TRACE-EVO-06 | FR-ARCH-010 | Scenario/Experiment Lab | 0108/0122 只读资产；0138 trusted operation/event/run ledger、Docker attestation contract | `PARTIAL_TRUSTED_LEDGER_NO_DOCKER_CALLER`：唯一 fenced claim、live duplicate 拒绝执行、expiry reconciliation、exact completed replay 已由真实 SQLite 验证；真实容器仍待接线 | NE-04 |
+| TRACE-EVO-07 | FR-ARCH-010 | Counterfactual replay | 0138 trusted report/proposal/golden-suite ledger + `CounterfactualPairV2` | `PARTIAL_TRUSTED_REPORT_NO_REAL_ARMS`：全 variant 覆盖、baseline→alternative、proposal-only 已冻结；三类真实隔离双臂未运行 | NE-04 |
 | TRACE-EVO-08 | FR-NLE-005、FR-ARCH-007 | Maturity 成为默认 restrict-only 门禁 | scorecard + disabled adapter | `PARTIAL` | NE-05 |
 | TRACE-EVO-09 | FR-ARCH-007、FR-ARCH-010 | Skill Compiler 与 signed lifecycle | deterministic draft + intake/quarantine + 0109 ledger | `PARTIAL_NON_ATOMIC_NO_RUNTIME_RESOLVER` | NE-05 |
 | TRACE-EVO-10 | FR-ARCH-010 | 经验只以 proposal 回流 | 多条局部 feedback；T-PERSONA-PROPOSAL-01 待实现 | `PARTIAL_BROKEN_PATH` | NE-06 |
