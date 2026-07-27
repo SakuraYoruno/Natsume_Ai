@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.core.errors import MCP_TASK_AUTHORITY_REQUIRED
 from host_brain.mcp.tool_registry import MCPToolRegistry, ToolMeta
 from host_brain.skills.registry import SkillMeta, SkillRegistry
@@ -68,6 +72,10 @@ def register_mcp_tools_into_skill_registry(
                 handler=_handler,
                 require_confirm=require_confirm,
                 description=str(meta.description or ""),
+                execution_policy=(
+                    SkillExecutionPolicy.BLOCKED_PENDING_ACCEPTANCE_EFFECT
+                ),
+                budget_policy=SkillBudgetPolicy.TASK_PRECHARGE,
             )
         )
         count += 1

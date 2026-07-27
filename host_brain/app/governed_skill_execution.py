@@ -30,6 +30,9 @@ from host_brain.skills.governed_execution_support import (
     flatten_result_text,
     normalize_text,
 )
+from host_brain.skills.execution_policy_validation import (
+    governed_skill_policy_error,
+)
 
 
 GOVERNED_NODE_GRANT_INVALID = "GOVERNED_NODE_GRANT_INVALID"
@@ -109,6 +112,7 @@ def execute_governed_skill(
         raise PermissionError("GOVERNED_SKILL_EXECUTION_PORTS_INCOMPLETE")
 
     skill_meta = registry.require(skill_name)
+    _require_governed_skill_policy(skill_name, skill_meta)
     receipt_ref = _skill_receipt_ref(request_ref, skill_name)
     tokens = governor_result.get("tokens")
     token_projection = dict(tokens) if isinstance(tokens, Mapping) else {}
@@ -429,6 +433,14 @@ def _compose_model_budget_runtime(
         model_budget_guard=guard,
         task_request_id=request_id,
     )
+
+
+def _require_governed_skill_policy(skill_name: str, skill_meta: Any) -> None:
+    """Reject catalog-only or internally inconsistent Skill metadata."""
+
+    error = governed_skill_policy_error(skill_name, skill_meta)
+    if error is not None:
+        raise PermissionError(error)
 
 
 def _governed_node_grant_error(

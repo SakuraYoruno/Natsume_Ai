@@ -11,6 +11,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.skills.registry import SkillRegistry
 from host_brain.skills.registration import register_skill
 
@@ -112,6 +116,8 @@ _COMMON_SKILL_KWARGS: dict[str, Any] = {
     "risk_level": 1,
     "scope": "host",
     "reversible": False,
+    "execution_policy": SkillExecutionPolicy.INLINE_READ_ONLY,
+    "budget_policy": SkillBudgetPolicy.TASK_PRECHARGE,
 }
 
 

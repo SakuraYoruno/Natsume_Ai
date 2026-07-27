@@ -208,6 +208,8 @@ def _should_auto_schedule(meta: SkillMeta, profile: Mapping[str, Any]) -> tuple[
     skill_name = str(meta.skill_name or "").strip()
     if skill_name in RETIRED_AUTO_SCHEDULE_SKILLS:
         return False, "retired auto-schedule skill"
+    if not bool(getattr(meta, "governed_execution_enabled", False)):
+        return False, "skill requires a typed post-Acceptance effect"
     if not bool(getattr(meta, "scheduler_allowed", False)):
         return False, "skill is not scheduler_allowed"
     if not _as_bool(profile.get("auto_schedule"), default=False):

@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.25
+版本：v2.26
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-27
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -18,13 +18,26 @@ executor 重开 exact node grant、Attempt、Lease、Budget 和运行期 ports�
 第二条执行路径。执行结果的 receipt 也是终态因果链的一部分：写入失败必须
 向 Task Runtime 暴露为失败或待对账，而不能为了返回“成功”而吞掉异常。
 
+能力目录与执行能力必须严格分离。每个 Skill 都要在注册时声明一种不可歧义
+的执行策略：纯只读、验收前仅生成 proposal、验收后受控写入，或等待 typed
+Effect 而禁用。风险等级、名称、`reversible` 标记和 handler 返回值都不能
+替代这项声明；新增或 descriptor 漂移默认拒绝。所谓“读”若会持久化浏览器
+profile/session、触发外部网络状态或用户可见投递，也属于 Effect，而不是
+只读。这样，缩小生产能力面是诚实的安全收口，不是把被禁用能力计为完成。
+
+预算与副作用是同一个执行合同的两面。任何启用 Skill 都先消费 Task 账本；
+模型调用还必须提交 provider measurement。proposal 可以在 Acceptance 前
+计算，但不能提交用户可见或不可逆结果；真实写入只能由 Acceptance 后的
+typed Effect/Workspace handler 完成。没有这条分界，Worker 的“成功”会把
+业务计算、授权和外部效果重新混成第二套 authority。
+
 跨路线完成性遵循“同一提交、同一数据库快照、逐路线完整证据”的不变量。代码、单测或某几条路线成功都不能外推为通用 Runtime 完成；验收者必须以只读事务独立重开真实持久事实，并把 Git HEAD、仓库与数据库 migration head、Command/Graph/Node/Attempt/Lease/Operation、父子 Budget、Verification、Acceptance、Artifact、Effect/Outbox/Receipt 串成不可替换的证据链。一个 request 只能证明一条路线，未运行路线必须显式保留 `NOT_RUN`。收据只能暴露完成判断需要的标识、状态、版本与 digest，不能复制用户正文、模型输出、secret 或执行 payload。这样，“能够验收”与“已经七路验收通过”才不会被混为一谈。
 
 跨路线验收可以使用确定性的本地 worker 检查调度、授权、预算、Review、验收和副作用原子性，但收据必须标明其证据边界。确定性 worker 不能证明真实模型质量、外部 provider attestation、PlanningSearch 收益或真实网络/设备可用性；这些结论只能由后续各自的独立验收合同给出。换言之，同库七路 PASS 是 Runtime 治理证据，不是整个智能系统的 PASS。
 
 模型预算不能由 worker 自报一个总数。一次可验收调用必须从 canonical ModelAttempt 生命周期重开 provider、model、route、prompt/output digest 和 provider usage，再把它与不可变 WorkerProjection 中的测量证明、Graph aggregate usage 和 Attempt-bound child usage 做精确等值校验。执行所需的额度 guard 属于瞬时内部 authority，不能流入 Life、Memory、Effect 或公开收据；对外只允许暴露经白名单约束的标识、digest 和实际用量。exact replay 只能重开原有用量与结果，不能再请求 provider 或二次扣费。受控 terminal transport 可以证明这条治理链，但不能替代真实外部 provider、质量和成本收益验收。
 
-当前正式实例已在干净提交 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，Chat/Plan 的模型预算 lineage 也被独立重开，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。Chat 因所有声明控制均为 `PASS` 成为第一条 `COMPLETE` 路线；这不会把其余六路、真实模型质量或全栈 canary 推导为完成。
+当前正式实例已在干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 和同一文件型 SQLite 上满足上述不变量：七路线均为提交绑定 `PASS`，Chat/Plan 的模型预算 lineage 也被独立重开，迁移头精确为 0135，且收据不含用户正文、模型输出或 secret。Chat 与当前 44 个启用 Skill 因各自声明控制均为 `PASS` 成为两条 `COMPLETE` 路线；49 个 blocked Skill、其余五路、真实模型质量或全栈 canary 都不能由此推导为完成。
 
 恢复治理遵循“先持久化不确定性，再由精确证据消解”的不变量。未知副作用不能被 timeout、异常类型或操作者意图直接解释为未发生；Operation 首次进入待恢复状态时，状态 mutation、恢复 case 与各自 Outbox 必须同成同败，不能把 case 留给下一次请求补写。运行时冻结当前 Graph/Node/Attempt/Operation/Budget/Lease 与取消事实后，再让签名证据精确绑定该 recovery case。未决 case 的存续应跟随真正待消解的 Operation version 与取消身份，不能因后续预算计量、租约到期或生命周期围栏而从恢复清单意外消失；这些变化仍保留在不可变 subject 中供审计。证据只能收紧既有 authority，不能创建新的执行权；对账完成后还必须证明同一 case 已退出 current projection。无法证明时继续隔离，绝不盲目重放 worker。
 

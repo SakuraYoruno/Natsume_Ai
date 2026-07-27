@@ -18,6 +18,8 @@ from host_brain.app.governed_task_adapter import (
 from host_brain.orchestration.failure_replan_intent import (
     FAILURE_REPLAN_SCHEMA_VERSION,
 )
+from host_brain.contracts.skill_execution import SkillExecutionPolicy
+from host_brain.skills.registry import SkillMeta, SkillRegistry
 from natsume_contracts.task import HostCommandSurface
 
 
@@ -95,6 +97,22 @@ def _request(ts_ms: int = 1_800_000_000_000) -> dict:
     }
 
 
+def _echo_skill_registry() -> SkillRegistry:
+    registry = SkillRegistry()
+    registry.register(
+        SkillMeta(
+            skill_name="echo_skill",
+            clearance="LOW",
+            risk_level=1,
+            scope="host",
+            reversible=False,
+            handler=lambda _args, _ctx: {"status": "OK"},
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
+        )
+    )
+    return registry
+
+
 @pytest.mark.asyncio
 async def test_close_admission_rejects_new_work_and_drain_waits_for_in_flight() -> None:
     application = _BlockingApplication()
@@ -103,6 +121,7 @@ async def test_close_admission_rejects_new_work_and_drain_waits_for_in_flight() 
         runtime_router=CanonicalRuntimeRouter(),
         command_repository=_EmptyCommandRepository(),
         drain_timeout_s=1.0,
+        planning_skill_registry=_echo_skill_registry(),
     )
     await runtime.activate()
 

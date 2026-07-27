@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from host_brain.contracts.skill_execution import SkillExecutionPolicy
 from host_brain.scheduler.scheduling_center import (
     build_default_scheduler_registries,
     build_personality_scheduler_seed_task_configs,
@@ -30,12 +33,7 @@ def test_scheduling_center_builds_registry_driven_seed_tasks(monkeypatch) -> Non
     assert task_ids == [
         "life_tick",
         "evolution_cycle_daily",
-        "lightnovel_recommender_daily",
-        "diary_writer_daily",
-        "dream_generator_sleep",
         "life_memory_sleep_replay_daily",
-        "gaming_companion_tick",
-        "emergent_growth_weekly",
     ]
     assert task_ids.count("life_tick") == 1
     assert {
@@ -58,19 +56,8 @@ def test_scheduling_center_builds_registry_driven_seed_tasks(monkeypatch) -> Non
     assert configs["life_tick"].resource_profile["periodic_authority"] == "scheduler_clock"
     assert configs["evolution_cycle_daily"].priority is TaskPriority.MEDIUM
     assert configs["evolution_cycle_daily"].trigger_config == {"hour": 3, "minute": 20, "catch_up_window_minutes": 720}
-    assert configs["emergent_growth_weekly"].trigger_config == {
-        "day_of_week": 6,
-        "hour": 3,
-        "minute": 50,
-        "catch_up_window_minutes": 1440,
-    }
-    assert configs["lightnovel_recommender_daily"].trigger_mode is TriggerMode.CRON
-    assert configs["lightnovel_recommender_daily"].resource_profile["resource_class"] == "browser_heavy"
-    assert configs["lightnovel_recommender_daily"].resource_profile["uses_llm"] is True
     assert configs["life_memory_sleep_replay_daily"].resource_profile["resource_class"] == "maintenance"
     assert configs["life_memory_sleep_replay_daily"].resource_profile["uses_llm"] is False
-    assert configs["gaming_companion_tick"].resource_profile["resource_class"] == "gpu_heavy"
-    assert configs["gaming_companion_tick"].resource_profile["uses_gpu"] is True
     assert configs["life_tick"].resource_profile["resource_class"] == "light_tick"
 
 
@@ -81,16 +68,24 @@ def test_scheduling_center_resolves_env_overrides(monkeypatch) -> None:
     monkeypatch.setenv("HOST_DREAM_GENERATOR_IDLE_THRESHOLD_MINUTES", "5")
     monkeypatch.setenv("HOST_DREAM_GENERATOR_MAX_EPISODIC_ENTRIES", "7")
 
-    recommender = get_scheduled_task_config_by_task_id("lightnovel_recommender_daily")
-    dream = get_scheduled_task_config_by_task_id("dream_generator_sleep")
+    with pytest.raises(KeyError, match="lightnovel_recommender_daily"):
+        get_scheduled_task_config_by_task_id(
+            "lightnovel_recommender_daily"
+        )
+    with pytest.raises(KeyError, match="dream_generator_sleep"):
+        get_scheduled_task_config_by_task_id("dream_generator_sleep")
 
-    assert recommender.trigger_config == {"hour": 23, "minute": 0, "catch_up_window_minutes": 180}
-    assert recommender.intent_template["args"]["urls"] == [
-        "https://example.test/a",
-        "https://example.test/b",
-    ]
-    assert dream.intent_template["args"]["max_episodic_entries"] == 7
-    assert dream.intent_template["args"]["idle_threshold_ms"] == 5 * 60 * 1000
+    plan = build_registry_driven_scheduling_plan(
+        registries=build_default_scheduler_registries(),
+        include_system_tasks=False,
+    )
+    skipped = {item.skill_name: item.reason for item in plan.skipped}
+    assert skipped["agent_lightnovel_recommender"] == (
+        "skill requires a typed post-Acceptance effect"
+    )
+    assert skipped["dream_generator"] == (
+        "skill requires a typed post-Acceptance effect"
+    )
 
 
 def test_scheduling_center_keeps_high_risk_auto_schedule_as_advisory() -> None:
@@ -111,6 +106,7 @@ def test_scheduling_center_keeps_high_risk_auto_schedule_as_advisory() -> None:
                 "trigger_mode": "interval",
                 "trigger_config": {"seconds": 60},
             },
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
         )
     )
 

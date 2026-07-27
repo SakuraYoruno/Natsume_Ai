@@ -92,6 +92,9 @@ from host_brain.app.governed_task_authority import (
 from host_brain.app.governed_skill_execution_ports import (
     build_governed_skill_execution_ports,
 )
+from host_brain.skills.execution_policy_validation import (
+    governed_skill_policy_error,
+)
 from host_brain.task_runtime import GovernedTaskCoordinator
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
 from host_brain.task_runtime.review_runtime import TaskNodeReviewRuntime
@@ -787,6 +790,15 @@ class GovernedHostRuntime:
                 GOVERNED_HOST_AUTHORITY_INVALID,
                 "direct Skill admission could not freeze canonical risk metadata",
             ) from exc
+        policy_error = governed_skill_policy_error(target, metadata)
+        if policy_error is not None:
+            raise GovernedHostAdapterError(
+                policy_error,
+                (
+                    "direct Skill execution policy is not eligible for "
+                    "governed Task admission"
+                ),
+            )
         if not 1 <= risk_level <= 5:
             raise GovernedHostAdapterError(
                 GOVERNED_HOST_AUTHORITY_INVALID,

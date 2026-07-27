@@ -425,6 +425,9 @@ def _registry_capabilities(
         tags = tuple(dict.fromkeys((*tags, family)))
         if (
             scope != "host"
+            or not bool(
+                getattr(raw, "governed_execution_enabled", False)
+            )
             or not isinstance(require_confirm, bool)
             or isinstance(risk_level, bool)
             or not isinstance(risk_level, int)

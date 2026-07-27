@@ -20,6 +20,7 @@ from host_brain.contracts.agent_runtime.review_policy import (
 )
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.skill_execution import SkillExecutionPolicy
 from host_brain.planning_search.capability_domain import CapabilitySuccessorCatalog
 from host_brain.planning_search.capability_domain_models import (
     CAPABILITY_PLANNING_MODE,
@@ -53,6 +54,7 @@ def _registry(
             capability_tags=("research", "evidence"),
             parallelizable=True,
             fallback_policy="strict_fail",
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
         )
     )
     if include_second:
@@ -67,6 +69,7 @@ def _registry(
                 family="research",
                 capability_tags=("research", "evidence", "crosscheck"),
                 fallback_policy="strict_fail",
+                execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
             )
         )
     if include_low_risk_alternative:
@@ -82,6 +85,7 @@ def _registry(
                 capability_tags=("research", "evidence", "crosscheck"),
                 parallelizable=True,
                 fallback_policy="strict_fail",
+                execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
             )
         )
     registry.register(
@@ -96,6 +100,7 @@ def _registry(
             family="research",
             capability_tags=("research",),
             fallback_policy="strict_fail",
+            execution_policy=SkillExecutionPolicy.INLINE_READ_ONLY,
         )
     )
     return registry

@@ -3,8 +3,8 @@
 
 # 图 02：Governed Host 请求主链
 
-版本：v2.14
-核对日期：2026-07-26
+版本：v2.15
+核对日期：2026-07-27
 
 本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
 
@@ -23,6 +23,7 @@ flowchart TD
     BUILD["HostCommand + WorkOrderV3 + BudgetPolicy"]
     PLAN{"route=plan?"}
     SEARCH["registry capability search\n+ graph compiler"]
+    SPOL{"Skill execution policy"}
     DIRECT["direct route graph builder"]
     ADMIT["HostCommandRepository admission"]
     TASK["GovernedTaskCoordinator"]
@@ -42,8 +43,10 @@ flowchart TD
 
     REQ --> ROUTE --> AIR --> INTENT --> GOV --> CORTEX --> SUPPORT
     SUPPORT -->|"yes"| GR --> BUILD --> PLAN
-    PLAN -->|"yes"| SEARCH --> ADMIT
-    PLAN -->|"no"| DIRECT --> ADMIT
+    PLAN -->|"yes"| SEARCH --> SPOL
+    PLAN -->|"no"| DIRECT --> SPOL
+    SPOL -->|"read / proposal / workspace"| ADMIT
+    SPOL -->|"pending typed Effect"| REJECT
     ADMIT --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> ADEC
     ADEC -->|"ACCEPT"| EFFECT --> DISPATCH --> SSE
     ADEC -->|"non-ACCEPT"| REVIEW
@@ -60,6 +63,13 @@ flowchart TD
 Plan 的合成节点还有一条不能省略的数据边：已验收 predecessor Node 先生成 canonical TaskResult artifact，TaskStore 解析其 payload，`NodeInputArtifactAttestation` 再绑定 artifact/receipt/payload digest bundle，final Chat 只消费这组证据。仅有拓扑依赖而没有该数据流不能通过固定结构验收。任意未被固定 predicate 覆盖的自然语言验收条件进入 durable Review，不会自动写成 `PASS`。
 
 Plan 中 registry 标记 `require_confirm` 的 Skill 还有一条节点审批边：search 保留该候选并冻结 catalog provenance，compiler 将其重绑定到实际 Node ID，Scheduler 只让该节点进入 `WAITING_APPROVAL`。一次性 Review 消费后，0096 continuation 保留已 accepted predecessor 的历史 grant，并为未执行节点提供 claim-fenced 续签 grant；不会重新执行前驱。
+
+Skill policy gate 先把 canonical Host Registry 的 93 个条目分成 28 个只读、13 个 proposal-only、
+3 个 post-Acceptance Workspace 和 49 个 blocked。只有前三类进入候选与
+admission；blocked 条目也会在 frozen execution 再次拒绝，以覆盖旧图和
+并发配置漂移。Catalog 存在不代表执行可用。
+独立 Personality catalog 的 19 个 metadata 和动态 MCP Skill 均没有
+governed manifest 入口。
 
 需要模型的普通 Skill 还有一条预算数据边：Registry 的显式
 `model_budget_required` 声明使 Task Runtime 从当前 Node/Attempt Budget 派生

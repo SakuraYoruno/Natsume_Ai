@@ -3,11 +3,20 @@
 
 # Natsume AI 架构文档目录
 
-版本：v4.5
-维护日期：2026-07-26
+版本：v4.6
+维护日期：2026-07-27
 状态：`CURRENT_ARCHITECTURE_CATALOG`
 
 本目录只保留当前结构说明、稳定目标、差距、专项架构和可维护图册。旧路线图、混写完成报告、旧 Agentic RAG/Gateway 方案和按文件行数生成的模块快照已删除；Git 历史承担追溯。
+
+当前 Skill 执行边界：canonical Host Registry 的 93 个条目按 exact descriptor 分为 28 个只读、
+13 个 proposal-only、3 个 post-Acceptance Workspace 和 49 个 blocked。
+只有前 44 个进入运行 manifest；后 49 个等待 typed Acceptance Effect，
+catalog 可见不等于执行可用或已完成。干净提交 `c68850f8` 的 v3 同库收据
+已经把 44 个启用项的 Skill 路线提升为 `COMPLETE`，但没有授权或完成
+49 个 blocked 能力。
+旧 Personality Registry 的 19 个 metadata 与动态 MCP Skill 均不进入
+governed manifest。
 
 当前 Workspace 写边界：Governed Internal 与三条已登记 risk-4 Direct Agent Skill 都从 frozen source 密封 manifest/binary patch，并只在 Acceptance 后经 0116 晋升；Skill 路径要求 exact consumed Review、server-bound V3 和先于可见 Effect 的 promotion handler，调用方 source branch 不移动。Domain Pack、其它 Skill、一般恢复、handle-level TOCTOU、OS/container tenant 与跨路线 canary 仍为未完成项。
 

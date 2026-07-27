@@ -13,6 +13,10 @@ from host_brain.app.governed_skill_execution_ports import (
     build_governed_skill_execution_ports,
     execute_frozen_governed_skill,
 )
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -253,6 +257,11 @@ def test_frozen_executor_payload_skips_post_admission_skill_normalization(
             risk_level=2,
             fallback_policy="strict_fail",
             handler=forbidden_handler,
+            model_budget_required=False,
+            execution_policy=(
+                SkillExecutionPolicy.PRE_ACCEPTANCE_PROPOSAL_ONLY
+            ),
+            budget_policy=SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL,
         )
     )
     monkeypatch.setattr(

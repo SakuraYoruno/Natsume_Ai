@@ -24,14 +24,14 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     report = load_universal_runtime_coverage(ROOT)
 
     assert report.status == PROGRAM_INCOMPLETE
-    assert report.evaluated_commit_sha == "3d68bd1eca69ad1593454634c2999d07b4d4f2f5"
+    assert report.evaluated_commit_sha == "c68850f859048be955c15366e33ada3a917d9b12"
     assert report.migration_head == (
         "0135_task_review_denial_settlement.sql"
     )
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
         "chat": "COMPLETE",
-        "skill": "INCOMPLETE",
+        "skill": "COMPLETE",
         "plan": "INCOMPLETE",
         "delegate": "INCOMPLETE",
         "scheduler": "INCOMPLETE",
@@ -39,10 +39,6 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
         "operator": "INCOMPLETE",
     }
     assert report.missing_route_controls == {
-        "skill": (
-            "budget_enforcement",
-            "transactional_side_effects",
-        ),
         "plan": (
             "canonical_execution_authority",
             "budget_enforcement",
@@ -103,6 +99,11 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
     ] == "PASS"
     assert payload["routes"]["chat"]["controls"]["budget_enforcement"] == "PASS"
     assert payload["routes"]["chat"]["status"] == "COMPLETE"
+    assert payload["routes"]["skill"]["controls"]["budget_enforcement"] == "PASS"
+    assert payload["routes"]["skill"]["controls"][
+        "transactional_side_effects"
+    ] == "PASS"
+    assert payload["routes"]["skill"]["status"] == "COMPLETE"
     assert "host_brain/app/life_projection_barrier.py" in payload[
         "routes"
     ]["chat"]["evidence_refs"]
@@ -117,7 +118,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
         for route in payload["routes"].values()
     )
     assert (
-        "docs/45_testing/test_reports/ne01_universal_route_acceptance_20260727.json"
+        "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json"
         in report.evidence_refs
     )
 
@@ -131,7 +132,7 @@ def test_full_architecture_gate_fails_closed_while_any_route_is_missing() -> Non
 
 def test_manifest_cannot_call_a_partial_route_complete(tmp_path: Path) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    payload["routes"]["skill"]["status"] = "COMPLETE"
+    payload["routes"]["plan"]["status"] = "COMPLETE"
     candidate = tmp_path / "coverage.json"
     candidate.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -213,7 +214,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
     receipt_ref = (
         "docs/45_testing/test_reports/"
-        "ne01_universal_route_acceptance_20260727.json"
+        "ne01_skill_policy_route_acceptance_20260727.json"
     )
     receipt = json.loads((ROOT / receipt_ref).read_text(encoding="utf-8"))
     payload["evidence_binding"]["evaluated_commit_sha"] = receipt["commit_sha"]

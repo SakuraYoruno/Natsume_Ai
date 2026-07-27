@@ -3,8 +3,8 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.8
-维护日期：2026-07-26
+版本：v9.9
+维护日期：2026-07-27
 状态：`CURRENT_AUTHORITY_MAP`
 
 ## 1. 权威顺序
@@ -18,6 +18,16 @@
 7. 历史计划、固定 receipt 和审计快照。
 
 README、理论、系统总览、模块地图和数据流负责解释系统，但不能覆盖上述状态 authority。历史 `DONE/PASS` 只对固定提交、环境和声明范围成立。
+
+当前 Skill 文档基线为 canonical Host Registry 的 93 项完备 policy
+partition：28 个 read-only、13 个
+proposal-only、3 个 post-Acceptance Workspace、49 个 blocked pending
+typed Effect。只有 44 个启用项进入运行 manifest；blocked 能力保持目录
+可见但不算完成。代码定向证据与提交绑定七路收据必须分开记录；当前
+`c68850f8` v3 收据已使 44 个启用项的 Skill 路线达到 `COMPLETE`，但没有
+授权或完成 49 个 blocked 能力。
+独立 Personality Registry 的 19 项 metadata 与动态 MCP Skill 没有
+governed manifest 入口。
 
 当前文档基线为 migration head `0135_task_review_denial_settlement.sql`：0130/0131 继续负责未决 Operation hold 与 exact signed reconciliation；0132 负责 Attempt-bound child Budget；0133 把 VerificationResult 与 Node transition 持久绑定；0134 把 AcceptanceJudgement、自动接纳 artifact/effect 或 Review waiting bundle 与 Node transition 原子绑定；0135 再把 terminal Review、Node、Graph、graph Budget 和三条 Outbox 收进一个不可变 settlement。多节点 Graph 的普通成功/失败仍由 0090/0091 既有外层 authority 唯一终结。一般 cancellation/release、一般恢复、七路线 commit-bound acceptance 和 NE-01 仍未收口。
 

@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 import inspect
 from typing import Any, Callable, Iterable
 
+from host_brain.contracts.skill_execution import (
+    SkillBudgetPolicy,
+    SkillExecutionPolicy,
+)
 from host_brain.skills.registry import SkillMeta
 
 
@@ -64,6 +68,8 @@ class DeclarativeSkillSpec:
     fallback_policy: str = "chat_fallback"
     scheduler_profile: dict[str, Any] = field(default_factory=dict)
     invocation_defaults: dict[str, Any] = field(default_factory=dict)
+    execution_policy: SkillExecutionPolicy | None = None
+    budget_policy: SkillBudgetPolicy | None = None
 
     def _normalize_args(self, args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
         try:
@@ -94,6 +100,23 @@ class DeclarativeSkillSpec:
         return _handler
 
     def to_meta(self) -> SkillMeta:
+        from host_brain.skills.builtin_execution_policy import (  # noqa: PLC0415
+            builtin_skill_policies,
+        )
+
+        if (self.execution_policy is None) != (self.budget_policy is None):
+            raise ValueError(
+                "declarative Skill must declare both execution and budget policy"
+            )
+        if self.execution_policy is None:
+            execution_policy, budget_policy = builtin_skill_policies(
+                skill_id=self.skill_name,
+                tool=self.tool,
+                action=self.action,
+            )
+        else:
+            execution_policy = self.execution_policy
+            budget_policy = self.budget_policy
         return SkillMeta(
             skill_name=self.skill_name,
             clearance=self.clearance,
@@ -108,6 +131,8 @@ class DeclarativeSkillSpec:
             parallelizable=self.parallelizable,
             fallback_policy=self.fallback_policy,
             scheduler_profile=dict(self.scheduler_profile),
+            execution_policy=execution_policy,
+            budget_policy=budget_policy,
         )
 
 

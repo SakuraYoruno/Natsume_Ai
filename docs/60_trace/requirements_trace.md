@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：TRACE-EXEC-08～08AP 的数字均为提交绑定历史；现行工作树以机器状态为准。生产 locator consumer/import/module/field/lock/ref 全为 0。Operator 当前 `14/37`，其余 `23/37` 失败关闭。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0；它不改变 Operator 库存。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write 仍未接通。Chat 的本地 assistant/LifeMemory projection barrier 已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、commit-bound Chat 验收和完整 Worker/Obs composition 仍未闭环。
 
-版本：v5.6
+版本：v5.7
 核对日期：2026-07-27
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -30,8 +30,25 @@ metadata 入口只能失败关闭。缺 exact node grant/Task context 必须在 
 GR05 真实 Universal Host Runtime 与机械 AST inventory。干净提交
 `3d68bd1eca69ad1593454634c2999d07b4d4f2f5` 的 `209 passed`、真实
 GR05、static/doc 与交付元数据 Gate 将结论固化为
-`CANONICAL_EXECUTION_AUTHORITY_PASS`；Budget 与 transactional side-effects
-仍是 Skill 独立缺口，因此路线及 NE-01 均保持 `INCOMPLETE`。
+`CANONICAL_EXECUTION_AUTHORITY_PASS`。
+
+TRACE-EXEC-08AR（Skill 预算与副作用完备分类）：canonical Host Registry 的 93 个
+Skill 必须由 exact `skill_id/tool/action` 分成 28 个 inline read-only、
+13 个 pre-Acceptance proposal-only、3 个 post-Acceptance Workspace 和
+49 个 blocked pending Effect。只有 44 个启用条目可进入 manifest、
+PlanningSearch、Scheduler 与 admission；stale graph 在执行点再次拒绝。
+全部启用节点做 Task precharge，Agent 模型提交 canonical measurement，
+proposal-only 不投递用户可见 Effect，三条写 Agent 只走 Acceptance 后
+Workspace promotion。证据为 `test_ne01_skill_execution_policy.py`、
+`test_ne01_governed_skill_model_budget.py`、
+`test_ne01_governed_agent_workspace_acceptance.py`、GR05 与 registry/
+scheduler/search 回归。当前结论为
+干净提交 `c68850f859048be955c15366e33ada3a917d9b12` 的同库 v3 收据已把
+Budget 与 transactional Effect 控制提升为 `PASS`，故当前 44 个启用项的
+Skill 路线为 `COMPLETE`；NE-01 仍为 `IN_PROGRESS`，49 个 blocked 能力
+不计完成。
+独立 Personality Registry 的 19 个 metadata 必须保持 manifest=0（5 个
+blocked、14 个 unclassified），动态 MCP Skill 也必须 blocked。
 
 ## 2. 当前核心产品能力
 
