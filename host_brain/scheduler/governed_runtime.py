@@ -30,8 +30,18 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetExceededAction,
     BudgetPolicy,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_BUDGET_MODE,
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    ControlRouteExecutionPolicyError,
+    freeze_control_route_execution_policy,
+    require_control_route_execution_policy,
+)
 from host_brain.persistence.task_repository import OutboxMessage
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.work_order_replay import (
+    normalized_work_order_replay_payload,
+)
 from host_brain.orchestration import (
     DurableGovernorGrantResolver,
     GovernedCommandApplication,
@@ -323,11 +333,25 @@ class GovernedSchedulerRuntime:
                         "durable scheduler replay lacks a typed HostCommand",
                     )
                 _assert_stable_replay(candidate_command, command)
-                if work_order is None or assignment is None or graph is None:
+                if not isinstance(work_order, WorkOrderV3):
+                    raise GovernedSchedulerRuntimeError(
+                        SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+                        "durable scheduler replay has no typed WorkOrderV3",
+                    )
+                _assert_stable_work_order_replay(
+                    candidate_order,
+                    work_order,
+                )
+                if assignment is None or graph is None:
                     raise GovernedSchedulerRuntimeError(
                         SCHEDULER_RUNTIME_AUTHORITY_INVALID,
                         "durable scheduler replay is incomplete",
                     )
+            _require_scheduler_control_policy(
+                command=command,
+                work_order=work_order,
+                graph=graph,
+            )
             async for event in self._application.execute_stream(
                 command=command,
                 work_order=work_order,
@@ -449,6 +473,11 @@ class GovernedSchedulerRuntime:
                     SCHEDULER_RUNTIME_AUTHORITY_INVALID,
                     "Review continuation Scheduler admission is incomplete or misrouted",
                 )
+            _require_scheduler_control_policy(
+                command=command,
+                work_order=work_order,
+                graph=graph,
+            )
             operation = self._application.execute_review_continuation(
                 command=command,
                 work_order=work_order,
@@ -502,6 +531,11 @@ class GovernedSchedulerRuntime:
                     SCHEDULER_RUNTIME_AUTHORITY_INVALID,
                     "Operation recovery Scheduler admission is incomplete or misrouted",
                 )
+            _require_scheduler_control_policy(
+                command=command,
+                work_order=work_order,
+                graph=graph,
+            )
             result = await _review_continuation_result(
                 self._application.execute_stream(
                     command=command,
@@ -676,7 +710,10 @@ def build_governed_scheduler_runtime(
         verifier=verifier,
         acceptance=acceptance,
         projection_reader=projection_store,
-        review_runtime=TaskNodeReviewRuntime(review_store),
+        review_runtime=TaskNodeReviewRuntime.for_task_store(
+            review_store,
+            task_runtime_container.task_store,
+        ),
         node_grant_verifier=node_grant_verifier,
         acceptance_effects_enabled=True,
         atomic_graph_success_enabled=True,
@@ -762,6 +799,17 @@ def _build_contracts(
         if operator_surface
         else f"review-waiver://governor-grant/{suffix}"
     )
+    control_command_id = (
+        "scheduler.task.trigger"
+        if operator_surface
+        else "scheduler.occurrence.execute"
+    )
+    control_policy = freeze_control_route_execution_policy(
+        surface=surface,
+        control_command_id=control_command_id,
+        target_id=definition.worker_key,
+        review_required=operator_surface,
+    )
     budget_policy = BudgetPolicy(
         scope=f"work-order:{work_order_id}",
         limits=_SCHEDULER_BUDGET_LIMITS,
@@ -772,6 +820,8 @@ def _build_contracts(
             "route_type": "delegate",
             "fail_closed": True,
             "source": "scheduler_runtime_composition",
+            "measurement_mode": CONTROL_ROUTE_BUDGET_MODE,
+            "control_policy_ref": control_policy["policy_ref"],
         },
     )
     budget_policy.validate()
@@ -784,6 +834,7 @@ def _build_contracts(
             "occurrence_id": occurrence.occurrence_id,
             "definition_ref": definition_ref,
             **dict(frozen_runtime_context or {}),
+            CONTROL_ROUTE_EXECUTION_POLICY_KEY: dict(control_policy),
         },
         allowed_actions=(f"delegate:{definition.worker_key}",),
         forbidden_actions=(
@@ -834,6 +885,8 @@ def _build_contracts(
             "retry_policy": retry_policy,
             "risk_level": risk_level,
             "command_surface": surface.value,
+            "control_command_id": control_command_id,
+            CONTROL_ROUTE_EXECUTION_POLICY_KEY: dict(control_policy),
             "operator_command_id": (
                 "scheduler.task.trigger" if operator_surface else None
             ),
@@ -864,7 +917,12 @@ def _build_contracts(
         attempt=0,
         capability_requirements=(definition.worker_key,),
         risk_level=risk_level,
-        input_refs=(occurrence.occurrence_id, definition_ref, governor_grant),
+        input_refs=(
+            occurrence.occurrence_id,
+            definition_ref,
+            governor_grant,
+            control_policy["policy_ref"],
+        ),
         output_contract=output_contract,
         budget_policy=budget_policy,
         business_idempotency_scope=business_scope,
@@ -878,7 +936,12 @@ def _build_contracts(
         node_id=node_id,
         dependencies=(),
         route=worker_route,
-        input_refs=(occurrence.occurrence_id, definition_ref, governor_grant),
+        input_refs=(
+            occurrence.occurrence_id,
+            definition_ref,
+            governor_grant,
+            control_policy["policy_ref"],
+        ),
         output_contract=output_contract,
         retry_policy=retry_policy,
         risk_level=risk_level,
@@ -957,6 +1020,46 @@ def _assert_stable_replay(candidate: HostCommand, durable: HostCommand) -> None:
             SCHEDULER_RUNTIME_DEFINITION_DRIFT,
             "scheduler replay changed stable semantics: " + ", ".join(drift),
         )
+
+
+def _assert_stable_work_order_replay(
+    candidate: WorkOrderV3,
+    durable: WorkOrderV3,
+) -> None:
+    candidate_payload = normalized_work_order_replay_payload(candidate)
+    durable_payload = normalized_work_order_replay_payload(durable)
+    drift = [
+        field_name
+        for field_name in candidate_payload
+        if candidate_payload.get(field_name)
+        != durable_payload.get(field_name)
+    ]
+    if drift:
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_DEFINITION_DRIFT,
+            "scheduler WorkOrder replay changed stable semantics: "
+            + ", ".join(drift),
+        )
+
+
+def _require_scheduler_control_policy(
+    *,
+    command: HostCommand,
+    work_order: WorkOrderV3,
+    graph: TaskGraph,
+) -> None:
+    try:
+        require_control_route_execution_policy(
+            command=command,
+            work_order=work_order,
+            graph=graph,
+        )
+    except ControlRouteExecutionPolicyError as exc:
+        raise GovernedSchedulerRuntimeError(
+            SCHEDULER_RUNTIME_AUTHORITY_INVALID,
+            exc.detail,
+        ) from exc
+
 
 async def _review_continuation_result(operation: Any) -> dict[str, Any]:
     current = await operation if inspect.isawaitable(operation) else operation

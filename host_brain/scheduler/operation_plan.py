@@ -18,6 +18,10 @@ import re
 from typing import Any, Protocol
 
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    ControlRouteExecutionPolicyError,
+    require_control_route_execution_policy,
+)
 from host_brain.persistence.worker_projection_repository import (
     WorkerProjectionStoreError,
     validate_worker_projection_payload,
@@ -340,6 +344,16 @@ class _SchedulerOperationPlanProjectionAuthority:
                 "HostCommand and WorkOrderV3 are required",
             )
         work_order.validate()
+        try:
+            require_control_route_execution_policy(
+                command=command,
+                work_order=work_order,
+            )
+        except ControlRouteExecutionPolicyError as exc:
+            raise SchedulerOperationPlanError(
+                SCHEDULER_OPERATION_PLAN_PROJECTION_INVALID,
+                exc.detail,
+            ) from exc
         commit = dict(worker_commit or {})
         receipt_ref = str(commit.get("receipt_ref") or "").strip()
         if not receipt_ref.startswith("worker-projection://"):

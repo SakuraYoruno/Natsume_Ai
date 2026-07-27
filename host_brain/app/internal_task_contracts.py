@@ -15,6 +15,11 @@ from host_brain.contracts.agent_runtime.budget_policy import (
     BudgetExceededAction,
     BudgetPolicy,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_BUDGET_MODE,
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    freeze_control_route_execution_policy,
+)
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
     TaskGraphCompletionPolicy,
@@ -131,6 +136,12 @@ def build_internal_task_contracts(
         work_order,
         suffix=suffix,
     )
+    control_policy = freeze_control_route_execution_policy(
+        surface=HostCommandSurface.INTERNAL,
+        control_command_id="internal.agent.execute",
+        target_id="agent_runtime",
+        review_required=bool(review_policy.get("review_required")),
+    )
     approval_policy = {
         **dict(work_order.approval_policy or {}),
         "required": True,
@@ -147,6 +158,8 @@ def build_internal_task_contracts(
             "route_type": "delegate",
             "fail_closed": True,
             "source": "internal_task_runtime_composition",
+            "measurement_mode": CONTROL_ROUTE_BUDGET_MODE,
+            "control_policy_ref": control_policy["policy_ref"],
         },
     )
     budget_policy.validate()
@@ -177,6 +190,7 @@ def build_internal_task_contracts(
         input_pack={
             **deepcopy(dict(work_order.input_pack or {})),
             **deepcopy(context_payload),
+            CONTROL_ROUTE_EXECUTION_POLICY_KEY: deepcopy(control_policy),
         },
         allowed_actions=tuple(work_order.allowed_actions or ()),
         forbidden_actions=tuple(work_order.forbidden_actions or ()),
@@ -189,6 +203,8 @@ def build_internal_task_contracts(
         metadata={
             **deepcopy(dict(work_order.metadata or {})),
             "surface": HostCommandSurface.INTERNAL.value,
+            "control_command_id": "internal.agent.execute",
+            CONTROL_ROUTE_EXECUTION_POLICY_KEY: deepcopy(control_policy),
             "planning_lineage": {
                 "graph_id": graph_id,
                 "root_work_order_id": work_order.work_order_id,
@@ -214,7 +230,7 @@ def build_internal_task_contracts(
         attempt=0,
         capability_requirements=("agent_runtime",),
         risk_level=risk_level,
-        input_refs=(input_ref, grant_ref),
+        input_refs=(input_ref, grant_ref, control_policy["policy_ref"]),
         output_contract=output_contract,
         budget_policy=budget_policy,
         business_idempotency_scope=business_scope,
@@ -228,7 +244,7 @@ def build_internal_task_contracts(
         node_id=node_id,
         dependencies=(),
         route=INTERNAL_TASK_NODE_ROUTE,
-        input_refs=(input_ref, grant_ref),
+        input_refs=(input_ref, grant_ref, control_policy["policy_ref"]),
         output_contract=output_contract,
         retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
         risk_level=risk_level,

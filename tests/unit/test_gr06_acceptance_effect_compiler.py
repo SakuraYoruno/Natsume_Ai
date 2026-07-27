@@ -6,6 +6,10 @@ from copy import deepcopy
 import pytest
 
 from host_brain.runtime.context_contracts import WorldFactV2, WorldSnapshotV2
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    freeze_control_route_execution_policy,
+)
 from host_brain.orchestration.host_route_contracts import (
     build_direct_host_route_contracts,
 )
@@ -38,6 +42,15 @@ _OPERATION_RECOVERY_CASE_REF = (
     "operation-recovery-hold://sha256/" + "9" * 64
 )
 _OPERATION_RECOVERY_CASE_DIGEST = "sha256:" + "9" * 64
+
+
+def _control_policy(command_id: str, target_id: str) -> dict:
+    return freeze_control_route_execution_policy(
+        surface=HostCommandSurface.OPERATOR,
+        control_command_id=command_id,
+        target_id=target_id,
+        review_required=True,
+    )
 
 
 def _contracts():
@@ -130,6 +143,10 @@ def _operator_contracts():
         sanitized_message="switch host mode to focus",
         person_id="principal-operator",
         operator_command_id="sys_mode.switch",
+        control_route_execution_policy=_control_policy(
+            "sys_mode.switch",
+            _OPERATOR_TARGET,
+        ),
         frozen_context={
             "runtime_context_schema": "natsume.runtime-context.request.v1",
             "workspace_id": fact.workspace_id,
@@ -228,6 +245,10 @@ def _edge_operator_contracts():
         sanitized_message="set edge expression to happy",
         person_id="principal-edge",
         operator_command_id="edge.command.push",
+        control_route_execution_policy=_control_policy(
+            "edge.command.push",
+            _EDGE_TARGET,
+        ),
         frozen_context={
             "runtime_context_schema": "natsume.runtime-context.request.v1",
             "workspace_id": fact.workspace_id,
@@ -334,6 +355,10 @@ def _operation_reconciliation_contracts(*, recovery_case: bool = False):
         sanitized_message="reacquire one signed operation",
         person_id=fact.subject_id,
         operator_command_id="task_operation.reconcile",
+        control_route_execution_policy=_control_policy(
+            "task_operation.reconcile",
+            _OPERATION_TARGET,
+        ),
         frozen_context={
             "runtime_context_schema": "natsume.runtime-context.request.v1",
             "workspace_id": fact.workspace_id,
@@ -622,6 +647,25 @@ def test_operator_compiler_emits_only_bound_sys_mode_transition() -> None:
         "revision": 1,
         "decision_digest": "sha256:" + "b" * 64,
     }
+
+
+def test_operator_compiler_reopens_control_policy_before_effect_staging() -> None:
+    contracts = _operator_contracts()
+    tampered = deepcopy(
+        contracts.work_order.metadata[CONTROL_ROUTE_EXECUTION_POLICY_KEY]
+    )
+    tampered["policy_ref"] = "control-route-policy://sha256/" + "0" * 64
+    contracts.work_order.metadata[CONTROL_ROUTE_EXECUTION_POLICY_KEY] = tampered
+
+    with pytest.raises(AcceptanceEffectCompileError) as raised:
+        compile_graph_acceptance_effects(
+            command=contracts.command,
+            work_order=contracts.work_order,
+            node_id=contracts.graph.nodes[0].node_id,
+            attempt_id="attempt-gr06-control-policy-tamper",
+            worker_commit=_operator_commit(),
+        )
+    assert raised.value.reason_code == ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID
 
 
 @pytest.mark.parametrize(

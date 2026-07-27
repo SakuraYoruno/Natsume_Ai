@@ -276,6 +276,7 @@ async def test_governed_operator_reacquires_and_resumes_original_graph_once(
             reason_code="GOVERNED_WORKER_FAILED",
         )
         assert recovery_case["case_kind"] == "UNKNOWN_SIDE_EFFECT"
+        assert recovery_case["exact_replay"] is True
         assert recovery_case["current"] is True
         resumed_application = GovernedCommandApplication(
             command_repository=container.command_repository,

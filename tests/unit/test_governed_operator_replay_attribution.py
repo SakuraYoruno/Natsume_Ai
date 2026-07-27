@@ -20,6 +20,9 @@ from host_brain.contracts.host_hard_state import (
     HostHardStateEventV1,
     HostHardStateSnapshotV1,
 )
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    freeze_control_route_execution_policy,
+)
 from host_brain.orchestration.host_route_contracts import (
     build_direct_host_route_contracts,
 )
@@ -114,6 +117,14 @@ def _contracts():
         ingress_claim_ref=_CLAIM_REF,
         ingress_audit_ref=_AUDIT_REF,
         operator_command_id="sys_mode.switch",
+        control_route_execution_policy=(
+            freeze_control_route_execution_policy(
+                surface=HostCommandSurface.OPERATOR,
+                control_command_id="sys_mode.switch",
+                target_id="operator_sys_mode_switch",
+                review_required=True,
+            )
+        ),
     )
     return contracts, governor
 

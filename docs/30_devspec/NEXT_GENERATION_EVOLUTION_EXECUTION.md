@@ -5,9 +5,25 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.22
+版本：v3.23
 日期：2026-07-27
 状态：`NE-01_IN_PROGRESS / PROGRAM_INCOMPLETE`
+
+当前 Scheduler/Internal/Operator 收口切片采用统一不可变控制执行政策。
+任何以 `INTERNAL/OPERATOR/SCHEDULER + route=delegate` 进入 Task Runtime 的
+命令，都必须冻结 `ControlRouteExecutionPolicyV1`，并把相同 policy 与 ref
+写入 WorkOrder input/metadata、Budget metadata、WorkOrder input refs 和
+TaskNode input refs。initial、exact replay、Review continuation、Operation
+recovery、独立 Worker verifier/acceptance 与 Acceptance Effect compiler
+必须重新验证 exact surface/control-command/target/owner、Review mode、
+有限 Budget、durable projection verification 和 Graph-Acceptance-only
+Effect。Operator 的 Review authority 是 durable Intent admission；只有
+Scheduler trigger 或明确 reviewed Internal 使用 TaskNode Review，二者不得
+同时存在。Review 创建必须使用 TaskStore 的 canonical clock。同一
+RECOVERY_REQUIRED Operation status version 只能有一个 current recovery
+case，重复观察返回 exact replay，冲突 authority 失败关闭。本切片完成后仍
+不得把 blocked Operator 命令、一般恢复、波次 integration 或 NE-07 写为
+PASS。
 
 当前 Plan/Delegate 封板切片的合同是“准入政策不可变，任何恢复点重新开封”。
 `CAPABILITY_SEARCH_V1` 必须在 admission 前冻结

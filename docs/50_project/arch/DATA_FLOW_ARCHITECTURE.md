@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.25
+版本：v3.26
 
 核对日期：2026-07-27
 
@@ -12,6 +12,38 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+Scheduler、Internal、Operator 的已启用 control transport 数据流如下：
+
+```mermaid
+flowchart LR
+    I["Scheduler / Internal / Operator ingress"] --> F["Freeze ControlRouteExecutionPolicyV1"]
+    F --> W["WorkOrder input + metadata"]
+    F --> B["Finite Budget metadata"]
+    F --> N["TaskNode input refs"]
+    W --> A["HostCommand / TaskGraph admission"]
+    B --> A
+    N --> A
+    A --> R{"Review mode"}
+    R -->|"Operator"| RI["Durable Intent admission Review"]
+    R -->|"Scheduler trigger / reviewed Internal"| RN["TaskNode Review"]
+    R -->|"low-risk control"| RW["Governor waiver"]
+    RI --> E["Approved worker execution"]
+    RN --> E
+    RW --> E
+    E --> V["Independent durable projection verification"]
+    V --> X["Graph Acceptance Effect compiler"]
+    X --> O["Effect / Outbox / Receipt"]
+    A -. "policy / command / budget / graph drift" .-> Z["FAIL CLOSED"]
+    V -. "projection or policy drift" .-> Z
+    X -. "Effect ownership drift" .-> Z
+```
+
+Policy 会在 initial、exact replay、Review continuation 和 recovery 重开。
+Operator 不再因 control policy 产生第二个 TaskNode Review。Review 和 Task
+状态使用同一 TaskStore clock；同一 Operation status version 的 recovery
+hold 只能 exact replay 唯一 current case，Budget 或 Lease 的后续推进不会
+产生第二个签名对账目标。
 
 Plan/Delegate 当前新增的执行政策流如下；虚线表示漂移时在执行或副作用前
 失败关闭：

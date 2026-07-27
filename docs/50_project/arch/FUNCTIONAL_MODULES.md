@@ -3,12 +3,30 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.32
+版本：v2.33
 核对日期：2026-07-27
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+Control Route Execution Policy 模块由
+[`contracts/agent_runtime/control_route_execution_policy.py`](../../../host_brain/contracts/agent_runtime/control_route_execution_policy.py)
+统一定义 Scheduler、Internal、Operator 的控制传输合同。它只冻结
+surface/command/target、Task Runtime owner、Review、Budget、verification
+与 Effect ownership，不执行 worker、不决定业务结果，也不赋予 child-agent
+能力。Host direct control、Scheduler occurrence 和 Internal Agent builder
+分别创建政策；admission/replay/recovery、WorkerProjection verifier 和
+Graph Acceptance Effect compiler 都必须重开同一 content address。Operator
+的 durable Intent Review 与 TaskNode Review 是不同模式，禁止叠加。
+`TaskNodeReviewRuntime.for_task_store()` 只负责共享 canonical clock，不取得
+Review 或 Task writer。Operation Recovery Hold Store 则保证一个
+Operation status version 只有一个 current nonterminal case。
+[`contracts/agent_runtime/work_order_replay.py`](../../../host_brain/contracts/agent_runtime/work_order_replay.py)
+只规范 rotating authority ref 的 replay normalization，Scheduler 可以直接
+消费 contracts 而不反向依赖 app。
+[`app/governed_acceptance_effect_projection.py`](../../../host_brain/app/governed_acceptance_effect_projection.py)
+只把 Effect dispatcher 结果投影到 audit refs，不取得 Effect writer。
 
 Plan Execution Policy 模块由
 [`contracts/agent_runtime/plan_execution_policy.py`](../../../host_brain/contracts/agent_runtime/plan_execution_policy.py)

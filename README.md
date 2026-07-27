@@ -9,6 +9,29 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 ## 当前状态
 
+NE-01 当前切片正在收口 Scheduler、Internal、Operator 复用
+`route=delegate` 时的控制面语义。三者现在必须携带同一个
+content-addressed `ControlRouteExecutionPolicyV1`，精确绑定 surface、
+控制命令、target、Task Runtime owner、Review 层级、有限 Budget、
+durable verification 与“只能由 Graph Acceptance 提交 Effect”的边界。
+Policy 同时写入 WorkOrder input/metadata、Budget metadata、WorkOrder
+input refs 与 TaskNode input refs，并在首次执行、exact replay、Review
+continuation、Operation recovery、独立 Verifier/Acceptance 和 Effect
+编译前重开。Operator 复用已有 durable Intent admission Review，不再叠加
+第二个 TaskNode Review；Scheduler 的人工 trigger 与需要 Review 的 Internal
+仍可使用 TaskNode Review，两种 authority 不能同时声明。Review 创建使用
+TaskStore 暴露的同一可信时钟，固定时钟和重启测试不再因两个 clock 漂移。
+同一 `RECOVERY_REQUIRED` Operation 版本也只能保留一个 current recovery
+case，后续 Budget/Lease 推进只能 exact replay 该 case，不能制造第二个
+签名对账 authority。最终三个互不重叠的本地回归组分别为 `29 passed`、
+`32 passed` 和 `8 passed`，共 69 项、零失败。该切片不会把仍失败关闭的
+Operator 命令、一般恢复、
+波次集成或 NE-07 提前写成完成，NE-01 继续为 `IN_PROGRESS`。
+纯 WorkOrder replay normalization 已下沉 contracts，Acceptance Effect
+audit projection 与 control policy composition 已拆成 focused 模块；
+`governed_task_adapter.py`/`internal_task_runtime.py` 分别保持 1480/1499 行，
+没有扩大巨石白名单，完整架构静态 Gate 1～14 为 `PASS`。
+
 NE-01 已封板 Plan 与 Delegate 的当前启用范围，接下来收口 Scheduler、
 Internal、Operator 与一般恢复。当前唯一启用的
 `CAPABILITY_SEARCH_V1` Plan 会在准入前冻结 content-addressed

@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.52
+版本：v5.53
 核对日期：2026-07-27
 原始审计基线：`origin/dev@a6d7ae383`，叠加仓库清理 `f0cd1dfd`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -13,6 +13,26 @@
 ## 1. 结论
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
+
+Scheduler、Internal、Operator 虽然都以 `route=delegate` 进入 canonical
+worker resolver，但现在由
+[`control_route_execution_policy.py`](../../../host_brain/contracts/agent_runtime/control_route_execution_policy.py)
+明确建模为 control transport，而不是 child-agent Delegate。政策的
+content address 覆盖 surface、control command、target、execution owner、
+Review mode、Budget mode、verification mode 和 Effect mode；其 ref 同时
+绑定 WorkOrder、TaskNode 和 Budget。Host、Scheduler、Internal 在 initial、
+replay、Review continuation、recovery 入口重开政策，通用 Verifier、
+Acceptance 与 Effect compiler 再独立重开。Operator 使用既有 Intent
+admission Review，Scheduler trigger/Internal 可使用节点 Review，合同禁止
+同时声明两套 Review。Review runtime 与 TaskStore 共享可信时钟。同一
+Operation status version 的 unknown-side-effect recovery hold 也已收成唯一
+current authority，重复登记只允许 exact replay。这关闭的是三路已启用
+控制入口的执行政策漂移，不代表 Operator `23/37` blocked 命令、一般恢复、
+整波 integration 或 NE-07 已完成。
+纯 replay normalization 位于 contracts 层，Scheduler 不再反向 import app；
+Host 的 Effect audit projection 和 control policy composition 也已拆为 focused
+app 模块。两个被本切片推过 1500 行的 owner 已回落至 1480/1499 行，Gate
+1～14 在未新增 allowlist 的前提下重新全部通过。
 
 当前代码已把 Plan/Delegate 的 enabled-scope authority 收成显式合同。
 Plan 的 search trace 与 execution policy 分离：前者解释选路，后者以

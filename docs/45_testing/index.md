@@ -3,9 +3,40 @@
 
 # 测试与验收目录
 
-版本：v2.30
+版本：v2.31
 维护日期：2026-07-27
 状态：当前证据
+
+## NE-01 Scheduler/Internal/Operator 控制政策与恢复唯一性切片
+
+- `test_gr05_direct_host_route_contracts.py` 覆盖
+  `ControlRouteExecutionPolicyV1` content address、WorkOrder/TaskNode/
+  Budget binding、缺失/篡改拒绝，以及 Intent Review 与 TaskNode Review
+  不能同时声明。
+- `test_aw02_internal_agent_runtime_cutover.py` 与
+  `test_ne01_governed_operator_scheduler_trigger.py` 覆盖真实 SQLite 的
+  initial/replay/Review/recovery 重开，完整 WorkOrder replay drift 失败关闭。
+- `test_governed_operator_replay_attribution.py`、
+  `test_gr06_acceptance_effect_compiler.py` 和通用 worker evidence 测试要求
+  independent verifier/acceptance/Effect compiler 不信任 route 字符串，
+  必须重新验证 frozen policy。
+- Operator 使用已有 durable Intent admission Review；Scheduler 的人工
+  trigger 与 reviewed Internal 保留 TaskNode Review。测试必须证明批准一次
+  后不会再进入第二个 `WAITING_APPROVAL`。
+- `test_ne01_governed_operation_reconciliation.py` 使用真实 SQLite 证明同一
+  `RECOVERY_REQUIRED` Operation version 在 Budget/Lease 推进后仍只返回原
+  recovery case；签名请求不能面对两个同时 current 的 authority。
+- 最终结构重构后合批按不重叠文件分为：policy/Effect/replay unit
+  `29 passed in 1.41s`；Host/Scheduler/Internal `32 passed in 61.30s`；
+  Operator `8 passed in 170.27s`。合计 69 项、零失败；三组并行执行，墙钟不以三组
+  时长相加。
+- 结构收口把 replay normalization 下沉 contracts，并拆出 control policy
+  composition 与 Effect audit projection；Scheduler→app 反向 import 清零，
+  两个 owner 为 1480/1499 行。完整架构静态 Gate 1～14
+  `PASS / failed_gates=[]`，没有修改 mixed/cohesive allowlist。
+- 本节只证明当前启用 control transport 的执行政策和 recovery-case
+  唯一性。Operator blocked 命令、一般恢复、NE-01 波次 integration 与
+  NE-07 实栈仍未完成；远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-01 Plan/Delegate 执行政策与审批恢复当前切片
 
