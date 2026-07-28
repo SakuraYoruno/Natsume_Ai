@@ -6,6 +6,20 @@
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
+## T-NE07-ISOLATED-EXTERNAL-STACK
+
+- T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；
+  Compose 不得包含 Chroma `latest`、Redis 浮动 tag 或仓库默认 Neo4j 密码。
+- T-NE07-EXT-02：project、三个 container name、network、host ports 与 data
+  root 必须可独立配置；非默认 project 自动派生隔离 identity，不得复用或停止
+  用户长期 `natsume-ext` 容器。
+- T-NE07-EXT-03：三个服务必须声明容器 healthcheck；启动器在 `up` 前执行
+  `docker compose config`，进程级 acceptance 配置必须优先于 checked-in
+  `.env`，启动结果不得回显运行期密码。
+- 当前静态合同为 `6 passed in 0.61s`，PowerShell parser 与真实 Docker
+  `compose config --quiet` 通过。acceptance 容器的真实写/读/重启尚未执行，
+  因此状态仅为 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。
+
 ## T-NE01-CODE-WAVE-CLOSEOUT
 
 - T-NE01-CWC-01：当前权威 evidence commit 必须是 HEAD 的祖先。以 SQLite

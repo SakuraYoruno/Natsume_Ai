@@ -55,7 +55,7 @@ Review/activation 尚未执行，因此 NE-02 仍是
 `static_scan,doc_gate` 为 `PASS / failures=[]`，耗时 109.4 秒；fresh 架构
 Gate 1～14 为 `PASS / failed_gates=[]`，耗时 25.6 秒。
 
-NE-03～NE-05 的本地生产接线波次已经合入；当前活动实现波为 NE-06。
+NE-03～NE-06 的本地生产接线波次已经合入；当前活动实现波为 NE-07。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime
 scope/owner/lease/fence 约束单一 append-only SQLite owner，持有
@@ -621,7 +621,7 @@ flowchart LR
 | Edge RPC | `python -m edge_client` | ASR、TTS、Avatar、桌面与设备 actuator | 物理副作用必须回传 receipt |
 | Unified Gateway | Edge lifecycle 中的 `edge_client/gateway/bootstrap.py` | 平台 webhook、消息归一化、Host 回流与出站投递 | 平台适配器不拥有 Host 业务状态 |
 | Desktop Pet | `desktop_pet/main.cjs` | Electron + Live2D 本地表现 | 只消费状态和动作，不裁决事实 |
-| External Services | `scripts/runtime/docker-compose.external.yml` | Neo4j、Chroma、Redis | 日常启动可按配置降级；NE-07 最终验收必须启动真实固定版本容器并完成写入、读取、重启持久性和清理，不允许内存 fallback |
+| External Services | `scripts/runtime/docker-compose.external.yml` | Neo4j、Chroma、Redis | 镜像默认绑定 digest，project/container/network/data root/port 可隔离；日常启动可按配置降级，NE-07 必须在独立 acceptance project 完成真实写入、读取、重启持久性和清理，不允许内存 fallback |
 
 Host 与 Edge 之间的共享数据结构位于 `natsume_contracts/`。该目录是跨进程版本化合同，不是重复实现或可删除的临时目录。
 
@@ -806,11 +806,12 @@ NATSUME_AUDIT_DB=runtime/host/audit.sqlite3
 ### 3. 可选外部服务
 
 ```powershell
-docker compose -f scripts/runtime/docker-compose.external.yml up -d
-docker compose -f scripts/runtime/docker-compose.external.yml ps
+.\scripts\runtime\start_docker_services.ps1 -EnvFile .env
+docker compose -f scripts/runtime/docker-compose.external.yml -p natsume-ext ps
 ```
 
-该 Compose 只启动外部依赖，不会代替 Host、Obs、Edge 或前端进程。
+启动器从本地 secret store 或运行期注入解析 Neo4j 认证；Compose 不再提供默认
+密码。该 Compose 只启动外部依赖，不会代替 Host、Obs、Edge 或前端进程。
 
 ### 4. 启动后端
 

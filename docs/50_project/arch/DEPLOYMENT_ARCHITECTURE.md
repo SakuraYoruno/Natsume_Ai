@@ -263,17 +263,30 @@ Host 主进程 → OBS → Monitor Proxy
 
 | 服务 | 镜像 | 宿主端口 | 数据目录 | 当前问题 |
 |---|---|---:|---|---|
-| Neo4j | `neo4j:5.26-community` | HTTP `${NATSUME_NEO4J_HTTP_PORT:-7474}`；Bolt `${NATSUME_NEO4J_BOLT_PORT:-17687}` | `runtime/docker/neo4j/` | Compose 仍带默认密码回退 |
-| Chroma | `chromadb/chroma:latest` | `${NATSUME_CHROMA_PORT:-18000}` | `runtime/docker/chroma/data/` | `latest` 不可复现 |
-| Redis | `redis:7-alpine` | `${NATSUME_REDIS_PORT:-6379}` | `runtime/docker/redis/data/` | 仅 TCP 探测 |
+| Neo4j | `neo4j@sha256:409728…` | HTTP `${NATSUME_NEO4J_HTTP_PORT:-7474}`；Bolt `${NATSUME_NEO4J_BOLT_PORT:-17687}` | `${NATSUME_DOCKER_DATA_ROOT}/neo4j/` | 密码必须由运行期注入；容器内 HTTP healthcheck |
+| Chroma | `chromadb/chroma@sha256:3a9bcb…` | `${NATSUME_CHROMA_PORT:-18000}` | `${NATSUME_DOCKER_DATA_ROOT}/chroma/data/` | digest 固定；容器内 healthcheck，外层仍验证 v2 heartbeat |
+| Redis | `redis@sha256:8b81dd…` | `${NATSUME_REDIS_PORT:-6379}` | `${NATSUME_DOCKER_DATA_ROOT}/redis/data/` | digest 固定；`redis-cli ping` healthcheck |
 
-Compose 没有容器级 `healthcheck`、资源限制、独立网络、备份任务或迁移策略。三个固定 `container_name` 还会削弱 `ProjectName` 的多实例隔离效果。
+Compose 的 project、三个 container name、network、端口与数据根现在都可独立
+参数化，三个服务也有容器 healthcheck。仍未提供资源限制、备份任务或跨版本
+数据迁移策略；这些不能由 healthcheck 替代。
 
 ### 8.1 已收口的端口契约
 
 `.env.example`、`start_docker_services.ps1`、`start_host_side.ps1`、`check_external_env.py` 与 Compose 现在共同使用 Neo4j Bolt 默认 `17687`；启动器从 `BOND_NEO4J_URI` 解析端口后传入 `NATSUME_NEO4J_BOLT_PORT`。Chroma 则从 `CHROMA_ENDPOINT` 解析端口并传入 `NATSUME_CHROMA_PORT`，模板的 `CHROMA_ENDPOINT` 与 `CHROMA_PORT` 均为 `18000`。定向回归测试会防止这个默认值再次漂移。
 
-自定义端口时，`BOND_NEO4J_URI` 与 `CHROMA_ENDPOINT` 是运行时探测的权威来源；不要只改 `CHROMA_PORT` 却保留旧 endpoint。该收口只解决端口一致性，不解决 Compose 默认密码、`latest` 镜像、固定容器名或缺少健康检查等运维缺口。
+自定义端口时，`BOND_NEO4J_URI` 与 `CHROMA_ENDPOINT` 是运行时探测的权威来源；
+不要只改 `CHROMA_PORT` 却保留旧 endpoint。进程级变量优先于 checked-in
+`.env`，以便 NE-07 在不碰用户默认数据的情况下创建独立 acceptance project。
+Neo4j 启动结果不回显运行期密码。
+
+### 8.2 NE-07 隔离实例
+
+默认端口上已有的 `natsume-ext` 容器属于用户长期环境，不能作为验收数据源。
+NE-07 使用独立 project、container names、network、ports 和
+`runtime/acceptance/...` 数据根并行启动；默认不删除其 volume/data root。
+只有隔离实例完成真实写入、读取、重启读取和 namespace 清理，才能形成
+`FullStackAcceptanceReceiptV1` 的 Docker 部分。
 
 ## 9. 健康与降级语义
 

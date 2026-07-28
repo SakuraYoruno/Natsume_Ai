@@ -3,9 +3,9 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.62
+版本：v5.63
 核对日期：2026-07-28
-合并基线：`origin/dev@7e9b090b3`；当前事实以本文所在提交的工作树为准
+合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
@@ -14,14 +14,22 @@
 
 NE-01 当前代码波次为
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。当前权威收据在
-`dev@7e9b090b3` 上以 migration 0140 query-only 重开同一个 accepted
+`dev@08a172da` 上以 migration 0142 query-only 重开同一个 accepted
 canonical SQLite，七路线全部 `PASS` 且没有重跑 worker；既有代码还通过
 24 个去重的真实 SQLite、Windows 进程和 Git
 Workspace 恢复场景。代码已经具备 bounded fan-out、签名 ambiguity
 reconciliation、原子 terminal settlement 和 Workspace promotion/abandon
 所需路径；部署 feature receipt、真实网络/provider、外部 namespace 与 Docker
 仍未执行，因此 Universal Runtime 的严格生产 Gate 继续为 `INCOMPLETE`。
-当前代码实施焦点转入 NE-02，不改变完整架构 `INCOMPLETE`。
+NE-03～NE-06 本地代码波次已合入，当前实施焦点是 NE-07，不改变完整架构
+`INCOMPLETE`。
+
+NE-07 首个预检切片已将 Neo4j、Chroma、Redis 默认镜像固定到 SHA-256
+digest，并参数化 project、container、network、port 与 data root；Neo4j
+不再有仓库默认密码。默认端口上已有的用户 `natsume-ext` 容器明确排除在
+验收之外，独立 project `natsume-ne07-555ead6d` 的真实 Compose 配置已验证。
+acceptance 容器和其后的 Host/Obs/Nginx Monitor/Edge/Gateway 尚未启动，
+故状态仅为 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

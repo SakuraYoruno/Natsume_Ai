@@ -7,6 +7,18 @@
 维护日期：2026-07-28
 状态：当前证据
 
+## NE-07 隔离外部服务栈预检
+
+- 默认端口上已有用户长期 `natsume-ext` Neo4j、Chroma、Redis；本轮明确不
+  停止、不写入、不计入验收。
+- acceptance project `natsume-ne07-555ead6d` 使用独立 container names、
+  network、27474/27687/28000/26379 端口和 `runtime/acceptance/...` 数据根。
+- 三个默认镜像已固定 digest，Neo4j 密码只允许运行期注入并在启动结果中脱敏；
+  三个服务均声明容器 healthcheck。
+- 真实 Docker `compose config --quiet`、PowerShell parser 与静态合同
+  `6 passed in 0.61s` 通过。容器尚未启动，真实写/读/重启、Host、Obs、
+  Monitor、Edge、Gateway 和故障注入均不得记为通过。
+
 ## NE-05 Skill 生命周期本地代码波次
 
 - migration `0141_skill_lifecycle_authority.sql` 通过 fresh 0001→0141

@@ -467,12 +467,12 @@ function Get-EnvSetting {
     [string]$Name,
     [string]$DefaultValue
   )
-  if ($Values -and $Values.ContainsKey($Name)) {
-    return [string]$Values[$Name]
-  }
   $existing = [Environment]::GetEnvironmentVariable($Name, "Process")
   if (-not [string]::IsNullOrWhiteSpace($existing)) {
     return [string]$existing
+  }
+  if ($Values -and $Values.ContainsKey($Name)) {
+    return [string]$Values[$Name]
   }
   return $DefaultValue
 }
@@ -978,7 +978,7 @@ if ($Port -le 0) {
 
 $probeHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
 $monitorProxyEnabled = $false
-$obsEnabled = Parse-BoolValue -Value $(if ($envValues.ContainsKey("HOST_OBS_APP_ENABLED")) { $envValues["HOST_OBS_APP_ENABLED"] } else { $env:HOST_OBS_APP_ENABLED }) -Default $true
+$obsEnabled = Parse-BoolValue -Value $(if ($env:HOST_OBS_APP_ENABLED) { $env:HOST_OBS_APP_ENABLED } elseif ($envValues.ContainsKey("HOST_OBS_APP_ENABLED")) { $envValues["HOST_OBS_APP_ENABLED"] } else { $null }) -Default $true
 if ($DisableMonitorProxy.IsPresent) {
   $monitorProxyEnabled = $false
 } elseif ($EnableMonitorProxy.IsPresent) {
@@ -988,26 +988,26 @@ if ($DisableMonitorProxy.IsPresent) {
 }
 
 $obsBindHost = "127.0.0.1"
-if ($envValues.ContainsKey("HOST_OBS_APP_HOST")) {
-  $obsBindHost = [string]$envValues["HOST_OBS_APP_HOST"]
-} elseif ($env:HOST_OBS_APP_HOST) {
+if ($env:HOST_OBS_APP_HOST) {
   $obsBindHost = [string]$env:HOST_OBS_APP_HOST
+} elseif ($envValues.ContainsKey("HOST_OBS_APP_HOST")) {
+  $obsBindHost = [string]$envValues["HOST_OBS_APP_HOST"]
 }
 if ($obsBindHost -eq "0.0.0.0") {
   $obsBindHost = "127.0.0.1"
 }
 $obsBindPort = 18082
-if ($envValues.ContainsKey("HOST_OBS_APP_PORT")) {
-  $obsBindPort = [int]$envValues["HOST_OBS_APP_PORT"]
-} elseif ($env:HOST_OBS_APP_PORT) {
+if ($env:HOST_OBS_APP_PORT) {
   $obsBindPort = [int]$env:HOST_OBS_APP_PORT
+} elseif ($envValues.ContainsKey("HOST_OBS_APP_PORT")) {
+  $obsBindPort = [int]$envValues["HOST_OBS_APP_PORT"]
 }
 
 if (-not $MonitorProxyHost) {
-  if ($envValues.ContainsKey("HOST_MONITOR_PROXY_HOST")) {
-    $MonitorProxyHost = [string]$envValues["HOST_MONITOR_PROXY_HOST"]
-  } elseif ($env:HOST_MONITOR_PROXY_HOST) {
+  if ($env:HOST_MONITOR_PROXY_HOST) {
     $MonitorProxyHost = [string]$env:HOST_MONITOR_PROXY_HOST
+  } elseif ($envValues.ContainsKey("HOST_MONITOR_PROXY_HOST")) {
+    $MonitorProxyHost = [string]$envValues["HOST_MONITOR_PROXY_HOST"]
   } else {
     $MonitorProxyHost = "127.0.0.1"
   }
@@ -1016,10 +1016,10 @@ if ($MonitorProxyHost -eq "0.0.0.0") {
   $MonitorProxyHost = "127.0.0.1"
 }
 if ($MonitorProxyPort -le 0) {
-  if ($envValues.ContainsKey("HOST_MONITOR_PROXY_PORT")) {
-    $MonitorProxyPort = [int]$envValues["HOST_MONITOR_PROXY_PORT"]
-  } elseif ($env:HOST_MONITOR_PROXY_PORT) {
+  if ($env:HOST_MONITOR_PROXY_PORT) {
     $MonitorProxyPort = [int]$env:HOST_MONITOR_PROXY_PORT
+  } elseif ($envValues.ContainsKey("HOST_MONITOR_PROXY_PORT")) {
+    $MonitorProxyPort = [int]$envValues["HOST_MONITOR_PROXY_PORT"]
   } else {
     $MonitorProxyPort = 18180
   }

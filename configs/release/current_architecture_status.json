@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "2c67f143a44eb08cdeb66123a899011105fa93fc",
+    "dev_commit": "555ead6d7dc78d376fc21fa49335ae64206de10a",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE06_EVOLUTION_ACTIVATION_V2_LOCAL_WAVE_PASS_FULL_STACK_PENDING_NE07_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE07_ISOLATED_REAL_STACK_PREFLIGHT_IN_PROGRESS_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-06",
-  "active_wave_status": "COMPLETED",
-  "active_wave_detail": "NE06_V2_FEEDBACK_KNOWLEDGE_IDENTITY_ACTIVATION_AND_EXACT_ROLLBACK_WIRED_199_PASS_ARCHITECTURE_GATES_1_TO_14_PASS_REAL_FULL_STACK_NOT_RUN",
-  "next_wave": "NE-07",
+  "active_wave": "NE-07",
+  "active_wave_status": "IN_PROGRESS",
+  "active_wave_detail": "EXISTING_USER_NATSUME_EXT_CONTAINERS_PRESERVED_ACCEPTANCE_PROJECT_DATA_ROOT_CONTAINER_NETWORK_AND_PORT_ISOLATION_WIRED_FIXED_IMAGE_DIGESTS_COMPOSE_CONFIG_PASS_REAL_ACCEPTANCE_START_PENDING",
+  "next_wave": "PROGRAM_ACCEPTANCE",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -26,6 +26,33 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne07_isolated_external_stack_preflight": {
+      "status": "IN_PROGRESS",
+      "implementation_parent": "origin/dev@555ead6d7dc78d376fc21fa49335ae64206de10a",
+      "existing_user_stack_boundary": "RUNNING_NATSUME_EXT_NEO4J_CHROMA_REDIS_ON_DEFAULT_PORTS_BELONG_TO_USER_DATA_AND_ARE_NOT_REUSED_STOPPED_OR_COUNTED_AS_ACCEPTANCE",
+      "acceptance_project": "natsume-ne07-555ead6d",
+      "acceptance_ports": "NEO4J_HTTP_27474_BOLT_27687_CHROMA_28000_REDIS_26379",
+      "isolation": "DEDICATED_PROJECT_CONTAINER_NAMES_NETWORK_AND_RUNTIME_ACCEPTANCE_DATA_ROOT",
+      "images": "NEO4J_CHROMA_REDIS_DEFAULTS_PINNED_BY_SHA256_DIGEST",
+      "secret_boundary": "NEO4J_PASSWORD_MUST_BE_RUNTIME_INJECTED_AND_IS_REDACTED_FROM_START_RESULT",
+      "compose_validation": "PASS_REAL_DOCKER_COMPOSE_CONFIG_QUIET",
+      "targeted_validation": "6_PASSED_IN_0_61_SECONDS",
+      "powershell_parse": "PASS",
+      "not_run": [
+        "acceptance containers up and real database read/write/restart",
+        "Host Obs Nginx Monitor",
+        "full Edge and Unified Gateway",
+        "full route and evolution golden flows",
+        "fault injection and performance"
+      ],
+      "evidence_refs": [
+        "scripts/runtime/docker-compose.external.yml",
+        "scripts/runtime/start_docker_services.ps1",
+        "scripts/runtime/start_host_side.ps1",
+        "tests/unit/test_ne07_external_service_isolation.py",
+        "tests/unit/test_d8_external_compose_port_alignment.py"
+      ]
+    },
     "ne06_evolution_activation_v2_current_validation": {
       "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "implementation_parent": "origin/dev@2c67f143a44eb08cdeb66123a899011105fa93fc",
@@ -6244,7 +6271,7 @@
     }
   },
   "full_stack_acceptance": {
-    "status": "NOT_RUN_NE07",
+    "status": "IN_PROGRESS_ISOLATED_STACK_PREFLIGHT",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "local_mandatory_stack": [
       "Docker Neo4j",
@@ -6257,7 +6284,7 @@
       "Unified Gateway"
     ],
     "evidence_receipt": "MISSING",
-    "boundary": "NE-07 has not started. No mock, fake store, port probe or scripted replay may promote this status. A future FullStackAcceptanceReceiptV1 must bind the exact commit, process/container identities, real database writes and restart reads, network roundtrips, failure recovery and performance evidence. External providers and hardware may be NOT_TESTED only after all local mandatory services pass."
+    "boundary": "NE-07 has started with an isolated acceptance project contract, fixed image digests and runtime-only secret injection. Existing user natsume-ext containers are explicitly excluded. No acceptance container, Host, Obs, Monitor, Edge or Gateway has been counted as PASS yet. A future FullStackAcceptanceReceiptV1 must bind the exact commit, process/container identities, real database writes and restart reads, network roundtrips, failure recovery and performance evidence. External providers and hardware may be NOT_TESTED only after all local mandatory services pass."
   },
   "active_execution_contract": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
   "gap_matrix": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md"

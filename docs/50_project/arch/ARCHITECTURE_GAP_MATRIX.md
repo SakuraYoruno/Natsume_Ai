@@ -3,10 +3,16 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.32
+版本：v3.33
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
+运行期注入 Neo4j secret，project/container/network/port/data root 全部与
+用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`
+通过。acceptance 容器、真实数据库写读与重启、Host/Obs/Nginx
+Monitor/Edge/Gateway、故障和性能验收尚未运行，不能把预检提升为 `PASS`。
 
 NE-01 的剩余差距已从“本地代码/恢复未封口”收窄为 NE-07 部署验收。
 当前提交的七路线同库收据全部 `PASS`，24 个去重恢复用例通过；因此实现依赖

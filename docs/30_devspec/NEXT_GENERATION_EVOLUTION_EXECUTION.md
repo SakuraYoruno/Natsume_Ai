@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.34
+版本：v3.35
 日期：2026-07-28
-状态：`NE-06_COMPLETED / CODE_COMPLETE_LOCAL_WAVE_PASS / NE-07_NEXT / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / ISOLATED_REAL_STACK_PREFLIGHT / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -22,7 +22,7 @@ Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE
 machine，继续 proposal-only 且零 mutation 失败关闭；unknown effect 必须
 签名对账，不把自动归因列为完成条件。NE-02 已完成本地机械波次并保持
 `ACCEPTANCE_PENDING_EXTERNAL`；NE-03～NE-05 已合入，NE-06 已完成本地
-代码与波次验证。当前下一实施波为 NE-07 真实 Docker 与全服务栈验收；
+代码与波次验证。当前实施波为 NE-07 真实 Docker 与全服务栈验收；
 外部 Research/Code/Pentest cohort 仍按外部条件独立保持待验收。
 
 当前批次封闭 outer settlement 前进程崩溃的 mixed-terminal 窗口：
@@ -1244,3 +1244,28 @@ Docker Neo4j/Chroma/Redis、Host/Obs/Nginx Monitor、完整 Edge/Gateway、
 Knowledge ENFORCE 部署、真实 release pair 或外部模型/硬件；这些只能在
 NE-07 的隔离全服务栈中决定最终 `PASS / ACCEPTANCE_PENDING_EXTERNAL /
 FAIL`。远程 CI 继续如实记录 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## 19. NE-07 当前实施：隔离外部服务栈
+
+环境盘点确认默认端口 7474/17687、18000 与 6379 上已有用户长期
+`natsume-ext` Neo4j、Chroma、Redis 容器。它们的数据目录、container identity
+和运行历史不属于本轮验收，因此不得停止、写入或作为 NE-07 证据。
+
+当前首个切片已完成：
+
+- Compose 的 Neo4j、Chroma、Redis 默认镜像全部绑定 SHA-256 digest，不再使用
+  Chroma `latest` 或 Redis 浮动 tag；
+- Neo4j 不再带仓库默认密码，密码只能由运行期注入，启动结果只返回
+  `RUNTIME_INJECTED_REDACTED`；
+- project、三个 container name、network、host ports 与 data root 均可独立
+  参数化；非默认 project 自动派生隔离 identity；
+- 三个服务新增容器 healthcheck，启动前强制执行 `docker compose config`；
+- Host/Docker 启动器允许进程级 acceptance 配置覆盖 checked-in `.env`，避免
+  回落到用户默认数据或端口。
+
+本轮预留 project 为 `natsume-ne07-555ead6d`，端口为 Neo4j
+27474/27687、Chroma 28000、Redis 26379，数据根位于独立
+`runtime/acceptance/...`。真实 Docker `compose config --quiet` 已通过，相关
+合同为 `6 passed in 0.61s`，PowerShell parser 通过。此时尚未启动 acceptance
+容器，也未运行真实读写、重启、Host/Obs/Monitor/Edge/Gateway 或故障注入，
+所以状态只能是 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。

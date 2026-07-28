@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.12
+版本：v9.13
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -92,6 +92,14 @@ flowchart TD
 
 ## 4. 当前状态摘要
 
+> NE-07 已进入隔离真实服务栈预检。默认端口上的用户长期
+> `natsume-ext` Neo4j、Chroma、Redis 不停止、不写入且不计入验收；
+> acceptance project `natsume-ne07-555ead6d` 已完成独立
+> container/network/port/data-root 与固定镜像 digest 配置，真实
+> `docker compose config --quiet` 已通过。独立容器、Host、Obs、Nginx
+> Monitor、Edge、Gateway 尚未启动，因此当前只能是
+> `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。
+
 > 最新 locator 清点（2026-07-25）：生产具名 consumer/import、全部 import-form consumer、locator 模块、Container 字段/锁/引用均为 0。`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 构造 fresh `ProcessApplicationPorts` 并显式传入 Host root。旧测试只通过 `tests/support/process_service_compat.py` 的 pytest-only bridge 运行，fresh 生产进程不会加载它。`HostAuthorityRuntimeOwner` 继续持有同一 epoch 的 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图。外部 Chroma/Neo4j namespace、Token/MCP durable restart、资源崩溃恢复、事务化 Chat 和完整 Worker/Obs Composition仍未闭环；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 - Full Architecture：`INCOMPLETE`。
@@ -107,7 +115,8 @@ flowchart TD
 - Capability Planning authority：Research/Frontend 的 `CAPABILITY_SEARCH_V1` 候选上限必须同时满足 intent 请求和 Governor approved binding，effective risk 为二者最小值；冻结目录强制选择两项不同 Skill，再以 `skill → skill → chat` 编译图，grant ref 与步数进入 virtual-state lineage；缺失/畸形 binding risk 失败关闭。该本地定向证据不提升 NE-02 或收益状态。
 - Persona 演化：`CODE_COMPLETE_LOCAL / PROPOSAL_ONLY_RUNTIME / REVIEWED_VERSION_ACTIVATION / ACCEPTANCE_PENDING_NE07`。
 - 长期演化程序：NE-03～NE-06 本地代码波次已形成各自受限 authority；
-  Knowledge 默认 SHADOW，真实部署、外部服务和 NE-07 尚未完成，程序整体仍为
+  Knowledge 默认 SHADOW；NE-07 隔离预检已开始，但真实部署、外部服务读写和
+  全栈验收尚未完成，程序整体仍为
   `INCOMPLETE`。
 - Agent 模型预算：Chat、Internal 与 governed Agent Skill 已共享
   graph/node/attempt-bound guard；Skill sealed authority 会保留 canonical

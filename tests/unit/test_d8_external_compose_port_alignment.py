@@ -24,6 +24,7 @@ def test_compose_consumes_the_ports_its_startup_script_exports() -> None:
         encoding="utf-8"
     )
     assert '"${NATSUME_NEO4J_BOLT_PORT:-17687}:7687"' in compose
+    assert '"${NATSUME_NEO4J_HTTP_PORT:-7474}:7474"' in compose
     assert '"${NATSUME_CHROMA_PORT:-18000}:8000"' in compose
     assert '"${NATSUME_REDIS_PORT:-6379}:6379"' in compose
 
