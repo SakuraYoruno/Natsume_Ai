@@ -60,7 +60,6 @@ def build_input_runtime_application_ports(
         host_services,
         "evolution_scope",
     )
-    get_emotion_context_runtime = _emotion_runtime_provider(host_services)
     relationship_lifecycle_service = (
         RelationshipLifecycleService(
             command_service_provider=life_command_service_provider,
@@ -80,6 +79,14 @@ def build_input_runtime_application_ports(
             ),
         )
         if callable(life_command_service_provider)
+        else None
+    )
+    # The canonical fusion route is authoritative for production Chat.  Keep
+    # the mutable HostEmotionRuntime lazy fallback only for explicitly legacy
+    # compositions that do not have a Life command authority at all.
+    get_emotion_context_runtime = (
+        _emotion_runtime_provider(host_services)
+        if affect_fusion_service is None
         else None
     )
     reply_form_decider = ResponseFormDecider()
@@ -125,9 +132,15 @@ def build_input_runtime_application_ports(
             yield event
 
     def resolve_chat_emotion_context_with_runtime(**kwargs: Any) -> dict[str, Any]:
+        if affect_fusion_service is not None:
+            return resolve_chat_emotion_context(
+                affect_fusion_service=affect_fusion_service,
+                **kwargs,
+            )
+        if get_emotion_context_runtime is None:
+            raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
         return resolve_chat_emotion_context(
             runtime=get_emotion_context_runtime(),
-            affect_fusion_service=affect_fusion_service,
             **kwargs,
         )
 

@@ -579,10 +579,33 @@ protocol 切片的完成范围。
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor
 字段。`normalize_chat_emotion_context(raw)` 对 replay/render 和 trusted fused
-context 都不写状态。旧 `HostEmotionRuntime.ingest → vector/timeline/profile` 流在
-未注入 fusion service 的 compatibility 调用中仍可使用；DL-06 之前不得把它的
-writer 使用量写为零。`ResponseFormDecider` 继续由 Input composition 独占并做
-原子额度检查，不是 affect authority。
+context 都不写状态。只要 production composition 注入 fusion service，它不会解析
+或调用旧 `HostEmotionRuntime.ingest → vector/timeline/profile`；后者只留在未注入
+Life authority 的明确 compatibility 调用中。`ResponseFormDecider` 继续由 Input
+composition 独占并做原子额度检查，不是 affect authority。
+
+DL-06 的 Scheduler 主动消息已开始走同一条 canonical 边界，但只完成了发送前
+决策层：`companion_proactive` adapter 读取 matching Life aggregate 的
+`relationship_v2`、`state.affective`、clock 和 admitted timezone，先验证明确
+`ALLOWED` 权限、无 repair/active episode、无给空间 regulation、能量和休息需要，
+才调用既有的纯 impulse/risk 算法；Bond score、legacy `state.affect`、私密 inner note
+和 project title 不会进入该输入。decision trace 只记录 content digest；真正的消息
+仅存在于已经授权的 outbox payload。未知/拒绝、裂痕、等待后效应或自我克制均为 hold，
+而不是用沉默惩罚用户。
+
+```mermaid
+flowchart LR
+    L["matching Life snapshot"] --> R["relationship_v2: explicit permission"]
+    L --> A["state.affective: mood / need / regulation"]
+    L --> C["clock + admitted timezone"]
+    R --> G{"ALLOWED / no rupture / no episode?"}
+    A --> G
+    C --> G
+    G -->|no| H["hold: no outbox"]
+    G -->|yes| I["canonical companion impulse adapter"]
+    I --> O["authorized proactive.gateway outbox"]
+    I --> D["bounded decision trace + content digest"]
+```
 
 Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Secure Ingress → immutable `BLOCKED` cancellation intent → trusted `CANCELLED` final decision → restart terminal worker → deterministic nonacceptance claim → tombstone/Workspace cleanup。intent 不能冒充 final decision，任何 lineage 漂移均 fail-closed；该流不处理一般取消、多节点或 unknown effect。
 

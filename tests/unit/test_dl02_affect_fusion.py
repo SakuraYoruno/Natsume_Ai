@@ -237,18 +237,21 @@ def test_duplicate_request_reopens_exact_receipts_without_duplicate_events(tmp_p
     assert len(events) == len(first.receipts)
 
 
-def test_input_runtime_composition_wires_fusion_before_host_emotion_runtime(
+def test_input_runtime_composition_does_not_resolve_host_emotion_runtime_when_fused(
     tmp_path: Path,
 ) -> None:
     _, reader, command_service = _runtime(tmp_path)
-    host_runtime = HostEmotionRuntime(clock_ms=lambda: NOW, hour_provider=lambda: 12)
+
+    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
+        raise AssertionError("canonical fusion must not resolve HostEmotionRuntime")
+
     providers = {
         "intent_engine": lambda: object(),
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: reader,
         "multimodal_observer": lambda: object(),
         "multimodal_processor": lambda: object(),
-        "emotion_context_runtime": lambda: host_runtime,
+        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
     }
     host_services = SimpleNamespace(
         require_provider=lambda name: providers[name],
@@ -267,7 +270,6 @@ def test_input_runtime_composition_wires_fusion_before_host_emotion_runtime(
 
     assert result["emotion_inference_source"] == "affective_life_fusion"
     assert result["affective_life"]["workspace_id"] == "workspace-a"
-    assert host_runtime.user_emotion_profile().to_summary()["total_interactions"] == 0
 
 
 def test_external_affective_life_payload_cannot_spoof_canonical_self_affect() -> None:

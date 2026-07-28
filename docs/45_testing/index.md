@@ -7,6 +7,23 @@
 维护日期：2026-07-28
 状态：当前证据
 
+## DL-06 主动陪伴策略第一切片
+
+- `test_dl06_companion_proactive.py` 验证 Scheduler 的主动决定只读取 canonical
+  `relationship_v2`、`state.affective`、clock 与 admitted timezone：explicit
+  `ALLOWED` 才能发送；`UNKNOWN/DENIED`、repair、未结 episode 与 `GIVE_SPACE`
+  regulation 均只会 hold。测试故意提供极端 legacy `state.affect`，证明该字段
+  不再拥有主动消息发送权。
+- `test_aw04_life_tick_policy.py` 验证同一 frozen snapshot 的 deterministic outbox、
+  content-digest trace、scene/grant fail-closed 和 explicit permission。旧早/晚/默认
+  三句模板不再是当前 Scheduler 输出合同。
+- `test_dl02_affect_fusion.py` 验证 production fusion composition 不会解析
+  `HostEmotionRuntime` provider；compatibility runtime 仅在不存在 Life authority 的
+  明确 fallback 调用中可用。
+- 本切片不含跨 aggregate target registry、delivery-success relationship episode
+  reconciliation、重启 outbox 后效应、5 次 canary/rollback、真实模型或真实 Gateway；
+  它们不能由这些定向单测推导为已完成。
+
 ## NE-07 隔离外部服务栈
 
 - 默认端口上已有用户长期 `natsume-ext` Neo4j、Chroma、Redis；本轮明确不
