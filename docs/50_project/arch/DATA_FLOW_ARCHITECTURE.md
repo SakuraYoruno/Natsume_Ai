@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.38
+版本：v3.39
 
 核对日期：2026-07-28
 
@@ -16,11 +16,12 @@
 > 情感链路当前为 PARTIAL。0143 已提供一个真实、可重放的 canonical
 > LifeCommand → life_event_journal → state.affective 内核：typed observation
 > 与 typed Appraisal 分离，只有 Appraisal command 可以创建 mixed
-> self-affect/episode，regulation 只记录表达约束。该内核尚未由 Host
-> Fusion/Appraisal ingress 调用，因此当前流还不是目标中的
-> Observation → Appraisal → SelfAffect → Regulation → ExpressionPlan 生产
-> 闭环；Host-local runtime、Limbic 与 Surface 的旧情感上下文只可作为待替换的
-> compatibility 输入，不能被解释为 canonical self-affect writer。
+> self-affect/episode，regulation 只记录表达约束。Host Input 的
+> `AffectFusionService` 已经把受信任的 Observation/Appraisal ingress 接入该内核；
+> 普通 Chat 仍只在其已启用 route 上具备这条链，delivery-success relationship
+> reconciliation、旧 organ writer 清零、真实 Voice/Avatar 物理回执与全栈恢复仍缺，
+> 因此不能把现有流写成完整生产闭环。Host-local runtime、Limbic 与 Surface 的旧情感
+> 上下文只可作为待替换的 compatibility 输入，不能被解释为 canonical self-affect writer。
 
 NE-01 代码封口后的证据流固定为：
 
@@ -584,18 +585,25 @@ context 都不写状态。只要 production composition 注入 fusion service，
 Life authority 的明确 compatibility 调用中。`ResponseFormDecider` 继续由 Input
 composition 独占并做原子额度检查，不是 affect authority。
 
-DL-06 的 Scheduler 主动消息已开始走同一条 canonical 边界，但只完成了发送前
-决策层：`companion_proactive` adapter 读取 matching Life aggregate 的
-`relationship_v2`、`state.affective`、clock 和 admitted timezone，先验证明确
-`ALLOWED` 权限、无 repair/active episode、无给空间 regulation、能量和休息需要，
-才调用既有的纯 impulse/risk 算法；Bond score、legacy `state.affect`、私密 inner note
-和 project title 不会进入该输入。decision trace 只记录 content digest；真正的消息
-仅存在于已经授权的 outbox payload。未知/拒绝、裂痕、等待后效应或自我克制均为 hold，
-而不是用沉默惩罚用户。
+DL-06 的 Scheduler 主动消息已开始走同一条 canonical 边界。accepted foreground
+reply 先把 `CompanionProactiveTargetV1` 与 provisional relationship episode 原子写入同一
+Life command；这个 target 绑定 workspace、relationship subject、session、route 与来源
+receipt，但登记不等于主动许可。read-only registry 只重开 explicit `ALLOWED`、无
+repair/active episode 且 scope-valid 的 target，Scheduler 再从与 frozen Scene 匹配的集合稳定
+选择一个 aggregate。`companion_proactive` adapter 读取其 `relationship_v2`、`state.affective`、
+clock 和 admitted timezone，先验证无给空间 regulation、能量和休息需要，才调用既有的纯
+impulse/risk 算法；Bond score、legacy `state.affect`、旧 `last_target`、私密 inner note 和
+project title 不会进入该输入。decision trace 只记录 content digest；真正的消息仅存在于已经
+授权的 outbox payload。用于未来 delivery-success 对账的私有关系 context 只保留在该 canonical
+outbox 行，进入 Preview 和 Gateway 前会被剥离，不能成为外发 metadata。未知/拒绝、裂痕、
+等待后效应或自我克制均为 hold，而不是用沉默惩罚用户。
 
 ```mermaid
 flowchart LR
-    L["matching Life snapshot"] --> R["relationship_v2: explicit permission"]
+    F["accepted foreground reply"] --> T["CompanionProactiveTargetV1 + provisional episode\n同一 Life command"]
+    T --> X["read-only durable target registry\nscope / permission / active episode filter"]
+    X --> L["one frozen-Scene-compatible Life snapshot"]
+    L --> R["relationship_v2: explicit permission"]
     L --> A["state.affective: mood / need / regulation"]
     L --> C["clock + admitted timezone"]
     R --> G{"ALLOWED / no rupture / no episode?"}
@@ -603,7 +611,7 @@ flowchart LR
     C --> G
     G -->|no| H["hold: no outbox"]
     G -->|yes| I["canonical companion impulse adapter"]
-    I --> O["authorized proactive.gateway outbox"]
+    I --> O["authorized proactive.gateway outbox\nprivate reconciliation context"]
     I --> D["bounded decision trace + content digest"]
 ```
 

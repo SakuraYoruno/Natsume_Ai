@@ -18,6 +18,7 @@ from typing import Any
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.service import LifeCommandService
 from natsume_contracts.life import (
+    CompanionProactiveTargetV1,
     LifeCommand,
     LifeCommandReceipt,
     RelationshipEpisodeV1,
@@ -157,6 +158,59 @@ class RelationshipLifecycleService:
         self._command_service_provider = command_service_provider
         self._snapshot_reader_provider = snapshot_reader_provider
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+
+    def record_proactive_permission(
+        self,
+        *,
+        workspace_id: Any,
+        relationship_subject_id: Any,
+        session_id: Any,
+        request_id: Any,
+        proactive_permission: Any,
+        source_ref: Any,
+    ) -> LifeCommandReceipt:
+        """Persist a user-explicit proactive-contact decision.
+
+        The caller must supply an opaque evidence reference from a structured
+        consent interaction.  This service intentionally has no natural
+        language parser: warmth, Bond and inferred affection cannot become
+        contact permission.
+        """
+
+        scope = RelationshipScope.from_values(
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+            session_id=session_id,
+        )
+        permission = _text(proactive_permission, limit=64).upper()
+        if permission not in {"ALLOWED", "DENIED"}:
+            raise ValueError("proactive permission must be ALLOWED or DENIED")
+        evidence_ref = _text(source_ref, limit=512)
+        if not evidence_ref or "://" not in evidence_ref:
+            raise ValueError("proactive permission requires an opaque source_ref")
+        stable_request_id = _text(request_id) or _digest(
+            {
+                "schema": "relationship-proactive-permission.v1",
+                "scope": scope.aggregate_id,
+                "permission": permission,
+                "source_ref": evidence_ref,
+            }
+        )[:32]
+        created_at_ms = max(0, int(self._clock_ms()))
+        return self._submit(
+            scope=scope,
+            request_id=stable_request_id,
+            command_type="relationship_proactive_permission_changed",
+            ordinal=0,
+            payload={
+                "workspace_id": scope.workspace_id,
+                "relationship_subject_id": scope.relationship_subject_id,
+                "proactive_permission": permission,
+                "source_kind": "USER_EXPLICIT",
+                "source_ref": evidence_ref,
+            },
+            created_at_ms=created_at_ms,
+        )
 
     def record_followup(
         self,
@@ -299,25 +353,45 @@ class RelationshipLifecycleService:
         request_id: Any,
         response_receipt: Mapping[str, Any],
         response_text: str,
+        proactive_target: Mapping[str, Any] | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
         """Open one provisional episode after a reply has canonical receipt."""
 
-        scope, stable_request_id, episode, opened_at_ms = self._accepted_response_episode(
+        (
+            scope,
+            stable_request_id,
+            episode,
+            companion_target,
+            opened_at_ms,
+        ) = self._accepted_response_episode(
             workspace_id=workspace_id,
             relationship_subject_id=relationship_subject_id,
             session_id=session_id,
             request_id=request_id,
             response_receipt=response_receipt,
             response_text=response_text,
+            proactive_target=proactive_target,
             source_kind=source_kind,
         )
+        payload = self._accepted_response_payload(
+            episode=episode,
+            companion_target=companion_target,
+        )
+        legacy = self._legacy_accepted_response_receipt(
+            scope=scope,
+            request_id=stable_request_id,
+            episode=episode,
+            companion_target=companion_target,
+        )
+        if legacy is not None:
+            return legacy.as_replayed()
         return self._submit(
             scope=scope,
             request_id=stable_request_id,
             command_type="relationship_response_accepted",
             ordinal=0,
-            payload={"episode": episode.as_dict()},
+            payload=payload,
             created_at_ms=opened_at_ms,
         )
 
@@ -330,6 +404,7 @@ class RelationshipLifecycleService:
         request_id: Any,
         response_receipt: Mapping[str, Any],
         response_text: str,
+        proactive_target: Mapping[str, Any] | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
         """Reopen exactly one already-provisioned episode without writing.
@@ -340,7 +415,7 @@ class RelationshipLifecycleService:
         rather than assume a best-effort side effect succeeded.
         """
 
-        scope, stable_request_id, episode, _opened_at_ms = (
+        scope, stable_request_id, episode, companion_target, _opened_at_ms = (
             self._accepted_response_episode(
                 workspace_id=workspace_id,
                 relationship_subject_id=relationship_subject_id,
@@ -348,18 +423,34 @@ class RelationshipLifecycleService:
                 request_id=request_id,
                 response_receipt=response_receipt,
                 response_text=response_text,
+                proactive_target=proactive_target,
                 source_kind=source_kind,
             )
         )
-        return self._read_command_receipt(
-            self._command_id(
+        payload = self._accepted_response_payload(
+            episode=episode,
+            companion_target=companion_target,
+        )
+        try:
+            return self._read_command_receipt(
+                self._command_id(
+                    scope=scope,
+                    request_id=stable_request_id,
+                    command_type="relationship_response_accepted",
+                    ordinal=0,
+                    payload=payload,
+                )
+            )
+        except LookupError:
+            legacy = self._legacy_accepted_response_receipt(
                 scope=scope,
                 request_id=stable_request_id,
-                command_type="relationship_response_accepted",
-                ordinal=0,
-                payload={"episode": episode.as_dict()},
+                episode=episode,
+                companion_target=companion_target,
             )
-        )
+            if legacy is None:
+                raise
+            return legacy.as_replayed()
 
     def _classify_followup(
         self,
@@ -417,8 +508,15 @@ class RelationshipLifecycleService:
         request_id: Any,
         response_receipt: Mapping[str, Any],
         response_text: str,
+        proactive_target: Mapping[str, Any] | None,
         source_kind: str,
-    ) -> tuple[RelationshipScope, str, RelationshipEpisodeV1, int]:
+    ) -> tuple[
+        RelationshipScope,
+        str,
+        RelationshipEpisodeV1,
+        CompanionProactiveTargetV1 | None,
+        int,
+    ]:
         scope = RelationshipScope.from_values(
             workspace_id=workspace_id,
             relationship_subject_id=relationship_subject_id,
@@ -453,7 +551,94 @@ class RelationshipLifecycleService:
             opened_at_ms=opened_at_ms,
             evidence_refs=(response_receipt_ref,),
         )
-        return scope, stable_request_id, episode, opened_at_ms
+        companion_target = self._accepted_response_target(
+            scope=scope,
+            response_receipt_ref=response_receipt_ref,
+            opened_at_ms=opened_at_ms,
+            target=proactive_target,
+        )
+        return scope, stable_request_id, episode, companion_target, opened_at_ms
+
+    @staticmethod
+    def _accepted_response_payload(
+        *,
+        episode: RelationshipEpisodeV1,
+        companion_target: CompanionProactiveTargetV1 | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"episode": episode.as_dict()}
+        if companion_target is not None:
+            payload["companion_proactive_target"] = companion_target.as_dict()
+        return payload
+
+    def _legacy_accepted_response_receipt(
+        self,
+        *,
+        scope: RelationshipScope,
+        request_id: str,
+        episode: RelationshipEpisodeV1,
+        companion_target: CompanionProactiveTargetV1 | None,
+    ) -> LifeCommandReceipt | None:
+        """Reopen a pre-registry episode without adding a second episode.
+
+        Older accepted-reply commands did not carry a target.  A route retry
+        after this cutover may now have target metadata available, but must
+        not create a second command with the same episode identity merely to
+        backfill it.  The next accepted response can register a new target.
+        """
+
+        if companion_target is None:
+            return None
+        legacy_payload = self._accepted_response_payload(
+            episode=episode,
+            companion_target=None,
+        )
+        legacy_command_id = self._command_id(
+            scope=scope,
+            request_id=request_id,
+            command_type="relationship_response_accepted",
+            ordinal=0,
+            payload=legacy_payload,
+        )
+        try:
+            return self._read_command_receipt(legacy_command_id)
+        except LookupError:
+            return None
+
+    @staticmethod
+    def _accepted_response_target(
+        *,
+        scope: RelationshipScope,
+        response_receipt_ref: str,
+        opened_at_ms: int,
+        target: Mapping[str, Any] | None,
+    ) -> CompanionProactiveTargetV1 | None:
+        raw = _mapping(target)
+        if not raw:
+            return None
+        platform = _text(raw.get("platform"), limit=80).lower()
+        conversation_id = _text(raw.get("conversation_id"), limit=512)
+        if not platform and not conversation_id:
+            return None
+        if not platform or not conversation_id:
+            raise ValueError("companion proactive target requires platform and conversation_id")
+        identity = {
+            "schema": "companion-proactive-target.v1",
+            "aggregate_id": scope.aggregate_id,
+            "workspace_id": scope.workspace_id,
+            "relationship_subject_id": scope.relationship_subject_id,
+            "platform": platform,
+            "conversation_id": conversation_id,
+        }
+        return CompanionProactiveTargetV1(
+            target_id=f"companion_target_{_digest(identity)[:32]}",
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            source_receipt_ref=response_receipt_ref,
+            registered_at_ms=opened_at_ms,
+        )
 
     @staticmethod
     def _command_id(

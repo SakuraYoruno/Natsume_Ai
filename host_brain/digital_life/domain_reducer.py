@@ -16,6 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from natsume_contracts.life import (
+    CompanionProactiveTargetV1,
     EmotionComponentV1,
     EmotionEpisodeV1,
     EventAppraisalV1,
@@ -47,7 +48,7 @@ _RELATIONSHIP_COMMAND_TYPES = frozenset(
     }
 )
 _AFFECTIVE_PATCH_PROTECTED_KEYS = frozenset(
-    {"identity", "affective", "relationship_v2"}
+    {"identity", "affective", "relationship_v2", "companion_proactive_target"}
 )
 _AFFECTIVE_RAW_MATERIAL_KEYS = frozenset(
     {
@@ -121,6 +122,10 @@ def reduce_life_domains(
         state.get("relationship_v2"),
         relationship_subject_id=relationship_subject_id,
         aggregate_person_id=person_id,
+    )
+    state["companion_proactive_target"] = _normalize_companion_proactive_target(
+        state.get("companion_proactive_target"),
+        relationship_state=state["relationship_v2"],
     )
 
     if event_type in {"tick", "advance"}:
@@ -292,6 +297,10 @@ def _seed_state(
             "active_episodes": [],
             "last_aftereffect": None,
         },
+        # A target is registered atomically with an accepted foreground
+        # response.  It is neither a relationship score nor a permission to
+        # contact; only relationship_v2.proactive_permission can grant that.
+        "companion_proactive_target": None,
         "scene": {"kind": "idle", "since_ms": now_ms},
         "intent": {"kind": "quiet_presence", "confidence": 0.5},
         "inner_world": {
@@ -709,6 +718,44 @@ def _relationship_episode_from_mapping(raw: Mapping[str, Any]) -> RelationshipEp
     )
 
 
+def _companion_proactive_target_from_mapping(
+    raw: Mapping[str, Any],
+) -> CompanionProactiveTargetV1:
+    if not raw:
+        raise ValueError("companion proactive target is required")
+    return CompanionProactiveTargetV1(
+        target_id=raw.get("target_id"),
+        workspace_id=raw.get("workspace_id"),
+        relationship_subject_id=raw.get("relationship_subject_id"),
+        session_id=raw.get("session_id"),
+        platform=raw.get("platform"),
+        conversation_id=raw.get("conversation_id"),
+        source_receipt_ref=raw.get("source_receipt_ref"),
+        registered_at_ms=raw.get("registered_at_ms"),
+        self_id=raw.get("self_id") or "natsume_ai",
+    )
+
+
+def _normalize_companion_proactive_target(
+    raw: Any,
+    *,
+    relationship_state: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ValueError("companion proactive target must be an object")
+    target = _companion_proactive_target_from_mapping(raw)
+    relationship = _mapping(relationship_state)
+    if (
+        target.workspace_id != str(relationship.get("workspace_id") or "")
+        or target.relationship_subject_id
+        != str(relationship.get("relationship_subject_id") or "")
+    ):
+        raise ValueError("companion proactive target scope drift")
+    return target.as_dict()
+
+
 def _relational_aftereffect_from_mapping(
     raw: Mapping[str, Any],
 ) -> RelationalAftereffectV1:
@@ -858,8 +905,22 @@ def _apply_relationship_response_accepted(
 ) -> None:
     _reject_raw_affective_material(payload)
     episode = _relationship_episode_from_mapping(_mapping(payload.get("episode")))
+    raw_target = payload.get("companion_proactive_target")
+    target = (
+        _companion_proactive_target_from_mapping(_mapping(raw_target))
+        if raw_target is not None
+        else None
+    )
     if episode.opened_at_ms > now_ms:
         raise ValueError("relationship episode cannot open after command time")
+    if target is not None and (
+        target.workspace_id != episode.workspace_id
+        or target.relationship_subject_id != episode.relationship_subject_id
+        or target.session_id != episode.session_id
+        or target.source_receipt_ref != episode.response_receipt_ref
+        or target.registered_at_ms != episode.opened_at_ms
+    ):
+        raise ValueError("companion proactive target response receipt drift")
     current = _relationship_scope_matches(
         state=_relationship_state_from_state(state),
         workspace_id=episode.workspace_id,
@@ -886,6 +947,10 @@ def _apply_relationship_response_accepted(
         active_episodes=episodes,
         last_aftereffect=current.last_aftereffect,
     ).as_dict()
+    if target is not None:
+        state["companion_proactive_target"] = target.as_dict()
+    if episode.source_kind == "CHAT_RESPONSE":
+        _record_relationship_user_presence(state, observed_at_ms=episode.opened_at_ms)
 
 
 def _apply_relational_aftereffect(
@@ -968,6 +1033,10 @@ def _apply_relational_aftereffect(
         active_episodes=remaining,
         last_aftereffect=aftereffect,
     ).as_dict()
+    _record_relationship_user_presence(
+        state,
+        observed_at_ms=aftereffect.observed_at_ms,
+    )
 
 
 def _apply_relationship_proactive_permission(
@@ -1017,6 +1086,24 @@ def _apply_relationship_proactive_permission(
         active_episodes=current.active_episodes,
         last_aftereffect=current.last_aftereffect,
     ).as_dict()
+    _record_relationship_user_presence(state, observed_at_ms=now_ms)
+
+
+def _record_relationship_user_presence(
+    state: dict[str, Any],
+    *,
+    observed_at_ms: int,
+) -> None:
+    """Advance the relationship aggregate clock only from typed user events."""
+
+    clock = _mapping(state.get("clock"))
+    timestamp = max(0, int(observed_at_ms))
+    clock["last_user_seen_ms"] = max(
+        _integer(clock.get("last_user_seen_ms")),
+        timestamp,
+    )
+    clock["idle_minutes"] = 0
+    state["clock"] = clock
 
 
 def _apply_affective_observation(

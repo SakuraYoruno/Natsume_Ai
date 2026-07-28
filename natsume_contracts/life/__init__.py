@@ -13,6 +13,7 @@ from .affect import (
     UserAffectObservationV1,
 )
 from .relationship import (
+    CompanionProactiveTargetV1,
     RelationshipEpisodeV1,
     RelationshipStateV2,
     RelationalAftereffectV1,
@@ -37,6 +38,7 @@ __all__ = [
     "RegulationDecisionV1",
     "SelfAffectStateV2",
     "UserAffectObservationV1",
+    "CompanionProactiveTargetV1",
     "RelationshipEpisodeV1",
     "RelationshipStateV2",
     "RelationalAftereffectV1",

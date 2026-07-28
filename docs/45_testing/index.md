@@ -3,11 +3,11 @@
 
 # 测试与验收目录
 
-版本：v2.52
+版本：v2.53
 维护日期：2026-07-28
 状态：当前证据
 
-## DL-06 主动陪伴策略第一切片
+## DL-06 主动陪伴策略与目标登记切片
 
 - `test_dl06_companion_proactive.py` 验证 Scheduler 的主动决定只读取 canonical
   `relationship_v2`、`state.affective`、clock 与 admitted timezone：explicit
@@ -20,8 +20,15 @@
 - `test_dl02_affect_fusion.py` 验证 production fusion composition 不会解析
   `HostEmotionRuntime` provider；compatibility runtime 仅在不存在 Life authority 的
   明确 fallback 调用中可用。
-- 本切片不含跨 aggregate target registry、delivery-success relationship episode
-  reconciliation、重启 outbox 后效应、5 次 canary/rollback、真实模型或真实 Gateway；
+- `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted
+  reply 与 `CompanionProactiveTargetV1` 同一 relation command 写入；只有显式 `ALLOWED`
+  且 provisional episode 被后效应关闭后，read-only registry 才返回 scope-valid target。
+  同一文件还验证 Scheduler 只从与 frozen Scene 相符的 registry target 中稳定选择一个。
+- 本切片定向集合为：主动 policy/registry/relationship/scheduler/重启 `39 passed in 24.70s`，
+  Surface/Acceptance 邻接回归 `59 passed in 21.78s`；历史
+  大合同文件在 60 秒窗口未完成，未记为通过。
+- 本切片不含 delivery-success relationship episode reconciliation、重启 outbox 后效应、
+  5 次 canary/rollback、真实模型或真实 Gateway；
   它们不能由这些定向单测推导为已完成。
 
 ## NE-07 隔离外部服务栈

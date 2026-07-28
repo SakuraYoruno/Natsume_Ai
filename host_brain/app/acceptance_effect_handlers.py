@@ -579,6 +579,8 @@ class _AcceptedLifeForegroundHandler:
             value.get("payload"),
             "life.foreground_completed.payload",
         )
+        reply_channel = str(payload.get("reply_channel") or "").strip()
+        reply_target = str(payload.get("reply_target") or "").strip()
         return {
             "workspace_id": str(payload.get("workspace_id") or "workspace::default").strip(),
             "relationship_subject_id": str(value.get("person_id") or "").strip(),
@@ -589,6 +591,14 @@ class _AcceptedLifeForegroundHandler:
             # its conversation projection.  The relationship kernel consumes
             # it only transiently to derive an opaque digest reference.
             "response_text": str(payload.get("assistant_reply") or ""),
+            "proactive_target": (
+                {
+                    "platform": reply_channel,
+                    "conversation_id": reply_target,
+                }
+                if reply_channel and reply_target
+                else None
+            ),
         }
 
     def _provision_relationship_episode(

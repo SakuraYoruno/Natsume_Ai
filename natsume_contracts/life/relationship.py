@@ -124,6 +124,71 @@ class RelationshipEpisodeV1:
 
 
 @dataclass(frozen=True)
+class CompanionProactiveTargetV1:
+    """One scope-bound destination registered by an accepted foreground reply.
+
+    This is a routing capability for a relationship aggregate, not evidence of
+    intimacy or permission to contact.  The relationship's explicit
+    ``proactive_permission`` remains the separate authority that can allow a
+    scheduler to use it.  No user or assistant body is retained here.
+    """
+
+    target_id: str
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    platform: str
+    conversation_id: str
+    source_receipt_ref: str
+    registered_at_ms: int
+    self_id: str = _SELF_ID
+
+    def __post_init__(self) -> None:
+        if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
+            raise ValueError("self_id must be natsume_ai")
+        platform = _required(self.platform, "platform", limit=80).lower()
+        object.__setattr__(self, "target_id", _required(self.target_id, "target_id"))
+        object.__setattr__(self, "workspace_id", _required(self.workspace_id, "workspace_id"))
+        object.__setattr__(
+            self,
+            "relationship_subject_id",
+            _required(self.relationship_subject_id, "relationship_subject_id"),
+        )
+        object.__setattr__(self, "session_id", _required(self.session_id, "session_id"))
+        object.__setattr__(self, "platform", platform)
+        object.__setattr__(
+            self,
+            "conversation_id",
+            _required(self.conversation_id, "conversation_id", limit=512),
+        )
+        object.__setattr__(
+            self,
+            "source_receipt_ref",
+            _required(self.source_receipt_ref, "source_receipt_ref", limit=512),
+        )
+        object.__setattr__(
+            self,
+            "registered_at_ms",
+            _non_negative_int(self.registered_at_ms, "registered_at_ms"),
+        )
+        object.__setattr__(self, "self_id", _SELF_ID)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "companion_proactive_target.v1",
+            "target_id": self.target_id,
+            "self_id": self.self_id,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "platform": self.platform,
+            "conversation_id": self.conversation_id,
+            "source_receipt_ref": self.source_receipt_ref,
+            "registered_at_ms": self.registered_at_ms,
+        }
+
+
+@dataclass(frozen=True)
 class RelationalAftereffectV1:
     """A later user-side outcome bound to one provisional response episode."""
 
@@ -275,6 +340,7 @@ class RelationshipStateV2:
 
 
 __all__ = [
+    "CompanionProactiveTargetV1",
     "RelationshipEpisodeV1",
     "RelationshipStateV2",
     "RelationalAftereffectV1",

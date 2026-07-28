@@ -122,6 +122,20 @@ class LifeSnapshotReader:
             session_id=session_id,
         )
 
+    def list_companion_proactive_targets(
+        self,
+        *,
+        limit: int = 1_000,
+    ) -> list[dict[str, object]]:
+        """List currently eligible, scope-valid canonical companion targets.
+
+        The registry is reconstructed from durable Life projections rather
+        than an in-process queue.  This read has no authority to create,
+        alter or infer a target or relationship permission.
+        """
+
+        return self.repository.list_companion_proactive_targets(limit=limit)
+
     def get_receipt(self, command_id: str) -> LifeCommandReceipt | None:
         return self.repository.get_receipt(command_id)
 

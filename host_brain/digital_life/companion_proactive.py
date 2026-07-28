@@ -98,6 +98,10 @@ class CompanionProactiveDecision:
     disturbance_risk: float = 0.0
     self_affect_revision: int = 0
     relationship_revision: int = 0
+    target_id: str = ""
+    workspace_id: str = ""
+    relationship_subject_id: str = ""
+    session_id: str = ""
     reason_tags: tuple[str, ...] = ()
 
     def as_trace(self) -> dict[str, Any]:
@@ -112,12 +116,37 @@ class CompanionProactiveDecision:
             "disturbance_risk": round(_unit(self.disturbance_risk), 6),
             "self_affect_revision": _integer(self.self_affect_revision),
             "relationship_revision": _integer(self.relationship_revision),
+            "target_id": self.target_id,
             "reason_tags": list(self.reason_tags[:8]),
             "content_digest": (
                 f"sha256:{_digest({'content': self.content})}"
                 if self.content
                 else ""
             ),
+        }
+
+    def as_delivery_context(self) -> dict[str, str]:
+        """Return the private outbox context needed for later reconciliation.
+
+        ``LifeDeliveryTransport`` strips this field before forwarding the
+        message to a Gateway.  It is intentionally not part of ``as_trace``.
+        """
+
+        if not all(
+            (
+                self.target_id,
+                self.workspace_id,
+                self.relationship_subject_id,
+                self.session_id,
+            )
+        ):
+            return {}
+        return {
+            "schema_version": "companion_proactive_delivery_context.v1",
+            "target_id": self.target_id,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
         }
 
 
@@ -137,13 +166,25 @@ def decide_companion_proactive(
 
     life = _mapping(state)
     proactive = _mapping(life.get("proactive"))
-    target = _mapping(proactive.get("last_target"))
+    target = _mapping(life.get("companion_proactive_target"))
     platform = str(target.get("platform") or "").strip().lower()
     conversation_id = str(target.get("conversation_id") or "").strip()
     if not platform or not conversation_id:
         return _hold("PROACTIVE_TARGET_UNAVAILABLE")
 
     relationship = _mapping(life.get("relationship_v2"))
+    if (
+        str(target.get("workspace_id") or "")
+        != str(relationship.get("workspace_id") or "")
+        or str(target.get("relationship_subject_id") or "")
+        != str(relationship.get("relationship_subject_id") or "")
+    ):
+        return _hold(
+            "PROACTIVE_TARGET_SCOPE_DRIFT",
+            platform=platform,
+            conversation_id=conversation_id,
+            relationship=relationship,
+        )
     permission = str(relationship.get("proactive_permission") or "UNKNOWN").strip().upper()
     if permission != "ALLOWED":
         return _hold(
@@ -249,6 +290,10 @@ def decide_companion_proactive(
         disturbance_risk=episode.disturbance_risk,
         self_affect_revision=_integer(affective.get("revision")),
         relationship_revision=_integer(relationship.get("revision")),
+        target_id=str(target.get("target_id") or ""),
+        workspace_id=str(target.get("workspace_id") or ""),
+        relationship_subject_id=str(target.get("relationship_subject_id") or ""),
+        session_id=str(target.get("session_id") or ""),
         reason_tags=tuple(str(item) for item in episode.reason_tags[:8]),
     )
 

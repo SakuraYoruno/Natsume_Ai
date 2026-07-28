@@ -912,6 +912,13 @@ async def test_life_gateway_actuator_requires_preview_and_strips_private_context
         "conversation_id": "conversation-preview",
         "content": "exact message",
         "_action_preview_context": context,
+        "_companion_relationship_context": {
+            "schema_version": "companion_proactive_delivery_context.v1",
+            "target_id": "companion-target-preview",
+            "workspace_id": "workspace-preview",
+            "relationship_subject_id": "person-preview",
+            "session_id": "session-preview",
+        },
     }
     message = LifeOutboxMessage(
         outbox_id="outbox-preview-life",
@@ -942,10 +949,18 @@ async def test_life_gateway_actuator_requires_preview_and_strips_private_context
         ledger=type("Ledger", (), {"trace_request": lambda *_: {}})(),
         action_preview_service=service,
     )
+    grant_payload: dict[str, Any] = {}
+
+    class _GrantResolver:
+        @staticmethod
+        def require_delivery_bound(*_args, **kwargs):
+            grant_payload.update(dict(kwargs.get("payload") or {}))
+            return {}
+
     transport._grant_resolver = type(
         "GrantResolver",
         (),
-        {"require_delivery_bound": lambda *_args, **_kwargs: {}},
+        {"require_delivery_bound": _GrantResolver.require_delivery_bound},
     )()
     result = await transport(message)
 
@@ -954,6 +969,8 @@ async def test_life_gateway_actuator_requires_preview_and_strips_private_context
     )
     assert seen["content"] == "exact message"
     assert "_action_preview_context" not in seen
+    assert "_companion_relationship_context" not in seen
+    assert "_companion_relationship_context" not in grant_payload
 
     missing_payload = {
         "platform": "qq",

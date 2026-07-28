@@ -13,6 +13,18 @@ def _state(*, permission: str = "ALLOWED") -> dict:
             "last_attempt_ms": 0,
             "last_sent_ms": 0,
         },
+        "companion_proactive_target": {
+            "schema_version": "companion_proactive_target.v1",
+            "target_id": "companion_target_a",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace-a",
+            "relationship_subject_id": "person-a",
+            "session_id": "session-a",
+            "platform": "qq",
+            "conversation_id": "conversation-a",
+            "source_receipt_ref": "life-event://foreground-a",
+            "registered_at_ms": NOW - 1,
+        },
         "relationship_v2": {
             "schema_version": "relationship_state.v2",
             "self_id": "natsume_ai",
@@ -74,6 +86,7 @@ def test_canonical_proactive_requires_explicit_permission_not_bond_or_legacy_aff
     assert decision.reason_code == "PROACTIVE_CANONICAL_IMPULSE_READY"
     assert decision.relationship_revision == 7
     assert decision.self_affect_revision == 11
+    assert decision.target_id == "companion_target_a"
     assert "不用回" in decision.content
     assert decision.as_trace()["content_digest"].startswith("sha256:")
 
@@ -88,6 +101,20 @@ def test_unknown_or_denied_permission_holds_without_sending() -> None:
         assert decision.send_allowed is False
         assert decision.reason_code == "PROACTIVE_PERMISSION_NOT_ALLOWED"
         assert decision.content == ""
+
+
+def test_legacy_last_target_cannot_authorize_a_send_without_canonical_registry() -> None:
+    state = _state()
+    state.pop("companion_proactive_target")
+
+    decision = decide_companion_proactive(
+        state,
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+
+    assert decision.send_allowed is False
+    assert decision.reason_code == "PROACTIVE_TARGET_UNAVAILABLE"
 
 
 def test_unresolved_relationship_or_self_regulation_holds_the_impulse() -> None:

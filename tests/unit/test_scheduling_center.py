@@ -49,7 +49,7 @@ def test_scheduling_center_builds_registry_driven_seed_tasks(monkeypatch) -> Non
     configs = {task.task_id: task for task in build_personality_scheduler_seed_task_configs()}
     assert configs["life_tick"].intent_template == {
         "skill_name": "life_tick",
-        "args": {"person_id": "default", "timezone": "Asia/Shanghai"},
+        "args": {"timezone": "Asia/Shanghai"},
         "proposer_node_id": "scheduler",
     }
     assert configs["life_tick"].trigger_mode is TriggerMode.INTERVAL

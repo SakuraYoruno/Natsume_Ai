@@ -235,10 +235,7 @@ def _proactive_delivery(
     scene_identity: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     proactive = _mapping(state.get("proactive"))
-    target = _mapping(proactive.get("last_target"))
-    platform = str(target.get("platform") or "").strip()
-    conversation_id = str(target.get("conversation_id") or "").strip()
-    if not platform or not conversation_id or idle_ms < PROACTIVE_IDLE_THRESHOLD_MS:
+    if idle_ms < PROACTIVE_IDLE_THRESHOLD_MS:
         return None
     last_attempt = max(0, int(proactive.get("last_attempt_ms") or 0))
     if last_attempt and now_ms - last_attempt < PROACTIVE_COOLDOWN_MS:
@@ -257,6 +254,10 @@ def _proactive_delivery(
             "conversation_id": decision.conversation_id,
             "content": decision.content,
             "msg_type": "text",
+            # This durable context is for the Host-side delivery-success
+            # reconciler.  LifeDeliveryTransport removes it before any
+            # Gateway receives the outbound request.
+            "_companion_relationship_context": decision.as_delivery_context(),
             "raw_extra": {
                 "source_kind": "canonical_life_companion_tick",
                 "motive": decision.motive,

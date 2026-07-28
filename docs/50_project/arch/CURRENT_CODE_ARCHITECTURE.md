@@ -3,14 +3,14 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.76
+版本：v5.77
 核对日期：2026-07-28
 合并基线：`origin/dev@fcb8997fa`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_CANONICAL_PROACTIVE_POLICY_FIRST_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_CANONICAL_TARGET_REGISTRY_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -23,13 +23,17 @@
 > reply 才能开 provisional episode，下一次用户输入以 opaque digest 形成 aftereffect，
 > relation aggregate 以 workspace + subject 连续而不把 session 当长期身份。边界、
 > 未接住和修复状态会收紧 Surface 话术；沉默、投递失败和单次道歉不会自动修复。
-> `HostBondRuntime` 的生产默认已关闭积分自动阶段升级。DL-06 第一条 Scheduler
+> `HostBondRuntime` 的生产默认已关闭积分自动阶段升级。DL-06 Scheduler
 > policy 已要求 canonical relationship 的 `ALLOWED` 主动权限、无未结 episode/repair，
 > 且七海自身未选择给空间，才会从 bounded canonical self-affect 生成无回应压力的
-> 主动 outbox；旧 Bond/legacy affect 和三条固定模板不再拥有该 route 的发送权。
+> 主动 outbox；旧 Bond/legacy affect 和三条固定模板不再拥有该 route 的发送权。已接受
+> foreground reply 会将 `CompanionProactiveTargetV1` 与 provisional episode 原子写入同一
+> relationship command；只读 registry 仅返回 scope-valid、`ALLOWED`、无 repair/active
+> episode 的 target，Scheduler 再按 frozen Scene scope 确定性选择一个 aggregate。旧
+> `last_target` 不能授权发送。
 > `HostEmotionRuntime`、Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与
-> Surface 的其它兼容 state 仍未清零；跨 aggregate target 登记、投递成功后的 relationship
-> episode 对账、偏好 canary/rollback、真实模型和三模态物理服务也尚未闭环。因此状态仍为
+> Surface 的其它兼容 state 仍未清零；投递成功后的 relationship episode 对账、偏好
+> canary/rollback、真实模型和三模态物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与

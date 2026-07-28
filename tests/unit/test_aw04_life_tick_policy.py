@@ -61,6 +61,18 @@ def _snapshot(state: dict, *, version: int = 3) -> LifeSnapshot:
 
 def _canonical_companion_state(*, permission: str = "ALLOWED") -> dict:
     return {
+        "companion_proactive_target": {
+            "schema_version": "companion_proactive_target.v1",
+            "target_id": "companion_target_unit",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace::default",
+            "relationship_subject_id": "person-1",
+            "session_id": "session-1",
+            "platform": "qq",
+            "conversation_id": "chat-1",
+            "source_receipt_ref": "life-event://foreground-unit",
+            "registered_at_ms": 1,
+        },
         "relationship_v2": {
             "schema_version": "relationship_state.v2",
             "self_id": "natsume_ai",
@@ -163,6 +175,7 @@ def test_tick_is_deterministic_and_only_emits_outbox_after_known_idle_target() -
     assert trace["send_allowed"] is True
     assert trace["relationship_revision"] == 3
     assert trace["self_affect_revision"] == 4
+    assert trace["target_id"] == "companion_target_unit"
     assert trace["content_digest"].startswith("sha256:")
     assert delivery["payload"]["raw_extra"]["scene_decision_digest"] == _scene_context()[
         "scene_identity_v2"

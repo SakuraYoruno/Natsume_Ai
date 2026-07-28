@@ -56,6 +56,11 @@ class LifeDeliveryTransport:
             )
         payload = dict(message.payload)
         preview_context = payload.pop("_action_preview_context", None)
+        # Relationship reconciliation context stays in the canonical Life
+        # outbox row for the post-delivery reconciler.  It is not gateway
+        # metadata and must not enter an Action Preview receipt or a transport
+        # request.
+        payload.pop("_companion_relationship_context", None)
         self._grant_resolver.require_delivery_bound(
             request_id=message.authorization.request_id,
             expected_ref=message.authorization.governor_grant_ref,
