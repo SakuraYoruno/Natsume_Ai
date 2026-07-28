@@ -19,6 +19,15 @@
 
 README、理论、系统总览、模块地图和数据流负责解释系统，但不能覆盖上述状态 authority。历史 `DONE/PASS` 只对固定提交、环境和声明范围成立。
 
+## 当前执行焦点
+
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-00_IN_PROGRESS`：以七海的实时
+情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
+关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
+偏好学习”的唯一持久链。此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
+仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
+不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。
+
 当前 Plan/Delegate 文档基线是不可变 execution policy，而不是 handler
 存在性：Plan policy 绑定 Graph/Budget/Registry/Review/effect owner 并在
 initial/replay/continuation/recovery 重开；Delegate policy 绑定
@@ -90,7 +99,7 @@ flowchart TD
 | 为什么不能封板？ | [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) |
 | 下一阶段做什么？ | [正式执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) |
 
-## 4. 当前状态摘要
+## 4. 历史基础设施状态摘要（范围受限）
 
 > NE-07 已进入隔离真实服务栈预检。默认端口上的用户长期
 > `natsume-ext` Neo4j、Chroma、Redis 不停止、不写入且不计入验收；

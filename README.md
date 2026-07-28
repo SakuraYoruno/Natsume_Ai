@@ -5,9 +5,11 @@
 
 Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。它把对话、人格表达、长期记忆、关系状态、主动行为、工具执行、设备能力和多平台消息接入放在同一套可审计运行时中，并要求所有真实动作都能回答四个问题：谁批准、执行了什么、依据什么验收、产生了什么副作用。
 
-本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、Internal Agent、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施；NE-06 的 Feedback、Knowledge 与 Identity 版本 authority 已完成本地代码波次，但真实部署切流、外部服务、设备和完整长期演化验收仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。Durable 调度恢复会对持久 TaskGraph 重新检查依赖环，发现环以 `PLAN_CYCLE` 失败关闭。新建的 Chat、Skill、Plan、Delegate、Tool、Scheduler、Internal 与 Operator 图默认使用 `ATOMIC_GRAPH_SUCCESS_V1`：0090/0091 分别原子收口失败/成功，节点 `ACCEPTED` 在 Graph 与 graph-scope Budget 同事务终结前只属于内部结果。历史无 policy 图仍按 legacy 只读兼容；`HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED` 继续默认关闭，因此实际 sibling 并发、取消、通用恢复和整波 canary 仍未完成。
+> 当前唯一产品主线是“实时情感陪伴数字生命”（`NE-08 / DL-00～DL-07`）。工程治理、任务、模型、Gateway、Edge 和观测是支撑七海连续情感、关系与自然表达的底座，不是产品完成的替代品。现有 NE-01～NE-07 记录均为范围受限的历史基础证据；它们不能证明七海已拥有自身情感因果、长期修复或文本/语音/Avatar 同轮一致性。
 
-## 当前状态
+当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE`、fixture、目录数量或静态合同推导。当前情感状态仍存在多套兼容 writer；远端 Edge 位于另一台电脑，未在本波启动。
+
+## 历史基础设施状态（范围受限）
 
 NE-01 的代码波次封口证据绑定 `27b032f1e`，并已进入当前
 `origin/dev@9ddeadc1e`；状态为

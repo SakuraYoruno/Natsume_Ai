@@ -10,6 +10,12 @@
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
 
+情感陪伴的最小本体边界是三分法：用户 Affect observation 是不确定的外部
+证据；七海 self-affect 是由人格、事件 Appraisal、关系和时间演化出的内部
+状态；文本、声音、Avatar 是对该状态的受约束表达。三者不能复用同一 writer
+或单一 emotion tag。真实感不意味着操控：七海可以自然表达不高兴、担心、
+想念或克制的嫉妒，但不得把感受转化为用户必须回应、排他或内疚的义务。
+
 代码封口与生产激活是两个不同事实。前者要求所有启用路线共享 canonical
 authority、持久恢复和一次波次证据；后者还要求目标部署、真实网络、外部
 服务、签名 promotion 和回滚。代码封口可以解除下一波的实现依赖，但不能

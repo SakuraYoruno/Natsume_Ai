@@ -11,6 +11,16 @@
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
 
+TRACE-DL00（用户观察与 self-affect 分离）：`foreground_completed` 可以写入
+脱敏 `user_affect_observation.v0`，但不得把用户 VAD 直接混入 canonical Life
+的 `affect.valence/arousal`；Life tick 只累计本次新产生的未互动时间，Motive
+willingness 映射必须随意愿升高单调降低 withdraw。代码位于
+`digital_life/domain_reducer.py` 与 `persona/motive_engine.py`，覆盖为
+`test_aw04_life_domain_reducer.py`、`test_dl00_motive_willingness.py` 与
+`test_dl00_emotional_baseline_manifest.py`。72 条合成多轮轨迹已冻结，但真人
+盲评、真实模型、语音和 Avatar 证据均为 `NOT_RUN`；状态为
+`LOCAL_TARGETED_PASS / EMOTIONAL_DIGITAL_LIFE_PARTIAL`。
+
 当前 NE-01 trace 追加本地代码封口证据：
 `08a172da → migration 0142 七路线 canonical SQLite receipt
 sha256:161b860f…`，并继承 `27b032f1e` 的 24 个跨进程/Workspace 恢复用例。

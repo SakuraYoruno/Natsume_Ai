@@ -8,6 +8,12 @@
 
 文件名保留为 `05_tribe_topology.md` 以兼容旧链接。本图不再把一个固定 family 清单当作整个数字生命架构，而是描述状态、记忆、关系、场景、人格和最终表达的 authority 关系。
 
+> 当前图中的 `BODY` 仅表示 compatibility signals，不是 self-affect writer。
+> `NE-08 / DL-00` 已明确用户情绪观察与七海自身情绪必须分离：目标链为
+> `UserAffectObservation → EventAppraisal → canonical Life self-affect →
+> Regulation → ExpressionPlan`。该目标尚未完整接入生产，图中旧 Bond 与
+> Emotion/Motive signals 不能被理解为已经完成的长期情感生命。
+
 ## 状态到表达
 
 ```mermaid

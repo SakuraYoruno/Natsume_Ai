@@ -99,6 +99,14 @@ def _seed_state(
             "valence": 0.0,
             "uncertainty": 0.0,
         },
+        # User affect is an observation about the relationship subject, never a
+        # writable alias for Natsume's own ``affect`` state.  DL-00 keeps only a
+        # bounded, privacy-safe compatibility projection here; DL-02 replaces it
+        # with the full append-only UserAffectObservation journal.
+        "observations": {
+            "last_user_affect": {},
+            "last_user_affect_at_ms": 0,
+        },
         "affect": {
             "mood": "calm",
             "valence": 0.18,
@@ -228,6 +236,13 @@ def _apply_tick(
     clock = _mapping(state.get("clock"))
     last_user_seen = max(0, _integer(clock.get("last_user_seen_ms")))
     idle_ms = max(0, now_ms - last_user_seen) if last_user_seen else 0
+    interval_end_ms = scheduled_at_ms or now_ms
+    unattended_elapsed_ms = _unattended_elapsed_ms(
+        start_ms=last_integrated,
+        end_ms=interval_end_ms,
+        last_user_seen_ms=last_user_seen,
+    )
+    unattended_ratio = min(1.0, unattended_elapsed_ms / 86_400_000.0)
     timezone_name = str(
         _mapping(payload.get("occurrence_payload")).get("timezone")
         or payload.get("timezone")
@@ -257,11 +272,13 @@ def _apply_tick(
     affect["fatigue"] = _clamp(_float(affect.get("fatigue"), 0.12) + elapsed_hours * 0.018)
     affect["energy"] = _clamp(_float(affect.get("energy"), 0.62) - elapsed_hours * 0.014)
     affect["loneliness"] = _clamp(
-        _float(affect.get("loneliness")) + min(idle_ms / 86_400_000.0, 1.0) * 0.18
+        _float(affect.get("loneliness")) + unattended_ratio * 0.18
     )
     affect["arousal"] = _approach(_float(affect.get("arousal"), 0.24), 0.22, min(1.0, elapsed_hours * 0.08))
     affect["tension"] = _approach(_float(affect.get("tension")), 0.08, min(1.0, elapsed_hours * 0.06))
-    needs["contact"] = _clamp(_float(needs.get("contact"), 0.12) + min(idle_ms / 86_400_000.0, 1.0) * 0.2)
+    needs["contact"] = _clamp(
+        _float(needs.get("contact"), 0.12) + unattended_ratio * 0.2
+    )
     needs["rest"] = _clamp(_float(needs.get("rest"), 0.12) + elapsed_hours * 0.012)
     needs["memory_consolidation"] = _clamp(_float(needs.get("memory_consolidation"), 0.2) + elapsed_hours * 0.006)
     state["affect"] = affect
@@ -277,11 +294,23 @@ def _apply_foreground(
     clock = _mapping(state.get("clock"))
     clock.update({"last_user_seen_ms": now_ms, "idle_minutes": 0})
     state["clock"] = clock
-    affect = _mapping(state.get("affect"))
     emotion = _mapping(payload.get("emotion_context"))
-    observed_valence, observed_arousal = _emotion_signal(emotion)
-    affect["valence"] = _approach(_float(affect.get("valence"), 0.18), observed_valence, 0.28)
-    affect["arousal"] = _approach(_float(affect.get("arousal"), 0.24), observed_arousal, 0.25)
+    user_affect_observation = _user_affect_observation(emotion, observed_at_ms=now_ms)
+    if user_affect_observation:
+        observations = _mapping(state.get("observations"))
+        observations.update(
+            {
+                "last_user_affect": user_affect_observation,
+                "last_user_affect_at_ms": now_ms,
+            }
+        )
+        state["observations"] = observations
+
+    # Foreground presence can relieve contact pressure, but a user's affect
+    # observation must not directly become Natsume's self affect.  A later
+    # EventAppraisal command is the sole path that may create a causal
+    # self-affect transition.
+    affect = _mapping(state.get("affect"))
     affect["loneliness"] = _clamp(_float(affect.get("loneliness")) - 0.16)
     affect["attachment_warmth"] = _clamp(_float(affect.get("attachment_warmth"), 0.42) + 0.025)
     affect["tension"] = _clamp(_float(affect.get("tension")) * 0.82)
@@ -634,22 +663,71 @@ def _embodiment(affect: Mapping[str, Any], *, intent_kind: str) -> tuple[str, di
     return "NEUTRAL", {"expression": "calm_idle", "voice_tone": "soft_neutral", "mateengine_state": "idle"}
 
 
-def _emotion_signal(emotion: Mapping[str, Any]) -> tuple[float, float]:
-    if "emotion_valence" in emotion or "valence" in emotion:
-        valence = max(-1.0, min(1.0, _float(emotion.get("emotion_valence", emotion.get("valence")))))
-    else:
-        tag = str(emotion.get("emotion_tag") or "NEUTRAL").strip().upper()
-        valence = {
-            "HAPPY": 0.65,
-            "WARM": 0.5,
-            "EXCITED": 0.55,
-            "SAD": -0.55,
-            "ANGRY": -0.7,
-            "TENSE": -0.35,
-            "TIRED": -0.15,
-        }.get(tag, 0.08)
-    arousal = _clamp(emotion.get("emotion_arousal", emotion.get("arousal", 0.35)), 0.35)
-    return valence, arousal
+def _unattended_elapsed_ms(
+    *,
+    start_ms: int,
+    end_ms: int,
+    last_user_seen_ms: int,
+) -> int:
+    """Return only the unattended portion of a reducer integration interval."""
+
+    start = max(0, int(start_ms))
+    end = max(start, int(end_ms))
+    if not start or end <= start:
+        return 0
+    if last_user_seen_ms <= start:
+        return end - start
+    if last_user_seen_ms >= end:
+        return 0
+    return end - int(last_user_seen_ms)
+
+
+def _user_affect_observation(
+    emotion: Mapping[str, Any],
+    *,
+    observed_at_ms: int,
+) -> dict[str, Any]:
+    """Create the bounded compatibility projection for an observed user state.
+
+    This function intentionally copies no message text, raw audio, image data,
+    inner monologue or profile content.  It is an observation with uncertainty,
+    not a claim about Natsume's own emotion.
+    """
+
+    if not emotion:
+        return {}
+    vector = _mapping(emotion.get("vad_vector"))
+    tag = str(emotion.get("emotion_tag") or "NEUTRAL").strip().upper()[:48]
+    confidence = _clamp(
+        emotion.get("emotion_inference_confidence", emotion.get("confidence", 0.0))
+    )
+    return {
+        "version": "user_affect_observation.v0",
+        "emotion_tag": tag or "NEUTRAL",
+        "emotion_intensity": round(_clamp(emotion.get("emotion_intensity"), 0.0), 4),
+        "valence": round(
+            max(
+                -1.0,
+                min(
+                    1.0,
+                    _float(
+                        vector.get(
+                            "valence",
+                            emotion.get("emotion_valence", emotion.get("valence")),
+                        )
+                    ),
+                ),
+            ),
+            4,
+        ),
+        "arousal": round(
+            _clamp(vector.get("arousal", emotion.get("emotion_arousal", emotion.get("arousal", 0.35))), 0.35),
+            4,
+        ),
+        "confidence": round(confidence, 4),
+        "source": str(emotion.get("emotion_inference_source") or "compatibility_projection")[:120],
+        "observed_at_ms": max(0, int(observed_at_ms)),
+    }
 
 
 def _day_phase(now_ms: int, timezone_name: str) -> str:

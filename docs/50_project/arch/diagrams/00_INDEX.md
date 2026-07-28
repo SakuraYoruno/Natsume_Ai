@@ -11,6 +11,10 @@
 
 完成度以 [当前代码事实](../CURRENT_CODE_ARCHITECTURE.md) 和 [差距矩阵](../ARCHITECTURE_GAP_MATRIX.md) 为准。旧图中固定的进程数量、路由数量、Tribe family 数量、文件行数和“全部 A 级”等口径已废弃。
 
+当前活动波为 `NE-08 / DL-00`。图 05 的情感/Tribe 信号仍有 compatibility
+边界；用户 Affect observation、七海 self-affect 与文本/语音/Avatar
+ExpressionPlan 的目标链尚未完整接线，不能从现有图册推导情感数字生命已完成。
+
 ## 阅读顺序
 
 | 顺序 | 图 | 回答的问题 |
