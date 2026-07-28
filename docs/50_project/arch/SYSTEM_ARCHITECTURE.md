@@ -119,9 +119,11 @@ composition root：`build_production_host_application_ports()` 不再构造 muta
 `HostEmotionRuntime`，也不再发布 process-wide `user_emotion_profile`。ASGI 为 Tribe
 注入 lazy Life command provider；因此 Input 与 Tribe 只要存在 canonical Life authority，都会
 在 request 时走 `AffectFusionService`，而不是把旧 runtime 当 fallback。离线或测试 composition
-仍可显式选择 compatibility runtime，但它不属于 production object graph。此处只清除了
-Host runtime writer，Limbic metabolism、EmotionPersistence、BodySense、Endocrine、Motive 和
-volatile Bond queue 尚未完成 read-only cutover。
+仍可显式选择 compatibility runtime，但它不属于 production object graph。production Tribe ports
+随后还以 immutable affective-life authority gate 退役 Limbic 的 legacy persistence、metabolism、
+timeline、decay 与 Bond callback：这些路径只返回 `RETIRED_CANONICAL_LIFE`，而不再生成 self-affect
+mutation。此处仍只清除了 Host 与 Limbic 两组旧 writer；BodySense、Endocrine、Motive 和 volatile
+Bond queue 尚未完成 read-only cutover。
 
 0148 的 `CompanionProfileIngress` 现在把一条更窄的直接控制路径加入同一 composition：
 `POST /v1/digital-life/relationship/companion-profile` 经 `host.companion-profile` 验证

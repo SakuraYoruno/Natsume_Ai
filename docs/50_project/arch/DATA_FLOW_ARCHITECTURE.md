@@ -638,8 +638,11 @@ protocol 切片的完成范围。
 `HostEmotionRuntime`，且 ASGI 为 Input 与 Tribe 都注入 lazy Life command provider；二者在
 authority 存在时均经 `AffectFusionService` 形成 scoped observation/appraisal。因而 global
 `user_emotion_profile` 在 production 留空，不能跨 workspace/person/session 汇总并反馈为七海的
-感受。旧 runtime 只存在于显式 offline/test compatibility composition；Limbic 等其它 legacy
-writer 尚未清零。
+感受。旧 runtime 只存在于显式 offline/test compatibility composition。随后 canonical
+`TribeApplicationPorts` 也成为 Limbic compatibility writer 的 gate：旧 persistence/metabolism/
+timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
+回调追加为另一个 self-affect 事实。Endocrine、BodySense、Motive、Bond queue 与旧 timeline 的只读
+投影仍未清零。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal

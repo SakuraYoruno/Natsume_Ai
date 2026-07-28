@@ -394,8 +394,12 @@ Host 情感上下文有两层边界。生产 ASGI 的 `InputRuntimeApplicationPo
 `emotion_runtime_factory` 与 runtime/profile publication。ASGI 同时把 lazy Life command provider
 传给 Tribe composition；Tribe 与 Input 在有 authority 时都 resolve `AffectFusionService`，不会
 解析或调用 `HostEmotionRuntime`。Lifecycle 的 global profile consumer 现为 optional read-only
-compatibility slot，production 留空。该事实不等于全量旧 writer 清零：Limbic、EmotionPersistence、
-BodySense、Endocrine、Motive、Bond queue 和 timeline compatibility projection 仍待后续切断。
+compatibility slot，production 留空。`TribeApplicationPorts` 还显式携带 affective-life authority：
+canonical mode 下 Limbic 的 legacy `EmotionPersistence`、metabolism、timeline append、decay 和
+Bond progress/regress callback 统一 short-circuit 为 `RETIRED_CANONICAL_LIFE`，不得再构造或写入
+第二份 self-affect；只有明确 offline/test compatibility composition 才保留旧行为。该事实仍不等于
+全量旧 writer 清零：BodySense、Endocrine、Motive、Bond queue 和 timeline compatibility projection 的
+read-only/retirement 边界仍待后续切断。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

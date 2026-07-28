@@ -11,7 +11,11 @@ from host_brain.app.tribe_runtime_scope import (
     TribeAgentProviders,
     TribeRuntimeScope,
 )
-from host_brain.tribe.application_ports import TribeApplicationPorts
+from host_brain.tribe.application_ports import (
+    CANONICAL_AFFECT_LIFE_JOURNAL,
+    LEGACY_AFFECT_COMPATIBILITY,
+    TribeApplicationPorts,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +277,11 @@ def build_tribe_application_ports(
             (lambda: canonical_affect_fusion)
             if canonical_affect_fusion is not None
             else None
+        ),
+        affective_life_authority=(
+            CANONICAL_AFFECT_LIFE_JOURNAL
+            if canonical_affect_fusion is not None
+            else LEGACY_AFFECT_COMPATIBILITY
         ),
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_user_preference_pack=build_user_preference_pack_with_ledger,

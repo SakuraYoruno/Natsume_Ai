@@ -312,6 +312,7 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
     assert result["emotion_inference_source"] == "affective_life_fusion"
     assert result["affective_life"]["self_id"] == "natsume_ai"
     assert ports.canonical_affect_fusion is not None
+    assert ports.uses_canonical_affective_life() is True
 
 
 def test_external_affective_life_payload_cannot_spoof_canonical_self_affect() -> None:

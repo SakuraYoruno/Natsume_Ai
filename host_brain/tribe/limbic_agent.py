@@ -81,6 +81,35 @@ class LimbicAgent:
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry)  # T-29：使用全局单例
     _emotion_persistence: Any | None = field(default=None, init=False, repr=False)
 
+    def _legacy_self_affect_writes_retired(self) -> bool:
+        """Return whether this Host has canonical Life self-affect authority.
+
+        The check is deliberately derived from the immutable app-local port
+        bundle.  A legacy/offline test may still exercise its isolated
+        compatibility model, but a production Host must never let an event
+        bus callback rebuild EmotionPersistence or append the old timeline.
+        """
+
+        ports = self.application_ports
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_affect_result(
+        *,
+        source: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_SELF_AFFECT_WRITE_RETIRED",
+            "operation": str(operation),
+            "source": str(source or "limbic_agent"),
+        }
+
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
@@ -184,6 +213,21 @@ class LimbicAgent:
         arousal: float,
         dominance: float,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            # No fallback read/merge/persist is permitted.  Canonical request
+            # fusion supplies self-affect to production prompts instead.
+            return {
+                **self._retired_legacy_affect_result(
+                    source="resolve_persistent_emotion_state",
+                    operation="emotion_persistence",
+                ),
+                "user_id": _resolve_limbic_persona_id(person_id),
+                "valence": float(valence),
+                "arousal": float(arousal),
+                "dominance": float(dominance),
+                "from_baseline": True,
+                "reunion_type": "CANONICAL_LIFE_REQUIRED",
+            }
         from host_brain.persona.emotion_persistence import EmotionPersistence  # noqa: PLC0415
 
         if self._emotion_persistence is None:
@@ -898,10 +942,13 @@ class LimbicAgent:
         event_kind: str = "interaction",
         source: str = "limbic_agent",
     ) -> dict[str, Any]:
-        """T-137：驱动情绪代谢，将 EmotionVector 代谢逻辑族化到 LimbicAgent。
+        """Compatibility-only emotion metabolism for offline legacy callers.
 
-        封装 EmotionVector.decay() / blend() 调用，LimbicAgent 作为情绪代谢的
-        唯一驱动者，确保代谢逻辑不散落在 PrefrontalAgent 或其他模块中。
+        Production Host composition selects the canonical Digital Life journal
+        and this method then returns a retired marker without mutating the
+        former metabolism/persistence authority. The implementation remains
+        available only for isolated legacy/offline fixtures during the single
+        rollback window.
 
         Args:
             valence: 当前效价 [-1.0, 1.0]。
@@ -916,6 +963,15 @@ class LimbicAgent:
             {"valence": float, "arousal": float, "dominance": float,
              "emotion_tag": str, "mood_state": str, "decayed": bool}
         """
+        if self._legacy_self_affect_writes_retired():
+            return {
+                **self._retired_legacy_affect_result(
+                    source=source,
+                    operation="emotion_metabolism",
+                ),
+                "decayed": False,
+                "event_kind": str(event_kind or "interaction"),
+            }
         try:
             from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
             from host_brain.core.ids import now_ms  # noqa: PLC0415
@@ -1004,10 +1060,11 @@ class LimbicAgent:
         source: str = "limbic_agent",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
-        """T-138：将情绪事件写入 EmotionTimeline，将 emotion_timeline 写入操作族化到 LimbicAgent。
+        """Compatibility-only legacy EmotionTimeline append.
 
-        LimbicAgent 作为 emotion_timeline 的唯一写入者，确保时间线写入
-        不散落在 PrefrontalAgent 或其他模块中。
+        Canonical Host composition never appends this projection. It receives
+        an explicit retired result instead, so a delayed event-bus callback
+        cannot recreate a second self-affect journal.
 
         Args:
             emotion_tag: 情绪标签（如 "HAPPY"/"SAD"/"NEUTRAL" 等）。
@@ -1019,6 +1076,14 @@ class LimbicAgent:
         Returns:
             {"status": "OK", "emotion_tag": str, "ts_ms": int}
         """
+        if self._legacy_self_affect_writes_retired():
+            return {
+                **self._retired_legacy_affect_result(
+                    source=source,
+                    operation="emotion_timeline_append",
+                ),
+                "emotion_tag": str(emotion_tag or "NEUTRAL").upper(),
+            }
         try:
             from host_brain.core.ids import now_ms  # noqa: PLC0415
 
@@ -1350,6 +1415,8 @@ class LimbicAgent:
         效价提升：intensity * 0.12（上限 0.10）
         沉默意愿降低：intensity * 0.08（上限 0.06）
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.limbic_agent")
@@ -1426,6 +1493,8 @@ class LimbicAgent:
         效价降低：intensity * 0.10（上限 0.08）
         沉默意愿提升：通过 apply_body_sense_penalty 施加惩罚
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.limbic_agent")
@@ -1770,6 +1839,14 @@ class LimbicAgent:
         Returns:
             {"valence": float, "arousal": float, "emotion_tag": str, "decayed": bool}
         """
+        if self._legacy_self_affect_writes_retired():
+            return {
+                **self._retired_legacy_affect_result(
+                    source=source,
+                    operation="emotion_decay",
+                ),
+                "decayed": False,
+            }
         import logging as _logging
         _log = _logging.getLogger("Natsume.tribe.limbic_agent")
         try:

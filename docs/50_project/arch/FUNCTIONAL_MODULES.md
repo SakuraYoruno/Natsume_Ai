@@ -10,7 +10,7 @@
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> `NE-08 / DL-06_AUTOMATIC_PROFILE_CANARY_ACTIVATION_SLICE` 已把实时情感陪伴设为当前产品主线。
+> `NE-08 / DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE` 已把实时情感陪伴设为当前产品主线。
 > Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
 > head：`EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
 > Regulation`；ASGI Input composition 又将 `AffectFusionService` 接入输入入口。
@@ -190,8 +190,10 @@ Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskSto
 当前 production Host root 不再实例化该 compatibility runtime；`user_emotion_profile` 也不再
 作为 process-wide port 发布。`build_tribe_application_ports()` 接收 ASGI 的 lazy Life command
 provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime。只在
-没有 Life authority 的 offline/test composition 中才可显式创建 `HostEmotionRuntime`。这不是完整
-organ 退役：Limbic、Endocrine、BodySense、Motive 和 Bond queue 的兼容写权仍列为 DL-06 后续项。
+没有 Life authority 的 offline/test composition 中才可显式创建 `HostEmotionRuntime`。canonical
+Tribe ports 还会令 Limbic 的 legacy persistence、metabolism、timeline append、decay 与 Bond callback
+全部 no-op 并返回 `RETIRED_CANONICAL_LIFE`，避免 event callback 重建第二份 self-affect。这不是完整
+organ 退役：Endocrine、BodySense、Motive 和 Bond queue 的兼容写权仍列为 DL-06 后续项。
 
 Internal terminal recovery 模块除 #114 的精确后置审核取消外，当前还拥有一个独立的 signed raw-failure claim contract：它只从无取消意图、零投影/Effect、单节点和单 Budget 的原子失败终态生成 deterministic result，并要求先结算 Secure Ingress claim、再清理 Workspace/stage。该模块不拥有一般 failure/cancellation/multi-node/unknown-effect recovery authority。
 

@@ -25,6 +25,12 @@
   ASGI Tribe 具备 Life authority 时会和 Input 一样走 canonical fusion，且不会解析旧 runtime。
   本切片连同 Host lifecycle、hard-state 与 ASGI composition 定向集合为 `85 passed in 34.06s`；
   这不是 Limbic、Endocrine、BodySense、Motive、Bond queue 清零或真实服务栈证据。
+- `test_limbic_agent.py` 现验证 production canonical Life authority 会让 Limbic 的 legacy
+  persistence、metabolism、timeline append、decay 以及 Bond progress/regress callback 返回
+  `RETIRED_CANONICAL_LIFE`，且不会实例化 `EmotionPersistence` 或追加旧 timeline；未知 authority
+  值失败关闭，Tribe canonical fusion wiring 也被直接断言。相关 Limbic、fusion 与 Host composition
+  集合为 `77 passed in 31.74s`，与前项集合有重叠，不能相加；它不证明 BodySense、Endocrine、Motive、
+  Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
 - `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted
   reply 与 `CompanionProactiveTargetV1` 同一 relation command 写入；只有显式 `ALLOWED`
   且 provisional episode 被后效应关闭后，read-only registry 才返回 scope-valid target。

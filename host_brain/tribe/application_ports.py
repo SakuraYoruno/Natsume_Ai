@@ -14,6 +14,9 @@ from typing import Any, Callable
 
 ServiceProvider = Callable[..., Any]
 
+LEGACY_AFFECT_COMPATIBILITY = "LEGACY_AFFECT_COMPATIBILITY_V1"
+CANONICAL_AFFECT_LIFE_JOURNAL = "CANONICAL_LIFE_JOURNAL_V1"
+
 
 @dataclass(frozen=True, slots=True)
 class TribeApplicationPorts:
@@ -34,6 +37,7 @@ class TribeApplicationPorts:
     prompt_registry: ServiceProvider | None = None
     resolve_chat_emotion_context: ServiceProvider | None = None
     canonical_affect_fusion: ServiceProvider | None = None
+    affective_life_authority: str = LEGACY_AFFECT_COMPATIBILITY
     build_chat_emotion_snapshot: ServiceProvider | None = None
     build_user_preference_pack: ServiceProvider | None = None
     build_conversation_experience_read_pack: ServiceProvider | None = None
@@ -47,8 +51,26 @@ class TribeApplicationPorts:
             raise RuntimeError(f"TRIBE_APPLICATION_PORT_NOT_CONFIGURED:{name}")
         return provider
 
+    def uses_canonical_affective_life(self) -> bool:
+        """Whether legacy Tribe affect writers must remain read-only.
+
+        This is a composition-time invariant, not a process-global feature
+        flag.  It lets legacy/offline fixtures keep their isolated behaviour
+        while a production Host with Life authority fails closed instead of
+        resurrecting another self-affect writer.
+        """
+
+        if self.affective_life_authority not in {
+            LEGACY_AFFECT_COMPATIBILITY,
+            CANONICAL_AFFECT_LIFE_JOURNAL,
+        }:
+            raise RuntimeError("TRIBE_AFFECTIVE_LIFE_AUTHORITY_INVALID")
+        return self.affective_life_authority == CANONICAL_AFFECT_LIFE_JOURNAL
+
 
 __all__ = [
     "ServiceProvider",
+    "CANONICAL_AFFECT_LIFE_JOURNAL",
+    "LEGACY_AFFECT_COMPATIBILITY",
     "TribeApplicationPorts",
 ]

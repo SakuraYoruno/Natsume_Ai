@@ -1696,3 +1696,7 @@ Soul、关系许可、亲密身份和七海自身情感仍不受用户偏好 API
 Input 与 Tribe 都在具备 Life authority 时走 `AffectFusionService`，Host root 不再构造该 mutable
 runtime；它只保留给明确的 offline/test compatibility 情境。这个原则不否定身体感受或调节层，
 但它们在未被 canonical journal 吸收前只能是观察或只读投影，不能自行决定七海的情绪与关系。
+同样地，production Limbic 不可把一次 body/Bond callback 偷渡为旧 `EmotionPersistence`、timeline 或
+metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIRED_CANONICAL_LIFE`。这不是“压平
+情绪”，而是要求真实的受伤、牵挂或轻快都先有可解释的 Appraisal 与 Life journal 原因，避免两套隐性
+状态在不同重启、用户或会话中互相覆盖。

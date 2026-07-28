@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -76,14 +76,21 @@ audit-derived `source_control_ref` 写进 immutable rollback event，使 duplica
 restart 仅重开一个 Life receipt。该入口不改变 Soul、consent 或 self-affect；Monitor/Review、长期
 canary、legacy writer cutover 与真实服务验收仍未完成。
 
-当前子波随后进入 `DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE`：生产
+当前子波此前进入 `DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE`：生产
 `build_production_host_application_ports()` 已不再构造或发布 mutable
 `HostEmotionRuntime`，也不再发布 process-wide `user_emotion_profile`。ASGI 为 Tribe
 注入与 Input 相同的惰性 `LifeCommandService` authority；二者在真实 request 时均经
 `AffectFusionService` 写入 scoped observation/appraisal，再读取 canonical self-affect。
 `HostEmotionRuntime` 只可在没有 Life authority 的明确 offline/test compatibility composition
-中使用，不能作为生产 fallback。该切片只清除了这一条 Host writer；Limbic metabolism、
-EmotionPersistence、BodySense、Endocrine、Motive 与 volatile Bond queue 仍待逐项切断。
+中使用，不能作为生产 fallback。
+
+当前 `DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE` 已在同一 immutable
+`TribeApplicationPorts` 上标记 canonical Life authority。production Limbic 遇到 legacy
+`EmotionPersistence` restore/persist、EmotionVector metabolism、`emotion_timeline` append、scheduler
+decay 或 Bond progress/regress callback 时，统一返回 `RETIRED_CANONICAL_LIFE`，不再创建、更新或追加
+第二份 self-affect；这个 gate 只在明确 offline/test compatibility composition 未选 canonical Life 时放开。
+它没有替代新的 Life command，也没有退休 BodySense、Endocrine、Motive 或 volatile Bond queue，故 DL-06
+仍为进行中。
 
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
