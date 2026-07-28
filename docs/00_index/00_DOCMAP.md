@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.21
+版本：v9.22
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -98,17 +98,17 @@ flowchart TD
 > container/network/port/data-root 与固定镜像 digest 配置，真实
 > `docker compose config --quiet` 已通过。提交 `14f015bd` 又完成三库真实
 > 写入、容器重启、持久读取、更新/查询与探针清理，receipt digest 为
-> `sha256:7af6e6a0…2f71`。Host 首次真实启动暴露 Workspace 密钥明文入口与
-> 安全 runtime 快照互斥，并发现启动器会把短暂健康后退出误报为成功；
-> Obs/Nginx 的该次短暂启动不构成验收。代码现改用 `sec://` 引用，并在所有
-> sidecar 启动后执行连续稳定性 Gate。第二次启动已确认密钥接线有效且 Gate
-> 正确拒绝假成功，同时发现首探针命中了 Service Catalog 的中间 rollout
-> candidate；当前又增加最终 stage/owner/digest 身份门禁，仍待干净提交重跑。
-> Edge、Gateway 尚未
-> 启动，因此当前仍只能是 `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。
-> Monitor UI 生产构建已通过，Host/Obs/Monitor 的独立 runtime root 与
-> secret 快照过滤已接线；这仍是启动前证据，且 8 项 npm audit 告警开放，
-> 不改变上述结论。
+> `sha256:7af6e6a0…2f71`。第五次 Host 启动已使 Service Catalog
+> AUDIT→ENFORCE、Host 和 Nginx Monitor 启动，缺外部模型凭据仍明确为
+> `DEGRADED`；Obs 的空 Life projection 同 cursor 不同 digest 缺陷已完成
+> 确定性修复但尚未实栈复核。第六次 `ForceRestart` 又暴露被强杀 Host 的
+> 30 秒 embodiment authority Lease：replacement 单次 acquire 后退出，
+> launcher 空等约 240 秒且旧 sidecar 残留。代码现只对精确 authority 冲突
+> 做 35 秒有界等待、要求更高 fence，live owner 不可抢占；启动器先定向停止
+> 同 runtime root 的 Obs/Nginx 并监视 launcher 退出，定向集合
+> `33 passed in 34.32s`。真实接管、Obs 恢复与认证 Monitor 仍须重跑；
+> Edge、Gateway 尚未启动，因此当前只能是
+> `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。8 项 npm audit 告警继续开放。
 
 > 最新 locator 清点（2026-07-25）：生产具名 consumer/import、全部 import-form consumer、locator 模块、Container 字段/锁/引用均为 0。`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 构造 fresh `ProcessApplicationPorts` 并显式传入 Host root。旧测试只通过 `tests/support/process_service_compat.py` 的 pytest-only bridge 运行，fresh 生产进程不会加载它。`HostAuthorityRuntimeOwner` 继续持有同一 epoch 的 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图。外部 Chroma/Neo4j namespace、Token/MCP durable restart、资源崩溃恢复、事务化 Chat 和完整 Worker/Obs Composition仍未闭环；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 

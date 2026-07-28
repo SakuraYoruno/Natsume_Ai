@@ -116,9 +116,49 @@ def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() ->
     assert identity_source.count("sha256:[0-9a-f]{64}") == 2
     assert "$healthOk = Wait-HostCatalogStage `" in launch_source
     assert "-ExpectedCatalogStage $catalogTargetStage" in launch_source
+    assert "-ExpectedProcessId ([int]$proc.Id)" in launch_source
     assert "Wait-Http -Url $healthUrl" not in launch_source
     assert "/obs/metrics" not in launch_source
     assert "Get-ListeningPid -ProbePort $Port" not in launch_source
+
+
+def test_host_catalog_wait_stops_when_launched_process_exits() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    function_start = source.index("function Wait-HostCatalogStage")
+    function_end = source.index(
+        "\nfunction Test-HostStartupStability",
+        function_start,
+    )
+    function_source = source[function_start:function_end]
+
+    assert "[int]$ExpectedProcessId = 0" in function_source
+    assert "Get-Process -Id $ExpectedProcessId" in function_source
+    assert function_source.index("Get-Process -Id $ExpectedProcessId") < (
+        function_source.index("Test-HttpPayloadIdentity")
+    )
+
+
+def test_forced_host_restart_stops_existing_sidecars_before_new_host() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    restart_stop = source.index("if ($ForceRestart.IsPresent) {", source.index(
+        'Set-ObjectProperty -Target $localServices -Name "external_services_ready"'
+    ))
+    host_launch = source.index("$proc = Start-HostCommand `", restart_stop)
+    restart_source = source[restart_stop:host_launch]
+
+    assert '& $stopMonitorScript `' in restart_source
+    assert '& $stopObsScript `' in restart_source
+    assert "-Port $MonitorProxyPort" in restart_source
+    assert "-Port $obsBindPort" in restart_source
+    assert "Get-ListeningPid -ProbePort $MonitorProxyPort" in restart_source
+    assert "Get-ListeningPid -ProbePort $obsBindPort" in restart_source
+    assert restart_source.index("& $stopMonitorScript `") < (
+        restart_source.index("& $stopObsScript `")
+    )
 
 
 def test_host_launcher_rejects_workspace_source_overlap_before_creating_root(

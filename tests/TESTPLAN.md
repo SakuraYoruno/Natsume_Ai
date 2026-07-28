@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.43
+版本：v0.44
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -67,6 +67,13 @@
   必须以 source cursor/time 0 生成确定性 payload；禁止把 wall clock 写入
   同 cursor 的 view/digest。Projection Store 的 cursor conflict 门禁不得为
   此场景放宽。
+- T-NE07-HOST-12：被强杀 Host 留下的 embodiment authority Lease 只能在
+  TTL 到期后由 replacement 取得更高 fencing token；只允许精确
+  `EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE` 进入默认 35 秒、最大 40 秒的
+  有界等待。live heartbeat 不得被抢占，其他初始化错误必须立即失败。
+- T-NE07-HOST-13：`ForceRestart` 必须在新 Host 前定向停止同一显式 runtime
+  root/端口的 Obs 与 Monitor，并复核端口为空；首次 catalog identity 等待
+  必须监视 launcher PID，子进程退出后立即失败，禁止继续空等总超时。
 - 首次真实启动已暴露 HMAC 配置矛盾与旧脚本假成功，跑次结论为 `FAIL`。
   `b6b341be` 的第二次启动确认密钥修复和失败关闭有效，并暴露中间 stage
   误判。第三次正确拒绝中间 stage，但暴露 acceptance Workspace 根与源码
@@ -84,6 +91,10 @@
   的半套 Neo4j direct credential 已由
   writer 修复，脚本合同为 `18 passed in 3.82s`；真实 snapshot restart、
   Operator 认证 Playwright 和崩溃恢复仍待执行。
+- 第六次真实 `ForceRestart` 因旧 30 秒 authority Lease 正确失败，但旧实现
+  单次 acquire、空等约 240 秒且遗留 sidecar。新增 T-NE07-HOST-12/13 的
+  authority、配置、隔离与启动编排集合为 `33 passed in 34.32s`；该结果是
+  修复代码证据，不替代真实更高 fence 接管与进程残留复核。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

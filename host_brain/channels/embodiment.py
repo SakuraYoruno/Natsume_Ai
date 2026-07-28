@@ -1129,6 +1129,52 @@ class HostEmbodimentRuntime:
                 _logger.warning("Embodiment receipt observer failed: %s", exc)
 
 
+async def build_host_embodiment_runtime_with_takeover_wait(
+    *,
+    repository: "EmbodimentOutboxRepository",
+    worker_id: str,
+    command_port: EmbodimentCommandPort | None = None,
+    post_to_edge: Callable[..., Any] | None = None,
+    session_config: EdgeEmbodimentSessionConfig | None = None,
+    receipt_observers: tuple[ReceiptObserver, ...] = (),
+    authority_lease_ms: int = 30_000,
+    takeover_wait_ms: int = 35_000,
+    retry_interval_ms: int = 250,
+) -> HostEmbodimentRuntime:
+    """Wait only for an expired predecessor authority during process takeover.
+
+    A Windows crash/forced stop cannot run the ASGI shutdown hook that releases
+    the durable embodiment lease.  The replacement must therefore wait for
+    the existing 30-second lease to expire and acquire a strictly higher
+    fencing token.  Only the exact authority-unavailable result is retryable;
+    every configuration, storage, Edge rebind, or construction failure remains
+    fail-closed.
+    """
+
+    wait_ms = max(0, int(takeover_wait_ms))
+    interval_ms = max(1, int(retry_interval_ms))
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + (wait_ms / 1_000.0)
+    while True:
+        try:
+            return HostEmbodimentRuntime(
+                repository=repository,
+                worker_id=worker_id,
+                command_port=command_port,
+                post_to_edge=post_to_edge,
+                session_config=session_config,
+                receipt_observers=receipt_observers,
+                authority_lease_ms=authority_lease_ms,
+            )
+        except RuntimeError as exc:
+            if str(exc) != "EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE":
+                raise
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise
+            await asyncio.sleep(min(interval_ms / 1_000.0, remaining))
+
+
 def build_host_embodiment_command(
     *,
     kind: str,
@@ -1470,6 +1516,7 @@ __all__ = [
     "EmbodimentReceiptLookupUnavailable", "HostEmbodimentRuntime",
     "ReceiptObserver", "build_embodiment_receipt_audit_observer",
     "build_durable_host_embodiment_session_config",
+    "build_host_embodiment_runtime_with_takeover_wait",
     "build_host_embodiment_command", "submit_embodiment_command",
     "queue_embodiment_command", "submit_voice_command", "submit_avatar_command",
     "submit_avatar_behavior",

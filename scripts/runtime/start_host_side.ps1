@@ -544,10 +544,17 @@ function Wait-HostCatalogStage {
   param(
     [string]$Url,
     [string]$ExpectedCatalogStage,
-    [int]$TimeoutSeconds
+    [int]$TimeoutSeconds,
+    [int]$ExpectedProcessId = 0
   )
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
+    if (
+      $ExpectedProcessId -gt 0 -and
+      $null -eq (Get-Process -Id $ExpectedProcessId -ErrorAction SilentlyContinue)
+    ) {
+      return $false
+    }
     if (
       Test-HttpPayloadIdentity `
         -Url $Url `
@@ -1355,6 +1362,44 @@ if ($ExternalServicesBackend -eq "none" -and [string]$externalServicesReady.stat
 }
 Set-ObjectProperty -Target $localServices -Name "external_services_ready" -Value $externalServicesReady
 
+if ($ForceRestart.IsPresent) {
+  if ($monitorProxyEnabled) {
+    $stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"
+    if (-not (Test-Path -LiteralPath $stopMonitorScript)) {
+      throw "stop_monitor_proxy.ps1 not found: $stopMonitorScript"
+    }
+    $null = & $stopMonitorScript `
+      -EnvFile $EnvFile `
+      -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy") `
+      -NginxExe $NginxExe `
+      -Port $MonitorProxyPort
+    $remainingMonitorPid = Get-ListeningPid -ProbePort $MonitorProxyPort
+    if ($null -ne $remainingMonitorPid) {
+      throw (
+        "failed to stop existing monitor proxy on port $MonitorProxyPort " +
+        "before forced restart; pid=$remainingMonitorPid"
+      )
+    }
+  }
+  if ($obsEnabled) {
+    $stopObsScript = Join-Path $PSScriptRoot "stop_obs_side.ps1"
+    if (-not (Test-Path -LiteralPath $stopObsScript)) {
+      throw "stop_obs_side.ps1 not found: $stopObsScript"
+    }
+    $null = & $stopObsScript `
+      -EnvFile $EnvFile `
+      -RuntimeRoot $RuntimeRoot `
+      -Port $obsBindPort
+    $remainingObsPid = Get-ListeningPid -ProbePort $obsBindPort
+    if ($null -ne $remainingObsPid) {
+      throw (
+        "failed to stop existing obs sidecar on port $obsBindPort " +
+        "before forced restart; pid=$remainingObsPid"
+      )
+    }
+  }
+}
+
 if (Test-Path -Path $pidFile) {
   $existingPidText = (Get-Content -Path $pidFile -Raw -Encoding ascii).Trim()
   if ($existingPidText) {
@@ -1497,7 +1542,8 @@ $healthUrl = "http://$probeHost`:$Port/health?skip_dependency_probes=1"
 $healthOk = Wait-HostCatalogStage `
   -Url $healthUrl `
   -ExpectedCatalogStage $catalogTargetStage `
-  -TimeoutSeconds $WaitSeconds
+  -TimeoutSeconds $WaitSeconds `
+  -ExpectedProcessId ([int]$proc.Id)
 if (-not $healthOk) {
   Stop-ProcessTree -ProcessId ([int]$proc.Id) | Out-Null
   $stderrTail = ""

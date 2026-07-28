@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.35
+版本：v2.36
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-28
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -33,6 +33,14 @@ parallel settlement 的输入；只有失败、Review、恢复阻断或整图原
 哪一个是唯一提交结果；正确做法是缓冲节点终态、重开 durable snapshot、经
 同一个 settlement/finalizer 产生唯一图回执。已验收兄弟节点必须保持不变，
 未知兄弟只能在 Lease 失效且签名重获 authority 后继续。
+
+进程替换也必须服从同一原则。强杀旧进程并不等于它的 durable Lease 已经
+消失；replacement 只能等待 Lease 自然到期并取得更高 fence，不能因为本机
+PID 不存在就覆盖仍有效的 authority。等待必须有界且只针对精确的
+authority-unavailable 结果：live heartbeat 继续续租时应失败，配置、存储或
+外部端口初始化错误则立即失败。部署编排还必须把“子进程已退出”视为终态
+观察，及时停止同一实例的只读 sidecar；否则安全的持久门禁仍会被外围脚本
+包装成漫长假等待和残留进程。
 
 持久执行不能把“调用返回”当成“状态提交”。目标状态变更与调用方收到结果是
 两个崩溃窗口：前者必须由目标 UoW、Outbox 和不可变 proof 定义，后者只能

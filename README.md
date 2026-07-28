@@ -97,7 +97,20 @@ OPENAI 凭据的 required cold-start failure，因此状态为可审计的 `DEGR
 runtime snapshot 会过滤
 Neo4j 密码却残留用户名，直接复用时形成半套凭据；snapshot writer 现同时
 排除两项 direct auth，只保留 `sec://` ref，相关合同为
-`18 passed in 3.82s`。真实重启和带临时 Operator 会话的浏览器验收仍待执行。
+`18 passed in 3.82s`。
+
+第六次真实 `ForceRestart` 已使用修正后的 snapshot，但在旧 Host 被强杀后，
+其 30 秒 durable embodiment authority Lease 尚未到期；新进程只尝试一次
+acquire 就以 `EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE` 退出，Service
+Catalog 将本次 ENFORCE operation 持久收口为 `ACTIVATION_FAILED`。启动器
+没有观察已退出的 launcher，继续空等约 240 秒，旧 Obs/Nginx 也残留在
+acceptance 端口。这次结果明确为 `FAIL`。当前修复只对这一精确 authority
+冲突做最多 35 秒的异步等待，Lease 到期后必须取得更高 fence；仍在 heartbeat
+的 live owner 不会被抢占，其他配置、存储或 Edge 重绑错误仍立即失败关闭。
+`ForceRestart` 还会先定向停止同一 runtime root 的 Obs/Nginx，并在首次
+catalog 探针期间检测 launcher 退出，避免再次空等。新边界定向验证为
+`33 passed in 34.32s`；真实重启、Obs daemon 恢复和带临时 Operator 会话的
+浏览器验收仍待下一跑次。
 `npm audit` 的 8 项依赖告警仍开放，不能据此宣称前后端验收通过。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime

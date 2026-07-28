@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.51
+版本：v2.52
 维护日期：2026-07-28
 状态：当前证据
 
@@ -72,6 +72,16 @@
   credential；writer 现同时排除 direct username/password，只保留 `sec://`
   ref。启动脚本合同为 `18 passed in 3.82s`，真实 snapshot restart 与无拦截
   认证 Playwright 尚待下一跑次。
+- 第六次 `ForceRestart` 不再受半套 Neo4j credential 阻断，但旧 Host 被
+  强杀后留下 30 秒 embodiment authority Lease；replacement 单次 acquire
+  失败并退出，ENFORCE operation durable `ACTIVATION_FAILED`，旧 Lease
+  随后自然过期。启动器未观察 launcher 退出而空等约 240 秒，旧 Obs/Nginx
+  也未在前置阶段清理；本跑次结论为 `FAIL`。
+- takeover builder 现在只对精确 authority-unavailable 做默认 35 秒有界
+  重试，必须在 predecessor 到期后取得更高 fence，live heartbeat 不可抢占；
+  `ForceRestart` 先定向停止同 runtime root 的 Monitor/Obs，首次 catalog
+  等待监视 launcher PID。authority、配置、隔离和启动脚本集合为
+  `33 passed in 34.32s`，真实 crash restart 与 Obs daemon 恢复仍待重跑。
 
 ## NE-05 Skill 生命周期本地代码波次
 

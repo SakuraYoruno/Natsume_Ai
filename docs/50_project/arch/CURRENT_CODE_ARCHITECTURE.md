@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.71
+版本：v5.72
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -92,6 +92,24 @@ Obs 或本地整栈，须重启确认 daemon 恢复。
 项 direct auth 都排除，只持久化 `sec://` auth ref；定向合同
 `18 passed in 3.82s`。新 snapshot 的真实重启、Operator 认证 read model 与
 无网络拦截 Playwright 尚未执行。
+
+第六次真实 `ForceRestart` 已证明 snapshot direct-auth 修复不再构成前置
+阻断，但发现 Host crash takeover 仍有缺口：被强杀的旧进程不能释放
+30 秒 `host_embodiment_runtime_lease`，replacement candidate 单次 acquisition
+失败后退出，0113 ENFORCE operation 以
+`SERVICE_CATALOG_START_CALLBACK_FAILED / ACTIVATION_FAILED` durable
+收口；旧 Lease 随后只靠 TTL 自然过期。启动器未感知 launcher 已退出，继续
+等待约 240 秒，且此前 Obs/Nginx 仍监听。
+
+当前代码新增有界 takeover builder：只重试精确
+`EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE`，默认 35 秒且配置上限 40 秒；
+到期后 repository 必须发放更高 fence，仍有 heartbeat 的 live owner 会继续
+阻断 replacement。其他配置、存储和 Edge rebind 错误保持立即失败。Host
+启动器的 `ForceRestart` 先按显式 runtime root/端口停止旧 Obs/Nginx，再
+启动 replacement；首次 catalog 等待同时监视 launcher PID，退出即返回
+失败而非耗尽总超时。authority、配置、隔离和 PowerShell 编排定向集合为
+`33 passed in 34.32s`。真实更高 fence 接管、Obs 修复和 Monitor 交互仍待
+实栈重跑，故不能将这段代码事实提升为恢复 `PASS`。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

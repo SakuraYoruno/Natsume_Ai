@@ -11,6 +11,7 @@ from host_brain.channels.embodiment import (
     EdgeEmbodimentSessionConfig,
     HostEmbodimentRuntime,
     build_durable_host_embodiment_session_config,
+    build_host_embodiment_runtime_with_takeover_wait,
     build_host_embodiment_command,
 )
 from host_brain.persistence.embodiment_outbox_repository import (
@@ -53,6 +54,50 @@ class _NoopCommandPort:
             received_at_ms=command.issued_at_ms,
             completed_at_ms=command.issued_at_ms,
         )
+
+
+class _DelayedAcquireRepository:
+    def __init__(
+        self,
+        delegate: EmbodimentOutboxRepository,
+        *,
+        unavailable_attempts: int,
+    ) -> None:
+        self._delegate = delegate
+        self._remaining = int(unavailable_attempts)
+        self.acquire_calls = 0
+
+    def acquire_runtime_lease(self, **kwargs):  # noqa: ANN003
+        self.acquire_calls += 1
+        if self._remaining > 0:
+            self._remaining -= 1
+            return None
+        return self._delegate.acquire_runtime_lease(**kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._delegate, name)
+
+
+class _ClockedAcquireRepository:
+    def __init__(
+        self,
+        delegate: EmbodimentOutboxRepository,
+        *,
+        acquire_times_ms: tuple[int, ...],
+    ) -> None:
+        self._delegate = delegate
+        self._acquire_times = iter(acquire_times_ms)
+        self.acquire_calls = 0
+
+    def acquire_runtime_lease(self, **kwargs):  # noqa: ANN003
+        self.acquire_calls += 1
+        return self._delegate.acquire_runtime_lease(
+            **kwargs,
+            now_ms=next(self._acquire_times),
+        )
+
+    def __getattr__(self, name: str):
+        return getattr(self._delegate, name)
 
 
 def _repository(tmp_path: Path, name: str) -> tuple[EmbodimentOutboxRepository, Path]:
@@ -207,6 +252,94 @@ def test_same_canonical_store_has_one_runtime_authority_and_close_releases_exact
     assert replacement["lease_id"] != first_row["lease_id"]
     assert replacement["fencing_token"] == first_row["fencing_token"] + 1
     second.close()
+
+
+def test_process_takeover_wait_retries_only_until_authority_can_be_fenced(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    repository, db_path = _repository(tmp_path, "bounded-takeover-wait")
+    delayed = _DelayedAcquireRepository(repository, unavailable_attempts=2)
+
+    runtime = asyncio.run(
+        build_host_embodiment_runtime_with_takeover_wait(
+            repository=delayed,  # type: ignore[arg-type]
+            worker_id="host-after-crash",
+            command_port=_NoopCommandPort(),
+            takeover_wait_ms=100,
+            retry_interval_ms=1,
+        )
+    )
+
+    assert delayed.acquire_calls == 3
+    assert _runtime_lease_row(db_path)["owner_id"] == "host-after-crash"
+    runtime.close()
+
+
+def test_process_takeover_wait_acquires_higher_fence_after_crashed_lease_expires(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    repository, db_path = _repository(tmp_path, "expired-crash-takeover")
+    crashed = repository.acquire_runtime_lease(
+        worker_id="host-crashed",
+        lease_ms=1_000,
+        now_ms=1_000,
+    )
+    assert crashed is not None
+    clocked = _ClockedAcquireRepository(
+        repository,
+        acquire_times_ms=(1_999, 2_000),
+    )
+
+    runtime = asyncio.run(
+        build_host_embodiment_runtime_with_takeover_wait(
+            repository=clocked,  # type: ignore[arg-type]
+            worker_id="host-replacement",
+            command_port=_NoopCommandPort(),
+            authority_lease_ms=1_000,
+            takeover_wait_ms=100,
+            retry_interval_ms=1,
+        )
+    )
+
+    replacement = _runtime_lease_row(db_path)
+    assert clocked.acquire_calls == 2
+    assert replacement["owner_id"] == "host-replacement"
+    assert replacement["lease_id"] != crashed["lease_id"]
+    assert replacement["fencing_token"] == int(crashed["fencing_token"]) + 1
+    runtime.close()
+
+
+def test_process_takeover_wait_does_not_steal_a_live_authority(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    first_repository, db_path = _repository(tmp_path, "bounded-live-owner")
+    first = HostEmbodimentRuntime(
+        repository=first_repository,
+        worker_id="host-live",
+        command_port=_NoopCommandPort(),
+        authority_lease_ms=30_000,
+    )
+    original = dict(_runtime_lease_row(db_path))
+
+    with pytest.raises(
+        RuntimeError,
+        match="EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE",
+    ):
+        asyncio.run(
+            build_host_embodiment_runtime_with_takeover_wait(
+                repository=EmbodimentOutboxRepository(db_path),
+                worker_id="host-must-not-steal",
+                command_port=_NoopCommandPort(),
+                takeover_wait_ms=5,
+                retry_interval_ms=1,
+            )
+        )
+
+    current = dict(_runtime_lease_row(db_path))
+    assert current["owner_id"] == original["owner_id"] == "host-live"
+    assert current["lease_id"] == original["lease_id"]
+    assert current["fencing_token"] == original["fencing_token"]
+    first.close()
 
 
 def test_restart_loads_live_edge_lease_without_busy_and_rebinds_it_to_new_runtime_claim(

@@ -712,9 +712,9 @@ def create_app(
                         )
                     )
                 from host_brain.channels.embodiment import (  # noqa: PLC0415
-                    HostEmbodimentRuntime,
                     build_embodiment_receipt_audit_observer,
                     build_durable_host_embodiment_session_config,
+                    build_host_embodiment_runtime_with_takeover_wait,
                 )
                 from host_brain.persistence.embodiment_outbox_repository import (  # noqa: PLC0415
                     EmbodimentOutboxRepository,
@@ -723,7 +723,17 @@ def create_app(
                 embodiment_repository = EmbodimentOutboxRepository(
                     task_runtime.canonical_db_path
                 )
-                embodiment_runtime = HostEmbodimentRuntime(
+                takeover_wait_ms = int(
+                    os.environ.get(
+                        "HOST_EMBODIMENT_AUTHORITY_TAKEOVER_WAIT_MS",
+                        "35000",
+                    )
+                )
+                if not 0 <= takeover_wait_ms <= 40_000:
+                    raise RuntimeError(
+                        "HOST_EMBODIMENT_AUTHORITY_TAKEOVER_WAIT_MS_INVALID"
+                    )
+                embodiment_runtime = await build_host_embodiment_runtime_with_takeover_wait(
                     repository=embodiment_repository,
                     worker_id=f"{task_runtime.recovery_id}::embodiment",
                     session_config=build_durable_host_embodiment_session_config(
@@ -734,6 +744,7 @@ def create_app(
                             ledger.log_voice_event
                         ),
                     ),
+                    takeover_wait_ms=takeover_wait_ms,
                 )
                 # A replacement process must rotate any inherited live Edge
                 # fence before routes can admit more physical work.  Fresh

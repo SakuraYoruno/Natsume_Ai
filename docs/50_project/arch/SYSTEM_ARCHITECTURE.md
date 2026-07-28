@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.34
+版本：v2.35
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -613,7 +613,7 @@ flowchart LR
     SCENE --> PER --> SURF
 ```
 
-该图表达职责边界。NE-03 当前生产链为 `server observation + 0137 active goals → 0111 Observation Journal → WorldResolver → SceneResolver → frozen ContextPack → Intent admission → Action Preview authority reopen`：Host ASGI lifespan 在取得 runtime lease/fence 后构造唯一 app-local composition，World 读取 captured head，Scene/Guardian 的 revision 在 0112 中 CAS 封口。0137 长期目标只能经已验收的 governed Operator Effect 激活/撤销，并以 typed ref/constraint 进入 World；撤销形成 `SOURCE_REVOKED` expiry。Surface、Proactive 和 Task admission 消费同一 Scene revision/digest；production Intent authority 重开 HostCommand/WorkOrder/TaskGraph/Scene/Grant 和 current goal identity，并持久化 restrict-only receipt set；冻结后 goal 漂移的旧图失败关闭。高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance/Life 在执行点再次重开 Task/Attempt/Lease/Grant/Context/Scene/Guardian；Preview receipt 本身不产生新权限。`RuntimeGuardian` 的 health heartbeat task、可选 keepalive、observer、probe cache 与 HTTP transport 由每个 Host lifespan 的 `ServiceHealthHeartbeat` 单独拥有。0113 Service Catalog 从 durable head 逐级真实启动到默认目标 ENFORCE，commit-bound 本地 Gate 与 crash takeover 已通过；当前 `test_ne03_*` 完整波次为 `271 passed, 2 warnings in 332.52s`。这不等于整个演化架构完成：Bond 上游原始证据、Windows graceful stop 与部署多实例 canary 仍未验收，World 也不是可模拟未来的规划世界模型。
+该图表达职责边界。NE-03 当前生产链为 `server observation + 0137 active goals → 0111 Observation Journal → WorldResolver → SceneResolver → frozen ContextPack → Intent admission → Action Preview authority reopen`：Host ASGI lifespan 在取得 runtime lease/fence 后构造唯一 app-local composition，World 读取 captured head，Scene/Guardian 的 revision 在 0112 中 CAS 封口。0137 长期目标只能经已验收的 governed Operator Effect 激活/撤销，并以 typed ref/constraint 进入 World；撤销形成 `SOURCE_REVOKED` expiry。Surface、Proactive 和 Task admission 消费同一 Scene revision/digest；production Intent authority 重开 HostCommand/WorkOrder/TaskGraph/Scene/Grant 和 current goal identity，并持久化 restrict-only receipt set；冻结后 goal 漂移的旧图失败关闭。高风险 Skill、Delegate、Scheduler/Proactive 与 Acceptance/Life 在执行点再次重开 Task/Attempt/Lease/Grant/Context/Scene/Guardian；Preview receipt 本身不产生新权限。`RuntimeGuardian` 的 health heartbeat task、可选 keepalive、observer、probe cache 与 HTTP transport 由每个 Host lifespan 的 `ServiceHealthHeartbeat` 单独拥有。0113 Service Catalog 从 durable head 逐级真实启动到默认目标 ENFORCE；被强杀 Host 的 30 秒 embodiment Lease 只允许 replacement 有界等待自然过期并取得更高 fence，live heartbeat 不可抢占，非 authority 初始化错误立即失败。启动器同时观察 replacement PID 并在 `ForceRestart` 前定向停止同 runtime root 的 sidecar。该 crash 接管边界目前只有定向代码证据，真实重跑仍待 NE-07；当前 `test_ne03_*` 完整波次为 `271 passed, 2 warnings in 332.52s`。这不等于整个演化架构完成：Bond 上游原始证据、Windows graceful stop 与部署多实例 canary 仍未验收，World 也不是可模拟未来的规划世界模型。
 
 安全演化的目标链必须是：运行证据/反馈 → proposal → 隔离实验与 shadow → Review → version activation → rollback point。任何 milestone、后台周期或模型输出直接调用 trait writer 都违反目标 authority。
 

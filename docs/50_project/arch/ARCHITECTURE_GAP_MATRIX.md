@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.41
+版本：v3.42
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -47,6 +47,16 @@ runtime snapshot 过滤密码但
 保留原子 `sec://` auth ref，真实 snapshot restart 尚待重跑。
 Monitor 依赖还有 8 项 npm audit 告警，因此该项保持
 `HOST_ENFORCE_START_PASS / OBS_FIX_AND_RESTART_PENDING`。
+
+第六次 `ForceRestart` 进一步暴露 Host 被强杀后 30 秒 embodiment authority
+Lease 无法由 shutdown hook 释放：新 candidate 单次 acquire 失败并退出，
+启动器仍空等约 240 秒，旧 Obs/Nginx 留在端口。当前代码只对精确 authority
+不可用做 35 秒有界等待，过期后要求更高 fence，live heartbeat 不可抢占；
+启动器在替换前先定向停止同 runtime root 的 sidecar，并在首次探针期间检测
+launcher 退出。定向集合 `33 passed in 34.32s`，但尚未实栈重跑，因此当前
+口径收紧为
+`HOST_ENFORCE_START_PASS / CRASH_TAKEOVER_FIX_PENDING_RERUN /
+OBS_FIX_PENDING_RERUN`。
 
 NE-01 的剩余差距已从“本地代码/恢复未封口”收窄为 NE-07 部署验收。
 当前提交的七路线同库收据全部 `PASS`，24 个去重恢复用例通过；因此实现依赖

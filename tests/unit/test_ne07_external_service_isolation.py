@@ -104,6 +104,15 @@ def test_host_stack_scripts_accept_an_isolated_runtime_root() -> None:
     assert "RuntimeRoot = $RuntimeRoot" in host
     assert 'RuntimeRoot = (Join-Path $RuntimeRoot "monitor_proxy")' in host
     assert "if ($ForceRestart.IsPresent -and -not $runtimeRootWasExplicit)" in host
+    restart_stop = host.index("if ($ForceRestart.IsPresent) {", host.index(
+        'Set-ObjectProperty -Target $localServices -Name "external_services_ready"'
+    ))
+    host_launch = host.index("$proc = Start-HostCommand `", restart_stop)
+    restart_source = host[restart_stop:host_launch]
+    assert '-RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")' in restart_source
+    assert "-RuntimeRoot $RuntimeRoot" in restart_source
+    assert "Get-ListeningPid -ProbePort $MonitorProxyPort" in restart_source
+    assert "Get-ListeningPid -ProbePort $obsBindPort" in restart_source
     stop_host = sources["stop_host_side.ps1"]
     assert "if (-not $runtimeRootWasExplicit)" in stop_host
 

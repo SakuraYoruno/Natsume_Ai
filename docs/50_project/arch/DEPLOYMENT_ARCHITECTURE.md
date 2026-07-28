@@ -3,7 +3,7 @@
 
 # Natsume AI 部署架构与运行验收
 
-> 基线日期：2026-07-15
+> 基线日期：2026-07-28
 >
 > 事实来源：当前仓库的 Python 入口、PowerShell 运行脚本、类型化设置与外部服务 Compose。
 >
@@ -137,6 +137,13 @@ failure 都精确为 `SERVICE_UNAVAILABLE_COLD_START` 时，Host public health
 disabled、本地 authority、混合 required failure 或 durability failure 一律保持
 `FAILED`。
 
+Host 具身 authority 的 durable Lease TTL 为 30 秒。Windows 强杀不能执行
+ASGI shutdown hook，replacement 因而只允许对精确
+`EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE` 做有界等待：默认
+`HOST_EMBODIMENT_AUTHORITY_TAKEOVER_WAIT_MS=35000`，配置上限 40000 ms。
+Lease 到期后必须取得更高 fencing token；live heartbeat 持续续租时不得
+抢占。任何配置、存储或 Edge rebind 初始化错误不属于 takeover 等待。
+
 ### 4.2 Edge
 
 [edge_client/__main__.py](../../../edge_client/__main__.py) 本身不加载 dotenv；直接启动时只消费现有进程环境、默认值和秘密配置。PowerShell 启动器负责注入 `.env` 或运行时覆盖。远端主服务脚本会写入 `runtime/edge/edge.runtime.env`，并可能把环境值写进动态 CMD/PowerShell 启动文件。
@@ -193,14 +200,22 @@ HOST_NODE_INVENTORY_PATH=configs/deploy/node_inventory_personal_lan.json
 
 [start_host_side.ps1](../../../scripts/runtime/start_host_side.ps1) 的实际行为是：
 
-1. 选择 `.env`，创建默认 `runtime/host/` 或显式 `RuntimeRoot` 与日志目录；
-2. 默认调用 [start_docker_services.ps1](../../../scripts/runtime/start_docker_services.ps1)，启动并探测 Neo4j、Chroma、Redis；`ExternalServicesBackend=none` 时跳过；
-3. 按配置尝试启动 MateEngine Bridge；
-4. 启动 `python -m host_brain`，可附加 `--startup-check`；
-5. 依次尝试 Host `/health?skip_dependency_probes=1`、`/ready`、错误遗留的 `/obs/metrics` 或端口监听判定；
-6. 启动 OBS，失败只记降级警告；
-7. 探测 OBS、MCP、Canon Sync，失败只记降级警告；
-8. 启动 Nginx Monitor Proxy，失败只记降级警告。
+1. 选择 `.env`，创建默认 `runtime/host/` 或显式 `RuntimeRoot` 与日志目录，
+   并在任何进程前验证 Agent Workspace 与源码不重叠；
+2. 默认调用 [start_docker_services.ps1](../../../scripts/runtime/start_docker_services.ps1)，
+   启动并探测 Neo4j、Chroma、Redis；`ExternalServicesBackend=none` 时跳过；
+3. 使用 `-ForceRestart` 时，先按同一显式 runtime root/端口停止旧 Nginx
+   Monitor 与 OBS，并复核两个监听端口为空；
+4. 按配置尝试启动 MateEngine Bridge；
+5. 启动 `python -m host_brain`，可附加 `--startup-check`；
+6. 首次放行只接受目标 Service Catalog stage、`host.main` owner 和合法
+   operation/snapshot digest 的 `/health?skip_dependency_probes=1`；等待期间
+   launcher PID 一旦退出立即失败，不再等待完整超时；
+7. 启动 OBS 与 Nginx Monitor Proxy，并执行 OBS、MCP、Canon Sync 探针；
+8. 连续五轮核对 Host 进程、监听 PID、最终 catalog health/readiness identity，
+   同时要求启用的 OBS health 与 Monitor 静态页/metrics 真实可用；
+9. 任一强制稳定性条件失败时，只回收本次 runtime root 的
+   Host/OBS/Nginx，并返回脱敏日志尾部，不得输出 `started`。
 
 典型命令：
 

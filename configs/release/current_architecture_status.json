@@ -5,12 +5,12 @@
     "dev_commit": "555ead6d7dc78d376fc21fa49335ae64206de10a",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE07_EXTERNAL_PERSISTENCE_PASS_HOST_TWO_STARTS_FAILED_SECRET_REF_FIXED_FINAL_CATALOG_IDENTITY_FIX_PENDING_RERUN_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE07_EXTERNAL_PERSISTENCE_PASS_HOST_ENFORCE_START_PASS_OBS_AND_CRASH_TAKEOVER_FIXES_PENDING_RERUN_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-07",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS_HOST_FIRST_START_SECRET_SOURCE_FAILURE_SECOND_START_FINAL_CATALOG_STAGE_MISIDENTIFICATION_FAILURE_FIX_CODE_COMPLETE_RERUN_PENDING",
+  "active_wave_detail": "EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS_HOST_ENFORCE_START_PASS_SIXTH_FORCE_RESTART_CRASH_AUTHORITY_TAKEOVER_FAILURE_FIX_CODE_COMPLETE_RERUN_PENDING",
   "next_wave": "PROGRAM_ACCEPTANCE",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -64,8 +64,8 @@
       ]
     },
     "ne07_host_stack_isolation_preflight": {
-      "status": "HOST_ENFORCE_START_PASS_OBS_LIFE_PROJECTION_FIX_RERUN_PENDING",
-      "implementation_parent": "origin/codex/ne07-full-acceptance@837006abf",
+      "status": "HOST_ENFORCE_START_PASS_CRASH_TAKEOVER_AND_OBS_FIXES_RERUN_PENDING",
+      "implementation_parent": "origin/codex/ne07-full-acceptance@b83c62c36",
       "runtime_root": "HOST_OBS_MONITOR_START_AND_STOP_ACCEPT_EXPLICIT_ISOLATED_RUNTIME_ROOT",
       "process_boundary": "EXPLICIT_RUNTIME_ROOT_FORCE_RESTART_AND_STOP_DO_NOT_SCAN_OR_TERMINATE_OTHER_HOST_INSTANCES",
       "secret_snapshot": "PASSWORD_PASSWD_SECRET_TOKEN_AUTH_KEY_AND_COUPLED_NEO4J_DIRECT_USERNAME_EXCLUDED_SAFE_SEC_REFS_ONLY",
@@ -90,15 +90,20 @@
       "runtime_snapshot_restart_fix": "EXCLUDE_BOTH_DIRECT_NEO4J_USERNAME_AND_PASSWORD_PERSIST_ONLY_SEC_AUTH_REF_FOR_ATOMIC_RESOLUTION",
       "obs_life_projection_finding": "MISSING_CANONICAL_LIFE_SOURCE_CURSOR_ZERO_USED_WALL_CLOCK_IN_PAYLOAD_CAUSING_REPEATED_SAME_CURSOR_DIFFERENT_DIGEST_CONFLICT",
       "obs_life_projection_fix": "MISSING_SOURCE_USES_DETERMINISTIC_GENERATED_AT_ZERO_REAL_SOURCE_REMAINS_BOUND_TO_UPDATED_AT_CURSOR_STORE_MONOTONIC_GATE_UNCHANGED",
+      "sixth_real_force_restart": "FAIL_CLOSED_SAFE_SNAPSHOT_REUSED_OLD_HOST_FORCE_KILL_LEFT_30_SECOND_EMBODIMENT_AUTHORITY_LEASE_REPLACEMENT_EXITED_WITH_AUTHORITY_UNAVAILABLE_ENFORCE_OPERATION_ACTIVATION_FAILED",
+      "sixth_real_force_restart_orchestrator_finding": "LAUNCHER_EXIT_WAS_NOT_OBSERVED_HEALTH_WAIT_CONTINUED_ABOUT_240_SECONDS_AND_PREVIOUS_OBS_NGINX_REMAINED_LISTENING",
+      "crash_takeover_fix": "ONLY_EXACT_EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE_RETRIES_FOR_DEFAULT_35_SECONDS_MAX_40_SECONDS_EXPIRED_PREDECESSOR_REQUIRES_HIGHER_FENCE_LIVE_HEARTBEAT_CANNOT_BE_STOLEN_OTHER_ERRORS_FAIL_IMMEDIATELY",
+      "force_restart_sidecar_boundary": "STOP_SAME_EXPLICIT_RUNTIME_ROOT_MONITOR_AND_OBS_BEFORE_REPLACEMENT_AND_REQUIRE_BOTH_PORTS_FREE",
+      "launcher_exit_boundary": "INITIAL_FINAL_CATALOG_WAIT_MONITORS_LAUNCHER_PID_AND_FAILS_IMMEDIATELY_AFTER_EXIT",
       "post_sidecar_stability_gate": "FIVE_CONSECUTIVE_EXPECTED_HOST_PID_LISTENER_FINAL_CATALOG_HEALTH_AND_READINESS_PAYLOAD_IDENTITY_CHECKS_PLUS_REAL_OBS_AND_MONITOR_ENDPOINTS",
       "failure_cleanup": "EXPLICIT_ACCEPTANCE_RUNTIME_ROOT_ONLY_WITH_SANITIZED_BOUNDED_HOST_LOG_TAIL",
       "monitor_ui": "NPM_CI_OPERATOR_CLIENT_LINT_TYPECHECK_15_READ_MODEL_TESTS_AND_PRODUCTION_BUILD_PASS",
       "nginx": "OFFICIAL_NGINX_1_31_3_INSTALLED_BY_WINGET_EXE_SHA256_C9D79164B117B32BE2E184037D8D0B97142A84203CE81183D580A215DC20EDBE",
-      "targeted_validation": "41_HEALTH_GUARDIAN_SERVICE_CATALOG_CONFIG_BOOTSTRAP_PLUS_18_RUNTIME_SNAPSHOT_LAUNCHER_PLUS_29_DOMAIN_CANONICAL_AND_LIVE_SOURCE_PROJECTION_PASSED",
+      "targeted_validation": "41_HEALTH_GUARDIAN_SERVICE_CATALOG_CONFIG_BOOTSTRAP_PLUS_18_RUNTIME_SNAPSHOT_LAUNCHER_PLUS_29_DOMAIN_CANONICAL_AND_LIVE_SOURCE_PROJECTION_PLUS_33_CRASH_TAKEOVER_CONFIG_ISOLATION_AND_STARTUP_ORCHESTRATION_PASSED_OVERLAPPING_SETS_NOT_ADDED",
       "powershell_parse": "PASS_SIX_START_STOP_SCRIPTS",
       "npm_audit": "OPEN_8_TOTAL_6_HIGH_BUILD_TOOLCHAIN_2_MODERATE_REACT_ROUTER_MAJOR_FIX_REQUIRED",
       "not_run": [
-        "generated secret-safe runtime snapshot exact Host restart and canonical recovery",
+        "successful generated secret-safe runtime snapshot Host restart with higher-fence crash takeover",
         "Obs projection daemon successful wave and health OK after deterministic Life fix",
         "authenticated protected Obs task read model and no-interception Playwright interaction",
         "Host crash restart and durable projection recovery",
@@ -106,6 +111,8 @@
       ],
       "evidence_refs": [
         "host_brain/app/settings/core.py",
+        "host_brain/app/asgi.py",
+        "host_brain/channels/embodiment.py",
         "host_brain/composition/agent_workspace.py",
         "scripts/runtime/start_host_side.ps1",
         "scripts/runtime/start_obs_side.ps1",
@@ -114,6 +121,7 @@
         "scripts/runtime/stop_obs_side.ps1",
         "scripts/runtime/stop_monitor_proxy.ps1",
         "tests/unit/test_agent_workspace_runtime_secret_ref.py",
+        "tests/unit/test_d8_host_runtime_authority_integration.py",
         "tests/unit/test_ne07_external_service_isolation.py",
         "tests/unit/test_runtime_startup_script_composition.py"
       ]

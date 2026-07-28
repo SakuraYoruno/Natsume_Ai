@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.43
+版本：v3.44
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_ENFORCE_START_PASS / OBS_LIFE_PROJECTION_FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_ENFORCE_START_PASS / CRASH_TAKEOVER_AND_OBS_FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1423,3 +1423,31 @@ Life snapshot 仍使用其 `updated_at_ms`。同一空源现在机械地产生�
 集合为 `29 passed in 23.25s`。只有重启后 projection daemon
 `last_success_ts_ms` 出现、failure wave 清零且 Obs health 为 OK，才能恢复
 Host/Obs/Monitor 栈通过口径。
+
+第六次真实启动以 `ForceRestart` 直接复用修正后的安全 snapshot。旧 Host
+被强杀后无法运行 ASGI shutdown hook，其 canonical embodiment authority
+Lease 仍在 30 秒 TTL 内；新 candidate 的单次 acquire 因而得到
+`EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE`，ENFORCE operation 以
+`SERVICE_CATALOG_START_CALLBACK_FAILED / ACTIVATION_FAILED` 留下 durable
+终态。旧 Lease 随后自然过期，owner、Lease 和 fencing token 在等待窗口内
+没有被新进程篡改。该跑次必须记为 `FAIL`；启动器还在已经死亡的 launcher
+上空等约 240 秒，并留下上一轮 Obs/Nginx，暴露的是实际 crash takeover 和
+编排清理缺口。
+
+修复后的合同为：
+
+- Host composition 只对精确
+  `EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE` 做有界异步重试，默认等待
+  35 秒、上限 40 秒，覆盖既有 30 秒 Lease TTL；
+- predecessor Lease 到期后必须由 repository 原子取得更高 fence；live
+  heartbeat 会持续续租并使 replacement 超时失败，禁止抢占；
+- 配置、存储、Edge rebind 或其他 RuntimeError 不得进入等待循环；
+- `ForceRestart` 在拉起新 Host 前先按同一显式 runtime root/端口停止旧
+  Monitor 与 Obs，并复核监听端口为空；
+- 首次 catalog identity 等待同时观察 launcher PID，子进程退出立即失败，
+  不再把 240 秒超时当作必要等待。
+
+authority、启动脚本、隔离与配置的定向集合为
+`33 passed in 34.32s`，PowerShell 解析通过。该集合只证明代码边界；下一次
+真实跑次必须同时证明更高 fence takeover、Obs projection 成功 wave、
+Host/Obs/Nginx 无残留切换和认证 Monitor 交互，才可继续 Edge/Gateway。
