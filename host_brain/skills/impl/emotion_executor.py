@@ -149,13 +149,24 @@ def _execute_bond_update(payload: dict[str, Any], context: dict[str, Any] | None
     bond_update_queue = ctx.get("bond_update_queue")
     if bond_update_queue is not None:
         try:
-            bond_update_queue.enqueue(
+            queue_result = bond_update_queue.enqueue(
                 event_type=event_type,
                 delta=delta,
                 user_id=user_id,
                 note=note,
                 session_id=session_id,
             )
+            if isinstance(queue_result, dict) and str(queue_result.get("status") or "") == "RETIRED_CANONICAL_LIFE":
+                return {
+                    "event_type": event_type,
+                    "delta": delta,
+                    "queued": False,
+                    "status": "RETIRED_CANONICAL_LIFE",
+                    "reason_code": str(
+                        queue_result.get("reason_code")
+                        or "LEGACY_BOND_QUEUE_RETIRED"
+                    ),
+                }
             _logger.info("Bond 积分更新（bond_update_queue）: event=%s, delta=%s", event_type, delta)
             return {"event_type": event_type, "delta": delta, "queued": True}
         except Exception as exc:

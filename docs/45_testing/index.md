@@ -46,6 +46,12 @@
   无状态规则对象，同一冻结输入仍得到相同动机投影；配合 Motive/Limbic 定向集合为
   `37 passed in 1.55s`。这只证明模块级缓存已退役，不证明 volatile Bond queue、关系后效应、
   真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_ne01_host_bond_runtime.py`、`test_ne01_host_lifecycle_composition.py`、
+  `test_ne01_agent_runtime_composition.py`、`test_cortex_agent.py`、`test_bond_async_queue.py`、
+  `test_surface_emotion_bond_flow.py` 与 `test_bond_routes_api.py` 现验证 production Host 不再
+  构造真实 Bond writer/worker queue，canonical Cortex 不解析 queue，Surface hook 不回退写分数，
+  legacy `/bond/event` 返回 `410`。该定向集合为 `84 passed in 12.82s`；这是本地退役边界证据，
+  不证明 legacy emotion timeline、真实模型、远端 Edge/provider 或 DL-07 服务栈完成。
 - 上述 Host/Limbic/Endocrine、fusion 与旧 organ 邻接文件的最终合并定向回归为
   `149 passed in 33.81s`。它是覆盖重叠后的单一集合，不能与前述批次相加，也不构成波次集成或真实服务栈验收。
 - `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted

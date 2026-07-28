@@ -128,7 +128,9 @@ production BodySense 也已完成 read-only cutover：Surface/startup 不再构�
 typed Life snapshot reader 按 exact relationship subject 纯投影身体在场；缺 scope 不能回退到 default/global。
 legacy BodySense tick、loneliness 和 conversation mutation 统一 `RETIRED_CANONICAL_LIFE`，retired tick 不会
 再经 EventBus 影响 silence 或 self-affect。Motive factory 已移除模块级 instance，每次仅对当前输入
-做无状态规则投影；volatile Bond queue 尚未完成 cutover。
+做无状态规则投影；production volatile Bond queue 及 score writer 已完成 no-write cutover：
+`ProcessApplicationPorts` 不再构造它们，Host/Cortex/Surface 只得到显式 retired result，stage/graph
+保留只读兼容；legacy emotion timeline projection 尚未完成 cutover。
 
 0148 的 `CompanionProfileIngress` 现在把一条更窄的直接控制路径加入同一 composition：
 `POST /v1/digital-life/relationship/companion-profile` 经 `host.companion-profile` 验证

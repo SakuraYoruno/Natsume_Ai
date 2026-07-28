@@ -350,6 +350,26 @@ def test_agent_runtime_scope_fails_closed_when_nested_host_provider_is_missing()
         )
 
 
+def test_agent_runtime_retires_surface_bond_flow_without_resolving_queue() -> None:
+    def _unexpected_queue():
+        raise AssertionError("canonical Agent Runtime must not resolve Bond queue")
+
+    ports = build_agent_runtime_application_ports(
+        host_services=_host_services(bond_update_queue=_unexpected_queue),
+        life_authority_provider=lambda: (object(), object()),
+    )
+
+    assert ports.apply_surface_emotion_bond_flow(
+        request_id="request-retired-surface-bond",
+        person_id="person-retired-surface-bond",
+        session_id="session-retired-surface-bond",
+    ) == {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_SURFACE_BOND_FLOW_RETIRED",
+    }
+
+
 def test_production_adapters_do_not_import_the_retired_global_port_bundle() -> None:
     root = Path(__file__).resolve().parents[2]
     production_files = (

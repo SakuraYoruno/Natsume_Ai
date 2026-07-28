@@ -288,6 +288,12 @@ async def submit_bond_event(
             emotion_intensity=float(body.emotion_intensity if body.emotion_intensity is not None else 0.5),
         )
         if not result.success:
+            if str(result.reason_code or "") == "LEGACY_BOND_WRITE_RETIRED":
+                raise HTTPException(
+                    status_code=410,
+                    detail="Legacy Bond score writes are retired; use canonical Digital Life relationship commands.",
+                    headers={"X-Reason-Code": "LEGACY_BOND_WRITE_RETIRED"},
+                )
             raise HTTPException(
                 status_code=409,
                 detail=result.detail,

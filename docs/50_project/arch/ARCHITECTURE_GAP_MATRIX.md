@@ -8,6 +8,10 @@
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
+> **最新执行焦点：** 当前已进入 `DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER`。下段保留的是
+> Motive 子切片结束时的完整背景；其中“volatile Bond queue 未完成”的描述已被本页后文的
+> “Bond queue 退役修订”取代，不能再作为当前结论。
+
 > 当前活动波为 `NE-08 / DL-06_MOTIVE_GLOBAL_SINGLETON_RETIREMENT_SLICE`。数字生命产品缺口优先于剩余通用架构验收：canonical Life kernel 已可将 typed Appraisal 折叠为 bounded mixed self-affect，且 ASGI Input/Tribe composition 已把 `AffectFusionService` 接入真实代码路径；有 Life authority 时不会解析 compatibility `HostEmotionRuntime`。DL-03 还将 accepted reply 的 provisional relationship episode 与下一次用户输入的 aftereffect 交给同一 canonical Life journal，关系以 workspace + subject 连续，边界、未接住和修复不能被沉默、投递失败或单次道歉自动消解，Surface 只消费可信内部 hand-off。DL-04 已在该 hand-off 后冻结 scope-bound `AffectiveTurnPlanV1`：普通低歧义回合可通过真实 provider stream 逐句输出，句子在可见前先进入 canonical Life intent，模型候选和外部 emotion hint 都不能覆盖 self-affect。DL-05 又在该同一 plan/revision/sync 上持久化 Voice `SPEAK`、Avatar `TRANSITION` 及 `CANCEL/RELEASE` 的 Host protocol；0146 projection 只证明 Host staging，不能证明远端播放或 Avatar 已执行。DL-06 现要求 Scheduler 主动消息显式 `ALLOWED`、无 repair/active episode/self-regulation hold，并以 canonical self-affect 适配既有 impulse/risk 算法；accepted reply 还会原子登记 scope-bound `CompanionProactiveTargetV1`，Scheduler 只读选择 frozen-Scene-compatible target，旧 Bond/legacy affect/fixed template/`last_target` 均无发送权。已完成的 `proactive.gateway` Host/Gateway receipt 现在经 outbox、摘要、scope 与 target 重验后才打开 deterministic `PROACTIVE_MESSAGE` episode；receipt 后崩溃仅以只读扫描补记 relation command，绝不重发。0147 则把低风险 companion profile 置于同一 authority：只有五条独立、跨三天、强且 boundary-safe 的 aftereffect 才能发起五互动 canary，CANARY/ACTIVE identity 真实冻结到文本、TTS 与 Avatar Host plan，第五条合格 canary 后效应会自动 activation，随后只能精确回滚到此版本原定的旧 profile。普通 `0.72` 文本分类不能自动累积此证据。production canonical Tribe authority 现会阻断 Limbic 的 legacy persistence、metabolism、timeline、decay 与 Bond callback，并让 Endocrine 的 legacy delta/last-state/hint/fan-out return `RETIRED_CANONICAL_LIFE`；Circadian/MirrorNeuron 不再绕过它直接写私有字段。production Surface/startup 也不再 warmup/read global `BodySenseModel`，而是以 exact relationship subject 从 Life snapshot 纯投影身体在场；legacy BodySense mutation 退役且不发伪 EventBus update。Motive 兼容 factory 现已移除模块级 engine，只能按当前输入快照纯投影，不能保存跨 turn 状态。这仍不等于全量旧 writer 清零：volatile Bond queue、Monitor/Review、受治理 Budget stream、连接恢复、真实 Edge receipt、真实模型和真实服务验收均未完成。下文的 NE-07 记录是历史服务栈基础，不能据此把情感数字生命标记为完成。
 
 **0148 修订：** 当前子波已改为 `DL-06_AUTOMATIC_PROFILE_CANARY_ACTIVATION_SLICE`。Host 的
@@ -50,6 +54,14 @@ Bond、loneliness、task、immune callback 均返回 `RETIRED_CANONICAL_LIFE` �
 MirrorNeuron 已不再写 `_bond_*` 私有字段，只能提交受控 compatibility delta，后者在 canonical mode
 同样拒写。这个本地收口不包含 BodySense、Motive、volatile Bond queue、Monitor/Review、真实 provider、
 远端 Edge 或服务栈验收。
+
+**Bond queue 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
+construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧
+writer/queue 请求返回 `RETIRED_CANONICAL_LIFE`，不创建 worker、backlog 或失败后 direct writer；canonical
+Cortex 在解析 queue 前即拒绝旧 mutation，Surface post-process 也只记录 retired result。历史
+`POST /bond/event` 在 production adapter 下返回 `410 LEGACY_BOND_WRITE_RETIRED`。因此 volatile Bond
+queue 不再是生产关系 authority；legacy emotion timeline、Monitor/Review、受治理 Budget、真实 provider/Edge
+与服务栈验收仍未完成。
 
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与

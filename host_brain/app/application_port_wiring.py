@@ -51,8 +51,6 @@ def build_process_application_ports(
         resolve_model_provider_credential,
     )
     from host_brain.app.multimodal_observer import MultimodalObserver
-    from host_brain.bond.async_queue import BondUpdateQueue
-    from host_brain.bond.bond_dynamics import BondDynamicsWriter
     from host_brain.bond.bond_stage_engine import BondStageEngine
     from host_brain.bond.shared_memory_index import SharedMemoryIndex
     from host_brain.app.recall.semantic_recall import SemanticRecaller
@@ -104,8 +102,6 @@ def build_process_application_ports(
         graph_handler_bindings=graph_handler_bindings,
         graph_runtime_factory=GraphRuntimeContract,
         bond_stage_engine_factory=BondStageEngine,
-        bond_dynamics_writer_factory=BondDynamicsWriter,
-        bond_update_queue_factory=BondUpdateQueue,
         shared_memory_index_factory=SharedMemoryIndex,
         multimodal_observer_factory=MultimodalObserver,
         conversation_turn_store_factory=conversation_turn_store_factory,

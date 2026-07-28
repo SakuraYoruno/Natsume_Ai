@@ -25,7 +25,6 @@ from host_brain.app.route_catalog_runtime import (
     resolve_surface_reply_llm_runtime,
 )
 from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact
-from host_brain.app.surface_emotion_bond_flow import apply_surface_emotion_bond_flow
 from host_brain.app.tts_route import resolve_tts_route
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion
@@ -95,7 +94,6 @@ def build_agent_runtime_application_ports(
     )
     prompt_registry = host_services.require_provider("prompt_registry")
     model_attempt_service = host_services.require_provider("model_attempt_service")
-    bond_update_queue = host_services.require_provider("bond_update_queue")
     model_route_catalog = host_services.require_provider("model_route_catalog")
     bond_stage_engine = host_services.require_provider("bond_stage_engine")
     session_topic_ledger_store = host_services.require_provider(
@@ -193,11 +191,19 @@ def build_agent_runtime_application_ports(
     def build_user_preference_pack_with_ledger(**kwargs: Any) -> dict[str, Any]:
         return build_user_preference_pack(ledger=ledger(), **kwargs)
 
-    def apply_surface_emotion_bond_flow_with_queue(**kwargs: Any) -> dict[str, Any]:
-        return apply_surface_emotion_bond_flow(
-            queue=bond_update_queue(),
-            **kwargs,
-        )
+    def retire_surface_emotion_bond_flow(**_kwargs: Any) -> dict[str, Any]:
+        """Keep the old Surface hook observable without resurrecting Bond writes.
+
+        Foreground relationship outcomes are already committed through the
+        canonical Life relationship lifecycle before this post-process stage.
+        A second score queue would be volatile and could contradict recovery.
+        """
+
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_SURFACE_BOND_FLOW_RETIRED",
+        }
 
     def task_status_projection() -> Any:
         return build_durable_task_status_projection(ledger=ledger())
@@ -238,7 +244,7 @@ def build_agent_runtime_application_ports(
             resolve_surface_reply_llm_runtime_with_catalog
         ),
         resolve_state_arbiter_bond_fact=resolve_state_arbiter_bond_fact_with_engine,
-        apply_surface_emotion_bond_flow=apply_surface_emotion_bond_flow_with_queue,
+        apply_surface_emotion_bond_flow=retire_surface_emotion_bond_flow,
         build_conversation_experience_read_pack=conversation_experience_read_pack,
         drive_stream_vts_emotion=drive_stream_vts_emotion_with_ledger,
         resolve_tts_route=resolve_tts_route_with_host_services,

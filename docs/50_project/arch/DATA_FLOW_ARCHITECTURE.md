@@ -542,8 +542,9 @@ rupture，`MISUNDERSTOOD` 与 `REPAIR_UNRESOLVED` 保留 repair required；`SILE
 Surface 不能直接读写关系账本：Input runtime 只把 canonical result 标成 trusted hand-off，
 reply compiler 才把它变成“尊重空间、不索取回应、不把修复说成完成、不使用排他或
 负罪施压”的 facts/must-not/style anchors。外部 `emotion_context` 没有 marker 时被忽略。
-生产 `HostBondRuntime` 默认关闭 score-driven automatic stage transition；旧 Bond queue
-和 projection 仍为 compatibility，直到 DL-06 才能声称 writer usage=0。
+生产 `HostBondRuntime` 默认关闭 score-driven automatic stage transition；production Host 已删除旧
+Bond queue/writer construction，只有 no-write retired adapter 与 score/stage read projection 保留，不能
+再由 queue crash、full 或 fallback 影响关系事实。
 
 DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由
@@ -646,7 +647,8 @@ timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
 没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
 `RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive 每次只对当前输入快照新建
-无状态投影，已不再保存模块级 engine；volatile Bond queue 与旧 timeline 的只读投影仍未清零。
+无状态投影，已不再保存模块级 engine；production volatile Bond queue 已无 worker/backlog，旧 timeline
+的只读投影仍未清零。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal

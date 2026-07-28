@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_MOTIVE_GLOBAL_SINGLETON_RETIREMENT_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -48,8 +48,8 @@
 > profile 仅含低风险表达偏好和 opaque refs；其 ID/digest/revision 会进入下一次冻结的文本、
 > Voice 与 Avatar plan，不能修改 Soul、consent 或 self-affect。生产文本 classifier 的 `0.72`
 > 不满足门槛，不能被当成自动成长成功。
-> `HostEmotionRuntime`、Limbic、Endocrine 与 global BodySense 的生产写入已逐项切断，Motive 也已降为无模块级缓存的纯规则投影；但 legacy
-> Bond queue 与 Surface 的其它兼容 state 仍未清零；Monitor 审核、canary 长期收益、真实模型和三模态物理服务也尚未闭环。因此状态仍为
+> `HostEmotionRuntime`、Limbic、Endocrine 与 global BodySense 的生产写入已逐项切断，Motive 也已降为无模块级缓存的纯规则投影，production
+> Bond queue/writer 已退役为 no-write adapter；但 legacy emotion timeline 与 Surface 的其它兼容 state 仍未清零；Monitor 审核、canary 长期收益、真实模型和三模态物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 > 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
@@ -404,7 +404,13 @@ BodySense 同样不再被 Surface/startup warmup/read：`project_body_sense_from
 relationship subject 的 canonical Life snapshot，Limbic canonical mode 的 tick/loneliness/conversation
 mutation 统一退役，且 retired tick 不发布 Bus update。`MotiveEngine` 同时移除模块级 `_engine`，factory
 每次返回新建的纯规则对象；它不能存储跨 turn 的情感、关系或学习上下文。该事实仍不等于全量旧 writer
-清零：Bond queue 和 timeline compatibility projection 的 read-only/retirement 边界仍待后续切断。
+清零：legacy emotion timeline compatibility projection 的 read-only/retirement 边界仍待后续切断。
+
+**Bond queue 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
+`BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 只保留 stage/graph 的
+read compatibility，并返回没有 worker、backlog 或直接 writer fallback 的 retired adapter；canonical
+Cortex 也会在解析 queue 前拒绝旧 Bond mutation。`/bond/event` 仍为历史写 API，但遇到该 adapter 固定
+返回 `410 LEGACY_BOND_WRITE_RETIRED`。这不证明 legacy emotion timeline 已变成 canonical projection。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

@@ -13,7 +13,7 @@ from host_brain.bond.bond_stage_engine import (
 )
 from host_brain.app.bond_routes import create_bond_router
 from host_brain.app.host_route_ports import HostRoutePorts
-from host_brain.bond.bond_dynamics import BondDynamicsWriter
+from host_brain.bond.bond_dynamics import BondDynamicsWriter, RetiredBondDynamicsWriter
 from host_brain.bond.user_identity import get_canonical_bond_user_id
 
 
@@ -26,6 +26,17 @@ def client():
     app.include_router(create_bond_router(HostRoutePorts(
         bond_engine_provider=lambda: engine,
         bond_writer_provider=lambda: BondDynamicsWriter(stage_engine=engine),
+    )))
+    return TestClient(app)
+
+
+@pytest.fixture
+def retired_write_client():
+    engine = BondStageEngine()
+    app = FastAPI()
+    app.include_router(create_bond_router(HostRoutePorts(
+        bond_engine_provider=lambda: engine,
+        bond_writer_provider=RetiredBondDynamicsWriter,
     )))
     return TestClient(app)
 
@@ -170,6 +181,19 @@ class TestBondEventValidation:
             "evidence_refs": ["evt::valid"],
         })
         assert resp.status_code == 200
+
+    def test_retired_production_writer_rejects_legacy_score_mutation(
+        self,
+        retired_write_client,
+    ):
+        resp = retired_write_client.post("/bond/event", json={
+            "user_id": "user-retired",
+            "update_kind": "INTERACTION",
+            "evidence_refs": ["evt::retired"],
+        })
+
+        assert resp.status_code == 410
+        assert resp.headers.get("x-reason-code") == "LEGACY_BOND_WRITE_RETIRED"
 
 
 # ── T-BOND-API-06: GET /bond/users ───────────────────────────────────────────

@@ -216,11 +216,12 @@ def build_production_host_application_ports(
     bond_runtime_owner = HostBondRuntimeOwner(
         ledger_provider=ledger_provider,
         stage_engine_factory=process_application_ports.bond_stage_engine_factory,
-        dynamics_writer_factory=(
-            process_application_ports.bond_dynamics_writer_factory
-        ),
-        update_queue_factory=process_application_ports.bond_update_queue_factory,
+        dynamics_writer_factory=None,
+        update_queue_factory=None,
         client_factory=build_host_bond_client,
+        # Digital Life owns production relationship mutation.  This Host owner
+        # keeps only legacy read projections alive during the rollback window.
+        legacy_write_authority_enabled=False,
     )
     evolution_runtime_owner = HostEvolutionRuntimeOwner(
         persistence_db_path_provider=(

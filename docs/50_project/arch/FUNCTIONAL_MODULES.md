@@ -10,7 +10,7 @@
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> `NE-08 / DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE` 已把实时情感陪伴设为当前产品主线。
+> `NE-08 / DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER` 已把实时情感陪伴设为当前产品主线。
 > Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
 > head：`EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
 > Regulation`；ASGI Input composition 又将 `AffectFusionService` 接入输入入口。
@@ -20,8 +20,8 @@
 > DL-03 再将 accepted reply 的 provisional relationship episode 与下一次用户输入的
 > aftereffect 写入相同 journal；Surface 只从内部 provenance hand-off 获取关系边界，
 > 不接受请求伪造。HostEmotionRuntime、Limbic、Endocrine 与 global BodySense 的 production mutation 已逐项切断；
-> BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪，Bond 与 Surface
-> 仍有兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
+> BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪；production Bond writer/queue 已退役为只读 projection 与明确 no-write adapter，Surface
+> 仍有其它兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
 > episode 与旧 writer 清零仍待后续 DL 波。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`
 > 接到 Surface 主链：普通低歧义文本在可见前逐句落 journal，模型输出不能回写
@@ -197,7 +197,8 @@ Tribe ports 还会令 Limbic 的 legacy persistence、metabolism、timeline appe
 organ 退役：Endocrine 的 legacy delta/last-state/hint/fan-out 现同样 no-op；Circadian/MirrorNeuron
 只能调用它的受控 compatibility port，不再触碰私有字段。BodySense 的 legacy global model 也不再被
 production Surface/startup 读取，canonical Limbic 必须从 scoped Life snapshot 做纯投影，且 legacy tick/
-loneliness/conversation mutation 不发布伪更新。Motive 和 Bond queue 的兼容写权仍列为 DL-06 后续项。
+loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond queue/writer 已退役；legacy
+emotion timeline 的投影边界仍列为 DL-06 后续项。
 
 Internal terminal recovery 模块除 #114 的精确后置审核取消外，当前还拥有一个独立的 signed raw-failure claim contract：它只从无取消意图、零投影/Effect、单节点和单 Budget 的原子失败终态生成 deterministic result，并要求先结算 Secure Ingress claim、再清理 Workspace/stage。该模块不拥有一般 failure/cancellation/multi-node/unknown-effect recovery authority。
 

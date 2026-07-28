@@ -37,6 +37,13 @@ class CortexAgent:
         emotion_context: dict[str, Any] | None,
         ts_ms: int,
     ) -> dict[str, Any]:
+        if self.application_ports is not None and self.application_ports.uses_canonical_affective_life():
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "LEGACY_BOND_WRITE_RETIRED",
+            }
+
         from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
         from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
 
@@ -66,6 +73,16 @@ class CortexAgent:
         queue_result = dict(queue.enqueue(bond_payload) or {})
         if str(queue_result.get("status") or "") == "QUEUED":
             return {"status": "QUEUED", "update_kind": update_kind}
+        if str(queue_result.get("status") or "") == "RETIRED_CANONICAL_LIFE":
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": str(
+                    queue_result.get("reason_code")
+                    or "LEGACY_BOND_QUEUE_RETIRED"
+                ),
+                "update_kind": update_kind,
+            }
 
         stage_engine = get_social_brain_agent().resolve_stage_engine()
         writer = BondDynamicsWriter(

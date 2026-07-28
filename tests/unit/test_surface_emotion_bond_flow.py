@@ -6,6 +6,7 @@ from host_brain.app.surface_emotion_bond_flow import (
     plan_surface_emotion_bond_update,
 )
 from host_brain.bond.bond_stage_engine import BondStageEngine, compute_affinity_delta
+from host_brain.bond.async_queue import RetiredBondUpdateQueue
 
 
 def test_negative_affect_with_supportive_reply_becomes_emotional_support() -> None:
@@ -105,6 +106,22 @@ def test_apply_surface_emotion_bond_flow_fails_closed_without_queue() -> None:
 
     assert result["status"] == "FAILED"
     assert result["queue_reason_code"] == "BOND_UPDATE_QUEUE_NOT_COMPOSED"
+
+
+def test_surface_bond_flow_reports_retired_queue_without_fallback_write() -> None:
+    result = apply_surface_emotion_bond_flow(
+        request_id="req-retired-surface-bond",
+        person_id="user-1",
+        session_id="sess-1",
+        user_message="我想先自己待会儿。",
+        assistant_reply="好，我先给你一点空间。",
+        emotion_context={"emotion_tag": "TIRED"},
+        reply_plan={"primary_topic": "give_space"},
+        queue=RetiredBondUpdateQueue(),
+    )
+
+    assert result["status"] == "RETIRED_CANONICAL_LIFE"
+    assert result["queue_reason_code"] == "LEGACY_BOND_QUEUE_RETIRED"
 
 
 def test_bond_stage_engine_uses_real_valence_for_texture() -> None:
