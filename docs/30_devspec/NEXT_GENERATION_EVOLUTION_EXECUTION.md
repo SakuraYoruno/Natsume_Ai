@@ -5,13 +5,14 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.32
+版本：v3.33
 日期：2026-07-28
-状态：`NE-03_IN_PROGRESS / PROGRAM_INCOMPLETE`
+状态：`NE-02_IN_PROGRESS / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
-`dev@27b032f1e` 的同库七路线收据全部 `PASS`，receipt digest 为
-`sha256:1a4ae4890d5cbf32275898681dcaec02c3948dd862ad1056481b53ab4d330383`；
+`dev@7e9b090b3` 的 migration 0140 同库七路线收据全部 `PASS`，receipt
+digest 为
+`sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`；
 一次去重恢复波次以 `24 passed in 165.99s` 覆盖一般图形、跨进程 checkpoint、
 签名 unknown-effect/cancellation、并行 failure/Budget/Review 和真实 Git
 Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE-01 生产
@@ -19,7 +20,8 @@ Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE
 与 Docker 全栈仍必须在 NE-07 完成。`DEGRADE/REVIEW` 没有 runtime state
 machine，继续 proposal-only 且零 mutation 失败关闭；unknown effect 必须
 签名对账，不把自动归因列为完成条件。NE-02 已完成本地机械波次并保持
-`ACCEPTANCE_PENDING_EXTERNAL`；当前唯一活动实现波为 NE-03。
+`ACCEPTANCE_PENDING_EXTERNAL`；当前唯一活动实现波为 NE-02 的真实
+Research/Code/Pentest cohort 验收。
 
 当前批次封闭 outer settlement 前进程崩溃的 mixed-terminal 窗口：
 
@@ -187,7 +189,7 @@ exact TaskGraph node authority 下调用。Executive 执行文件必须不存在
 
 历史 Chat 副作用切片先把 `transactional_side_effects` 从 `PARTIAL` 提升为单控制项 `PASS`：两个 Life Acceptance Effect 必须在 exact command 的完整 projection-intent 集合和 durable receipts 全部吻合后才能 COMMIT；foreground 的 `surface.post_process` receipt 又要求 visible assistant turn 与 LifeMemory admission 已持久成功。该切片当时 Chat 仍不完整；后续 `3d68bd1e` 正式收据已补齐 commit binding 与模型 Budget，所以当前 Chat 为 `COMPLETE`。外部 Gateway delivery 仍是幂等 eventual delivery，不属于同一 SQL transaction。
 
-Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；0137 又增加 `long_term_goal.activate/revoke` 两条受治理命令，现行 Operator 为 `16 active / 23 retired / 39 known / blocked=0`，Scheduler surface 不计入该库存。当前连续 migration head 为 0137；0133～0135 固化节点 Verification、Acceptance/Review 和 denial terminal，0136 独立持有 PlanningSearch cohort evidence，0137 独立持有 runtime-fenced 长期目标 authority，均不改写 Scheduler authority。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
+Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 governed state control 及 0129 Host mode-policy journal 边界保持有效；0137 又增加 `long_term_goal.activate/revoke` 两条受治理命令，现行 Operator 为 `16 active / 23 retired / 39 known / blocked=0`，Scheduler surface 不计入该库存。当前连续 migration head 为 0140；0133～0135 固化节点 Verification、Acceptance/Review 和 denial terminal，0136 独立持有 PlanningSearch cohort evidence，0137 独立持有 runtime-fenced 长期目标 authority，0138～0140 独立持有 proposal-only trusted Lab 数据链，均不改写 Scheduler authority。Scheduler 管理命令历史批次为 `34 passed in 139.12s`，不与当前恢复批次相加；Gate 3 当时发现 `acceptance_effects.py:1511` 后通过真实拆分回到 1500 行，未扩白名单。该历史证据不等于部署 key、真实 HTTP/network canary、完整 Host 进程重启、一般恢复全覆盖、事务化 Chat 或 NE-01 完成。
 
 当前后续切片以最新 `origin/dev` 为动态基线，不再把任何历史提交号当固定 Goal authority。多节点恢复在既有双 checkpoint、共享 `EXCEEDED` 缺失落账与 four-root mixed settlement 之上，新增五节点 `root → (left,right) → join → tail` 菱形图和八个并行根节点的真实 SQLite 重启恢复：精确 `COMMITTED` checkpoint 只按不可变图序续接，依赖满足后才释放后继，每个 worker 调用一次，不存在固定四节点恢复上限。0130 同时把 `UNKNOWN_SIDE_EFFECT`、`CANCELLATION_CROSSING`、checkpoint Budget/authority `CONFLICT` 冻结为 exact Graph/Node/Attempt/Operation/Budget/cancellation/active-Lease 版本绑定的 append-only case。当前实现已把 known interruption 的 `RECOVERY_REQUIRED` marker、Operation Outbox、0130 case 与 case Outbox收进同一 SQLite UoW；Budget/Lease/lifecycle 后续推进不再让未对账 case从 current inventory消失，Graph cancellation 会追加 intent-bound successor 并淘汰旧 unknown current case。前两类仍须各自签名对账，冲突保持 quarantine 且不得取得 takeover Lease。状态提升为 `ATOMIC_INTERRUPTION_RECOVERY_HOLD_LOCAL_PROVEN / GENERAL_SHAPE_COMMITTED_CHECKPOINT_RECOVERY_LOCAL_PROVEN / GENERAL_RECOVERY_INCOMPLETE`，但不改变 NE-01=`IN_PROGRESS`、wave integration=`NOT_RUN`、Docker full stack=`NOT_RUN_NE07` 或 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -577,7 +579,7 @@ ReAct 与 Visual 的退役结论、历史 inventory 和测试批次保持各自�
 
 完成条件：Research planning、主动行为、记忆写入三类实验可重复；同 seed/dataset digest 结果稳定；Lab 外部副作用为 0。
 
-当前边界：总体波次状态保持 `NE-04_IN_PROGRESS`。0108 V1 与 0122 structural V2 保持只读且永久 `benefit_eligible=false`。0138 独占 trusted operation/event 与 append-only run/report/proposal/golden-suite，0139 另建 trusted redaction receipt namespace 并移除 0138 对 0108 表的误拦截，0140 原子持久化 sanitized real-trace dataset、Manifest 与 digest-only Receipt；migration head 为 0140，raw trace 不落库。只有首次 fenced claim 可启动 sandbox，活租约重放不可执行，过期或未知终态进入 reconciliation，完成后只重开 exact receipt。专用 production composition 现已接入 synthetic/redacted DatasetReader、受限 trace intake、digest-pinned Docker executor、独立 verifier 与两个 SQLite authority，并明确不复用可降级为 subprocess 的 Airlock。Research Planning、Proactive、Memory Write 六个真实容器 arm、response-loss exact reopen 和 0140 restart/tamper/atomic rollback 均通过。query-only repository、Obs 第 22 个 producer、GET route 与 Monitor 页面已经接通，只公开 proposal-only 证据。当前最终 Python 波次为 `84 passed in 182.60s`，包含真实 Docker 且不与此前回归批次相加；正式 commit-bound suite receipt 必须在实现提交后生成，故证据子状态为 `LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS / COMMIT_BOUND_SUITE_PENDING_POST_COMMIT`，整个演化计划仍为 `IN_PROGRESS`。
+当前边界：活动波次已切换为 `NE-02_IN_PROGRESS`；NE-04 本地可信实验状态为 `LOCAL_ACCEPTANCE_PASS / PROPOSAL_ONLY / PROGRAM_INCOMPLETE`。0108 V1 与 0122 structural V2 保持只读且永久 `benefit_eligible=false`。0138 独占 trusted operation/event 与 append-only run/report/proposal/golden-suite，0139 另建 trusted redaction receipt namespace 并移除 0138 对 0108 表的误拦截，0140 原子持久化 sanitized real-trace dataset、Manifest 与 digest-only Receipt；migration head 为 0140，raw trace 不落库。只有首次 fenced claim 可启动 sandbox，活租约重放不可执行，过期或未知终态进入 reconciliation，完成后只重开 exact receipt。专用 production composition 现已接入 synthetic/redacted DatasetReader、受限 trace intake、digest-pinned Docker executor、独立 verifier 与两个 SQLite authority，并明确不复用可降级为 subprocess 的 Airlock。Research Planning、Proactive、Memory Write 六个真实容器 arm、response-loss exact reopen 和 0140 restart/tamper/atomic rollback 均通过。query-only repository、Obs 第 22 个 producer、GET route 与 Monitor 页面已经接通，只公开 proposal-only 证据。最终 Python 波次为 `84 passed in 182.60s`，包含真实 Docker且不与此前回归批次相加；clean-commit suite 已绑定 `b68a8b9dd30588493d1a19c1836efb6206a28bde`，receipt digest 为 `020c8fc00953df66bcfcb5ad3e93a75ee92a7f10979cbafd471b5cc3ca84cea3`，exact replay 后 Lab 表计数、收据哈希和容器计数均不变。整个演化计划仍为 `IN_PROGRESS`。
 
 ### NE-05：Skill Compiler、成熟度与签名供应链
 
@@ -729,7 +731,7 @@ FAIL
 - 同一外部依赖阻塞连续出现且无安全替代；
 - 发现目标合同本身矛盾，继续实现会产生第二 authority。
 
-代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0137_long_term_goal_authority.sql`：0115～0132 保留为连续历史资产，0133 固化节点 Verification 与直接拒绝终态，0134 固化节点 Acceptance/Review 创建边界，0135 固化拒绝后的 Node/Graph/Budget/Outbox 原子 settlement，0136 独立持有 PlanningSearch cohort evidence/proposal，0137 独立持有 runtime-fenced 长期目标 event/head；这些资产不创建第二个通用 Graph settlement authority。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
+代码难、测试慢、旧文档冲突或实现量大都不是停止理由。每个迁移必须 expand-first、读写可切、数据可备份；禁止 destructive down migration。Core Release manifest 的 `migration_head` 始终以仓库中实际连续的最高 migration 为准；当前分支已推进到 `0140_evolution_lab_redacted_dataset.sql`：0115～0132 保留为连续历史资产，0133 固化节点 Verification 与直接拒绝终态，0134 固化节点 Acceptance/Review 创建边界，0135 固化拒绝后的 Node/Graph/Budget/Outbox 原子 settlement，0136 独立持有 PlanningSearch cohort evidence/proposal，0137 独立持有 runtime-fenced 长期目标 event/head，0138～0140 独立持有 proposal-only 的 trusted Lab、redaction 与 sanitized dataset；这些资产不创建第二个通用 Graph settlement authority。后续 NE 波次继续使用 next-free 编号，不得把旧的固定值写回合同或测试。
 
 ## 8. 后续 Goal 定义
 
@@ -1115,7 +1117,7 @@ Review/checkpoint 集合为 `39 passed in 6.56s`，文档/交付合同为
 
 NE-02 cohort authority 对应 migration
 `0136_planning_search_cohort_ledger.sql`；仓库当前连续 head 已是
-`0137_long_term_goal_authority.sql`。0136 建立一个
+`0140_evolution_lab_redacted_dataset.sql`。0136 建立一个
 append-only owner，统一持有 Research 24、Code 20、Pentest 30 的冻结
 registration、成员 evidence、来源 proof、完整报告和跨域 promotion proposal。
 它不持有模型、工具、Task 或 activation writer。

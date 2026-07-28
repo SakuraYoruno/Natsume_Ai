@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "6a4c23cab683709c0dcbce75fd68fd9445f88135",
+    "dev_commit": "7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE04_0140_REDACTED_TRACE_TRUSTED_DOCKER_GOLDEN_QUERY_ONLY_OPERATOR_AND_MONITOR_LOCAL_WAVE_PASS_COMMIT_BOUND_SUITE_PENDING_POST_COMMIT"
+    "evaluated_source": "NE01_SEVEN_ROUTE_RECEIPT_REBOUND_TO_MERGED_DEV_AT_0140_NE04_TRUSTED_DOCKER_GOLDEN_QUERY_ONLY_OPERATOR_LOCAL_ACCEPTANCE_PASS_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-04",
+  "active_wave": "NE-02",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "NE04_0138_FENCED_AUTHORITY_0139_REDACTION_NAMESPACE_REPAIR_0140_ATOMIC_SANITIZED_DATASET_REAL_DIGEST_PINNED_DOCKER_SIX_ARMS_RESPONSE_LOSS_QUERY_ONLY_OPERATOR_AND_MONITOR_LOCAL_WAVE_PASS_COMMIT_BOUND_SUITE_PENDING_POST_COMMIT",
-  "next_wave": "NE-01",
+  "active_wave_detail": "NE02_CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_EXTERNAL_RESEARCH_24_CODE_20_PENTEST_30_REAL_COHORTS_NOT_RUN",
+  "next_wave": "NE-05",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -27,7 +27,7 @@
   },
   "active_wave_local_validation": {
     "ne04_trusted_evolution_lab_ledger_current_validation": {
-      "status": "LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS_COMMIT_BOUND_SUITE_PENDING_POST_COMMIT",
+      "status": "LOCAL_ACCEPTANCE_PASS_PROPOSAL_ONLY_PROGRAM_INCOMPLETE",
       "migration_head": "0140_evolution_lab_redacted_dataset.sql",
       "authority": "ONE_SQLITE_FENCED_OPERATION_HEAD_PLUS_APPEND_ONLY_EVENT_RUN_REPORT_PROPOSAL_REDACTION_REDACTED_DATASET_AND_GOLDEN_SUITE_LEDGER",
       "execution_fence": "ONLY_NEW_RUNNING_CLAIM_AUTHORIZES_CONTAINER_LIVE_DUPLICATE_IS_NON_EXECUTABLE_EXPIRED_LEASE_ENTERS_RECONCILIATION",
@@ -47,9 +47,12 @@
       "architecture_static_gates": "FIRST_RUN_FAIL_GATE10_BUSINESS_LAYER_SQLITE_READER_THEN_REFACTORED_TO_CONTRACTS_AND_PERSISTENCE_FINAL_PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_NO_ALLOWLIST_EXPANSION",
       "prior_static_and_doc_gate": "PRIOR_0138_SLICE_PASS_FAILURES_EMPTY_IN_112_6_SECONDS",
       "current_slice_wave_gates": "PYTHON_WAVE_UI_BUILD_ARCHITECTURE_GATES_1_TO_14_AND_UNIFIED_STATIC_DOC_GATE_PASS_FAILURES_EMPTY_UNIFIED_GATE_113_3_SECONDS",
+      "commit_bound_suite_commit": "b68a8b9dd30588493d1a19c1836efb6206a28bde",
+      "commit_bound_suite_id": "ne04-golden-suite-b68a8b9dd305-c0ef7f1dfd55",
+      "commit_bound_suite_receipt_digest": "020c8fc00953df66bcfcb5ad3e93a75ee92a7f10979cbafd471b5cc3ca84cea3",
+      "commit_bound_suite_exact_replay": "ALL_18_EVOLUTION_LAB_TABLE_COUNTS_RECEIPT_FILE_SHA256_AND_DOCKER_CONTAINER_COUNT_UNCHANGED",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "not_run": [
-        "clean implementation commit-bound operational golden suite receipt",
         "NE-07 Nginx runtime and real full service stack"
       ],
       "evidence_refs": [
@@ -102,11 +105,11 @@
       "static_and_doc_gate": "PASS_FAILURES_EMPTY_IN_114_5_SECONDS_FINAL_RERUN",
       "coverage_manifest_first_run": "23_PASSED_9_FAILED_STALE_0135_BINDING_FAIL_CLOSED",
       "coverage_manifest_final_run": "32_PASSED_IN_4_71_SECONDS",
-      "seven_route_receipt_commit": "708aa845ef68b9f7df931b2aba8c204cf6e9946a",
-      "seven_route_receipt_migration": "0137_long_term_goal_authority.sql",
-      "seven_route_receipt_run_id": "universal-runtime-acceptance://sha256/a0478eebb63fba7336feaa1ad8cee5c27a37539c6f0c9e5e47d1e09639bdac89",
-      "seven_route_receipt_digest": "sha256:3eb9b295b6a598fa0ce38c63d29e6cbaffac4909f6ce3f24344b1a3bd51bf129",
-      "seven_route_receipt_boundary": "EXISTING_ACCEPTED_SQLITE_BACKED_UP_AND_APPEND_ONLY_MIGRATED_FROM_0135_THROUGH_0137_THEN_QUERY_ONLY_REOPENED_WITHOUT_ACCEPTED_WORKER_REEXECUTION",
+      "seven_route_receipt_commit": "7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8",
+      "seven_route_receipt_migration": "0140_evolution_lab_redacted_dataset.sql",
+      "seven_route_receipt_run_id": "universal-runtime-acceptance://sha256/3dc0088b55c7d0dec2d39f21521fb3722024dd553f38de6e065165af0c97909b",
+      "seven_route_receipt_digest": "sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3",
+      "seven_route_receipt_boundary": "EXISTING_ACCEPTED_SQLITE_BACKED_UP_AND_APPEND_ONLY_MIGRATED_FROM_0137_THROUGH_0140_THEN_QUERY_ONLY_REOPENED_ON_MERGED_DEV_ANCESTOR_WITHOUT_ACCEPTED_WORKER_REEXECUTION",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "not_run": [
         "deployed multi-instance canary",
@@ -272,18 +275,22 @@
     },
     "ne01_code_wave_closeout_current_validation": {
       "status": "CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07",
-      "base_commit": "27b032f1ebc408c8456a7182d456cb98b441a260",
+      "base_commit": "7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8",
       "route_acceptance": "PASS_ALL_SEVEN_ROUTES_ONE_FILE_BACKED_CANONICAL_SQLITE_QUERY_ONLY_RECEIPT",
-      "route_acceptance_run_id": "universal-runtime-acceptance://sha256/5f23080c825daf4aa1d6abcdd9866225d1e67c9a47c37c6e02cd5e178e1bd82d",
-      "route_acceptance_receipt_digest": "sha256:1a4ae4890d5cbf32275898681dcaec02c3948dd862ad1056481b53ab4d330383",
-      "route_acceptance_snapshot_digest": "sha256:729bb984df79acbfefeaaa4c3629ba6899c32f889dc137dbd6f8711a302d07d0",
-      "migration_head": "0135_task_review_denial_settlement.sql",
+      "route_acceptance_run_id": "universal-runtime-acceptance://sha256/3dc0088b55c7d0dec2d39f21521fb3722024dd553f38de6e065165af0c97909b",
+      "route_acceptance_receipt_digest": "sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3",
+      "route_acceptance_snapshot_digest": "sha256:a2f6b759d64960d78d6cbb54cd1157168f18e8deeff8f9579a7bd3f9cfa2750c",
+      "migration_head": "0140_evolution_lab_redacted_dataset.sql",
+      "coverage_rebind_initial_validation": "10_FAILED_32_PASSED_OLD_708AA845_EVIDENCE_COMMIT_NOT_CURRENT_HEAD_ANCESTOR_FAIL_CLOSED_AS_DESIGNED",
+      "coverage_rebind_final_validation": "35_PASSED_IN_4_52_SECONDS_CURRENT_7E9B090B_ANCESTOR_AND_0140_RECEIPT",
+      "post_merge_route_regression": "UNIVERSAL_REMAINING_ROUTE_1_PASSED_IN_19_11_SECONDS_AND_GR05_HOST_1_PASSED_IN_33_01_SECONDS",
+      "documentation_validation": "13_PASSED_IN_6_28_SECONDS_AND_DOC_GATE_PASS_FAILURES_EMPTY",
       "recovery_wave": "24_PASSED_IN_165_99_SECONDS",
       "recovery_scope": "DIAMOND_AND_EIGHT_ROOT_GRAPH_PREOPERATION_AND_COMMITTED_CHECKPOINT_RESTART_SIGNED_UNKNOWN_EFFECT_SIGNED_COMMIT_RELEASE_CANCELLATION_CROSSING_ACCEPTED_PLUS_RESERVED_FANOUT_PARALLEL_FAILURE_BUDGET_REVIEW_AND_REAL_GIT_WORKSPACE_PROMOTION_ABANDON_RESTART",
       "exactly_once_boundary": "FRESH_PROCESS_RECOVERY_REOPENS_CANONICAL_ATTEMPT_LEASE_BUDGET_VERIFICATION_ACCEPTANCE_EFFECT_AND_RECEIPT_WITHOUT_REPLAYING_ACCEPTED_WORKERS",
       "budget_boundary": "BLOCK_IS_THE_ONLY_ENABLED_RUNTIME_ACTION_DEGRADE_AND_REVIEW_FAIL_CLOSED_BEFORE_MUTATION_AND_REMAIN_PROPOSAL_ONLY",
       "unknown_effect_boundary": "NO_AUTOMATIC_ATTRIBUTION_SIGNED_CASE_BOUND_RECONCILIATION_IS_REQUIRED_BY_DESIGN",
-      "local_evidence_root": "artifacts/local-gates/27b032f1ebc408c8456a7182d456cb98b441a260/ne01-wave",
+      "local_evidence_root": "artifacts/local-gates/7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8/ne01-coverage-v2",
       "production_activation": "ACCEPTANCE_PENDING_NE07_SIGNED_FEATURE_PROMOTION_REAL_HTTP_NETWORK_PROVIDER_DOCKER_AND_EXTERNAL_NAMESPACE",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -3837,14 +3844,14 @@
       "scope": ["chat", "skill", "plan", "delegate", "scheduler", "internal", "operator"],
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
-        "evaluated_commit_sha": "708aa845ef68b9f7df931b2aba8c204cf6e9946a",
-        "migration_head": "0137_long_term_goal_authority.sql",
+        "evaluated_commit_sha": "7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8",
+        "migration_head": "0140_evolution_lab_redacted_dataset.sql",
         "route_status": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_REMAINING_THREE_INCOMPLETE",
-        "commit_bound_acceptance": "PASS_ALL_SEVEN_CLEAN_SHA_QUERY_ONLY_FILE_BACKED_SQLITE_APPEND_ONLY_MIGRATED_0135_TO_0137_RECEIPT_SHA256_3EB9B295B6A598FA0CE38C63D29E6CBAFFAC4909F6CE3F24344B1A3BD51BF129",
+        "commit_bound_acceptance": "PASS_ALL_SEVEN_CLEAN_SHA_QUERY_ONLY_FILE_BACKED_SQLITE_APPEND_ONLY_MIGRATED_0137_TO_0140_RECEIPT_SHA256_8DA27BC8056533C2A4005356F26518BE6F47209BA6BA24F345D81F6A5F06D9E3",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "The v2 coverage matrix covers chat/skill/plan/delegate/scheduler/internal/operator. The v3 ledger reopens one file-backed canonical SQLite database in mode=ro/query_only and requires exact clean Git HEAD, repository/applied migration head, strict Command/WorkOrder/TaskGraph JSON plus digest identity, completed Graph, accepted Nodes, latest successful Attempts, terminal Leases, committed Operation receipts, graph/child Budget lineage, durable Verification/Acceptance, Artifact/WorkerProjection, committed Effects, published Outboxes and zero current recovery/cancellation ambiguity. The existing accepted seven-route snapshot was copied with SQLite backup semantics, append-only migrated from 0135 through 0136 and 0137, then reopened on clean commit 708aa845ef68b9f7df931b2aba8c204cf6e9946a without re-executing an accepted worker. Internal, Operator and Scheduler each independently reopen exactly one content-addressed control policy; the other routes expose zero. The privacy-safe receipt validates all seven PASS with no reason codes and makes all seven commit_bound_acceptance controls PASS. Chat, Skill, enabled CAPABILITY_SEARCH_V1 Plan and enabled read-only pentest_agent Delegate are COMPLETE. Scheduler, Internal, Operator and NE-01 remain incomplete because their other controls are still partial. The controlled terminal provider is runtime-governance evidence only; deployed-key HTTP/network canary, real external model quality, generic PlanningSearch benefit and production canary remain incomplete.",
+      "end_to_end_boundary": "The v2 coverage matrix covers chat/skill/plan/delegate/scheduler/internal/operator. The v3 ledger reopens one file-backed canonical SQLite database in mode=ro/query_only and requires exact clean Git HEAD, repository/applied migration head, strict Command/WorkOrder/TaskGraph JSON plus digest identity, completed Graph, accepted Nodes, latest successful Attempts, terminal Leases, committed Operation receipts, graph/child Budget lineage, durable Verification/Acceptance, Artifact/WorkerProjection, committed Effects, published Outboxes and zero current recovery/cancellation ambiguity. After the former evidence topology was rewritten by PR merge, the existing accepted seven-route snapshot was copied with SQLite backup semantics, append-only migrated from 0137 through 0140, then reopened on clean merged-dev ancestor 7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8 without re-executing an accepted worker. Internal, Operator and Scheduler each independently reopen exactly one content-addressed control policy; the other routes expose zero. The privacy-safe receipt validates all seven PASS with no reason codes and makes all seven commit_bound_acceptance controls PASS. Chat, Skill, enabled CAPABILITY_SEARCH_V1 Plan and enabled read-only pentest_agent Delegate are COMPLETE. Scheduler, Internal, Operator and NE-01 remain incomplete at production acceptance because their other controls or deployed canaries are still partial. The controlled terminal provider is runtime-governance evidence only; deployed-key HTTP/network canary, real external model quality, generic PlanningSearch benefit and production canary remain incomplete.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -3865,6 +3872,7 @@
         "tests/contract/test_universal_route_acceptance.py",
         "tests/contract/test_universal_governed_runtime_coverage.py",
         "configs/release/universal_governed_runtime_coverage.json",
+        "docs/45_testing/test_reports/ne01_universal_route_acceptance_0140_20260728.json",
         "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json",
         "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json",
         "docs/45_testing/test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json"
@@ -5987,7 +5995,7 @@
       "reason": "Read-only runtime_repo/current_runtime_repo no longer exposes the live checkout: WorkspacePolicy freezes exact HEAD, exports only tracked regular files into an executor-owned ephemeral snapshot, excludes dirty/untracked/.git state, binds the source commit and cleans the snapshot after result sealing. The durable cleanup worker exposes a sanitized app-local health/readiness projection; Host shutdown retries the same close handle once and, on exhaustion, preserves Workspace/Task dependencies and stops teardown for both live and partial-startup shapes. Cleanup failure and recovery now also enter the existing runtime-scoped RuntimeGuardian as one opaque durable SLO incident per consecutive failure sequence; replacement-process success resolves owned active breaches, while Guardian projection failure keeps readiness degraded. Canonical path safety, W0, migration 0101 and the W2 worktree/lease/cleanup assets remain active. Governed Internal and three reviewed risk-4 Direct Agent Skills seal an exact bounded path manifest plus binary patch, revalidate it after Graph Acceptance, create a deterministic accepted HEAD without moving the configured source branch and persist 0116 ACTIVE→ACCEPTED→PROMOTED. Direct Skill payload cannot inject V3, Workspace, Review, Grant, Budget, Lease or fence authority. Success uses only a post-Acceptance promotion intent; failure uses only a bounded immutable terminal descriptor. A route-specific reconciler reopens exact Task, Lease, Operation, projection and canonical terminal evidence before abandonment, while the shared lifecycle cleaner reopens the post-Lease authority version before cleanup CAS. Real SQLite and Git cover Direct success and Verification failure plus one reviewed non-result Plan Workspace writer across graph success, downstream failure, downstream post-review cancellation, pre-checkpoint signed failure, post-COMMIT Budget rejection and the signed-failure/time-budget cross terminal, with zero source-branch mutation and zero terminal replay. This remains partial: additional Plan write ownership, the remaining Direct Skill and Plan terminal matrices, general Budget policy, unknown effect and arbitrary multi-node/batch settlement recovery are not fully proven. Cross-process OS supervisor restart, crash-left snapshot startup sweep, handle-level atomic TOCTOU, per-operation preemption, Domain Pack and other Skill injection, OS/container/tenant isolation, real canary and seven-route acceptance also remain missing."
     },
     "evolution_lab": {
-      "status": "LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS_COMMIT_BOUND_SUITE_PENDING_POST_COMMIT",
+      "status": "LOCAL_ACCEPTANCE_PASS_PROPOSAL_ONLY_PROGRAM_INCOMPLETE",
       "evidence_refs": [
         "host_brain/evolution_lab/contracts.py",
         "host_brain/evolution_lab/policy.py",

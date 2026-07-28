@@ -424,7 +424,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0137_long_term_goal_authority.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head。后二者都不拥有 Task activation authority。
+当前连续 SQLite migration head 为 `0140_evolution_lab_redacted_dataset.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset。后四项都不拥有 Task activation authority。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -583,7 +583,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Gateway delivery | durable transport/outbox/receipt | delivery status | adapter 不能自行重做业务决定 |
 | Edge effect | actuator execution + receipt | device telemetry | 物理动作必须可追踪和降级 |
 
-SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0137_long_term_goal_authority.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0135 保持各自既有窄 authority；0136 定义 PlanningSearch cohort evidence/proposal；0137 定义 runtime-fenced 长期目标 event/head。两者都不取代 0090/0091 的普通 Graph settlement。
+SQLite migration/ledger 是当前多数 durable 主干的基础，连续 migration head 为 `0140_evolution_lab_redacted_dataset.sql`；Neo4j、Chroma、Redis 等是可选服务或衍生索引，不应让服务可用性改变 authority 归属。0119～0135 保持各自既有窄 authority；0136 定义 PlanningSearch cohort evidence/proposal；0137 定义 runtime-fenced 长期目标 event/head；0138～0140 定义 proposal-only trusted Lab 数据链。它们都不取代 0090/0091 的普通 Graph settlement。
 
 ## 7. 数字生命状态模型
 

@@ -38,7 +38,7 @@ typed Effect。只有 44 个启用项进入运行 manifest；blocked 能力保�
 独立 Personality Registry 的 19 项 metadata 与动态 MCP Skill 没有
 governed manifest 入口。
 
-当前文档基线为 migration head `0137_long_term_goal_authority.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束。两者都不改变 Task execution authority，多节点 Graph 的普通成功/失败仍由 0090/0091 既有外层 authority 唯一终结。
+当前文档基线为 migration head `0140_evolution_lab_redacted_dataset.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset。这些资产都不改变 Task execution authority，多节点 Graph 的普通成功/失败仍由 0090/0091 既有外层 authority 唯一终结。
 
 当前 Chat 文档基线为 exact Life projection barrier：assistant turn 与 LifeMemory admission 的 durable receipts是 external reply的必要前置条件；首次调用可完成 exact pending intent，reclaimed reconciliation只读。该项只关闭 Chat 的 `transactional_side_effects` 控制，不改变七路线 `INCOMPLETE`、external eventual delivery、wave integration或 NE-07状态。
 

@@ -3,17 +3,18 @@
 
 # 当前需求可追溯矩阵
 
-> 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator active manifest 为 `14 governed / 0 blocked`；另外 23 个旧 ID 已从后端 manifest、handler、OpenAPI 和 Monitor 生成客户端退役，并由独立 replacement policy 记录，不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain/Skill/Codex write仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace、一般恢复和完整 Worker/Obs composition 仍未闭环。
+> 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain Pack 与其它 Skill write 仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待 NE-07 验收。
 
-版本：v5.16
-核对日期：2026-07-27
+版本：v5.17
+核对日期：2026-07-28
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
 
 当前 NE-01 trace 追加本地代码封口证据：
-`27b032f1e → 七路线 canonical SQLite receipt
-sha256:1a4ae489… → 24 个跨进程/Workspace 恢复用例`。该链只把后续实现依赖
+`7e9b090b3 → migration 0140 七路线 canonical SQLite receipt
+sha256:8da27bc8…`，并继承 `27b032f1e` 的 24 个跨进程/Workspace 恢复用例。
+该链只把后续实现依赖
 推进到 NE-02；production feature promotion、真实网络/provider/Docker 与
 回滚仍指向 NE-07，完整架构状态继续 `INCOMPLETE`。
 
@@ -309,8 +310,8 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 | TRACE-EVO-03 | FR-NLE-004 | user/task/life/relationship/authority 仲裁 | `ProductionIntentAuthorityPort`、`DurableIntentAdmissionVerifier` | `PARTIAL_PRODUCTION_ADMISSION_WIRED_RESTRICT_ONLY` | NE-03 本地 Gate；长周期 goal owner 后续 |
 | TRACE-EVO-04 | FR-NLE-004 | 高风险 action 统一 preview/shadow | `ProductionActionPreviewAuthorityResolver`、Action Preview RuntimeEvent、terminal transport gates | `PARTIAL_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED` | Operator Governed route 属 NE-01 |
 | TRACE-EVO-05 | FR-NLE-005 | 统一 health/degradation/recovery/SLO 与 Catalog rollout | RuntimeGuardian、0112、0113、Host Service Catalog startup | `PARTIAL_HOST_LIFESPAN_AND_ENFORCE_TARGET_WIRED_LOCAL_ACCEPTANCE_PASSED` | Windows graceful stop 与部署 canary 后续 |
-| TRACE-EVO-06 | FR-ARCH-010 | Scenario/Experiment Lab | 0108/0122 只读；0138 trusted ledger；0139 namespace repair；0140 sanitized real-trace dataset；专用 Docker、typed composition、query-only Obs/Monitor | `LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS / COMMIT_BOUND_SUITE_PENDING_POST_COMMIT`：raw trace 不落库；唯一 fenced claim、真实容器、exact response-loss、unknown reconciliation、脱敏重启/篡改/回滚和只读 Operator 已验证；Gate 1～14 与统一 static/doc Gate 通过，仅实现提交后的正式 receipt 待生成 | NE-04 |
-| TRACE-EVO-07 | FR-ARCH-010 | Counterfactual replay | 0138 trusted report/proposal/golden-suite + `GoldenExperimentService` + `CounterfactualPairV2` + Operator projection | `LOCAL_WAVE_CODE_PASS / PROPOSAL_ONLY`：Research Planning、Proactive、Memory Write 六个真实隔离 arm 已完成 baseline→candidate 比较，Monitor 只读展示 diff/证据/成本/风险/Review 状态；没有 activation authority，clean-commit suite 待提交后生成 | NE-04 |
+| TRACE-EVO-06 | FR-ARCH-010 | Scenario/Experiment Lab | 0108/0122 只读；0138 trusted ledger；0139 namespace repair；0140 sanitized real-trace dataset；专用 Docker、typed composition、query-only Obs/Monitor | `LOCAL_ACCEPTANCE_PASS / PROPOSAL_ONLY / PROGRAM_INCOMPLETE`：raw trace 不落库；唯一 fenced claim、真实容器、exact response-loss、unknown reconciliation、脱敏重启/篡改/回滚和只读 Operator 已验证；clean-commit suite 绑定 `b68a8b9dd` 与 receipt `020c8fc0…`，exact replay 不增长 Lab 表或容器 | NE-07 只验真实全栈 |
+| TRACE-EVO-07 | FR-ARCH-010 | Counterfactual replay | 0138 trusted report/proposal/golden-suite + `GoldenExperimentService` + `CounterfactualPairV2` + Operator projection | `LOCAL_ACCEPTANCE_PASS / PROPOSAL_ONLY`：Research Planning、Proactive、Memory Write 六个真实隔离 arm 已形成 baseline→candidate 比较，Monitor 只读展示 diff/证据/成本/风险/Review 状态；没有 activation authority | NE-05/NE-06 消费 proposal；NE-07 实测 |
 | TRACE-EVO-08 | FR-NLE-005、FR-ARCH-007 | Maturity 成为默认 restrict-only 门禁 | scorecard + disabled adapter | `PARTIAL` | NE-05 |
 | TRACE-EVO-09 | FR-ARCH-007、FR-ARCH-010 | Skill Compiler 与 signed lifecycle | deterministic draft + intake/quarantine + 0109 ledger | `PARTIAL_NON_ATOMIC_NO_RUNTIME_RESOLVER` | NE-05 |
 | TRACE-EVO-10 | FR-ARCH-010 | 经验只以 proposal 回流 | 多条局部 feedback；T-PERSONA-PROPOSAL-01 待实现 | `PARTIAL_BROKEN_PATH` | NE-06 |

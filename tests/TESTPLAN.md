@@ -1,17 +1,19 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.36
+版本：v0.37
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 
-- T-NE01-CWC-01：在干净 `dev@27b032f1e` 上，GR05 四路线和 remaining-route
-  三路线必须写入同一个文件型 canonical SQLite；query-only collector 必须
-  得到七路线 `PASS`、migration `0135`、零 reason code 和不含正文/secret 的
-  receipt `sha256:1a4ae4890d5cbf32275898681dcaec02c3948dd862ad1056481b53ab4d330383`。
+- T-NE01-CWC-01：当前权威 evidence commit 必须是 HEAD 的祖先。以 SQLite
+  backup 复制既有 accepted 七路线快照，只允许 append-only migration 到
+  repository head 后由 query-only collector 重开；不得重跑 accepted worker。
+  当前绑定为 `dev@7e9b090b3`、migration `0140`、七路线 `PASS`、零 reason
+  code 和不含正文/secret 的 receipt
+  `sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`。
 - T-NE01-CWC-02：一次去重恢复波次固定运行 24 个真实 SQLite、Windows
   `spawn` 和 Git Workspace 用例，必须覆盖菱形、八根、pre-Operation、
   committed checkpoint、unknown effect、cancellation、parallel terminal
@@ -19,6 +21,14 @@
 - T-NE01-CWC-03：本证据只允许状态
   `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。未签名 feature
   promotion、未启动真实网络/provider/Docker 时禁止写 production `PASS`。
+- T-NE01-CWC-04：PR 合并改变 Git 拓扑后，coverage Gate 必须拒绝不再是
+  HEAD 祖先的 receipt commit。首次合并后复核如实得到
+  `10 failed, 32 passed in 7.94s`，全部失败都来自旧 `708aa845` 祖先校验；
+  同时 remaining-route 与 GR05 Host 真实集成分别
+  `1 passed in 19.11s`、`1 passed in 33.01s`，证明运行路线未回退。以同一
+  accepted SQLite snapshot 做 backup、append-only 迁移到 0140 并绑定
+  `7e9b090b3` 后，coverage/receipt 合同为 `35 passed in 4.52s`，文档/发布
+  合同为 `13 passed in 6.28s`，doc Gate 为 `PASS / failures=[]`。
 
 ## T-NE01-CANCELLATION-FANOUT-PROCESS-RECOVERY
 
@@ -648,9 +658,13 @@ replay 为 `1 passed in 115.13s`。migration 兼容组首次为
 manifest 仍绑定 0135 而失败关闭，结果为 `23 passed / 9 failed`；随后以
 SQLite backup 复制既有七路线数据库，仅追加应用 0136/0137，在干净提交
 `708aa845ef68b9f7df931b2aba8c204cf6e9946a` 上 query-only 重开，未重跑
-任何已验收 worker。新收据七路线均为 `PASS`，receipt digest 为
-`sha256:3eb9b295b6a598fa0ce38c63d29e6cbaffac4909f6ce3f24344b1a3bd51bf129`；
-release/metadata/coverage 最终整组 `32 passed in 4.71s`。部署 canary、
+accepted worker。该 SHA 在后续 PR 合并后不再是 `dev` 祖先，所以旧收据只作
+历史校准。当前权威收据再次 backup 同一 accepted snapshot，仅追加
+0138～0140，并在干净祖先提交
+`7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8` 上 query-only 重开；七路线
+仍均为 `PASS`，receipt digest 为
+`sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`。
+部署 canary、
 Windows graceful stop 与 NE-07 真实服务栈仍未运行，远程 CI 为
 `NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -787,7 +801,7 @@ Visual Agent 旧 authority 退役切片最终定向回归：真实 `/v1/chat` fo
 - T-NE01-EFFECT-RECONCILE-01：visible turn、Preference 与 Life projection 必须由三个独立 post-Acceptance Effect 提交。Preference store缺失或暴露非`bool` privacy gate时必须失败关闭且零写；配置false或malformed env必须保守解析为`bool false`并只提交`DISABLED` receipt，event/current profile/0118 child profile version为0。启用时 operation ID绑定graph/revision/node/Attempt/request，event、append-only child profile与evaluation receipt同一SQLite UoW；receipt可见后parent-sealed trigger阻止新增child，reconcile还必须比较receipt声明与实际child全集，绕过trigger的篡改也失败。`NO_SIGNAL`必须有真实receipt，旧operation receipt在新profile version后仍有效。推荐反馈只能读取`created_at_ms <= admitted_at_ms`且同person、exact conversation/session的delivery，并记录canonical full-delivery digest。
 - T-NE01-EFFECT-RECONCILE-02：Surface 初次响应必须精确绑定 effect ID、outbox ID、delivery ID、platform、conversation ID 与 payload digest。HTTP 500、缺字段、畸形 body 或 response loss 先进入 `UNKNOWN/RECONCILIATION_REQUIRED`，同 effect POST 次数保持1；重启后只能使用既有 `internal_reply` HMAC、timestamp、nonce 对 Gateway durable outbox 发起只读 query。Gateway 必须从同一 SQLite outbox snapshot 的 canonical payload 精确校验 `effect_id`，不能相信 query body 自报；Host 必须由原 Effect 重新派生 delivery/payload identity。query 不得改变 status/version/fence/attempt/claim/update time；合法签名read nonce replay幂等返回同一snapshot且零写，`NOT_FOUND`、tamper、identity drift或未知状态保持`UNKNOWN`。
 - T-NE01-EFFECT-GUARDIAN-03：启动 `drain_ready`、pending inventory 或后台 recovery 的失败必须写入 app-local RuntimeGuardian durable SLO；重复 active failure 不得无界追加，真实恢复后才 resolve。持久 event 和日志只允许 opaque random incident 与异常类型，禁止异常正文、traceback 或可由低熵消息离线枚举的 message hash。observer 自身失败不得杀死 recovery loop或伪造恢复。
-- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0137，但不得用新 migration 刷新旧批次数字。NE-01波次集成、真实模型、NE-07 Docker全栈与canary未运行，远程CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持`IN_PROGRESS`。
+- 对应新增定向文件为 `tests/integration/test_ne01_conversation_atomic_effects.py`、`tests/integration/test_ne01_gateway_reply_query.py` 与 `tests/unit/test_ne01_gateway_reply_query_client.py`。Conversation/Gateway/GR05/GR06 的 `65 passed in 118.52s` 是 migration head 仍为 0118 时的历史切片证据；早期零散定向只作被覆盖历史，不得叠加。该历史段落后续曾随 0126 更新；仓库现行 head 已推进到 0140，但不得用新 migration 刷新旧批次数字。NE-01 代码波次为 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，真实模型、NE-07 Docker 全栈与 canary 未运行，远程 CI=`NOT_RUN_ACCOUNT_QUOTA`，总体保持 `INCOMPLETE`。
 
 ### NE-01 Internal Agent 验收后 canonical result
 
