@@ -22,6 +22,9 @@ from host_brain.app.context.memory_context_orchestrator import (
 from host_brain.app.settings import get_persistence_settings
 from host_brain.app.surface_context_packet import build_surface_context_packet
 from host_brain.app.user_preference_store import build_user_preference_pack
+from host_brain.digital_life.companion_profile_lifecycle import (
+    CompanionProfileLifecycleService,
+)
 from host_brain.digital_life.relationship_lifecycle import RelationshipLifecycleService
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 
@@ -72,9 +75,16 @@ def build_surface_runtime_ports(
         _, snapshot_reader = resolve_life_authority()
         return snapshot_reader
 
+    companion_profile_lifecycle_service = CompanionProfileLifecycleService(
+        command_service_provider=get_life_command_service,
+        snapshot_reader_provider=get_life_snapshot_reader,
+    )
     relationship_lifecycle_service = RelationshipLifecycleService(
         command_service_provider=get_life_command_service,
         snapshot_reader_provider=get_life_snapshot_reader,
+        companion_profile_lifecycle_service_provider=(
+            lambda: companion_profile_lifecycle_service
+        ),
     )
 
     def build_surface_context_packet_with_life_authority(

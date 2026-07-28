@@ -39,6 +39,9 @@ _AVATAR_POSTURES = frozenset(
 _PREVIOUS_EXPRESSION_SOURCES = frozenset(
     {"DURABLE_LAST_ACCEPTED", "FALLBACK_NEUTRAL", "UNAVAILABLE"}
 )
+_COMPANION_PROFILE_STAGES = frozenset(
+    {"BASELINE", "CANARY", "ACTIVE", "COMPATIBILITY_UNBOUND"}
+)
 
 
 def _required(value: Any, field_name: str, *, limit: int = 240) -> str:
@@ -210,6 +213,9 @@ class ExpressionPlanV1:
     avatar_posture: str = "RELAXED"
     avatar_transition_ms: int = 240
     avatar_behavior: str = "CALM_ATTENTIVE"
+    avatar_motion_intensity: float = 0.5
+    companion_profile_id: str = ""
+    companion_profile_digest: str = ""
     previous_avatar_expression: str = "NEUTRAL"
     previous_expression_source: str = "FALLBACK_NEUTRAL"
 
@@ -284,6 +290,29 @@ class ExpressionPlanV1:
         )
         object.__setattr__(
             self,
+            "avatar_motion_intensity",
+            _unit(self.avatar_motion_intensity, "avatar_motion_intensity"),
+        )
+        profile_id = str(self.companion_profile_id or "").strip()
+        profile_digest = str(self.companion_profile_digest or "").strip()
+        if bool(profile_id) != bool(profile_digest):
+            raise ValueError("expression companion profile id and digest must appear together")
+        if profile_id:
+            object.__setattr__(
+                self,
+                "companion_profile_id",
+                _required(profile_id, "companion_profile_id", limit=240),
+            )
+            object.__setattr__(
+                self,
+                "companion_profile_digest",
+                _sha256(profile_digest, "companion_profile_digest"),
+            )
+        else:
+            object.__setattr__(self, "companion_profile_id", "")
+            object.__setattr__(self, "companion_profile_digest", "")
+        object.__setattr__(
+            self,
             "previous_avatar_expression",
             _required(
                 self.previous_avatar_expression,
@@ -322,6 +351,9 @@ class ExpressionPlanV1:
             "avatar_posture": self.avatar_posture,
             "avatar_transition_ms": self.avatar_transition_ms,
             "avatar_behavior": self.avatar_behavior,
+            "avatar_motion_intensity": self.avatar_motion_intensity,
+            "companion_profile_id": self.companion_profile_id,
+            "companion_profile_digest": self.companion_profile_digest,
             "previous_avatar_expression": self.previous_avatar_expression,
             "previous_expression_source": self.previous_expression_source,
         }
@@ -347,6 +379,10 @@ class AffectiveTurnPlanV1:
     candidate_count: int
     created_at_ms: int
     self_id: str = _SELF_ID
+    companion_profile_id: str = ""
+    companion_profile_digest: str = ""
+    companion_profile_revision: int = 0
+    companion_profile_stage: str = "COMPATIBILITY_UNBOUND"
 
     def __post_init__(self) -> None:
         mode = _required(self.generation_mode, "generation_mode", limit=64).upper()
@@ -395,10 +431,53 @@ class AffectiveTurnPlanV1:
         object.__setattr__(self, "candidate_count", candidate_count)
         object.__setattr__(self, "created_at_ms", _non_negative_int(self.created_at_ms, "created_at_ms"))
         object.__setattr__(self, "self_id", _SELF_ID)
+        profile_id = str(self.companion_profile_id or "").strip()
+        profile_digest = str(self.companion_profile_digest or "").strip()
+        stage = _required(
+            self.companion_profile_stage,
+            "companion_profile_stage",
+            limit=64,
+        ).upper()
+        if stage not in _COMPANION_PROFILE_STAGES:
+            raise ValueError(
+                "companion_profile_stage must be one of "
+                f"{sorted(_COMPANION_PROFILE_STAGES)}"
+            )
+        revision = _non_negative_int(
+            self.companion_profile_revision,
+            "companion_profile_revision",
+        )
+        if bool(profile_id) != bool(profile_digest):
+            raise ValueError("turn companion profile id and digest must appear together")
+        if not profile_id and stage != "COMPATIBILITY_UNBOUND":
+            raise ValueError("bound companion profile stage requires profile identity")
+        if profile_id:
+            object.__setattr__(
+                self,
+                "companion_profile_id",
+                _required(profile_id, "companion_profile_id", limit=240),
+            )
+            object.__setattr__(
+                self,
+                "companion_profile_digest",
+                _sha256(profile_digest, "companion_profile_digest"),
+            )
+        else:
+            object.__setattr__(self, "companion_profile_id", "")
+            object.__setattr__(self, "companion_profile_digest", "")
+        object.__setattr__(self, "companion_profile_revision", revision)
+        object.__setattr__(self, "companion_profile_stage", stage)
         if self.companion_act.relationship_subject_id != self.relationship_subject_id:
             raise ValueError("companion_act relationship subject differs from turn plan")
         if self.expression_plan.self_affect_revision != self.self_affect_revision:
             raise ValueError("expression plan affect revision differs from turn plan")
+        if (
+            self.expression_plan.companion_profile_id
+            != self.companion_profile_id
+            or self.expression_plan.companion_profile_digest
+            != self.companion_profile_digest
+        ):
+            raise ValueError("expression plan companion profile differs from turn plan")
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -419,6 +498,10 @@ class AffectiveTurnPlanV1:
             "generation_mode": self.generation_mode,
             "candidate_count": self.candidate_count,
             "created_at_ms": self.created_at_ms,
+            "companion_profile_id": self.companion_profile_id,
+            "companion_profile_digest": self.companion_profile_digest,
+            "companion_profile_revision": self.companion_profile_revision,
+            "companion_profile_stage": self.companion_profile_stage,
         }
 
 

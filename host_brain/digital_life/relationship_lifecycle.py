@@ -194,10 +194,14 @@ class RelationshipLifecycleService:
         *,
         command_service_provider: Callable[[], LifeCommandService],
         snapshot_reader_provider: Callable[[], LifeSnapshotReader],
+        companion_profile_lifecycle_service_provider: Callable[[], Any] | None = None,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
         self._command_service_provider = command_service_provider
         self._snapshot_reader_provider = snapshot_reader_provider
+        self._companion_profile_lifecycle_service_provider = (
+            companion_profile_lifecycle_service_provider
+        )
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
 
     def record_proactive_permission(
@@ -377,6 +381,11 @@ class RelationshipLifecycleService:
             ordinal=0,
             payload={"aftereffect": aftereffect.as_dict()},
             created_at_ms=now_ms,
+        )
+        self._observe_profile_canary_aftereffect(
+            scope=scope,
+            request_id=stable_request_id,
+            aftereffect=aftereffect,
         )
         return RelationshipAftereffectResult(
             scope=scope,
@@ -649,6 +658,42 @@ class RelationshipLifecycleService:
         ):
             raise RuntimeError("RELATIONSHIP_LIFE_RECEIPT_INVALID")
         return receipt
+
+    def _observe_profile_canary_aftereffect(
+        self,
+        *,
+        scope: RelationshipScope,
+        request_id: str,
+        aftereffect: RelationalAftereffectV1,
+    ) -> None:
+        """Let a composed profile canary observe only strong safe evidence.
+
+        Normal low-confidence text classification intentionally does not count
+        as a preference-learning success.  The no-op path retains ordinary
+        conversation availability; an injected profile lifecycle receives only
+        the strong typed signal and owns its own durable idempotency.
+        """
+
+        provider = self._companion_profile_lifecycle_service_provider
+        if provider is None:
+            return
+        if (
+            aftereffect.outcome != "HELPFUL"
+            or not aftereffect.boundary_respected
+            or aftereffect.helpfulness < 0.85
+        ):
+            return
+        service = provider()
+        method = getattr(service, "record_eligible_canary_aftereffect", None)
+        if not callable(method):
+            raise RuntimeError("COMPANION_PROFILE_LIFECYCLE_SERVICE_NOT_INJECTED")
+        method(
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            request_id=f"{request_id}::companion-profile",
+            aftereffect_id=aftereffect.aftereffect_id,
+        )
 
     def _accepted_response_episode(
         self,

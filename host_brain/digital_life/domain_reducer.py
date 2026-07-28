@@ -16,6 +16,9 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from natsume_contracts.life import (
+    CompanionProfileCanaryInteractionV1,
+    CompanionProfileStateV1,
+    CompanionProfileVersionV1,
     CompanionProactiveTargetV1,
     EmotionComponentV1,
     EmotionEpisodeV1,
@@ -28,6 +31,7 @@ from natsume_contracts.life import (
     RelationshipEpisodeV1,
     RelationshipStateV2,
     RelationalAftereffectV1,
+    baseline_companion_profile,
 )
 
 
@@ -48,8 +52,22 @@ _RELATIONSHIP_COMMAND_TYPES = frozenset(
         "relationship_proactive_permission_changed",
     }
 )
+_COMPANION_PROFILE_COMMAND_TYPES = frozenset(
+    {
+        "companion_profile_canary_started",
+        "companion_profile_canary_interaction_recorded",
+        "companion_profile_activated",
+        "companion_profile_rolled_back",
+    }
+)
 _AFFECTIVE_PATCH_PROTECTED_KEYS = frozenset(
-    {"identity", "affective", "relationship_v2", "companion_proactive_target"}
+    {
+        "identity",
+        "affective",
+        "relationship_v2",
+        "companion_proactive_target",
+        "companion_profile",
+    }
 )
 _AFFECTIVE_RAW_MATERIAL_KEYS = frozenset(
     {
@@ -128,6 +146,10 @@ def reduce_life_domains(
         state.get("companion_proactive_target"),
         relationship_state=state["relationship_v2"],
     )
+    state["companion_profile"] = _normalize_companion_profile_state(
+        state.get("companion_profile"),
+        relationship_state=state["relationship_v2"],
+    )
 
     if event_type in {"tick", "advance"}:
         _apply_tick(state, prior=prior, payload=body, now_ms=now_ms)
@@ -162,6 +184,23 @@ def reduce_life_domains(
         _apply_relational_aftereffect(state, payload=body, now_ms=now_ms)
     elif event_type == "relationship_proactive_permission_changed":
         _apply_relationship_proactive_permission(state, payload=body, now_ms=now_ms)
+    elif event_type == "companion_profile_canary_started":
+        _apply_companion_profile_canary_started(state, payload=body)
+    elif event_type == "companion_profile_canary_interaction_recorded":
+        _apply_companion_profile_canary_interaction(state, payload=body)
+    elif event_type == "companion_profile_activated":
+        _apply_companion_profile_activation(state, payload=body)
+    elif event_type == "companion_profile_rolled_back":
+        _apply_companion_profile_rollback(state, payload=body)
+
+    # A first relationship event can bind an aggregate that was seeded with
+    # ``workspace::unbound``. Re-normalize after the domain action so its
+    # deterministic baseline profile follows that one allowed binding; any
+    # learned/canary profile still fails closed on scope drift.
+    state["companion_profile"] = _normalize_companion_profile_state(
+        state.get("companion_profile"),
+        relationship_state=state["relationship_v2"],
+    )
 
     _derive_semantic_projection(
         state,
@@ -305,6 +344,11 @@ def _seed_state(
         # response.  It is neither a relationship score nor a permission to
         # contact; only relationship_v2.proactive_permission can grant that.
         "companion_proactive_target": None,
+        # The profile is only an expression preference head.  It does not
+        # replace Soul, relationship consent, self-affect or the user-facing
+        # identity.  The deterministic baseline makes first rollback exact
+        # without inventing an in-memory default authority.
+        "companion_profile": None,
         "scene": {"kind": "idle", "since_ms": now_ms},
         "intent": {"kind": "quiet_presence", "confidence": 0.5},
         "inner_world": {
@@ -697,6 +741,10 @@ def _resolve_canonical_relationship_subject(
         ).strip()
     elif event_type == "relationship_proactive_permission_changed":
         candidate = str(payload.get("relationship_subject_id") or "").strip()
+    elif event_type in _COMPANION_PROFILE_COMMAND_TYPES:
+        candidate = str(
+            _mapping(payload.get("profile")).get("relationship_subject_id") or ""
+        ).strip()
 
     if not candidate:
         return existing or str(aggregate_person_id)
@@ -761,6 +809,109 @@ def _normalize_companion_proactive_target(
     ):
         raise ValueError("companion proactive target scope drift")
     return target.as_dict()
+
+
+def _companion_profile_from_mapping(raw: Mapping[str, Any]) -> CompanionProfileVersionV1:
+    if not raw:
+        raise ValueError("companion profile is required")
+    return CompanionProfileVersionV1.from_mapping(raw)
+
+
+def _companion_profile_state_from_mapping(raw: Mapping[str, Any]) -> CompanionProfileStateV1:
+    if not raw:
+        raise ValueError("companion profile state is required")
+    return CompanionProfileStateV1.from_mapping(raw)
+
+
+def _normalize_companion_profile_state(
+    raw: Any,
+    *,
+    relationship_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep one bounded, scope-bound expression profile head in Life state."""
+
+    relationship = _mapping(relationship_state)
+    workspace_id = str(relationship.get("workspace_id") or "workspace::unbound").strip()
+    subject_id = str(relationship.get("relationship_subject_id") or "").strip()
+    if not workspace_id or not subject_id:
+        raise ValueError("companion profile requires a canonical relationship scope")
+    if raw is None:
+        baseline = baseline_companion_profile(
+            workspace_id=workspace_id,
+            relationship_subject_id=subject_id,
+        )
+        return CompanionProfileStateV1(
+            workspace_id=workspace_id,
+            relationship_subject_id=subject_id,
+            revision=0,
+            active_profile=baseline,
+            known_profiles=(baseline,),
+        ).as_dict()
+    if not isinstance(raw, Mapping):
+        raise ValueError("companion profile state must be an object")
+    state = _companion_profile_state_from_mapping(raw)
+    if (
+        state.workspace_id != workspace_id
+        or state.relationship_subject_id != subject_id
+    ):
+        if (
+            state.workspace_id == "workspace::unbound"
+            and state.relationship_subject_id == subject_id
+            and state.revision == 0
+            and state.active_profile.is_baseline
+            and state.canary_profile is None
+            and len(state.known_profiles) == 1
+        ):
+            baseline = baseline_companion_profile(
+                workspace_id=workspace_id,
+                relationship_subject_id=subject_id,
+            )
+            return CompanionProfileStateV1(
+                workspace_id=workspace_id,
+                relationship_subject_id=subject_id,
+                revision=0,
+                active_profile=baseline,
+                known_profiles=(baseline,),
+            ).as_dict()
+        raise ValueError("companion profile scope drift")
+    return state.as_dict()
+
+
+def _companion_profile_state_from_state(state: Mapping[str, Any]) -> CompanionProfileStateV1:
+    return _companion_profile_state_from_mapping(_mapping(state.get("companion_profile")))
+
+
+def _assert_companion_profile_scope(
+    profile: CompanionProfileVersionV1,
+    *,
+    state: Mapping[str, Any],
+) -> RelationshipStateV2:
+    relationship = _relationship_state_from_state(state)
+    if relationship.workspace_id == "workspace::unbound":
+        raise ValueError("companion profile requires an established relationship scope")
+    return _relationship_scope_matches(
+        state=relationship,
+        workspace_id=profile.workspace_id,
+        relationship_subject_id=profile.relationship_subject_id,
+    )
+
+
+def _profile_known_with(
+    current: CompanionProfileStateV1,
+    profile: CompanionProfileVersionV1,
+) -> tuple[CompanionProfileVersionV1, ...]:
+    existing = {item.profile_id: item for item in current.known_profiles}
+    prior = existing.get(profile.profile_id)
+    if prior is not None and prior.as_dict() != profile.as_dict():
+        raise ValueError("companion profile id digest drift")
+    if prior is None:
+        existing[profile.profile_id] = profile
+    ordered = tuple(
+        sorted(existing.values(), key=lambda item: (item.version, item.profile_id))
+    )
+    if len(ordered) > 8:
+        raise ValueError("companion profile history limit exceeded")
+    return ordered
 
 
 def _relational_aftereffect_from_mapping(
@@ -902,6 +1053,144 @@ def _relationship_scope_matches(
     if state.workspace_id != workspace_id:
         raise ValueError("relationship workspace drift")
     return state
+
+
+def _apply_companion_profile_canary_started(
+    state: dict[str, Any],
+    *,
+    payload: Mapping[str, Any],
+) -> None:
+    """Start one exact five-interaction expression-profile canary.
+
+    This is a Life command, not an in-process experiment counter.  A new
+    profile has to name the exact current active version as its rollback
+    target, so a later rollback cannot select a convenient unrelated version.
+    """
+
+    _reject_raw_affective_material(payload)
+    profile = _companion_profile_from_mapping(_mapping(payload.get("profile")))
+    if profile.is_baseline:
+        raise ValueError("baseline companion profile cannot enter canary")
+    current = _companion_profile_state_from_state(state)
+    _assert_companion_profile_scope(profile, state=state)
+    if current.canary_profile is not None:
+        raise ValueError("companion profile canary is already active")
+    if profile.rollback_profile_id != current.active_profile.profile_id:
+        raise ValueError("companion profile rollback target must equal active profile")
+    max_version = max(item.version for item in current.known_profiles)
+    if profile.version != max_version + 1:
+        raise ValueError("companion profile version must advance exactly once")
+    known = _profile_known_with(current, profile)
+    state["companion_profile"] = CompanionProfileStateV1(
+        workspace_id=current.workspace_id,
+        relationship_subject_id=current.relationship_subject_id,
+        revision=current.revision + 1,
+        active_profile=current.active_profile,
+        canary_profile=profile,
+        canary_accepted_interaction_ids=(),
+        known_profiles=known,
+    ).as_dict()
+
+
+def _apply_companion_profile_canary_interaction(
+    state: dict[str, Any],
+    *,
+    payload: Mapping[str, Any],
+) -> None:
+    """Record one independently accepted aftereffect during the fixed canary."""
+
+    _reject_raw_affective_material(payload)
+    profile = _companion_profile_from_mapping(_mapping(payload.get("profile")))
+    interaction = CompanionProfileCanaryInteractionV1.from_mapping(
+        _mapping(payload.get("canary_interaction"))
+    )
+    current = _companion_profile_state_from_state(state)
+    _assert_companion_profile_scope(profile, state=state)
+    candidate = current.canary_profile
+    if candidate is None or candidate.profile_id != profile.profile_id:
+        raise ValueError("companion profile canary is not active for profile")
+    if candidate.as_dict() != profile.as_dict():
+        raise ValueError("companion profile canary payload drift")
+    if interaction.profile_id != candidate.profile_id:
+        raise ValueError("companion profile canary interaction profile drift")
+    if len(current.canary_accepted_interaction_ids) >= 5:
+        raise ValueError("companion profile canary is already complete")
+    if interaction.interaction_id in current.canary_accepted_interaction_ids:
+        raise ValueError("companion profile canary interaction already recorded")
+    state["companion_profile"] = CompanionProfileStateV1(
+        workspace_id=current.workspace_id,
+        relationship_subject_id=current.relationship_subject_id,
+        revision=current.revision + 1,
+        active_profile=current.active_profile,
+        canary_profile=candidate,
+        canary_accepted_interaction_ids=(
+            *current.canary_accepted_interaction_ids,
+            interaction.interaction_id,
+        ),
+        known_profiles=current.known_profiles,
+    ).as_dict()
+
+
+def _apply_companion_profile_activation(
+    state: dict[str, Any],
+    *,
+    payload: Mapping[str, Any],
+) -> None:
+    """Promote only a fully observed candidate into the active expression head."""
+
+    _reject_raw_affective_material(payload)
+    profile = _companion_profile_from_mapping(_mapping(payload.get("profile")))
+    current = _companion_profile_state_from_state(state)
+    _assert_companion_profile_scope(profile, state=state)
+    candidate = current.canary_profile
+    if candidate is None or candidate.profile_id != profile.profile_id:
+        raise ValueError("companion profile activation requires the active canary")
+    if candidate.as_dict() != profile.as_dict():
+        raise ValueError("companion profile activation payload drift")
+    if len(current.canary_accepted_interaction_ids) != 5:
+        raise ValueError("companion profile activation requires five accepted canary interactions")
+    if profile.rollback_profile_id != current.active_profile.profile_id:
+        raise ValueError("companion profile activation rollback target drift")
+    state["companion_profile"] = CompanionProfileStateV1(
+        workspace_id=current.workspace_id,
+        relationship_subject_id=current.relationship_subject_id,
+        revision=current.revision + 1,
+        active_profile=candidate,
+        canary_profile=None,
+        canary_accepted_interaction_ids=(),
+        known_profiles=current.known_profiles,
+    ).as_dict()
+
+
+def _apply_companion_profile_rollback(
+    state: dict[str, Any],
+    *,
+    payload: Mapping[str, Any],
+) -> None:
+    """Restore the current version's exact pre-canary profile only."""
+
+    _reject_raw_affective_material(payload)
+    target = _companion_profile_from_mapping(_mapping(payload.get("profile")))
+    current = _companion_profile_state_from_state(state)
+    _assert_companion_profile_scope(target, state=state)
+    current_active = current.active_profile
+    if current_active.is_baseline:
+        raise ValueError("baseline companion profile has no earlier rollback target")
+    if target.profile_id != current_active.rollback_profile_id:
+        raise ValueError("companion profile rollback must restore exact previous profile")
+    known_by_id = {item.profile_id: item for item in current.known_profiles}
+    known_target = known_by_id.get(target.profile_id)
+    if known_target is None or known_target.as_dict() != target.as_dict():
+        raise ValueError("companion profile rollback target is not an exact known version")
+    state["companion_profile"] = CompanionProfileStateV1(
+        workspace_id=current.workspace_id,
+        relationship_subject_id=current.relationship_subject_id,
+        revision=current.revision + 1,
+        active_profile=known_target,
+        canary_profile=None,
+        canary_accepted_interaction_ids=(),
+        known_profiles=current.known_profiles,
+    ).as_dict()
 
 
 def _apply_relationship_response_accepted(

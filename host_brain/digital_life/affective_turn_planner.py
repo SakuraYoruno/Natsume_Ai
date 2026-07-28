@@ -15,7 +15,11 @@ from typing import Any
 from natsume_contracts.life import (
     AffectiveTurnPlanV1,
     CompanionActV1,
+    CompanionProfilePreferencesV1,
+    CompanionProfileStateV1,
+    CompanionProfileVersionV1,
     ExpressionPlanV1,
+    baseline_companion_profile,
     digest_json,
 )
 
@@ -110,6 +114,10 @@ class AffectiveTurnGuidance:
             "generation_mode": self.plan.generation_mode,
             "candidate_count": self.plan.candidate_count,
             "text_pacing": self.plan.expression_plan.text_pacing,
+            "companion_profile_id": self.plan.companion_profile_id,
+            "companion_profile_digest": self.plan.companion_profile_digest,
+            "companion_profile_revision": self.plan.companion_profile_revision,
+            "companion_profile_stage": self.plan.companion_profile_stage,
         }
 
 
@@ -190,6 +198,11 @@ def build_affective_turn_guidance(
     aftereffect_outcome = _text(aftereffect.get("outcome")).upper()
     repair_required = bool(relationship_state.get("repair_required"))
     proactive_permission = _text(relationship_state.get("proactive_permission"), default="UNKNOWN").upper()
+    profile, profile_revision, profile_stage = _companion_profile_for_plan(
+        relationship_life=relationship_life,
+        workspace_id=expected_workspace,
+        relationship_subject_id=expected_subject,
+    )
     conflict = bool(life.get("conflict"))
     observations = tuple(
         _mapping(item)
@@ -240,6 +253,10 @@ def build_affective_turn_guidance(
             default="FALLBACK_NEUTRAL",
             limit=64,
         ).upper(),
+        "companion_profile_id": profile.profile_id,
+        "companion_profile_digest": profile.profile_digest,
+        "companion_profile_revision": profile_revision,
+        "companion_profile_stage": profile_stage,
     }
     seed_digest = digest_json(seed)
     voice_style = _voice_style(
@@ -255,6 +272,7 @@ def build_affective_turn_guidance(
     expression_controls = _expression_controls(
         voice_style=voice_style,
         avatar_expression=avatar_expression,
+        profile_preferences=profile.preferences,
     )
     expression = ExpressionPlanV1(
         expression_plan_id=f"expression::{seed_digest[:40]}",
@@ -277,6 +295,9 @@ def build_affective_turn_guidance(
         avatar_posture=expression_controls["avatar_posture"],
         avatar_transition_ms=expression_controls["avatar_transition_ms"],
         avatar_behavior=expression_controls["avatar_behavior"],
+        avatar_motion_intensity=expression_controls["avatar_motion_intensity"],
+        companion_profile_id=profile.profile_id,
+        companion_profile_digest=profile.profile_digest,
         previous_avatar_expression=seed["previous_avatar_expression"],
         previous_expression_source=seed["previous_expression_source"],
     )
@@ -311,13 +332,53 @@ def build_affective_turn_guidance(
         generation_mode=generation_mode,
         candidate_count=candidate_count,
         created_at_ms=stable_created_at,
+        companion_profile_id=profile.profile_id,
+        companion_profile_digest=profile.profile_digest,
+        companion_profile_revision=profile_revision,
+        companion_profile_stage=profile_stage,
     )
     return AffectiveTurnGuidance(
         plan=plan,
         facts=_facts_for_plan(plan),
         must_not_do=_must_not_for_plan(plan),
-        style_anchor=_style_for_plan(plan),
+        style_anchor=(*_style_for_plan(plan), *_profile_style_anchors(profile.preferences)),
     )
+
+
+def _companion_profile_for_plan(
+    *,
+    relationship_life: Mapping[str, Any],
+    workspace_id: str,
+    relationship_subject_id: str,
+) -> tuple[CompanionProfileVersionV1, int, str]:
+    """Resolve only a canonical relationship profile or a deterministic baseline.
+
+    The profile is not a request field.  When a real profile canary is in
+    progress, the candidate is deliberately selected for the next bounded
+    interactions so its five observed outcomes have a real expression change
+    to evaluate.  It remains reversible until the lifecycle promotes it.
+    """
+
+    raw = relationship_life.get("companion_profile")
+    if not isinstance(raw, Mapping) or not raw:
+        baseline = baseline_companion_profile(
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+        )
+        return baseline, 0, "BASELINE"
+    try:
+        state = CompanionProfileStateV1.from_mapping(raw)
+    except ValueError as exc:
+        raise AffectiveTurnPlanError("AFFECTIVE_TURN_COMPANION_PROFILE_INVALID") from exc
+    if (
+        state.workspace_id != workspace_id
+        or state.relationship_subject_id != relationship_subject_id
+    ):
+        raise AffectiveTurnPlanError("AFFECTIVE_TURN_COMPANION_PROFILE_SCOPE_MISMATCH")
+    if state.canary_profile is not None:
+        return state.canary_profile, state.revision, "CANARY"
+    profile = state.active_profile
+    return profile, state.revision, "BASELINE" if profile.is_baseline else "ACTIVE"
 
 
 def _select_companion_act(
@@ -409,7 +470,12 @@ def _avatar_expression(*, act_kind: str, emotion_tag: str, regulation_mode: str)
     return "CALM_ATTENTIVE"
 
 
-def _expression_controls(*, voice_style: str, avatar_expression: str) -> dict[str, Any]:
+def _expression_controls(
+    *,
+    voice_style: str,
+    avatar_expression: str,
+    profile_preferences: CompanionProfilePreferencesV1,
+) -> dict[str, Any]:
     """Derive bounded multimodal controls from the same frozen expression.
 
     There is no channel-side affect inference here.  A single table keeps the
@@ -474,7 +540,57 @@ def _expression_controls(*, voice_style: str, avatar_expression: str) -> dict[st
     # The behaviour is only a posture/transition companion and may not change
     # the selected expression.
     selected["avatar_behavior"] = str(selected["avatar_behavior"] or expression).upper()
+    # A profile can only nudge delivery controls inside narrow bounds. It
+    # cannot turn a boundary, hurt, or quiet-presence decision into a new
+    # emotion or bypass the canonical regulation decision.
+    selected["voice_rate"] = round(
+        max(
+            0.7,
+            min(
+                1.3,
+                float(selected["voice_rate"]) * profile_preferences.tts_rate_scale,
+            ),
+        ),
+        6,
+    )
+    selected["avatar_motion_intensity"] = profile_preferences.avatar_motion_intensity
     return selected
+
+
+def _profile_style_anchors(
+    preferences: CompanionProfilePreferencesV1,
+) -> tuple[str, ...]:
+    """Translate bounded preferences into prose texture, never new intent."""
+
+    anchors: list[str] = []
+    addressing = preferences.addressing_style
+    if addressing == "WARM_FAMILIAR":
+        anchors.append("称呼自然亲近，但不强行撒娇、不暗示专属关系。")
+    elif addressing == "PLAYFUL_LIGHT":
+        anchors.append("可以有一点熟人式轻松打趣，但对方低落、边界或修复时不拿情绪开玩笑。")
+    elif addressing == "GENTLE_DIRECT":
+        anchors.append("表达直接、短一些、柔和一点；少铺垫，不用客服腔。")
+
+    if preferences.response_length == "COMPACT":
+        anchors.append("优先一两句真话，留白胜过堆安慰。")
+    elif preferences.response_length == "EXPANDED":
+        anchors.append("可以多一点细节和陪伴，但避免重复、说教或压迫对方回应。")
+
+    if preferences.humor_level == "LOW":
+        anchors.append("这一轮少用玩笑，先保证认真和清楚。")
+    elif preferences.humor_level == "MEDIUM":
+        anchors.append("轻松时可有一点机灵的幽默，但不能冲淡难过、冲突或拒绝。")
+
+    if preferences.followup_rate == "NONE":
+        anchors.append("不要追加追问；把选择权留给对方。")
+    elif preferences.followup_rate == "OCCASIONAL":
+        anchors.append("只有确实能帮对方展开时才留一个可不回答的问题。")
+
+    if preferences.comfort_mode == "QUIET_FIRST":
+        anchors.append("安慰先陪在旁边，少急着分析或给方案。")
+    elif preferences.comfort_mode == "PRACTICAL_GENTLE":
+        anchors.append("需要时给一个小而可选的实际步骤，仍然先接住感受。")
+    return tuple(anchors)
 
 
 def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:

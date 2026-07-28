@@ -555,9 +555,20 @@ plan 下为每个稳定句生成 Voice `SPEAK` 和 Avatar `TRANSITION` 成对 Ho
 sync、self-affect revision、avatar predecessor 与 Host staging status，绝不复制文本、原始媒体
 或模型推理。该读模型的 “last accepted” 是**最后一次 Host 暂存**，不是远端设备实际状态。
 
+0147 将 `companion_profile` 作为同一 relation aggregate 的 bounded head，而不是 Surface、TTS
+或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only
+`relational_aftereffect_recorded` 事件：五条独立 user-input ref、跨至少三 UTC 日、`HELPFUL`、
+boundary-safe 且 `helpfulness>=0.85` 的证据才能建立 candidate；candidate 再收集五次后续
+strong aftereffect 才可 active。每个 learned profile 的 rollback ref 固定指向候选创建时的 active
+profile，不能挑一个方便的旧版本。普通文本 classifier 仅 `0.72`，因此不会写入或推进这条成长链。
+planner 从 trusted relationship hand-off 读取 CANARY 或 ACTIVE profile，把同一 profile id/digest/
+revision 冻结进 `AffectiveTurnPlanV1`、`ExpressionPlanV1`、Voice `SPEAK` 和 Avatar `TRANSITION`；
+它只能改变受限表达锚点、TTS rate、动作强度或把主动时段进一步收紧，不能改变 Soul、许可或 self-affect。
+
 ```mermaid
 flowchart LR
     H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]
+    R["canonical companion profile\nCANARY or ACTIVE"] --> P
     P -->|"low ambiguity"| M["ModelAttempt native text stream"]
     P -->|"repair / conflict / boundary"| C["two-candidate buffered selection"]
     M --> G["local consistency + non-manipulation Gate"]
@@ -567,6 +578,7 @@ flowchart LR
     S --> F["foreground_completed\nRELEASE or accepted relationship aftereffect"]
     I --> R["0145 text delivery digest projection"]
     E --> X["0146 expression protocol projection\nnot an Edge-applied receipt"]
+    R --> CP["0147 profile lifecycle projection\nopaque evidence and bounded head"]
 ```
 
 当前 stream adapter 尚不能携带 provider-final canonical usage；因此带 node-bound

@@ -416,8 +416,21 @@ def create_app(
     def life_delivery_relationship_lifecycle_service_provider() -> Any:
         """Create the app-local relation reconciler over canonical Life ports."""
 
+        from host_brain.digital_life.companion_profile_lifecycle import (  # noqa: PLC0415
+            CompanionProfileLifecycleService,
+        )
         from host_brain.digital_life.relationship_lifecycle import (  # noqa: PLC0415
             RelationshipLifecycleService,
+        )
+
+        companion_profile_lifecycle = CompanionProfileLifecycleService(
+            command_service_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[0]
+            ),
+            snapshot_reader_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[1]
+            ),
+            clock_ms=now_ms,
         )
 
         return RelationshipLifecycleService(
@@ -426,6 +439,9 @@ def create_app(
             ),
             snapshot_reader_provider=(
                 lambda: life_command_authority_provider(ledger_provider())[1]
+            ),
+            companion_profile_lifecycle_service_provider=(
+                lambda: companion_profile_lifecycle
             ),
             clock_ms=now_ms,
         )

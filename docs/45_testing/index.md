@@ -7,7 +7,7 @@
 维护日期：2026-07-28
 状态：当前证据
 
-## DL-06 主动陪伴送达回执与关系后效应切片
+## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_companion_proactive.py` 验证 Scheduler 的主动决定只读取 canonical
   `relationship_v2`、`state.affective`、clock 与 admitted timezone：explicit
@@ -42,9 +42,16 @@
 - 本次 permission ingress 切片额外运行 `test_dl06_companion_permission_ingress.py`、DL-06
   relationship/proactive 回归及 Secure Ingress service 回归，合计 `47 passed in 27.69s`；这是本地
   定向代码证据，不包含真实 Gateway、Monitor、provider、Edge 或 DL-07 服务栈。
-- 本切片的 receipt 只表示 Host/Gateway transport accepted，不证明第三方平台送达、用户阅读或
-  真实 Gateway 运行；Monitor 用户控件、5 次 canary/rollback、旧 writer 清零、真实模型和
-  DL-07 服务栈仍未运行，不能由这些定向测试推导为主动陪伴完成。
+- 本次 `test_dl06_companion_profile_lifecycle.py` 在真实 SQLite migration `0147` 上覆盖：五条独立、
+  跨三天、强且守住边界的 canonical aftereffect 才能启动 candidate；五次后续 canary interaction 后
+  才能 activate；冻结 profile 确实影响下一轮 text anchor、TTS rate 和 Avatar motion，rollback 精确恢复
+  baseline；journal replay/restart digest 一致且 projection 禁止直接改写。该文件 `3 passed in 11.76s`；
+  与 relationship/proactive 邻接集合合计 `11 passed in 17.99s`，两组不得相加。
+- 证据 fixture 明确替换了 relation classifier 才产生 `0.91` 的强后效应；生产保守文本 classifier 的
+  `0.72` 仍被拒绝，不能把该 fixture 当作自动偏好学习已经上线。receipt 只表示 Host/Gateway transport
+  accepted 或 Host expression staged，不证明第三方平台送达、用户阅读或真实 Gateway/Edge 运行；直接偏好
+  反馈与 Monitor 审核控件、旧 writer 清零、真实模型和 DL-07 服务栈仍未运行，不能由这些定向测试推导为
+  主动陪伴完成。
 
 ## NE-07 隔离外部服务栈
 

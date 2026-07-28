@@ -45,6 +45,14 @@ class LifeCommandRepositoryPort(Protocol):
         after_event_id: str = "",
         limit: int = 100,
     ) -> list[dict[str, Any]]: ...
+    def list_companion_profile_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]: ...
     def list_affective_turn_delivery_event_heads(
         self,
         person_id: str,

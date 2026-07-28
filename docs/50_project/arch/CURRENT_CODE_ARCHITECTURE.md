@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_EXPLICIT_PERMISSION_INGRESS_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_REVERSIBLE_COMPANION_PROFILE_CANARY_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -41,9 +41,15 @@
 > strict `CompanionProactivePermissionRequestV1`，要求 scope `companion:contact:write`、
 > `principal_kind=user`、`principal_id=relationship_subject_id` 与 `tenant_id=workspace_id`；
 > audit ref 才会作为 `USER_EXPLICIT` 的 canonical evidence，重复/重启只重开同一 Life command。
-> 它没有自然语言解析、模型或 Bond 旁路，也尚无 Monitor 端用户控件。
+> 它没有自然语言解析、模型或 Bond 旁路，也尚无 Monitor 端用户控件。0147 新增的
+> `CompanionProfileLifecycleService` 同样只通过 Life command 写入：它从 canonical relation
+> aftereffect chain 重开五条独立、跨至少三天、`HELPFUL`、boundary-safe 且 `>=0.85` 的证据，
+> 才能建立五互动 canary；随后才能 activate，并只能 exact rollback 到候选创建时绑定的旧 profile。
+> profile 仅含低风险表达偏好和 opaque refs；其 ID/digest/revision 会进入下一次冻结的文本、
+> Voice 与 Avatar plan，不能修改 Soul、consent 或 self-affect。生产文本 classifier 的 `0.72`
+> 不满足门槛，不能被当成自动成长成功。
 > `HostEmotionRuntime`、Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与
-> Surface 的其它兼容 state 仍未清零；偏好 canary/rollback、真实模型和三模态物理服务也尚未闭环。因此状态仍为
+> Surface 的其它兼容 state 仍未清零；直接偏好反馈/Monitor 审核、真实模型和三模态物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与

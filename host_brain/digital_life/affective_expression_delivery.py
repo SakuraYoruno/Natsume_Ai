@@ -97,6 +97,10 @@ def _plan_scope(plan: Mapping[str, Any]) -> dict[str, Any]:
         "self_emotion_tag": _text(
             raw.get("self_emotion_tag"), field_name="self_emotion_tag", limit=64
         ).upper(),
+        "companion_profile_id": str(raw.get("companion_profile_id") or "").strip(),
+        "companion_profile_digest": str(
+            raw.get("companion_profile_digest") or ""
+        ).strip(),
         "companion_intensity": _float(
             _mapping(raw.get("companion_act")).get("intensity"),
             default=0.2,
@@ -110,6 +114,10 @@ def _plan_scope(plan: Mapping[str, Any]) -> dict[str, Any]:
         field_name="expression.self_affect_revision",
     ) != scope["self_affect_revision"]:
         raise ValueError("AFFECTIVE_EXPRESSION_REVISION_MISMATCH")
+    if bool(scope["companion_profile_id"]) != bool(
+        scope["companion_profile_digest"]
+    ):
+        raise ValueError("AFFECTIVE_EXPRESSION_COMPANION_PROFILE_INVALID")
     return scope
 
 
@@ -164,6 +172,8 @@ def build_sentence_expression_delivery(
             "pitch": _float(expression.get("voice_pitch"), default=0.0, minimum=-1.0, maximum=1.0),
             "pause_ms": _integer(expression.get("voice_pause_ms"), field_name="voice_pause_ms"),
             "style_note": _text(expression.get("voice_style"), field_name="voice_style", limit=64),
+            "companion_profile_id": scope["companion_profile_id"],
+            "companion_profile_digest": scope["companion_profile_digest"],
             "interruptible": True,
         },
         created_at_ms=created,
@@ -204,6 +214,14 @@ def build_sentence_expression_delivery(
             "behavior_id": _text(
                 expression.get("avatar_behavior"), field_name="avatar_behavior", limit=64
             ),
+            "motion_intensity": _float(
+                expression.get("avatar_motion_intensity"),
+                default=0.5,
+                minimum=0.0,
+                maximum=1.0,
+            ),
+            "companion_profile_id": scope["companion_profile_id"],
+            "companion_profile_digest": scope["companion_profile_digest"],
         },
         created_at_ms=created,
         **base,

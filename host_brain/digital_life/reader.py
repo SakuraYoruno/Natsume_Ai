@@ -68,6 +68,23 @@ class LifeSnapshotReader:
             limit=limit,
         )
 
+    def list_companion_profile_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """Read the DL-06 profile lifecycle projection without text or media."""
+
+        return self.repository.list_companion_profile_event_heads(
+            person_id,
+            after_created_at_ms=after_created_at_ms,
+            after_event_id=after_event_id,
+            limit=limit,
+        )
+
     def list_affective_turn_delivery_event_heads(
         self,
         person_id: str,

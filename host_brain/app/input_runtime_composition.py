@@ -29,6 +29,9 @@ from host_brain.app.surface_reply_preprocessor import (
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
 from host_brain.digital_life.affect_fusion import AffectFusionService
+from host_brain.digital_life.companion_profile_lifecycle import (
+    CompanionProfileLifecycleService,
+)
 from host_brain.digital_life.relationship_lifecycle import RelationshipLifecycleService
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
@@ -60,10 +63,23 @@ def build_input_runtime_application_ports(
         host_services,
         "evolution_scope",
     )
+    companion_profile_lifecycle_service = (
+        CompanionProfileLifecycleService(
+            command_service_provider=life_command_service_provider,
+            snapshot_reader_provider=get_life_snapshot_reader,
+        )
+        if callable(life_command_service_provider)
+        else None
+    )
     relationship_lifecycle_service = (
         RelationshipLifecycleService(
             command_service_provider=life_command_service_provider,
             snapshot_reader_provider=get_life_snapshot_reader,
+            companion_profile_lifecycle_service_provider=(
+                (lambda: companion_profile_lifecycle_service)
+                if companion_profile_lifecycle_service is not None
+                else None
+            ),
         )
         if callable(life_command_service_provider)
         else None

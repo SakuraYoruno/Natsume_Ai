@@ -21,7 +21,7 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_EXPLICIT_PERMISSION_INGRESS_SLICE`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_REVERSIBLE_COMPANION_PROFILE_CANARY_SLICE`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
 偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
@@ -45,8 +45,14 @@ Life delivery intent，再对外可见，高歧义/修复回合保持恰好两�
 `CompanionProactivePermissionRequestV1` 经 strict JSON 与 `companion:contact:write` Secure
 Ingress 验证后，必须证明 `user principal == relationship subject` 且 `tenant == workspace`，
 才可将 `ALLOWED/DENIED` 写入 canonical relationship journal；duplicate/restart 只返回同一
-Life receipt。它不是自然语言许可识别，也尚无面向用户的 Monitor 控件；可逆偏好成长、旧 writer
-清零、受治理预算流的 provider-final canonical usage、连接恢复与真实服务验收仍未完成。
+Life receipt。它不是自然语言许可识别，也尚无面向用户的 Monitor 控件。0147 现把低风险表达偏好
+作为 canonical Life profile：五条独立、跨三天、`HELPFUL`、守住边界且置信下界至少 `0.85` 的
+aftereffect 才能开始五次真实互动 canary，随后才可激活或精确回滚到 profile 自己指定的旧版本。
+该 profile 只收紧或调整称呼、长度、追问、安慰、主动时段、语速和动作强度；它不能修改 Soul、
+relationship consent 或 self-affect。CANARY/ACTIVE identity 会冻结进入后续文本/Voice/Avatar Host
+plan 与 delivery intent；生产的保守文本分类仅为 `0.72`，不会自动伪造强偏好证据。直接反馈入口、
+Monitor 审核、旧 writer 清零、受治理预算流的 provider-final canonical usage、连接恢复与真实服务验收
+仍未完成。
 此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
 不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。

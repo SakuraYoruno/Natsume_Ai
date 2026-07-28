@@ -28,6 +28,14 @@ from .affective_delivery import (
     ExpressionDeliveryIntentV1,
     ExpressionDeliveryReceiptV1,
 )
+from .companion_profile import (
+    CompanionProfileCanaryInteractionV1,
+    CompanionProfilePreferencesV1,
+    CompanionProfileStateV1,
+    CompanionProfileVersionV1,
+    baseline_companion_profile,
+    utc_day_from_ms,
+)
 
 __all__ = [
     *_v1_all,
@@ -49,4 +57,10 @@ __all__ = [
     "ExpressionPlanV1",
     "ExpressionDeliveryIntentV1",
     "ExpressionDeliveryReceiptV1",
+    "CompanionProfileCanaryInteractionV1",
+    "CompanionProfilePreferencesV1",
+    "CompanionProfileStateV1",
+    "CompanionProfileVersionV1",
+    "baseline_companion_profile",
+    "utc_day_from_ms",
 ]

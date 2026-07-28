@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from typing import Any
+
+from natsume_contracts.life import CompanionProfileStateV1
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from host_brain.persona.emotional_proactive import (
@@ -102,6 +104,8 @@ class CompanionProactiveDecision:
     workspace_id: str = ""
     relationship_subject_id: str = ""
     session_id: str = ""
+    companion_profile_id: str = ""
+    companion_profile_stage: str = ""
     reason_tags: tuple[str, ...] = ()
 
     def as_trace(self) -> dict[str, Any]:
@@ -116,6 +120,8 @@ class CompanionProactiveDecision:
             "disturbance_risk": round(_unit(self.disturbance_risk), 6),
             "self_affect_revision": _integer(self.self_affect_revision),
             "relationship_revision": _integer(self.relationship_revision),
+            "companion_profile_id": self.companion_profile_id,
+            "companion_profile_stage": self.companion_profile_stage,
             "target_id": self.target_id,
             "reason_tags": list(self.reason_tags[:8]),
             "content_digest": (
@@ -232,6 +238,29 @@ def decide_companion_proactive(
 
     clock = _mapping(life.get("clock"))
     local_hour = _local_hour(now_ms, timezone_name)
+    profile, profile_stage = _effective_companion_profile(
+        life,
+        relationship=relationship,
+    )
+    if profile is None:
+        return _hold(
+            "PROACTIVE_COMPANION_PROFILE_INVALID",
+            platform=platform,
+            conversation_id=conversation_id,
+            affective=affective,
+            relationship=relationship,
+        )
+    if not _proactive_window_allows(
+        profile.preferences.proactive_window,
+        local_hour=local_hour,
+    ):
+        return _hold(
+            "PROACTIVE_PROFILE_WINDOW_HOLD",
+            platform=platform,
+            conversation_id=conversation_id,
+            affective=affective,
+            relationship=relationship,
+        )
     episode = build_emotional_proactive_episode(
         inner_state=_canonical_inner_state(
             affective=affective,
@@ -294,6 +323,8 @@ def decide_companion_proactive(
         workspace_id=str(target.get("workspace_id") or ""),
         relationship_subject_id=str(target.get("relationship_subject_id") or ""),
         session_id=str(target.get("session_id") or ""),
+        companion_profile_id=profile.profile_id,
+        companion_profile_stage=profile_stage,
         reason_tags=tuple(str(item) for item in episode.reason_tags[:8]),
     )
 
@@ -402,6 +433,59 @@ def _relationship_intensity(relationship: Mapping[str, Any]) -> float:
         + _unit(relationship.get("safety")) * 0.22
         + _unit(relationship.get("attunement")) * 0.14
     )
+
+
+def _effective_companion_profile(
+    state: Mapping[str, Any],
+    *,
+    relationship: Mapping[str, Any],
+) -> tuple[Any | None, str]:
+    """Read only the canonical bounded profile; absent legacy state is neutral."""
+
+    raw = state.get("companion_profile")
+    if raw is None:
+        return _NeutralCompanionProfile(), "BASELINE"
+    if not isinstance(raw, Mapping):
+        return None, ""
+    try:
+        profile_state = CompanionProfileStateV1.from_mapping(raw)
+    except ValueError:
+        return None, ""
+    if (
+        profile_state.workspace_id != str(relationship.get("workspace_id") or "")
+        or profile_state.relationship_subject_id
+        != str(relationship.get("relationship_subject_id") or "")
+    ):
+        return None, ""
+    if profile_state.canary_profile is not None:
+        return profile_state.canary_profile, "CANARY"
+    profile = profile_state.active_profile
+    return profile, "BASELINE" if profile.is_baseline else "ACTIVE"
+
+
+@dataclass(frozen=True, slots=True)
+class _NeutralCompanionPreferences:
+    proactive_window: str = "FLEXIBLE"
+
+
+@dataclass(frozen=True, slots=True)
+class _NeutralCompanionProfile:
+    profile_id: str = ""
+    preferences: _NeutralCompanionPreferences = _NeutralCompanionPreferences()
+
+
+def _proactive_window_allows(window: str, *, local_hour: int) -> bool:
+    """A profile may reduce contact time, never override permission or safety."""
+
+    normalized = str(window or "FLEXIBLE").upper()
+    hour = max(0, min(23, int(local_hour)))
+    if normalized == "OFF":
+        return False
+    if normalized == "DAYTIME":
+        return 9 <= hour < 21
+    if normalized == "EVENING":
+        return 18 <= hour < 23
+    return normalized == "FLEXIBLE"
 
 
 def _local_hour(now_ms: int, timezone_name: str) -> int:
