@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.41
+版本：v0.42
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -60,6 +60,9 @@
   `DEGRADED`；原 service row 和 required count 必须保留。disabled provider、
   本地或混合 required failure、Guardian durability failure 必须保持
   `FAILED`。
+- T-NE07-HOST-10：secret-safe runtime snapshot 必须同时排除 Neo4j direct
+  username/password，只保留可原子解析的 `sec://` auth ref；生成 snapshot
+  直接复用时不得因半套 credential 阻断 Docker/Host 重启。
 - 首次真实启动已暴露 HMAC 配置矛盾与旧脚本假成功，跑次结论为 `FAIL`。
   `b6b341be` 的第二次启动确认密钥修复和失败关闭有效，并暴露中间 stage
   误判。第三次正确拒绝中间 stage，但暴露 acceptance Workspace 根与源码
@@ -67,7 +70,13 @@
   `b56d4d78` 的第四次启动确认外部 Workspace 根修复有效，但
   provider=disabled 令 required health 失败并触发第四个 AUDIT durable
   rollback。cold-start health 受影响集为 `41 passed in 25.17s`，Workspace
-  ASGI 前序定向集成为 `5 passed in 5.45s`；第五次真实重跑仍待执行。
+  ASGI 前序定向集成为 `5 passed in 5.45s`。
+- `f48afe1b` 的第五次真实 Host 进程启动已通过 AUDIT→ENFORCE 五阶段
+  durable rollout，Host/Obs/Nginx Monitor、真实代理路由与三个 Docker
+  容器均独立核对通过。Host 仅有一个缺外部模型凭据的 cold-start failure，
+  状态保持 `DEGRADED`。旧 snapshot 的半套 Neo4j direct credential 已由
+  writer 修复，脚本合同为 `18 passed in 3.82s`；真实 snapshot restart、
+  Operator 认证 Playwright 和崩溃恢复仍待执行。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

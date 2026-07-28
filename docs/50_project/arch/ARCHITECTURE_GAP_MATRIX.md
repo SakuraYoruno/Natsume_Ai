@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.39
+版本：v3.40
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -37,9 +37,13 @@ provider=disabled 使 Governor/LLM required health 失败，AUDIT 以
 `SERVICE_CATALOG_POST_HEALTH_FAILED` durable rollback。当前 health 只把
 “非 disabled provider 已选、显式允许 cold start、且 required failure 全为
 缺外部凭据”映射为 `DEGRADED`；本地 authority 或混合失败仍是 `FAILED`。
-第五次仍须重跑。
+`f48afe1b` 上的第五次真实 Host 进程启动已使五阶段 rollout、Host、Obs、
+Nginx Monitor 和真实代理路由通过；唯一 required failure 是缺 OPENAI 凭据
+的 cold start，未伪造模型 PASS。该跑次发现 runtime snapshot 过滤密码但
+残留 Neo4j 用户名，导致直接复用时在进程前拒绝半套凭据；writer 已改为只
+保留原子 `sec://` auth ref，真实 snapshot restart 尚待重跑。
 Monitor 依赖还有 8 项 npm audit 告警，因此该项保持
-`FOUR_REAL_STARTS_FAILED / FIX_CODE_COMPLETE / RERUN_PENDING`。
+`FIRST_REAL_HOST_STACK_START_PASS / RESTART_AND_AUTH_UI_PENDING`。
 
 NE-01 的剩余差距已从“本地代码/恢复未封口”收窄为 NE-07 部署验收。
 当前提交的七路线同库收据全部 `PASS`，24 个去重恢复用例通过；因此实现依赖

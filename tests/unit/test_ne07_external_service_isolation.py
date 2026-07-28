@@ -130,6 +130,7 @@ foreach ($name in @('Test-SensitiveRuntimeEnvEntry', 'Write-RuntimeEnvFile')) {{
   . ([ScriptBlock]::Create($definition.Extent.Text))
 }}
 $env:NATSUME_NEO4J_PASSWORD = 'must-not-be-written'
+$env:NATSUME_NEO4J_USER = 'neo4j'
 $env:OPENAI_API_KEY = 'must-not-be-written'
 $env:EDGE_HMAC_SHARED_KEY = 'must-not-be-written'
 $env:BOND_NEO4J_AUTH_REF = 'sec://neo4j/ne07'
@@ -159,5 +160,6 @@ Write-RuntimeEnvFile -Path '{output.as_posix()}' -SeedValues @{{
     assert completed.returncode == 0, completed.stderr
     content = json.loads(completed.stdout.strip())["content"]
     assert "must-not-be-written" not in content
+    assert "NATSUME_NEO4J_USER=" not in content
     assert "BOND_NEO4J_AUTH_REF=sec://neo4j/ne07" in content
     assert "NATSUME_AUDIT_DB=runtime/acceptance/canonical.sqlite3" in content

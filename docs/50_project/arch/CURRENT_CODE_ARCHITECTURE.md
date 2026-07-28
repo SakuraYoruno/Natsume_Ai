@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.69
+版本：v5.70
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -71,7 +71,20 @@ disabled provider、显式允许 cold start、实际 required failure 行数与 
 一致，且每一行 reason 都是 `SERVICE_UNAVAILABLE_COLD_START`。原 service
 row 和 required count 不会被改成可用；任何本地或混合 required failure 以及
 Guardian durability failure 仍为 `FAILED`。受影响合同为
-`41 passed in 25.17s`，尚未形成第五次真实通过回执。
+`41 passed in 25.17s`。
+
+`f48afe1b` 上的第五次真实 Host 进程启动已经形成首个本地栈成功证据：
+canonical Service Catalog 的 AUDIT→ENFORCE 五阶段全部 `STARTED`，active
+head 为 ENFORCE；Host、Obs、Nginx Monitor 与真实 metrics/static 代理均为
+200，三个 Docker 容器保持 healthy。Host status 为 `DEGRADED` 的唯一原因是
+缺 OPENAI 凭据，原 LLM row 仍 DOWN、required count=1、Guardian durability
+为 READY。因此该证据关闭本地首启，不关闭真实模型或全栈验收。
+
+首启过程中还验证出 secret-safe runtime snapshot 过去会排除 Neo4j password
+但保留 username，复用时构成无效的半套 direct credential。当前 writer 将两
+项 direct auth 都排除，只持久化 `sec://` auth ref；定向合同
+`18 passed in 3.82s`。新 snapshot 的真实重启、Operator 认证 read model 与
+无网络拦截 Playwright 尚未执行。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

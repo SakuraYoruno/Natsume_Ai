@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.49
+版本：v2.50
 维护日期：2026-07-28
 状态：当前证据
 
@@ -59,7 +59,14 @@
   failures 全部为缺凭据”映射为 `DEGRADED`；disabled provider、混合
   required failure 和 durable Guardian failure 仍失败关闭。旧 health contract
   同步到 app-local provider fixture，最终受影响集为
-  `41 passed in 25.17s`；第五次真实启动仍待执行。
+  `41 passed in 25.17s`。
+- `f48afe1b` 的第五次真实 Host 进程启动已通过五阶段 durable rollout；
+  Host/Obs/Nginx Monitor、真实代理路由和三个 Docker 容器均独立核对成功。
+  Host 精确保留一个缺外部模型凭据的 cold-start failure，不能记模型 PASS。
+- 直接复用旧安全 snapshot 的预检暴露 Neo4j 用户名/密码被过滤成半套
+  credential；writer 现同时排除 direct username/password，只保留 `sec://`
+  ref。启动脚本合同为 `18 passed in 3.82s`，真实 snapshot restart 与无拦截
+  认证 Playwright 尚待下一跑次。
 
 ## NE-05 Skill 生命周期本地代码波次
 

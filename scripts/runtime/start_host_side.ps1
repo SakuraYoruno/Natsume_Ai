@@ -301,6 +301,19 @@ function Test-SensitiveRuntimeEnvEntry {
   if (-not $normalizedName) {
     return $false
   }
+  # Neo4j direct auth is an indivisible runtime credential.  The password is
+  # intentionally excluded below, so retaining only its username would create
+  # an unusable half-credential when this snapshot is reused.  Persist the
+  # sec:// auth ref instead and resolve both values in the Docker launcher.
+  if (
+    [string]::Equals(
+      $normalizedName,
+      "NATSUME_NEO4J_USER",
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+  ) {
+    return $true
+  }
   if (
     $normalizedName -match '(?i)_REF$' -and
     $normalizedValue.StartsWith("sec://", [System.StringComparison]::Ordinal)

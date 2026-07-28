@@ -116,6 +116,11 @@ Host 入口见 [host_brain/__main__.py](../../../host_brain/__main__.py)，OBS �
 进入快照；只有 `sec://` 引用可保留。文件被 Git 忽略且正常停止时删除，
 真实秘密仍必须由受控 `.env`、secret store 或外部注入提供。
 
+Neo4j direct username/password 是不可拆分的 credential pair。runtime
+snapshot 不能只留下安全但不可独立使用的 username；两项 direct auth 都必须
+排除，只保留 `BOND_NEO4J_AUTH_REF=sec://...`，重启时由 Docker launcher
+原子解析。这样 snapshot 可复用而不会把半套 credential 与 auth ref 混合。
+
 Agent Workspace 是源码 Git worktree 的受控派生目录，不能与源码仓库同目录
 或互为父子目录。普通默认根位于用户目录；隔离验收必须显式传入位于源码树外
 的 `-AgentWorkspaceRoot`。启动器在拉起 Docker 或 Host 前规范化并验证该根，
@@ -293,8 +298,9 @@ Compose 的 project、三个 container name、network、端口与数据根现在
 数据迁移策略；这些不能由 healthcheck 替代。
 启动前配置校验固定使用 `docker compose config --quiet`，避免失败诊断路径
 输出展开后的运行期认证。隔离验收优先经进程级
-`NATSUME_NEO4J_USER/NATSUME_NEO4J_PASSWORD` 注入；错误只报告配置类别，
-不拼接认证引用或认证值。
+`BOND_NEO4J_AUTH_REF=sec://...` 原子解析认证；仅当两项同时存在时才允许
+进程级 `NATSUME_NEO4J_USER/NATSUME_NEO4J_PASSWORD` 覆盖，且两项都不进入
+runtime snapshot。错误只报告配置类别，不拼接认证引用或认证值。
 
 ### 8.1 已收口的端口契约
 

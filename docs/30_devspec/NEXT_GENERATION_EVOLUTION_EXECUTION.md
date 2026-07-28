@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.41
+版本：v3.42
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_FOUR_STARTS_FAILED / COLD_START_HEALTH_FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_OBS_MONITOR_FIRST_REAL_START_PASS / RESTART_AND_AUTH_UI_PENDING / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1383,3 +1383,29 @@ app 或 patch 已退役的 process probe symbol。受影响 health、Guardian、
 Service Catalog real-socket、配置和 bootstrap 集合为
 `41 passed in 25.17s`；第五次真实启动须使用 provider=openai、无伪造凭据的
 合法 cold-start 配置。
+
+提交 `f48afe1b` 的第五次真实 Host 进程启动已使用 `provider=openai`、无
+API key 和源码树外 Workspace 根完成。独立核对结果为：
+
+- canonical SQLite 中 AUDIT、SHADOW、PREFLIGHT、CANARY、ENFORCE 五个
+  operation 依次以 `ACTIVATION_STARTED / STARTED` 收口，active head 为
+  ENFORCE，candidate owner 为 `host.main`；
+- `/health` 与 `/ready` 均返回 200，响应头绑定同一 ENFORCE catalog
+  snapshot；唯一 required failure 是
+  `host.integrations.llm_gateway / SERVICE_UNAVAILABLE_COLD_START`，service
+  row 仍为 DOWN、required count 仍为 1、Guardian durability 为 READY；
+- Host、Obs、Nginx Monitor 分别监听隔离端口 18080/18082/18180，
+  `/obs/metrics`、`/monitor/index.html` 与 Nginx 代理后的 metrics 均为真实
+  200；Neo4j、Chroma、Redis 三个验收容器继续 healthy；
+- 无凭据模型没有被提升为 PASS，整体仍须按
+  `ACCEPTANCE_PENDING_EXTERNAL` 处理。
+
+本跑次前的一次启动器预检还发现：若把上一轮 secret-safe
+`host.runtime.env` 直接作为 EnvFile，Docker 启动器会读到 Neo4j 用户名，
+但密码已按安全合同过滤，因而在创建 Host 进程前拒绝半套 direct credential。
+这不影响上述成功跑次，却说明生成快照还不能作为可靠重启输入。snapshot
+writer 现同时排除 `NATSUME_NEO4J_USER` 和密码，只保留
+`BOND_NEO4J_AUTH_REF=sec://...`，由 Docker launcher 原子解析用户名与密码。
+定向合同为 `18 passed in 3.82s`、PowerShell parse 通过；下一跑次必须直接
+复用新快照完成真实重启，并注入仅存于进程内的 Operator token digest 做无
+网络拦截浏览器验收。

@@ -84,7 +84,15 @@ required failure，AUDIT 因 `SERVICE_CATALOG_POST_HEALTH_FAILED` 回滚，仍�
 误报成功。health 现只允许“选中真实 provider、仅缺凭据且显式允许 cold
 start”的纯 `SERVICE_UNAVAILABLE_COLD_START` 映射为 `DEGRADED`；SQLite、
 Guardian、Workspace、disabled provider 或混合 required failure 仍为
-`FAILED`。受影响集为 `41 passed in 25.17s`；第五次真实启动仍待执行。
+`FAILED`。受影响集为 `41 passed in 25.17s`。提交 `f48afe1b` 上的第五次
+真实 Host 进程启动已通过：AUDIT、SHADOW、PREFLIGHT、CANARY、ENFORCE
+全部写入 durable `STARTED`，active head 为 ENFORCE；Host/Obs/Nginx
+Monitor 与真实代理路由均返回 200，三个 Docker 容器继续健康。Host 只保留
+一个缺 OPENAI 凭据的 required cold-start failure，因此状态为可审计的
+`DEGRADED`，不是模型 PASS。该跑次同时发现安全 runtime snapshot 会过滤
+Neo4j 密码却残留用户名，直接复用时形成半套凭据；snapshot writer 现同时
+排除两项 direct auth，只保留 `sec://` ref，相关合同为
+`18 passed in 3.82s`。真实重启和带临时 Operator 会话的浏览器验收仍待执行。
 `npm audit` 的 8 项依赖告警仍开放，不能据此宣称前后端验收通过。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime

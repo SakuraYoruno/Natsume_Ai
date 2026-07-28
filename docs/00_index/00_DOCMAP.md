@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.19
+版本：v9.20
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -130,7 +130,9 @@ flowchart TD
   外部根修复，第四次因显式 provider=disabled 形成 required health failure
   而正确回滚。只有选中真实 provider、显式允许 cold start 且全部 required
   failure 都是缺外部凭据时才可降级为 `DEGRADED`；其它失败口径保持不变，
-  仍须实栈重跑。
+  `f48afe1b` 上的第五次真实 Host 启动已使五阶段 rollout 和 Host/Obs/
+  Nginx Monitor 通过。安全 runtime snapshot 的半套 Neo4j direct auth
+  重启缺口已完成代码修复，仍须真实重启与认证浏览器重跑。
   Edge/Gateway、真实部署和全栈验收尚未完成，程序整体仍为
   `INCOMPLETE`。
 - Agent 模型预算：Chat、Internal 与 governed Agent Skill 已共享
