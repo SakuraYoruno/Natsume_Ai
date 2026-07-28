@@ -3,9 +3,9 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.61
+版本：v5.62
 核对日期：2026-07-28
-合并基线：`origin/dev@a407e73e`；当前事实以本文所在提交的工作树为准
+合并基线：`origin/dev@7e9b090b3`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
@@ -13,9 +13,10 @@
 ## 1. 结论
 
 NE-01 当前代码波次为
-`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。在
-`dev@27b032f1e` 上，七路线共用一个文件型 canonical SQLite 并通过 query-only
-receipt；同一代码随后通过 24 个去重的真实 SQLite、Windows 进程和 Git
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。当前权威收据在
+`dev@7e9b090b3` 上以 migration 0140 query-only 重开同一个 accepted
+canonical SQLite，七路线全部 `PASS` 且没有重跑 worker；既有代码还通过
+24 个去重的真实 SQLite、Windows 进程和 Git
 Workspace 恢复场景。代码已经具备 bounded fan-out、签名 ambiguity
 reconciliation、原子 terminal settlement 和 Workspace promotion/abandon
 所需路径；部署 feature receipt、真实网络/provider、外部 namespace 与 Docker
@@ -197,7 +198,7 @@ reconciler 与 repository 重开唯一 Acceptance/artifact/Operation/projection
 路径、源分支不变与第二次重启零重放。多个写 owner、其它
 failure/cancellation/unknown-effect 组合及强隔离仍未完成。
 
-当前连续 migration head 为 `0137_long_term_goal_authority.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head，均不改变 Task execution authority。
+当前连续 migration head 为 `0140_evolution_lab_redacted_dataset.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset，均不改变 Task execution authority。
 
 无 cancellation intent 的 signed `RELEASE + NO_SIDE_EFFECT` 已从单节点整图终态扩展为通用节点终态。`TaskOperationFailureReconciliationStoreMixin` 的第一事务只释放 Operation、失败目标 Attempt/Node、过期原 Lease并写四条 Outbox；只有单节点兼容路径在同一事务关闭 Graph/Budget。多节点 Graph/Budget 保持 ACTIVE，重启后的 `DurableDagSchedulingRuntime` 先重建 failed outcome，再让现有 0090 writer 原子提交 Graph/Budget 失败终态。Acceptance v4 receipt 不摘要会变化的 Graph settlement 字段，因此 `PENDING→COMMITTED` 后仍精确重放；0090 decision 或 Graph/Budget Outbox 漂移会失败关闭。双根、并发额度1的真实 SQLite 测试证明 READY sibling 未执行；并发额度2的双失败测试证明非 selected 失败节点仍由同一 decision outcome 精确覆盖并可重开。该链不自动判定副作用，也不覆盖其它 failure/cancellation。
 
@@ -219,8 +220,8 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
-| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0137_long_term_goal_authority.sql`。0133～0135 收口 Task Verification/Acceptance/Review denial；0136 增加 proposal-only PlanningSearch cohort evidence；0137增加长期目标 event/head。这些资产不代表外部收益或整体生产验收 |
-| Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`2a88f56e` 同库收据使七路 commit binding、三控制 policy 和当前 Plan/Delegate enabled-scope 其余控制通过。Scheduler/Internal/Operator 仍有独立缺口；Operator active inventory 为 14 |
+| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0140_evolution_lab_redacted_dataset.sql`。0133～0135 收口 Task Verification/Acceptance/Review denial；0136 增加 proposal-only PlanningSearch cohort evidence；0137 增加长期目标 event/head；0138～0140 增加 proposal-only trusted Lab 数据链。这些资产不代表外部收益或整体生产验收 |
+| Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`7e9b090b3` 同库收据在 migration 0140 query-only 重开，使七路 commit binding 与三控制 policy 继续通过且未重跑 accepted worker。Scheduler/Internal/Operator 仍有部署/其它控制缺口；Operator inventory 为 `16 active / 23 retired / 39 known / blocked=0` |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`workspace_write_promotion.py` 密封 bounded safe-path manifest 与 binary patch并确定性生成 accepted HEAD；源 branch 不移动。`internal_startup_checkpoint_continuation.py` 提供 exact scan，`periodic_durable_continuation.py` 只托管 timer/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 仍以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 除精确 sealed abandon/cleanup 外，只对 finalized cancellation 且符合共享中立合同两类 exact signed terminal 的未封存单节点先关闭 claim、再 cleanup/discard；失败顺序不会删除证据。一般 unknown effect、其它 crash-left/取消 closeout 与 general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、OS/container isolation、canary与七路线验收也未完成 |
 | Agent Skill / 单写节点 Plan Workspace | `PARTIAL / DIRECT_AND_SINGLE_PLAN_WRITER_SUCCESS_FAILURE_CANCELLATION_LOCAL_PROVEN` | 三条登记 Skill 冻结 risk 4 和 durable Review；server-bound V3 拒绝 caller authority。private `codex_runtime` 取得 app-local Artifact/Workspace ports。Direct success/failure 与 Plan 单写节点 whole-graph success/downstream failure/downstream post-review cancellation 均由 `skill_artifact_terminal_reconciliation.py`、纯只读 `workspace_terminal_cancellation_authority.py` 和 shared lifecycle cleaner 在 fresh runtime 收口；Plan 只允许一个 reviewed 非结果 owner，graph Acceptance 前 Effect 为零。取消路径还要求 finalized intent/decision 与 accepted writer 三快照同版本。真实 SQLite+Git 已证明源分支不变与零重放。其它 terminal matrix、多 Workspace、Domain Pack、其它 Skill、完整进程/network canary 与七路线验收仍缺 |
@@ -706,7 +707,7 @@ Edge session/owner 不是默认的进程字符串：Host 从 normalized canonica
 | Obs Preview / Shadow | `governor/action_preview.py`、Obs route | Obs 端点仍是单独的 dry-run eligibility 视图，固定 `would_execute=false`；它不替代 Host lifespan 的 canonical authority，也没有统一 shadow runner |
 | Capability Maturity | scorecard/provider/Governor adapter、production composition fail-closed wiring | production IntentDecisionEngine 默认启用 restrict-only policy；缺 durable promotion/degradation lifecycle |
 | Capability Forge | `app/capability_forge.py` | 仍只产生 proposal/gap candidate；不得绕过 Lab/Review/0109 lifecycle，Skill Compiler 仍只产 SkillDraft |
-| Evolution Lab | 0108 V1、0122 structural V2；0138 trusted ledger；0139 trusted redaction repair；0140 redacted dataset；`contracts/evolution_lab_redaction.py`、`evolution_lab/{docker_executor,golden_datasets,redacted_trace,golden_worker,golden_verifier,golden_experiments,trusted_runner,production_composition}.py`、`persistence/evolution_lab_{redacted_dataset,trusted_query}_repository.py`；Obs/Monitor Operator projection | 0108/0122 只读且不可晋级；0139 消除 trusted/V1 redaction 同名冲突，0140 只保存 content-addressed sanitized dataset、Manifest 与 digest-only Receipt，raw trace 不落库；纯规则位于 contracts，SQLite reader 只位于 persistence。专用 executor 只接受 digest-pinned Docker，重新验证 engine/image/container/command/inspect、禁网、只读 rootfs/dataset/runtime、非 root、临时 bind output、资源限制和零 effect audit；不允许 host subprocess fallback。三类 Golden Experiment 共六个独立容器 arm、本机真实 Docker response-loss exact reopen、unknown-effect reconciliation、脱敏重启/篡改/回滚已通过；query-only repository、Obs producer/route 与 Monitor 页面只展示 proposal-only 证据。Gate 1～14 与统一 static/doc Gate 已通过，仅实现提交后的正式 clean-commit suite receipt 待生成，状态为 `LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS / COMMIT_BOUND_SUITE_PENDING_POST_COMMIT` |
+| Evolution Lab | 0108 V1、0122 structural V2；0138 trusted ledger；0139 trusted redaction repair；0140 redacted dataset；`contracts/evolution_lab_redaction.py`、`evolution_lab/{docker_executor,golden_datasets,redacted_trace,golden_worker,golden_verifier,golden_experiments,trusted_runner,production_composition}.py`、`persistence/evolution_lab_{redacted_dataset,trusted_query}_repository.py`；Obs/Monitor Operator projection | 0108/0122 只读且不可晋级；0139 消除 trusted/V1 redaction 同名冲突，0140 只保存 content-addressed sanitized dataset、Manifest 与 digest-only Receipt，raw trace 不落库；纯规则位于 contracts，SQLite reader 只位于 persistence。专用 executor 只接受 digest-pinned Docker，重新验证 engine/image/container/command/inspect、禁网、只读 rootfs/dataset/runtime、非 root、临时 bind output、资源限制和零 effect audit；不允许 host subprocess fallback。三类 Golden Experiment 共六个独立容器 arm、本机真实 Docker response-loss exact reopen、unknown-effect reconciliation、脱敏重启/篡改/回滚已通过；query-only repository、Obs producer/route 与 Monitor 页面只展示 proposal-only 证据。clean-commit suite 绑定 `b68a8b9dd` 与 receipt `020c8fc0…`，exact replay 后 18 张 Lab 表、收据哈希和容器计数不变；状态为 `LOCAL_ACCEPTANCE_PASS / PROPOSAL_ONLY / PROGRAM_INCOMPLETE` |
 | Feedback | response/persona/recommendation feedback + 0110 proposal ledger | `FeedbackProposalV1` 已可持久化 STAGED/APPLIED/ROLLED_BACK；Prefrontal 参数漂移已修复，旧增长 caller 尚未全部转为 proposal adapter |
 | Persona Growth | `persona_growth.py`、Bond stage、Evolution Orchestrator、emergent growth skill | legacy 入口已被 `PersonaEngine` 中央围栏和静态扫描封禁；当前只产生经 drift guard 检查的无副作用 candidate，尚未接入 proposal/Review/版本激活 |
 | Knowledge OS | `KnowledgeEntryV1`、0110 namespace event ledger | active winner、cursor、supersedes/deprecation/dedup/conflict resolution 与生产 retrieval 均未接线 |
@@ -982,7 +983,7 @@ scheduler 出现三次独立 lifecycle 写；Plan writer 的
 ## 12. NE-02 固定 cohort authority 当前事实
 
 NE-02 cohort migration 为 `0136_planning_search_cohort_ledger.sql`；
-仓库当前 migration head 为 `0137_long_term_goal_authority.sql`。新增
+仓库当前 migration head 为 `0140_evolution_lab_redacted_dataset.sql`。新增
 `SQLitePlanningSearchCohortLedger` 是三个固定 cohort 的唯一本地 writer：
 它持有 registration、member proof、report 与 promotion proposal；连接和
 `BEGIN IMMEDIATE` 仍只在 repository owner 中。support 模块仅做无连接的

@@ -133,7 +133,7 @@ Host 情感连续状态和回复形态额度的 module-global authority 也已�
 
 本文件是“目标与当前状态如何解释”的唯一入口。历史 receipt 保留原样，但只能证明其声明范围；本矩阵按当前生产代码重新定级。
 
-当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0137_long_term_goal_authority.sql`。0132～0135 的 Task Budget/Verification/Acceptance/Review denial 语义保持不变；0136 新增 PlanningSearch cohort evidence/proposal；0137新增 runtime-fenced 长期目标 event/head，二者都不改变 Task execution authority。
+当前分支的 fresh 全量静态检查继续以本提交 Gate 结果为准。连续 migration head 为 `0140_evolution_lab_redacted_dataset.sql`。0132～0135 的 Task Budget/Verification/Acceptance/Review denial 语义保持不变；0136 新增 PlanningSearch cohort evidence/proposal；0137 新增 runtime-fenced 长期目标 event/head；0138～0140 新增 proposal-only trusted Lab、redaction 与 sanitized dataset，均不改变 Task execution authority。
 
 Scheduler 管理 HTTP 的 create/update/delete/enable/disable 已在 `/scheduler` 与 `/host-scheduler` 双前缀统一切入 app-local governed runtime：每个写请求冻结 Secure Ingress method/path/body、definition head 和 claim，生成 `HostCommand(surface=SCHEDULER)` 与不可变 TaskGraph，只有 post-Acceptance `operator.state_control` Effect 可以写 canonical repository；不可变 admin operation receipt 与 claim 之间的崩溃可由新实例精确恢复。路由中的直接 Scheduler writer 为 0，read 路由保持只读，trigger 保持既有 governed occurrence。
 
@@ -268,7 +268,7 @@ Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界�
 运行得到 `271 passed, 2 warnings in 332.52s`。部署多实例 canary、
 Windows graceful stop 与 NE-07 真实服务栈尚未运行，因此本表保持
 `PARTIAL / IN_PROGRESS`。
-| Evolution Lab | `LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS / COMMIT_BOUND_SUITE_PENDING_POST_COMMIT` | 0108/0122 只读；0138 trusted ledger；0139 namespace repair；0140 sanitized dataset UoW；专用 Docker executor、typed composition、query-only Obs/Monitor | raw trace 不落库；六个真实 digest-pinned container arm、响应丢失 exact reopen、unknown-effect reconciliation、0140 restart/tamper/rollback 和只读 Operator 展示已通过；Gate 1～14 与统一 static/doc Gate 通过，仅实现提交后的正式 clean-commit suite receipt 待生成 | NE-04 |
+| Evolution Lab | `LOCAL_ACCEPTANCE_PASS / PROPOSAL_ONLY / PROGRAM_INCOMPLETE` | 0108/0122 只读；0138 trusted ledger；0139 namespace repair；0140 sanitized dataset UoW；专用 Docker executor、typed composition、query-only Obs/Monitor | raw trace 不落库；六个真实 digest-pinned container arm、响应丢失 exact reopen、unknown-effect reconciliation、0140 restart/tamper/rollback 和只读 Operator 展示已通过；clean-commit suite 绑定 `b68a8b9dd` 与 receipt `020c8fc0…`，exact replay 不增长 Lab 表或容器；没有 activation authority | NE-07 只验真实全栈 |
 | Counterfactual | `LOCAL_WAVE_CODE_PASS / PROPOSAL_ONLY` | 0138 trusted report + `CounterfactualPairV2` + 三类 Golden service + query-only Operator projection | outcome/evidence/cost/latency/risk/verification 的真实隔离 baseline→candidate 比较已产出；Operator 可只读展示 arm diff 与 proposal，不提供激活；正式 commit-bound aggregate 仍待实现提交后生成 | NE-04 |
 | Capability Maturity | `PARTIAL_NE05_PRODUCTION_FAIL_CLOSED` | scorecard/provider/Governor adapter + production IntentDecisionEngine wiring | 生产门禁默认开启且缺失/伪造 scorecard 最高风险；仍缺 durable promotion/degradation authority | NE-05 |
 | Capability Forge | `PARTIAL_LEGACY_RUNTIME_OVERRIDE_REMAINS` | `app/capability_forge.py`、Obs `runtime-match` route | Executive 内 call site 已删除，但服务仍能生成/批准 blueprint、维护 canary 状态并输出 runtime route override；这违反 Forge 仅生成 EvolutionProposal 的目标，必须在 NE-05 退役/改为 proposal-only | NE-05 |
