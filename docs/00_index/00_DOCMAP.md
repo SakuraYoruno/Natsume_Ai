@@ -21,7 +21,7 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_CANONICAL_TARGET_REGISTRY_SLICE`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_DELIVERY_RECEIPT_RELATIONSHIP_RECONCILIATION_SLICE`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
 偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
@@ -38,8 +38,11 @@ Life delivery intent，再对外可见，高歧义/修复回合保持恰好两�
 主动策略只在 canonical explicit permission、无 repair/未结 episode 且 self regulation
 允许时发送；它不再把 Bond、legacy `affect` 或固定模板当作发送 authority。已接受 reply
 登记 scope-bound `CompanionProactiveTargetV1`，Scheduler 只从该 durable registry 选择与
-冻结 Scene 匹配的单一 target；该切片仍缺投递成功后的关系对账和可逆偏好成长，不能宣称
-主动陪伴已完成。受治理预算流尚缺 provider-final canonical usage，连接恢复与真实服务验收均未完成。
+冻结 Scene 匹配的单一 target。`proactive.gateway` 的 immutable Host/Gateway delivery receipt
+现经 scope、target、payload/authorization digest 重验后，才打开 deterministic
+`PROACTIVE_MESSAGE` episode；回执后的崩溃由 Host 启动或 outbox tick 只读对账，绝不重发。
+这不是第三方平台或用户实际收到的证明，且显式许可入口、可逆偏好成长、旧 writer 清零、
+受治理预算流的 provider-final canonical usage、连接恢复与真实服务验收仍未完成。
 此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
 不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。

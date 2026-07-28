@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_CANONICAL_TARGET_REGISTRY_SLICE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_DELIVERY_RECEIPT_RELATIONSHIP_RECONCILIATION_SLICE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -37,8 +37,11 @@ Avatar 已执行。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_p
 self-affect 生成无回应压力的主动消息；旧 Bond、legacy `affect` 与固定模板均无发送权。
 已接受 foreground reply 现在会把 scope-bound `CompanionProactiveTargetV1` 与 provisional
 episode 原子写入同一 relationship command；Scheduler 从 durable registry 按冻结 Scene
-scope 确定性选择单一 aggregate，旧 `last_target` 无发送权。delivery-success 后效应对账、
-重启 reconciliation 或偏好 canary/rollback 仍未完成，不得称为主动陪伴闭环。受治理预算流、
+scope 确定性选择单一 aggregate，旧 `last_target` 无发送权。`proactive.gateway` 的 immutable
+Host/Gateway receipt 现重验 outbox、授权摘要、scope 与 target 后才写入 deterministic
+`relationship_proactive_delivered`；receipt 后崩溃由 Host 启动或 outbox tick 只读重开，绝不
+重发外部消息。它不代表第三方平台送达或用户已阅读；显式许可入口与偏好 canary/rollback
+仍未完成，不得称为主动陪伴闭环。受治理预算流、
 连接恢复和旧兼容 writer 清零仍由后续 DL-06～DL-07
 交付。此前 NE-01～NE-07 的 Universal Runtime、搜索、
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立

@@ -34,6 +34,13 @@
 队列、旧的 `last_target` 缓存或模型猜测补出。登记本身不等于许可；调度器还要在
 相同 scope 的关系许可、未结 episode 与七海自身 regulation 都允许时才可使用它。
 
+“发出”同样不能被偷换成“用户已经收到”。关系中的主动 episode 只能在本地
+`proactive.gateway` 取得 immutable transport receipt 后开启；该 receipt 必须与原
+outbox、授权摘要和 scope-bound target 精确相符。若进程在 receipt 与关系事件之间
+中断，恢复程序只能重开这两个本地事实并补记 deterministic episode，不能借恢复之名
+再次外发。第三方平台送达、用户阅读和用户回应仍是不同层次的证据；只有后续真实输入
+才可以形成 relationship aftereffect。
+
 代码封口与生产激活是两个不同事实。前者要求所有启用路线共享 canonical
 authority、持久恢复和一次波次证据；后者还要求目标部署、真实网络、外部
 服务、签名 promotion 和回滚。代码封口可以解除下一波的实现依赖，但不能

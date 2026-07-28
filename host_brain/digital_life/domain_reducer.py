@@ -43,6 +43,7 @@ _AFFECTIVE_COMMAND_TYPES = frozenset(
 _RELATIONSHIP_COMMAND_TYPES = frozenset(
     {
         "relationship_response_accepted",
+        "relationship_proactive_delivered",
         "relational_aftereffect_recorded",
         "relationship_proactive_permission_changed",
     }
@@ -152,7 +153,10 @@ def reduce_life_domains(
         _apply_affective_episode_resolution(state, payload=body, now_ms=now_ms)
     elif event_type == "affective_regulation_decided":
         _apply_affective_regulation(state, payload=body, now_ms=now_ms)
-    elif event_type == "relationship_response_accepted":
+    elif event_type in {
+        "relationship_response_accepted",
+        "relationship_proactive_delivered",
+    }:
         _apply_relationship_response_accepted(state, payload=body, now_ms=now_ms)
     elif event_type == "relational_aftereffect_recorded":
         _apply_relational_aftereffect(state, payload=body, now_ms=now_ms)
@@ -674,7 +678,10 @@ def _resolve_canonical_relationship_subject(
             )
             or ""
         ).strip()
-    elif event_type == "relationship_response_accepted":
+    elif event_type in {
+        "relationship_response_accepted",
+        "relationship_proactive_delivered",
+    }:
         candidate = str(
             _mapping(payload.get("episode")).get(
                 "relationship_subject_id"

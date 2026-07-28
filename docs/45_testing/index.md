@@ -7,7 +7,7 @@
 维护日期：2026-07-28
 状态：当前证据
 
-## DL-06 主动陪伴策略与目标登记切片
+## DL-06 主动陪伴送达回执与关系后效应切片
 
 - `test_dl06_companion_proactive.py` 验证 Scheduler 的主动决定只读取 canonical
   `relationship_v2`、`state.affective`、clock 与 admitted timezone：explicit
@@ -24,12 +24,18 @@
   reply 与 `CompanionProactiveTargetV1` 同一 relation command 写入；只有显式 `ALLOWED`
   且 provisional episode 被后效应关闭后，read-only registry 才返回 scope-valid target。
   同一文件还验证 Scheduler 只从与 frozen Scene 相符的 registry target 中稳定选择一个。
-- 本切片定向集合为：主动 policy/registry/relationship/scheduler/重启 `39 passed in 24.70s`，
-  Surface/Acceptance 邻接回归 `59 passed in 21.78s`；历史
-  大合同文件在 60 秒窗口未完成，未记为通过。
-- 本切片不含 delivery-success relationship episode reconciliation、重启 outbox 后效应、
-  5 次 canary/rollback、真实模型或真实 Gateway；
-  它们不能由这些定向单测推导为已完成。
+- `test_dl06_proactive_delivery_reconciliation.py` 使用真实 SQLite Life journal 验证：只有
+  immutable `LifeDeliveryReceipt` 与原 outbox 的 id、key、payload/authorization digest 和
+  scope-bound target 全部一致时，才会打开一个 `PROACTIVE_MESSAGE` episode；下一次真实用户输入
+  才关闭该 episode 并写 aftereffect。它还注入 receipt 已落库但关系对账回调崩溃的窗口，验证
+  恢复扫描只重开 deterministic relationship command、不会第二次调用 transport；篡改私有 target
+  context 会失败关闭。
+- 本次新增定向集合为 delivery reconciliation/policy/registry/relationship/outbox `28 passed in
+  26.13s`，邻接 recovery、Surface/Acceptance、scheduler、fusion 回归 `91 passed in 49.91s`。
+  两组有重叠，不能相加；历史大合同文件在 60 秒窗口未完成，仍未记为通过。
+- 本切片的 receipt 只表示 Host/Gateway transport accepted，不证明第三方平台送达、用户阅读或
+  真实 Gateway 运行；面向用户的显式许可入口、5 次 canary/rollback、旧 writer 清零、真实模型和
+  DL-07 服务栈仍未运行，不能由这些定向测试推导为主动陪伴完成。
 
 ## NE-07 隔离外部服务栈
 

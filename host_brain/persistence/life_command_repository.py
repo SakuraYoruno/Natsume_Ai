@@ -1590,6 +1590,47 @@ class LifeCommandRepository:
             ).fetchall()
             return [_delivery_receipt_from_row(row) for row in rows]
 
+    def list_completed_companion_proactive_messages(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[LifeOutboxMessage]:
+        """Read receipt-backed companion rows still missing their relation event.
+
+        This is a recovery-only projection of the canonical outbox.  It does
+        not claim, alter or resend messages.  A completed relation event is
+        excluded at query time so recurring ticks do not replay historical
+        messages; the relationship service still validates context and receipt
+        identity before writing a missing episode.
+        """
+
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT outbox.*
+                FROM life_delivery_outbox AS outbox
+                INNER JOIN life_delivery_receipt AS receipt
+                    ON receipt.outbox_id = outbox.outbox_id
+                WHERE outbox.status = 'DELIVERED'
+                  AND outbox.destination = 'proactive.gateway'
+                  AND outbox.payload_json LIKE '%"_companion_relationship_context"%'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM life_event_journal AS relation_event
+                      WHERE relation_event.event_type =
+                            'relationship_proactive_delivered'
+                        AND json_extract(
+                            relation_event.event_payload_json,
+                            '$.command_payload.episode.response_receipt_ref'
+                        ) = ('life-delivery://' || outbox.outbox_id)
+                  )
+                ORDER BY receipt.completed_at_ms ASC, outbox.outbox_id ASC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 10_000)),),
+            ).fetchall()
+        return [_outbox_from_row(row) for row in rows]
+
     def list_outbox(self, *, command_id: str | None = None) -> list[dict[str, Any]]:
         with self._operation(write=False) as conn:
             if command_id:

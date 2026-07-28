@@ -21,6 +21,8 @@ from natsume_contracts.life import (
     CompanionProactiveTargetV1,
     LifeCommand,
     LifeCommandReceipt,
+    LifeDeliveryReceipt,
+    LifeOutboxMessage,
     RelationshipEpisodeV1,
     RelationalAftereffectV1,
 )
@@ -77,6 +79,45 @@ def _digest(value: Any) -> str:
 
 def _opaque_ref(prefix: str, value: Any) -> str:
     return f"{prefix}://sha256/{_digest(value)}"
+
+
+def _companion_target_id(
+    *,
+    scope: "RelationshipScope",
+    platform: str,
+    conversation_id: str,
+) -> str:
+    identity = {
+        "schema": "companion-proactive-target.v1",
+        "aggregate_id": scope.aggregate_id,
+        "workspace_id": scope.workspace_id,
+        "relationship_subject_id": scope.relationship_subject_id,
+        "platform": str(platform or "").strip().lower(),
+        "conversation_id": str(conversation_id or "").strip(),
+    }
+    return f"companion_target_{_digest(identity)[:32]}"
+
+
+def _validate_delivery_receipt(
+    *,
+    message: LifeOutboxMessage,
+    receipt: LifeDeliveryReceipt,
+) -> None:
+    if (
+        receipt.outbox_id != message.outbox_id
+        or receipt.delivery_key != message.delivery_key
+        or receipt.payload_digest != message.payload_digest
+        or receipt.authorization_digest != message.authorization_digest
+    ):
+        raise ValueError("companion proactive delivery receipt drift")
+
+
+def _delivery_result_is_success(result: Mapping[str, Any]) -> bool:
+    payload = _mapping(result)
+    if payload.get("success") is False or payload.get("ok") is False:
+        return False
+    status = _text(payload.get("status"), limit=80).upper()
+    return status not in {"FAILED", "ERROR", "REJECTED", "DEGRADED", "IN_DOUBT"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -452,6 +493,116 @@ class RelationshipLifecycleService:
                 raise
             return legacy.as_replayed()
 
+    def provision_delivered_proactive(
+        self,
+        *,
+        message: LifeOutboxMessage,
+        delivery_receipt: LifeDeliveryReceipt,
+    ) -> LifeCommandReceipt | None:
+        """Open a proactive episode only after its durable delivery receipt.
+
+        Creating a Life outbox intent does not mean a message reached the
+        Gateway.  The immutable ``LifeDeliveryReceipt`` is therefore the
+        source fact for a ``PROACTIVE_MESSAGE`` episode.  Reopening this
+        method is exact-idempotent and never resends the external message.
+        """
+
+        if not isinstance(message, LifeOutboxMessage):
+            raise TypeError("message must be a LifeOutboxMessage")
+        if not isinstance(delivery_receipt, LifeDeliveryReceipt):
+            raise TypeError("delivery_receipt must be a LifeDeliveryReceipt")
+        context = _mapping(
+            _mapping(message.payload).get("_companion_relationship_context")
+        )
+        if not context:
+            # Historical or non-companion deliveries have no relationship
+            # semantics.  They remain readable but cannot invent an episode.
+            return None
+        if str(message.destination or "").strip().lower() != "proactive.gateway":
+            raise ValueError("companion relationship context requires proactive.gateway")
+        _validate_delivery_receipt(message=message, receipt=delivery_receipt)
+        if not _delivery_result_is_success(delivery_receipt.result):
+            raise ValueError("companion proactive delivery receipt is not successful")
+        scope, target_id = self._companion_delivery_scope(
+            message=message,
+            context=context,
+        )
+        delivery_ref = f"life-delivery://{delivery_receipt.outbox_id}"
+        result_ref = _opaque_ref(
+            "life-delivery-result",
+            {
+                "outbox_id": delivery_receipt.outbox_id,
+                "delivery_key": delivery_receipt.delivery_key,
+                "payload_digest": delivery_receipt.payload_digest,
+                "authorization_digest": delivery_receipt.authorization_digest,
+                "result": dict(delivery_receipt.result),
+            },
+        )
+        identity = {
+            "schema": "relationship-proactive-delivery.v1",
+            "scope": scope.aggregate_id,
+            "target_id": target_id,
+            "delivery_ref": delivery_ref,
+            "delivery_key": delivery_receipt.delivery_key,
+            "payload_digest": delivery_receipt.payload_digest,
+        }
+        episode = RelationshipEpisodeV1(
+            episode_id=f"relationship_episode_{_digest(identity)[:32]}",
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            source_kind="PROACTIVE_MESSAGE",
+            response_receipt_ref=delivery_ref,
+            response_digest=(
+                f"sha256:{_digest({'delivery': identity, 'result_ref': result_ref})}"
+            ),
+            opened_at_ms=delivery_receipt.completed_at_ms,
+            evidence_refs=(delivery_ref, result_ref),
+        )
+        payload = {"episode": episode.as_dict()}
+        request_id = f"proactive_delivery_{_digest(identity)[:32]}"
+        return self._submit(
+            scope=scope,
+            request_id=request_id,
+            command_type="relationship_proactive_delivered",
+            ordinal=0,
+            payload=payload,
+            created_at_ms=delivery_receipt.completed_at_ms,
+        )
+
+    def reconcile_completed_proactive_deliveries(
+        self,
+        *,
+        limit: int = 100,
+    ) -> int:
+        """Recover completed companion deliveries missing a relation event.
+
+        The delivery receipt and original durable outbox row are the only
+        inputs.  A crash after ``complete_delivery`` but before the relation
+        command is committed is therefore recoverable on Host startup or the
+        next Life I/O tick without a second Gateway submission.  The reader
+        excludes delivery receipts that already have their immutable relation
+        event, so a normal recurrent tick has no historical replay work.
+        """
+
+        reader = self._require_snapshot_reader()
+        messages = reader.list_completed_companion_proactive_messages(
+            limit=max(1, int(limit))
+        )
+        reconciled = 0
+        for message in messages:
+            receipt = reader.get_delivery_receipt(message.outbox_id)
+            if receipt is None:
+                raise RuntimeError(
+                    "COMPANION_PROACTIVE_DELIVERY_RECEIPT_MISSING"
+                )
+            self.provision_delivered_proactive(
+                message=message,
+                delivery_receipt=receipt,
+            )
+            reconciled += 1
+        return reconciled
+
     def _classify_followup(
         self,
         *,
@@ -621,16 +772,13 @@ class RelationshipLifecycleService:
             return None
         if not platform or not conversation_id:
             raise ValueError("companion proactive target requires platform and conversation_id")
-        identity = {
-            "schema": "companion-proactive-target.v1",
-            "aggregate_id": scope.aggregate_id,
-            "workspace_id": scope.workspace_id,
-            "relationship_subject_id": scope.relationship_subject_id,
-            "platform": platform,
-            "conversation_id": conversation_id,
-        }
+        target_id = _companion_target_id(
+            scope=scope,
+            platform=platform,
+            conversation_id=conversation_id,
+        )
         return CompanionProactiveTargetV1(
-            target_id=f"companion_target_{_digest(identity)[:32]}",
+            target_id=target_id,
             workspace_id=scope.workspace_id,
             relationship_subject_id=scope.relationship_subject_id,
             session_id=scope.session_id,
@@ -639,6 +787,47 @@ class RelationshipLifecycleService:
             source_receipt_ref=response_receipt_ref,
             registered_at_ms=opened_at_ms,
         )
+
+    @staticmethod
+    def _companion_delivery_scope(
+        *,
+        message: LifeOutboxMessage,
+        context: Mapping[str, Any],
+    ) -> tuple[RelationshipScope, str]:
+        required = {
+            "schema_version",
+            "target_id",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+        }
+        if frozenset(context) != required:
+            raise ValueError("companion delivery context field set drift")
+        if str(context.get("schema_version") or "") != (
+            "companion_proactive_delivery_context.v1"
+        ):
+            raise ValueError("companion delivery context schema drift")
+        scope = RelationshipScope.from_values(
+            workspace_id=context.get("workspace_id"),
+            relationship_subject_id=context.get("relationship_subject_id"),
+            session_id=context.get("session_id"),
+        )
+        if message.person_id != scope.aggregate_id:
+            raise ValueError("companion delivery aggregate scope drift")
+        payload = _mapping(message.payload)
+        platform = _text(payload.get("platform"), limit=80).lower()
+        conversation_id = _text(payload.get("conversation_id"), limit=512)
+        if not platform or not conversation_id:
+            raise ValueError("companion delivery target route is required")
+        target_id = _text(context.get("target_id"), limit=240)
+        expected_target_id = _companion_target_id(
+            scope=scope,
+            platform=platform,
+            conversation_id=conversation_id,
+        )
+        if target_id != expected_target_id:
+            raise ValueError("companion delivery target identity drift")
+        return scope, target_id
 
     @staticmethod
     def _command_id(

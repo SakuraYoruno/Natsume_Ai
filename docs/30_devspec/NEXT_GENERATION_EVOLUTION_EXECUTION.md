@@ -3,9 +3,9 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v4.6
+版本：v4.7
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-06_CANONICAL_TARGET_REGISTRY_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-06_DELIVERY_RECEIPT_RELATIONSHIP_RECONCILIATION_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -198,9 +198,13 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   content digest，不复制文本。accepted foreground reply 会把 typed
   `CompanionProactiveTargetV1` 与 provisional episode 原子写入同一 relationship command；
   registry 只读重开 scope-valid、显式 `ALLOWED`、无 repair/active episode 的 target，Scheduler
-  再按冻结 Scene scope 确定性选择一个 aggregate，旧 `last_target` 不能进入该 route。
-  delivery-success→episode reconciliation、restart reconciliation 和后续 aftereffect 仍在完成前，
-  不得称为主动陪伴闭环。
+  再按冻结 Scene scope 确定性选择一个 aggregate，旧 `last_target` 不能进入该 route。已完成
+  `proactive.gateway` 的 Host/Gateway receipt 会重验 outbox identity、payload/authorization
+  digest 与私有 scope/target context，才追加 deterministic `relationship_proactive_delivered`
+  command 并打开 `PROACTIVE_MESSAGE` episode；receipt 后中断时，Host lifespan 或下一次 outbox
+  tick 只读扫描该 receipt 并 exact-replay relation command，绝不重放 Gateway transport。该 receipt
+  不代表第三方平台已经投递或用户已阅读，下一次真实用户输入才记录 aftereffect；显式用户许可
+  入口、profile canary/rollback 与旧 writer 清零仍在完成前，不得称为主动陪伴闭环。
 - 低风险偏好只覆盖称呼、长度、幽默、追问、安慰风格、主动频率、语速和动作强度。
 - 自动升级需至少 5 条独立 aftereffect、跨 3 天、置信下界≥0.85、边界违规=0，并先经历 5 次 canary；核心人格、价值观、亲密身份与敏感推断必须 Review。
 - 清零 HostEmotionRuntime self-state、Limbic metabolism、EmotionPersistence、BodySense、Endocrine、Motive writer 和 volatile Bond queue 的生产 writer 使用量。

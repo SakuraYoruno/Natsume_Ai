@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from natsume_contracts.life import (
     LifeCommandReceipt,
+    LifeDeliveryReceipt,
     LifeEvent,
+    LifeOutboxMessage,
     LifeProjectionIntent,
     LifeProjectionReceipt,
     LifeSnapshot,
@@ -138,6 +140,23 @@ class LifeSnapshotReader:
 
     def get_receipt(self, command_id: str) -> LifeCommandReceipt | None:
         return self.repository.get_receipt(command_id)
+
+    def get_delivery_receipt(
+        self,
+        outbox_id: str,
+    ) -> LifeDeliveryReceipt | None:
+        return self.repository.get_delivery_receipt(outbox_id)
+
+    def list_completed_companion_proactive_messages(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[LifeOutboxMessage]:
+        """Read only receipt-backed companion messages missing a relation event."""
+
+        return self.repository.list_completed_companion_proactive_messages(
+            limit=limit
+        )
 
     def list_projection_intents(
         self,

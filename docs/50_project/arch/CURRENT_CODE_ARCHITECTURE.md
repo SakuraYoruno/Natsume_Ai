@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_CANONICAL_TARGET_REGISTRY_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_DELIVERY_RECEIPT_RELATIONSHIP_RECONCILIATION_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -30,10 +30,15 @@
 > foreground reply 会将 `CompanionProactiveTargetV1` 与 provisional episode 原子写入同一
 > relationship command；只读 registry 仅返回 scope-valid、`ALLOWED`、无 repair/active
 > episode 的 target，Scheduler 再按 frozen Scene scope 确定性选择一个 aggregate。旧
-> `last_target` 不能授权发送。
+> `last_target` 不能授权发送。`proactive.gateway` 的完成 receipt 会同 canonical outbox 的
+> id/key/payload/authorization digest 与私有 scope-bound target context 一起重验；只有全部一致
+> 才生成 deterministic `relationship_proactive_delivered` command 并打开 `PROACTIVE_MESSAGE`
+> episode。receipt 后进程崩溃时，Host lifespan 与 outbox tick 只读扫描 completed receipt 并
+> exact-replay relation command，不会重复调用 Gateway transport；该回执只表示 Host/Gateway
+> accepted，不能推导第三方平台送达或用户阅读。
 > `HostEmotionRuntime`、Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与
-> Surface 的其它兼容 state 仍未清零；投递成功后的 relationship episode 对账、偏好
-> canary/rollback、真实模型和三模态物理服务也尚未闭环。因此状态仍为
+> Surface 的其它兼容 state 仍未清零；显式许可入口、偏好 canary/rollback、真实模型和三模态
+> 物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与

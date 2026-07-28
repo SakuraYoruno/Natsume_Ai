@@ -594,9 +594,14 @@ repair/active episode 且 scope-valid 的 target，Scheduler 再从与 frozen Sc
 clock 和 admitted timezone，先验证无给空间 regulation、能量和休息需要，才调用既有的纯
 impulse/risk 算法；Bond score、legacy `state.affect`、旧 `last_target`、私密 inner note 和
 project title 不会进入该输入。decision trace 只记录 content digest；真正的消息仅存在于已经
-授权的 outbox payload。用于未来 delivery-success 对账的私有关系 context 只保留在该 canonical
-outbox 行，进入 Preview 和 Gateway 前会被剥离，不能成为外发 metadata。未知/拒绝、裂痕、
-等待后效应或自我克制均为 hold，而不是用沉默惩罚用户。
+授权的 outbox payload。用于 delivery-success 对账的私有关系 context 只保留在该 canonical
+outbox 行，进入 Preview 和 Gateway 前会被剥离，不能成为外发 metadata。transport 成功先固定
+`LifeDeliveryReceipt`；app-local relationship reconciler 再重验 receipt/outbox 的 id、key、
+payload/authorization digest 及 target/scope，才追加 `relationship_proactive_delivered`。若进程
+在这两步之间中断，Host lifespan 或下一 outbox tick 只读扫描已完成 receipt 并 exact-replay
+该 relation command，永不重发 Gateway。这个 receipt 仅表示 Host/Gateway accepted，不能代表
+第三方平台送达或用户已阅读。未知/拒绝、裂痕、等待后效应或自我克制均为 hold，而不是用沉默
+惩罚用户。
 
 ```mermaid
 flowchart LR
@@ -613,6 +618,11 @@ flowchart LR
     G -->|yes| I["canonical companion impulse adapter"]
     I --> O["authorized proactive.gateway outbox\nprivate reconciliation context"]
     I --> D["bounded decision trace + content digest"]
+    O --> GY["Gateway transport accepted\nimmutable LifeDeliveryReceipt"]
+    GY --> Q["revalidate receipt + scope + target\nrelationship_proactive_delivered"]
+    Q --> E["PROACTIVE_MESSAGE episode\nwait for real next user input"]
+    GY -. "crash after receipt" .-> RS["Host startup / outbox tick\nreceipt-only reconciliation, no resend"]
+    RS --> Q
 ```
 
 Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Secure Ingress → immutable `BLOCKED` cancellation intent → trusted `CANCELLED` final decision → restart terminal worker → deterministic nonacceptance claim → tombstone/Workspace cleanup。intent 不能冒充 final decision，任何 lineage 漂移均 fail-closed；该流不处理一般取消、多节点或 unknown effect。

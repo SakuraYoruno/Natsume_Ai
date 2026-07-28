@@ -68,6 +68,7 @@ def compose_life_dispatchers(
     embodiment_runtime: Any,
     action_preview_service: Any | None = None,
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
+    relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
 ) -> tuple[Any, Any]:
     """Bind projection and delivery workers to the canonical Life repository."""
 
@@ -99,6 +100,9 @@ def compose_life_dispatchers(
                 ledger=ledger,
                 embodiment_runtime=embodiment_runtime,
                 action_preview_service=action_preview_service,
+            ),
+            relationship_lifecycle_service_provider=(
+                relationship_lifecycle_service_provider
             ),
         ),
     )

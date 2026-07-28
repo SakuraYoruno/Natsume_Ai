@@ -386,6 +386,23 @@ def create_app(
             life_command_authority = _compose_life_command_authority(ledger)
         return life_command_authority
 
+    def life_delivery_relationship_lifecycle_service_provider() -> Any:
+        """Create the app-local relation reconciler over canonical Life ports."""
+
+        from host_brain.digital_life.relationship_lifecycle import (  # noqa: PLC0415
+            RelationshipLifecycleService,
+        )
+
+        return RelationshipLifecycleService(
+            command_service_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[0]
+            ),
+            snapshot_reader_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[1]
+            ),
+            clock_ms=now_ms,
+        )
+
     async def handle_chat_with_runtime(
         request_body: ChatRequest,
         request: Request,
@@ -827,6 +844,17 @@ def create_app(
                     embodiment_runtime=embodiment_runtime,
                     action_preview_service=action_preview_service,
                     agent_runtime_ports=agent_runtime_ports,
+                    relationship_lifecycle_service_provider=(
+                        life_delivery_relationship_lifecycle_service_provider
+                    ),
+                )
+                # A completed Gateway receipt may have survived a process
+                # crash before its relationship episode was journaled.  This
+                # scan reads only canonical outbox/receipt facts and never
+                # replays transport, so run it before routes become available.
+                await asyncio.to_thread(
+                    life_dispatchers[1].reconcile_completed_relationship_deliveries,
+                    limit=100,
                 )
                 application.state.embodiment_runtime = embodiment_runtime
                 canon = build_process_canon_container(
