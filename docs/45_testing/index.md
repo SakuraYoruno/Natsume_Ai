@@ -18,12 +18,13 @@
   content-digest trace、scene/grant fail-closed 和 explicit permission。旧早/晚/默认
   三句模板不再是当前 Scheduler 输出合同。
 - `test_dl02_affect_fusion.py` 验证 production fusion composition 不会解析
-  `HostEmotionRuntime` provider；compatibility runtime 仅在不存在 Life authority 的
-  明确 fallback 调用中可用。
+  `HostEmotionRuntime` provider；Input/Tribe composition 在缺少 Life authority 时固定
+  `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不会构造任何 compatibility runtime。
 - `test_ne01_host_lifecycle_composition.py` 与 `test_dl02_affect_fusion.py` 现额外验证
   production Host root 不再构造或发布 mutable `HostEmotionRuntime` / global user profile，
   ASGI Tribe 具备 Life authority 时会和 Input 一样走 canonical fusion，且不会解析旧 runtime。
-  本切片连同 Host lifecycle、hard-state 与 ASGI composition 定向集合为 `85 passed in 34.06s`；
+  本切片的最终 composition/输入路由受影响集合为 `148 passed in 39.51s`（其中直接 composition
+  子集为 57 项）；
   这不是 Limbic、Endocrine、BodySense、Motive、Bond queue 清零或真实服务栈证据。
 - `test_limbic_agent.py` 现验证 production canonical Life authority 会让 Limbic 的 legacy
   persistence、metabolism、timeline append、decay 以及 Bond progress/regress callback 返回

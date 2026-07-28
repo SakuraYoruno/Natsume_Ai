@@ -22,7 +22,7 @@
 > 不接受请求伪造。HostEmotionRuntime、Limbic、Endocrine 与 global BodySense 的 production mutation 已逐项切断；
 > BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪；production Bond writer/queue 已退役为只读 projection 与明确 no-write adapter，Surface
 > 仍有其它兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
-> episode 与旧 writer 清零仍待后续 DL 波。
+> episode 与旧 writer 清零仍待后续 DL 波。Input/Tribe composition 也已删除旧 runtime fallback：缺 Life authority 时拒绝，不能构造 `HostEmotionRuntime`。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`
 > 接到 Surface 主链：普通低歧义文本在可见前逐句落 journal，模型输出不能回写
 > self-affect；高歧义回合只能两候 buffered selection。DL-05 使 `ExpressionPlanV1`
@@ -186,12 +186,12 @@ Worker Evidence 模块只负责对 durable WorkerProjection 做独立验证与�
 
 Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskStore 负责有序 Effect staging，Digital Life command repository 负责 command/event/intent 原子入账，`LifeProjectionDispatcher + life_projection_barrier` 负责 exact intent 执行与回执集合校验。`surface.post_process` 继续调用真实 app-local AgentRuntime ports，只有 assistant turn 和 LifeMemory admission 均持久成功才可完成 projection。Gateway transport仍由后序 delivery Effect 拥有，任何本地投影 UNKNOWN 都会阻断它；这样没有新增第二个 Conversation writer，也没有让 Life command receipt越权成为投影成功证明。
 
-情感上下文模块现在分为 canonical fusion 与 legacy compatibility 两个清晰边界。生产 ASGI 在 `InputRuntimeApplicationPorts` 提供 `LifeCommandService` 后，会构造 app-local `AffectFusionService`：它把 `ChatRequest` 的文本、自述和允许的结构化声学/视觉摘要转换为 `UserAffectObservationV1`，以 workspace-scoped opaque aggregate key 持久化，再最多产生两个 `EventAppraisalV1` 候选；只有后者可推进 `state.affective`。只要该 fusion service 存在，Input composition 就不再解析 `HostEmotionRuntime`。`normalize_chat_emotion_context()` 对 fused internal context 与 replay/render 均只读，外部无法以伪造 `affective_life` 字段越过该边界。`HostEmotionRuntime` 仍管理旧连续向量、前一标签、Timeline、用户画像和日记节流，但仅是未提供 fusion service 时的 app-local compatibility fallback，不是 canonical self-affect。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。上述模块均不拥有 Persona/Feedback 的永久写 authority。
+情感上下文模块现在由 canonical fusion 单独拥有 Host composition 入口。生产 ASGI 在 `InputRuntimeApplicationPorts` 提供 `LifeCommandService` 后，会构造 app-local `AffectFusionService`：它把 `ChatRequest` 的文本、自述和允许的结构化声学/视觉摘要转换为 `UserAffectObservationV1`，以 workspace-scoped opaque aggregate key 持久化，再最多产生两个 `EventAppraisalV1` 候选；只有后者可推进 `state.affective`。Input/Tribe composition 缺少该 authority 时固定 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，既不解析 provider，也不构造 `HostEmotionRuntime`。`normalize_chat_emotion_context()` 对 fused internal context 与 replay/render 均只读，外部无法以伪造 `affective_life` 字段越过该边界。旧 runtime 类仅保留给直接隔离测试，不是任何 Host fallback。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。上述模块均不拥有 Persona/Feedback 的永久写 authority。
 
 当前 production Host root 不再实例化该 compatibility runtime；`user_emotion_profile` 也不再
 作为 process-wide port 发布。`build_tribe_application_ports()` 接收 ASGI 的 lazy Life command
-provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime。只在
-没有 Life authority 的 offline/test composition 中才可显式创建 `HostEmotionRuntime`。canonical
+provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime；遗漏
+authority 的 composition 失败关闭，不能恢复 offline/test fallback。canonical
 Tribe ports 还会令 Limbic 的 legacy persistence、metabolism、timeline append、decay 与 Bond callback
 全部 no-op 并返回 `RETIRED_CANONICAL_LIFE`，避免 event callback 重建第二份 self-affect。这不是完整
 organ 退役：Endocrine 的 legacy delta/last-state/hint/fan-out 现同样 no-op；Circadian/MirrorNeuron

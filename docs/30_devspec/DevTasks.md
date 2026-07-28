@@ -81,8 +81,9 @@ canary、legacy writer cutover 与真实服务验收仍未完成。
 `HostEmotionRuntime`，也不再发布 process-wide `user_emotion_profile`。ASGI 为 Tribe
 注入与 Input 相同的惰性 `LifeCommandService` authority；二者在真实 request 时均经
 `AffectFusionService` 写入 scoped observation/appraisal，再读取 canonical self-affect。
-`HostEmotionRuntime` 只可在没有 Life authority 的明确 offline/test compatibility composition
-中使用，不能作为生产 fallback。
+`HostEmotionRuntime` 不再可由 Input 或 Tribe composition 构造；遗漏 Life authority 的请求固定
+`CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不能以 offline/test composition 名义恢复第二个 self-affect
+writer。该类只保留给直接隔离测试，不能作为 Host fallback。
 
 当前 `DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE` 已在同一 immutable
 `TribeApplicationPorts` 上标记 canonical Life authority。production Limbic 遇到 legacy
@@ -110,6 +111,9 @@ backlog 或失败后直写 fallback。production Host 现在也不再从旧 acti
 `EmotionTimeline`：retired empty projection 不含伪造的 `NEUTRAL`，Lifecycle/proactive 会忽略它，canonical
 Limbic/Prefrontal 不会读取或缓存它，user profile 也不能覆盖七海 self-affect。其它 compatibility projection
 的生产读取审计、Monitor/Review 与真实服务验收仍待处理；这一事实不是 DL-06 或真实陪伴验收完成。
+
+本轮只完成 composition 级 fail-closed：Input/Tribe 缺 Life authority 的情感解析稳定拒绝，最终定向
+composition/输入路由集合 `148 passed in 39.51s`（直接 composition 子集 57 项）。它不等于旧类物理删除、Monitor/Review 使用量归零或真实服务验收。
 
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与

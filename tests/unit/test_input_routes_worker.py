@@ -60,6 +60,24 @@ async def _noop_reply_performance(**_kwargs):  # noqa: ANN003
     return {"invoked": False, "success": True, "reason_code": "UNIT_TEST_NOOP"}
 
 
+def _test_canonical_emotion_context(*, request_id: str, **_kwargs):  # noqa: ANN003
+    """Provide an explicit read-only canonical hand-off for route tests.
+
+    These tests exercise input routing rather than Affective Life persistence.
+    They must inject an emotion port instead of relying on a composer-created
+    HostEmotionRuntime fallback.
+    """
+
+    return {
+        "mood_state": "steady",
+        "emotion_tag": "NEUTRAL",
+        "emotion_intensity": 0.5,
+        "emotion_ts_ms": 123456,
+        "emotion_inference_source": "test_canonical_affect_port",
+        "request_id": str(request_id),
+    }
+
+
 def _ports(**overrides):  # noqa: ANN003
     overrides.setdefault("get_intent_engine", lambda: object())
     overrides.setdefault(
@@ -70,6 +88,10 @@ def _ports(**overrides):  # noqa: ANN003
     )
     overrides.setdefault("evaluate_governor_with_timing", _approve_governor)
     overrides.setdefault("trigger_reply_performance", _noop_reply_performance)
+    overrides.setdefault(
+        "resolve_chat_emotion_context",
+        _test_canonical_emotion_context,
+    )
     thalamus = ThalamusAgent(state_registry=TribeStateRegistry())
     overrides.setdefault("get_thalamus_agent", lambda: thalamus)
     return replace(build_input_runtime_application_ports(), **overrides)

@@ -183,7 +183,6 @@ def build_tribe_application_ports(
         build_conversation_experience_read_pack,
     )
     from host_brain.app.emotion_context import (
-        HostEmotionRuntime,
         build_chat_emotion_snapshot,
         resolve_chat_emotion_context,
     )
@@ -216,15 +215,6 @@ def build_tribe_application_ports(
                 relationship_lifecycle_service_provider
             ),
         )
-        emotion_runtime_provider = None
-    elif host_services is None:
-        local_emotion_runtime = HostEmotionRuntime()
-        emotion_runtime_provider = lambda: local_emotion_runtime
-    else:
-        emotion_runtime_provider = _host_provider(
-            host_services,
-            "emotion_context_runtime",
-        )
 
     def resolve_process_mode_transition_service():
         if mode_transition_service_provider is not None:
@@ -249,12 +239,7 @@ def build_tribe_application_ports(
                 affect_fusion_service=canonical_affect_fusion,
                 **kwargs,
             )
-        if emotion_runtime_provider is None:
-            raise RuntimeError("CANONICAL_AFFECT_FUSION_NOT_INJECTED")
-        runtime = emotion_runtime_provider()
-        if not isinstance(runtime, HostEmotionRuntime):
-            raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
-        return resolve_chat_emotion_context(runtime=runtime, **kwargs)
+        raise RuntimeError("CANONICAL_AFFECT_FUSION_NOT_INJECTED")
 
     return TribeApplicationPorts(
         activity_monitor=resolved_activity_monitor_provider,

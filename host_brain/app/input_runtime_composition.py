@@ -10,7 +10,6 @@ from host_brain.app.chat_handler import _evaluate_governor_with_timing
 from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator
 from host_brain.app.durable_task_status import build_durable_task_status_projection
 from host_brain.app.emotion_context import (
-    HostEmotionRuntime,
     build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
@@ -97,14 +96,10 @@ def build_input_runtime_application_ports(
         if callable(life_command_service_provider)
         else None
     )
-    # The canonical fusion route is authoritative for production Chat.  Keep
-    # the mutable HostEmotionRuntime lazy fallback only for explicitly legacy
-    # compositions that do not have a Life command authority at all.
-    get_emotion_context_runtime = (
-        _emotion_runtime_provider(host_services)
-        if affect_fusion_service is None
-        else None
-    )
+    # A Host request may only resolve affect through the canonical Life
+    # authority.  Do not construct HostEmotionRuntime as a composition
+    # fallback: even an app-local fallback would restore a second mutable
+    # self-affect writer when a caller accidentally omitted Life wiring.
     reply_form_decider = ResponseFormDecider()
     get_thalamus_agent = _tribe_agent_provider(
         tribe_runtime_agent_ports,
@@ -153,12 +148,7 @@ def build_input_runtime_application_ports(
                 affect_fusion_service=affect_fusion_service,
                 **kwargs,
             )
-        if get_emotion_context_runtime is None:
-            raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
-        return resolve_chat_emotion_context(
-            runtime=get_emotion_context_runtime(),
-            **kwargs,
-        )
+        raise RuntimeError("CANONICAL_AFFECT_FUSION_NOT_INJECTED")
 
     return InputRuntimeApplicationPorts(
         get_intent_engine=get_intent_engine,
@@ -212,23 +202,6 @@ def _optional_host_provider(
         return None
     provider = getattr(host_services, field_name, None)
     return provider if callable(provider) else None
-
-
-def _emotion_runtime_provider(
-    host_services: HostLifecycleApplicationPorts | None,
-) -> Callable[[], HostEmotionRuntime]:
-    if host_services is not None:
-        provider = host_services.require_provider("emotion_context_runtime")
-
-        def require_host_runtime() -> HostEmotionRuntime:
-            runtime = provider()
-            if not isinstance(runtime, HostEmotionRuntime):
-                raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
-            return runtime
-
-        return require_host_runtime
-    local_runtime = HostEmotionRuntime()
-    return lambda: local_runtime
 
 
 def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:

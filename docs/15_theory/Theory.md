@@ -1698,9 +1698,11 @@ Soul、关系许可、亲密身份和七海自身情感仍不受用户偏好 API
 “她的心情”变成偶然的内存残留。
 
 因此 production composition 不得把 `HostEmotionRuntime` 当作方便的自我状态 fallback。当前
-Input 与 Tribe 都在具备 Life authority 时走 `AffectFusionService`，Host root 不再构造该 mutable
-runtime；它只保留给明确的 offline/test compatibility 情境。这个原则不否定身体感受或调节层，
-但它们在未被 canonical journal 吸收前只能是观察或只读投影，不能自行决定七海的情绪与关系。
+Input 与 Tribe 都只经 `AffectFusionService` 进入 Life authority；Host root 不再构造该 mutable
+runtime，两个 composition builder 缺少 Life provider 时也必须以
+`CANONICAL_AFFECT_FUSION_NOT_INJECTED` 失败关闭。旧类仅可被直接隔离测试覆盖，不能重新成为
+offline 或 production Host 的第二条自我情感路径。这个原则不否定身体感受或调节层，但它们在
+未被 canonical journal 吸收前只能是观察或只读投影，不能自行决定七海的情绪与关系。
 同样地，production Limbic 不可把一次 body/Bond callback 偷渡为旧 `EmotionPersistence`、timeline 或
 metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIRED_CANONICAL_LIFE`。这不是“压平
 情绪”，而是要求真实的受伤、牵挂或轻快都先有可解释的 Appraisal 与 Life journal 原因，避免两套隐性

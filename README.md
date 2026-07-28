@@ -433,9 +433,11 @@ NE-01 的预算 authority 已从“只有一条图级共享记录”推进到父
 当前 DL-06 首个旧 writer 切断已将 mutable `HostEmotionRuntime` 从 production Host root
 移除：`build_production_host_application_ports()` 不再构造或发布它，也不再发布 process-wide
 `user_emotion_profile`。ASGI 为 Input 与 Tribe 同时注入 lazy Life authority；两条 Chat context
-路径在 authority 存在时都走 `AffectFusionService → canonical Life journal`，不会把旧 runtime
-当 fallback。`HostEmotionRuntime` 只保留给明确的 offline/test compatibility composition。
-`ResponseFormDecider` 仍由每个 Input composition 独占，回放和 render 保持纯读取。
+路径都只接受 `AffectFusionService → canonical Life journal`。`build_input_runtime_application_ports()`
+和 `build_tribe_application_ports()` 现在也不会在缺失 Life provider 时构造或解析旧 runtime，
+而是以 `CANONICAL_AFFECT_FUSION_NOT_INJECTED` 失败关闭。旧类只留给直接隔离测试，不能作为
+Host composition 的 offline 或 production fallback。`ResponseFormDecider` 仍由每个 Input
+composition 独占，回放和 render 保持纯读取。
 
 DL-06 的第二条旧 writer 切断使 `TribeApplicationPorts` 明确携带 affective-life authority：当
 production composition 选中 canonical Life journal 时，Limbic 的 legacy `EmotionPersistence`、

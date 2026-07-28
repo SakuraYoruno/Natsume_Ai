@@ -42,8 +42,9 @@ Monitor/Review、canary 长期收益、旧 writer cutover 或真实服务栈通�
 **Host 情感运行时切断修订：** production `ProcessApplicationPorts` 与 Host root 已删除
 `emotion_runtime_factory`，不再发布 mutable `HostEmotionRuntime` 或 global
 `user_emotion_profile`。ASGI 将 lazy Life command provider 同时传给 Input 与 Tribe；二者在
-production request 上以 canonical `AffectFusionService` 读取/写入 scoped Life journal，旧 runtime
-只可在明确 offline/test compatibility composition 中使用。此为一条 writer 的定向收口，不包含
+production request 上以 canonical `AffectFusionService` 读取/写入 scoped Life journal。Input/Tribe
+composition 现已删除旧 runtime 的构造与 provider fallback；遗漏 Life authority 固定失败关闭，旧类仅保留
+直接隔离测试。此为一条 writer 的定向收口，不包含
 Limbic、EmotionPersistence、BodySense、Endocrine、Motive、volatile Bond queue、Monitor/Review 或
 真实服务栈验收。
 

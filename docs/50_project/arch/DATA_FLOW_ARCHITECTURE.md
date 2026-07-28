@@ -639,7 +639,8 @@ protocol 切片的完成范围。
 `HostEmotionRuntime`，且 ASGI 为 Input 与 Tribe 都注入 lazy Life command provider；二者在
 authority 存在时均经 `AffectFusionService` 形成 scoped observation/appraisal。因而 global
 `user_emotion_profile` 在 production 留空，不能跨 workspace/person/session 汇总并反馈为七海的
-感受。旧 runtime 只存在于显式 offline/test compatibility composition。随后 canonical
+感受。旧 runtime 类不由任何 Input/Tribe composition 构造；缺 Life authority 的解析稳定拒绝。
+随后 canonical
 `TribeApplicationPorts` 也成为 Limbic compatibility writer 的 gate：旧 persistence/metabolism/
 timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
 回调追加为另一个 self-affect 事实。Endocrine 的 delta buffer/last-state/hint/fan-out 也由同一 gate
@@ -657,10 +658,10 @@ reader 与真实服务验收仍待处理。
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor
 字段。`normalize_chat_emotion_context(raw)` 对 replay/render 和 trusted fused
-context 都不写状态。只要 production composition 注入 fusion service，它不会解析
-或调用旧 `HostEmotionRuntime.ingest → vector/timeline/profile`；后者只留在未注入
-Life authority 的明确 compatibility 调用中。`ResponseFormDecider` 继续由 Input
-composition 独占并做原子额度检查，不是 affect authority。
+context 都不写状态。Input/Tribe composition 不会解析或调用旧
+`HostEmotionRuntime.ingest → vector/timeline/profile`；遗漏 Life authority 时稳定
+`CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不能退回 compatibility runtime。
+`ResponseFormDecider` 继续由 Input composition 独占并做原子额度检查，不是 affect authority。
 
 DL-06 的 Scheduler 主动消息已开始走同一条 canonical 边界。accepted foreground
 reply 先把 `CompanionProactiveTargetV1` 与 provisional relationship episode 原子写入同一

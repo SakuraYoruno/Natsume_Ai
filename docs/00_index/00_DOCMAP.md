@@ -62,7 +62,8 @@ mode 退役，且 Circadian/MirrorNeuron 不再直写其私有字段。生产 Su
 及其 writer 已改为无 worker、无 backlog 的明确 retired adapter，旧 score/stage 仅可读取。production
 Host 现在也不再从旧 action log 预热 `EmotionTimeline`：它只暴露显式 retired 空投影，Lifecycle/
 proactive 忽略该标记，canonical Limbic/Prefrontal 不会解析它；user profile 保持用户观察，不能覆盖
-七海 self-affect。剩余的是其它兼容读取审计与 runtime 使用计量，不是 DL-06 或真实服务验收完成。
+七海 self-affect。Input/Tribe composition 现已彻底删除 `HostEmotionRuntime` fallback：缺 Life authority
+稳定拒绝，旧类只留直接隔离测试。剩余的是其它兼容读取审计与 runtime 使用计量，不是 DL-06 或真实服务验收完成。
 
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user

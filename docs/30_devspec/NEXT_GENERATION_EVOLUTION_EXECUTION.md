@@ -263,6 +263,13 @@ Bond queue 已退役：production factory 不再构造 real queue/writer，Surfa
 canonical Limbic/Prefrontal 不会 resolve/cached 该投影，user profile 不得覆盖七海 self-affect。其它
 compatibility projection 的生产读取审计与 runtime 使用计量仍未清零，不能把这些局部切断写成 DL-06 完成。
 
+**本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
+`build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。
+任何遗漏 Life authority 的 Host request 都稳定拒绝为 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不再以
+“离线 composition”名义创建第二份 mutable self-affect。`HostEmotionRuntime` 类仅保留给直接隔离测试；
+本地最终 148 项 composition 与输入路由受影响回归通过（其中直接 composition 子集为 57 项）。这不证明 Monitor/Review 读取审计、真实 provider、远端 Edge 或 DL-07
+服务栈验收完成。
+
 退出：Soul digest 不变，低风险 apply→rollback 真实影响后续表达，旧 writer runtime 使用量=0。
 
 ### DL-07：真实陪伴验收
