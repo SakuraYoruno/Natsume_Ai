@@ -36,6 +36,9 @@ class HostBondRuntimeSettings:
     score_map: Mapping[str, int]
     max_queue_size: int
     worker_enabled: bool
+    # DL-03: legacy Bond scores remain a compatibility read projection, never
+    # a production authority that silently promotes intimacy.
+    automatic_stage_transitions: bool = False
 
 
 class HostBondRuntimeCloseError(RuntimeError):
@@ -99,8 +102,11 @@ class HostBondRuntimeOwner:
                 settings = self._require_settings()
                 self._stage_engine = self._stage_engine_factory(
                     ledger=self._ledger_provider(),
-                    stage_thresholds=dict(settings.stage_thresholds),
-                    score_map=dict(settings.score_map),
+                stage_thresholds=dict(settings.stage_thresholds),
+                score_map=dict(settings.score_map),
+                automatic_stage_transitions=(
+                    bool(settings.automatic_stage_transitions)
+                ),
                 )
             return self._stage_engine
 
@@ -231,6 +237,10 @@ def load_host_bond_runtime_settings(
         worker_enabled=_parse_bool(
             source.get("HOST_BOND_QUEUE_ENABLED"),
             default=True,
+        ),
+        automatic_stage_transitions=_parse_bool(
+            source.get("HOST_BOND_AUTO_STAGE_TRANSITIONS"),
+            default=False,
         ),
     )
 

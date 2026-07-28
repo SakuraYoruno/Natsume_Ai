@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.36
+版本：v2.37
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-07-28
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -524,7 +524,7 @@ Identity 至少包含：
 
 关系不是一个可以刷分的“好感度”。它至少需要表达熟悉、信任、舒适、开放、边界柔软度、依恋、冲突裂痕等不同维度。
 
-当前 [RelationshipStateBlock](../../host_brain/persona/context/relationship_state.py) 会从 Bond 与 social state 派生关系表达上下文，[Affect policy](../../host_brain/persona/affect_policy.py) 再用它限制亲密度、温度、幽默和主动追问。
+当前 legacy [RelationshipStateBlock](../../host_brain/persona/context/relationship_state.py) 仍会从 Bond 与 social state 派生兼容表达上下文，但它不再是关系长期 authority。DL-03 已把 [`RelationshipEpisodeV1`](../../natsume_contracts/life/relationship.py)、aftereffect 与有界 `RelationshipStateV2` 接入 canonical [Digital Life reducer](../../host_brain/digital_life/domain_reducer.py)：已接受的回复先开 provisional episode，下一次用户输入才以脱敏 digest 记录是否接住、触及边界、误解或被接受修复。Surface 只能从内部 provenance hand-off 把该结果变成表达的收紧约束，不能由请求体、模型或 Bond 分数直接改写关系事实。
 
 关系状态必须遵守：
 
@@ -534,6 +534,14 @@ Identity 至少包含：
 - 关系亲密不能扩大工具权限；
 - 用户能查看、纠正或重置关系数据；
 - 关系阶段变化不能直接改写 Identity 核心。
+
+关系后效应还必须遵守以下不对称性：
+
+- 信任、安全和默契只可由可归因的连续体验缓慢积累；裂痕可以因明确边界或未接住而快速上升；
+- 道歉是七海承担分寸的开始，不是修复完成证据；只有后续用户反应才可将修复标为接受；
+- 沉默、离线、技术投递失败都不是拒绝或惩罚，不能扣信任、催促用户或制造情感债；
+- 浪漫、排他和依赖不是“高 Bond”的奖励，默认未授权，必须有明确双向信号与独立 Review；
+- `workspace + relationship_subject` 是长期关系 scope，`session` 只说明事件发生在哪一次会话，不能成为跨用户合并捷径。
 
 ### 7.4 Affect：内部信号，不是表演标签
 

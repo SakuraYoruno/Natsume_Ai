@@ -24,6 +24,9 @@ from natsume_contracts.life import (
     RegulationDecisionV1,
     SelfAffectStateV2,
     UserAffectObservationV1,
+    RelationshipEpisodeV1,
+    RelationshipStateV2,
+    RelationalAftereffectV1,
 )
 
 
@@ -36,7 +39,16 @@ _AFFECTIVE_COMMAND_TYPES = frozenset(
         "affective_regulation_decided",
     }
 )
-_AFFECTIVE_PATCH_PROTECTED_KEYS = frozenset({"identity", "affective"})
+_RELATIONSHIP_COMMAND_TYPES = frozenset(
+    {
+        "relationship_response_accepted",
+        "relational_aftereffect_recorded",
+        "relationship_proactive_permission_changed",
+    }
+)
+_AFFECTIVE_PATCH_PROTECTED_KEYS = frozenset(
+    {"identity", "affective", "relationship_v2"}
+)
 _AFFECTIVE_RAW_MATERIAL_KEYS = frozenset(
     {
         "assistant_reply",
@@ -93,7 +105,7 @@ def reduce_life_domains(
             + ", ".join(protected)
         )
     state = _merge_patch(state, raw_patch)
-    relationship_subject_id = _resolve_affective_relationship_subject(
+    relationship_subject_id = _resolve_canonical_relationship_subject(
         state,
         aggregate_person_id=person_id,
         event_type=event_type,
@@ -104,6 +116,11 @@ def reduce_life_domains(
         state.get("affective"),
         person_id=relationship_subject_id,
         now_ms=now_ms,
+    )
+    state["relationship_v2"] = _normalize_relationship_head(
+        state.get("relationship_v2"),
+        relationship_subject_id=relationship_subject_id,
+        aggregate_person_id=person_id,
     )
 
     if event_type in {"tick", "advance"}:
@@ -130,6 +147,12 @@ def reduce_life_domains(
         _apply_affective_episode_resolution(state, payload=body, now_ms=now_ms)
     elif event_type == "affective_regulation_decided":
         _apply_affective_regulation(state, payload=body, now_ms=now_ms)
+    elif event_type == "relationship_response_accepted":
+        _apply_relationship_response_accepted(state, payload=body, now_ms=now_ms)
+    elif event_type == "relational_aftereffect_recorded":
+        _apply_relational_aftereffect(state, payload=body, now_ms=now_ms)
+    elif event_type == "relationship_proactive_permission_changed":
+        _apply_relationship_proactive_permission(state, payload=body, now_ms=now_ms)
 
     _derive_semantic_projection(
         state,
@@ -247,6 +270,27 @@ def _seed_state(
             "trust": 0.5,
             "closeness": 0.4,
             "distance": "familiar",
+        },
+        # DL-03 is the canonical relationship projection.  It is separate
+        # from the historical scalar ``relationship`` compatibility view and
+        # from all Bond score/stage machinery.
+        "relationship_v2": {
+            "schema_version": "relationship_state.v2",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace::unbound",
+            "relationship_subject_id": person_id,
+            "revision": 0,
+            "trust": 0.5,
+            "safety": 0.58,
+            "attunement": 0.42,
+            "rupture_load": 0.0,
+            "repair_required": False,
+            "proactive_permission": "UNKNOWN",
+            "romantic_consent": "NOT_GRANTED",
+            "exclusive_consent": "NOT_GRANTED",
+            "dependency_consent": "NOT_GRANTED",
+            "active_episodes": [],
+            "last_aftereffect": None,
         },
         "scene": {"kind": "idle", "since_ms": now_ms},
         "intent": {"kind": "quiet_presence", "confidence": 0.5},
@@ -582,7 +626,7 @@ def _canonical_identity(person_id: str) -> dict[str, str]:
     }
 
 
-def _resolve_affective_relationship_subject(
+def _resolve_canonical_relationship_subject(
     state: Mapping[str, Any],
     *,
     aggregate_person_id: str,
@@ -591,11 +635,10 @@ def _resolve_affective_relationship_subject(
 ) -> str:
     """Keep the Life aggregate key separate from the relationship subject.
 
-    DL-02 scopes affect aggregates by workspace.  The aggregate key is an
-    opaque storage identifier, while all affect contracts retain the actual
-    relationship subject.  Existing non-affective Life commands keep their
-    historical identity unchanged; an affect command may establish the raw
-    subject exactly once and later commands must match it.
+    DL-02 scopes affect aggregates by workspace/session and DL-03 scopes
+    relationship aggregates by workspace. The aggregate key is opaque, while
+    canonical affect and relationship contracts retain the actual subject.
+    Existing non-canonical Life commands keep their historical identity.
     """
 
     identity = _mapping(state.get("identity"))
@@ -622,6 +665,22 @@ def _resolve_affective_relationship_subject(
             )
             or ""
         ).strip()
+    elif event_type == "relationship_response_accepted":
+        candidate = str(
+            _mapping(payload.get("episode")).get(
+                "relationship_subject_id"
+            )
+            or ""
+        ).strip()
+    elif event_type == "relational_aftereffect_recorded":
+        candidate = str(
+            _mapping(payload.get("aftereffect")).get(
+                "relationship_subject_id"
+            )
+            or ""
+        ).strip()
+    elif event_type == "relationship_proactive_permission_changed":
+        candidate = str(payload.get("relationship_subject_id") or "").strip()
 
     if not candidate:
         return existing or str(aggregate_person_id)
@@ -631,6 +690,333 @@ def _resolve_affective_relationship_subject(
     if existing and existing not in {str(aggregate_person_id), candidate}:
         raise ValueError("affective relationship subject drift")
     return candidate
+
+
+def _relationship_episode_from_mapping(raw: Mapping[str, Any]) -> RelationshipEpisodeV1:
+    if not raw:
+        raise ValueError("relationship episode is required")
+    return RelationshipEpisodeV1(
+        episode_id=raw.get("episode_id"),
+        workspace_id=raw.get("workspace_id"),
+        relationship_subject_id=raw.get("relationship_subject_id"),
+        session_id=raw.get("session_id"),
+        source_kind=raw.get("source_kind"),
+        response_receipt_ref=raw.get("response_receipt_ref"),
+        response_digest=raw.get("response_digest"),
+        opened_at_ms=raw.get("opened_at_ms"),
+        evidence_refs=raw.get("evidence_refs") or (),
+        self_id=raw.get("self_id") or "natsume_ai",
+    )
+
+
+def _relational_aftereffect_from_mapping(
+    raw: Mapping[str, Any],
+) -> RelationalAftereffectV1:
+    if not raw:
+        raise ValueError("relational aftereffect is required")
+    return RelationalAftereffectV1(
+        aftereffect_id=raw.get("aftereffect_id"),
+        episode_id=raw.get("episode_id"),
+        workspace_id=raw.get("workspace_id"),
+        relationship_subject_id=raw.get("relationship_subject_id"),
+        session_id=raw.get("session_id"),
+        source_receipt_ref=raw.get("source_receipt_ref"),
+        user_input_ref=raw.get("user_input_ref"),
+        outcome=raw.get("outcome"),
+        helpfulness=raw.get("helpfulness"),
+        boundary_respected=raw.get("boundary_respected"),
+        repair_acknowledged=raw.get("repair_acknowledged"),
+        observed_at_ms=raw.get("observed_at_ms"),
+        evidence_refs=raw.get("evidence_refs") or (),
+        self_id=raw.get("self_id") or "natsume_ai",
+    )
+
+
+def _normalize_relationship_head(
+    raw: Any,
+    *,
+    relationship_subject_id: str,
+    aggregate_person_id: str,
+) -> dict[str, Any]:
+    source = _mapping(raw)
+    workspace_id = str(source.get("workspace_id") or "workspace::unbound").strip()
+    if not workspace_id:
+        workspace_id = "workspace::unbound"
+    subject = str(source.get("relationship_subject_id") or "").strip()
+    # A just-seeded aggregate initially uses its opaque aggregate id as a
+    # placeholder.  The first typed relationship command is allowed to bind
+    # the real user subject exactly once; an existing non-empty head may never
+    # silently switch subjects.
+    if (
+        not subject
+        or (
+            subject == str(aggregate_person_id)
+            and _integer(source.get("revision")) == 0
+            and not list(source.get("active_episodes") or [])
+            and source.get("last_aftereffect") is None
+        )
+    ):
+        subject = str(relationship_subject_id)
+    if subject != str(relationship_subject_id):
+        raise ValueError("relationship_v2 relationship subject drift")
+    raw_episodes = source.get("active_episodes") or []
+    if not isinstance(raw_episodes, list):
+        raise ValueError("relationship_v2.active_episodes must be a list")
+    episodes = tuple(
+        _relationship_episode_from_mapping(_mapping(item))
+        for item in raw_episodes
+        if isinstance(item, Mapping)
+    )
+    if len(episodes) != len(raw_episodes):
+        raise ValueError("relationship_v2.active_episodes must contain objects")
+    last_aftereffect_raw = source.get("last_aftereffect")
+    last_aftereffect = (
+        _relational_aftereffect_from_mapping(_mapping(last_aftereffect_raw))
+        if isinstance(last_aftereffect_raw, Mapping)
+        else None
+    )
+    return RelationshipStateV2(
+        workspace_id=workspace_id,
+        relationship_subject_id=subject,
+        revision=max(0, _integer(source.get("revision"))),
+        trust=_clamp(source.get("trust"), 0.5),
+        safety=_clamp(source.get("safety"), 0.58),
+        attunement=_clamp(source.get("attunement"), 0.42),
+        rupture_load=_clamp(source.get("rupture_load"), 0.0),
+        repair_required=bool(source.get("repair_required", False)),
+        proactive_permission=str(source.get("proactive_permission") or "UNKNOWN"),
+        romantic_consent=str(source.get("romantic_consent") or "NOT_GRANTED"),
+        exclusive_consent=str(source.get("exclusive_consent") or "NOT_GRANTED"),
+        dependency_consent=str(source.get("dependency_consent") or "NOT_GRANTED"),
+        active_episodes=episodes,
+        last_aftereffect=last_aftereffect,
+    ).as_dict()
+
+
+def _relationship_state_from_state(state: Mapping[str, Any]) -> RelationshipStateV2:
+    raw = _mapping(state.get("relationship_v2"))
+    return RelationshipStateV2(
+        workspace_id=raw.get("workspace_id"),
+        relationship_subject_id=raw.get("relationship_subject_id"),
+        revision=raw.get("revision"),
+        trust=raw.get("trust"),
+        safety=raw.get("safety"),
+        attunement=raw.get("attunement"),
+        rupture_load=raw.get("rupture_load"),
+        repair_required=raw.get("repair_required"),
+        proactive_permission=raw.get("proactive_permission"),
+        romantic_consent=raw.get("romantic_consent"),
+        exclusive_consent=raw.get("exclusive_consent"),
+        dependency_consent=raw.get("dependency_consent"),
+        active_episodes=tuple(
+            _relationship_episode_from_mapping(_mapping(item))
+            for item in list(raw.get("active_episodes") or [])
+        ),
+        last_aftereffect=(
+            _relational_aftereffect_from_mapping(_mapping(raw.get("last_aftereffect")))
+            if isinstance(raw.get("last_aftereffect"), Mapping)
+            else None
+        ),
+    )
+
+
+def _relationship_scope_matches(
+    *,
+    state: RelationshipStateV2,
+    workspace_id: str,
+    relationship_subject_id: str,
+) -> RelationshipStateV2:
+    if state.relationship_subject_id != relationship_subject_id:
+        raise ValueError("relationship subject drift")
+    if state.workspace_id == "workspace::unbound":
+        return RelationshipStateV2(
+            workspace_id=workspace_id,
+            relationship_subject_id=state.relationship_subject_id,
+            revision=state.revision,
+            trust=state.trust,
+            safety=state.safety,
+            attunement=state.attunement,
+            rupture_load=state.rupture_load,
+            repair_required=state.repair_required,
+            proactive_permission=state.proactive_permission,
+            romantic_consent=state.romantic_consent,
+            exclusive_consent=state.exclusive_consent,
+            dependency_consent=state.dependency_consent,
+            active_episodes=state.active_episodes,
+            last_aftereffect=state.last_aftereffect,
+        )
+    if state.workspace_id != workspace_id:
+        raise ValueError("relationship workspace drift")
+    return state
+
+
+def _apply_relationship_response_accepted(
+    state: dict[str, Any],
+    *,
+    payload: Mapping[str, Any],
+    now_ms: int,
+) -> None:
+    _reject_raw_affective_material(payload)
+    episode = _relationship_episode_from_mapping(_mapping(payload.get("episode")))
+    if episode.opened_at_ms > now_ms:
+        raise ValueError("relationship episode cannot open after command time")
+    current = _relationship_scope_matches(
+        state=_relationship_state_from_state(state),
+        workspace_id=episode.workspace_id,
+        relationship_subject_id=episode.relationship_subject_id,
+    )
+    if any(item.episode_id == episode.episode_id for item in current.active_episodes):
+        raise ValueError("relationship episode already active")
+    episodes = (*current.active_episodes, episode)
+    if len(episodes) > 4:
+        raise ValueError("relationship active episode limit exceeded")
+    state["relationship_v2"] = RelationshipStateV2(
+        workspace_id=current.workspace_id,
+        relationship_subject_id=current.relationship_subject_id,
+        revision=current.revision + 1,
+        trust=current.trust,
+        safety=current.safety,
+        attunement=current.attunement,
+        rupture_load=current.rupture_load,
+        repair_required=current.repair_required,
+        proactive_permission=current.proactive_permission,
+        romantic_consent=current.romantic_consent,
+        exclusive_consent=current.exclusive_consent,
+        dependency_consent=current.dependency_consent,
+        active_episodes=episodes,
+        last_aftereffect=current.last_aftereffect,
+    ).as_dict()
+
+
+def _apply_relational_aftereffect(
+    state: dict[str, Any],
+    *,
+    payload: Mapping[str, Any],
+    now_ms: int,
+) -> None:
+    _reject_raw_affective_material(payload)
+    aftereffect = _relational_aftereffect_from_mapping(
+        _mapping(payload.get("aftereffect"))
+    )
+    if aftereffect.observed_at_ms > now_ms:
+        raise ValueError("relational aftereffect cannot be after command time")
+    current = _relationship_scope_matches(
+        state=_relationship_state_from_state(state),
+        workspace_id=aftereffect.workspace_id,
+        relationship_subject_id=aftereffect.relationship_subject_id,
+    )
+    episode = next(
+        (item for item in current.active_episodes if item.episode_id == aftereffect.episode_id),
+        None,
+    )
+    if episode is None:
+        raise ValueError("relational aftereffect requires an active episode")
+    if episode.response_receipt_ref != aftereffect.source_receipt_ref:
+        raise ValueError("relational aftereffect response receipt drift")
+
+    trust = current.trust
+    safety = current.safety
+    attunement = current.attunement
+    rupture = current.rupture_load
+    repair_required = current.repair_required
+    permission = current.proactive_permission
+    outcome = aftereffect.outcome
+    if outcome == "HELPFUL":
+        trust = _clamp(trust + 0.012 * aftereffect.helpfulness)
+        safety = _clamp(safety + 0.009 * aftereffect.helpfulness)
+        attunement = _clamp(attunement + 0.02 * aftereffect.helpfulness)
+    elif outcome == "MISUNDERSTOOD":
+        trust = _clamp(trust - 0.035)
+        safety = _clamp(safety - 0.05)
+        rupture = _clamp(rupture + 0.11)
+        repair_required = True
+    elif outcome == "BOUNDARY":
+        trust = _clamp(trust - 0.06)
+        safety = _clamp(safety - 0.11)
+        rupture = _clamp(rupture + 0.2)
+        repair_required = True
+        permission = "DENIED"
+    elif outcome == "REPAIR_UNRESOLVED":
+        safety = _clamp(safety - 0.025)
+        rupture = _clamp(rupture + 0.05)
+        repair_required = True
+    elif outcome == "REPAIR_ACCEPTED":
+        if not current.repair_required or not aftereffect.repair_acknowledged:
+            raise ValueError("repair acceptance requires a pending rupture and user acknowledgement")
+        safety = _clamp(safety + 0.035)
+        attunement = _clamp(attunement + 0.015)
+        rupture = _clamp(rupture - 0.18)
+        repair_required = rupture > 0.05
+    # NEUTRAL, SILENCE and DELIVERY_FAILED intentionally do not alter trust,
+    # safety, permission or consent. Lack of interaction is not rejection.
+    remaining = tuple(
+        item for item in current.active_episodes if item.episode_id != episode.episode_id
+    )
+    state["relationship_v2"] = RelationshipStateV2(
+        workspace_id=current.workspace_id,
+        relationship_subject_id=current.relationship_subject_id,
+        revision=current.revision + 1,
+        trust=trust,
+        safety=safety,
+        attunement=attunement,
+        rupture_load=rupture,
+        repair_required=repair_required,
+        proactive_permission=permission,
+        romantic_consent=current.romantic_consent,
+        exclusive_consent=current.exclusive_consent,
+        dependency_consent=current.dependency_consent,
+        active_episodes=remaining,
+        last_aftereffect=aftereffect,
+    ).as_dict()
+
+
+def _apply_relationship_proactive_permission(
+    state: dict[str, Any],
+    *,
+    payload: Mapping[str, Any],
+    now_ms: int,
+) -> None:
+    _reject_raw_affective_material(payload)
+    workspace_id = _required_text(
+        payload.get("workspace_id"), "relationship permission workspace_id", limit=240
+    )
+    subject_id = _required_text(
+        payload.get("relationship_subject_id"), "relationship permission relationship_subject_id", limit=240
+    )
+    permission = _required_text(
+        payload.get("proactive_permission"), "relationship proactive_permission", limit=64
+    ).upper()
+    source_ref = _required_text(
+        payload.get("source_ref"), "relationship permission source_ref", limit=512
+    )
+    if permission not in {"ALLOWED", "DENIED"}:
+        raise ValueError("relationship proactive permission must be ALLOWED or DENIED")
+    source_kind = _required_text(
+        payload.get("source_kind"), "relationship permission source_kind", limit=64
+    ).upper()
+    if source_kind != "USER_EXPLICIT":
+        raise ValueError("relationship proactive permission requires USER_EXPLICIT evidence")
+    current = _relationship_scope_matches(
+        state=_relationship_state_from_state(state),
+        workspace_id=workspace_id,
+        relationship_subject_id=subject_id,
+    )
+    state["relationship_v2"] = RelationshipStateV2(
+        workspace_id=current.workspace_id,
+        relationship_subject_id=current.relationship_subject_id,
+        revision=current.revision + 1,
+        trust=current.trust,
+        safety=current.safety,
+        attunement=current.attunement,
+        rupture_load=current.rupture_load,
+        repair_required=current.repair_required,
+        proactive_permission=permission,
+        romantic_consent=current.romantic_consent,
+        exclusive_consent=current.exclusive_consent,
+        dependency_consent=current.dependency_consent,
+        active_episodes=current.active_episodes,
+        last_aftereffect=current.last_aftereffect,
+    ).as_dict()
 
 
 def _apply_affective_observation(

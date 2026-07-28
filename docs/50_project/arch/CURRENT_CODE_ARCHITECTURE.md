@@ -3,14 +3,14 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.74
+版本：v5.75
 核对日期：2026-07-28
-合并基线：`origin/dev@d77cdb33e`；当前事实以本文所在提交的工作树为准
+合并基线：`origin/dev@fcb8997fa`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-02_CODE_COMPLETE_LOCAL`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-03_CODE_COMPLETE_LOCAL`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -18,9 +18,14 @@
 > append-only command，再以有界 appraisal 生成七海自身的 `CARE/CONCERN`
 > 等 self-affect，绝不镜像用户 VAD。只有带内部 provenance marker 的 fused
 > context 能进入纯 normalize bridge，外部伪造的 affective context 会被忽略。
-> 这只是 Host ingress 已接线的本地代码证据：`HostEmotionRuntime`、Limbic、
-> BodySense、Endocrine、Motive、Bond 与 Surface 仍有兼容或易失 state，关系
-> episode、ExpressionPlan、真实模型和三模态服务尚未闭环。因此状态仍为
+> DL-03 进一步把 `RelationshipEpisodeV1`、`RelationalAftereffectV1` 和
+> `RelationshipStateV2` 纳入相同 Life event/CAS/replay authority：已接受的
+> reply 才能开 provisional episode，下一次用户输入以 opaque digest 形成 aftereffect，
+> relation aggregate 以 workspace + subject 连续而不把 session 当长期身份。边界、
+> 未接住和修复状态会收紧 Surface 话术；沉默、投递失败和单次道歉不会自动修复。
+> `HostBondRuntime` 的生产默认已关闭积分自动阶段升级。`HostEmotionRuntime`、
+> Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与 Surface 的其它兼容
+> state 仍未清零，ExpressionPlan、真实模型和三模态服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 ## 1. 结论

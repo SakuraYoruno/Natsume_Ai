@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.24
+版本：v9.25
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -21,11 +21,14 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-02_CODE_COMPLETE_LOCAL`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-03_CODE_COMPLETE_LOCAL`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
-偏好学习”的唯一持久链。DL-02 已将 Host Input 的用户观察与七海自身 appraisal
-接入 canonical Life journal；这不是关系、三模态或真实服务验收完成。此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
+偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
+episode 与下一次用户输入的 aftereffect 写入 canonical Life journal：关系按
+workspace/subject 连续，session 只保留事件上下文，边界和误解不因道歉、沉默或
+投递失败被自动消解。Surface 只消费可信内部 hand-off 来收紧话术，不能由外部
+请求伪造。它仍不是主动陪伴、三模态或真实服务验收完成。此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
 不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。
 
@@ -51,7 +54,7 @@ governed manifest 入口。NE-05 另以 0141 V2 lifecycle authority 约束版本
 `builtin-skill-alias.v1` 指向可信内置 handler；外部 bundle 不被目录扫描或
 直接 import。
 
-当前文档 catalog 基线为 migration head `0143_affective_life_kernel.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset；0141 原子持有 Skill canary、activation evidence、maturity、active projection、operation 与 terminal receipt；0142 原子持有 Feedback/Knowledge/Identity 的真实 evidence resolution、version decision、operation、active projection 与 transition receipt，并将 0110 V1 mutation 冻结为只读；0143 把七海的 typed observation/appraisal/self-affect episode head 投影到既有 immutable Life journal。0143 不会升级旧 NE-01 七路线收据：该历史收据仍精确绑定 0142，coverage manifest 会同时声明 accepted head 与 current catalog head。
+当前文档 catalog 基线为 migration head `0144_relationship_life_kernel.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset；0141 原子持有 Skill canary、activation evidence、maturity、active projection、operation 与 terminal receipt；0142 原子持有 Feedback/Knowledge/Identity 的真实 evidence resolution、version decision、operation、active projection 与 transition receipt，并将 0110 V1 mutation 冻结为只读；0143 把七海的 typed observation/appraisal/self-affect episode head 投影到既有 immutable Life journal；0144 只从 canonical Life event 派生 workspace/subject-scoped relationship episode、aftereffect 和状态 head。0144 不会升级旧 NE-01 七路线收据：该历史收据仍精确绑定 0142，coverage manifest 会同时声明 accepted head 与 current catalog head。
 
 当前 Chat 文档基线为 exact Life projection barrier：assistant turn 与 LifeMemory admission 的 durable receipts是 external reply的必要前置条件；首次调用可完成 exact pending intent，reclaimed reconciliation只读。该项只关闭 Chat 的 `transactional_side_effects` 控制，不改变七路线 `INCOMPLETE`、external eventual delivery、wave integration或 NE-07状态。
 

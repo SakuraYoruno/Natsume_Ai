@@ -12,6 +12,11 @@ from .affect import (
     SelfAffectStateV2,
     UserAffectObservationV1,
 )
+from .relationship import (
+    RelationshipEpisodeV1,
+    RelationshipStateV2,
+    RelationalAftereffectV1,
+)
 
 __all__ = [
     *_v1_all,
@@ -23,4 +28,7 @@ __all__ = [
     "RegulationDecisionV1",
     "SelfAffectStateV2",
     "UserAffectObservationV1",
+    "RelationshipEpisodeV1",
+    "RelationshipStateV2",
+    "RelationalAftereffectV1",
 ]

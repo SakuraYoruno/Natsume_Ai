@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.35
+版本：v2.36
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -112,7 +112,7 @@ signed checkpoint `COMMIT` 在相同证据入口之后使用单独的 `Operation
 
 Host composition 通过 fresh `ProcessApplicationPorts` 与 frozen Host/Agent/Context/Startup ports 注入依赖；ASGI/CLI 都显式持有该 bundle，Host builder 不回读全局状态。生产 locator consumer/import/module/field/lock/ref 全为 0，旧测试桥仅在 pytest 安装。`HostAuthorityRuntimeOwner` 在 migration-first 后固定 canonical ledger、Episodic/LifeMemory、Prompt/Route/Provider/ModelAttempt 与 Capability runtime。ResourceManager status 已由 0123 Host-fenced journal 持久化；外部 Chroma/Neo4j namespace、Token/MCP durable restart 和其它外部资源恢复仍未闭环。locator 与 status 文件 authority 退役不代表事务化 Chat、完整 Worker/Obs Composition 或 NE-01 完成。
 
-情感运行面不再是进程共享 singleton。Host root 通过 construction factory 创建一个 `HostEmotionRuntime`，Input 与 Tribe 的 admission resolver 取得同一 Host-scoped identity，Lifecycle 的画像读取也指向该实例；只读归一化不触碰它。回复形态决策器则由每个 Input composition 独占，并在一个锁内完成语音额度检查与消费。该分层隔离了重叠 Host/Input 对象图，但没有提供跨进程持久恢复或 NE-06 人格演化 authority。
+情感运行面不再只依赖进程共享 singleton。Host root 仍会创建 compatibility `HostEmotionRuntime`，但生产 Input 已将 `AffectFusionService`、`LifeCommandService` 与 `RelationshipLifecycleService` 绑定为 app-local ports：用户观察先进入 canonical Life journal，Appraisal 才形成七海的 self-affect；accepted reply 再开 provisional relationship episode，下一次用户输入才以 opaque digest 写 aftereffect。关系 aggregate 按 workspace + subject 连续，session 只作事件上下文。Surface 只接受内部 provenance hand-off，把边界、给空间和未完成修复转为非操控话术约束；请求、模型和 Bond 分数都不能直接写关系。生产 `HostBondRuntime` 默认关闭按积分自动 stage transition。回复形态决策器仍由每个 Input composition 独占，并在一个锁内完成语音额度检查与消费。旧 Bond queue、其它 organ compatibility state、跨进程真实恢复和 NE-06 writer 清零仍未完成。
 
 Edge 指令不再由 Host lifespan 创建一个进程共享客户端。Tribe Agent 只提交计划或观察，内部/Obs 兼容入口只返回 fail-closed 状态；`EdgeCommandPusher` 是不可发现的低层 adapter，只有显式 TaskGraph 执行边界持有 exact Preview proof 时才能调用。当前正向 issuer 尚缺，因此结构上清除了第二 authority，但没有把具身执行定级为完成。
 
@@ -413,13 +413,13 @@ canary 尚未执行，不能把本地 fixture 视为生产外部激活。
 
 ### 3.6 数字生命与表达层
 
-- `host_brain/digital_life/`：Life command/event/reducer/projection 主干。
+- `host_brain/digital_life/`：Life command/event/reducer/projection 主干，以及关系 episode/aftereffect 的 canonical lifecycle。
 - `host_brain/persona/`：人格、情绪、场景策略、表达材料和最终 Surface 行为。
-- `host_brain/bond/`：关系状态与事件。
+- `host_brain/bond/`：历史关系阶段、里程碑与兼容投影；不是长期关系 authority。
 - `host_brain/tribe/`、`host_brain/organ_ops/`：器官化能力模型与协作材料。
 - `host_brain/surface_runtime/`：最终回复运行合同。
 
-Life 状态、人格策略和最终文本不是同一种 authority：Life reducer 管状态，Persona 提供表达约束，Surface 生成最终外显。当前仍存在直接 Persona growth writer，因此“安全演化”尚未成立。
+Life 状态、关系后效应、人格策略和最终文本不是同一种 authority：Life reducer 管状态与关系事件，Persona 提供表达约束，Surface 只生成最终外显。`RelationshipLifecycleService` 必须先看 accepted Life receipt，后看下一输入的 derived outcome；沉默/投递失败不是拒绝，单次道歉不是修复完成。当前仍存在直接 Persona growth writer，因此“安全演化”尚未成立。
 
 ### 3.7 记忆、知识素材与状态层
 
@@ -429,7 +429,7 @@ Life 状态、人格策略和最终文本不是同一种 authority：Life reduce
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0140_evolution_lab_redacted_dataset.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset。后四项都不拥有 Task activation authority。
+当前连续 SQLite migration head 为 `0144_relationship_life_kernel.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill 与 version activation authority；0143 保存 affective observation/appraisal/self-affect head；0144 只从 canonical Life event 派生 relationship episode、aftereffect 与有界状态 head。后续资产都不拥有 Task activation authority。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 

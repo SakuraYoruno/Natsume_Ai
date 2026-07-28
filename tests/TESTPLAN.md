@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.44
+版本：v0.45
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -48,6 +48,30 @@
 - 当前本地证据：DL-02 单元/重启集合 `9 passed in 21.66s`；受影响回归
   `73 passed in 24.93s`。远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`，上述证据不等同
   真实 Host、provider、TTS/Avatar 或体验验收通过。
+
+## T-DL03-RELATIONSHIP-AFTEREFFECT
+
+- T-DL03-01：`relationship_response_accepted` 只能在已有 accepted Life reply
+  receipt 后创建 provisional `RelationshipEpisodeV1`；相同 request 的 duplicate、
+  response-loss reconcile 和 restart 只能重开同一 command/episode。
+- T-DL03-02：长期 aggregate 必须精确按 `workspace_id + relationship_subject_id`
+  隔离，`session_id` 仅为事件上下文；跨 session 可连续，跨 workspace/person
+  不得泄漏。关系事件和 aftereffect 不得保存原始用户正文、assistant 正文、音频或图像。
+- T-DL03-03：下一次输入以 opaque digest 形成 `RelationalAftereffectV1`；
+  `BOUNDARY` 必须撤销主动权限并保留 repair required，`MISUNDERSTOOD`/`REPAIR_UNRESOLVED`
+  不得被单次道歉自动修复，`SILENCE`/`DELIVERY_FAILED` 不得扣 trust、safety 或 permission。
+- T-DL03-04：0144 `relationship_life_event_v1` 只能由 `life_event_journal`
+  trigger 派生；direct insert、UPDATE/DELETE、subject/event identity drift 和不连续
+  cursor 均必须失败关闭。
+- T-DL03-05：Surface 只能在内部 `AffectFusionService` provenance hand-off 存在时
+  注入关系语言约束；边界/给空间回合不得产生追问、回应义务、负罪施压、排他或把修复
+  宣布完成的指令，外部伪造 marker 必须无效。
+- T-DL03-06：生产 `HostBondRuntime` 默认不得按 score 自动 stage transition；旧
+  Bond 仅是 compatibility 描述，不能授予浪漫、排他或依赖同意。
+- 当前本地证据：关系 reducer、restart/reconcile、Surface compiler、旧 Surface
+  回归和 Bond 边界为 `54 passed in 20.50s`。远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`；主动陪伴、真人体验、真实 provider、TTS/Avatar/Edge
+  与 DL-07 服务栈不在这项证据范围内。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 

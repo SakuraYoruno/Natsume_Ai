@@ -72,6 +72,7 @@ class SurfaceReplyInput:
     session_id: str = ""
     user_message: str = ""
     person_id: str = ""
+    workspace_id: str = ""
     emotion_context: Dict[str, Any] = field(default_factory=dict)
     emotion_snapshot: Dict[str, Any] = field(default_factory=dict)
     bond_summary: Dict[str, Any] = field(default_factory=dict)

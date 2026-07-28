@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.37
+版本：v3.38
 
 核对日期：2026-07-28
 
@@ -495,11 +495,11 @@ flowchart LR
 
 `NO_SIDE_EFFECT` 必须绑定 executor quiescence，目标 Effect 只能回到带专用 reason 的可重试 `PENDING`；`SIDE_EFFECT_CONFIRMED` 必须绑定 durable downstream receipt，目标 Effect 才可固定为 `COMMITTED`。Review 前不写 proof，response loss 只重开相同 evidence/proof/effect/handler receipt。0128 在数据库边界禁止 evidence/case/proof UPDATE/DELETE，并拒绝 subject、signature、proof/outbox 或 target Effect identity 漂移。该流只覆盖 `GENERAL_UNKNOWN_EFFECT`，取消绑定的 Effect 对账继续使用 0098 合同；部署 key、真实 HTTP/network canary 与多节点恢复未运行。
 
-DL-02 后，情感 admission 的 canonical 路径已从生产 ASGI Input composition
+DL-03 后，情感 admission 与关系后效应的 canonical 路径已从生产 ASGI Input composition
 进入 Life kernel，而 replay/render 仍无副作用。`AffectFusionService` 将
 `ChatRequest` 中的文本、自述或允许的结构化声学/视觉摘要解析为**用户观察**；
-它按 `workspace_id + relationship_subject_id + session_id` 建立 opaque aggregate
-scope（跨 session 的关系连续性留给 DL-03），保留冲突 ref 和 TTL，且不将 raw audio/image/text/model-chain 写入
+它按 `workspace_id + relationship_subject_id + session_id` 建立 affect opaque aggregate
+scope，保留冲突 ref 和 TTL，且不将 raw audio/image/text/model-chain 写入
 journal。深路径至多生成两个 appraisal 候选；选定 appraisal 的自身意义、边界
 和关系判断才会形成七海的 mixed self-affect。没有内部 provenance marker 的
 外部 affective context 只能作为不可信输入，不能伪造 canonical head。
@@ -518,7 +518,31 @@ flowchart LR
     J --> H["0143 affective_life_event_v1\nread-only head"]
     S --> N["trusted internal normalize bridge"]
     N --> G["Governor / Surface"]
+    G --> R["accepted foreground Life receipt"]
+    R --> E1["relationship_response_accepted\nprovisional episode"]
+    E1 --> J
+    I --> A1["下一次用户输入\nopaque digest only"]
+    A1 --> E2["relational_aftereffect_recorded"]
+    E2 --> J
+    J --> RH["0144 relationship_life_event_v1\nworkspace + subject head"]
 ~~~
+
+`RelationshipLifecycleService` 只有在 accepted Surface reply 或 governed
+`life.foreground_completed` effect 已取得 canonical Life receipt 后，才提交
+`relationship_response_accepted`。它以 `workspace_id + relationship_subject_id`
+作为长期 relation aggregate，`session_id` 仅在事件中保留；因此跨 session 可连续、
+跨 workspace 不泄漏。下一次输入只保存 opaque user/reply digest 并关联最近 active
+episode，写入 `relational_aftereffect_recorded`。`BOUNDARY` 会撤销主动权限并增加
+rupture，`MISUNDERSTOOD` 与 `REPAIR_UNRESOLVED` 保留 repair required；`SILENCE` 与
+`DELIVERY_FAILED` 不改变 trust/safety/permission，`REPAIR_ACCEPTED` 才允许谨慎回暖。
+0144 的 SQLite trigger 只允许 Life event journal 生成派生行，读侧可按 compound cursor
+重开；response loss 只重开 deterministic command，不重复创建 episode。
+
+Surface 不能直接读写关系账本：Input runtime 只把 canonical result 标成 trusted hand-off，
+reply compiler 才把它变成“尊重空间、不索取回应、不把修复说成完成、不使用排他或
+负罪施压”的 facts/must-not/style anchors。外部 `emotion_context` 没有 marker 时被忽略。
+生产 `HostBondRuntime` 默认关闭 score-driven automatic stage transition；旧 Bond queue
+和 projection 仍为 compatibility，直到 DL-06 才能声称 writer usage=0。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal

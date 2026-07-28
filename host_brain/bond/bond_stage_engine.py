@@ -553,10 +553,16 @@ class BondStageEngine:
         stage_thresholds: dict[str, int] | None = None,
         score_map: dict[str, int] | None = None,
         milestone_tracker: Any | None = None,
+        automatic_stage_transitions: bool = True,
     ) -> None:
         self._ledger = ledger
         self._thresholds = dict(stage_thresholds or DEFAULT_STAGE_THRESHOLDS)
         self._score_map = dict(score_map or DEFAULT_SCORE_MAP)
+        # Direct/legacy callers retain their historical behavior by default.
+        # The Host composition explicitly opts out: a cumulative score cannot
+        # promote closeness, romance, or dependency without durable relation
+        # evidence and review.
+        self._automatic_stage_transitions = bool(automatic_stage_transitions)
         # user_id → BondScoreState
         self._states: dict[str, BondScoreState] = {}
         # Phase IX：可选注入 MilestoneTracker（接通里程碑→人格成长断路）
@@ -632,8 +638,15 @@ class BondStageEngine:
             emotion_valence=texture_valence,
         )
 
-        # 判断阶段变化
-        new_stage = self._compute_stage(state.total_score)
+        # A score is only a compatibility observation in the production Host.
+        # It may still record interaction texture, but it may not decide an
+        # intimate stage.  Existing explicit legacy callers can opt in while
+        # their migration window is still open.
+        new_stage = (
+            self._compute_stage(state.total_score)
+            if self._automatic_stage_transitions
+            else from_stage
+        )
         transition_status = TRANSITION_STATUS_STABLE
         if new_stage != from_stage:
             from_idx = STAGE_ORDER.index(from_stage) if from_stage in STAGE_ORDER else 0
@@ -649,10 +662,16 @@ class BondStageEngine:
             )
 
         transition_id = f"bond_trans_{req_id}"
+        stage_policy = (
+            "AUTO_STAGE_ENABLED"
+            if self._automatic_stage_transitions
+            else "AUTO_STAGE_DISABLED"
+        )
         detail = (
             f"{transition_status}: {from_stage}→{new_stage} "
             f"(affinity_delta={delta:+d}, total={state.total_score}, "
-            f"affinity_rule={delta_breakdown.reason_code})"
+            f"affinity_rule={delta_breakdown.reason_code}, "
+            f"stage_policy={stage_policy})"
         )
 
         result = StageTransitionResult(

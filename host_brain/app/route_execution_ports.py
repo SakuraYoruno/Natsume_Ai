@@ -269,6 +269,7 @@ def _build_chat_input(
         session_id=session_id,
         user_message=sanitized_message,
         person_id=person_id,
+        workspace_id=str(getattr(request_body, "workspace_id", "") or "").strip(),
         emotion_context=dict(emotion_context or {}),
         emotion_snapshot=dict(emotion_snapshot or {}),
         bond_summary=dict(bond_summary or {}),
