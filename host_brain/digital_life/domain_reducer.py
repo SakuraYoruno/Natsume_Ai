@@ -93,10 +93,16 @@ def reduce_life_domains(
             + ", ".join(protected)
         )
     state = _merge_patch(state, raw_patch)
-    state["identity"] = _canonical_identity(person_id)
+    relationship_subject_id = _resolve_affective_relationship_subject(
+        state,
+        aggregate_person_id=person_id,
+        event_type=event_type,
+        payload=body,
+    )
+    state["identity"] = _canonical_identity(relationship_subject_id)
     state["affective"] = _normalize_affective_head(
         state.get("affective"),
-        person_id=person_id,
+        person_id=relationship_subject_id,
         now_ms=now_ms,
     )
 
@@ -574,6 +580,57 @@ def _canonical_identity(person_id: str) -> dict[str, str]:
         "self_id": "natsume_ai",
         "relationship_subject_id": str(person_id),
     }
+
+
+def _resolve_affective_relationship_subject(
+    state: Mapping[str, Any],
+    *,
+    aggregate_person_id: str,
+    event_type: str,
+    payload: Mapping[str, Any],
+) -> str:
+    """Keep the Life aggregate key separate from the relationship subject.
+
+    DL-02 scopes affect aggregates by workspace.  The aggregate key is an
+    opaque storage identifier, while all affect contracts retain the actual
+    relationship subject.  Existing non-affective Life commands keep their
+    historical identity unchanged; an affect command may establish the raw
+    subject exactly once and later commands must match it.
+    """
+
+    identity = _mapping(state.get("identity"))
+    existing = str(identity.get("relationship_subject_id") or "").strip()
+    candidate = ""
+    if event_type == "affective_observation_recorded":
+        candidate = str(
+            _mapping(payload.get("observation")).get(
+                "relationship_subject_id"
+            )
+            or ""
+        ).strip()
+    elif event_type == "affective_event_appraised":
+        candidate = str(
+            _mapping(payload.get("appraisal")).get(
+                "relationship_subject_id"
+            )
+            or ""
+        ).strip()
+    elif event_type == "affective_regulation_decided":
+        candidate = str(
+            _mapping(payload.get("regulation")).get(
+                "relationship_subject_id"
+            )
+            or ""
+        ).strip()
+
+    if not candidate:
+        return existing or str(aggregate_person_id)
+    # An untouched seed uses the aggregate key as its placeholder.  Replacing
+    # that placeholder is reducer-owned and deterministic; state_patch still
+    # cannot write either identity or affective domains.
+    if existing and existing not in {str(aggregate_person_id), candidate}:
+        raise ValueError("affective relationship subject drift")
+    return candidate
 
 
 def _apply_affective_observation(

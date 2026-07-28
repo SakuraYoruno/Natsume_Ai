@@ -3,21 +3,23 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.42
+版本：v2.43
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> `NE-08 / DL-01` 已把实时情感陪伴设为当前产品主线。Digital Life reducer
-> 现在拥有一个 typed、可重放的 canonical `state.affective` head：
-> `EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
-> Regulation`。它经既有 Life UoW 与 0143 append-only projection 持久化，
-> 而 observation 不会直接写入 self-affect。HostEmotionRuntime、Limbic、
-> BodySense、Endocrine、Motive、Bond 与 Surface 仍有兼容态或易失 state；
-> 它们不得被描述为七海的长期情感 authority。Host Fusion/Appraisal ingress、
-> relationship episode、ExpressionPlan 与三模态闭环仍待后续 DL 波。
+> `NE-08 / DL-02_CODE_COMPLETE_LOCAL` 已把实时情感陪伴设为当前产品主线。
+> Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
+> head：`EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
+> Regulation`；ASGI Input composition 又将 `AffectFusionService` 接入输入入口。
+> 该服务把用户多模态信号保存为带 TTL/置信度/冲突 ref 的 observation，并由七海
+> 自身 appraisal 而非用户 emotion tag 生成 self-affect。它经既有 Life UoW 与
+> 0143 append-only projection 持久化；raw 音视频和正文不会进入 journal。
+> HostEmotionRuntime、Limbic、BodySense、Endocrine、Motive、Bond 与 Surface
+> 仍有兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
+> episode、ExpressionPlan 与三模态闭环仍待后续 DL 波。
 
 Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
 `PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名
@@ -174,7 +176,7 @@ Worker Evidence 模块只负责对 durable WorkerProjection 做独立验证与�
 
 Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskStore 负责有序 Effect staging，Digital Life command repository 负责 command/event/intent 原子入账，`LifeProjectionDispatcher + life_projection_barrier` 负责 exact intent 执行与回执集合校验。`surface.post_process` 继续调用真实 app-local AgentRuntime ports，只有 assistant turn 和 LifeMemory admission 均持久成功才可完成 projection。Gateway transport仍由后序 delivery Effect 拥有，任何本地投影 UNKNOWN 都会阻断它；这样没有新增第二个 Conversation writer，也没有让 Life command receipt越权成为投影成功证明。
 
-情感上下文模块的当前 owner 是 Host-local `HostEmotionRuntime`：它管理连续情绪向量、前一标签、Timeline、用户画像和日记节流；Input、Tribe 与 Lifecycle 只通过注入端口访问同一实例。`normalize_chat_emotion_context()` 是 replay/render 只读入口，`resolve_chat_emotion_context()` 是要求 exact runtime 的 admission ingest 入口。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。两者均不拥有 Persona/Feedback 的永久写 authority。
+情感上下文模块现在分为 canonical fusion 与 legacy compatibility 两个清晰边界。生产 ASGI 在 `InputRuntimeApplicationPorts` 提供 `LifeCommandService` 后，会构造 app-local `AffectFusionService`：它把 `ChatRequest` 的文本、自述和允许的结构化声学/视觉摘要转换为 `UserAffectObservationV1`，以 workspace-scoped opaque aggregate key 持久化，再最多产生两个 `EventAppraisalV1` 候选；只有后者可推进 `state.affective`。`normalize_chat_emotion_context()` 对 fused internal context 与 replay/render 均只读，外部无法以伪造 `affective_life` 字段越过该边界。`HostEmotionRuntime` 仍管理旧连续向量、前一标签、Timeline、用户画像和日记节流，但仅是未提供 fusion service 时的 app-local compatibility fallback，不是 canonical self-affect。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。上述模块均不拥有 Persona/Feedback 的永久写 authority。
 
 Internal terminal recovery 模块除 #114 的精确后置审核取消外，当前还拥有一个独立的 signed raw-failure claim contract：它只从无取消意图、零投影/Effect、单节点和单 Budget 的原子失败终态生成 deterministic result，并要求先结算 Secure Ingress claim、再清理 Workspace/stage。该模块不拥有一般 failure/cancellation/multi-node/unknown-effect recovery authority。
 

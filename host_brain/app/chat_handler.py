@@ -716,7 +716,8 @@ async def _unified_chat_sse_generator(
             )
 
         emotion_context = input_runtime_ports.resolve_chat_emotion_context(
-            request_body=request_body
+            request_body=request_body,
+            request_id=request_id,
         )
         governance_snapshot = input_runtime_ports.build_chat_governance_snapshot(
             emotion_context=emotion_context,

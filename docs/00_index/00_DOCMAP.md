@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.23
+版本：v9.24
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -21,10 +21,11 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-01_CODE_COMPLETE_LOCAL`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-02_CODE_COMPLETE_LOCAL`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
-偏好学习”的唯一持久链。此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
+偏好学习”的唯一持久链。DL-02 已将 Host Input 的用户观察与七海自身 appraisal
+接入 canonical Life journal；这不是关系、三模态或真实服务验收完成。此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
 不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。
 

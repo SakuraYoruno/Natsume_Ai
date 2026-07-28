@@ -34,6 +34,21 @@ trigger 写入。覆盖为 `test_dl01_affective_life_kernel.py` 与
 restart/replay digest 一致。状态为
 `CODE_COMPLETE_LOCAL / INGRESS_NOT_WIRED / LEGACY_COMPATIBILITY_WRITERS_REMAIN`。
 
+TRACE-DL02（多模态观察与 Appraisal）：`AffectFusionService` 位于
+`host_brain/digital_life/affect_fusion.py`，由
+`input_runtime_composition.py` 和生产 `app/asgi.py` 的 Life command provider
+接入 Host Input。它将文本（低置信度）、自述、声学和视觉的脱敏结构化观察写入
+0143 Life journal；raw text/audio/image/model-chain 不可入账，视觉/声学/文本
+观察分别在 3/5/30 秒后失效。冲突来源保留 ref，深路径最多给出两个 appraisal
+候选且最多一次重试；只有选定的 `affective_event_appraised` 能写七海自身
+`CARE/CONCERN/CAUTION` 等 self-affect。`emotion_context.py` 仅接受带内部
+provenance marker 的 fused context，外部 `affective_life` 注入不能冒充
+canonical state。覆盖为 `test_dl02_affect_fusion.py` 与
+`test_dl02_affect_fusion_restart.py`，包含 user/self 不镜像、TTL、冲突、scope、
+重复 request、Input composition 和真实 SQLite restart/replay。当前为
+`CODE_COMPLETE_LOCAL / HOST_INGRESS_WIRED / LEGACY_COMPATIBILITY_WRITERS_REMAIN /
+EMOTIONAL_DIGITAL_LIFE_PARTIAL`；尚未运行真实 Host、模型、Edge、TTS 或 Avatar。
+
 当前 NE-01 trace 追加本地代码封口证据：
 `08a172da → migration 0142 七路线 canonical SQLite receipt
 sha256:161b860f…`，并继承 `27b032f1e` 的 24 个跨进程/Workspace 恢复用例。

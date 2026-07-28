@@ -3,22 +3,25 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.73
+版本：v5.74
 核对日期：2026-07-28
-合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
+合并基线：`origin/dev@d77cdb33e`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-01`。现有代码已将 typed
-> observation、appraisal、mixed self-affect、episode、mood、need 与
-> regulation fold 纳入 existing Life command/event/CAS/replay 链，并以 0143
-> 投影其 immutable event head。仅 `affective_event_appraised` 可以形成
-> canonical self-affect transition；observation 与 foreground presence 不会
-> 镜像用户 VAD。Host-local `HostEmotionRuntime`、Limbic、BodySense、
-> Endocrine、Motive、Bond 和 Surface 仍是多套 compatibility state，且当前
-> Host ingress 尚未构造 typed Appraisal command；因此情感数字生命仍为
-> `PARTIAL`，不应把 DL-01 本地内核当成生产闭环。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-02_CODE_COMPLETE_LOCAL`。
+> 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
+> episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
+> 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
+> 文本、自述、声学或视觉的**用户观察**写为 workspace/person/session-scoped aggregate 的
+> append-only command，再以有界 appraisal 生成七海自身的 `CARE/CONCERN`
+> 等 self-affect，绝不镜像用户 VAD。只有带内部 provenance marker 的 fused
+> context 能进入纯 normalize bridge，外部伪造的 affective context 会被忽略。
+> 这只是 Host ingress 已接线的本地代码证据：`HostEmotionRuntime`、Limbic、
+> BodySense、Endocrine、Motive、Bond 与 Surface 仍有兼容或易失 state，关系
+> episode、ExpressionPlan、真实模型和三模态服务尚未闭环。因此状态仍为
+> `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 ## 1. 结论
 
@@ -312,7 +315,7 @@ Operator 平面的 `scheduler.task.enable/disable`、`sys_mode.auto_rules.update
 
 > 当前库存纠偏：生产 locator consumer/import、全部 import-form consumer、模块、字段、锁和可变引用均为 0。`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 各自构造 fresh ports 并显式传给 Host root，Host builder 无全局 fallback。`HostAuthorityRuntimeOwner` 继续 migration-first 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图。ResourceManager status 已由 0123 Host-fenced Runtime Event journal 持久化，共享 JSON production reader/writer/fallback 为 0。Tribe shared state、Host registry、event bus 与 23-Agent catalog 也由每个 Host scope fresh 持有；bind 不发布进程级 active owner，lifespan/background execution 与 HTTP request 通过 execution-local `ContextVar` 借用 exact owner context。两个异步重叠 scope 已证明 legacy shared-state/cross-Agent getter 返回各自 Agent/registry；同 execution 跨 scope、active execution 解绑和 stale inherited context 均失败关闭。23 个 Agent backing singleton/setter 与 state/Host registry/event bus 的无上下文 fallback 已物理删除，缺 exact context 统一拒绝；完整 Host multi-app production canary 尚未执行。旧测试通过显式隔离 registry/context 兼容，fresh 生产进程不会加载 pytest bridge。外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它外部资源恢复、事务化 Chat、完整 Worker/Obs Composition 与 NE-01 仍未完成。
 
-Host 情感上下文现在也遵守同一对象图边界。`ProcessApplicationPorts` 只暴露 construction-only `emotion_runtime_factory`；`build_production_host_application_ports()` 为一个 Host root 惰性构造 `HostEmotionRuntime`，并把同一实例交给 Input、Tribe、Lifecycle 与用户情感画像读取端口。模块级 `_global_emotion_*`、`_user_emotion_profile`、`get_user_emotion_profile()` 以及回复形态 `_decider/get_*_decider()` 均已删除。`normalize_chat_emotion_context()` 在没有显式 runtime 时是纯函数，只有 `resolve_chat_emotion_context(..., runtime=...)` 推进连续向量、时间线和画像；并发语音额度检查与记账在同一锁内完成。该状态仍是 Host epoch 内存，不是 durable Feedback/Identity authority。
+Host 情感上下文有两层边界。生产 ASGI 的 `InputRuntimeApplicationPorts` 通过惰性 `LifeCommandService` provider 构造 `AffectFusionService`；`resolve_chat_emotion_context(..., affect_fusion_service=...)` 会将输入归一为 `UserAffectObservationV1`，用 `workspace_id + relationship_subject_id + session_id` 形成不含原始身份的 aggregate key，并先持久化 observation，再有界生成至多两个 `EventAppraisalV1` 候选。只有 appraisal command 才能推进 canonical `state.affective`。视觉、声学、文本/自述各自有 3/5/30 秒 TTL；journal 只接受脱敏摘要和 digest ref，原始音频、图像、文本和模型链字段会失败关闭。`normalize_chat_emotion_context()` 对内部 fused context 只读；外部伪造 marker 不会取得 canonical authority。旧 `HostEmotionRuntime` 仍由 `emotion_runtime_factory` 在未注入 fusion service 的兼容调用中使用，管理 Host epoch 内 vector/timeline/profile；它不是 durable self-affect authority，也尚未在 DL-06 前清零。回复形态 `ResponseFormDecider` 继续由 Input composition 独占，并发语音额度检查与记账在同一锁内完成。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

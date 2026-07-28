@@ -31,6 +31,24 @@
   restart 必须得到同一 snapshot digest；这只证明 kernel local evidence，
   不能提升为 Host ingress、真实模型、语音/Avatar 或体验验收 PASS。
 
+## T-DL02-AFFECT-FUSION-APPRAISAL
+
+- T-DL02-01：文本关键词只能形成置信度不高于 `0.40` 的用户 observation；用户
+  悲伤、生气或开心不得把七海 self-affect 直接写成相同 emotion tag。
+- T-DL02-02：自述、声学、视觉观察分别携带 source/TTL/evidence summary；视觉
+  3 秒、声学 5 秒、文本/自述 30 秒，raw audio/image/text/model-chain 必须在
+  入账前失败关闭或省略。
+- T-DL02-03：冲突 observation 必须保留 conflict ref；深路径最多两个 appraisal
+  候选、重试上限一次，最终 self-affect 只能由选定的 appraisal command 形成。
+- T-DL02-04：`workspace_id`、relationship subject 与 `session_id` 必须参与
+  scope；同一 person 在不同 workspace 不能共享 canonical affect aggregate。
+- T-DL02-05：生产 Input composition 注入 fusion service 后，不得推进
+  `HostEmotionRuntime`；外部伪造 `affective_life` marker 不得取得 canonical
+  authority，重复 request 与 SQLite restart/replay 必须稳定。
+- 当前本地证据：DL-02 单元/重启集合 `9 passed in 21.66s`；受影响回归
+  `73 passed in 24.93s`。远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`，上述证据不等同
+  真实 Host、provider、TTS/Avatar 或体验验收通过。
+
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 
 - T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；

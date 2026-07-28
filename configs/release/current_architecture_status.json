@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "ed6e5c8522bc9a2d8d9c13ddc84ac6ecf4db516f",
+    "dev_commit": "d77cdb33e38cc04f4cebddee8e708d8ffde4b00a",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "EMOTIONAL_DIGITAL_LIFE_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE08_EMOTIONAL_DIGITAL_LIFE_DL01_CODE_COMPLETE_LOCAL_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE08_EMOTIONAL_DIGITAL_LIFE_DL02_AFFECT_FUSION_CODE_COMPLETE_LOCAL_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "EMOTIONAL_DIGITAL_LIFE_DL01_AFFECTIVE_LIFE_KERNEL_CODE_COMPLETE_LOCAL_INGRESS_NOT_WIRED",
-  "next_wave": "DL-02_MULTIMODAL_OBSERVATION_AND_APPRAISAL",
+  "active_wave_detail": "EMOTIONAL_DIGITAL_LIFE_DL02_AFFECT_FUSION_AND_APPRAISAL_HOST_INGRESS_CODE_COMPLETE_LOCAL_LEGACY_WRITERS_REMAIN",
+  "next_wave": "DL-03_RELATIONSHIP_MEMORY_AND_AFTEREFFECT",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -27,9 +27,9 @@
   },
   "emotional_digital_life": {
     "status": "PARTIAL",
-    "active_subwave": "DL-01",
-    "self_affect_authority": "CANONICAL_LIFE_JOURNAL_KERNEL_LOCAL_PROVEN_LEGACY_COMPATIBILITY_WRITERS_REMAIN",
-    "user_affect_separation": "DL01_TYPED_OBSERVATION_AND_APPRAISAL_BOUNDARY_LOCAL_PROVEN_INGRESS_NOT_WIRED",
+    "active_subwave": "DL-02",
+    "self_affect_authority": "CANONICAL_LIFE_JOURNAL_KERNEL_WITH_WORKSPACE_SCOPED_FUSION_AND_APPRAISAL_HOST_INGRESS_CODE_COMPLETE_LOCAL_LEGACY_COMPATIBILITY_WRITERS_REMAIN",
+    "user_affect_separation": "DL02_HOST_FUSION_WRITES_USER_OBSERVATION_THEN_APPRAISES_SELF_AFFECT_NO_USER_TAG_MIRRORING_RAW_AUDIO_IMAGE_TEXT_OMITTED",
     "relationship_continuity": "VOLATILE_BOND_PATH_PENDING_REPLACEMENT",
     "text_voice_avatar_alignment": "NOT_YET_WIRED",
     "real_edge_status": "NOT_STARTED_REMOTE_MACHINE",

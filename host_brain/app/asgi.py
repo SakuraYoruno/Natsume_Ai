@@ -220,6 +220,12 @@ def create_app(
         ),
         agent_runtime_ports_provider=agent_runtime_scope.provider,
         tribe_runtime_agent_ports=tribe_runtime_agent_ports,
+        # The closure is evaluated only on request handling, after the
+        # app-local Life authority is composed during startup. It avoids a
+        # business-module lookup of the process provider.
+        life_command_service_provider=(
+            lambda: life_command_authority_provider(ledger_provider())[0]
+        ),
     )
     # This slot belongs to one FastAPI application factory invocation.  Route
     # providers close over it explicitly; there is no module-global service

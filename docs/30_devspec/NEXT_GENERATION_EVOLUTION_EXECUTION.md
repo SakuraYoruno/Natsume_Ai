@@ -3,13 +3,13 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v4.1
+版本：v4.2
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-01_CODE_COMPLETE_LOCAL / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-02_CODE_COMPLETE_LOCAL / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
-已经拥有持续情感生命”推导为完成。本合同以当前 `dev@ed6e5c852` 为基线，
+已经拥有持续情感生命”推导为完成。本合同以当前 `dev@d77cdb33e` 为基线，
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。
 
 ## 1. 产品结果
@@ -96,11 +96,24 @@ raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life ev
 服务和旧 compatibility writer 的清零分别属于 DL-02 与 DL-06，不能据此称为
 完整情感生命或生产切流。
 
-### DL-02：观察、融合与 Appraisal
+### DL-02：观察、融合与 Appraisal（代码完成，本地证据）
 
-- 文本关键词退为低置信 observer；加入 self-report、声学、视觉及冲突/过期处理。
-- face TTL 为 2～3 秒、acoustic TTL 为 5 秒、文本 TTL 为 30 秒；所有观察绑定 person/session。
-- 普通回合走快路径；低置信、冲突、边界、裂痕、修复、distress 和 mixed affect 才走最多两候选的深路径。
+- `AffectFusionService` 已在 Host Input composition 中接入真实 `LifeCommandService` /
+  `LifeSnapshotReader` provider。每个观察先生成 workspace-scoped opaque aggregate，
+  再写 `affective_observation_recorded`；Appraisal 只能随后通过
+  `affective_event_appraised` 形成 self-affect。
+- 文本关键词现在只是最高 0.4 confidence 的 `TEXT` observer；self-report、声学和
+  视觉使用 typed observation。文本/self-report TTL=30 秒、acoustic=5 秒、visual=3 秒；
+  raw text/audio/image/model-chain 不进入命令、snapshot 或 projection。
+- Fast path 只保存观察；distress、冲突、边界、给空间和修复进入最多两个确定性候选的
+  deep path。用户 SAD/ANGRY 不会直接写入七海，而是由 Appraisal 形成 CARE、CONCERN、
+  CAUTION、RESPECT 或 SHARED_JOY 等自我反应。
+- Host 下游兼容 `emotion_tag` 仅从 canonical self-affect bridge 导出；fused route 不再
+  调用 `HostEmotionRuntime.ingest()`。同一 subject 的不同 workspace 使用不同 Life
+  aggregate，relationship subject 与 session/workspace 不再混作同一标识。
+
+本地覆盖包含 9 项 DL-02 unit/restart 集成和 73 项受影响 Host/聊天/内核回归。它不
+证明真实 Host 部署、模型、语音、Avatar、关系后效应或旧 writer 已清零。
 
 退出：用户的悲伤、生气或快乐不会自动使七海拥有同一情绪。
 

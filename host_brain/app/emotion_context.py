@@ -162,6 +162,16 @@ def normalize_chat_emotion_context(
     """
 
     source = dict(raw or {})
+    # ``affective_life`` is an internal, canonical hand-off created by
+    # AffectFusionService. An external ChatRequest may never spoof it to set
+    # Natsume's self-affect or bypass the Life journal.
+    if bool(source.get("_affective_life_internal")) and isinstance(
+        source.get("affective_life"),
+        Mapping,
+    ):
+        return _normalize_affective_life_context(source)
+    source.pop("_affective_life_internal", None)
+    source.pop("affective_life", None)
     state = normalize_hard_state(
         {
             "mood_state": source.get("mood_state"),
@@ -250,6 +260,79 @@ def normalize_chat_emotion_context(
         "user_emotion_profile": profile_summary,
         # 方向 C：上一次 emotion_tag（供 VTS 渐变过渡帧计算）
         "_prev_emotion_tag": prev_tag,
+    }
+
+
+def _normalize_affective_life_context(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Render the durable self-affect head without advancing legacy runtime.
+
+    This is the DL-02 boundary that prevents an observed user emotion from
+    being blended into ``HostEmotionRuntime``. The bridge fields retain their
+    historical names for downstream Governor/prompt consumers, but every one
+    is derived from the canonical *self* head supplied by the Life journal.
+    """
+
+    life = dict(source.get("affective_life") or {})
+    self_affect = dict(life.get("self_affect") or {})
+    mood = dict(self_affect.get("mood") or {})
+    components = list(self_affect.get("components") or [])
+    top = dict(components[0] or {}) if components and isinstance(components[0], Mapping) else {}
+    state = normalize_hard_state({"mood_state": mood.get("label")})
+    hard_snapshot = build_hard_snapshot(state)
+    allowed_emotion_tags = list(hard_snapshot.allowed_emotion_tags)
+    emotion_tag = _normalize_runtime_emotion_tag(source.get("emotion_tag")) or "CALM"
+    if allowed_emotion_tags and emotion_tag not in allowed_emotion_tags:
+        emotion_tag = allowed_emotion_tags[0]
+    emotion_intensity = _coerce_emotion_intensity(
+        source.get("emotion_intensity"),
+        default=_coerce_emotion_intensity(top.get("intensity"), default=0.18),
+    )
+    try:
+        updated_at_ms = int(mood.get("updated_at_ms") or self_affect.get("last_integrated_ms") or 0)
+    except (TypeError, ValueError):
+        updated_at_ms = 0
+    vector = EmotionVector(
+        valence=max(-1.0, min(1.0, float(mood.get("valence") or 0.18))),
+        arousal=max(-1.0, min(1.0, (float(mood.get("arousal") or 0.24) * 2.0) - 1.0)),
+        dominance=0.0,
+        ts_ms=max(0, updated_at_ms),
+    )
+    return {
+        "mood_state": str(mood.get("label") or "calm"),
+        "emotion_tag": emotion_tag,
+        "emotion_range_hint": "canonical_self_affect",
+        "emotion_intensity": emotion_intensity,
+        "emotion_inference_source": "affective_life_fusion",
+        "emotion_inference_confidence": 1.0,
+        "emotion_inference_degraded": str(life.get("path") or "") == "FAST_FALLBACK",
+        "emotion_bootstrap_reason_codes": [
+            str(item)
+            for item in list(life.get("reason_codes") or [])
+            if str(item or "").strip()
+        ][:6],
+        "allowed_emotion_tags": allowed_emotion_tags,
+        "emotion_ts_ms": max(0, updated_at_ms),
+        "vad_vector": vector.as_dict(),
+        "emotion_echo": compute_emotion_echo(
+            emotion_tag,
+            current_vector=vector,
+            echo_weight=0.0,
+        ),
+        "triggered_emotions": evaluate_emotion_triggers(
+            {
+                "emotion_tag": emotion_tag,
+                "emotion_intensity": emotion_intensity,
+                "mood_state": str(mood.get("label") or "calm"),
+            }
+        ),
+        "inner_monologue": _vector_to_inner_monologue(vector),
+        "user_emotion_profile": {
+            "status": "AFFECTIVE_FUSION",
+            "total_interactions": 0,
+        },
+        "_prev_emotion_tag": None,
+        "_affective_life_internal": True,
+        "affective_life": life,
     }
 
 
@@ -350,11 +433,25 @@ def resolve_chat_emotion_context(
     *,
     request_body: Any,
     runtime: "HostEmotionRuntime",
+    affect_fusion_service: Any | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     """Resolve and ingest one real Host input through its exact runtime."""
 
     if not isinstance(runtime, HostEmotionRuntime):
         raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
+    if affect_fusion_service is not None:
+        resolver = getattr(affect_fusion_service, "resolve_request", None)
+        if not callable(resolver):
+            raise RuntimeError("AFFECT_FUSION_SERVICE_NOT_INJECTED")
+        fused = resolver(
+            request_body=request_body,
+            request_id=request_id,
+        )
+        as_context = getattr(fused, "as_emotion_context", None)
+        if not callable(as_context):
+            raise RuntimeError("AFFECT_FUSION_RESULT_INVALID")
+        return normalize_chat_emotion_context(as_context())
     raw: dict[str, Any] = {}
     if isinstance(getattr(request_body, "emotion_context", None), Mapping):
         raw.update(dict(request_body.emotion_context))
