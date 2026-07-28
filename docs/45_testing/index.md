@@ -18,6 +18,9 @@
 - 真实 Docker `compose config --quiet`、PowerShell parser 与静态合同
   `6 passed in 0.61s` 通过。容器尚未启动，真实写/读/重启、Host、Obs、
   Monitor、Edge、Gateway 和故障注入均不得记为通过。
+- 外部服务 persistence runner 已进入代码，强制校验隔离 identity、端口和
+  Compose project 标签；其真实执行结果必须另存 ignored acceptance receipt，
+  不能由 runner 存在性替代。
 
 ## NE-05 Skill 生命周期本地代码波次
 

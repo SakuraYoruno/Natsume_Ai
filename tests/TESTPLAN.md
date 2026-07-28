@@ -20,6 +20,10 @@
 - 当前静态合同为 `6 passed in 0.61s`，PowerShell parser 与真实 Docker
   `compose config --quiet` 通过。acceptance 容器的真实写/读/重启尚未执行，
   因此状态仅为 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。
+- T-NE07-EXT-04：正式 runner 必须拒绝默认容器 identity、默认端口和非
+  loopback endpoint；必须重开 Compose project 标签，逐库完成真实写入、
+  容器重启、持久读取、更新/查询与 namespace 清理。Neo4j 密码只能由进程
+  环境读取，CLI、标准输出和 receipt 不得携带明文。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

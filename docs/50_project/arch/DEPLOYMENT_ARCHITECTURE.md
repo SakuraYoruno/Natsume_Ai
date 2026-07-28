@@ -291,6 +291,11 @@ NE-07 使用独立 project、container names、network、ports 和
 `runtime/acceptance/...` 数据根并行启动；默认不删除其 volume/data root。
 只有隔离实例完成真实写入、读取、重启读取和 namespace 清理，才能形成
 `FullStackAcceptanceReceiptV1` 的 Docker 部分。
+该机械链由
+`scripts/runtime/run_ne07_external_services_acceptance.py` 执行；runner
+拒绝默认容器 identity、默认端口和非 loopback endpoint，并重开每个容器的
+Compose project 标签。输出只含 probe digest、container/image identity、
+重启时间和清理结果，不含 Neo4j 密码或探针原文。
 
 ## 9. 健康与降级语义
 
