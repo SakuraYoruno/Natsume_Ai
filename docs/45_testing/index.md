@@ -60,6 +60,13 @@
   随后 profile lifecycle、permission、proactive、relationship 的受影响集合 `20 passed in 46.58s`，
   Secure Ingress 邻接回归 `7 passed in 4.40s`；集合分开报告，未运行真实 Gateway、模型、Monitor、Edge
   或 DL-07 服务栈。
+- `test_dl06_companion_feedback_ingress.py` 以真实 SQLite、Host route 和 Secure Ingress 验证：一条
+  signed `HELPFUL` 必须同时绑定 `companion:feedback:write`、exact user/subject、tenant/workspace 与
+  仍 active 的 response receipt，才可写入 `0.95` canonical aftereffect；它随后只推进已经存在的
+  profile CANARY。HTTP duplicate、进程重启和 claim-result 恢复不会重复写 aftereffect 或 canary
+  interaction；service principal、跨 scope body、失活 receipt 和额外 `rating` 字段全部失败关闭。
+  该文件 `2 passed in 8.98s`；随后与 profile/permission/proactive/relationship/Secure Ingress 邻接集合
+  共 `29 passed in 59.14s`。这仍不是真实用户盲评、Monitor UI、Gateway、provider、Edge 或 DL-07 证据。
 
 ## NE-07 隔离外部服务栈
 

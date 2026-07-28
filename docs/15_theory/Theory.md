@@ -1650,3 +1650,23 @@ duplicate、重启或 claim-result 中断只会重开同一 receipt，而不是�
 这条边界让“七海更懂得怎样和我说话”保持可感知、可撤销、非操控，同时保证 Soul、核心价值、
 亲密身份、关系许可和 self-affect 不被偏好学习吞没。用户界面的 Review、真实 canary 体验证据和
 旧兼容 writer 的清零仍是后续工作；有 endpoint 不等于已经证明长期体验更好。
+
+## 32. 明确回应反馈是关系证据，不是对人格的投票
+
+“这句话有帮到我”“你误解我了”“这里越界了”是用户对**某一条已经呈现的回应**
+的关系性评价，而不是让一段自由文本在事后重写七海。因而它必须引用一个仍在
+canonical provisional relationship episode 中的 response receipt；反馈本身只能是
+`HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY` 四种有限结果。原文、自由评分、
+情绪标签和 Soul patch 都不进入这个证据入口。
+
+经过独立 scope 认证的 `HELPFUL` 可以成为该回应的高置信 aftereffect，但它不创建
+profile、更不 activation profile。它至多推进一个已经由独立历史证据启动的 CANARY；
+普通聊天中的关键词分类和 persona proposal 继续是保守、低权重的理解信号。这样，
+七海能从“这次有没有接住我”学习低风险表达方式，却不会把一次点赞、一次误解或
+一段模型推断误当成对人格、亲密身份、关系许可或 self-affect 的授权。
+
+Secure Ingress audit ref 与 aftereffect 一起进入 append-only Life journal，故 claim
+完成前崩溃会按同一证据精确重开，而不是再次写入关系事件。`MISUNDERSTOOD` 与
+`BOUNDARY` 同样应保留为可见的关系事实；它们不能被沉默、投递失败或一次道歉自动
+冲销。真正的 Monitor 反馈界面、人工 Review、canary 的长期体验结果和 legacy writer
+退役仍需后续波次证明。

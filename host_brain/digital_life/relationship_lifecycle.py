@@ -19,6 +19,7 @@ from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.service import LifeCommandService
 from natsume_contracts.life import (
     CompanionProactiveTargetV1,
+    CompanionResponseFeedbackRequestV1,
     LifeCommand,
     LifeCommandReceipt,
     LifeDeliveryReceipt,
@@ -64,6 +65,28 @@ def _text(value: Any, *, default: str = "", limit: int = 240) -> str:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _aftereffect_from_payload(payload: Mapping[str, Any]) -> RelationalAftereffectV1:
+    raw = _mapping(payload.get("aftereffect"))
+    if not raw:
+        raise ValueError("relational aftereffect is required")
+    return RelationalAftereffectV1(
+        aftereffect_id=raw.get("aftereffect_id"),
+        episode_id=raw.get("episode_id"),
+        workspace_id=raw.get("workspace_id"),
+        relationship_subject_id=raw.get("relationship_subject_id"),
+        session_id=raw.get("session_id"),
+        source_receipt_ref=raw.get("source_receipt_ref"),
+        user_input_ref=raw.get("user_input_ref"),
+        outcome=raw.get("outcome"),
+        helpfulness=raw.get("helpfulness"),
+        boundary_respected=raw.get("boundary_respected"),
+        repair_acknowledged=raw.get("repair_acknowledged"),
+        observed_at_ms=raw.get("observed_at_ms"),
+        evidence_refs=raw.get("evidence_refs") or (),
+        self_id=raw.get("self_id") or "natsume_ai",
+    )
 
 
 def _digest(value: Any) -> str:
@@ -255,6 +278,144 @@ class RelationshipLifecycleService:
                 "source_ref": evidence_ref,
             },
             created_at_ms=created_at_ms,
+        )
+
+    def record_explicit_response_feedback(
+        self,
+        *,
+        workspace_id: Any,
+        relationship_subject_id: Any,
+        session_id: Any,
+        request_id: Any,
+        response_receipt_ref: Any,
+        feedback: Any,
+        source_ref: Any,
+    ) -> RelationshipAftereffectResult:
+        """Record an authenticated, bounded evaluation of one open response.
+
+        This is intentionally different from keyword detection in a normal
+        chat turn.  A signed user explicitly evaluates the exact accepted
+        response receipt; the canonical aggregate then verifies that the
+        corresponding relationship episode is still active.  The only strong
+        positive mapping is an explicit ``HELPFUL`` selection, and it can
+        still only advance an already-running profile canary through the
+        existing lifecycle gate.
+        """
+
+        control = CompanionResponseFeedbackRequestV1(
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+            session_id=session_id,
+            response_receipt_ref=response_receipt_ref,
+            feedback=feedback,
+        )
+        scope = RelationshipScope.from_values(
+            workspace_id=control.workspace_id,
+            relationship_subject_id=control.relationship_subject_id,
+            session_id=control.session_id,
+        )
+        evidence_ref = _text(source_ref, limit=512)
+        if not evidence_ref or "://" not in evidence_ref:
+            raise ValueError("explicit response feedback requires an opaque source_ref")
+        stable_request_id = _text(request_id) or _digest(
+            {
+                "schema": "relationship-explicit-feedback.v1",
+                "scope": scope.aggregate_id,
+                "response_receipt_ref": control.response_receipt_ref,
+                "feedback": control.feedback,
+                "source_ref": evidence_ref,
+            }
+        )[:32]
+        replayed = self._aftereffect_by_evidence_ref(
+            scope=scope,
+            evidence_ref=evidence_ref,
+        )
+        if replayed is not None:
+            aftereffect, receipt = replayed
+            self._observe_profile_canary_aftereffect(
+                scope=scope,
+                request_id=stable_request_id,
+                aftereffect=aftereffect,
+            )
+            return RelationshipAftereffectResult(
+                scope=scope,
+                aftereffect=aftereffect,
+                receipt=receipt.as_replayed(),
+                reason_code="RELATIONAL_EXPLICIT_FEEDBACK_REPLAYED",
+            )
+
+        reader = self._require_snapshot_reader()
+        snapshot = reader.get_snapshot(scope.aggregate_id)
+        relation = _mapping(_mapping(snapshot.state).get("relationship_v2"))
+        episodes = tuple(
+            _mapping(item)
+            for item in relation.get("active_episodes") or ()
+            if isinstance(item, Mapping)
+        )
+        episode = next(
+            (
+                item
+                for item in episodes
+                if _text(item.get("response_receipt_ref"), limit=512)
+                == control.response_receipt_ref
+            ),
+            None,
+        )
+        if episode is None:
+            raise ValueError("RELATIONSHIP_RESPONSE_RECEIPT_NOT_ACTIVE")
+        outcome, helpfulness, boundary_respected, repair_acknowledged = (
+            self._explicit_feedback_outcome(control.feedback)
+        )
+        now_ms = max(0, int(self._clock_ms()))
+        user_input_ref = _opaque_ref(
+            "relationship-user-feedback",
+            {
+                "scope": scope.aggregate_id,
+                "request_id": stable_request_id,
+                "source_ref": evidence_ref,
+                "response_receipt_ref": control.response_receipt_ref,
+                "feedback": control.feedback,
+            },
+        )
+        identity = {
+            "schema": "relational-explicit-feedback-aftereffect.v1",
+            "episode_id": _text(episode.get("episode_id")),
+            "source_ref": evidence_ref,
+            "response_receipt_ref": control.response_receipt_ref,
+        }
+        aftereffect = RelationalAftereffectV1(
+            aftereffect_id=f"aftereffect_{_digest(identity)[:32]}",
+            episode_id=_text(episode.get("episode_id")),
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            source_receipt_ref=control.response_receipt_ref,
+            user_input_ref=user_input_ref,
+            outcome=outcome,
+            helpfulness=helpfulness,
+            boundary_respected=boundary_respected,
+            repair_acknowledged=repair_acknowledged,
+            observed_at_ms=now_ms,
+            evidence_refs=(evidence_ref, control.response_receipt_ref),
+        )
+        receipt = self._submit(
+            scope=scope,
+            request_id=stable_request_id,
+            command_type="relational_aftereffect_recorded",
+            ordinal=0,
+            payload={"aftereffect": aftereffect.as_dict()},
+            created_at_ms=now_ms,
+        )
+        self._observe_profile_canary_aftereffect(
+            scope=scope,
+            request_id=stable_request_id,
+            aftereffect=aftereffect,
+        )
+        return RelationshipAftereffectResult(
+            scope=scope,
+            aftereffect=aftereffect,
+            receipt=receipt,
+            reason_code="RELATIONAL_EXPLICIT_FEEDBACK_RECORDED",
         )
 
     def record_followup(
@@ -634,6 +795,76 @@ class RelationshipLifecycleService:
         if any(marker in normalized for marker in _HELPFUL_MARKERS):
             return "HELPFUL", 0.72, True, False
         return "NEUTRAL", 0.0, True, False
+
+    @staticmethod
+    def _explicit_feedback_outcome(
+        feedback: str,
+    ) -> tuple[str, float, bool, bool]:
+        """Map one bounded user selection without invoking text inference."""
+
+        normalized = _text(feedback, limit=64).upper()
+        if normalized == "HELPFUL":
+            # A signed explicit selection is stronger than the conservative
+            # textual classifier, but it remains scoped to exactly one
+            # accepted response and one user-controlled request.
+            return "HELPFUL", 0.95, True, False
+        if normalized == "NEUTRAL":
+            return "NEUTRAL", 0.0, True, False
+        if normalized == "MISUNDERSTOOD":
+            return "MISUNDERSTOOD", 0.0, False, False
+        if normalized == "BOUNDARY":
+            return "BOUNDARY", 0.0, False, False
+        raise ValueError("explicit response feedback is invalid")
+
+    def _aftereffect_by_evidence_ref(
+        self,
+        *,
+        scope: RelationshipScope,
+        evidence_ref: str,
+    ) -> tuple[RelationalAftereffectV1, LifeCommandReceipt] | None:
+        """Reopen an explicit feedback command after claim-result failure.
+
+        The Secure Ingress claim can survive a process crash between the
+        canonical Life command and claim completion.  The immutable audit ref
+        is the replay key, so later relationship activity cannot hide the
+        original result behind ``last_aftereffect``.
+        """
+
+        reader = self._require_snapshot_reader()
+        after_sequence = 0
+        while True:
+            batch = reader.list_events(
+                scope.aggregate_id,
+                after_sequence=after_sequence,
+                limit=500,
+            )
+            if not batch:
+                return None
+            for event in batch:
+                sequence = int(event.sequence)
+                if sequence <= after_sequence:
+                    raise RuntimeError("RELATIONSHIP_EVENT_CURSOR_REGRESSION")
+                after_sequence = sequence
+                if event.event_type != "relational_aftereffect_recorded":
+                    continue
+                payload = _mapping(event.payload)
+                aftereffect = _aftereffect_from_payload(
+                    _mapping(payload.get("command_payload"))
+                )
+                if evidence_ref not in aftereffect.evidence_refs:
+                    continue
+                if (
+                    aftereffect.workspace_id != scope.workspace_id
+                    or aftereffect.relationship_subject_id
+                    != scope.relationship_subject_id
+                ):
+                    raise RuntimeError("RELATIONSHIP_AFTEREFFECT_SCOPE_DRIFT")
+                receipt = reader.get_receipt(event.command_id)
+                if receipt is None:
+                    raise RuntimeError("RELATIONSHIP_AFTEREFFECT_REPLAY_RECEIPT_MISSING")
+                return aftereffect, receipt
+            if len(batch) < 500:
+                return None
 
     def _require_command_service(self) -> LifeCommandService:
         service = self._command_service_provider()

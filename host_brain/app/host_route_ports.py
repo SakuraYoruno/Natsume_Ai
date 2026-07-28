@@ -36,6 +36,7 @@ class HostRoutePorts:
     security_immune_agent_provider: RouteProvider | None = None
     companion_permission_ingress_provider: RouteProvider | None = None
     companion_profile_ingress_provider: RouteProvider | None = None
+    companion_feedback_ingress_provider: RouteProvider | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -54,6 +55,7 @@ class HostRoutePorts:
             "security_immune_agent_provider",
             "companion_permission_ingress_provider",
             "companion_profile_ingress_provider",
+            "companion_feedback_ingress_provider",
         ):
             provider = getattr(self, field_name)
             if provider is not None and not callable(provider):

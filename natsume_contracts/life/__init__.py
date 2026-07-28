@@ -15,6 +15,7 @@ from .affect import (
 from .relationship import (
     CompanionProactivePermissionRequestV1,
     CompanionProactiveTargetV1,
+    CompanionResponseFeedbackRequestV1,
     RelationshipEpisodeV1,
     RelationshipStateV2,
     RelationalAftereffectV1,
@@ -50,6 +51,7 @@ __all__ = [
     "UserAffectObservationV1",
     "CompanionProactivePermissionRequestV1",
     "CompanionProactiveTargetV1",
+    "CompanionResponseFeedbackRequestV1",
     "RelationshipEpisodeV1",
     "RelationshipStateV2",
     "RelationalAftereffectV1",

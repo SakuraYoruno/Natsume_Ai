@@ -581,6 +581,22 @@ flowchart LR
 或任意 command，且不直接 activation。claim 完成中断后，Host 以相同 Secure Ingress audit ref 重开已提交的
 Life receipt，不产生第二个 candidate。
 
+明确回应反馈使用另一条 receipt-bound 的权限边界，不能把 chat keyword 或 persona proposal 伪装为强证据：
+
+```mermaid
+flowchart LR
+    U["签名 HELPFUL / NEUTRAL / MISUNDERSTOOD / BOUNDARY"] --> SI["host.companion-feedback\nSecure Ingress"]
+    SI --> R["active provisional response receipt\n精确 scope 验证"]
+    R --> A["relational_aftereffect_recorded\nopaque audit + response refs"]
+    A --> C["已有 CANARY 才可计一次\ncanary interaction"]
+    C --> P["五次后由独立 lifecycle activation"]
+```
+
+`HELPFUL` 是唯一映射为 `0.95` 的 strong aftereffect；其余反馈仍会正常影响关系修复/边界状态，
+但不能成为 profile 成长成功。没有 active receipt、跨 user/workspace、service principal、重复 JSON key
+或额外 rating 字段都会失败关闭。feedback 的 Secure Ingress audit ref 是 crash/retry 的重开键，而非原始
+对话正文。
+
 ```mermaid
 flowchart LR
     H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]

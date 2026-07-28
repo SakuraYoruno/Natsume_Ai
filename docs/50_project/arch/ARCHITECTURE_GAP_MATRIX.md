@@ -8,14 +8,24 @@
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
-> 当前活动波为 `NE-08 / DL-06_REVERSIBLE_COMPANION_PROFILE_CANARY_SLICE`。数字生命产品缺口优先于剩余通用架构验收：canonical Life kernel 已可将 typed Appraisal 折叠为 bounded mixed self-affect，且 ASGI Input composition 已把 `AffectFusionService` 接入 Chat/Ingress 的真实代码路径；注入 fusion 后不会再解析 compatibility `HostEmotionRuntime`。DL-03 还将 accepted reply 的 provisional relationship episode 与下一次用户输入的 aftereffect 交给同一 canonical Life journal，关系以 workspace + subject 连续，边界、未接住和修复不能被沉默、投递失败或单次道歉自动消解，Surface 只消费可信内部 hand-off。DL-04 已在该 hand-off 后冻结 scope-bound `AffectiveTurnPlanV1`：普通低歧义回合可通过真实 provider stream 逐句输出，句子在可见前先进入 canonical Life intent，模型候选和外部 emotion hint 都不能覆盖 self-affect。DL-05 又在该同一 plan/revision/sync 上持久化 Voice `SPEAK`、Avatar `TRANSITION` 及 `CANCEL/RELEASE` 的 Host protocol；0146 projection 只证明 Host staging，不能证明远端播放或 Avatar 已执行。DL-06 现要求 Scheduler 主动消息显式 `ALLOWED`、无 repair/active episode/self-regulation hold，并以 canonical self-affect 适配既有 impulse/risk 算法；accepted reply 还会原子登记 scope-bound `CompanionProactiveTargetV1`，Scheduler 只读选择 frozen-Scene-compatible target，旧 Bond/legacy affect/fixed template/`last_target` 均无发送权。已完成的 `proactive.gateway` Host/Gateway receipt 现在经 outbox、摘要、scope 与 target 重验后才打开 deterministic `PROACTIVE_MESSAGE` episode；receipt 后崩溃仅以只读扫描补记 relation command，绝不重发。DL-06 另有 signed strict permission ingress：`host.companion-contact` 要求 `companion:contact:write`，并将 `user principal == relationship subject` 与 `tenant == workspace` 绑定，才允许 `ALLOWED/DENIED` 通过 canonical Life command 写入；它没有自然语言、模型、Bond 或情绪旁路，duplicate/restart 只重开同一 receipt。0147 则把低风险 companion profile 置于同一 authority：只有五条独立、跨三天、强且 boundary-safe 的 aftereffect 才能发起五互动 canary，CANARY/ACTIVE identity 真实冻结到文本、TTS 与 Avatar Host plan，随后只能精确回滚到此版本原定的旧 profile。普通 `0.72` 文本分类不能自动累积此证据。它仍不是第三方平台送达证明，也仍不是主动陪伴或三模态实测：直接偏好反馈、Monitor/Review、旧兼容 writer 清零、受治理 Budget stream、连接恢复、真实 Edge receipt、真实模型和真实服务验收均未完成。下文的 NE-07 记录是历史服务栈基础，不能据此把情感数字生命标记为完成。
+> 当前活动波为 `NE-08 / DL-06_SIGNED_RESPONSE_FEEDBACK_CANARY_EVIDENCE_SLICE`。数字生命产品缺口优先于剩余通用架构验收：canonical Life kernel 已可将 typed Appraisal 折叠为 bounded mixed self-affect，且 ASGI Input composition 已把 `AffectFusionService` 接入 Chat/Ingress 的真实代码路径；注入 fusion 后不会再解析 compatibility `HostEmotionRuntime`。DL-03 还将 accepted reply 的 provisional relationship episode 与下一次用户输入的 aftereffect 交给同一 canonical Life journal，关系以 workspace + subject 连续，边界、未接住和修复不能被沉默、投递失败或单次道歉自动消解，Surface 只消费可信内部 hand-off。DL-04 已在该 hand-off 后冻结 scope-bound `AffectiveTurnPlanV1`：普通低歧义回合可通过真实 provider stream 逐句输出，句子在可见前先进入 canonical Life intent，模型候选和外部 emotion hint 都不能覆盖 self-affect。DL-05 又在该同一 plan/revision/sync 上持久化 Voice `SPEAK`、Avatar `TRANSITION` 及 `CANCEL/RELEASE` 的 Host protocol；0146 projection 只证明 Host staging，不能证明远端播放或 Avatar 已执行。DL-06 现要求 Scheduler 主动消息显式 `ALLOWED`、无 repair/active episode/self-regulation hold，并以 canonical self-affect 适配既有 impulse/risk 算法；accepted reply 还会原子登记 scope-bound `CompanionProactiveTargetV1`，Scheduler 只读选择 frozen-Scene-compatible target，旧 Bond/legacy affect/fixed template/`last_target` 均无发送权。已完成的 `proactive.gateway` Host/Gateway receipt 现在经 outbox、摘要、scope 与 target 重验后才打开 deterministic `PROACTIVE_MESSAGE` episode；receipt 后崩溃仅以只读扫描补记 relation command，绝不重发。DL-06 另有 signed strict permission ingress：`host.companion-contact` 要求 `companion:contact:write`，并将 `user principal == relationship subject` 与 `tenant == workspace` 绑定，才允许 `ALLOWED/DENIED` 通过 canonical Life command 写入；它没有自然语言、模型、Bond 或情绪旁路，duplicate/restart 只重开同一 receipt。0147 则把低风险 companion profile 置于同一 authority：只有五条独立、跨三天、强且 boundary-safe 的 aftereffect 才能发起五互动 canary，CANARY/ACTIVE identity 真实冻结到文本、TTS 与 Avatar Host plan，随后只能精确回滚到此版本原定的旧 profile。普通 `0.72` 文本分类不能自动累积此证据。它仍不是第三方平台送达证明，也仍不是主动陪伴或三模态实测：已接入的 receipt-scoped 回应反馈之外的 Monitor/Review、旧兼容 writer 清零、受治理 Budget stream、连接恢复、真实 Edge receipt、真实模型和真实服务验收均未完成。下文的 NE-07 记录是历史服务栈基础，不能据此把情感数字生命标记为完成。
 
-**0148 修订：** 当前子波已改为 `DL-06_SIGNED_COMPANION_PROFILE_CONTROL_SLICE`。Host 的
+**0148 修订：** 当前子波已改为 `DL-06_SIGNED_RESPONSE_FEEDBACK_CANARY_EVIDENCE_SLICE`。Host 的
 `POST /v1/digital-life/relationship/companion-profile` 已真实接入独立 `host.companion-profile`
 Secure Ingress surface；它要求 `companion:profile:write`、exact user/relationship subject 与
 tenant/workspace 绑定，仅从 canonical strong aftereffect history 启动 profile CANARY，并把 audit ref
 持久化到 immutable head。它不是聊天语义推断、直接 activation 或 Monitor/Review 控件；剩余缺口为
 canary 真实后效应、激活/回滚实测、兼容 writer 清零、provider/Edge 和完整服务栈验收。
+
+**回应反馈修订：** `POST /v1/digital-life/relationship/response-feedback` 已作为
+`host.companion-feedback` 独立 Secure Ingress surface 接入 Host。它要求
+`companion:feedback:write`、exact user/relationship subject 与 tenant/workspace
+绑定，并只接受指向仍为 active provisional episode 的 `life-event://` 或
+`life-delivery://` receipt 的四种 bounded outcome。signed `HELPFUL` 写入
+receipt-scoped `0.95` aftereffect，且仅可推进既有 profile CANARY；它不能从聊天文本
+生成 evidence、创建/激活 profile、改写 Soul、consent 或 self-affect。该路径已有真实
+SQLite、route、跨 scope、service principal、malformed body 与 restart replay 的定向证据；
+它不是 Monitor 用户界面、人工 Review、canary 长期收益、旧 writer 清零或真实服务栈验收。
 
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与

@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_SIGNED_COMPANION_PROFILE_CONTROL_SLICE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_SIGNED_RESPONSE_FEEDBACK_CANARY_EVIDENCE_SLICE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -58,6 +58,14 @@ canary 真实证据、旧 writer 清零仍未完成，不得称为主动陪伴�
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。
+
+本切片同时新增 receipt-scoped `CompanionResponseFeedbackRequestV1`：
+`POST /v1/digital-life/relationship/response-feedback` 只允许 `HELPFUL/NEUTRAL/MISUNDERSTOOD/BOUNDARY`，
+必须持有 `companion:feedback:write`、exact user/relationship subject 与 tenant/workspace 绑定，并且
+引用一条仍处于 canonical provisional episode 的已接受 response receipt。只有明确的 `HELPFUL` 映射为
+`0.95` strong aftereffect；它只可推进既有 profile CANARY，无法自动创建或 activation profile。现有
+自然语言 classifier 的 `0.72` 和旧 ResponseFeedback proposal 保持低权重/proposal-only，均不具备该
+成长 authority。
 
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与

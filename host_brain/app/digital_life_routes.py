@@ -45,6 +45,18 @@ from host_brain.digital_life.companion_profile_ingress import (
     CompanionProfileIngress,
     CompanionProfileIngressError,
 )
+from host_brain.digital_life.companion_feedback_ingress import (
+    COMPANION_FEEDBACK_BODY_INVALID,
+    COMPANION_FEEDBACK_COMMAND_NOT_APPLIED,
+    COMPANION_FEEDBACK_EVIDENCE_UNAVAILABLE,
+    COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+    COMPANION_FEEDBACK_PRINCIPAL_KIND_DENIED,
+    COMPANION_FEEDBACK_RESULT_CONFLICT,
+    COMPANION_FEEDBACK_RESULT_RECORD_UNAVAILABLE,
+    COMPANION_FEEDBACK_SCOPE_BINDING_DENIED,
+    CompanionFeedbackIngress,
+    CompanionFeedbackIngressError,
+)
 from natsume_contracts.life import LifeDeliveryAuthorization
 from host_brain.orchestration.governor_grant import (
     DurableGovernorGrantResolver,
@@ -118,6 +130,32 @@ def _companion_profile_http_status(reason_code: str) -> int:
     ):
         return 409
     if any(marker in reason for marker in ("THRESHOLD", "CANARY", "RELATIONSHIP")):
+        return 409
+    return 401
+
+
+def _companion_feedback_http_status(reason_code: str) -> int:
+    """Map receipt-scoped feedback failures without disclosing private data."""
+
+    reason = str(reason_code or "").strip().upper()
+    if reason in {
+        COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        COMPANION_FEEDBACK_EVIDENCE_UNAVAILABLE,
+        COMPANION_FEEDBACK_RESULT_RECORD_UNAVAILABLE,
+        COMPANION_FEEDBACK_COMMAND_NOT_APPLIED,
+    } or "UNAVAILABLE" in reason or "ENFORCE_REQUIRED" in reason:
+        return 503
+    if reason == COMPANION_FEEDBACK_BODY_INVALID:
+        return 422
+    if reason in {
+        COMPANION_FEEDBACK_PRINCIPAL_KIND_DENIED,
+        COMPANION_FEEDBACK_SCOPE_BINDING_DENIED,
+    } or "SCOPE" in reason or "PRINCIPAL" in reason:
+        return 403
+    if reason == COMPANION_FEEDBACK_RESULT_CONFLICT or any(
+        marker in reason
+        for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT", "RELATIONSHIP")
+    ):
         return 409
     return 401
 
@@ -747,6 +785,53 @@ async def digital_life_companion_profile(
     return result.as_dict()
 
 
+async def digital_life_companion_feedback(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Record one signed, bounded evaluation of an accepted response.
+
+    The body refers to a canonical response receipt and a fixed feedback kind;
+    it cannot contain raw dialogue, ratings, Soul changes or arbitrary Life
+    state.  The relationship aggregate still verifies the receipt owns an
+    active provisional episode before writing an aftereffect.
+    """
+
+    provider = _route_ports.companion_feedback_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionFeedbackIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionFeedbackIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_feedback_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
 async def digital_life_proactive_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
@@ -917,6 +1002,11 @@ def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
     add(
         "/v1/digital-life/relationship/companion-profile",
         digital_life_companion_profile,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/response-feedback",
+        digital_life_companion_feedback,
         methods=["POST"],
     )
     add(

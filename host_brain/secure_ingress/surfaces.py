@@ -16,6 +16,7 @@ class IngressSurface(str, Enum):
     HOST = "host"
     COMPANION_CONTACT = "companion_contact"
     COMPANION_PROFILE = "companion_profile"
+    COMPANION_FEEDBACK = "companion_feedback"
     TOOL = "tool"
     OBS = "obs"
     GATEWAY = "gateway"
@@ -62,6 +63,14 @@ SECURE_INGRESS_SURFACE_POLICIES: Mapping[
         action="companion:profile:write",
         required_scopes=("companion:profile:write",),
         default_path="/v1/digital-life/relationship/companion-profile",
+    ),
+    IngressSurface.COMPANION_FEEDBACK: IngressSurfacePolicy(
+        surface=IngressSurface.COMPANION_FEEDBACK,
+        surface_id="host.companion-feedback",
+        audience="host",
+        action="companion:feedback:write",
+        required_scopes=("companion:feedback:write",),
+        default_path="/v1/digital-life/relationship/response-feedback",
     ),
     IngressSurface.TOOL: IngressSurfacePolicy(
         surface=IngressSurface.TOOL,

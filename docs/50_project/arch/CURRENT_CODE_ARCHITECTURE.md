@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_REVERSIBLE_COMPANION_PROFILE_CANARY_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_SIGNED_RESPONSE_FEEDBACK_CANARY_EVIDENCE_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -49,7 +49,7 @@
 > Voice 与 Avatar plan，不能修改 Soul、consent 或 self-affect。生产文本 classifier 的 `0.72`
 > 不满足门槛，不能被当成自动成长成功。
 > `HostEmotionRuntime`、Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与
-> Surface 的其它兼容 state 仍未清零；直接偏好反馈/Monitor 审核、真实模型和三模态物理服务也尚未闭环。因此状态仍为
+> Surface 的其它兼容 state 仍未清零；Monitor 审核、canary 长期收益、真实模型和三模态物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 > 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
@@ -60,6 +60,14 @@
 > 仅从 canonical 强 aftereffect history 选证据并启动 CANARY，Secure Ingress audit ref 与 profile
 > version 同时进入 Life journal。该路由不会直接 activation；Monitor/Review 与 legacy writer cutover
 > 仍未完成。
+
+> `CompanionFeedbackIngress` 已接入同一个 app-local Host composition：
+> `POST /v1/digital-life/relationship/response-feedback` 经独立 `host.companion-feedback` surface
+> 验证 `companion:feedback:write`、exact user/relationship subject 和 tenant/workspace。其 strict body
+> 只能引用一个仍为 active provisional episode 的 accepted receipt，并给出四种 bounded outcome；只有
+> explicit `HELPFUL` 生成 `0.95` 的 canonical aftereffect。该证据最多推进已有 companion-profile
+> CANARY，不能创建/activation profile 或写 Soul、consent、self-affect；旧关键词 classifier 与 persona
+> proposal 没有该权限。
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 `ExpressionPlanV1`，并在可信 internal AffectFusion hand-off 后由纯 planner 冻结。
