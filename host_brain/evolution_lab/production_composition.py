@@ -8,14 +8,15 @@ from pathlib import Path
 from host_brain.evolution_lab.docker_executor import (
     TrustedDockerSandboxExecutor,
 )
-from host_brain.evolution_lab.golden_datasets import (
-    BuiltInGoldenDatasetReader,
-)
 from host_brain.evolution_lab.golden_experiments import (
     GoldenExperimentService,
 )
 from host_brain.evolution_lab.golden_verifier import (
     GoldenExperimentVerifier,
+)
+from host_brain.evolution_lab.redacted_trace import (
+    TrustedCompositeDatasetReader,
+    TrustedTraceRedactionService,
 )
 from host_brain.evolution_lab.trusted_runner import (
     TrustedEvolutionLabPorts,
@@ -23,6 +24,9 @@ from host_brain.evolution_lab.trusted_runner import (
 )
 from host_brain.persistence.evolution_lab_trusted_repository import (
     SQLiteTrustedEvolutionLabLedger,
+)
+from host_brain.persistence.evolution_lab_redacted_dataset_repository import (
+    SQLiteTrustedRedactedDatasetReader,
 )
 from host_brain.persistence.evolution_lab_v2_repository import (
     SQLiteEvolutionLabV2Ledger,
@@ -33,7 +37,9 @@ from host_brain.persistence.evolution_lab_v2_repository import (
 class TrustedEvolutionLabComposition:
     """Closed Lab graph; it exposes no production writer or activation port."""
 
-    dataset_reader: BuiltInGoldenDatasetReader
+    dataset_reader: TrustedCompositeDatasetReader
+    redacted_dataset_reader: SQLiteTrustedRedactedDatasetReader
+    trace_redaction: TrustedTraceRedactionService
     executor: TrustedDockerSandboxExecutor
     verifier: GoldenExperimentVerifier
     spec_registry: SQLiteEvolutionLabV2Ledger
@@ -52,16 +58,23 @@ def build_trusted_evolution_lab_composition(
     runtime_root: str | Path,
     image_reference: str,
 ) -> TrustedEvolutionLabComposition:
-    """Construct only after the central migration runner made 0122/0138 ready."""
+    """Construct only after the central migration runner made 0122/0138-0140 ready."""
 
-    dataset_reader = BuiltInGoldenDatasetReader()
+    spec_registry = SQLiteEvolutionLabV2Ledger(db_path)
+    evidence_ledger = SQLiteTrustedEvolutionLabLedger(db_path)
+    redacted_dataset_reader = SQLiteTrustedRedactedDatasetReader(db_path)
+    dataset_reader = TrustedCompositeDatasetReader(
+        redacted_reader=redacted_dataset_reader,
+    )
+    trace_redaction = TrustedTraceRedactionService(
+        ledger=evidence_ledger,
+        reader=redacted_dataset_reader,
+    )
     executor = TrustedDockerSandboxExecutor(
         runtime_root=runtime_root,
         image_reference=image_reference,
     )
     verifier = GoldenExperimentVerifier(dataset_reader=dataset_reader)
-    spec_registry = SQLiteEvolutionLabV2Ledger(db_path)
-    evidence_ledger = SQLiteTrustedEvolutionLabLedger(db_path)
     runner = TrustedEvolutionLabRunner(
         ports=TrustedEvolutionLabPorts(
             dataset_reader=dataset_reader,
@@ -79,6 +92,8 @@ def build_trusted_evolution_lab_composition(
     )
     return TrustedEvolutionLabComposition(
         dataset_reader=dataset_reader,
+        redacted_dataset_reader=redacted_dataset_reader,
+        trace_redaction=trace_redaction,
         executor=executor,
         verifier=verifier,
         spec_registry=spec_registry,

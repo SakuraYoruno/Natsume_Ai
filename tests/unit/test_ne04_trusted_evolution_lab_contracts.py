@@ -289,7 +289,7 @@ def test_ne04_golden_suite_requires_three_reports_and_six_independent_arms() -> 
     suite = GoldenExperimentSuiteReceiptV1(
         suite_id="ne04-golden-suite",
         commit_sha="d" * 40,
-        migration_head="0139#evolution_lab_trusted_redaction_repair",
+        migration_head="0140#evolution_lab_redacted_dataset",
         engine_identity=ENGINE_IDENTITY,
         image_reference=IMAGE_REFERENCE,
         report_digests={

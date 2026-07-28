@@ -983,6 +983,15 @@ Evolution Lab 只能读取脱敏快照与可重放 trace，不能持有生产写
 
 实现层还必须区分“临时”与“退出即丢失”。Docker tmpfs 在容器停止后无法由 host 重新打开，因此需要取回并持久验证的实验输出使用 acceptance-root 下的隔离临时 bind mount；其实际 source identity 只以 digest 进入 attestation，并在 durable receipt 提交后删除。dataset 与 worker 则只读挂载，worker 源码 digest 和完整 sandbox profile 绑定 `ExperimentSpec`。这样既能在响应丢失时保留 reconciliation 事实，也不会把运行目录误当长期数据资产。
 
+真实 trace 也不能因为“进入实验室”就获得豁免。原始记录只能在 intake
+进程内参与 source digest 和确定性脱敏；持久层只接收字段白名单投影、
+不可逆记录引用、规则版本/摘要、输出 dataset digest 与移除计数。脱敏
+Receipt、Manifest 和 sanitized dataset 必须在同一事务提交，重启只能按
+source/rules identity 重开原结果。Operator 读取则使用 `mode=ro +
+query_only` 的独立对象图，重新验证 suite/report/spec/run/operation 的完整
+摘要链，只公开 proposal、成本、风险和验证结论；原始 trace、sanitized
+dataset 正文和任何激活按钮都不进入读模型。
+
 ### 13.2 可演化对象的不同门槛
 
 | 对象 | 允许的自动化程度 | 必要门槛 |

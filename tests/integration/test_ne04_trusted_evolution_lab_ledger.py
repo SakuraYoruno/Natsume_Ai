@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
+import time
 
 import pytest
 
@@ -32,6 +34,21 @@ from host_brain.persistence.evolution_lab_trusted_repository import (
 )
 from host_brain.persistence.evolution_lab_v2_repository import (
     SQLiteEvolutionLabV2Ledger,
+)
+from host_brain.persistence.evolution_lab_trusted_query_repository import (
+    TrustedEvolutionLabOperatorQueryRepository,
+    TrustedEvolutionLabQueryError,
+)
+from host_brain.app.observability_runtime.evolution_lab_projection import (
+    EVOLUTION_LAB_OPERATOR_KEY,
+    EVOLUTION_LAB_OPERATOR_KIND,
+    load_evolution_lab_operator_projection_source,
+    paginate_evolution_lab_operator_projection,
+    read_evolution_lab_operator_projection,
+)
+from host_brain.observability.projection_store import QueryProjectionStore
+from host_brain.app.obs_routes_evolution_lab import (
+    list_trusted_evolution_lab_suites,
 )
 
 
@@ -201,7 +218,7 @@ def _prepare(tmp_path, *, clock=lambda: 100):
         ts_ms=1,
     )
     assert migrated.success is True
-    assert migrated.summary["latest_version"] == 139
+    assert migrated.summary["latest_version"] == 140
     return (
         db_path,
         SQLiteEvolutionLabV2Ledger(db_path),
@@ -267,6 +284,57 @@ def _report(
             ),
         ),
     )
+
+
+def _persist_operator_suite(
+    *,
+    v2_ledger: SQLiteEvolutionLabV2Ledger,
+    trusted_ledger: SQLiteTrustedEvolutionLabLedger,
+    suite_id: str = "ne04-golden-suite-operator",
+    created_at_ms: int = 200,
+) -> GoldenExperimentSuiteReceiptV1:
+    reports: dict[str, TrustedExperimentReportV2] = {}
+    run_digests: list[str] = []
+    for kind in ("research_planning", "proactive", "memory_write"):
+        spec = _spec(kind)
+        baseline, candidate = _complete_pair(
+            v2_ledger=v2_ledger,
+            trusted_ledger=trusted_ledger,
+            spec=spec,
+        )
+        report = _report(
+            spec=spec,
+            kind=kind,
+            baseline=baseline,
+            candidate=candidate,
+        )
+        trusted_ledger.append_report(report)
+        proposal = EvolutionProposalV2(
+            proposal_id=f"proposal-{kind}",
+            report_digest=report.report_digest,
+            target_kind=f"{kind}-policy",
+            target_version="candidate.v2",
+            rationale="可信 Lab 仅生成待 Review 的演化提案。",
+        )
+        trusted_ledger.append_proposal(proposal)
+        reports[kind] = report
+        run_digests.extend(
+            (baseline.receipt_digest, candidate.receipt_digest)
+        )
+    suite = GoldenExperimentSuiteReceiptV1(
+        suite_id=suite_id,
+        commit_sha="d" * 40,
+        migration_head="0140#evolution_lab_redacted_dataset",
+        engine_identity=ENGINE_IDENTITY,
+        image_reference=IMAGE_REFERENCE,
+        report_digests={
+            kind: report.report_digest for kind, report in reports.items()
+        },
+        run_receipt_digests=tuple(run_digests),
+        created_at_ms=created_at_ms,
+    )
+    trusted_ledger.append_golden_suite(suite)
+    return suite
 
 
 def test_ne04_trusted_ledger_fences_duplicates_and_replays_completed_receipt(
@@ -496,7 +564,7 @@ def test_ne04_trusted_ledger_persists_three_golden_reports_and_proposal_only(
     suite = GoldenExperimentSuiteReceiptV1(
         suite_id="ne04-golden-suite-ledger",
         commit_sha="d" * 40,
-        migration_head="0139#evolution_lab_trusted_redaction_repair",
+        migration_head="0140#evolution_lab_redacted_dataset",
         engine_identity=ENGINE_IDENTITY,
         image_reference=IMAGE_REFERENCE,
         report_digests={
@@ -570,3 +638,164 @@ def test_ne04_trusted_redaction_uses_distinct_0139_namespace(
         }
     assert "receipt_id" in columns
     assert "redaction_id" not in columns
+
+
+def test_ne04_operator_query_reopens_complete_chain_and_stays_query_only(
+    tmp_path,
+) -> None:
+    db_path, v2_ledger, trusted_ledger = _prepare(tmp_path)
+    suite = _persist_operator_suite(
+        v2_ledger=v2_ledger,
+        trusted_ledger=trusted_ledger,
+    )
+
+    repository = TrustedEvolutionLabOperatorQueryRepository(db_path)
+    page = repository.list_suites(limit=1)
+
+    assert page["read_only"] is True
+    assert page["proposal_only"] is True
+    assert page["production_influence_enabled"] is False
+    assert page["page_size"] == 1
+    projected = page["items"][0]
+    assert projected["suite_id"] == suite.suite_id
+    assert projected["report_count"] == 3
+    assert projected["run_count"] == 6
+    assert all(
+        report["review_status"] == "AWAITING_REVIEW"
+        and report["review_ref"] is None
+        and report["production_influence_enabled"] is False
+        and report["proposals"]
+        for report in projected["reports"]
+    )
+    encoded = json.dumps(projected, ensure_ascii=False)
+    assert "rationale" not in encoded
+    assert "dataset_id" not in encoded
+    assert "sandbox_attestation\"" not in encoded
+    assert "output_digest" not in encoded
+    with repository._connection() as conn:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            conn.execute(
+                "UPDATE evolution_lab_golden_suite_receipt SET status = 'PASS'"
+            )
+
+
+def test_ne04_operator_query_cursor_projection_and_tamper_fail_closed(
+    tmp_path,
+) -> None:
+    db_path, v2_ledger, trusted_ledger = _prepare(tmp_path)
+    first = _persist_operator_suite(
+        v2_ledger=v2_ledger,
+        trusted_ledger=trusted_ledger,
+        suite_id="ne04-golden-suite-newer",
+        created_at_ms=300,
+    )
+    with sqlite3.connect(db_path) as conn:
+        source = json.loads(
+            conn.execute(
+                """
+                SELECT receipt_json
+                FROM evolution_lab_golden_suite_receipt
+                WHERE suite_id = ?
+                """,
+                (first.suite_id,),
+            ).fetchone()[0]
+        )
+    second = GoldenExperimentSuiteReceiptV1(
+        suite_id="ne04-golden-suite-older",
+        commit_sha="e" * 40,
+        migration_head=source["migration_head"],
+        engine_identity=source["engine_identity"],
+        image_reference=source["image_reference"],
+        report_digests=source["report_digests"],
+        run_receipt_digests=tuple(source["run_receipt_digests"]),
+        created_at_ms=200,
+    )
+    trusted_ledger.append_golden_suite(second)
+    repository = TrustedEvolutionLabOperatorQueryRepository(db_path)
+    page_one = repository.list_suites(limit=1)
+    page_two = repository.list_suites(
+        limit=1,
+        cursor=page_one["next_cursor"],
+    )
+    assert page_one["items"][0]["suite_id"] == first.suite_id
+    assert page_two["items"][0]["suite_id"] == second.suite_id
+
+    payload, source_cursor = load_evolution_lab_operator_projection_source(
+        repository
+    )
+    projected_page = paginate_evolution_lab_operator_projection(
+        payload,
+        limit=1,
+    )
+    assert projected_page["items"][0]["suite_id"] == first.suite_id
+    assert projected_page["has_more"] is True
+    projected_page_two = paginate_evolution_lab_operator_projection(
+        payload,
+        limit=1,
+        cursor=projected_page["next_cursor"],
+        workspace_id="workspace-ne04-ledger",
+    )
+    assert projected_page_two["items"][0]["suite_id"] == second.suite_id
+
+    store = QueryProjectionStore(db_path)
+    store.upsert(
+        EVOLUTION_LAB_OPERATOR_KIND,
+        EVOLUTION_LAB_OPERATOR_KEY,
+        payload,
+        source_cursor=source_cursor,
+        source_ref="test://trusted-evolution-lab",
+        freshness_ts_ms=int(time.time() * 1000),
+    )
+    reopened, projection = read_evolution_lab_operator_projection(store)
+    assert reopened == payload
+    assert projection["degraded_state"] == "HEALTHY"
+    route_page = asyncio.run(
+        list_trusted_evolution_lab_suites(
+            limit=1,
+            cursor=None,
+            workspace_id="workspace-ne04-ledger",
+            projection_store=store,
+        )
+    )
+    assert route_page["read_only"] is True
+    assert route_page["proposal_only"] is True
+    assert route_page["items"][0]["suite_id"] == first.suite_id
+    assert route_page["projection"]["degraded_state"] == "HEALTHY"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "DROP TRIGGER evolution_lab_trusted_report_no_update"
+        )
+        row = conn.execute(
+            """
+            SELECT report_id, report_json
+            FROM evolution_lab_trusted_report
+            ORDER BY report_id
+            LIMIT 1
+            """
+        ).fetchone()
+        tampered = json.loads(row[1])
+        tampered["experiment_kind"] = "tampered"
+        conn.execute(
+            """
+            UPDATE evolution_lab_trusted_report
+            SET report_json = ?
+            WHERE report_id = ?
+            """,
+            (
+                json.dumps(
+                    tampered,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                row[0],
+            ),
+        )
+    with pytest.raises(
+        TrustedEvolutionLabQueryError,
+        match="REPORT_BINDING_DRIFT",
+    ):
+        TrustedEvolutionLabOperatorQueryRepository(db_path).list_suites(
+            limit=10
+        )

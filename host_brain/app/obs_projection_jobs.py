@@ -34,6 +34,11 @@ from host_brain.app.observability_runtime.domain_state_projection import (
     _domain_pack_catalog,
     load_skill_pack_catalog_projection_source,
 )
+from host_brain.app.observability_runtime.evolution_lab_projection import (
+    EVOLUTION_LAB_OPERATOR_KEY,
+    EVOLUTION_LAB_OPERATOR_KIND,
+    load_evolution_lab_operator_projection_source,
+)
 from host_brain.app.observability_runtime.health_device_projection import (
     DEVICE_STATUS_KIND,
     LLM_NODE_HEALTH_KEY,
@@ -140,6 +145,10 @@ from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.task_repository import DurableTaskStore
 from host_brain.persistence.life_body_query_repository import (
     LifeBodyQueryRepository,
+)
+from host_brain.persistence.evolution_lab_trusted_query_repository import (
+    TrustedEvolutionLabOperatorQueryRepository,
+    TrustedEvolutionLabQueryError,
 )
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
 from host_brain.channels.edge_transport import resolve_gateway_base_urls
@@ -967,6 +976,84 @@ def _task_runtime_callback(
     return refresh
 
 
+def _evolution_lab_operator_callback(
+    store: QueryProjectionStore,
+    canonical_db_path: Path,
+) -> Callable[[], object]:
+    """Project only fully reopened trusted evidence into the public store."""
+
+    repository = TrustedEvolutionLabOperatorQueryRepository(canonical_db_path)
+    target = ProjectionTarget(
+        EVOLUTION_LAB_OPERATOR_KIND,
+        EVOLUTION_LAB_OPERATOR_KEY,
+    )
+
+    def refresh() -> dict[str, int]:
+        try:
+            payload, cursor = load_evolution_lab_operator_projection_source(
+                repository
+            )
+        except TrustedEvolutionLabQueryError as exc:
+            changed = _upsert_unavailable(
+                store,
+                job_name="evolution-lab-operator",
+                target=target,
+                reason_code=exc.reason_code,
+                detail=exc.detail,
+                source_scope="canonical-trusted-evolution-lab-ledger",
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 1,
+                "changed_document_count": int(changed),
+            }
+        current = store.get(target.kind, target.key)
+        public_payload = public_projection_payload(payload)
+        if (
+            current is not None
+            and current.degraded_state is ProjectionDegradedState.HEALTHY
+            and current.payload == public_payload
+        ):
+            _upsert(
+                store,
+                target.kind,
+                target.key,
+                payload,
+                source_cursor=int(current.source_cursor),
+                source_ref=(
+                    "obs-app://evolution-lab-operator/"
+                    "trusted-query-repository"
+                ),
+                freshness_ts_ms=_now_ms(),
+            )
+            return {
+                "document_count": 1,
+                "unavailable_document_count": 0,
+                "changed_document_count": 0,
+            }
+        if current is not None and cursor <= int(current.source_cursor):
+            cursor = int(current.source_cursor) + 1
+        _upsert(
+            store,
+            target.kind,
+            target.key,
+            payload,
+            source_cursor=max(0, int(cursor)),
+            source_ref=(
+                "obs-app://evolution-lab-operator/"
+                "trusted-query-repository"
+            ),
+            freshness_ts_ms=_now_ms(),
+        )
+        return {
+            "document_count": 1,
+            "unavailable_document_count": 0,
+            "changed_document_count": 1,
+        }
+
+    return refresh
+
+
 def _trace_callback(ledger: Any, store: QueryProjectionStore) -> Callable[[], object]:
     def host_tribe_source_unavailable() -> list[dict[str, Any]]:
         raise RuntimeError("OBS_HOST_TRIBE_EVENT_PORT_NOT_INJECTED")
@@ -1104,6 +1191,12 @@ def build_explicit_obs_projection_callbacks(
         "health-passive": ExplicitObsProjectionCallback(
             "health-passive",
             _health_callback(ledger, store),
+            DURABLE_READ,
+            30_000,
+        ),
+        "evolution-lab-operator": ExplicitObsProjectionCallback(
+            "evolution-lab-operator",
+            _evolution_lab_operator_callback(store, database),
             DURABLE_READ,
             30_000,
         ),
@@ -1298,6 +1391,7 @@ def build_explicit_obs_projection_callbacks(
         "bio-ops-metadata",
         "capability-forge-operator",
         "device-status",
+        "evolution-lab-operator",
         "governance-snapshot",
         "health-passive",
         "operator-live-state",

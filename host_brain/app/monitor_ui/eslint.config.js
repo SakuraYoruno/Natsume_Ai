@@ -10,13 +10,20 @@ const taskRuntimeFiles = [
   'src/features/execution/components/TaskRuntimeConsole.jsx',
   'src/pages/TaskRuntime.jsx',
 ]
+const evolutionLabFiles = [
+  'src/features/evolutionLab/evolutionLabApi.js',
+  'src/features/evolutionLab/evolutionLabQueries.js',
+  'src/features/evolutionLab/evolutionLabModel.js',
+  'src/features/evolutionLab/components/EvolutionLabConsole.jsx',
+  'src/pages/EvolutionLab.jsx',
+]
 
 export default [
   {
     ignores: ['../static/monitor/**', 'test-results/**'],
   },
   {
-    files: taskRuntimeFiles,
+    files: [...taskRuntimeFiles, ...evolutionLabFiles],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',
@@ -35,7 +42,10 @@ export default [
     },
   },
   {
-    files: ['src/features/execution/taskRuntimeModel.test.js'],
+    files: [
+      'src/features/execution/taskRuntimeModel.test.js',
+      'src/features/evolutionLab/evolutionLabModel.test.js',
+    ],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module',

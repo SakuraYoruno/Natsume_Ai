@@ -11,8 +11,10 @@ import sqlite3
 from typing import Callable, Iterator, Mapping
 
 from host_brain.contracts.evolution_lab import (
+    DatasetManifestV1,
     EvolutionProposalV2,
     ExperimentSpecV2,
+    LabDatasetV1,
     PolicyVariantV1,
     canonical_evolution_lab_digest,
 )
@@ -31,10 +33,14 @@ EVOLUTION_LAB_TRUSTED_MIGRATION_ASSET_KEY = (
 EVOLUTION_LAB_TRUSTED_REDACTION_MIGRATION_ASSET_KEY = (
     "0139#evolution_lab_trusted_redaction_repair"
 )
+EVOLUTION_LAB_TRUSTED_DATASET_MIGRATION_ASSET_KEY = (
+    "0140#evolution_lab_redacted_dataset"
+)
 _MIGRATION_FILE = "0138_evolution_lab_trusted_sandbox.sql"
 _REDACTION_MIGRATION_FILE = (
     "0139_evolution_lab_trusted_redaction_repair.sql"
 )
+_DATASET_MIGRATION_FILE = "0140_evolution_lab_redacted_dataset.sql"
 _ALLOWED_MIGRATION_DISPOSITIONS = frozenset(
     {"APPLIED", "APPLIED_WITH_COMPAT", "LEGACY_BACKFILL"}
 )
@@ -133,6 +139,17 @@ class SQLiteTrustedEvolutionLabLedger:
                     encoding="utf-8-sig"
                 ).encode("utf-8")
             ).hexdigest()
+            dataset_migration_path = (
+                Path(__file__).resolve().parents[1]
+                / "audit"
+                / "migrations"
+                / _DATASET_MIGRATION_FILE
+            )
+            dataset_migration_checksum = hashlib.sha256(
+                dataset_migration_path.read_text(
+                    encoding="utf-8-sig"
+                ).encode("utf-8")
+            ).hexdigest()
             with self._connection() as conn:
                 rows = conn.execute(
                     """
@@ -159,6 +176,16 @@ class SQLiteTrustedEvolutionLabLedger:
                         EVOLUTION_LAB_TRUSTED_REDACTION_MIGRATION_ASSET_KEY,
                     ),
                 ).fetchone()
+                dataset_asset = conn.execute(
+                    """
+                    SELECT checksum, disposition
+                    FROM schema_migration_assets
+                    WHERE asset_key = ?
+                    """,
+                    (
+                        EVOLUTION_LAB_TRUSTED_DATASET_MIGRATION_ASSET_KEY,
+                    ),
+                ).fetchone()
         except (OSError, sqlite3.Error) as exc:
             raise TrustedEvolutionLabLedgerError(
                 "migration 0138 trusted Evolution Lab schema is not ready"
@@ -171,26 +198,32 @@ class SQLiteTrustedEvolutionLabLedger:
             "evolution_lab_trusted_report",
             "evolution_lab_trusted_proposal",
             "evolution_lab_trusted_redaction_receipt",
+            "evolution_lab_trusted_redacted_dataset",
             "evolution_lab_golden_suite_receipt",
             "evolution_lab_trusted_event_chain_guard",
             "evolution_lab_trusted_head_matches_event",
             "evolution_lab_trusted_run_operation_bound",
             "evolution_lab_trusted_redaction_insert_guard",
+            "evolution_lab_redacted_dataset_insert_guard",
         }
         if (
             not required.issubset(names)
             or asset is None
             or redaction_asset is None
+            or dataset_asset is None
             or str(asset["checksum"]) != migration_checksum
             or str(redaction_asset["checksum"])
             != redaction_migration_checksum
+            or str(dataset_asset["checksum"]) != dataset_migration_checksum
             or str(asset["disposition"])
             not in _ALLOWED_MIGRATION_DISPOSITIONS
             or str(redaction_asset["disposition"])
             not in _ALLOWED_MIGRATION_DISPOSITIONS
+            or str(dataset_asset["disposition"])
+            not in _ALLOWED_MIGRATION_DISPOSITIONS
         ):
             raise TrustedEvolutionLabLedgerError(
-                "migrations 0138/0139 trusted Evolution Lab schema is not ready"
+                "migrations 0138/0139/0140 trusted Evolution Lab schema is not ready"
             )
 
     def reserve_execution(
@@ -636,6 +669,122 @@ class SQLiteTrustedEvolutionLabLedger:
                 ),
             )
         return receipt.receipt_digest
+
+    def append_redacted_dataset(
+        self,
+        *,
+        receipt: RedactionReceiptV1,
+        manifest: DatasetManifestV1,
+        dataset: LabDatasetV1,
+    ) -> str:
+        """Atomically commit one sanitized dataset and its digest-only receipt."""
+
+        if (
+            not isinstance(receipt, RedactionReceiptV1)
+            or not isinstance(manifest, DatasetManifestV1)
+            or not isinstance(dataset, LabDatasetV1)
+        ):
+            raise TrustedEvolutionLabLedgerError(
+                "trusted redacted dataset contracts are invalid"
+            )
+        if (
+            receipt.workspace_id != manifest.workspace_id
+            or receipt.output_dataset_digest != dataset.dataset_digest
+            or manifest.dataset_id != dataset.dataset_id
+            or manifest.dataset_digest != dataset.dataset_digest
+            or manifest.record_count != len(dataset.records)
+            or manifest.source_kind != "redacted_trace"
+            or manifest.redaction_receipt_digest != receipt.receipt_digest
+            or receipt.record_count != len(dataset.records)
+        ):
+            raise TrustedEvolutionLabLedgerError(
+                "trusted redacted dataset identity drift"
+            )
+        receipt_json = _canonical(receipt.to_dict())
+        manifest_json = _canonical(manifest.to_dict())
+        dataset_json = _canonical(dataset.to_dict())
+        with self._transaction() as conn:
+            existing_receipt = conn.execute(
+                """
+                SELECT receipt_json
+                FROM evolution_lab_trusted_redaction_receipt
+                WHERE redaction_id = ?
+                """,
+                (receipt.redaction_id,),
+            ).fetchone()
+            if existing_receipt is not None:
+                if str(existing_receipt["receipt_json"]) != receipt_json:
+                    raise TrustedEvolutionLabLedgerError(
+                        "redacted dataset receipt replay drift"
+                    )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO evolution_lab_trusted_redaction_receipt
+                    (redaction_id, workspace_id, source_digest,
+                     output_dataset_digest, receipt_digest, receipt_json,
+                     created_at_ms)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        receipt.redaction_id,
+                        receipt.workspace_id,
+                        receipt.source_digest,
+                        receipt.output_dataset_digest,
+                        receipt.receipt_digest,
+                        receipt_json,
+                        receipt.created_at_ms,
+                    ),
+                )
+            existing_dataset = conn.execute(
+                """
+                SELECT workspace_id, dataset_digest, manifest_digest,
+                       redaction_receipt_digest, dataset_json, manifest_json,
+                       record_count, source_kind, created_at_ms
+                FROM evolution_lab_trusted_redacted_dataset
+                WHERE dataset_id = ?
+                """,
+                (dataset.dataset_id,),
+            ).fetchone()
+            if existing_dataset is not None:
+                expected = (
+                    manifest.workspace_id,
+                    dataset.dataset_digest,
+                    manifest.manifest_digest,
+                    receipt.receipt_digest,
+                    dataset_json,
+                    manifest_json,
+                    len(dataset.records),
+                    "redacted_trace",
+                    receipt.created_at_ms,
+                )
+                actual = tuple(existing_dataset)
+                if actual != expected:
+                    raise TrustedEvolutionLabLedgerError(
+                        "redacted dataset replay drift"
+                    )
+                return manifest.manifest_digest
+            conn.execute(
+                """
+                INSERT INTO evolution_lab_trusted_redacted_dataset
+                (dataset_id, workspace_id, dataset_digest, manifest_digest,
+                 redaction_receipt_digest, dataset_json, manifest_json,
+                 record_count, source_kind, created_at_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'redacted_trace', ?)
+                """,
+                (
+                    dataset.dataset_id,
+                    manifest.workspace_id,
+                    dataset.dataset_digest,
+                    manifest.manifest_digest,
+                    receipt.receipt_digest,
+                    dataset_json,
+                    manifest_json,
+                    len(dataset.records),
+                    receipt.created_at_ms,
+                ),
+            )
+        return manifest.manifest_digest
 
     def append_golden_suite(
         self, receipt: GoldenExperimentSuiteReceiptV1
@@ -1122,6 +1271,7 @@ def _text(value: object, field: str, maximum: int) -> str:
 
 
 __all__ = [
+    "EVOLUTION_LAB_TRUSTED_DATASET_MIGRATION_ASSET_KEY",
     "EVOLUTION_LAB_TRUSTED_MIGRATION_ASSET_KEY",
     "EVOLUTION_LAB_TRUSTED_REDACTION_MIGRATION_ASSET_KEY",
     "SQLiteTrustedEvolutionLabLedger",

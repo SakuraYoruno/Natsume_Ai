@@ -478,13 +478,13 @@ Gate 6 原始证据为完整 Obs app `13 passed + 1 test fixture failed`、旧 `
 
 D1 route scope 另将 Canon/Tool/Bond 从模块全局 provider 迁到每个 app 的 frozen `HostRoutePorts`。`app_factory`/`router_registry` 用 `create_canon_router/create_tool_router/create_bond_router` 闭包注册，Security→OBS composition 把同一个 ports bundle 传给三类 command adapters；构造或关闭另一个 Host app 不会覆盖已有 app。该切片没有删除 Capability Forge、Scheduler/Review、Life、Tribe 或其余 `process_services` locator。
 
-D2 为独立Obs增加`create_obs_app()`与app-local `ObsApplicationPorts/Container`。D3最初注册19个producer并先迁移17个端点。D4将BioOps 8、Life 3、Operator live 4、summary/runtime/resource 4共19个GET的store discovery改为必需显式参数；36个已识别端点（35 HTTP + 1 WebSocket）及stats查询使用当前app Store/View。D5又修正5个`/api/ui/*` GET，以及Security 3、Skill 1、Life 1、Semantic 1、Governance 1共7个实际GET，并以双Obs app/双SQLite验证隔离。Semantic/Governance拆为独立认证job后总producer增至21。
+D2 为独立Obs增加`create_obs_app()`与app-local `ObsApplicationPorts/Container`。D3最初注册19个producer并先迁移17个端点。D4将BioOps 8、Life 3、Operator live 4、summary/runtime/resource 4共19个GET的store discovery改为必需显式参数；36个已识别端点（35 HTTP + 1 WebSocket）及stats查询使用当前app Store/View。D5又修正5个`/api/ui/*` GET，以及Security 3、Skill 1、Life 1、Semantic 1、Governance 1共7个实际GET，并以双Obs app/双SQLite验证隔离。Semantic/Governance拆为独立认证job后总producer增至21；NE-04 再增加只读 `evolution-lab-operator` producer，总数为22。
 
 Host新增mode、capability-forge、semantic-recall、governance、runtime五条不进入OpenAPI的隐藏只读路由及版本合同；Host侧只保留专用token摘要，Obs client持有启动时捕获的配置值。每个Host lifespan创建一个五合同共享的source instance，合同revision各自锁内单调递增。Obs通过通用Query Projection SQLite的`compare_and_upsert`单事务CAS持久当前lineage，并从immutable journal读取完整历史epoch；同epoch revision/observed/evidence回滚、同revision payload漂移和任意退役epoch重放都会失败关闭。合同递归约束`timestamp`、`*_ts_ms`、`*_at_ms`不晚于Host observed；Obs以本地接收时间最多允许5秒skew、正证据最大120秒，freshness不晚于本地接收。Host composition、route、Obs receiver各做公共序列化和合同复验；Organ `key_metrics`另以逐agent显式数值/布尔allowlist约束。Transport固定五路径allowlist、禁代理/重定向、限制1 MiB，并以单一monotonic总deadline覆盖DNS解析、连接、响应头和分块正文；HTTP的解析结果再次限定为loopback，不可取消的系统DNS调用由全进程4槽有界resolver限制。Forge、Semantic、Governance、Organ四个认证job各读独立生产source；Semantic/Governance不消费Capability v1兼容child，故拥有独立cache和failure domain。
 
 Capability v1的兼容child provider异常仅把该字段降级为带reason code的`SOURCE_UNAVAILABLE`；Forge自身authority有效时，capability-forge endpoint仍返200，不会被child反向拖垮。
 
-当前`REGISTERED_21_OF_21`只证明registration。source-mode为6 durable、3 static、8 partial、4 authenticated-host-read、0 unavailable；21/0与认证声明都不是成功率。Host source provider只在ASGI lifespan预热/捕获并在finally清空；ledger、Forge、Semantic 与 Governance 已由 Host owner 提供，Tribe state/registry/bus/Agent catalog 也由 Host scope 提供，但 compatibility context 并发隔离、外部 namespace 和其余 Worker authority 仍未完成。缺token、Host或证据时仍写`SOURCE_UNAVAILABLE`；0115 后 mode transition history 来自 durable HardState journal，但自动模式规则与 last-interaction 仍在当前进程内，Organ也只反映allowlist内瞬态runtime，不是Life authority。D7b Life Body改读同app四个durable roots和canonical ledger有界lineage；它不再声明整job unavailable，但任一root缺失、无效、过期或ledger查询失败仍会物化typed unavailable。8个partial与4个认证job使health保持`DEGRADED`。Ledger-stats最新有界窗口、D6 Memory/VTS冷读、0103迁移与ModelAttempt测量边界继续有效。
+当前`REGISTERED_22_OF_22`只证明registration。source-mode为8 durable、2 static、8 partial、4 authenticated-host-read、0 unavailable；22/0与认证声明都不是成功率。新增 Lab producer 从 canonical SQLite 的 `mode=ro/query_only` repository 重开完整 trusted suite chain，再写隐私有界、proposal-only projection，不持有 writer 或 activation port。Host source provider只在ASGI lifespan预热/捕获并在finally清空；ledger、Forge、Semantic 与 Governance 已由 Host owner 提供，Tribe state/registry/bus/Agent catalog 也由 Host scope 提供，但 compatibility context 并发隔离、外部 namespace 和其余 Worker authority 仍未完成。缺token、Host或证据时仍写`SOURCE_UNAVAILABLE`；0115 后 mode transition history 来自 durable HardState journal，但自动模式规则与 last-interaction 仍在当前进程内，Organ也只反映allowlist内瞬态runtime，不是Life authority。D7b Life Body改读同app四个durable roots和canonical ledger有界lineage；它不再声明整job unavailable，但任一root缺失、无效、过期或ledger查询失败仍会物化typed unavailable。8个partial与4个认证job使health保持`DEGRADED`。Ledger-stats最新有界窗口、D6 Memory/VTS冷读、0103迁移与ModelAttempt测量边界继续有效。
 
 D7关闭了两个更窄的结构边界。第一，`obs_routes*.py`中的`process_services`与`_get_ledger`直接词法引用均从5降到0，四个projection兼容模块的全局reader/factory/source fallback也已删除；显式reader和composition-owned source job保留。第二，Host world/canon-sync/startup/3个memory GET由lifespan Query Projection Store服务，sys-mode通过`HostRoutePorts.mode_transition_service_provider`，Life action-preview通过可选trusted context/token validator端口；缺端口全部失败关闭，preview仍只DRY_RUN。无挂载消费者的core ledger compatibility handlers已删除，不保留伪ledger route port；Host factory强制typed `ObsRoutePorts`，Process/Tribe全局ports不再捕获某个app closure。这个结果只证明已识别route/helper不再反向定位服务，不证明底层authority已脱离process-global对象图。
 
@@ -508,21 +508,24 @@ HTTP Tool runtime 已改为 app-local application 捕获 Secure Ingress、Govern
 
 当前切片的 full architecture static 仍必须以本提交 fresh Gate 为准，不能沿用历史 `PASS`。Gate 1 的 application/persistence 与 app/composition SCC、生产 locator 和 Tribe fallback 已归零。0115/0129 分别持久化 mode 与 mode-policy，0137 持久化长期目标；当前 Operator 为 `16 active / 23 retired / 39 known / blocked=0`，旧 Obs sys-mode mutation helper 为 0；Scheduler CRUD HTTP 的双前缀 direct writer 也已归零。首次 Gate 3 对 `acceptance_effects.py:1511` 失败，state-control route predicate 下沉后主 owner 为 1500 行，未扩白名单，最近一次 Gate 1～14=`PASS`、`failed_gates=[]`，但当前提交仍须 fresh 复跑。易失 Endocrine 事件缓冲/last state、易失 Tribe bus、其它恢复边界与真实 executor 仍未完成。Scheduler Admin 历史受影响批次为 `34 passed in 139.12s`，不包含真实 HTTP/network、完整 Host 进程重启、production canary 或 NE-01 wave integration；远程 CI 保持 `NOT_RUN_ACCOUNT_QUOTA`。
 
-NE-04 的 operation authority 位于 0138，当前 migration head 为 0139：历史
-0108/0122 继续只读，0139 用独立 trusted redaction 表修复 0138 与 0108 的
-同名冲突而不重写历史 migration。新的 trusted
-ledger 独占 sandbox operation head、不可变 event chain、可信 run/report、
-proposal、redaction 与 golden-suite receipt。app-local Lab composition 只装配
-code-backed DatasetReader、专用 Docker executor、独立 Verifier 和 0122/0138/0139
-repositories；没有 production writer、Token/Broker effect port、Edge actuator
-或 activation port。首次 claim 才能创建 digest-pinned container，executor
-从真实 inspect 复验 engine/image/container/command、禁网、只读
-rootfs/dataset/runtime、非 root、security option、capability、PID/内存/CPU 与
-隔离临时 output；worker 和 output source identity 以 digest 绑定 effect audit。
-Research Planning、Proactive、Memory Write 六个独立容器 arm 以及 completion
-响应丢失重开已在本机 Docker 通过，未知终态进入 reconciliation 而不盲跑。
-当前系统状态为 `PARTIAL_TRUSTED_DOCKER_GOLDEN_LOCAL_PASS`；正式 clean-commit
-suite receipt、Operator 只读投影和波次 Gate 尚未完成。
+NE-04 的 operation authority 位于 0138，当前 migration head 为 0140：历史
+0108/0122 继续只读；0139 用独立 trusted redaction receipt 表修复 0138 与
+0108 的同名冲突，0140 再原子持久化 content-addressed sanitized dataset 与
+Manifest，raw trace 始终不落库。trusted ledger 独占 sandbox operation head、
+不可变 event chain、可信 run/report、proposal、redaction、redacted dataset 与
+golden-suite receipt。app-local Lab composition 只装配 synthetic/redacted
+DatasetReader、受限 trace intake、专用 Docker executor、独立 Verifier 和
+0122/0138～0140 repositories；没有 production writer、Token/Broker effect
+port、Edge actuator 或 activation port。首次 claim 才能创建 digest-pinned
+container，executor 从真实 inspect 复验 engine/image/container/command、禁网、
+只读 rootfs/dataset/runtime、非 root、security option、capability、PID/内存/CPU
+与隔离临时 output；worker 和 output source identity 以 digest 绑定 effect
+audit。Research Planning、Proactive、Memory Write 六个独立容器 arm 以及
+completion 响应丢失重开已在本机 Docker 通过，未知终态进入 reconciliation
+而不盲跑。独立 query-only repository、Obs producer、GET route 和 Monitor
+“演化实验室”页面现已接通，且只公开 proposal-only 证据。Gate 10 首跑暴露的
+应用层 SQLite reader 已迁入 persistence，最终 Gate 1～14 与统一 static/doc
+Gate 均通过；正式 clean-commit suite receipt 仍须在实现提交后生成。
 
 ## 5. Command 与 Task 架构
 

@@ -33,7 +33,7 @@ from host_brain.evolution_lab.trusted_runner import (
 
 
 _COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
-_MIGRATION_HEAD = "0139#evolution_lab_trusted_redaction_repair"
+_MIGRATION_HEAD = "0140#evolution_lab_redacted_dataset"
 _TARGET_KIND = {
     "research_planning": "research_planning_policy",
     "proactive": "proactive_policy",

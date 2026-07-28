@@ -36,6 +36,7 @@ import host_brain.app.obs_routes_security_immune  # noqa: F401
 import host_brain.app.obs_routes_task_runtime  # noqa: F401
 import host_brain.app.obs_routes_life_evolution  # noqa: F401
 import host_brain.app.obs_routes_governance  # noqa: F401
+import host_brain.app.obs_routes_evolution_lab  # noqa: F401
 
 def _build_trace_live_feed_snapshot(
     ledger,

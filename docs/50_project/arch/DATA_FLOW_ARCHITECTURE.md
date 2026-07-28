@@ -2262,6 +2262,7 @@ sequenceDiagram
     participant L as "0138 Operation Ledger"
     participant D as "Docker Sandbox"
     participant V as "Independent Verifier"
+    participant Q as "Query-only Obs Projection"
     participant O as "Operator / Review"
 
     R->>L: reserve(spec digest, variant, owner, lease)
@@ -2280,19 +2281,41 @@ sequenceDiagram
         L-->>R: exact durable receipt
     end
     R->>L: append report + proposal only
-    L-->>O: read-only evidence, production influence=false
+    Q->>L: mode=ro + query_only reopen full evidence chain
+    L-->>Q: privacy-bounded suite/report/arm/proposal
+    Q-->>O: read-only evidence, production influence=false
 ```
 
-0138 不会把 0108/0122 记录升级成可信证据。operation head 与 append-only
-event chain 同事务 CAS；只有新 claim 能启动容器。实际生产 composition 已把
-冻结 dataset、专用 digest-pinned Docker executor、独立 verifier 和两个
-repository 接成闭合对象图；executor 不使用 Airlock 的 subprocess fallback。
+0138 不会把 0108/0122 记录升级成可信证据。0139 把 trusted redaction receipt
+移入独立 namespace；0140 将 digest-only receipt、manifest 与 sanitized
+dataset 放进同一 repository UoW，raw trace 不落库。operation head 与
+append-only event chain 同事务 CAS；只有新 claim 能启动容器。实际生产
+composition 已把 synthetic/redacted dataset reader、受限 trace intake、
+专用 digest-pinned Docker executor、独立 verifier 和两个 repository 接成
+闭合对象图；executor 不使用 Airlock 的 subprocess fallback。
 六个真实 arm 已重新绑定 image/engine/container/command/inspect、只读
 dataset/runtime/rootfs、隔离临时 bind output、禁网、非 root、security option、
 cap drop、资源限制和零 effect audit。容器完成后先持久 receipt 再清理；
 response loss 重开原 receipt，未知结果保留容器事实并进入 reconciliation。
-Operator 只读投影、clean-commit 正式 suite receipt 和本波 Gate 尚未完成，
-因此不能把这张流图解读为 NE-04 已封板。
+Obs 的第 22 个 producer 只用 SQLite `mode=ro/query_only` 重开 suite、report、
+spec、run、operation event/head 和 proposal，再把隐私有界结果写入 Query
+Projection；Monitor 的“演化实验室”页面没有激活控件。clean-commit 正式
+suite receipt 仍必须在实现提交后独立生成；本波 Gate 1～14 与统一
+static/doc Gate 已通过，但不能只凭流图宣称整个演化计划完成。
+
+```mermaid
+flowchart LR
+    T["Raw real trace（仅进程内）"]
+    R["Deterministic redactor"]
+    D["source/rules digest"]
+    U["0140 atomic UoW"]
+    S["Sanitized content-addressed dataset"]
+    M["DatasetManifest + RedactionReceipt"]
+    T --> R --> D --> U
+    R --> S --> U
+    U --> M
+    T -. "禁止写入" .-> X["Durable DB"]
+```
 
 ```mermaid
 flowchart LR

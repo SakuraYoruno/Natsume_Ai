@@ -47,7 +47,7 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
         payload = resp.json()
         assert payload["status"] == "DEGRADED"
         assert payload["service"] == "obs"
-        assert payload["composition"]["projection_coverage"] == "REGISTERED_21_OF_21"
+        assert payload["composition"]["projection_coverage"] == "REGISTERED_22_OF_22"
         assert payload["composition"]["count_semantics"] == (
             "producer_registration_and_declared_source_mode_not_runtime_success"
         )
@@ -57,6 +57,7 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
             "bio-ops-metadata",
             "capability-forge-operator",
             "device-status",
+            "evolution-lab-operator",
             "governance-snapshot",
             "health-passive",
             "operator-live-state",
@@ -75,8 +76,8 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
             "life-body",
         ]
         assert payload["composition"]["missing_jobs"] == []
-        assert payload["composition"]["registered_count"] == 21
-        assert payload["composition"]["declared_non_typed_unavailable_count"] == 21
+        assert payload["composition"]["registered_count"] == 22
+        assert payload["composition"]["declared_non_typed_unavailable_count"] == 22
         assert payload["composition"]["typed_unavailable_job_count"] == 0
         assert payload["composition"]["declared_partial_job_count"] == 8
         assert payload["composition"]["authenticated_host_read_job_count"] == 4

@@ -47,7 +47,7 @@ def _forbidden_locator(*_args, **_kwargs):  # noqa: ANN002, ANN003
     raise AssertionError("app-local projection callback touched process locator")
 
 
-def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
+def test_default_obs_projection_factory_has_registered_22_of_22_coverage(
     tmp_path: Path,
 ) -> None:
     ports = build_default_obs_application_ports(
@@ -55,11 +55,11 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
     )
     try:
         names = tuple(job.name for job in ports.projection_jobs)
-        assert len(names) == 21
-        assert len(set(names)) == 21
+        assert len(names) == 22
+        assert len(set(names)) == 22
         assert names[:2] == ("ledger-stats", "life-evolution")
         assert names[2:] == OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS
-        assert ports.projection_coverage == "REGISTERED_21_OF_21"
+        assert ports.projection_coverage == "REGISTERED_22_OF_22"
         assert ports.missing_projection_jobs == ()
         assert all(job.source_mode != "CALLER_DEFINED" for job in ports.projection_jobs)
         assert sum(
@@ -70,7 +70,7 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
             job.source_mode == AUTHENTICATED_HOST_READ
             for job in ports.projection_jobs
         ) == 4
-        assert sum(job.source_mode == DURABLE_READ for job in ports.projection_jobs) == 7
+        assert sum(job.source_mode == DURABLE_READ for job in ports.projection_jobs) == 8
         assert sum(job.source_mode == STATIC_READ for job in ports.projection_jobs) == 2
         assert sum(
             job.source_mode == DURABLE_READ_PARTIAL
@@ -79,7 +79,7 @@ def test_default_obs_projection_factory_has_registered_21_of_21_coverage(
         assert sum(
             job.source_mode != TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 21
+        ) == 22
     finally:
         assert ports.close_owned_resources is not None
         ports.close_owned_resources()
@@ -95,12 +95,12 @@ def test_d4_route_scope_and_producer_metadata_remain_truthful(
         # Producer counts remain declared source metadata, while D4 separately
         # proves that the identified HTTP/WebSocket projection routes no
         # longer rediscover their store through read_process_projection.
-        assert ports.projection_coverage == "REGISTERED_21_OF_21"
-        assert len(ports.projection_jobs) == 21
+        assert ports.projection_coverage == "REGISTERED_22_OF_22"
+        assert len(ports.projection_jobs) == 22
         assert sum(
             job.source_mode != TYPED_UNAVAILABLE
             for job in ports.projection_jobs
-        ) == 21
+        ) == 22
         assert sum(
             job.source_mode == TYPED_UNAVAILABLE
             for job in ports.projection_jobs
@@ -568,7 +568,7 @@ def test_default_job_set_is_explicit_and_no_module_registers_global_jobs(
     )
     try:
         assert {job.name for job in ports.projection_jobs} == expected_jobs
-        assert len(expected_jobs) == 21
+        assert len(expected_jobs) == 22
     finally:
         ports.close_owned_resources()
 

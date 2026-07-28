@@ -41,6 +41,7 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "bio-ops-metadata",
     "capability-forge-operator",
     "device-status",
+    "evolution-lab-operator",
     "governance-snapshot",
     "health-passive",
     "operator-live-state",
@@ -280,7 +281,7 @@ def build_default_obs_application_ports(
             life_snapshot_reader=life_snapshot,
             projection_jobs=jobs,
             close_owned_resources=ledger.close,
-            projection_coverage="REGISTERED_21_OF_21",
+            projection_coverage="REGISTERED_22_OF_22",
             missing_projection_jobs=(),
         )
     except BaseException:

@@ -321,7 +321,11 @@ def _delta_mapping(value: Any, field: str) -> dict[str, float]:
 
 @dataclass(frozen=True, slots=True)
 class LabDatasetV1:
-    """Ephemeral JSON-safe Lab input; the repository never persists its records."""
+    """JSON-safe Lab input.
+
+    Synthetic records stay code-backed and ephemeral.  A trusted intake may
+    persist only its independently redacted, content-addressed projection.
+    """
 
     dataset_id: str
     records: tuple[Mapping[str, Any], ...]

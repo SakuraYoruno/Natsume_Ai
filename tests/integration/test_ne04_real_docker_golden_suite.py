@@ -58,7 +58,7 @@ def test_ne04_runs_three_real_docker_golden_experiments(
         ts_ms=1,
     )
     assert migrated.success is True
-    assert migrated.summary["latest_version"] >= 139
+    assert migrated.summary["latest_version"] >= 140
     composition = build_trusted_evolution_lab_composition(
         db_path=db_path,
         runtime_root=runtime_root,
