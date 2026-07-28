@@ -297,6 +297,11 @@ NE-07 使用独立 project、container names、network、ports 和
 Compose project 标签。输出只含 probe digest、container/image identity、
 重启时间和清理结果，不含 Neo4j 密码或探针原文。
 
+当前本机证据：提交 `14f015bd` 的 `ne07-ext-20260728-01` 已真实完成三库
+写入、容器重启、持久读取、更新/查询与 namespace 清理，耗时 38,984 ms，
+receipt digest 为 `sha256:7af6e6a0…2f71`。该结果不包含 Host、Obs、
+Nginx Monitor、Edge 或 Gateway。
+
 ## 9. 健康与降级语义
 
 ### 9.1 端点不是同义词

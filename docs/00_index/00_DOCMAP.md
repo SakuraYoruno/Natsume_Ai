@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.13
+版本：v9.14
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -96,9 +96,10 @@ flowchart TD
 > `natsume-ext` Neo4j、Chroma、Redis 不停止、不写入且不计入验收；
 > acceptance project `natsume-ne07-555ead6d` 已完成独立
 > container/network/port/data-root 与固定镜像 digest 配置，真实
-> `docker compose config --quiet` 已通过。独立容器、Host、Obs、Nginx
-> Monitor、Edge、Gateway 尚未启动，因此当前只能是
-> `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。
+> `docker compose config --quiet` 已通过。提交 `14f015bd` 又完成三库真实
+> 写入、容器重启、持久读取、更新/查询与探针清理，receipt digest 为
+> `sha256:7af6e6a0…2f71`。Host、Obs、Nginx Monitor、Edge、Gateway 尚未
+> 启动，因此当前仍只能是 `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。
 
 > 最新 locator 清点（2026-07-25）：生产具名 consumer/import、全部 import-form consumer、locator 模块、Container 字段/锁/引用均为 0。`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 构造 fresh `ProcessApplicationPorts` 并显式传入 Host root。旧测试只通过 `tests/support/process_service_compat.py` 的 pytest-only bridge 运行，fresh 生产进程不会加载它。`HostAuthorityRuntimeOwner` 继续持有同一 epoch 的 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图。外部 Chroma/Neo4j namespace、Token/MCP durable restart、资源崩溃恢复、事务化 Chat 和完整 Worker/Obs Composition仍未闭环；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 

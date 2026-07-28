@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.63
+版本：v5.64
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -28,8 +28,11 @@ NE-07 首个预检切片已将 Neo4j、Chroma、Redis 默认镜像固定到 SHA-
 digest，并参数化 project、container、network、port 与 data root；Neo4j
 不再有仓库默认密码。默认端口上已有的用户 `natsume-ext` 容器明确排除在
 验收之外，独立 project `natsume-ne07-555ead6d` 的真实 Compose 配置已验证。
-acceptance 容器和其后的 Host/Obs/Nginx Monitor/Edge/Gateway 尚未启动，
-故状态仅为 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。
+提交 `14f015bd` 已在隔离 project 中完成三库真实写入、容器重启、持久
+读取、更新/查询和 namespace 清理；receipt digest 为
+`sha256:7af6e6a0…2f71`，独立残留复核为 0，用户默认栈未重启。Host/Obs/
+Nginx Monitor/Edge/Gateway 尚未启动，故状态仍为
+`IN_PROGRESS_EXTERNAL_SERVICES_PASS_HOST_STACK_PENDING`。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

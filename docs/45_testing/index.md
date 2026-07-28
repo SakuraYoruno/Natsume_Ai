@@ -3,11 +3,11 @@
 
 # 测试与验收目录
 
-版本：v2.43
+版本：v2.44
 维护日期：2026-07-28
 状态：当前证据
 
-## NE-07 隔离外部服务栈预检
+## NE-07 隔离外部服务栈
 
 - 默认端口上已有用户长期 `natsume-ext` Neo4j、Chroma、Redis；本轮明确不
   停止、不写入、不计入验收。
@@ -16,11 +16,16 @@
 - 三个默认镜像已固定 digest，Neo4j 密码只允许运行期注入并在启动结果中脱敏；
   三个服务均声明容器 healthcheck。
 - 真实 Docker `compose config --quiet`、PowerShell parser 与静态合同
-  `6 passed in 0.61s` 通过。容器尚未启动，真实写/读/重启、Host、Obs、
-  Monitor、Edge、Gateway 和故障注入均不得记为通过。
+  `9 passed in 0.88s` 通过。
 - 外部服务 persistence runner 已进入代码，强制校验隔离 identity、端口和
   Compose project 标签；其真实执行结果必须另存 ignored acceptance receipt，
   不能由 runner 存在性替代。
+- 提交 `14f015bd` 的跑次 `ne07-ext-20260728-01` 已真实完成 Neo4j、
+  Chroma、Redis 写入、容器重启、持久读取、更新/查询和清理，耗时
+  38,984 ms；receipt digest 为 `sha256:7af6e6a0…2f71`。独立复核的三类
+  探针残留均为 0，明文 secret 未进入 receipt/日志，用户默认栈未重启。
+- Host、Obs、Nginx Monitor、Edge、Gateway 和后续故障注入仍未运行，不能
+  把三库子 Gate 外推为完整全栈通过。
 
 ## NE-05 Skill 生命周期本地代码波次
 

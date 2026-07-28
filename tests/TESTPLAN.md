@@ -17,13 +17,16 @@
   `docker compose config --quiet`，进程级 acceptance 配置必须优先于
   checked-in `.env`；直接运行期用户名/密码必须成对提供，成功或失败诊断
   均不得回显认证引用或密码。
-- 当前静态合同为 `6 passed in 0.61s`，PowerShell parser 与真实 Docker
-  `compose config --quiet` 通过。acceptance 容器的真实写/读/重启尚未执行，
-  因此状态仅为 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。
+- 当前静态合同为 `9 passed in 0.88s`，PowerShell parser 与真实 Docker
+  `compose config --quiet` 通过。
 - T-NE07-EXT-04：正式 runner 必须拒绝默认容器 identity、默认端口和非
   loopback endpoint；必须重开 Compose project 标签，逐库完成真实写入、
   容器重启、持久读取、更新/查询与 namespace 清理。Neo4j 密码只能由进程
   环境读取，CLI、标准输出和 receipt 不得携带明文。
+- T-NE07-EXT-04 的真实跑次为 `ne07-ext-20260728-01@14f015bd`：
+  Neo4j、Chroma、Redis 均完成写→容器重启→持久读→更新/查询→清理，
+  receipt digest=`sha256:7af6e6a0…2f71`；独立复核三类残留均为 0，secret
+  scan 通过。该结果只使外部三库子 Gate 通过。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

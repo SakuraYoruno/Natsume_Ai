@@ -56,6 +56,11 @@ Review/activation 尚未执行，因此 NE-02 仍是
 Gate 1～14 为 `PASS / failed_gates=[]`，耗时 25.6 秒。
 
 NE-03～NE-06 的本地生产接线波次已经合入；当前活动实现波为 NE-07。
+独立 acceptance project 的真实 Neo4j、Chroma、Redis 已在提交
+`14f015bd` 完成写入、容器重启、持久读取、更新/查询和清理，receipt digest
+为 `sha256:7af6e6a0…2f71`；用户默认 `natsume-ext` 栈未被复用或重启。
+Host、Obs、Nginx Monitor、Edge 与 Unified Gateway 仍待本轮继续启动，因此
+整体状态仍为 `INCOMPLETE`。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime
 scope/owner/lease/fence 约束单一 append-only SQLite owner，持有

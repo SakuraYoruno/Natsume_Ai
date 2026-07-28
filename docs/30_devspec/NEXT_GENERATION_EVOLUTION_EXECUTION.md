@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.35
+版本：v3.36
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / ISOLATED_REAL_STACK_PREFLIGHT / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS / HOST_STACK_NEXT / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1266,6 +1266,14 @@ FAIL`。远程 CI 继续如实记录 `NOT_RUN_ACCOUNT_QUOTA`。
 本轮预留 project 为 `natsume-ne07-555ead6d`，端口为 Neo4j
 27474/27687、Chroma 28000、Redis 26379，数据根位于独立
 `runtime/acceptance/...`。真实 Docker `compose config --quiet` 已通过，相关
-合同为 `6 passed in 0.61s`，PowerShell parser 通过。此时尚未启动 acceptance
-容器，也未运行真实读写、重启、Host/Obs/Monitor/Edge/Gateway 或故障注入，
-所以状态只能是 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。
+合同扩展为 `9 passed in 0.88s`，PowerShell parser 通过。提交
+`14f015bd` 的真实跑次 `ne07-ext-20260728-01` 随后完成三个隔离容器的写入、
+重启、持久读取、更新/查询和 namespace 清理，耗时 38,984 ms，receipt
+digest 为
+`sha256:7af6e6a0c13d738547d5ea17f2fe4fbbee7d9dab30bad530aee10a44bd3a2f71`。
+独立复核得到 Neo4j probe rows、Chroma probe collections、Redis probe
+keys 均为 0，receipt/日志无明文 secret；用户默认栈保持连续运行。
+
+该证据只关闭 NE-07 的外部三库子 Gate。Host、Obs、Nginx Monitor、完整
+Edge/Gateway、全路线、故障注入和性能仍未运行，所以当前状态是
+`IN_PROGRESS_EXTERNAL_SERVICES_PASS_HOST_STACK_PENDING`。

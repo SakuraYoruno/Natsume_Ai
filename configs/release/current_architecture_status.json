@@ -5,12 +5,12 @@
     "dev_commit": "555ead6d7dc78d376fc21fa49335ae64206de10a",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE07_ISOLATED_REAL_STACK_PREFLIGHT_IN_PROGRESS_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE07_ISOLATED_NEO4J_CHROMA_REDIS_REAL_PERSISTENCE_PASS_HOST_STACK_PENDING_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-07",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "EXISTING_USER_NATSUME_EXT_CONTAINERS_PRESERVED_ACCEPTANCE_PROJECT_DATA_ROOT_CONTAINER_NETWORK_AND_PORT_ISOLATION_WIRED_FIXED_IMAGE_DIGESTS_COMPOSE_CONFIG_PASS_REAL_ACCEPTANCE_START_PENDING",
+  "active_wave_detail": "ISOLATED_NEO4J_CHROMA_REDIS_REAL_WRITE_RESTART_READ_UPDATE_QUERY_AND_CLEANUP_PASS_HOST_OBS_NGINX_MONITOR_EDGE_GATEWAY_PENDING",
   "next_wave": "PROGRAM_ACCEPTANCE",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -27,8 +27,9 @@
   },
   "active_wave_local_validation": {
     "ne07_isolated_external_stack_preflight": {
-      "status": "IN_PROGRESS",
+      "status": "PASS_REAL_PERSISTENCE",
       "implementation_parent": "origin/dev@555ead6d7dc78d376fc21fa49335ae64206de10a",
+      "implementation_commit": "14f015bd2814d4ad853286db24c180dc686edeb0",
       "existing_user_stack_boundary": "RUNNING_NATSUME_EXT_NEO4J_CHROMA_REDIS_ON_DEFAULT_PORTS_BELONG_TO_USER_DATA_AND_ARE_NOT_REUSED_STOPPED_OR_COUNTED_AS_ACCEPTANCE",
       "acceptance_project": "natsume-ne07-555ead6d",
       "acceptance_ports": "NEO4J_HTTP_27474_BOLT_27687_CHROMA_28000_REDIS_26379",
@@ -36,10 +37,16 @@
       "images": "NEO4J_CHROMA_REDIS_DEFAULTS_PINNED_BY_SHA256_DIGEST",
       "secret_boundary": "NEO4J_PASSWORD_MUST_BE_RUNTIME_INJECTED_AND_IS_REDACTED_FROM_START_RESULT",
       "compose_validation": "PASS_REAL_DOCKER_COMPOSE_CONFIG_QUIET",
-      "targeted_validation": "6_PASSED_IN_0_61_SECONDS",
+      "targeted_validation": "9_PASSED_IN_0_88_SECONDS",
       "powershell_parse": "PASS",
+      "real_run_id": "ne07-ext-20260728-01",
+      "real_run_duration_ms": 38984,
+      "real_run_receipt_digest": "sha256:7af6e6a0c13d738547d5ea17f2fe4fbbee7d9dab30bad530aee10a44bd3a2f71",
+      "real_run_result": "NEO4J_CHROMA_REDIS_WRITE_RESTART_PERSISTED_READ_UPDATE_OR_QUERY_AND_NAMESPACE_CLEANUP_PASS",
+      "independent_cleanup_reopen": "NEO4J_PROBE_ROWS_0_CHROMA_PROBE_COLLECTIONS_0_REDIS_PROBE_KEYS_0",
+      "secret_evidence_scan": "PASS_PLAINTEXT_ABSENT_FROM_RECEIPT_AND_LOGS",
+      "existing_user_stack_after_run": "UNCHANGED_AND_CONTINUOUSLY_RUNNING",
       "not_run": [
-        "acceptance containers up and real database read/write/restart",
         "Host Obs Nginx Monitor",
         "full Edge and Unified Gateway",
         "full route and evolution golden flows",
@@ -49,8 +56,11 @@
         "scripts/runtime/docker-compose.external.yml",
         "scripts/runtime/start_docker_services.ps1",
         "scripts/runtime/start_host_side.ps1",
+        "scripts/runtime/run_ne07_external_services_acceptance.py",
         "tests/unit/test_ne07_external_service_isolation.py",
-        "tests/unit/test_d8_external_compose_port_alignment.py"
+        "tests/unit/test_d8_external_compose_port_alignment.py",
+        "tests/unit/test_ne07_external_services_acceptance_runner.py",
+        "runtime/acceptance/ne07-555ead6d/evidence/external-services-14f015bd.json (ignored local evidence)"
       ]
     },
     "ne06_evolution_activation_v2_current_validation": {
@@ -6271,7 +6281,7 @@
     }
   },
   "full_stack_acceptance": {
-    "status": "IN_PROGRESS_ISOLATED_STACK_PREFLIGHT",
+    "status": "IN_PROGRESS_EXTERNAL_SERVICES_PASS_HOST_STACK_PENDING",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "local_mandatory_stack": [
       "Docker Neo4j",
@@ -6283,8 +6293,8 @@
       "Edge",
       "Unified Gateway"
     ],
-    "evidence_receipt": "MISSING",
-    "boundary": "NE-07 has started with an isolated acceptance project contract, fixed image digests and runtime-only secret injection. Existing user natsume-ext containers are explicitly excluded. No acceptance container, Host, Obs, Monitor, Edge or Gateway has been counted as PASS yet. A future FullStackAcceptanceReceiptV1 must bind the exact commit, process/container identities, real database writes and restart reads, network roundtrips, failure recovery and performance evidence. External providers and hardware may be NOT_TESTED only after all local mandatory services pass."
+    "evidence_receipt": "PARTIAL_EXTERNAL_SERVICES_sha256:7af6e6a0c13d738547d5ea17f2fe4fbbee7d9dab30bad530aee10a44bd3a2f71",
+    "boundary": "NE-07 isolated Neo4j, Chroma and Redis have passed real write, container restart, persisted read, update/query and cleanup on implementation commit 14f015bd. Existing user natsume-ext containers remained untouched. Host, Obs, Nginx Monitor, Edge, Unified Gateway, full routes, fault matrix and performance are still pending, so this is not FullStackAcceptanceReceiptV1 and cannot promote the program. External providers and hardware may be NOT_TESTED only after all local mandatory services pass."
   },
   "active_execution_contract": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
   "gap_matrix": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md"
