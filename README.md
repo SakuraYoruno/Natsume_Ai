@@ -14,10 +14,10 @@ NE-01 的代码波次封口证据绑定 `27b032f1e`，并已进入当前
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，不是生产全栈 `PASS`。
 同一个文件型 canonical SQLite 先运行 Chat、Skill、Delegate、Plan，再追加
 Scheduler、Internal、Operator；只读收据得到七路线全部 `PASS`，
-当前七路线收据绑定干净 NE-05 实现提交 `6f78e25c2` 与 migration 0141，run id 为
-`universal-runtime-acceptance://sha256/4d0023bdfb4becd9cc69710798375b09cbcfbb13b8652db8fdbaa08c09fcd00b`，
+当前七路线收据绑定干净 NE-06 实现提交 `08a172da` 与 migration 0142，run id 为
+`universal-runtime-acceptance://sha256/1f2b37fe2d4bae5e988546daa82d65fdf53ee1254bc27f8485fe65b570271b04`，
 receipt digest 为
-`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
+`sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`。
 随后一次性执行 24 个真实 SQLite、Windows 跨进程和 Git Workspace
 恢复用例，结果为 `24 passed in 165.99s`；覆盖菱形图、八根 fan-out、
 pre-Operation/committed checkpoint、签名未知副作用、取消交叉、并行
@@ -25,7 +25,7 @@ failure/Budget/Review 以及 accepted HEAD promotion/abandon/restart。
 恢复波次证据位于忽略目录
 `artifacts/local-gates/27b032f1ebc408c8456a7182d456cb98b441a260/ne01-wave/`；
 当前七路线重绑定证据位于
-`artifacts/local-gates/6f78e25c24a2bc148aa8a0a12016558a6e492a7a/ne01-coverage-v2/`。
+`artifacts/local-gates/08a172da662df11d34fb42ea6e25a651f84da141/ne06-coverage/`。
 Budget 生产动作仍只启用 `BLOCK`；`DEGRADE/REVIEW` 是 proposal-only，
 不得静默执行。未知副作用按设计必须签名对账，不以“自动猜测效果”作为完成项。
 有签名的 fan-out promotion、真实 HTTP/network/provider、外部 namespace 和
@@ -81,7 +81,11 @@ Universal Runtime coverage 首次复跑因仍绑定 0135 而按设计失败关�
 0141，并在干净实现提交 `6f78e25c2` 上 query-only 重开；七路线仍均为
 `PASS`，digest 为
 `sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`，
-没有重跑 accepted worker。部署
+没有重跑 accepted worker。NE-06 又从同一 accepted snapshot 做 backup，
+只追加 0142，并在干净实现提交 `08a172da` 上 query-only 重开；七路线继续
+全部 `PASS`，digest 为
+`sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`，
+仍未重跑 accepted worker。部署
 多实例 canary、Windows graceful stop 与 NE-07 全栈尚未执行，因此状态只是
 `PRODUCTION_WIRED_LOCAL_WAVE_PASS / PROGRAM_INCOMPLETE`。
 
@@ -533,6 +537,13 @@ release adapter 会执行 regression，重大差异默认阻断，no-change 可�
 激活切换真实 snapshot owner，rollback 恢复 exact previous snapshot/version。
 NE-06 波次为 `199 passed in 73.74s`，分层修正后的重叠回归为
 `51 passed in 28.16s`，架构 Gate 1～14 和 Persona writer 扫描均通过。
+0142 落定后，既有 accepted 七路线 snapshot 通过 SQLite backup 复制并只追加
+0142，在干净实现提交 `08a172da` 上 query-only 重开；七路线全部 `PASS`，
+receipt digest 为
+`sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`，
+accepted worker 没有重跑。
+收据落定后的最终重叠回归为 `53 passed in 45.10s`；架构 Gate 1～14、
+统一 `static_scan,doc_gate`、`compileall`、JSON 与 diff check 全部通过。
 该结论是 `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`，
 不是 Docker、真实部署或完整架构 `PASS`。
 World projection 现在按 `(key, source_ref)` 去重：不同来源且值不同的观察会保留并显式标记为冲突；同值多来源只作为佐证保留，不伪造冲突。该兼容投影不替代 workspace-scoped `WorldResolver`、Scene 或 Guardian 的生产 authority。

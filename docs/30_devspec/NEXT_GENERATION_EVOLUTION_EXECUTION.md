@@ -10,10 +10,10 @@
 状态：`NE-06_COMPLETED / CODE_COMPLETE_LOCAL_WAVE_PASS / NE-07_NEXT / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
-干净 NE-05 实现提交 `6f78e25c2` 的 migration 0141 同库七路线收据全部
+干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
 `PASS`，receipt
 digest 为
-`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`；
+`sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`；
 一次去重恢复波次以 `24 passed in 165.99s` 覆盖一般图形、跨进程 checkpoint、
 签名 unknown-effect/cancellation、并行 failure/Budget/Review 和真实 Git
 Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE-01 生产
@@ -1229,6 +1229,14 @@ application→app 反向依赖，SemanticHit/Result 已迁入中立 contracts；
 Agent owner 为 1,879 行。修正后的重叠回归为
 `51 passed in 28.16s`，完整架构 Gate 1～14=`PASS`、
 `failed_gates=[]`，Persona writer scan 零违规，migration fresh head=0142。
+实现提交落定后，既有 accepted 七路线 snapshot 经 SQLite backup 复制并只
+追加 0142，再由 query-only collector 在 `08a172da` 上重开；七路线全部
+`PASS`，receipt digest 为
+`sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`，
+没有重跑 accepted worker。
+收据、coverage、迁移、V2 integration、合同分层、文档 authority 与 Persona
+writer 的最终重叠集合为 `53 passed in 45.10s`；架构 Gate 1～14 和统一
+`static_scan,doc_gate` 再次通过，失败清单为空。
 
 本波结论仅为
 `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`。尚未运行真实

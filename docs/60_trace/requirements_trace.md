@@ -12,8 +12,8 @@
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
 
 当前 NE-01 trace 追加本地代码封口证据：
-`6f78e25c2 → migration 0141 七路线 canonical SQLite receipt
-sha256:f42f5fef…`，并继承 `27b032f1e` 的 24 个跨进程/Workspace 恢复用例。
+`08a172da → migration 0142 七路线 canonical SQLite receipt
+sha256:161b860f…`，并继承 `27b032f1e` 的 24 个跨进程/Workspace 恢复用例。
 该链只把后续实现依赖
 推进到 NE-02；production feature promotion、真实网络/provider/Docker 与
 回滚仍指向 NE-07，完整架构状态继续 `INCOMPLETE`。
