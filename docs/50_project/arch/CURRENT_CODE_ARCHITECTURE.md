@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.65
+版本：v5.66
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -37,8 +37,14 @@ Nginx Monitor/Edge/Gateway 尚未启动，故状态仍为
 Host/Obs/Monitor 启停现可绑定显式 acceptance runtime root；该模式下
 ForceRestart/stop 不再全局扫描其它 Host。运行环境快照也已排除秘密值，只
 保留安全 `sec://` 引用。Monitor UI 生产构建和 15 项 read-model test 通过，
-官方 Nginx 1.31.3 已安装；真实进程仍未启动，8 项 npm audit 告警开放，
-因此这部分只记 `CODE_COMPLETE_LOCAL_PREFLIGHT / START_PENDING`。
+官方 Nginx 1.31.3 已安装。首次真实启动实际拉起 Obs/Nginx，但 Host 因
+Workspace HMAC 只能从被快照过滤的明文变量取得而退出；旧脚本还把退出前
+短暂健康误报为 `started`。当前 Workspace composition 支持从 ignored local
+secret store 解析 `HOST_AGENT_WORKSPACE_HMAC_SECRET_REF`，并拒绝双来源、
+非 `sec://` 与未解析引用；启动器在 sidecar 之后要求五次连续 Host 进程、
+监听及 health/readiness payload identity，同时复核 Obs/Monitor 端点。
+修复尚待干净提交实栈重跑，8 项 npm audit 告警也仍开放，因此这里只记
+`FIRST_REAL_START_FAILED / FIX_CODE_COMPLETE / RERUN_PENDING`。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

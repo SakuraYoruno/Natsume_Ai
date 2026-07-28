@@ -307,6 +307,16 @@ Compose project 标签。输出只含 probe digest、container/image identity、
 receipt digest 为 `sha256:7af6e6a0…2f71`。该结果不包含 Host、Obs、
 Nginx Monitor、Edge 或 Gateway。
 
+Host 栈首次真实启动随后实际拉起 Obs 与 Nginx，Host 短暂响应后因 Workspace
+HMAC 仅支持明文环境变量、而隔离 runtime snapshot 禁止落盘明文 secret 而
+退出。旧编排器只做首次 HTTP 探针，最终错误返回 `started`。该跑次是失败
+证据，不是部分通过。当前代码增加
+`HOST_AGENT_WORKSPACE_HMAC_SECRET_REF=sec://...` 的进程内解析，并在 Obs/
+Monitor 启动后连续五次核对 Host 进程 identity、监听 PID、`/health` 与
+`/ready` payload identity；Obs/Monitor 也必须保持真实可达。任何失败只回收
+显式 acceptance runtime root，并对有限日志尾部脱敏。修复必须在干净提交上
+真实重跑后才能改变状态。
+
 ## 9. 健康与降级语义
 
 ### 9.1 端点不是同义词
@@ -330,7 +340,8 @@ Host 的 `--startup-check` 在探测结果为 degraded 时仍继续启动，只�
 - 本地 Edge 脚本在主 Edge 端口之外，仍探测遗留的 `17801 /health`（ASR）和 `17802 /health`（TTS）；当前实现的权威组件状态实际嵌套在 `17800/v1/edge/health`。
 - `start_edge.ps1` 默认可因 17801 探测失败而禁用 ASR 重启；`start_edge_side.ps1` 又默认关闭该自动降级，入口行为不一致。
 - Gateway 在 Edge bootstrap 中失败时只告警，启动脚本也不检查 19000，因此 Edge “started” 不保证平台入口可用。
-- Host 已运行时启动脚本会提前返回，不会补拉已掉线的 OBS 或 Monitor Proxy。
+- `already_running` 入口仍会提前返回，不会补拉已掉线的 OBS 或 Monitor
+  Proxy；本次新增的连续稳定性 Gate只覆盖新启动路径。
 - 多处以“端口正在监听”推断“本服务已运行”，强制停止也可能误杀占用相同端口或命令模式的无关进程。
 
 ## 10. 验收分层

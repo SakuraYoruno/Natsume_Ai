@@ -463,4 +463,4 @@ TASK-0076~0083 的风险点从 DevTasks.md 阶段 8 任务描述与代码审查�
 | # | 风险描述 | 等级 | 当前缓解 | 关闭条件 | 状态 |
 |---|---|---|---|---|---|
 | NE07-UI-AUDIT-001 | Monitor `npm audit` 报告 6 个 high 构建链依赖与 2 个 moderate React Router 依赖；自动修复要求 major 版本变化 | P1 | 不使用 `npm audit fix --force`；锁文件构建、lint、类型、read-model 和 production build 已通过 | 受控升级后重跑全部 UI 合同、真实 Nginx 路由与 Playwright，`npm audit` 清零或形成逐项风险接受 | OPEN |
-| NE07-HOST-START-001 | Host/Obs/Monitor 隔离脚本完成但真实进程、SQLite migration、网络回执和重启恢复尚未执行 | P0 | 外部三库已隔离；runtime root 与 secret 快照先失败关闭 | 独立进程启动、真实 API/UI、重启恢复和停止残留检查全部通过 | OPEN |
+| NE07-HOST-START-001 | 首次真实 Host 启动因 Workspace HMAC 明文入口与 secret-safe runtime snapshot 互斥而退出；旧脚本还把短暂健康后的退出误报为 `started` | P0 | 增加 `sec://` Workspace secret ref 进程内解析；sidecar 后连续五次核对 Host PID/监听/health/readiness，并要求 Obs/Monitor 真实可达；失败定向回收 acceptance 根 | 修复提交上完成独立进程启动、真实 API/UI、重启恢复和停止残留检查 | MITIGATED_RERUN_PENDING |

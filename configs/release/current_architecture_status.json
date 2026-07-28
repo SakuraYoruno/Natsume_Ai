@@ -5,12 +5,12 @@
     "dev_commit": "555ead6d7dc78d376fc21fa49335ae64206de10a",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE07_ISOLATED_NEO4J_CHROMA_REDIS_REAL_PERSISTENCE_PASS_HOST_STACK_PENDING_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE07_EXTERNAL_PERSISTENCE_PASS_HOST_FIRST_START_FAILED_SECRET_REF_AND_STABILITY_FIX_PENDING_RERUN_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-07",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS_MONITOR_BUILD_PASS_HOST_OBS_MONITOR_RUNTIME_ROOT_AND_SECRET_SNAPSHOT_ISOLATION_WIRED_REAL_HOST_START_PENDING",
+  "active_wave_detail": "EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS_HOST_FIRST_REAL_START_FAILED_WORKSPACE_SECRET_SOURCE_CONFLICT_AND_FALSE_SUCCESS_FIX_CODE_COMPLETE_RERUN_PENDING",
   "next_wave": "PROGRAM_ACCEPTANCE",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
@@ -64,29 +64,38 @@
       ]
     },
     "ne07_host_stack_isolation_preflight": {
-      "status": "CODE_COMPLETE_LOCAL_START_PENDING",
-      "implementation_parent": "origin/codex/ne07-full-acceptance@b3d9ab1927ba746b9596fe97961db7cae546d0fa",
+      "status": "FIRST_REAL_START_FAILED_FIX_CODE_COMPLETE_RERUN_PENDING",
+      "implementation_parent": "origin/codex/ne07-full-acceptance@877fb7bf2520",
       "runtime_root": "HOST_OBS_MONITOR_START_AND_STOP_ACCEPT_EXPLICIT_ISOLATED_RUNTIME_ROOT",
       "process_boundary": "EXPLICIT_RUNTIME_ROOT_FORCE_RESTART_AND_STOP_DO_NOT_SCAN_OR_TERMINATE_OTHER_HOST_INSTANCES",
       "secret_snapshot": "PASSWORD_PASSWD_SECRET_TOKEN_AUTH_AND_KEY_VALUES_EXCLUDED_SAFE_SEC_REFS_ONLY",
+      "first_real_start": "FAIL_HOST_EXITED_AFTER_TRANSIENT_HEALTH_BECAUSE_WORKSPACE_HMAC_HAD_ONLY_FILTERED_PLAINTEXT_INPUT",
+      "first_real_start_sidecars": "OBS_AND_NGINX_STARTED_TRANSIENTLY_BUT_DO_NOT_COUNT_AS_ACCEPTANCE",
+      "false_success_finding": "OLD_ORCHESTRATOR_RETURNED_STARTED_AFTER_HOST_EXIT",
+      "workspace_secret_source": "HOST_AGENT_WORKSPACE_HMAC_SECRET_REF_RESOLVED_IN_PROCESS_FROM_IGNORED_LOCAL_STORE_DIRECT_AND_REF_AMBIGUITY_FAILS_CLOSED",
+      "post_sidecar_stability_gate": "FIVE_CONSECUTIVE_EXPECTED_HOST_PID_LISTENER_HEALTH_AND_READINESS_PAYLOAD_IDENTITY_CHECKS_PLUS_REAL_OBS_AND_MONITOR_ENDPOINTS",
+      "failure_cleanup": "EXPLICIT_ACCEPTANCE_RUNTIME_ROOT_ONLY_WITH_SANITIZED_BOUNDED_HOST_LOG_TAIL",
       "monitor_ui": "NPM_CI_OPERATOR_CLIENT_LINT_TYPECHECK_15_READ_MODEL_TESTS_AND_PRODUCTION_BUILD_PASS",
       "nginx": "OFFICIAL_NGINX_1_31_3_INSTALLED_BY_WINGET_EXE_SHA256_C9D79164B117B32BE2E184037D8D0B97142A84203CE81183D580A215DC20EDBE",
-      "targeted_validation": "13_PASSED_IN_3_33_SECONDS",
+      "targeted_validation": "20_UNIT_PASSED_IN_3_63_SECONDS_AND_5_WORKSPACE_ASGI_INTEGRATION_PASSED_IN_5_45_SECONDS",
       "powershell_parse": "PASS_SIX_START_STOP_SCRIPTS",
       "npm_audit": "OPEN_8_TOTAL_6_HIGH_BUILD_TOOLCHAIN_2_MODERATE_REACT_ROUTER_MAJOR_FIX_REQUIRED",
       "not_run": [
-        "Host process start and canonical SQLite migration",
-        "Obs process and real read model",
-        "Nginx Monitor real proxy and browser interaction",
+        "fixed Host process stable rerun and canonical SQLite migration verification",
+        "fixed Obs process and real read model rerun",
+        "fixed Nginx Monitor real proxy and browser interaction",
         "Host restart and canonical recovery"
       ],
       "evidence_refs": [
+        "host_brain/app/settings/core.py",
+        "host_brain/composition/agent_workspace.py",
         "scripts/runtime/start_host_side.ps1",
         "scripts/runtime/start_obs_side.ps1",
         "scripts/runtime/start_monitor_proxy.ps1",
         "scripts/runtime/stop_host_side.ps1",
         "scripts/runtime/stop_obs_side.ps1",
         "scripts/runtime/stop_monitor_proxy.ps1",
+        "tests/unit/test_agent_workspace_runtime_secret_ref.py",
         "tests/unit/test_ne07_external_service_isolation.py",
         "tests/unit/test_runtime_startup_script_composition.py"
       ]
@@ -6322,7 +6331,7 @@
       "Unified Gateway"
     ],
     "evidence_receipt": "PARTIAL_EXTERNAL_SERVICES_sha256:7af6e6a0c13d738547d5ea17f2fe4fbbee7d9dab30bad530aee10a44bd3a2f71",
-    "boundary": "NE-07 isolated Neo4j, Chroma and Redis have passed real persistence. Monitor UI production build and Host/Obs/Monitor runtime-root plus secret-snapshot isolation preflight pass locally, but the processes have not yet started. Eight npm audit findings remain open. Host, Obs, Nginx Monitor, Edge, Unified Gateway, full routes, fault matrix and performance are still pending, so this is not FullStackAcceptanceReceiptV1 and cannot promote the program."
+    "boundary": "NE-07 isolated Neo4j, Chroma and Redis have passed real persistence. Monitor UI production build and Host/Obs/Monitor runtime-root isolation pass locally. The first real Host attempt started Obs/Nginx transiently but Host exited because the Workspace HMAC plaintext-only input conflicted with the secret-safe runtime snapshot; the old orchestrator falsely returned started. Code now resolves an opaque sec:// Workspace ref in process and performs a post-sidecar five-check Host/Obs/Monitor stability gate, but a clean-commit rerun is pending. Eight npm audit findings remain open. Host stable acceptance, Edge, Unified Gateway, full routes, fault matrix and performance are still pending, so this is not FullStackAcceptanceReceiptV1 and cannot promote the program."
   },
   "active_execution_contract": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
   "gap_matrix": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md"

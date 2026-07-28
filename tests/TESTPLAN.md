@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.37
+版本：v0.38
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -38,8 +38,16 @@
   或 key 值；只有 `sec://` 引用可以持久化。
 - T-NE07-HOST-04：Monitor 必须完成锁文件安装、Operator client check、
   lint、typecheck、read-model test、production build，并由真实 Nginx 服务。
-- 当前启动前合同为 `13 passed in 3.33s`，六个 PowerShell 脚本解析通过；
-  真实进程启动和网络回执尚未执行。
+- T-NE07-HOST-05：Workspace HMAC 的生产启动只允许 runtime snapshot 保存
+  `sec://` 引用，Host 在进程内从 ignored local store 解析；明文与引用双来源、
+  非法引用、store 缺失或引用不存在必须失败关闭且不能回显 secret。
+- T-NE07-HOST-06：Obs/Monitor 启动完成后必须连续五次验证 Host 进程
+  identity、监听 PID、`/health` 与 `/ready` payload identity；真实 Obs/
+  Monitor 端点也必须继续可用。任一失败不得返回 `started`，并且只能清理
+  本次显式 acceptance runtime root。
+- 首次真实启动已暴露 HMAC 配置矛盾与旧脚本假成功，跑次结论为 `FAIL`。
+  修复定向单元为 `20 passed in 3.63s`，Workspace ASGI 定向集成为
+  `5 passed in 5.45s`；干净提交上的真实重跑仍未执行。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

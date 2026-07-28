@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.45
+版本：v2.46
 维护日期：2026-07-28
 状态：当前证据
 
@@ -36,7 +36,13 @@
 - PowerShell parser 通过；定向合同为 `13 passed in 3.33s`。
 - 官方 Nginx 1.31.3 已安装并记录 executable SHA-256。
 - `npm audit` 的 6 high 构建链和 2 moderate React Router 告警保持开放；
-  Host/Obs/Monitor 尚未启动，所以这里只是 preflight。
+  Host 首次真实启动因 Workspace HMAC 缺少安全引用入口而退出，且暴露旧脚本
+  会把短暂健康误报为 `started`。该跑次为 `FAIL`，不是 preflight PASS。
+- Workspace 现支持只落盘 `sec://` 引用并在 Host 进程内解析；启动器在
+  sidecar 启动后连续五次核对 Host PID、监听与 health/readiness payload，
+  同时要求真实 Obs、Monitor 端点继续可用，失败会定向清理 acceptance 根。
+- 修复定向单元为 `20 passed in 3.63s`，Workspace ASGI 定向集成为
+  `5 passed in 5.45s`；真实干净提交重跑仍待执行。
 
 ## NE-05 Skill 生命周期本地代码波次
 

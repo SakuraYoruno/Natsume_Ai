@@ -63,7 +63,12 @@ Host、Obs、Nginx Monitor、Edge 与 Unified Gateway 仍待本轮继续启动�
 整体状态仍为 `INCOMPLETE`。
 Monitor UI 的锁文件安装、client 合同、lint、类型检查、15 项 read-model
 测试与生产构建已通过；Host/Obs/Monitor 启停也已支持独立 runtime root，
-且运行环境快照不再落盘 password、Token、auth 或 key。真实进程尚未启动，
+且运行环境快照不再落盘 password、Token、auth 或 key。首次真实启动中，
+Obs 与 Nginx 曾正常拉起，但 Host 因 Workspace HMAC 只有明文配置入口、而
+安全快照又禁止持久化明文而退出；旧启动器在退出前短暂健康后仍错误返回
+`started`。当前代码已增加 `sec://` Workspace 密钥解析和 Host/Obs/Monitor
+启动后的五次连续 identity/进程/监听稳定性 Gate，失败会只清理本 acceptance
+运行根。修复尚待在对应干净提交上重跑，因此不能把首次尝试记为通过。
 `npm audit` 的 8 项依赖告警仍开放，不能据此宣称前后端验收通过。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime

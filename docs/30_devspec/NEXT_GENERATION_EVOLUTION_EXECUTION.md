@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.37
+版本：v3.38
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_STACK_PREFLIGHT_PASS / REAL_START_NEXT / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_FIRST_START_FAILED / FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1297,6 +1297,25 @@ winget 安装，`nginx.exe` SHA-256 为
 
 `npm audit` 仍报告 8 项：6 个 high 来自 ESLint/minimatch 构建链，2 个
 moderate 来自 React Router；可用修复均要求 major 版本变化，当前登记开放，
-禁止在未跑真实 UI 路由回归前使用 `--force` 盲升。Host、Obs、Monitor 真实
-进程仍未启动，当前只可记
-`HOST_PREFLIGHT_PASS / REAL_START_PENDING / PROGRAM_INCOMPLETE`。
+禁止在未跑真实 UI 路由回归前使用 `--force` 盲升。
+
+首次真实启动已实际拉起 acceptance Obs 与 Nginx Monitor，Host 也曾短暂
+响应，但随后因 `HOST_AGENT_WORKSPACE_HMAC_SECRET` 没有安全引用入口而退出：
+启动器的 runtime snapshot 正确过滤明文 secret，Workspace composition 却只
+接受该明文变量，两个安全边界互相矛盾。旧脚本还在 Host 退出后返回了
+`started`，所以该次结果必须记为 `FAIL`，Obs/Nginx 的短暂可用不能单独升格。
+
+修订后的生产边界为：
+
+- 新增 `HOST_AGENT_WORKSPACE_HMAC_SECRET_REF=sec://...`；Host 只在进程内从
+  ignored local secret store 解析实际 HMAC，runtime env 仅持久化 opaque ref；
+- 明文与引用同时出现、引用非 `sec://`、store 不可读或引用不存在均失败关闭；
+- Obs 与 Monitor 启动完成后，启动器连续五次核对 Host 进程 identity、监听
+  PID、`/health` payload identity 与 `/ready` payload identity；
+- Obs 或 Nginx 状态/真实端点失败也不能返回 `started`；失败只停止该显式
+  acceptance runtime root 的 Host/Obs/Nginx，并输出脱敏的有限日志尾部。
+
+相关定向单元合同为 `20 passed in 3.63s`，Workspace ASGI 定向集成为
+`5 passed in 5.45s`。这只证明修复代码，不代替干净提交上的真实重跑；当前
+状态是
+`FIRST_REAL_START_FAIL / FIX_CODE_COMPLETE / RERUN_PENDING / PROGRAM_INCOMPLETE`。

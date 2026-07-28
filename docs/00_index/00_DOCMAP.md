@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.15
+版本：v9.16
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -98,7 +98,10 @@ flowchart TD
 > container/network/port/data-root 与固定镜像 digest 配置，真实
 > `docker compose config --quiet` 已通过。提交 `14f015bd` 又完成三库真实
 > 写入、容器重启、持久读取、更新/查询与探针清理，receipt digest 为
-> `sha256:7af6e6a0…2f71`。Host、Obs、Nginx Monitor、Edge、Gateway 尚未
+> `sha256:7af6e6a0…2f71`。Host 首次真实启动暴露 Workspace 密钥明文入口与
+> 安全 runtime 快照互斥，并发现启动器会把短暂健康后退出误报为成功；
+> Obs/Nginx 的该次短暂启动不构成验收。代码现改用 `sec://` 引用，并在所有
+> sidecar 启动后执行连续稳定性 Gate，仍待干净提交重跑。Edge、Gateway 尚未
 > 启动，因此当前仍只能是 `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。
 > Monitor UI 生产构建已通过，Host/Obs/Monitor 的独立 runtime root 与
 > secret 快照过滤已接线；这仍是启动前证据，且 8 项 npm audit 告警开放，

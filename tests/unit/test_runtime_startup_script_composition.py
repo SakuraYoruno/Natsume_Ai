@@ -52,6 +52,47 @@ def test_host_orchestrator_isolates_child_script_process_control() -> None:
     assert "Start-Process -Wait" not in source
 
 
+def test_host_orchestrator_requires_post_sidecar_stability_before_success() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    monitor_start = source.index('if ($monitorProxyEnabled) {', source.index("$monitorProxyResult"))
+    stability_gate = source.index("$hostStable = Test-HostStartupStability")
+    success_result = source.index('$result = [ordered]@{', stability_gate)
+
+    assert monitor_start < stability_gate < success_result
+    assert '-RequiredConsecutiveChecks 5' in source[stability_gate:success_result]
+    assert '"HOST_STACK_STARTUP_STABILITY_FAILED: host=$hostStable; "' in source
+    assert "Stop-ProcessTree -ProcessId $hostPid" in source[stability_gate:success_result]
+    assert '& $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot' in source
+    assert (
+        '-RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")'
+        in source[stability_gate:success_result]
+    )
+    assert source.index("Get-SanitizedLogTail", stability_gate) < success_result
+
+
+def test_host_stability_gate_checks_expected_listener_and_both_payload_identities(
+) -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    function_start = source.index("function Test-HostStartupStability")
+    function_end = source.index("\nfunction Get-SanitizedLogTail", function_start)
+    function_source = source[function_start:function_end]
+
+    for required in (
+        "Is-HostProcess -ProcessId $ExpectedPid",
+        "Get-ListeningPid -ProbePort $ProbePort",
+        "[int]$listeningPid -eq $ExpectedPid",
+        'Test-HttpPayloadIdentity -Url $HealthUrl -Kind "health"',
+        'Test-HttpPayloadIdentity -Url $ReadyUrl -Kind "readiness"',
+        "$consecutive -ge $RequiredConsecutiveChecks",
+    ):
+        assert required in function_source
+
+
 def test_child_script_capture_does_not_wait_for_long_lived_descendant(
     tmp_path: Path,
 ) -> None:

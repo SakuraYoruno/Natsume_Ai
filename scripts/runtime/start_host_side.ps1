@@ -419,6 +419,98 @@ function Wait-Http {
   return $false
 }
 
+function Test-HttpPayloadIdentity {
+  param(
+    [string]$Url,
+    [ValidateSet("health", "readiness")]
+    [string]$Kind,
+    [int]$TimeoutSec = 3
+  )
+  try {
+    $payload = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec $TimeoutSec
+    if ($null -eq $payload) {
+      return $false
+    }
+    $fields = @($payload.PSObject.Properties.Name)
+    if ($Kind -eq "health") {
+      return (
+        $fields -contains "status" -and
+        $fields -contains "version" -and
+        $fields -contains "timestamp" -and
+        $fields -contains "details"
+      )
+    }
+    return (
+      $fields -contains "ready" -and
+      $fields -contains "status" -and
+      $fields -contains "timestamp" -and
+      $fields -contains "summary"
+    )
+  } catch {
+    return $false
+  }
+}
+
+function Test-HostStartupStability {
+  param(
+    [int]$ExpectedPid,
+    [int]$ProbePort,
+    [string]$HealthUrl,
+    [string]$ReadyUrl,
+    [ValidateRange(2, 10)]
+    [int]$RequiredConsecutiveChecks = 5
+  )
+  $consecutive = 0
+  $maxChecks = $RequiredConsecutiveChecks + 5
+  for ($attempt = 0; $attempt -lt $maxChecks; $attempt++) {
+    $processAlive = (
+      $null -ne (Get-Process -Id $ExpectedPid -ErrorAction SilentlyContinue) -and
+      (Is-HostProcess -ProcessId $ExpectedPid)
+    )
+    $listeningPid = Get-ListeningPid -ProbePort $ProbePort
+    $listenerMatches = (
+      $null -ne $listeningPid -and
+      [int]$listeningPid -eq $ExpectedPid
+    )
+    $healthIdentity = if ($processAlive -and $listenerMatches) {
+      Test-HttpPayloadIdentity -Url $HealthUrl -Kind "health" -TimeoutSec 3
+    } else {
+      $false
+    }
+    $readyIdentity = if ($healthIdentity) {
+      Test-HttpPayloadIdentity -Url $ReadyUrl -Kind "readiness" -TimeoutSec 3
+    } else {
+      $false
+    }
+    if ($processAlive -and $listenerMatches -and $healthIdentity -and $readyIdentity) {
+      $consecutive += 1
+      if ($consecutive -ge $RequiredConsecutiveChecks) {
+        return $true
+      }
+    } else {
+      $consecutive = 0
+    }
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+
+function Get-SanitizedLogTail {
+  param(
+    [string]$Path,
+    [int]$Lines = 80
+  )
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return ""
+  }
+  $tail = (Get-Content -LiteralPath $Path -Tail $Lines -ErrorAction SilentlyContinue) -join "`n"
+  return (
+    $tail -replace
+      '(?im)(password|passwd|secret|token|authorization|api[_-]?key)(\s*[:=]\s*)([^\s,;]+)',
+      '$1$2<redacted>'
+  )
+}
+
 function Test-TcpPortQuick {
   param(
     [string]$HostName,
@@ -1514,6 +1606,67 @@ if ($monitorProxyEnabled) {
   if ($proxyStatus -eq "degraded") {
     $startupWarnings += "STARTUP_MONITOR_PROXY_DEGRADED"
   }
+}
+
+$hostStable = Test-HostStartupStability `
+  -ExpectedPid $hostPid `
+  -ProbePort $Port `
+  -HealthUrl $healthUrl `
+  -ReadyUrl "http://$probeHost`:$Port/ready" `
+  -RequiredConsecutiveChecks 5
+$obsProcessStatus = [string]$(
+  if ($obsProcessResult.PSObject.Properties.Name -contains "status") {
+    $obsProcessResult.status
+  } else {
+    ""
+  }
+)
+$obsStable = (
+  -not $obsEnabled -or
+  (
+    $obsProcessStatus -in @("started", "already_running") -and
+    (Test-HttpQuick -Url "http://$obsProbeHost`:$obsProbePort/health" -TimeoutSec 3)
+  )
+)
+$proxyStatus = [string]$(
+  if ($monitorProxyResult.PSObject.Properties.Name -contains "status") {
+    $monitorProxyResult.status
+  } else {
+    ""
+  }
+)
+$monitorStable = (
+  -not $monitorProxyEnabled -or
+  (
+    $proxyStatus -in @("started", "already_running") -and
+    (Test-HttpQuick -Url "http://$MonitorProxyHost`:$MonitorProxyPort/monitor/index.html" -TimeoutSec 3) -and
+    (Test-HttpQuick -Url "http://$MonitorProxyHost`:$MonitorProxyPort/obs/metrics" -TimeoutSec 3)
+  )
+)
+if (-not $hostStable -or -not $obsStable -or -not $monitorStable) {
+  $stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"
+  if ($monitorProxyEnabled -and (Test-Path -LiteralPath $stopMonitorScript)) {
+    try {
+      $null = & $stopMonitorScript `
+        -EnvFile $EnvFile `
+        -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")
+    } catch {
+    }
+  }
+  $stopObsScript = Join-Path $PSScriptRoot "stop_obs_side.ps1"
+  if ($obsEnabled -and (Test-Path -LiteralPath $stopObsScript)) {
+    try {
+      $null = & $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot
+    } catch {
+    }
+  }
+  Stop-ProcessTree -ProcessId $hostPid | Out-Null
+  Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
+  $stderrTail = Get-SanitizedLogTail -Path $stderrLog -Lines 80
+  throw (
+    "HOST_STACK_STARTUP_STABILITY_FAILED: host=$hostStable; " +
+    "obs=$obsStable; monitor=$monitorStable.`n$stderrTail"
+  )
 }
 
 $result = [ordered]@{
