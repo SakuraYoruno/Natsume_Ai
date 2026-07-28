@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -162,6 +163,12 @@ class LifeCommandRepository:
             isolation_level=None,
         )
         conn.row_factory = sqlite3.Row
+        conn.create_function(
+            "natsume_sha256_hex",
+            1,
+            _sqlite_sha256_hex,
+            deterministic=True,
+        )
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute(f"PRAGMA busy_timeout = {self._timeout_ms}")
         return conn
@@ -669,6 +676,43 @@ class LifeCommandRepository:
                 ),
             ).fetchall()
             return [_event_from_row(row) for row in rows]
+
+    def list_affective_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return the DL-01 journal projection in a stable compound cursor."""
+
+        cursor_ms = max(0, int(after_created_at_ms))
+        cursor_event_id = str(after_event_id or "")
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, person_id, self_id, relationship_subject_id,
+                       affective_kind, appraisal_id, episode_id, state_revision,
+                       event_digest, payload_digest, created_at_ms
+                FROM affective_life_event_v1
+                WHERE person_id = ?
+                  AND (
+                      created_at_ms > ?
+                      OR (created_at_ms = ? AND event_id > ?)
+                  )
+                ORDER BY created_at_ms ASC, event_id ASC
+                LIMIT ?
+                """,
+                (
+                    _required_text(person_id, "person_id"),
+                    cursor_ms,
+                    cursor_ms,
+                    cursor_event_id,
+                    max(1, min(int(limit), 1_000)),
+                ),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def list_replay_rows(self, person_id: str) -> list[dict[str, Any]]:
         with self._operation(write=False) as conn:
@@ -1822,6 +1866,13 @@ def _projection_intent_from_row(row: Mapping[str, Any]) -> LifeProjectionIntent:
         payload_digest=payload_digest,
         created_at_ms=int(row["created_at_ms"]),
     )
+
+
+def _sqlite_sha256_hex(value: Any) -> str:
+    if value is None:
+        raise ValueError("natsume_sha256_hex requires non-null input")
+    raw = value if isinstance(value, bytes) else str(value).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _json_object(value: Any, field_name: str) -> dict[str, Any]:

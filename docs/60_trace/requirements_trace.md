@@ -21,6 +21,19 @@ willingness 映射必须随意愿升高单调降低 withdraw。代码位于
 盲评、真实模型、语音和 Avatar 证据均为 `NOT_RUN`；状态为
 `LOCAL_TARGETED_PASS / EMOTIONAL_DIGITAL_LIFE_PARTIAL`。
 
+TRACE-DL01（唯一 Affective Life Kernel）：`UserAffectObservationV1`、
+`EventAppraisalV1`、`SelfAffectStateV2`、`EmotionEpisodeV1`、
+`MoodStateV1`、`NeedStateV1` 与 `RegulationDecisionV1` 进入既有
+`LifeCommand → life_event_journal → CAS snapshot → replay` 链。只有
+`affective_event_appraised` 能创建 canonical self-affect；snapshot 最多
+保留 4 个 active episode、8 个 component 和 16 个 evidence ref，raw text、
+audio、image 和 model-chain 键必须拒绝。0143 的
+`affective_life_event_v1` 只读 projection 只能由 immutable Life event
+trigger 写入。覆盖为 `test_dl01_affective_life_kernel.py` 与
+`test_dl01_affective_life_kernel.py` integration；1002 个真实 SQLite event
+restart/replay digest 一致。状态为
+`CODE_COMPLETE_LOCAL / INGRESS_NOT_WIRED / LEGACY_COMPATIBILITY_WRITERS_REMAIN`。
+
 当前 NE-01 trace 追加本地代码封口证据：
 `08a172da → migration 0142 七路线 canonical SQLite receipt
 sha256:161b860f…`，并继承 `27b032f1e` 的 24 个跨进程/Workspace 恢复用例。

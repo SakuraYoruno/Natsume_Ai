@@ -21,13 +21,14 @@ from host_brain.release.universal_route_acceptance import (
 )
 
 
-COVERAGE_SCHEMA_VERSION = "natsume.universal-governed-runtime-coverage.v2"
+COVERAGE_SCHEMA_VERSION = "natsume.universal-governed-runtime-coverage.v3"
 PROGRAM_COMPLETE = "COMPLETE"
 PROGRAM_INCOMPLETE = "INCOMPLETE"
 CONTROL_PASS = "PASS"
 CONTROL_MISSING = "MISSING"
 CONTROL_PARTIAL = "PARTIAL"
 CONTROL_IMPLEMENTED_NOT_WIRED = "IMPLEMENTED_NOT_WIRED"
+_MIGRATION_HEAD_RE = re.compile(r"^\d{4}_.+\.sql$")
 
 REQUIRED_ROUTES = (
     "chat",
@@ -72,6 +73,7 @@ class UniversalRuntimeCoverageReport:
     status: str
     evaluated_commit_sha: str
     migration_head: str
+    accepted_migration_head: str
     route_statuses: Mapping[str, str]
     missing_route_controls: Mapping[str, tuple[str, ...]]
     missing_architecture_controls: tuple[str, ...]
@@ -87,6 +89,7 @@ class UniversalRuntimeCoverageReport:
             "status": self.status,
             "evaluated_commit_sha": self.evaluated_commit_sha,
             "migration_head": self.migration_head,
+            "accepted_migration_head": self.accepted_migration_head,
             "route_statuses": dict(self.route_statuses),
             "missing_route_controls": {
                 route: list(controls)
@@ -125,7 +128,11 @@ def load_universal_runtime_coverage(
     if payload.get("schema_version") != COVERAGE_SCHEMA_VERSION:
         raise UniversalRuntimeCoverageError("coverage manifest schema is not supported")
 
-    evaluated_commit_sha, migration_head = _evidence_binding(
+    (
+        evaluated_commit_sha,
+        accepted_migration_head,
+        catalog_migration_head,
+    ) = _evidence_binding(
         payload,
         repository_root,
     )
@@ -173,7 +180,7 @@ def load_universal_runtime_coverage(
                     repository_root,
                     route=route,
                     evaluated_commit_sha=evaluated_commit_sha,
-                    migration_head=migration_head,
+                    accepted_migration_head=accepted_migration_head,
                 )
             )
         evidence_refs.update(
@@ -211,7 +218,8 @@ def load_universal_runtime_coverage(
     return UniversalRuntimeCoverageReport(
         status=status,
         evaluated_commit_sha=evaluated_commit_sha,
-        migration_head=migration_head,
+        migration_head=catalog_migration_head,
+        accepted_migration_head=accepted_migration_head,
         route_statuses=route_statuses,
         missing_route_controls=missing_by_route,
         missing_architecture_controls=tuple(missing_architecture),
@@ -284,11 +292,16 @@ def _evidence_refs(
 def _evidence_binding(
     payload: Mapping[str, Any],
     root: Path,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     binding = _required_mapping(payload, "evidence_binding")
-    if set(binding) != {"evaluated_commit_sha", "migration_head"}:
+    if set(binding) != {
+        "evaluated_commit_sha",
+        "accepted_migration_head",
+        "catalog_migration_head",
+    }:
         raise UniversalRuntimeCoverageError(
-            "evidence_binding must contain exactly evaluated_commit_sha and migration_head"
+            "evidence_binding must contain evaluated_commit_sha, "
+            "accepted_migration_head and catalog_migration_head"
         )
 
     evaluated_commit_sha = str(binding.get("evaluated_commit_sha") or "").strip()
@@ -298,14 +311,25 @@ def _evidence_binding(
         )
     _require_git_ancestor(root, evaluated_commit_sha)
 
-    migration_head = str(binding.get("migration_head") or "").strip()
-    actual_migration_head = _current_migration_head(root)
-    if migration_head != actual_migration_head:
+    accepted_migration_head = str(
+        binding.get("accepted_migration_head") or ""
+    ).strip()
+    if _MIGRATION_HEAD_RE.fullmatch(accepted_migration_head) is None:
         raise UniversalRuntimeCoverageError(
-            "evidence_binding.migration_head differs from repository migration head: "
-            f"declared={migration_head or '<empty>'}; actual={actual_migration_head}"
+            "evidence_binding.accepted_migration_head must be a numbered SQL migration"
         )
-    return evaluated_commit_sha, migration_head
+    catalog_migration_head = str(
+        binding.get("catalog_migration_head") or ""
+    ).strip()
+    actual_migration_head = _current_migration_head(root)
+    if catalog_migration_head != actual_migration_head:
+        raise UniversalRuntimeCoverageError(
+            "evidence_binding.catalog_migration_head differs from repository "
+            "migration head: "
+            f"declared={catalog_migration_head or '<empty>'}; "
+            f"actual={actual_migration_head}"
+        )
+    return evaluated_commit_sha, accepted_migration_head, catalog_migration_head
 
 
 def _require_git_ancestor(root: Path, commit_sha: str) -> None:
@@ -364,7 +388,7 @@ def _validate_route_acceptance_binding(
     *,
     route: str,
     evaluated_commit_sha: str,
-    migration_head: str,
+    accepted_migration_head: str,
 ) -> str:
     binding = record.get("acceptance_binding")
     if not isinstance(binding, Mapping):
@@ -397,7 +421,10 @@ def _validate_route_acceptance_binding(
         raise UniversalRuntimeCoverageError(
             f"route {route} acceptance receipt commit SHA does not match evidence_binding"
         )
-    if str(receipt.get("migration_head") or "").strip() != migration_head:
+    if (
+        str(receipt.get("migration_head") or "").strip()
+        != accepted_migration_head
+    ):
         raise UniversalRuntimeCoverageError(
             f"route {route} acceptance receipt migration head does not match evidence_binding"
         )

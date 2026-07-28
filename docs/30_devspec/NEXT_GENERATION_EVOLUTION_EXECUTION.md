@@ -3,13 +3,13 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v4.0
+版本：v4.1
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-00_IN_PROGRESS / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-01_CODE_COMPLETE_LOCAL / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
-已经拥有持续情感生命”推导为完成。本合同以当前 `dev@9834d6621` 为基线，
+已经拥有持续情感生命”推导为完成。本合同以当前 `dev@ed6e5c852` 为基线，
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。
 
 ## 1. 产品结果
@@ -69,7 +69,7 @@ TTS、Avatar 和 Bond 只能提交观察、读取投影或消费冻结计划。
 
 ## 3. 实施顺序
 
-### DL-00：纠偏与体验基线
+### DL-00：纠偏与体验基线（本地完成）
 
 - 标记 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，冻结 72 条合成多轮陪伴轨迹；当前只定义评估样本，不将其记作真人体验证据。
 - 修复用户 Affect 直接写入 self Affect、tick 重复孤独累计和 Motive 意愿映射错误。
@@ -77,13 +77,24 @@ TTS、Avatar 和 Bond 只能提交观察、读取投影或消费冻结计划。
 
 退出：无静态类、fixture、旧 receipt 或目录数量可冒充情感生命完成。
 
-### DL-01：Affective Life Kernel
+### DL-01：Affective Life Kernel（代码完成，本地证据）
 
 - 扩展现有 Life reducer，实现 mixed emotion、episode、mood、need、regulation 的确定性 fold。
 - 详细事件 append-only，snapshot 保持有界 head；重放、重复、CAS、时间跳跃和崩溃后 digest 必须一致。
 - 只有 `EventAppraisal` 能形成 self-affect transition；foreground presence 只影响接触压力，不镜像用户 VAD。
 
-退出：canonical self-affect writer=1，1001+ event replay/restart 一致率 100%。
+当前实现已新增 `UserAffectObservationV1`、`EventAppraisalV1`、
+`SelfAffectStateV2`、`EmotionEpisodeV1`、`MoodStateV1`、
+`NeedStateV1` 与 `RegulationDecisionV1`；它们经既有
+`LifeCommand → life_event_journal → CAS snapshot → replay` 链写入，
+并由 migration `0143_affective_life_kernel.sql` 投影为不可变只读事件 head。
+snapshot 最多保留 4 个 active episode、8 个 component 和 16 个 evidence ref；
+raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life event
+的 restart/replay digest 已在本地测试中一致。
+
+这只证明内核和持久化 UoW 已完成本地验证；Host ingress、实际 Fusion/Appraisal
+服务和旧 compatibility writer 的清零分别属于 DL-02 与 DL-06，不能据此称为
+完整情感生命或生产切流。
 
 ### DL-02：观察、融合与 Appraisal
 

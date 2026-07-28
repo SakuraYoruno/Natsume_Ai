@@ -10,12 +10,14 @@
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> `NE-08 / DL-00` 已把实时情感陪伴设为当前产品主线。当前 Digital Life
-> reducer 是唯一可演进的 self-affect foundation，但 HostEmotionRuntime、
-> Limbic、BodySense、Endocrine、Motive、Bond 与 Surface 仍有兼容态或易失
-> state；它们不得被描述为七海的长期情感 authority。foreground 目前只保存
-> 脱敏用户 Affect observation，不再将用户 VAD 直接写入 self-affect；完整
-> Appraisal、relationship episode、ExpressionPlan 与三模态闭环仍待后续 DL 波。
+> `NE-08 / DL-01` 已把实时情感陪伴设为当前产品主线。Digital Life reducer
+> 现在拥有一个 typed、可重放的 canonical `state.affective` head：
+> `EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
+> Regulation`。它经既有 Life UoW 与 0143 append-only projection 持久化，
+> 而 observation 不会直接写入 self-affect。HostEmotionRuntime、Limbic、
+> BodySense、Endocrine、Motive、Bond 与 Surface 仍有兼容态或易失 state；
+> 它们不得被描述为七海的长期情感 authority。Host Fusion/Appraisal ingress、
+> relationship episode、ExpressionPlan 与三模态闭环仍待后续 DL 波。
 
 Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
 `PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名

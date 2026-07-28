@@ -3,12 +3,12 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.42
+版本：v3.43
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
-> 当前活动波为 `NE-08 / DL-00`。数字生命产品缺口优先于剩余通用架构验收：用户 affect 与七海 self-affect 尚未完全分离，关系裂痕/修复和主动消息后效应没有 durable production closure，Surface/TTS/Avatar 未共享同轮 ExpressionPlan。下文的 NE-07 记录是历史服务栈基础，不能据此把情感数字生命标记为完成。
+> 当前活动波为 `NE-08 / DL-01_CODE_COMPLETE_LOCAL`。数字生命产品缺口优先于剩余通用架构验收：canonical Life kernel 已可将 typed Appraisal 折叠为 bounded mixed self-affect，但 Host Fusion/Appraisal ingress 尚未切入，旧兼容 writer 尚未清零；关系裂痕/修复和主动消息后效应没有 durable production closure，Surface/TTS/Avatar 未共享同轮 ExpressionPlan。下文的 NE-07 记录是历史服务栈基础，不能据此把情感数字生命标记为完成。
 
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与

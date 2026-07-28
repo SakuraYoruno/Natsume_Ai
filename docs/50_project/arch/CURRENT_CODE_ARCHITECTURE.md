@@ -3,14 +3,22 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.72
+版本：v5.73
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-00`。现有代码具备 Digital Life、Host-local `HostEmotionRuntime`、Limbic、BodySense、Endocrine、Motive、Bond 和 Surface 等情感相关部件，但它们仍是多套兼容状态；用户情绪可经 foreground 路径影响 self-affect，Bond/主动后效应与文本/语音/Avatar 同轮表达尚未形成生产闭环。因此情感数字生命状态为 `PARTIAL`，下文 NE-01～NE-07 内容均是范围受限基础事实。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-01`。现有代码已将 typed
+> observation、appraisal、mixed self-affect、episode、mood、need 与
+> regulation fold 纳入 existing Life command/event/CAS/replay 链，并以 0143
+> 投影其 immutable event head。仅 `affective_event_appraised` 可以形成
+> canonical self-affect transition；observation 与 foreground presence 不会
+> 镜像用户 VAD。Host-local `HostEmotionRuntime`、Limbic、BodySense、
+> Endocrine、Motive、Bond 和 Surface 仍是多套 compatibility state，且当前
+> Host ingress 尚未构造 typed Appraisal command；因此情感数字生命仍为
+> `PARTIAL`，不应把 DL-01 本地内核当成生产闭环。
 
 ## 1. 结论
 
