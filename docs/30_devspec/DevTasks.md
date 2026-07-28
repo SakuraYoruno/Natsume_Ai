@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_REVERSIBLE_COMPANION_PROFILE_CANARY_SLICE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_SIGNED_COMPANION_PROFILE_CONTROL_SLICE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -48,8 +48,12 @@ exact duplicate/restart replay。0147 已将低风险表达 profile 接入 canon
 重开五条独立、跨三天、`HELPFUL`、boundary-safe 且 `helpfulness>=0.85` 的 aftereffect；五次后续
 真实互动才可 activate，并只能 exact rollback 到当前 profile 预先绑定的旧版本。CANARY/ACTIVE profile
 会真实进入下一轮 text/Voice/Avatar 的冻结 plan，但不能改变 Soul、consent 或 self-affect；当前
-保守文本 classifier 为 `0.72`，不会误作学习成功。直接偏好反馈入口、Monitor 审核控件与旧 writer 清零
-仍未完成，不得称为主动陪伴闭环。受治理预算流与连接恢复仍由后续 DL-06～DL-07
+保守文本 classifier 为 `0.72`，不会误作学习成功。0148 已将受认证的结构化 profile control
+接入 app-local Host：`POST /v1/digital-life/relationship/companion-profile` 必须同时满足
+`companion:profile:write`、`user principal == relationship subject` 与 `tenant == workspace`；它只能
+从 canonical strong aftereffect history 启动 candidate canary，不能从自然语言推断、直接 activation
+或改写 Soul/consent/self-affect，Secure Ingress audit ref 与 candidate 一同持久化。Monitor 审核控件、
+canary 真实证据、旧 writer 清零仍未完成，不得称为主动陪伴闭环。受治理预算流与连接恢复仍由后续 DL-06～DL-07
 交付。此前 NE-01～NE-07 的 Universal Runtime、搜索、
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07

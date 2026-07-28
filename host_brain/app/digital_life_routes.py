@@ -33,6 +33,18 @@ from host_brain.digital_life.companion_permission_ingress import (
     CompanionPermissionIngress,
     CompanionPermissionIngressError,
 )
+from host_brain.digital_life.companion_profile_ingress import (
+    COMPANION_PROFILE_BODY_INVALID,
+    COMPANION_PROFILE_COMMAND_NOT_APPLIED,
+    COMPANION_PROFILE_EVIDENCE_UNAVAILABLE,
+    COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+    COMPANION_PROFILE_PRINCIPAL_KIND_DENIED,
+    COMPANION_PROFILE_RESULT_CONFLICT,
+    COMPANION_PROFILE_RESULT_RECORD_UNAVAILABLE,
+    COMPANION_PROFILE_SCOPE_BINDING_DENIED,
+    CompanionProfileIngress,
+    CompanionProfileIngressError,
+)
 from natsume_contracts.life import LifeDeliveryAuthorization
 from host_brain.orchestration.governor_grant import (
     DurableGovernorGrantResolver,
@@ -79,6 +91,33 @@ def _companion_permission_http_status(reason_code: str) -> int:
     if reason == COMPANION_PERMISSION_RESULT_CONFLICT or any(
         marker in reason for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT")
     ):
+        return 409
+    return 401
+
+
+def _companion_profile_http_status(reason_code: str) -> int:
+    """Map profile-control failures without exposing auth or user data."""
+
+    reason = str(reason_code or "").strip().upper()
+    if reason in {
+        COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        COMPANION_PROFILE_EVIDENCE_UNAVAILABLE,
+        COMPANION_PROFILE_RESULT_RECORD_UNAVAILABLE,
+        COMPANION_PROFILE_COMMAND_NOT_APPLIED,
+    } or "UNAVAILABLE" in reason or "ENFORCE_REQUIRED" in reason:
+        return 503
+    if reason == COMPANION_PROFILE_BODY_INVALID:
+        return 422
+    if reason in {
+        COMPANION_PROFILE_PRINCIPAL_KIND_DENIED,
+        COMPANION_PROFILE_SCOPE_BINDING_DENIED,
+    } or "SCOPE" in reason or "PRINCIPAL" in reason:
+        return 403
+    if reason == COMPANION_PROFILE_RESULT_CONFLICT or any(
+        marker in reason for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT")
+    ):
+        return 409
+    if any(marker in reason for marker in ("THRESHOLD", "CANARY", "RELATIONSHIP")):
         return 409
     return 401
 
@@ -662,6 +701,52 @@ async def digital_life_proactive_permission(
     return result.as_dict()
 
 
+async def digital_life_companion_profile(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Start only a signed, bounded companion-expression canary.
+
+    The body is strict JSON with the complete low-risk preference surface. It
+    cannot carry natural-language rationale, Soul patches, emotion state,
+    consent, raw media or arbitrary Life commands.
+    """
+
+    provider = _route_ports.companion_profile_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionProfileIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionProfileIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_profile_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
 async def digital_life_proactive_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
@@ -827,6 +912,11 @@ def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
     add(
         "/v1/digital-life/relationship/proactive-permission",
         digital_life_proactive_permission,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/companion-profile",
+        digital_life_companion_profile,
         methods=["POST"],
     )
     add(

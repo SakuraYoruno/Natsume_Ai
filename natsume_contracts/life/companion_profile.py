@@ -30,6 +30,7 @@ _HUMOR_LEVELS = frozenset({"LOW", "LIGHT", "MEDIUM"})
 _FOLLOWUP_RATES = frozenset({"NONE", "OCCASIONAL", "GENTLE"})
 _COMFORT_MODES = frozenset({"ASK_FIRST", "QUIET_FIRST", "PRACTICAL_GENTLE"})
 _PROACTIVE_WINDOWS = frozenset({"OFF", "DAYTIME", "EVENING", "FLEXIBLE"})
+_COMPANION_PROFILE_CONTROL_REQUEST_SCHEMA = "companion_profile_control_request.v1"
 
 
 def _required(value: Any, field_name: str, *, limit: int = 512) -> str:
@@ -201,6 +202,62 @@ class CompanionProfilePreferencesV1:
             avatar_motion_intensity=value.get("avatar_motion_intensity", 0.5),
         )
 
+    @classmethod
+    def from_strict_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "CompanionProfilePreferencesV1":
+        """Parse an explicit external preference control without defaults.
+
+        The internal reducer may use ``from_mapping`` while replaying older
+        snapshots.  A user-control wire request must name exactly the bounded
+        preference surface, so an omitted/unknown field cannot silently alter
+        how a later version is interpreted.
+        """
+
+        if not isinstance(value, Mapping):
+            raise ValueError("preferences must be an object")
+        expected = {
+            "schema_version",
+            "addressing_style",
+            "response_length",
+            "humor_level",
+            "followup_rate",
+            "comfort_mode",
+            "proactive_window",
+            "tts_rate_scale",
+            "avatar_motion_intensity",
+        }
+        if set(value) != expected:
+            raise ValueError("companion profile preference field set is invalid")
+        if value.get("schema_version") != "companion_profile_preferences.v1":
+            raise ValueError("companion profile preference schema is invalid")
+        for field_name in (
+            "addressing_style",
+            "response_length",
+            "humor_level",
+            "followup_rate",
+            "comfort_mode",
+            "proactive_window",
+        ):
+            raw = value.get(field_name)
+            if not isinstance(raw, str) or raw != raw.strip():
+                raise ValueError(f"{field_name} must be an exact string")
+        for field_name in ("tts_rate_scale", "avatar_motion_intensity"):
+            raw = value.get(field_name)
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                raise ValueError(f"{field_name} must be a JSON number")
+        return cls(
+            addressing_style=value["addressing_style"],
+            response_length=value["response_length"],
+            humor_level=value["humor_level"],
+            followup_rate=value["followup_rate"],
+            comfort_mode=value["comfort_mode"],
+            proactive_window=value["proactive_window"],
+            tts_rate_scale=value["tts_rate_scale"],
+            avatar_motion_intensity=value["avatar_motion_intensity"],
+        )
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "schema_version": "companion_profile_preferences.v1",
@@ -212,6 +269,96 @@ class CompanionProfilePreferencesV1:
             "proactive_window": self.proactive_window,
             "tts_rate_scale": self.tts_rate_scale,
             "avatar_motion_intensity": self.avatar_motion_intensity,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionProfileControlRequestV1:
+    """Strict, user-authenticated request to trial bounded expression prefs.
+
+    It carries no free-form rationale, raw conversation, self-affect patch,
+    relationship consent, or personality material.  Secure Ingress supplies
+    the caller identity and durable audit reference separately.
+    """
+
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    preferences: CompanionProfilePreferencesV1
+    schema_version: str = _COMPANION_PROFILE_CONTROL_REQUEST_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema_version != _COMPANION_PROFILE_CONTROL_REQUEST_SCHEMA:
+            raise ValueError("companion profile control request schema is invalid")
+        if not isinstance(self.preferences, CompanionProfilePreferencesV1):
+            raise ValueError("preferences must be CompanionProfilePreferencesV1")
+        object.__setattr__(
+            self,
+            "workspace_id",
+            _required(self.workspace_id, "workspace_id", limit=240),
+        )
+        object.__setattr__(
+            self,
+            "relationship_subject_id",
+            _required(
+                self.relationship_subject_id,
+                "relationship_subject_id",
+                limit=240,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "session_id",
+            _required(self.session_id, "session_id", limit=240),
+        )
+        object.__setattr__(
+            self,
+            "schema_version",
+            _COMPANION_PROFILE_CONTROL_REQUEST_SCHEMA,
+        )
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CompanionProfileControlRequestV1":
+        if not isinstance(value, Mapping):
+            raise ValueError("companion profile control request must be an object")
+        expected = {
+            "schema_version",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+            "preferences",
+        }
+        if set(value) != expected:
+            raise ValueError("companion profile control request field set is invalid")
+        for field_name in (
+            "schema_version",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+        ):
+            raw = value.get(field_name)
+            if not isinstance(raw, str) or raw != raw.strip():
+                raise ValueError(
+                    f"companion profile control request {field_name} must be an exact string"
+                )
+        preferences = value.get("preferences")
+        return cls(
+            schema_version=value["schema_version"],
+            workspace_id=value["workspace_id"],
+            relationship_subject_id=value["relationship_subject_id"],
+            session_id=value["session_id"],
+            preferences=CompanionProfilePreferencesV1.from_strict_mapping(
+                preferences if isinstance(preferences, Mapping) else {}
+            ),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "preferences": self.preferences.as_dict(),
         }
 
 
@@ -235,6 +382,7 @@ class CompanionProfileVersionV1:
     boundary_violation_count: int
     rollback_profile_id: str | None
     created_at_ms: int
+    source_control_ref: str | None = None
     is_baseline: bool = False
     self_id: str = _SELF_ID
 
@@ -272,10 +420,27 @@ class CompanionProfileVersionV1:
             limit=240,
         )
         created_at_ms = _non_negative_int(self.created_at_ms, "created_at_ms")
+        source_control_ref = _optional(
+            self.source_control_ref,
+            "source_control_ref",
+            limit=512,
+        )
+        if source_control_ref is not None:
+            source_control_ref = _opaque_ref(
+                source_control_ref,
+                "source_control_ref",
+            )
         if baseline:
             if version != 0:
                 raise ValueError("baseline profile version must be 0")
-            if refs or days or confidence != 0.0 or violations != 0 or rollback_profile_id:
+            if (
+                refs
+                or days
+                or confidence != 0.0
+                or violations != 0
+                or rollback_profile_id
+                or source_control_ref
+            ):
                 raise ValueError("baseline profile cannot claim learning evidence")
         else:
             if version < 1:
@@ -303,6 +468,8 @@ class CompanionProfileVersionV1:
             "created_at_ms": created_at_ms,
             "is_baseline": baseline,
         }
+        if source_control_ref is not None:
+            identity["source_control_ref"] = source_control_ref
         expected_id = f"companion-profile::{_digest(identity)[:40]}"
         if _required(self.profile_id, "profile_id", limit=240) != expected_id:
             raise ValueError("profile_id must match content-addressed profile identity")
@@ -316,6 +483,7 @@ class CompanionProfileVersionV1:
         object.__setattr__(self, "boundary_violation_count", violations)
         object.__setattr__(self, "rollback_profile_id", rollback_profile_id)
         object.__setattr__(self, "created_at_ms", created_at_ms)
+        object.__setattr__(self, "source_control_ref", source_control_ref)
         object.__setattr__(self, "is_baseline", baseline)
         object.__setattr__(self, "self_id", _SELF_ID)
 
@@ -333,6 +501,7 @@ class CompanionProfileVersionV1:
         boundary_violation_count: Any,
         rollback_profile_id: Any,
         created_at_ms: Any,
+        source_control_ref: Any = None,
         is_baseline: bool = False,
     ) -> "CompanionProfileVersionV1":
         """Construct a correctly content-addressed immutable profile."""
@@ -363,6 +532,9 @@ class CompanionProfileVersionV1:
         )
         rollback = _optional(rollback_profile_id, "rollback_profile_id", limit=240)
         created = _non_negative_int(created_at_ms, "created_at_ms")
+        control_ref = _optional(source_control_ref, "source_control_ref", limit=512)
+        if control_ref is not None:
+            control_ref = _opaque_ref(control_ref, "source_control_ref")
         identity = {
             "schema_version": "companion_profile_version.v1",
             "self_id": _SELF_ID,
@@ -378,6 +550,8 @@ class CompanionProfileVersionV1:
             "created_at_ms": created,
             "is_baseline": bool(is_baseline),
         }
+        if control_ref is not None:
+            identity["source_control_ref"] = control_ref
         return cls(
             profile_id=f"companion-profile::{_digest(identity)[:40]}",
             workspace_id=workspace,
@@ -390,6 +564,7 @@ class CompanionProfileVersionV1:
             boundary_violation_count=violations,
             rollback_profile_id=rollback,
             created_at_ms=created,
+            source_control_ref=control_ref,
             is_baseline=bool(is_baseline),
         )
 
@@ -411,6 +586,7 @@ class CompanionProfileVersionV1:
             boundary_violation_count=value.get("boundary_violation_count", 0),
             rollback_profile_id=value.get("rollback_profile_id"),
             created_at_ms=value.get("created_at_ms", 0),
+            source_control_ref=value.get("source_control_ref"),
             is_baseline=bool(value.get("is_baseline")),
             self_id=value.get("self_id", _SELF_ID),
         )
@@ -429,27 +605,9 @@ class CompanionProfileVersionV1:
         return str(self.as_dict()["profile_digest"])
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        digest_payload: dict[str, Any] = {
             "schema_version": "companion_profile_version.v1",
             "profile_id": self.profile_id,
-            "profile_digest": _digest(
-                {
-                    "schema_version": "companion_profile_version.v1",
-                    "profile_id": self.profile_id,
-                    "self_id": self.self_id,
-                    "workspace_id": self.workspace_id,
-                    "relationship_subject_id": self.relationship_subject_id,
-                    "version": self.version,
-                    "preferences": self.preferences.as_dict(),
-                    "source_aftereffect_refs": list(self.source_aftereffect_refs),
-                    "evidence_days_utc": list(self.evidence_days_utc),
-                    "confidence_lower_bound": self.confidence_lower_bound,
-                    "boundary_violation_count": self.boundary_violation_count,
-                    "rollback_profile_id": self.rollback_profile_id,
-                    "created_at_ms": self.created_at_ms,
-                    "is_baseline": self.is_baseline,
-                }
-            ),
             "self_id": self.self_id,
             "workspace_id": self.workspace_id,
             "relationship_subject_id": self.relationship_subject_id,
@@ -463,6 +621,28 @@ class CompanionProfileVersionV1:
             "created_at_ms": self.created_at_ms,
             "is_baseline": self.is_baseline,
         }
+        if self.source_control_ref is not None:
+            digest_payload["source_control_ref"] = self.source_control_ref
+        result: dict[str, Any] = {
+            "schema_version": "companion_profile_version.v1",
+            "profile_id": self.profile_id,
+            "profile_digest": _digest(digest_payload),
+            "self_id": self.self_id,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "version": self.version,
+            "preferences": self.preferences.as_dict(),
+            "source_aftereffect_refs": list(self.source_aftereffect_refs),
+            "evidence_days_utc": list(self.evidence_days_utc),
+            "confidence_lower_bound": self.confidence_lower_bound,
+            "boundary_violation_count": self.boundary_violation_count,
+            "rollback_profile_id": self.rollback_profile_id,
+            "created_at_ms": self.created_at_ms,
+            "is_baseline": self.is_baseline,
+        }
+        if self.source_control_ref is not None:
+            result["source_control_ref"] = self.source_control_ref
+        return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -707,6 +887,7 @@ def utc_day_from_ms(value: Any) -> str:
 
 __all__ = [
     "CompanionProfileCanaryInteractionV1",
+    "CompanionProfileControlRequestV1",
     "CompanionProfilePreferencesV1",
     "CompanionProfileStateV1",
     "CompanionProfileVersionV1",

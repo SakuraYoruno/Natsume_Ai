@@ -39,6 +39,13 @@ def _text(value: Any, *, limit: int = 240) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _opaque_ref(value: Any, *, field_name: str) -> str:
+    reference = _text(value, limit=512)
+    if not reference or "://" not in reference:
+        raise ValueError(f"{field_name} must be an opaque reference")
+    return reference
+
+
 def _digest(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(
@@ -105,7 +112,8 @@ class CompanionProfileLifecycleService:
         session_id: Any,
         request_id: Any,
         preferences: CompanionProfilePreferencesV1 | Mapping[str, Any],
-        evidence_aftereffect_ids: Sequence[Any],
+        evidence_aftereffect_ids: Sequence[Any] | None = None,
+        source_control_ref: Any = None,
     ) -> CompanionProfileLifecycleResult:
         """Create one evidence-qualified profile and begin its five-turn canary.
 
@@ -121,6 +129,33 @@ class CompanionProfileLifecycleService:
         )
         current = self._read_state(scope)
         self._require_established_relationship(scope)
+        stable_request_id = _text(request_id) or _digest(
+            {
+                "schema": "companion-profile-canary.v1",
+                "scope": scope.aggregate_id,
+                "preferences": (
+                    preferences.as_dict()
+                    if isinstance(preferences, CompanionProfilePreferencesV1)
+                    else _mapping(preferences)
+                ),
+            }
+        )[:32]
+        control_ref = self._source_control_ref(
+            source_control_ref,
+            scope=scope,
+            request_id=stable_request_id,
+        )
+        existing = self._existing_control_receipt(
+            scope=scope,
+            source_control_ref=control_ref,
+        )
+        if existing is not None:
+            return CompanionProfileLifecycleResult(
+                scope=scope,
+                receipt=existing.as_replayed(),
+                state=current,
+                reason_code="COMPANION_PROFILE_CANARY_REPLAYED",
+            )
         if current.canary_profile is not None:
             raise ValueError("COMPANION_PROFILE_CANARY_ALREADY_ACTIVE")
         preference_value = (
@@ -128,10 +163,14 @@ class CompanionProfileLifecycleService:
             if isinstance(preferences, CompanionProfilePreferencesV1)
             else CompanionProfilePreferencesV1.from_mapping(_mapping(preferences))
         )
-        evidence = self._validated_aftereffects(
-            scope,
-            aftereffect_ids=evidence_aftereffect_ids,
-            require_after_profile_ms=None,
+        evidence = (
+            self._validated_aftereffects(
+                scope,
+                aftereffect_ids=evidence_aftereffect_ids,
+                require_after_profile_ms=None,
+            )
+            if evidence_aftereffect_ids is not None
+            else self._recent_eligible_aftereffects(scope)
         )
         refs = tuple(f"relationship-aftereffect://{item.aftereffect.aftereffect_id}" for item in evidence)
         days = tuple(sorted({utc_day_from_ms(item.aftereffect.observed_at_ms) for item in evidence}))
@@ -148,15 +187,9 @@ class CompanionProfileLifecycleService:
             confidence_lower_bound=confidence_lower_bound,
             boundary_violation_count=0,
             rollback_profile_id=current.active_profile.profile_id,
-            created_at_ms=max(0, int(self._clock_ms())),
+            created_at_ms=self._next_created_at(scope),
+            source_control_ref=control_ref,
         )
-        stable_request_id = _text(request_id) or _digest(
-            {
-                "schema": "companion-profile-canary.v1",
-                "scope": scope.aggregate_id,
-                "profile_id": profile.profile_id,
-            }
-        )[:32]
         receipt = self._submit(
             scope=scope,
             request_id=stable_request_id,
@@ -399,6 +432,91 @@ class CompanionProfileLifecycleService:
             max(0, int(snapshot.updated_at_ms)) + 1,
         )
 
+    def _source_control_ref(
+        self,
+        raw: Any,
+        *,
+        scope: RelationshipScope,
+        request_id: str,
+    ) -> str:
+        """Bind every candidate to a replay-stable opaque control origin.
+
+        Signed user controls pass their Secure Ingress audit ref.  Internal
+        callers are not allowed to omit an origin either; their deterministic
+        request ref stays opaque and makes an interrupted command reopenable.
+        """
+
+        if raw not in (None, ""):
+            return _opaque_ref(raw, field_name="source_control_ref")
+        return "companion-profile-request://" + _digest(
+            {
+                "scope": scope.aggregate_id,
+                "request_id": request_id,
+            }
+        )
+
+    def _existing_control_receipt(
+        self,
+        *,
+        scope: RelationshipScope,
+        source_control_ref: str,
+    ) -> LifeCommandReceipt | None:
+        """Reopen an already-applied candidate after ingress claim loss.
+
+        Secure Ingress can crash after the Life command commits but before its
+        claim gets a result reference.  Looking up the immutable profile
+        source ref avoids emitting a second candidate when that same signed
+        request is retried.
+        """
+
+        reader = self._require_snapshot_reader()
+        for event in self._iter_scope_events(scope):
+            if event.event_type != "companion_profile_canary_started":
+                continue
+            profile = _mapping(
+                _mapping(event.payload).get("command_payload")
+            ).get("profile")
+            if not isinstance(profile, Mapping):
+                continue
+            if _text(profile.get("source_control_ref"), limit=512) != source_control_ref:
+                continue
+            receipt = reader.get_receipt(event.command_id)
+            if receipt is None:
+                raise RuntimeError("COMPANION_PROFILE_REPLAY_RECEIPT_MISSING")
+            return receipt
+        return None
+
+    def _recent_eligible_aftereffects(
+        self,
+        scope: RelationshipScope,
+    ) -> tuple["_AftereffectEvent", ...]:
+        """Choose a bounded, deterministic history for a direct control.
+
+        The external request cannot nominate event IDs.  We only take the
+        most recent distinct-user-input aftereffects which already satisfy the
+        canonical positive/boundary gate; the caller later verifies the
+        five-record and three-day threshold.
+        """
+
+        eligible = [
+            item
+            for item in self._all_aftereffects(scope)
+            if item.aftereffect.outcome == "HELPFUL"
+            and item.aftereffect.boundary_respected
+            and item.aftereffect.helpfulness >= 0.85
+        ]
+        selected_reverse: list[_AftereffectEvent] = []
+        seen_user_refs: set[str] = set()
+        for item in reversed(eligible):
+            user_ref = item.aftereffect.user_input_ref
+            if user_ref in seen_user_refs:
+                continue
+            seen_user_refs.add(user_ref)
+            selected_reverse.append(item)
+            if len(selected_reverse) >= 16:
+                break
+        return tuple(reversed(selected_reverse))
+
     def _validated_aftereffects(
         self,
         scope: RelationshipScope,
@@ -415,29 +533,11 @@ class CompanionProfileLifecycleService:
             raise ValueError("evidence_aftereffect_ids are required")
         if len(set(requested)) != len(requested):
             raise ValueError("evidence_aftereffect_ids must not contain duplicates")
-        by_id: dict[str, _AftereffectEvent] = {}
-        for event in self._require_snapshot_reader().list_events(
-            scope.aggregate_id,
-            after_sequence=0,
-            limit=1_000,
-        ):
-            if event.event_type != "relational_aftereffect_recorded":
-                continue
-            payload = _mapping(event.payload)
-            aftereffect = _aftereffect_from_mapping(
-                _mapping(_mapping(payload.get("command_payload")).get("aftereffect"))
-            )
-            if (
-                aftereffect.workspace_id != scope.workspace_id
-                or aftereffect.relationship_subject_id != scope.relationship_subject_id
-            ):
-                raise RuntimeError("COMPANION_PROFILE_AFTEREFFECT_SCOPE_DRIFT")
-            if aftereffect.aftereffect_id in requested:
-                by_id[aftereffect.aftereffect_id] = _AftereffectEvent(
-                    aftereffect=aftereffect,
-                    event_sequence=event.sequence,
-                    event_created_at_ms=event.created_at_ms,
-                )
+        by_id = {
+            item.aftereffect.aftereffect_id: item
+            for item in self._all_aftereffects(scope)
+            if item.aftereffect.aftereffect_id in requested
+        }
         missing = [item for item in requested if item not in by_id]
         if missing:
             raise ValueError("COMPANION_PROFILE_AFTEREFFECT_NOT_CANONICAL")
@@ -458,6 +558,62 @@ class CompanionProfileLifecycleService:
         ):
             raise ValueError("COMPANION_PROFILE_AFTEREFFECT_PRECEDES_CANARY")
         return selected
+
+    def _all_aftereffects(
+        self,
+        scope: RelationshipScope,
+    ) -> tuple["_AftereffectEvent", ...]:
+        rows: list[_AftereffectEvent] = []
+        for event in self._iter_scope_events(scope):
+            if event.event_type != "relational_aftereffect_recorded":
+                continue
+            payload = _mapping(event.payload)
+            aftereffect = _aftereffect_from_mapping(
+                _mapping(_mapping(payload.get("command_payload")).get("aftereffect"))
+            )
+            if (
+                aftereffect.workspace_id != scope.workspace_id
+                or aftereffect.relationship_subject_id != scope.relationship_subject_id
+            ):
+                raise RuntimeError("COMPANION_PROFILE_AFTEREFFECT_SCOPE_DRIFT")
+            rows.append(
+                _AftereffectEvent(
+                    aftereffect=aftereffect,
+                    event_sequence=event.sequence,
+                    event_created_at_ms=event.created_at_ms,
+                )
+            )
+        return tuple(rows)
+
+    def _iter_scope_events(self, scope: RelationshipScope):
+        """Read the complete immutable aggregate through bounded pages.
+
+        A direct preference request can arrive after more than one thousand
+        relationship events.  The evidence threshold must not silently turn
+        into a first-page threshold, and interrupted Secure Ingress claims
+        must still find their earlier canary command.  Pagination remains
+        read-only and detects a cursor regression rather than looping or
+        accepting a reordered journal.
+        """
+
+        reader = self._require_snapshot_reader()
+        after_sequence = 0
+        while True:
+            batch = reader.list_events(
+                scope.aggregate_id,
+                after_sequence=after_sequence,
+                limit=500,
+            )
+            if not batch:
+                return
+            for event in batch:
+                sequence = int(event.sequence)
+                if sequence <= after_sequence:
+                    raise RuntimeError("COMPANION_PROFILE_EVENT_CURSOR_REGRESSION")
+                after_sequence = sequence
+                yield event
+            if len(batch) < 500:
+                return
 
     def _require_command_service(self) -> LifeCommandService:
         service = self._command_service_provider()

@@ -353,6 +353,36 @@ def create_app(
             clock_ms=now_ms,
         )
 
+    def companion_profile_ingress_provider() -> Any | None:
+        """Bind a scoped low-risk preference trial to this Host lifespan."""
+
+        current = command_ingress_container
+        if current is None:
+            return None
+        from host_brain.digital_life.companion_profile_ingress import (  # noqa: PLC0415
+            CompanionProfileIngress,
+        )
+        from host_brain.digital_life.companion_profile_lifecycle import (  # noqa: PLC0415
+            CompanionProfileLifecycleService,
+        )
+
+        return CompanionProfileIngress(
+            evaluator=current.evaluator,
+            complete_claim=current.store.complete_claim,
+            companion_profile_lifecycle_service_provider=(
+                lambda: CompanionProfileLifecycleService(
+                    command_service_provider=(
+                        lambda: life_command_authority_provider(ledger_provider())[0]
+                    ),
+                    snapshot_reader_provider=(
+                        lambda: life_command_authority_provider(ledger_provider())[1]
+                    ),
+                    clock_ms=now_ms,
+                )
+            ),
+            clock_ms=now_ms,
+        )
+
     route_ports = HostRoutePorts(
         ledger_provider=ledger_provider,
         life_command_authority_provider=life_route_authority_provider,
@@ -374,6 +404,7 @@ def create_app(
         companion_permission_ingress_provider=(
             companion_permission_ingress_provider
         ),
+        companion_profile_ingress_provider=companion_profile_ingress_provider,
     )
     host_obs_route_ports = ObsRoutePorts(
         query_projection_store_provider=lambda: host_query_projection_store,

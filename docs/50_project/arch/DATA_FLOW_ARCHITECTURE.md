@@ -565,6 +565,22 @@ planner 从 trusted relationship hand-off 读取 CANARY 或 ACTIVE profile，把
 revision 冻结进 `AffectiveTurnPlanV1`、`ExpressionPlanV1`、Voice `SPEAK` 和 Avatar `TRANSITION`；
 它只能改变受限表达锚点、TTS rate、动作强度或把主动时段进一步收紧，不能改变 Soul、许可或 self-affect。
 
+0148 的 direct profile-control flow 不让请求指定 aftereffect 或直接写 profile：
+
+```mermaid
+flowchart LR
+    U["严格结构化偏好请求"] --> SI["host.companion-profile\nSecure Ingress"]
+    SI --> B["精确 user / subject\ntenant / workspace / scope 绑定"]
+    B --> H["canonical relation aftereffect 历史\nHost 自己选择合格证据"]
+    H --> C["companion_profile_canary_started\nLife command + audit ref"]
+    C --> P["0148 immutable profile head"]
+    P --> T["下一轮 AffectiveTurnPlan / ExpressionPlan"]
+```
+
+请求只可创建五互动 CANARY；它不能携带自然语言理由、Soul patch、emotion、relationship consent、原始媒体
+或任意 command，且不直接 activation。claim 完成中断后，Host 以相同 Secure Ingress audit ref 重开已提交的
+Life receipt，不产生第二个 candidate。
+
 ```mermaid
 flowchart LR
     H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]

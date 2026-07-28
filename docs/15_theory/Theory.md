@@ -1632,3 +1632,21 @@ Registry adapter 是一条显式协议边界：未知 adapter、protocol drift�
 可以自动维持或下降，新能力最高只能进入 L1/L2；升级仍必须经 Lab 和 Review。
 Capability Forge 因而只能产生 proposal，不能批准自身、调整运行 route 或把
 运行统计反向写成激活证据。
+
+## 31. 陪伴偏好是可撤回的表达试验，不是人格重写
+
+用户可以明确提出“这几天说短一点”“语速慢一点”之类的低风险表达偏好，但这不等于
+用户、模型或一次聊天拥有重写七海人格的权力。正确边界是一个**签名的、结构化的
+canary 请求**：它只能列出完整且有界的称呼、长度、幽默、追问、安慰、主动时段、语速和
+动作强度；不能夹带聊天正文、情绪标签、Soul patch、关系许可或任意状态命令。
+
+该请求的认证主体必须就是关系对象，租户必须就是 workspace，并由独立 scope 授权。系统
+也不能相信请求中自报的“我之前喜欢这样”：Host 只从 canonical relationship aftereffect
+journal 重新选取足够独立、跨日、强且 boundary-safe 的证据。满足门槛时只开始五次互动的
+CANARY；每次后效应仍决定是否可以 activation，任何时刻都能精确回到候选创建时绑定的旧
+profile。Secure Ingress audit ref 与 profile version 同时写入 append-only Life journal，所以
+duplicate、重启或 claim-result 中断只会重开同一 receipt，而不是制造第二次成长。
+
+这条边界让“七海更懂得怎样和我说话”保持可感知、可撤销、非操控，同时保证 Soul、核心价值、
+亲密身份、关系许可和 self-affect 不被偏好学习吞没。用户界面的 Review、真实 canary 体验证据和
+旧兼容 writer 的清零仍是后续工作；有 endpoint 不等于已经证明长期体验更好。

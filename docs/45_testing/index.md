@@ -52,6 +52,14 @@
   accepted 或 Host expression staged，不证明第三方平台送达、用户阅读或真实 Gateway/Edge 运行；直接偏好
   反馈与 Monitor 审核控件、旧 writer 清零、真实模型和 DL-07 服务栈仍未运行，不能由这些定向测试推导为
   主动陪伴完成。
+- `test_dl06_companion_profile_ingress.py` 以真实 SQLite migration `0148`、Secure Ingress
+  principal/credential/claim store 与 Host route 覆盖 signed profile control：只有
+  `companion:profile:write`、exact `user`/relationship subject、tenant/workspace 绑定和已有五条
+  canonical strong aftereffect 时才能创建 CANARY；duplicate 与重启只重开同一 Life receipt，service
+  principal、跨 scope body、弱历史、重复 key 和 Soul patch 全部失败关闭。该文件 `4 passed in 13.87s`。
+  随后 profile lifecycle、permission、proactive、relationship 的受影响集合 `20 passed in 46.58s`，
+  Secure Ingress 邻接回归 `7 passed in 4.40s`；集合分开报告，未运行真实 Gateway、模型、Monitor、Edge
+  或 DL-07 服务栈。
 
 ## NE-07 隔离外部服务栈
 

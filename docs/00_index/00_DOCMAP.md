@@ -21,7 +21,7 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_REVERSIBLE_COMPANION_PROFILE_CANARY_SLICE`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_SIGNED_COMPANION_PROFILE_CONTROL_SLICE`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
 偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
@@ -53,6 +53,12 @@ relationship consent 或 self-affect。CANARY/ACTIVE identity 会冻结进入后
 plan 与 delivery intent；生产的保守文本分类仅为 `0.72`，不会自动伪造强偏好证据。直接反馈入口、
 Monitor 审核、旧 writer 清零、受治理预算流的 provider-final canonical usage、连接恢复与真实服务验收
 仍未完成。
+
+0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
+只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
+principal/relationship subject 与 tenant/workspace 绑定。请求不能携带自由文本、Soul patch、情绪或关系
+许可；它只从 canonical aftereffect 读取合格历史来开始 CANARY，并把 audit ref 写进 immutable profile
+head。该 route 不是 Monitor 审核界面，也不直接 activation；远端 Edge 仍不启动。
 此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
 不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。

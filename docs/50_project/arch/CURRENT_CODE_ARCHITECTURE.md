@@ -52,6 +52,15 @@
 > Surface 的其它兼容 state 仍未清零；直接偏好反馈/Monitor 审核、真实模型和三模态物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
+> 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
+> `POST /v1/digital-life/relationship/companion-profile` 通过独立的
+> `host.companion-profile` Secure Ingress surface 认证 `companion:profile:write`，并再次比对
+> `user principal == relationship_subject_id`、`tenant == workspace_id`。它只接受完整 bounded
+> preference object，不能承载聊天正文、Soul patch、emotion、consent 或任意 Life command；lifecycle
+> 仅从 canonical 强 aftereffect history 选证据并启动 CANARY，Secure Ingress audit ref 与 profile
+> version 同时进入 Life journal。该路由不会直接 activation；Monitor/Review 与 legacy writer cutover
+> 仍未完成。
+
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 `ExpressionPlanV1`，并在可信 internal AffectFusion hand-off 后由纯 planner 冻结。
 低歧义路径使用 `ModelAttemptService.stream()`，生产 Vault adapter 会调用 provider

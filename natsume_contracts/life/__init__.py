@@ -30,6 +30,7 @@ from .affective_delivery import (
 )
 from .companion_profile import (
     CompanionProfileCanaryInteractionV1,
+    CompanionProfileControlRequestV1,
     CompanionProfilePreferencesV1,
     CompanionProfileStateV1,
     CompanionProfileVersionV1,
@@ -58,6 +59,7 @@ __all__ = [
     "ExpressionDeliveryIntentV1",
     "ExpressionDeliveryReceiptV1",
     "CompanionProfileCanaryInteractionV1",
+    "CompanionProfileControlRequestV1",
     "CompanionProfilePreferencesV1",
     "CompanionProfileStateV1",
     "CompanionProfileVersionV1",

@@ -769,7 +769,7 @@ class LifeCommandRepository:
                 """
                 SELECT event_id, person_id, self_id, workspace_id,
                        relationship_subject_id, profile_kind, profile_id,
-                       profile_digest, active_profile_id, rollback_profile_id,
+                       profile_digest, source_control_ref, active_profile_id, rollback_profile_id,
                        profile_revision, canary_accepted_count, event_digest,
                        payload_digest, created_at_ms
                 FROM companion_profile_life_event_v1
