@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.39
+版本：v3.40
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_FIRST_START_FAILED / FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_THREE_STARTS_FAILED / WORKSPACE_ROOT_FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1332,5 +1332,27 @@ moderate 来自 React Router；可用修复均要求 major 版本变化，当前
 `HOST_SERVICE_CATALOG_TARGET_MODE`，同时验证 candidate owner 为
 `host.main`、operation/snapshot digest 均为合法 SHA-256；禁止回落到
 `/ready`、`/obs/metrics` 或“端口正在监听”。最终五轮稳定性检查也必须保持
-同一最终 catalog identity。更新后的定向合同为
-`21 passed in 3.66s`；第三次真实启动仍须绑定下一干净提交。
+同一最终 catalog identity。
+
+第三次真实启动已经使用该最终 identity Gate，没有再接受中间 candidate，
+但在 180 秒内未形成最终 ENFORCE Host。canonical rollout ledger 证明三个
+AUDIT operation 都依次写入 `PREPARED → STARTING → ROLLED_BACK`，active head
+为空，coordinator lease 已释放；无需删除、改写或绕过持久状态。Host 日志的
+确定性原因是 acceptance 配置把
+`HOST_AGENT_WORKSPACE_MANAGED_ROOT` 放在当前源码 worktree 内部，Workspace
+allocator 按既有安全合同拒绝“managed root 与 Git source repository 重叠”。
+这不是应当放宽的门禁。
+
+启动器现增加以下前置合同：
+
+- `-AgentWorkspaceRoot` 显式指定与本次 acceptance 绑定、但位于源码树外的
+  Workspace 根；
+- 相对路径先规范化，源码目录本身、源码子目录和源码父目录都在 Docker 或
+  Host 进程启动前以
+  `HOST_AGENT_WORKSPACE_ROOT_OVERLAPS_SOURCE` 失败关闭；
+- 合法根创建后再次以 resolved identity 校验，随后写入
+  `HOST_AGENT_WORKSPACE_MANAGED_ROOT` 的 secret-safe runtime snapshot；
+- Host 返回的启动摘要记录实际 Workspace 根，但不包含密钥。
+
+更新后的定向合同为 `23 passed in 3.91s`，其中动态 PowerShell 合同证明非法
+根不会被创建、外部 sibling 根可创建；第四次真实启动仍须绑定本修复提交。

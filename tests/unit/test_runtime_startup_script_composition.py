@@ -121,6 +121,112 @@ def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() ->
     assert "Get-ListeningPid -ProbePort $Port" not in launch_source
 
 
+def test_host_launcher_rejects_workspace_source_overlap_before_creating_root(
+    tmp_path: Path,
+) -> None:
+    source_repository = tmp_path / "source"
+    source_repository.mkdir()
+    nested_workspace = source_repository / "runtime" / "agent-workspaces"
+    parent_workspace = tmp_path
+    external_workspace = tmp_path / "acceptance-workspaces"
+
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Ensure-Directory',
+  'Get-NormalizedDirectoryPath',
+  'Test-DirectoryPathsOverlap',
+  'Assert-AgentWorkspaceRootSeparated'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$source = Get-NormalizedDirectoryPath -Path '{source_repository}' -BasePath '{tmp_path}'
+$nested = Get-NormalizedDirectoryPath -Path '{nested_workspace}' -BasePath '{tmp_path}'
+$parent = Get-NormalizedDirectoryPath -Path '{parent_workspace}' -BasePath '{tmp_path}'
+$external = Get-NormalizedDirectoryPath -Path '{external_workspace}' -BasePath '{tmp_path}'
+$nestedError = ""
+$parentError = ""
+try {{
+  Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $nested -SourceRepository $source
+  Ensure-Directory -Path $nested
+}} catch {{
+  $nestedError = $_.Exception.Message
+}}
+try {{
+  Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $parent -SourceRepository $source
+}} catch {{
+  $parentError = $_.Exception.Message
+}}
+Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $external -SourceRepository $source
+Ensure-Directory -Path $external
+[ordered]@{{
+  nested_error = $nestedError
+  parent_error = $parentError
+  nested_created = Test-Path -LiteralPath $nested
+  external_created = Test-Path -LiteralPath $external
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    expected = "HOST_AGENT_WORKSPACE_ROOT_OVERLAPS_SOURCE"
+    assert expected in payload["nested_error"]
+    assert expected in payload["parent_error"]
+    assert payload["nested_created"] is False
+    assert payload["external_created"] is True
+
+
+def test_host_launcher_exports_explicit_workspace_root_to_runtime_snapshot() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    preflight = source.index("$configuredAgentWorkspaceRoot = ")
+    docker_start = source.index("$startDockerScript = ")
+    runtime_snapshot = source.index(
+        "$null = Write-RuntimeEnvFile",
+        docker_start,
+    )
+
+    assert preflight < docker_start < runtime_snapshot
+    assert (
+        '$env:HOST_AGENT_WORKSPACE_MANAGED_ROOT = $resolvedAgentWorkspaceRoot'
+        in source[preflight:docker_start]
+    )
+    assert (
+        '$envValues["HOST_AGENT_WORKSPACE_MANAGED_ROOT"] = '
+        "$resolvedAgentWorkspaceRoot"
+        in source[preflight:docker_start]
+    )
+    assert "agent_workspace_root = $resolvedAgentWorkspaceRoot" in source
+
+
 def test_child_script_capture_does_not_wait_for_long_lived_descendant(
     tmp_path: Path,
 ) -> None:

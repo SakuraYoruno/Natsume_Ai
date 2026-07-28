@@ -116,6 +116,14 @@ Host 入口见 [host_brain/__main__.py](../../../host_brain/__main__.py)，OBS �
 进入快照；只有 `sec://` 引用可保留。文件被 Git 忽略且正常停止时删除，
 真实秘密仍必须由受控 `.env`、secret store 或外部注入提供。
 
+Agent Workspace 是源码 Git worktree 的受控派生目录，不能与源码仓库同目录
+或互为父子目录。普通默认根位于用户目录；隔离验收必须显式传入位于源码树外
+的 `-AgentWorkspaceRoot`。启动器在拉起 Docker 或 Host 前规范化并验证该根，
+发现重叠时以 `HOST_AGENT_WORKSPACE_ROOT_OVERLAPS_SOURCE` 失败关闭，且不创建
+非法目录；合法 resolved 路径才写入
+`HOST_AGENT_WORKSPACE_MANAGED_ROOT` 的 runtime snapshot。Host runtime root
+仍可承载日志、PID 和 canonical SQLite，但不能顺便作为 Git Workspace 根。
+
 ### 4.2 Edge
 
 [edge_client/__main__.py](../../../edge_client/__main__.py) 本身不加载 dotenv；直接启动时只消费现有进程环境、默认值和秘密配置。PowerShell 启动器负责注入 `.env` 或运行时覆盖。远端主服务脚本会写入 `runtime/edge/edge.runtime.env`，并可能把环境值写进动态 CMD/PowerShell 启动文件。

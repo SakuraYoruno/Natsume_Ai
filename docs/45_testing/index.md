@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.47
+版本：v2.48
 维护日期：2026-07-28
 状态：当前证据
 
@@ -45,8 +45,13 @@
   拒绝假成功；进一步发现 Service Catalog 中间 rollout candidate 被旧首探针
   误认成最终 Host。首探针现必须验证最终 stage、`host.main` owner 及
   operation/snapshot digest，禁止用 readiness、metrics 或监听端口兜底。
-- 更新后定向单元为 `21 passed in 3.66s`，Workspace ASGI 定向集成为
-  `5 passed in 5.45s`；下一干净提交上的真实重跑仍待执行。
+- 第三次真实启动已拒绝中间 candidate，但因 acceptance Workspace managed
+  root 位于源码 worktree 内部而被既有隔离门禁拒绝。三个 AUDIT operation
+  均留下 `ROLLED_BACK` receipt，head 为空、lease 已释放，没有删库恢复。
+- 启动器新增 `-AgentWorkspaceRoot`：Docker/Host 启动前拒绝 managed root 与
+  source 的同目录、父子目录重叠，合法外部根才进入 runtime snapshot。更新后
+  定向单元为 `23 passed in 3.91s`，Workspace ASGI 前序定向集成为
+  `5 passed in 5.45s`；第四次真实启动仍待执行。
 
 ## NE-05 Skill 生命周期本地代码波次
 

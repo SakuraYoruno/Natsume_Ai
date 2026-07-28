@@ -64,8 +64,8 @@
       ]
     },
     "ne07_host_stack_isolation_preflight": {
-      "status": "TWO_REAL_STARTS_FAILED_SECOND_FAILURE_CLOSED_FINAL_CATALOG_IDENTITY_FIX_RERUN_PENDING",
-      "implementation_parent": "origin/codex/ne07-full-acceptance@b6b341bea",
+      "status": "THREE_REAL_STARTS_FAILED_WORKSPACE_ROOT_PREFLIGHT_FIX_RERUN_PENDING",
+      "implementation_parent": "origin/codex/ne07-full-acceptance@fa693c35c",
       "runtime_root": "HOST_OBS_MONITOR_START_AND_STOP_ACCEPT_EXPLICIT_ISOLATED_RUNTIME_ROOT",
       "process_boundary": "EXPLICIT_RUNTIME_ROOT_FORCE_RESTART_AND_STOP_DO_NOT_SCAN_OR_TERMINATE_OTHER_HOST_INSTANCES",
       "secret_snapshot": "PASSWORD_PASSWD_SECRET_TOKEN_AUTH_AND_KEY_VALUES_EXCLUDED_SAFE_SEC_REFS_ONLY",
@@ -76,17 +76,20 @@
       "second_real_start": "FAIL_CLOSED_WORKSPACE_SECRET_RESOLVED_OBS_AND_MONITOR_HEALTHY_SERVICE_CATALOG_INTERMEDIATE_CANDIDATE_WAS_NOT_FINAL_HOST",
       "second_real_start_false_success": "PREVENTED_BY_POST_SIDECAR_STABILITY_GATE",
       "final_catalog_identity_gate": "INITIAL_AND_FIVE_CONSECUTIVE_CHECKS_REQUIRE_TARGET_STAGE_HOST_MAIN_OWNER_OPERATION_AND_SNAPSHOT_SHA256_HEADERS_WITH_NO_READY_METRICS_OR_LISTENER_FALLBACK",
+      "third_real_start": "FAIL_CLOSED_FINAL_CATALOG_STAGE_NOT_REACHED_BECAUSE_ACCEPTANCE_WORKSPACE_MANAGED_ROOT_OVERLAPPED_SOURCE_WORKTREE",
+      "third_real_start_rollout_ledger": "THREE_AUDIT_OPERATIONS_PREPARED_STARTING_ROLLED_BACK_ACTIVE_HEAD_EMPTY_COORDINATOR_LEASE_RELEASED",
+      "workspace_root_preflight": "EXPLICIT_AGENT_WORKSPACE_ROOT_NORMALIZED_AND_PARENT_CHILD_OR_EQUAL_SOURCE_OVERLAP_REJECTED_BEFORE_DOCKER_OR_HOST_START_VALID_EXTERNAL_ROOT_EXPORTED_TO_RUNTIME_SNAPSHOT",
       "post_sidecar_stability_gate": "FIVE_CONSECUTIVE_EXPECTED_HOST_PID_LISTENER_FINAL_CATALOG_HEALTH_AND_READINESS_PAYLOAD_IDENTITY_CHECKS_PLUS_REAL_OBS_AND_MONITOR_ENDPOINTS",
       "failure_cleanup": "EXPLICIT_ACCEPTANCE_RUNTIME_ROOT_ONLY_WITH_SANITIZED_BOUNDED_HOST_LOG_TAIL",
       "monitor_ui": "NPM_CI_OPERATOR_CLIENT_LINT_TYPECHECK_15_READ_MODEL_TESTS_AND_PRODUCTION_BUILD_PASS",
       "nginx": "OFFICIAL_NGINX_1_31_3_INSTALLED_BY_WINGET_EXE_SHA256_C9D79164B117B32BE2E184037D8D0B97142A84203CE81183D580A215DC20EDBE",
-      "targeted_validation": "21_UNIT_PASSED_IN_3_66_SECONDS_AND_5_WORKSPACE_ASGI_INTEGRATION_PASSED_IN_5_45_SECONDS",
+      "targeted_validation": "23_UNIT_PASSED_IN_3_91_SECONDS_AND_5_WORKSPACE_ASGI_INTEGRATION_PASSED_IN_5_45_SECONDS_PREVIOUS_SLICE",
       "powershell_parse": "PASS_SIX_START_STOP_SCRIPTS",
       "npm_audit": "OPEN_8_TOTAL_6_HIGH_BUILD_TOOLCHAIN_2_MODERATE_REACT_ROUTER_MAJOR_FIX_REQUIRED",
       "not_run": [
-        "fixed Host process stable rerun and canonical SQLite migration verification",
-        "fixed Obs process and real read model rerun",
-        "fixed Nginx Monitor real proxy and browser interaction",
+        "external-workspace-root Host process stable rerun and canonical SQLite migration verification",
+        "external-workspace-root Obs process and real read model rerun",
+        "external-workspace-root Nginx Monitor real proxy and browser interaction",
         "Host restart and canonical recovery"
       ],
       "evidence_refs": [

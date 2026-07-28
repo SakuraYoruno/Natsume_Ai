@@ -3,6 +3,7 @@ param(
   [string]$EnvFile = "",
   [string]$RuntimeRoot = "",
   [string]$LogDir = "",
+  [string]$AgentWorkspaceRoot = "",
   [string]$BindHost = "",
   [int]$Port = 0,
   [ValidateSet("docker", "none")]
@@ -64,6 +65,61 @@ function Ensure-Directory {
   param([string]$Path)
   if (-not (Test-Path -Path $Path)) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
+  }
+}
+
+function Get-NormalizedDirectoryPath {
+  param(
+    [string]$Path,
+    [string]$BasePath
+  )
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    throw "directory path must not be empty"
+  }
+  $candidate = [Environment]::ExpandEnvironmentVariables($Path.Trim())
+  if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+    $candidate = Join-Path $BasePath $candidate
+  }
+  return [System.IO.Path]::GetFullPath($candidate).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+  )
+}
+
+function Test-DirectoryPathsOverlap {
+  param(
+    [string]$Left,
+    [string]$Right
+  )
+  $comparison = [System.StringComparison]::OrdinalIgnoreCase
+  $leftPath = $Left.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+  )
+  $rightPath = $Right.TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+  )
+  if ([string]::Equals($leftPath, $rightPath, $comparison)) {
+    return $true
+  }
+  $separator = [string][System.IO.Path]::DirectorySeparatorChar
+  return (
+    $leftPath.StartsWith($rightPath + $separator, $comparison) -or
+    $rightPath.StartsWith($leftPath + $separator, $comparison)
+  )
+}
+
+function Assert-AgentWorkspaceRootSeparated {
+  param(
+    [string]$WorkspaceRoot,
+    [string]$SourceRepository
+  )
+  if (Test-DirectoryPathsOverlap -Left $WorkspaceRoot -Right $SourceRepository) {
+    throw (
+      "HOST_AGENT_WORKSPACE_ROOT_OVERLAPS_SOURCE: " +
+      "managed workspace root must be outside the source repository tree"
+    )
   }
 }
 
@@ -1088,6 +1144,31 @@ $runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
 
+$configuredAgentWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceRoot)) {
+  [string]$AgentWorkspaceRoot
+} else {
+  Get-EnvSetting `
+    -Values $envValues `
+    -Name "HOST_AGENT_WORKSPACE_MANAGED_ROOT" `
+    -DefaultValue ""
+}
+$resolvedAgentWorkspaceRoot = ""
+if (-not [string]::IsNullOrWhiteSpace($configuredAgentWorkspaceRoot)) {
+  $candidateAgentWorkspaceRoot = Get-NormalizedDirectoryPath `
+    -Path $configuredAgentWorkspaceRoot `
+    -BasePath $repoRoot
+  Assert-AgentWorkspaceRootSeparated `
+    -WorkspaceRoot $candidateAgentWorkspaceRoot `
+    -SourceRepository $repoRoot
+  Ensure-Directory -Path $candidateAgentWorkspaceRoot
+  $resolvedAgentWorkspaceRoot = (Resolve-Path -LiteralPath $candidateAgentWorkspaceRoot).Path
+  Assert-AgentWorkspaceRootSeparated `
+    -WorkspaceRoot $resolvedAgentWorkspaceRoot `
+    -SourceRepository $repoRoot
+  $env:HOST_AGENT_WORKSPACE_MANAGED_ROOT = $resolvedAgentWorkspaceRoot
+  $envValues["HOST_AGENT_WORKSPACE_MANAGED_ROOT"] = $resolvedAgentWorkspaceRoot
+}
+
 if (-not $envValues.ContainsKey("HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK") -and -not $env:HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK) {
   $env:HOST_EDGE_RPC_ALLOW_LOCAL_FALLBACK = "false"
 }
@@ -1733,6 +1814,7 @@ $result = [ordered]@{
   health_url = $healthUrl
   env_file = $EnvFile
   runtime_root = $RuntimeRoot
+  agent_workspace_root = $resolvedAgentWorkspaceRoot
   runtime_env_file = $runtimeEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog

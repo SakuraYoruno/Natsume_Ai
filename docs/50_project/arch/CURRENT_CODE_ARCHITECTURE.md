@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.67
+版本：v5.68
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -51,8 +51,17 @@ Gate 也阻止了假 `started`；它同时表明 Service Catalog 的五阶段 ro
 会暂时提供并主动停止中间 Host candidate。启动器过去会在第一个通用 health
 响应后过早启动 sidecar。当前初始探针和最终连续探针都要求响应头匹配目标
 catalog stage、`host.main` owner、operation digest 与 snapshot digest，
-并删除 readiness、metrics 和仅监听端口兜底。此事实仍是代码修订，尚未形成
-第三次真实通过回执。
+并删除 readiness、metrics 和仅监听端口兜底。第三次真实启动证明该 Gate
+不会接受中间 candidate；三个 AUDIT rollout operation 均在 canonical SQLite
+中收口为 `ROLLED_BACK`，没有 active head，coordinator lease 已释放。
+
+第三次启动的实际失败原因是 acceptance
+`HOST_AGENT_WORKSPACE_MANAGED_ROOT` 位于当前源码 worktree 内。Workspace
+allocator 继续拒绝 managed root 与 source repository 同目录或互为父子目录，
+没有为验收放宽生产隔离。`start_host_side.ps1` 现接受独立
+`AgentWorkspaceRoot`，在启动 Docker/Host 前规范化并验证父/子/同目录重叠，
+合法外部根才进入进程环境和 secret-safe runtime snapshot；启动摘要也返回该
+路径。该代码定向合同为 `23 passed in 3.91s`，仍未形成第四次真实通过回执。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

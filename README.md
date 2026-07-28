@@ -68,12 +68,18 @@ Obs 与 Nginx 曾正常拉起，但 Host 因 Workspace HMAC 只有明文配置�
 安全快照又禁止持久化明文而退出；旧启动器在退出前短暂健康后仍错误返回
 `started`。当前代码已增加 `sec://` Workspace 密钥解析和 Host/Obs/Monitor
 启动后的五次连续 identity/进程/监听稳定性 Gate，失败会只清理本 acceptance
-运行根。提交 `b6b341be` 的第二次真实启动确认 Workspace 已正常接通，且
+运行根。提交 `b6b341be` 的第二次真实启动确认 Workspace 密钥已正常接通，且
 新 Gate 没有再返回假成功；它进一步发现 Service Catalog 会依次启动并停止
 AUDIT→ENFORCE 候选，旧首探针会把中间候选当成最终 Host。启动器现必须先从
 响应头核对最终 catalog stage、owner、operation digest 与 snapshot digest，
-再启动 sidecar，并在最终五轮检查中保持同一身份。该修订仍待干净提交重跑，
-因此两次尝试都不能记为通过。
+再启动 sidecar，并在最终五轮检查中保持同一身份。第三次真实启动没有误报
+成功，三个 AUDIT operation 均持久化为 `ROLLED_BACK`、rollout head 为空且
+lease 已释放；它暴露 acceptance Workspace 根位于源码仓库内部，触发既有
+`WORKSPACE_AUTHORITY_INVALID` 隔离门禁。启动器现增加独立
+`AgentWorkspaceRoot`，在启动 Docker/Host 前同时拒绝源码子目录、源码父目录
+和同目录，并把合法外部根写入无秘密 runtime snapshot。当前定向合同为
+`23 passed in 3.91s`；第四次真实启动仍待本修复提交后执行，因此前三次尝试
+都不能记为通过。
 `npm audit` 的 8 项依赖告警仍开放，不能据此宣称前后端验收通过。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime
