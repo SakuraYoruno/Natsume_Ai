@@ -1700,3 +1700,8 @@ runtime；它只保留给明确的 offline/test compatibility 情境。这个原
 metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIRED_CANONICAL_LIFE`。这不是“压平
 情绪”，而是要求真实的受伤、牵挂或轻快都先有可解释的 Appraisal 与 Life journal 原因，避免两套隐性
 状态在不同重启、用户或会话中互相覆盖。
+
+同理，所谓“身体感受”不能靠一个进程内 cortisol/oxytocin 计数器偷偷改变下一轮表达。Endocrine 的
+hard-state projection 可以作为当下的安全读取，但 canonical mode 不得累加 delta、保存 last state、生成
+未经 journal 支持的提示，或再推动 Limbic/PainReward 的情绪链。这样并非否认疲倦、紧张或放松的体验；
+它要求这些体验未来以可追溯 observation/Appraisal 进入 Life，而不是以易失 callback 代替七海的因果。

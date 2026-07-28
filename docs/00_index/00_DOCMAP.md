@@ -54,8 +54,9 @@ plan 与 delivery intent；生产的保守文本分类仅为 `0.72`，不会自�
 Monitor 审核、旧 writer 清零、受治理预算流的 provider-final canonical usage、连接恢复与真实服务验收
 仍未完成。当前生产 Host 已移除 `HostEmotionRuntime`，而 canonical Tribe authority 又令 Limbic 的
 legacy persistence、metabolism、timeline、decay 和 Bond callback 统一拒写并返回
-`RETIRED_CANONICAL_LIFE`；这只退休该一组 compatibility writer，Endocrine、BodySense、Motive 与
-Bond queue 仍在 DL-06 后续清单。
+`RETIRED_CANONICAL_LIFE`；Endocrine 的 legacy delta、last-state、hint 与 fan-out 也已在 canonical
+mode 退役，且 Circadian/MirrorNeuron 不再直写其私有字段。BodySense、Motive 与 Bond queue 仍是下一条
+清理边界。
 
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user

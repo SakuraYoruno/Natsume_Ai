@@ -29,8 +29,15 @@
   persistence、metabolism、timeline append、decay 以及 Bond progress/regress callback 返回
   `RETIRED_CANONICAL_LIFE`，且不会实例化 `EmotionPersistence` 或追加旧 timeline；未知 authority
   值失败关闭，Tribe canonical fusion wiring 也被直接断言。相关 Limbic、fusion 与 Host composition
-  集合为 `77 passed in 31.74s`，与前项集合有重叠，不能相加；它不证明 BodySense、Endocrine、Motive、
+  集合为 `77 passed in 31.20s`，与前项集合有重叠，不能相加；它不证明 BodySense、Endocrine、Motive、
   Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_endocrine_agent.py` 现验证 canonical Life mode 不会消费 legacy cortisol/oxytocin buffer、
+  更新 `_last_state`、产生 hormonal hint 或触发旧 endocrine fan-out；stress、Bond、loneliness、task、
+  immune 与 generic delta 输入均显式退役。Circadian/MirrorNeuron 的邻接测试还验证它们改为调用受控
+  compatibility port，而非写 Endocrine 私有字段。该受影响集合为 `72 passed in 2.11s`；它不证明
+  BodySense、Motive、Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- 上述 Host/Limbic/Endocrine、fusion 与旧 organ 邻接文件的最终合并定向回归为
+  `149 passed in 33.81s`。它是覆盖重叠后的单一集合，不能与前述批次相加，也不构成波次集成或真实服务栈验收。
 - `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted
   reply 与 `CompanionProactiveTargetV1` 同一 relation command 写入；只有显式 `ALLOWED`
   且 provisional episode 被后效应关闭后，read-only registry 才返回 scope-valid target。

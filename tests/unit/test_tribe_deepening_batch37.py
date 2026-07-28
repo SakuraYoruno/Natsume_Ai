@@ -217,17 +217,13 @@ class TestVitalSignsCircadian:
 # ── T-258 ────────────────────────────────────────────────────────────────────
 
 class TestCircadianNightEndocrineLink:
-    """T-258：CircadianAgent night 相位切换时联动 EndocrineAgent 降低 cortisol。"""
+    """T-258：夜间只提交 bounded endocrine relief，不再触碰私有 delta。"""
 
     def test_night_phase_reduces_cortisol_delta(self, registry):
         agent = CircadianAgent(state_registry=registry)
         agent._last_phase = "dusk"  # 模拟从 dusk 切换到 night
 
         mock_endo = MagicMock()
-        mock_endo._bond_cortisol_delta = 0.05
-        mock_endo._bond_lock = MagicMock()
-        mock_endo._bond_lock.__enter__ = MagicMock(return_value=None)
-        mock_endo._bond_lock.__exit__ = MagicMock(return_value=False)
 
         with patch("host_brain.tribe.circadian_agent.get_endocrine_agent", return_value=mock_endo), \
              patch("host_brain.tribe.circadian_agent.get_glymphatic_agent"), \
@@ -242,23 +238,20 @@ class TestCircadianNightEndocrineLink:
              }):
             agent.refresh_state(source="test", ts_ms=1000)
 
-        # 验证 _bond_cortisol_delta 被修改（降低）
-        assert mock_endo._bond_lock.__enter__.called, \
-            "night 相位切换时应访问 EndocrineAgent._bond_lock"
+        mock_endo.record_legacy_hormonal_delta.assert_called_once()
+        call_kwargs = mock_endo.record_legacy_hormonal_delta.call_args.kwargs
+        assert call_kwargs["cortisol_delta"] < 0.0
+        assert call_kwargs["operation"] == "circadian_night_relief"
 
 
 # ── T-259 ────────────────────────────────────────────────────────────────────
 
 class TestMirrorNeuronEndocrineLink:
-    """T-259：MirrorNeuronAgent 高共情时联动 EndocrineAgent 降低 cortisol。"""
+    """T-259：高共情只提交 bounded endocrine relief。"""
 
     def test_high_resonance_reduces_cortisol(self, registry):
         agent = MirrorNeuronAgent(state_registry=registry)
         mock_endo = MagicMock()
-        mock_endo._bond_cortisol_delta = 0.08
-        mock_endo._bond_lock = MagicMock()
-        mock_endo._bond_lock.__enter__ = MagicMock(return_value=None)
-        mock_endo._bond_lock.__exit__ = MagicMock(return_value=False)
 
         mock_social = MagicMock()
         mock_social.get_bond_context = MagicMock(return_value={
@@ -278,13 +271,14 @@ class TestMirrorNeuronEndocrineLink:
 
         resonance_strength = float(result.get("resonance_strength") or 0.0)
         if resonance_strength >= 0.60:
-            assert mock_endo._bond_lock.__enter__.called, \
-                "高共情时应访问 EndocrineAgent._bond_lock 降低 cortisol"
+            mock_endo.record_legacy_hormonal_delta.assert_called_once()
+            call_kwargs = mock_endo.record_legacy_hormonal_delta.call_args.kwargs
+            assert call_kwargs["cortisol_delta"] <= 0.0
+            assert call_kwargs["operation"] == "mirror_resonance_relief"
 
     def test_low_resonance_no_endocrine_call(self, registry):
         agent = MirrorNeuronAgent(state_registry=registry)
         mock_endo = MagicMock()
-        mock_endo._bond_lock = MagicMock()
 
         mock_social = MagicMock()
         mock_social.get_bond_context = MagicMock(return_value={
@@ -304,5 +298,4 @@ class TestMirrorNeuronEndocrineLink:
 
         resonance_strength = float(result.get("resonance_strength") or 0.0)
         if resonance_strength < 0.60:
-            assert not mock_endo._bond_lock.__enter__.called, \
-                "低共情时不应访问 EndocrineAgent._bond_lock"
+            mock_endo.record_legacy_hormonal_delta.assert_not_called()

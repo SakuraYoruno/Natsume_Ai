@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_AUTOMATIC_PROFILE_CANARY_ACTIVATION_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_ENDOCRINE_LEGACY_MUTATION_RETIREMENT_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -48,8 +48,8 @@
 > profile 仅含低风险表达偏好和 opaque refs；其 ID/digest/revision 会进入下一次冻结的文本、
 > Voice 与 Avatar plan，不能修改 Soul、consent 或 self-affect。生产文本 classifier 的 `0.72`
 > 不满足门槛，不能被当成自动成长成功。
-> `HostEmotionRuntime`、Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与
-> Surface 的其它兼容 state 仍未清零；Monitor 审核、canary 长期收益、真实模型和三模态物理服务也尚未闭环。因此状态仍为
+> `HostEmotionRuntime`、Limbic 与 Endocrine 的生产写入已逐项切断，但 BodySense、Motive、legacy
+> Bond queue 与 Surface 的其它兼容 state 仍未清零；Monitor 审核、canary 长期收益、真实模型和三模态物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 > 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
@@ -397,9 +397,11 @@ Host 情感上下文有两层边界。生产 ASGI 的 `InputRuntimeApplicationPo
 compatibility slot，production 留空。`TribeApplicationPorts` 还显式携带 affective-life authority：
 canonical mode 下 Limbic 的 legacy `EmotionPersistence`、metabolism、timeline append、decay 和
 Bond progress/regress callback 统一 short-circuit 为 `RETIRED_CANONICAL_LIFE`，不得再构造或写入
-第二份 self-affect；只有明确 offline/test compatibility composition 才保留旧行为。该事实仍不等于
-全量旧 writer 清零：BodySense、Endocrine、Motive、Bond queue 和 timeline compatibility projection 的
-read-only/retirement 边界仍待后续切断。
+第二份 self-affect；只有明确 offline/test compatibility composition 才保留旧行为。Endocrine 的 legacy
+cortisol/oxytocin delta buffer、`_last_state`、hormonal hint、callback 与 fan-out 在同一 canonical mode
+也全部退役，且 Circadian/MirrorNeuron 只能走受控 compatibility method，不能直写私有字段。该事实仍不等于
+全量旧 writer 清零：BodySense、Motive、Bond queue 和 timeline compatibility projection 的 read-only/
+retirement 边界仍待后续切断。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

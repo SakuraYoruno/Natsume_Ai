@@ -122,8 +122,10 @@ composition root：`build_production_host_application_ports()` 不再构造 muta
 仍可显式选择 compatibility runtime，但它不属于 production object graph。production Tribe ports
 随后还以 immutable affective-life authority gate 退役 Limbic 的 legacy persistence、metabolism、
 timeline、decay 与 Bond callback：这些路径只返回 `RETIRED_CANONICAL_LIFE`，而不再生成 self-affect
-mutation。此处仍只清除了 Host 与 Limbic 两组旧 writer；BodySense、Endocrine、Motive 和 volatile
-Bond queue 尚未完成 read-only cutover。
+mutation。Endocrine 的 legacy cortisol/oxytocin buffer、last-state、hint 和 fan-out 也在 canonical
+mode 退役，只可返回无状态 hard-state projection；Circadian/MirrorNeuron 不再绕过该边界直写私有 delta。
+此处仍只清除了 Host、Limbic 与 Endocrine 三组旧 writer；BodySense、Motive 和 volatile Bond queue 尚未
+完成 read-only cutover。
 
 0148 的 `CompanionProfileIngress` 现在把一条更窄的直接控制路径加入同一 composition：
 `POST /v1/digital-life/relationship/companion-profile` 经 `host.companion-profile` 验证

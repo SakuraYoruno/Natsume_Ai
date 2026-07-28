@@ -641,7 +641,8 @@ authority 存在时均经 `AffectFusionService` 形成 scoped observation/apprai
 感受。旧 runtime 只存在于显式 offline/test compatibility composition。随后 canonical
 `TribeApplicationPorts` 也成为 Limbic compatibility writer 的 gate：旧 persistence/metabolism/
 timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
-回调追加为另一个 self-affect 事实。Endocrine、BodySense、Motive、Bond queue 与旧 timeline 的只读
+回调追加为另一个 self-affect 事实。Endocrine 的 delta buffer/last-state/hint/fan-out 也由同一 gate
+拒绝；Circadian/MirrorNeuron 不再直写其私有字段。BodySense、Motive、Bond queue 与旧 timeline 的只读
 投影仍未清零。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；

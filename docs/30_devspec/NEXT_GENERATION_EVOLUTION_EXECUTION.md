@@ -5,7 +5,7 @@
 
 版本：v4.8
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-06_ENDOCRINE_LEGACY_MUTATION_RETIREMENT_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -249,8 +249,11 @@ Tribe 与 Input 都在有 Life authority 时走 canonical `AffectFusionService`�
 port 在 production 留空。随后 Limbic 的 compatibility self-affect writer 也在同一 production
 authority 下退役：`EmotionPersistence`、metabolism、timeline append、decay 与 Bond progress/regress
 callback 统一返回 `RETIRED_CANONICAL_LIFE`，禁止写入或重建旧 self-affect。离线/test composition 仍可
-显式使用该兼容实现，作为单一回滚窗口；它不构成第二个 production writer。BodySense、Endocrine、Motive、
-volatile Bond queue 和其它 organ/bond writer 仍未清零，不能把这些局部切断写成 DL-06 完成。
+显式使用该兼容实现，作为单一回滚窗口；它不构成第二个 production writer。Endocrine 的 legacy
+cortisol/oxytocin buffer、`_last_state`、hormonal hint 和 downstream fan-out 也在 canonical mode
+退役：只返回 hard-state projection 与 `RETIRED_CANONICAL_LIFE`，不消费 event delta；Circadian/MirrorNeuron
+不再直接操作它的私有字段。BodySense、Motive、volatile Bond queue 和其它 organ/bond writer 仍未清零，
+不能把这些局部切断写成 DL-06 完成。
 
 退出：Soul digest 不变，低风险 apply→rollback 真实影响后续表达，旧 writer runtime 使用量=0。
 

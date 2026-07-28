@@ -441,8 +441,11 @@ DL-06 的第二条旧 writer 切断使 `TribeApplicationPorts` 明确携带 affe
 production composition 选中 canonical Life journal 时，Limbic 的 legacy `EmotionPersistence`、
 EmotionVector metabolism、`emotion_timeline` append、periodic decay 和 Bond progress/regress callback
 全部返回 `RETIRED_CANONICAL_LIFE`，不再写入或重建旧自我情感状态；离线/测试兼容 composition 才可保留
-原行为。该 central gate 同时覆盖多个旧 organ callback，但并不代表 BodySense、Endocrine、Motive、
-volatile Bond queue、Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成。
+原行为。第三条切断沿用同一 authority 给 Endocrine：production endocrine 只可返回 hard-state 的无状态
+投影，不能消费 cortisol/oxytocin delta、更新 `_last_state`、生成 hormonal hint 或 fan-out 到 Limbic、
+Interoception/PainReward；所有 legacy delta/event 写入显式返回 `RETIRED_CANONICAL_LIFE`。Circadian 与
+MirrorNeuron 也不再触碰 Endocrine 私有字段。它仍不代表 BodySense、Motive、volatile Bond queue、
+Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成。
 
 内部旁车到 Governance owner 的既有批次都只作提交绑定历史。当前 Authority owner 集合证明每个 Host root 的 canonical SQLite connection、Memory stores、ModelAttempt 与 CapabilityBroker runtime identity 均隔离，Prompt/Route catalog 也不再共享可变实例；关闭失败会保留未完成资源并阻断新 epoch。生产 locator facade/Container 已物理清零，测试桥不属于可发布产品对象图；Chroma 与 Neo4j 仍使用配置级共享 namespace，所以不能外推为 tenant isolation、资源崩溃恢复、事务化 Chat、波次集成或 production canary 已完成。当前 fresh 完整架构静态 Gate 1～14 已全部 `PASS`、`failed_gates=[]`：Task Runtime feature-canary 合同和 Host lifecycle ports 已迁入中立 `host_brain/contracts/`，Persistence 与 Composition 分别直接依赖 canonical contract；旧导入路径只保留同一对象重导出，因此 application/persistence 与 app/composition 两个 SCC 均已消除。Gate 3 继续由 Research shadow ledger 的 1271/512/108 行职责拆分保持通过，没有扩大白名单。该结论只表示静态分层收口，不代表 Universal Runtime 七路线、NE-01 或完整架构项目完成。
 

@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_ENDOCRINE_LEGACY_MUTATION_RETIREMENT_SLICE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -91,6 +91,13 @@ decay 或 Bond progress/regress callback 时，统一返回 `RETIRED_CANONICAL_L
 第二份 self-affect；这个 gate 只在明确 offline/test compatibility composition 未选 canonical Life 时放开。
 它没有替代新的 Life command，也没有退休 BodySense、Endocrine、Motive 或 volatile Bond queue，故 DL-06
 仍为进行中。
+
+当前 `DL-06_ENDOCRINE_LEGACY_MUTATION_RETIREMENT_SLICE` 继续复用该 production authority：
+Endocrine 只能返回输入 hard-state 的无状态 compatibility projection，不能消费或累加旧
+cortisol/oxytocin delta、更新 `_last_state`、生成旧 hormonal hint 或向 Limbic/Interoception/PainReward
+fan-out。`record_stress_event`、Bond/loneliness/task/immune callback 与显式 delta 入口在 canonical
+mode 均返回 `RETIRED_CANONICAL_LIFE`；Circadian/MirrorNeuron 已停止直接写 Endocrine 私有字段。
+这只退役 Endocrine mutation authority，BodySense、Motive 和 volatile Bond queue 仍待处理。
 
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
