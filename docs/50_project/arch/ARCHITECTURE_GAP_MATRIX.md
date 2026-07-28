@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.36
+版本：v3.37
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -24,6 +24,11 @@ Host/Obs/Monitor 的固定 `runtime/host` 与跨实例误杀缺口已在代码�
 并在 sidecar 启动后连续验证 Host PID/监听/health/readiness 与真实 Obs/
 Monitor 端点，失败定向回收 acceptance 根。尚缺修复提交上的真实重跑、
 SQLite migration、网络/浏览器回执和重启恢复。
+`b6b341be` 的第二次跑次确认 secret ref 已生效、新 Gate 正确失败关闭，又
+暴露 Service Catalog 的中间 rollout candidate 被旧首探针提前接受。当前
+首探针和最终五轮 Gate 均要求最终 catalog stage、`host.main` owner 与两类
+identity digest；不得以 readiness、metrics 或端口监听兜底。下一干净提交
+仍须重跑。
 Monitor 依赖还有 8 项 npm audit 告警，因此该项保持
 `FIRST_REAL_START_FAILED / FIX_CODE_COMPLETE / RERUN_PENDING`。
 

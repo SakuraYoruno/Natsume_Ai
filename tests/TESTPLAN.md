@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.38
+版本：v0.39
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -45,9 +45,15 @@
   identity、监听 PID、`/health` 与 `/ready` payload identity；真实 Obs/
   Monitor 端点也必须继续可用。任一失败不得返回 `started`，并且只能清理
   本次显式 acceptance runtime root。
+- T-NE07-HOST-07：Service Catalog 多阶段 rollout 期间，启动器不得把
+  AUDIT/SHADOW/PREFLIGHT/CANARY 中间 candidate 误认成最终 Host。首次放行
+  与最终连续 Gate 都必须匹配配置的目标 stage、`host.main` owner、
+  operation/snapshot SHA-256 响应头；不得以 `/ready`、`/obs/metrics` 或
+  监听端口兜底。
 - 首次真实启动已暴露 HMAC 配置矛盾与旧脚本假成功，跑次结论为 `FAIL`。
-  修复定向单元为 `20 passed in 3.63s`，Workspace ASGI 定向集成为
-  `5 passed in 5.45s`；干净提交上的真实重跑仍未执行。
+  `b6b341be` 的第二次启动确认密钥修复和失败关闭有效，并暴露中间 stage
+  误判。更新后定向单元为 `21 passed in 3.66s`，Workspace ASGI 定向集成为
+  `5 passed in 5.45s`；下一干净提交上的真实重跑仍未执行。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

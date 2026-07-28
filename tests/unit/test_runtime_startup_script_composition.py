@@ -86,11 +86,39 @@ def test_host_stability_gate_checks_expected_listener_and_both_payload_identitie
         "Is-HostProcess -ProcessId $ExpectedPid",
         "Get-ListeningPid -ProbePort $ProbePort",
         "[int]$listeningPid -eq $ExpectedPid",
-        'Test-HttpPayloadIdentity -Url $HealthUrl -Kind "health"',
-        'Test-HttpPayloadIdentity -Url $ReadyUrl -Kind "readiness"',
+        '-ExpectedCatalogStage $ExpectedCatalogStage',
+        '-Kind "health"',
+        '-Kind "readiness"',
         "$consecutive -ge $RequiredConsecutiveChecks",
     ):
         assert required in function_source
+
+
+def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    identity_start = source.index("function Test-HttpPayloadIdentity")
+    identity_end = source.index("\nfunction Wait-HostCatalogStage", identity_start)
+    identity_source = source[identity_start:identity_end]
+    launch_start = source.index("$healthUrl = ")
+    launch_end = source.index("$hostPid = [int]$proc.Id", launch_start)
+    launch_source = source[launch_start:launch_end]
+
+    for header in (
+        "x-natsume-catalog-stage",
+        "x-natsume-catalog-candidate-owner",
+        "x-natsume-catalog-operation-digest",
+        "x-natsume-catalog-snapshot-digest",
+    ):
+        assert header in identity_source
+    assert '$candidateOwner -ne "host.main"' in identity_source
+    assert identity_source.count("sha256:[0-9a-f]{64}") == 2
+    assert "$healthOk = Wait-HostCatalogStage `" in launch_source
+    assert "-ExpectedCatalogStage $catalogTargetStage" in launch_source
+    assert "Wait-Http -Url $healthUrl" not in launch_source
+    assert "/obs/metrics" not in launch_source
+    assert "Get-ListeningPid -ProbePort $Port" not in launch_source
 
 
 def test_child_script_capture_does_not_wait_for_long_lived_descendant(

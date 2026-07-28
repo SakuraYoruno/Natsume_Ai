@@ -317,6 +317,14 @@ Monitor 启动后连续五次核对 Host 进程 identity、监听 PID、`/health
 显式 acceptance runtime root，并对有限日志尾部脱敏。修复必须在干净提交上
 真实重跑后才能改变状态。
 
+`b6b341be` 的下一次真实运行已消除 Workspace 错误，并由新稳定性 Gate 正确
+拒绝假成功；其 Host `Application startup complete → Shutting down` 是
+Service Catalog 正常停止中间 rollout candidate，而不是最终服务自然退出。
+启动脚本过去在第一个通用 health 响应后过早进入 sidecar 阶段。当前首次
+放行与五轮稳定性检查都必须核对最终目标 stage、`host.main` candidate owner
+以及 operation/snapshot SHA-256 响应头；不再接受 readiness、metrics 或
+单纯监听端口作为 Host 最终身份。
+
 ## 9. 健康与降级语义
 
 ### 9.1 端点不是同义词

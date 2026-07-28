@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.46
+版本：v2.47
 维护日期：2026-07-28
 状态：当前证据
 
@@ -41,8 +41,12 @@
 - Workspace 现支持只落盘 `sec://` 引用并在 Host 进程内解析；启动器在
   sidecar 启动后连续五次核对 Host PID、监听与 health/readiness payload，
   同时要求真实 Obs、Monitor 端点继续可用，失败会定向清理 acceptance 根。
-- 修复定向单元为 `20 passed in 3.63s`，Workspace ASGI 定向集成为
-  `5 passed in 5.45s`；真实干净提交重跑仍待执行。
+- `b6b341be` 的第二次真实启动确认 Workspace 引用已生效且稳定性 Gate 正确
+  拒绝假成功；进一步发现 Service Catalog 中间 rollout candidate 被旧首探针
+  误认成最终 Host。首探针现必须验证最终 stage、`host.main` owner 及
+  operation/snapshot digest，禁止用 readiness、metrics 或监听端口兜底。
+- 更新后定向单元为 `21 passed in 3.66s`，Workspace ASGI 定向集成为
+  `5 passed in 5.45s`；下一干净提交上的真实重跑仍待执行。
 
 ## NE-05 Skill 生命周期本地代码波次
 

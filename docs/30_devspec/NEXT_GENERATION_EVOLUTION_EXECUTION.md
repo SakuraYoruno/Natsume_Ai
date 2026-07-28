@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.38
+版本：v3.39
 日期：2026-07-28
 状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_FIRST_START_FAILED / FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
 
@@ -1319,3 +1319,18 @@ moderate 来自 React Router；可用修复均要求 major 版本变化，当前
 `5 passed in 5.45s`。这只证明修复代码，不代替干净提交上的真实重跑；当前
 状态是
 `FIRST_REAL_START_FAIL / FIX_CODE_COMPLETE / RERUN_PENDING / PROGRAM_INCOMPLETE`。
+
+提交 `b6b341be` 的第二次真实启动确认 `sec://` Workspace HMAC 已解析，
+日志中不再出现 `WORKSPACE_RUNTIME_BINDING_INVALID`；Obs/Monitor 均保持
+健康，新增稳定性 Gate 也正确返回失败并定向清理，没有再次输出 `started`。
+该跑次又暴露一层启动协议：Service Catalog 会按
+`AUDIT → SHADOW → PREFLIGHT → CANARY → ENFORCE` 逐级启动、验证、停止
+中间 candidate，旧的首次通用 `/health` 探针把中间 stage 当成最终服务，
+过早拉起了 sidecar。
+
+启动器因此再收紧为：首次放行必须读取 Host 响应头并匹配配置的最终
+`HOST_SERVICE_CATALOG_TARGET_MODE`，同时验证 candidate owner 为
+`host.main`、operation/snapshot digest 均为合法 SHA-256；禁止回落到
+`/ready`、`/obs/metrics` 或“端口正在监听”。最终五轮稳定性检查也必须保持
+同一最终 catalog identity。更新后的定向合同为
+`21 passed in 3.66s`；第三次真实启动仍须绑定下一干净提交。

@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.66
+版本：v5.67
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -45,6 +45,14 @@ secret store 解析 `HOST_AGENT_WORKSPACE_HMAC_SECRET_REF`，并拒绝双来源�
 监听及 health/readiness payload identity，同时复核 Obs/Monitor 端点。
 修复尚待干净提交实栈重跑，8 项 npm audit 告警也仍开放，因此这里只记
 `FIRST_REAL_START_FAILED / FIX_CODE_COMPLETE / RERUN_PENDING`。
+
+`b6b341be` 上的第二次真实启动已证明 Workspace ref 解析成功，新增稳定性
+Gate 也阻止了假 `started`；它同时表明 Service Catalog 的五阶段 rollout
+会暂时提供并主动停止中间 Host candidate。启动器过去会在第一个通用 health
+响应后过早启动 sidecar。当前初始探针和最终连续探针都要求响应头匹配目标
+catalog stage、`host.main` owner、operation digest 与 snapshot digest，
+并删除 readiness、metrics 和仅监听端口兜底。此事实仍是代码修订，尚未形成
+第三次真实通过回执。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

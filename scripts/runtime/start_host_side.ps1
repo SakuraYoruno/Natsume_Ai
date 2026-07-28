@@ -424,12 +424,32 @@ function Test-HttpPayloadIdentity {
     [string]$Url,
     [ValidateSet("health", "readiness")]
     [string]$Kind,
+    [string]$ExpectedCatalogStage = "",
     [int]$TimeoutSec = 3
   )
   try {
-    $payload = Invoke-RestMethod -Uri $Url -Method Get -TimeoutSec $TimeoutSec
+    $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec
+    if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+      return $false
+    }
+    $payload = $response.Content | ConvertFrom-Json
     if ($null -eq $payload) {
       return $false
+    }
+    $expectedStage = ([string]$ExpectedCatalogStage).Trim().ToUpperInvariant()
+    if ($expectedStage) {
+      $stage = [string]$response.Headers["x-natsume-catalog-stage"]
+      $candidateOwner = [string]$response.Headers["x-natsume-catalog-candidate-owner"]
+      $operationDigest = [string]$response.Headers["x-natsume-catalog-operation-digest"]
+      $snapshotDigest = [string]$response.Headers["x-natsume-catalog-snapshot-digest"]
+      if (
+        $stage.Trim().ToUpperInvariant() -ne $expectedStage -or
+        $candidateOwner -ne "host.main" -or
+        $operationDigest -notmatch '^sha256:[0-9a-f]{64}$' -or
+        $snapshotDigest -notmatch '^sha256:[0-9a-f]{64}$'
+      ) {
+        return $false
+      }
     }
     $fields = @($payload.PSObject.Properties.Name)
     if ($Kind -eq "health") {
@@ -451,12 +471,35 @@ function Test-HttpPayloadIdentity {
   }
 }
 
+function Wait-HostCatalogStage {
+  param(
+    [string]$Url,
+    [string]$ExpectedCatalogStage,
+    [int]$TimeoutSeconds
+  )
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if (
+      Test-HttpPayloadIdentity `
+        -Url $Url `
+        -Kind "health" `
+        -ExpectedCatalogStage $ExpectedCatalogStage `
+        -TimeoutSec 3
+    ) {
+      return $true
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  return $false
+}
+
 function Test-HostStartupStability {
   param(
     [int]$ExpectedPid,
     [int]$ProbePort,
     [string]$HealthUrl,
     [string]$ReadyUrl,
+    [string]$ExpectedCatalogStage,
     [ValidateRange(2, 10)]
     [int]$RequiredConsecutiveChecks = 5
   )
@@ -473,12 +516,20 @@ function Test-HostStartupStability {
       [int]$listeningPid -eq $ExpectedPid
     )
     $healthIdentity = if ($processAlive -and $listenerMatches) {
-      Test-HttpPayloadIdentity -Url $HealthUrl -Kind "health" -TimeoutSec 3
+      Test-HttpPayloadIdentity `
+        -Url $HealthUrl `
+        -Kind "health" `
+        -ExpectedCatalogStage $ExpectedCatalogStage `
+        -TimeoutSec 3
     } else {
       $false
     }
     $readyIdentity = if ($healthIdentity) {
-      Test-HttpPayloadIdentity -Url $ReadyUrl -Kind "readiness" -TimeoutSec 3
+      Test-HttpPayloadIdentity `
+        -Url $ReadyUrl `
+        -Kind "readiness" `
+        -ExpectedCatalogStage $ExpectedCatalogStage `
+        -TimeoutSec 3
     } else {
       $false
     }
@@ -1320,6 +1371,15 @@ $hostArgs = @("-m", "host_brain", "--host", $BindHost, "--port", ([string]$Port)
 if ($StartupCheck.IsPresent) {
   $hostArgs += "--startup-check"
 }
+$catalogTargetStage = (
+  Get-EnvSetting `
+    -Values $envValues `
+    -Name "HOST_SERVICE_CATALOG_TARGET_MODE" `
+    -DefaultValue "ENFORCE"
+).Trim().ToUpperInvariant()
+if ($catalogTargetStage -notin @("AUDIT", "SHADOW", "PREFLIGHT", "CANARY", "ENFORCE")) {
+  throw "HOST_SERVICE_CATALOG_TARGET_MODE is invalid"
+}
 
 $null = Write-RuntimeEnvFile -Path $runtimeEnvFile -SeedValues $envValues
 $cmdLine = @(
@@ -1340,28 +1400,20 @@ $proc = Start-HostCommand `
   -Breakaway:$BreakawayFromConsole
 
 $healthUrl = "http://$probeHost`:$Port/health?skip_dependency_probes=1"
-$healthOk = Wait-Http -Url $healthUrl -TimeoutSeconds $WaitSeconds
-if (-not $healthOk) {
-  $readyUrl = "http://$probeHost`:$Port/ready"
-  $healthOk = Wait-Http -Url $readyUrl -TimeoutSeconds 8
-}
-if (-not $healthOk) {
-  $metricsUrl = "http://$probeHost`:$Port/obs/metrics"
-  $healthOk = Wait-Http -Url $metricsUrl -TimeoutSeconds 8
-}
-if (-not $healthOk) {
-  $listeningPid = Get-ListeningPid -ProbePort $Port
-  if ($null -ne $listeningPid -and [int]$listeningPid -eq [int]$proc.Id) {
-    $healthOk = $true
-  }
-}
+$healthOk = Wait-HostCatalogStage `
+  -Url $healthUrl `
+  -ExpectedCatalogStage $catalogTargetStage `
+  -TimeoutSeconds $WaitSeconds
 if (-not $healthOk) {
   Stop-ProcessTree -ProcessId ([int]$proc.Id) | Out-Null
   $stderrTail = ""
   if (Test-Path -Path $stderrLog) {
-    $stderrTail = (Get-Content -Path $stderrLog -Tail 80 -ErrorAction SilentlyContinue) -join "`n"
+    $stderrTail = Get-SanitizedLogTail -Path $stderrLog -Lines 80
   }
-  throw "host service failed health check at $healthUrl within $WaitSeconds seconds.`n$stderrTail"
+  throw (
+    "host service failed final catalog stage health check at $healthUrl " +
+    "for stage $catalogTargetStage within $WaitSeconds seconds.`n$stderrTail"
+  )
 }
 
 $hostPid = [int]$proc.Id
@@ -1613,6 +1665,7 @@ $hostStable = Test-HostStartupStability `
   -ProbePort $Port `
   -HealthUrl $healthUrl `
   -ReadyUrl "http://$probeHost`:$Port/ready" `
+  -ExpectedCatalogStage $catalogTargetStage `
   -RequiredConsecutiveChecks 5
 $obsProcessStatus = [string]$(
   if ($obsProcessResult.PSObject.Properties.Name -contains "status") {
