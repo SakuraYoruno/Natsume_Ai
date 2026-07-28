@@ -1,15 +1,15 @@
 """CapabilityForgeSettings —— Capability Forge 自动提案域配置（OPT-4 第二批）。
 
-背景：`host_brain/app/capability_forge.py` 中 `_get_auto_plan_thresholds()` 使用 10 个
-`HOST_CAPABILITY_FORGE_AUTO_*` 环境变量控制自动提案的门槛、冷却、金丝雀比例、
-自动审批策略。这些配置原本散落在 `_parse_bool_env/_parse_int_env/_parse_float_env`
+背景：`host_brain/app/capability_forge.py` 中 `_get_auto_plan_thresholds()` 使用 7 个
+`HOST_CAPABILITY_FORGE_AUTO_*` 环境变量控制自动提案的门槛、冷却和建议金丝雀比例。
+这些配置原本散落在 `_parse_bool_env/_parse_int_env/_parse_float_env`
 的逐项 `os.getenv(...)` 调用中，属于 OPTIMIZATION_PLAN_20260420 §8 OPT-4 要求
 迁移的"散点环境读取"。
 
 本模块把它们统一收敛为 pydantic-settings 子域，并保留：
 - 原有的默认值（与 capability_forge.py 中 `default=` 完全对齐，防止回归）；
 - 原有的取值范围（ge/le 硬约束，防止非法配置）；
-- readiness_fields() 报告，让 /health/env-readiness 能看到这 10 个字段的来源。
+- readiness_fields() 报告，让 /health/env-readiness 能看到这 7 个字段的来源。
 
 迁移后，capability_forge.py 只需要调用 `get_capability_forge_settings()` 拿到强类型
 的设置对象，不再需要运行时 `os.getenv` 解析。
@@ -26,7 +26,7 @@ from .base import SettingsFieldReport, inspect_setting
 
 
 class CapabilityForgeSettings(BaseSettings):
-    """Capability Forge 自动提案域配置（10 个 HOST_CAPABILITY_FORGE_AUTO_* 环境变量）。"""
+    """Capability Forge 自动提案域配置（7 个 HOST_CAPABILITY_FORGE_AUTO_* 环境变量）。"""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -58,16 +58,6 @@ class CapabilityForgeSettings(BaseSettings):
         default=5, ge=1, le=100,
         alias="HOST_CAPABILITY_FORGE_AUTO_CANARY_TRAFFIC_PERCENT",
     )
-    auto_approve_enabled: bool = Field(
-        default=False, alias="HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED"
-    )
-    auto_approve_stage: str = Field(
-        default="shadow", alias="HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE"
-    )
-    auto_approver: str = Field(
-        default="auto_forge", alias="HOST_CAPABILITY_FORGE_AUTO_APPROVER"
-    )
-
     @classmethod
     def readiness_fields(cls) -> list[SettingsFieldReport]:
         s = get_capability_forge_settings()
@@ -80,9 +70,6 @@ class CapabilityForgeSettings(BaseSettings):
             ("auto_min_failed", "HOST_CAPABILITY_FORGE_AUTO_MIN_FAILED", 2, s.auto_min_failed),
             ("auto_dedupe_cooldown_ms", "HOST_CAPABILITY_FORGE_AUTO_DEDUPE_COOLDOWN_MS", 1_800_000, s.auto_dedupe_cooldown_ms),
             ("auto_canary_traffic_percent", "HOST_CAPABILITY_FORGE_AUTO_CANARY_TRAFFIC_PERCENT", 5, s.auto_canary_traffic_percent),
-            ("auto_approve_enabled", "HOST_CAPABILITY_FORGE_AUTO_APPROVE_ENABLED", False, s.auto_approve_enabled),
-            ("auto_approve_stage", "HOST_CAPABILITY_FORGE_AUTO_APPROVE_STAGE", "shadow", s.auto_approve_stage),
-            ("auto_approver", "HOST_CAPABILITY_FORGE_AUTO_APPROVER", "auto_forge", s.auto_approver),
         ]
         return [
             inspect_setting(

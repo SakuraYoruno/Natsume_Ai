@@ -3,9 +3,39 @@
 
 # 测试与验收目录
 
-版本：v2.41
+版本：v2.42
 维护日期：2026-07-28
 状态：当前证据
+
+## NE-05 Skill 生命周期本地代码波次
+
+- migration `0141_skill_lifecycle_authority.sql` 通过 fresh 0001→0141
+  真实 SQLite smoke；V2 authority 覆盖 canary operation/outbox、
+  activation evidence、maturity decision、idempotency operation、active
+  projection 和 terminal receipt。
+- `test_ne05_skill_lifecycle_v2.py` 真实重开 0138 Lab
+  report/run/sandbox、proposal、ReviewItem 和 Supply Chain 证据，覆盖原子
+  activate、exact replay、degrade、使用目标自身 evidence 的 rollback、
+  forged Review 零写、过期 canary reconciliation 以及 Host active-version
+  resolver。
+- Compiler、Supply Chain、安全接收、V2 lifecycle、Host composition、
+  maturity、Forge proposal-only 和持久化分层的最终受影响集合为
+  `181 passed, 1 skipped in 51.82s`。唯一 skip 是 Windows symlink 创建权限，
+  不计为通过。
+- 架构 Gate 3 首跑拒绝了 1,834 行未分类 V2 repository；没有增加白名单。
+  证据/投影校验被拆到不持有连接或事务的 475 行 mixin，SQLite transaction
+  owner 降为 1,492 行。拆分后的重叠定向回归为
+  `12 passed in 13.79s`，fresh Gate 1～14 最终
+  `PASS / failed_gates=[]`。
+- 全仓 collect-only 收集到 11,419 项；唯一 error 是 `origin/dev` 已有的
+  `test_long_memory_quality_regressions.py` 导入缺失。该基线错误未被计入
+  NE-05 通过，也未在本波扩范围修改。
+- 外部 bundle/provider canary、真实签名基础设施和 NE-07 全栈没有运行；
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。当前结论为
+  `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`。
+- 0141 使既有七路线 0140 coverage receipt 按设计失效；先落定干净实现提交，
+  再以 SQLite backup 复制 accepted snapshot、只追加 0141 并 query-only
+  重开，禁止重跑 accepted worker。
 
 ## NE-01 代码波次封口
 

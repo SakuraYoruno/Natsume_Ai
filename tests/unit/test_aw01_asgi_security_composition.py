@@ -1080,6 +1080,13 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "scheduler": scheduler_runtime,
             "operator": operator_runtime,
         }
+        review_continuation_observer = kwargs.pop(
+            "review_continuation_observer"
+        )
+        assert (
+            type(review_continuation_observer).__name__
+            == "ReviewContinuationGuardianObserver"
+        )
         assert kwargs == {
             "review_store": task_runtime_container.review_continuation_store,
             "review_decision_store": task_runtime_container.review_store,

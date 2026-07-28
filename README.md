@@ -392,7 +392,7 @@ Edge 指令的旧进程级 owner 已退役，首条正向受治理链也已接�
 | Planning Search | `PARTIAL_RULED_OBJECTIVE_CAPABILITY_SEARCH_V1 / D20C_ACCEPTANCE_PENDING_EXTERNAL` | Thalamus 现仅把明确的“研究/调研计划”与“前端可用性计划”编译为固定 `target_id=planning_search` 的 server-owned `CAPABILITY_SEARCH_V1`，并让 `task/tag/risk` 经 Governor 严格 schema 绑定；Host 只接受该 catalog-backed 入口，顶层或 `args` 内的 legacy `planned_steps/steps` 会在上下文构造和 admission 前拒绝。Host 再从 app-composed `SkillRegistry` 的冻结、低风险、免确认能力中生成至少两条竞争候选，在虚拟态中选择两项不同 Skill 的有界顺序路径，最后编译为 `skill → skill → chat` immutable TaskGraph。节点的标准 worker 输出是 `receipt_ref + narrative`，路径长度、依赖与候选目录均由服务端冻结，worker 不会二次规划。显式 Governor-bound `failure_replan` 会先由 canonical TaskStore 重开 `FAILED` predecessor 和 evidence，再以同 root 的 `graph_revision + 1` 准入替换图；它不是自动触发或按失败自适应选择不同候选。仅建议、禁止调用工具、通用计划、Code/Pentest 仍不会借此获得执行 authority。Research D20b/D20c 的机械证据链仍不构成真实外部 provider/cohort 或收益/promotion 结论。 |
 | Capability Planning Risk Authority | `LOCAL_TARGETED_PASS / NE-02_PARTIAL` | `CAPABILITY_SEARCH_V1` 的 effective risk ceiling 固定为 `min(intent.planning_max_risk_level, Governor approved binding.risk_level)`；Governor decision/grant reference 与 server-owned 两项执行步数均写入冻结 virtual state，缺失或畸形 binding risk 失败关闭。它只收紧当前 Research/Frontend 窄切片的候选空间，不构成通用规划、真实收益或生产 promotion。 |
 | Persona 演化 | `CENTRAL_FENCE_WIRED` | legacy 直写已中央拒绝；proposal、Review、版本激活和 rollback 替代链尚未实现 |
-| 长期演化 | `INCOMPLETE` | NE-03 的 World/Scene/Intent/Guardian、Action Preview/Catalog 与 0137 长期目标 owner 已进入 Host 对象图；NE-04 已能在真实 digest-pinned Docker 中运行三类隔离双臂，0140 只持久化脱敏 real-trace dataset，Obs/Monitor 只读展示 proposal-only 证据。实现提交的正式 commit-bound 收据仍须在提交后生成；Skill Compiler、Knowledge OS 及后续真实全栈也未完成 |
+| 长期演化 | `INCOMPLETE` | NE-03 的 World/Scene/Intent/Guardian、Action Preview/Catalog 与 0137 长期目标 owner 已进入 Host 对象图；NE-04 已能在真实 digest-pinned Docker 中运行三类隔离双臂，0140 只持久化脱敏 real-trace dataset，Obs/Monitor 只读展示 proposal-only 证据。NE-05 已完成本地代码波次：0141 成为 Skill activation/maturity/active projection 的单一 SQLite authority，Host 只解析已批准 active version；外部 bundle/provider canary、NE-06 与 NE-07 真实全栈仍未完成 |
 
 本轮 NE-01 还收口了一个此前明确缺失的窄窗口：无前置 Review 的到期 `RETRY_PENDING` 不再先独立提交 READY，而是与 Attempt、Lease、Heartbeat 和 claim Outbox 在同一 SQLite writer UoW 中完成；若 Attempt Outbox identity 漂移，READY promotion 也会回滚。需要新 Review 的重试仍先落 durable Review、后续再 claim，不能以原子化为由绕过审批。该证据只覆盖这条 retry 边界，不代表 general/multi-node recovery、生产 canary 或 NE-01 完成。
 
@@ -485,7 +485,33 @@ python scripts/runtime/run_ne04_golden_experiments.py `
   --commit-sha "<完整 40 位提交 SHA>" `
   --receipt-path artifacts/local-gates/<commit-sha>/ne04/golden-suite.json
 ```
-NE-05 已有确定性 `SkillDraftV1`、安全接收与 0109 lifecycle 记录。V1 rollback 现在必须从目标 bundle 自己既有的不可变 `ACTIVATED` receipt 重开 Lab/Review/SBOM/signature/sandbox evidence；从未独立激活、跨 skill kind/name 的目标会失败关闭，不再复制被替换版本的证据。但 Lab/Review/Sandbox URI 仍未查询真实 authority，supply-chain 状态与 terminal receipt 不是同一 UoW，exact replay 仍有缺陷，Host 也仍从旧 Skill registry 解析；因此不构成真实 activation/rollback 闭环。生产 Governor 的 restrict-only maturity policy 已默认开启，缺失或伪造 scorecard 最高风险。
+NE-05 已把确定性编译与运行时激活分开。`SkillDraftV1` 可从
+Markdown、API contract、script 或受约束的 accepted trace 生成确定性
+inventory、CycloneDX SBOM、签名申请和 content-addressed bundle；编译器只保存
+来源摘要，不保存 raw thought、私密正文或签名私钥。签名接收仍先进入
+quarantine/stage，不能直接 import 或 activate。
+
+新的连续 migration `0141_skill_lifecycle_authority.sql` 是生产生命周期 owner。
+激活会真实重开 0138 Lab report/run/sandbox、proposal、ReviewItem 的
+status/version/subject/evidence、Supply Chain 的 SBOM/signature/canary，
+并在一个 SQLite UoW 内提交 activation evidence、maturity decision、active
+projection、operation 与 terminal receipt。exact replay 先重开 operation；
+过期 canary claim 进入 reconciliation，不能重复发送。rollback 必须使用目标旧
+版本自己的历史 evidence。Host lifespan 只从 V2 active projection 解析冻结的
+`builtin-skill-alias.v1` adapter，未知 adapter/protocol、缺 handler 或成熟度超过
+静态风险上限会在启动时失败关闭；运行时不扫描目录，也不 import 外部 bundle
+Python。旧 V1 mutation service/repository、hot loader、Supply Chain 公共
+activate/reject 和 Forge 的 approval/runtime-route authority 已删除，Forge
+只保留 proposal source。最终受影响波次为 `181 passed, 1 skipped in 51.82s`；
+跳过项是 Windows 无 symlink 创建权限。真实外部 bundle/provider canary 与
+NE-07 全栈尚未执行，因此状态是
+`CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`，不是生产全栈
+`PASS`。架构 Gate 3 首跑拒绝 1,834 行未分类仓储后，证据/投影校验已拆为
+无连接、无事务的 475 行 mixin，唯一 SQLite writer 降为 1,492 行；没有增加
+大型文件白名单，最终 Gate 1～14 全部通过。
+由于 0141 推进了仓库 migration head，既有七路线 0140 收据在本实现提交中按
+设计先失败关闭；实现提交落定后只通过 SQLite backup 追加 0141 并 query-only
+重开，不重跑任何 accepted worker。
 NE-06 的 0110 V1 ledger 只持久化 Feedback、Knowledge、Identity 的事件名与引用；APPLIED/ACTIVE/ROLLED_BACK 没有切换真实 policy/persona/knowledge/identity owner，引用也未查询 Lab/Review/Snapshot authority。Prefrontal 的一个参数漂移已修复，但 V1 不具备 activation authority。
 World projection 现在按 `(key, source_ref)` 去重：不同来源且值不同的观察会保留并显式标记为冲突；同值多来源只作为佐证保留，不伪造冲突。该兼容投影不替代 workspace-scoped `WorldResolver`、Scene 或 Guardian 的生产 authority。
 
@@ -590,7 +616,7 @@ request
 
 对于 direct `skill` 与已选中的 `plan` 内已登记 `codex_production` 节点，Profile/default 展开都在 HostCommand/WorkOrderV3/TaskGraph admission 前完成。Plan 仅可从已批准候选输入和 immutable node binding 生成该载荷；调用方自带的冻结载荷会在 admission 前失败关闭，replan 会按 `graph_revision + 1` 重建新的 node-bound 载荷。冻结的 adapter payload 以 `node_id` 写入 WorkOrder input pack，带 payload digest、root/graph/node/revision、business scope、operation fingerprint、Review/approval ref；worker 会重验这些字段后才经 CapabilityBroker dispatch，且强制 `start_background=false`。重放比较只屏蔽 payload 内轮换的 Review/approval 引用及其派生 digest，真正执行始终读取首次 durable admission 的原载荷，其余字段漂移仍失败关闭。因此执行期不能因 profile 默认值变化而重建另一份工作单。此切片不等于 Plan 或 NE-01 完成：通用多节点恢复、全路线 Budget/Receipt、commit-bound acceptance 与真实服务栈验收仍未完成。
 
-当前 `chat`、`skill`、`delegate`、`plan`、Scheduler 和 Internal Agent 进入这条主链。`task_progress`、`recent_turn` 只读取 durable projection；旧 Executive 的生产入口、`route_planning`、`conversation_execution`、`skill_routing`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag 执行和进程内任务 registry 已物理退役。Cortex 的 contextual-session/style、clarification 直答、LLM unavailable fallback 和异步 post-process compatibility branch，以及 Surface 的 `schedule_async_post_process()` fire-and-forget 入口也已物理删除：canonical route 未获 Governed Runtime 支持会在可见对话写入前拒绝，支持时只把冻结上下文交给 TaskGraph；提交后的 Projection 仍经 durable `surface.post_process` 处理。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只保留 fail-closed 拒绝边界；`SkillDag` 类型及 adapter 仅保留为零生产调用者的兼容合同，不能调度 worker。旧 Executive 内对 Runtime Capability Forge 自动 gap synthesis/replan/route override 的调用已删除，但独立 Forge `runtime-match` 端点仍是 NE-05 待退役边界，不能记为 authority 清零。`app/intelligent_runtime.py` 已物理删除，不能再以 prompt outline 或只读 SkillDag hint 的名义形成第二执行 authority；`SkillComposer` 本身也不暴露 `execute()`。实际执行只能重新经 Governed admission 形成 immutable TaskGraph。这是旧 authority 的部分负向收口，不等于通用 PlanningSearch、全路线 receipt 或 NE-01 完成。Internal 的既有 Agent executor 只在 child grant 验证后接收由 V3 投影的兼容对象，不再拥有 admission authority。0096 后，Task-bound Review 的批准后一次性 resume、拒绝和到期会在原 Review 事务中排入 continuation；composition-owned worker 按 immutable HostCommand surface 回到原 Host/Internal/Scheduler runtime，POST continuation 不重跑 worker，PRE continuation 不制造伪 Attempt。
+当前 `chat`、`skill`、`delegate`、`plan`、Scheduler 和 Internal Agent 进入这条主链。`task_progress`、`recent_turn` 只读取 durable projection；旧 Executive 的生产入口、`route_planning`、`conversation_execution`、`skill_routing`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag 执行和进程内任务 registry 已物理退役。Cortex 的 contextual-session/style、clarification 直答、LLM unavailable fallback 和异步 post-process compatibility branch，以及 Surface 的 `schedule_async_post_process()` fire-and-forget 入口也已物理删除：canonical route 未获 Governed Runtime 支持会在可见对话写入前拒绝，支持时只把冻结上下文交给 TaskGraph；提交后的 Projection 仍经 durable `surface.post_process` 处理。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只保留 fail-closed 拒绝边界；`SkillDag` 类型及 adapter 仅保留为零生产调用者的兼容合同，不能调度 worker。旧 Executive 内的 Runtime Capability Forge 路由覆盖调用和独立 Forge approval/runtime-match authority 均已退役；Forge 只产生 proposal，运行统计固定显示 `authority=PROPOSAL_ONLY` 且 applied 为 0。`app/intelligent_runtime.py` 已物理删除，不能再以 prompt outline 或只读 SkillDag hint 的名义形成第二执行 authority；`SkillComposer` 本身也不暴露 `execute()`。实际执行只能重新经 Governed admission 形成 immutable TaskGraph。这些负向收口不等于真实外部 canary 或全程序完成。Internal 的既有 Agent executor 只在 child grant 验证后接收由 V3 投影的兼容对象，不再拥有 admission authority。0096 后，Task-bound Review 的批准后一次性 resume、拒绝和到期会在原 Review 事务中排入 continuation；composition-owned worker 按 immutable HostCommand surface 回到原 Host/Internal/Scheduler runtime，POST continuation 不重跑 worker，PRE continuation 不制造伪 Attempt。
 
 Review HTTP 决策使用独立的 server-owned `review.operator / review:decide` Secure Ingress policy；`internal:agent:execute` 不能越权审批，actor 必须等于认证 principal，Task-bound Review 只能由 Task Runtime 内部创建。Internal/Scheduler 的拒绝或到期结果使用 exact `review-decision://...` durable ref；升级前误写入的 POST pre-acceptance receipt 只能在 HostCommand、Graph revision、Review/node/version 与旧 receipt 全部匹配的单事务 CAS 中替换。生产 Operator credential 仍需部署配置，真实 canary 尚未运行。
 

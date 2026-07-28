@@ -11,7 +11,7 @@ import time
 from typing import Any, Mapping
 
 from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
-from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL, TokenService
+from host_brain.governor.tokens import TOKEN_TYPE_APPROVAL
 from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch D：业务路径统一降级
 
 
@@ -122,34 +122,19 @@ def _build_candidate_key(*, reason_code: str, suggested_family: str, missing_cap
 
 
 class CapabilityForgeService:
-    """Forge proposal registry with governor approval-token gate and replay persistence."""
-
-    _TOKEN_SKILL_NAME = "capability_forge"
-    _TOKEN_SEQ = 1
+    """Proposal-only Forge registry; it owns no runtime or activation route."""
 
     def __init__(
         self,
         *,
         telemetry: CapabilityGapTelemetry,
-        token_service: TokenService | None = None,
         ledger: Any | None = None,
     ) -> None:
         self._telemetry = telemetry
-        self._token_service = token_service or TokenService()
         self._ledger = ledger
         self._lock = threading.RLock()
         self._loaded_from_ledger = False
         self._proposals: dict[str, dict[str, Any]] = {}
-        self._runtime_match_counters: dict[str, int] = {
-            "total": 0,
-            "applied": 0,
-            "full_hit": 0,
-            "canary_hit": 0,
-            "canary_miss": 0,
-            "no_active_proposal": 0,
-            "invalid_input": 0,
-            "no_match": 0,
-        }
 
     def _audit(self, *, request_id: str, stage: str, reason_code: str, detail: str) -> None:
         if self._ledger is None:
@@ -341,8 +326,6 @@ class CapabilityForgeService:
         from host_brain.app.settings import get_capability_forge_settings  # noqa: PLC0415
 
         s = get_capability_forge_settings()
-        auto_approve_stage = _normalize_stage(s.auto_approve_stage)
-        auto_approver = (s.auto_approver or "").strip() or "auto_forge"
         return {
             "enabled": bool(s.auto_proposal_enabled),
             "min_detected_count": int(s.auto_min_detected),
@@ -351,9 +334,6 @@ class CapabilityForgeService:
             "min_failed_count": int(s.auto_min_failed),
             "dedupe_cooldown_ms": int(s.auto_dedupe_cooldown_ms),
             "canary_traffic_percent": int(s.auto_canary_traffic_percent),
-            "auto_approve_enabled": bool(s.auto_approve_enabled),
-            "auto_approve_stage": auto_approve_stage,
-            "auto_approver": auto_approver,
         }
 
     def maybe_auto_plan_for_gap(
@@ -479,24 +459,6 @@ class CapabilityForgeService:
             "auto_approved": False,
         }
 
-        if not bool(thresholds.get("auto_approve_enabled")):
-            return result
-
-        gate = dict(created.get("governor_gate") or {})
-        token = str(gate.get("approval_token_ref") or "").strip()
-        if not token or not proposal_id:
-            result["reason"] = "PROPOSAL_CREATED_TOKEN_MISSING"
-            return result
-        approved = self.approve_and_promote(
-            proposal_id=proposal_id,
-            approval_token_ref=token,
-            approver=str(thresholds.get("auto_approver") or "auto_forge"),
-            target_stage=str(thresholds.get("auto_approve_stage") or "SHADOW"),
-        )
-        result["reason"] = "PROPOSAL_CREATED_AND_APPROVED"
-        result["auto_approved"] = True
-        result["status"] = str(approved.get("status") or "APPROVED")
-        result["stage"] = str(dict(approved.get("promotion") or {}).get("stage") or "")
         return result
 
     def _resolve_executor_target(self, proposal: Mapping[str, Any]) -> str:
@@ -522,7 +484,6 @@ class CapabilityForgeService:
         session_id: str,
         proposer: str,
         candidate: Mapping[str, Any],
-        approval_token_ref: str,
         canary_traffic_percent: int,
         ts_ms: int,
     ) -> dict[str, Any]:
@@ -585,12 +546,9 @@ class CapabilityForgeService:
             },
             "governor_gate": {
                 "required": True,
-                "approval_token_ref": approval_token_ref,
-                "token_skill_name": self._TOKEN_SKILL_NAME,
-                "token_seq": self._TOKEN_SEQ,
-                "token_consumed": False,
-                "issued_ts_ms": ts_ms,
-                "expiry_ts_ms": ts_ms + int(getattr(self._token_service, "approval_ttl_ms", 120000)),
+                "authority": "VERSION_ACTIVATION_SERVICE",
+                "review_required": True,
+                "production_influence_enabled": False,
             },
             "release_plan": {
                 "shadow": {"enabled": True, "state": "PENDING"},
@@ -679,19 +637,11 @@ class CapabilityForgeService:
         proposal_id = _build_proposal_id(str(candidate.get("candidate_key") or ""), now)
         normalized_session = str(session_id or "").strip() or "forge-session"
         normalized_proposer = str(proposer or "").strip() or "capability_forge"
-        approval_token_ref = self._token_service.issue_approval_token(
-            intent_id=proposal_id,
-            skill_name=self._TOKEN_SKILL_NAME,
-            session_id=normalized_session,
-            seq=self._TOKEN_SEQ,
-            now_ts_ms=now,
-        )
         artifact = self._build_artifact(
             proposal_id=proposal_id,
             session_id=normalized_session,
             proposer=normalized_proposer,
             candidate=candidate,
-            approval_token_ref=approval_token_ref,
             canary_traffic_percent=canary_traffic_percent,
             ts_ms=now,
         )
@@ -719,7 +669,7 @@ class CapabilityForgeService:
             found = self._proposals.get(key)
         return copy.deepcopy(found) if isinstance(found, Mapping) else None
 
-    def approve_and_promote(
+    def _legacy_approve_and_promote(
         self,
         *,
         proposal_id: str,
@@ -727,6 +677,7 @@ class CapabilityForgeService:
         approver: str,
         target_stage: str = "shadow",
     ) -> dict[str, Any]:
+        raise RuntimeError("CAPABILITY_FORGE_PROPOSAL_ONLY")
         self._ensure_loaded_from_ledger()
         key = str(proposal_id or "").strip()
         if not key:
@@ -799,13 +750,14 @@ class CapabilityForgeService:
         self._persist_state_event(proposal=proposal, event=_FORGE_EVENT_APPROVE, actor=str(approver or "approver"))
         return copy.deepcopy(proposal)
 
-    def rollback(
+    def _legacy_rollback(
         self,
         *,
         proposal_id: str,
         operator: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
+        raise RuntimeError("CAPABILITY_FORGE_PROPOSAL_ONLY")
         self._ensure_loaded_from_ledger()
         key = str(proposal_id or "").strip()
         if not key:
@@ -993,7 +945,7 @@ class CapabilityForgeService:
         proposal["runtime_stats"] = runtime_stats
         return proposal
 
-    def record_runtime_result(
+    def _legacy_record_runtime_result(
         self,
         *,
         proposal_id: str,
@@ -1002,6 +954,7 @@ class CapabilityForgeService:
         error_code: str | None = None,
         actor: str = "executive_runtime",
     ) -> dict[str, Any] | None:
+        raise RuntimeError("CAPABILITY_FORGE_PROPOSAL_ONLY")
         self._ensure_loaded_from_ledger()
         key = str(proposal_id or "").strip()
         if not key:
@@ -1175,7 +1128,7 @@ class CapabilityForgeService:
             )
         return copy.deepcopy(proposal)
 
-    def get_runtime_route_override(
+    def _legacy_runtime_route_override(
         self,
         *,
         request_id: str,
@@ -1183,6 +1136,7 @@ class CapabilityForgeService:
         missing_capability_tags: list[str] | tuple[str, ...] | None = None,
         reason_code: str | None = None,
     ) -> dict[str, Any]:
+        raise RuntimeError("CAPABILITY_FORGE_PROPOSAL_ONLY")
         self._ensure_loaded_from_ledger()
         req = str(request_id or "").strip()
         family = str(suggested_family or "").strip().lower()
@@ -1274,14 +1228,21 @@ class CapabilityForgeService:
         return {"apply": False, "reason": "no_active_proposal"}
 
     def runtime_match_stats(self) -> dict[str, Any]:
-        with self._lock:
-            counters = dict(self._runtime_match_counters)
-        total = int(counters.get("total") or 0)
-        applied = int(counters.get("applied") or 0)
         return {
             "timestamp": _now_ms(),
-            "counters": counters,
-            "apply_rate": round((float(applied) / float(total)) if total > 0 else 0.0, 4),
+            "counters": {
+                "total": 0,
+                "applied": 0,
+                "full_hit": 0,
+                "canary_hit": 0,
+                "canary_miss": 0,
+                "no_active_proposal": 0,
+                "invalid_input": 0,
+                "no_match": 0,
+                "retired": 1,
+            },
+            "apply_rate": 0.0,
+            "authority": "PROPOSAL_ONLY",
         }
 
     def runtime_tuning_stats(self, *, limit: int = 20) -> dict[str, Any]:
@@ -1440,4 +1401,3 @@ class CapabilityForgeService:
 
 
 __all__ = ["CapabilityForgeService"]
-

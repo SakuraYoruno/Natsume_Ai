@@ -368,7 +368,7 @@ NE-03 先补做已合并 #84 的生产切流缺口，随后回到 NE-01 清除�
 - 0096 新增纯协调表与 composition-owned Review continuation worker。`CONSUMED/REJECTED/EXPIRED` 的 task-bound Review 与原 Review mutation 同事务入队；worker 以 owner/token/expiry/单调 fence 跨进程 claim/takeover，按 immutable HostCommand surface 回到原 Host/Internal/Scheduler runtime，并只在 reviewed Node 离开对应 waiting checkpoint 后完成协调。PRE `WAITING_APPROVAL` 进入统一 0090 outcome，公开 receipt/decision 使用合法的 `attempt_id=null`；POST 仍绑定原成功 Attempt 且不重跑 worker。续跑 credential 的期限覆盖 `budget time + child TTL` 且硬上限 24 小时；READY claim 与 worker 首次执行校验必须复核 live claim、exact Attempt/Lease/owner/fence。首次校验后由 Task Attempt/Lease 管理已开始的执行，Review heartbeat 丢失不伪称能撤销 blocking/to_thread 外部副作用，旧 owner也不得 complete/defer；
 - 0097 为 `S_TASK_GRAPH_NODE_GRANT` 增加 request+intent partial unique index 与身份 trigger；SQLite ledger 在 `BEGIN IMMEDIATE` 后重查 deterministic batch identity，跨进程 loser 只读取 winner 的 exact batch。批量第二条写入失败整事务回滚，历史重复让迁移 fail closed；
 - 0089 若在物理事务提交后丢失 migration receipt，只能在 checksum、列约束与索引形状全部吻合时修复 receipt；schema readiness 仍必须先于 Budget 写入；
-- Executive 生产入口、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag 执行和进程内任务 registry 已物理删除，`task_progress/recent_turn` 改为 durable projection/read route。Cortex 的 contextual-session/style、clarification 直答、LLM unavailable fallback 与异步 post-process compatibility branch，以及 Surface 的 `schedule_async_post_process()` fire-and-forget 入口也已删除；canonical route 未被 Governed Runtime 支持会在可见对话写入前拒绝，支持时只允许把冻结上下文交给 TaskGraph，提交后的 Projection 仍经 durable `surface.post_process` 处理。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只能 fail-closed 拒绝；纯 `SkillDag` 类型及 adapter 只作零生产调用者的兼容合同，不能调度 worker。旧 Executive 内的 Runtime Capability Forge 自动 gap synthesis/replan/route override 调用已删除；独立 Forge `runtime-match` 端点仍须在 NE-05 清理，不能伪称旧 authority 已归零。`app/intelligent_runtime.py` 已物理删除，`SkillComposer` 也不再暴露 `execute()`；任何可执行路径必须重新经 Governed admission 编译 immutable TaskGraph。该负向退役不构成通用 PlanningSearch 或 NE-01 完成。
+- Executive 生产入口、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、legacy SkillDag 执行和进程内任务 registry 已物理删除，`task_progress/recent_turn` 改为 durable projection/read route。Cortex 的 contextual-session/style、clarification 直答、LLM unavailable fallback 与异步 post-process compatibility branch，以及 Surface 的 `schedule_async_post_process()` fire-and-forget 入口也已删除；canonical route 未被 Governed Runtime 支持会在可见对话写入前拒绝，支持时只允许把冻结上下文交给 TaskGraph，提交后的 Projection 仍经 durable `surface.post_process` 处理。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只能 fail-closed 拒绝；纯 `SkillDag` 类型及 adapter 只作零生产调用者的兼容合同，不能调度 worker。旧 Executive 内的 Runtime Capability Forge 自动 gap synthesis/replan/route override 调用与独立 Forge approval/runtime-match authority 均已删除；Forge 只保留 proposal source。`app/intelligent_runtime.py` 已物理删除，`SkillComposer` 也不再暴露 `execute()`；任何可执行路径必须重新经 Governed admission 编译 immutable TaskGraph。该负向退役不构成真实外部 canary 或完整程序验收。
 - 旧 `/v1/agent/run` route-local Visual Agent loop 已同步退役：raw loop/client 与 Ledger writer 已物理删除，兼容 route 只返回固定 SSE 拒绝；视觉聊天仅 `text` 可进入模型链，`actions` 和未知格式在 runtime/model/Prompt/Memory/Ledger 前拒绝，legacy Action Planner 模型入口固定封口，纯 parser 标记 `NONE_PROPOSAL_ONLY`。这些负向路径都不产生 Task/Attempt/Effect/Receipt；正向视觉自动化只能由受治理 proposal 编译为新的 immutable TaskGraph revision，该安全收口不得记为能力完成。
 - D9 统一将受认证 Host Input/Gateway 的 Secure Ingress tuple（principal、成对 claim/audit ref、body SHA-256、派生 surface）冻结到 Governor、direct HostCommand 与 approved-plan admission；Plan 首次 admission 和 direct admission 均先以 base request/session/principal 只读预检 parent Governor binding，child grant 派生再复验。真实 SQLite admission/replay 与 principal-drift 零写入已覆盖该链。该证据不覆盖 Delegate 内部 dispatcher authority，也不等于通用候选搜索或 MCTS 已进入 Host。
 - D10 用 composition-owned `GovernedDelegateDispatcher` 替换 Host Delegate 对 legacy global dispatcher 的回落：只注册 `pentest_agent` 这个 effect-free Domain Pack/SecureRun handoff，冻结 command/request/session/principal/root WorkOrder/graph revision/node/attempt/lease/owner/fence/parent+node grant；调用前重验 node grant，Attempt/Lease/Fence 仍由外层 durable worker 保持。它不创建 runtime gateway、不写 legacy `skill_exec_log`。`intent_agent`、`translate_agent`、`vision_agent`、`repair_agent` 与未注册 target 在 direct/plan admission 前失败关闭。真实 SQLite direct + plan delegate/replay 已证明；这不是通用 delegate 平台，也不证明预算硬限、完整 Review canary 或候选搜索。
@@ -432,7 +432,7 @@ Lane A 已完成；Lane B 当前到 `PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / S
 #### Lane C：Legacy authority removal
 
 - 在 `PersonaEngine.apply_growth_delta()` authority 边界中央 fail closed 所有非迁移调用，并对 stage、milestone、interaction、emergent weekly 及后续新增调用点建立静态/运行时门禁；NE-01 只阻断旧写入，不在此波偷偷建立第二套演化系统；
-- 删除 Executive `_execute_explicit_skill_dag`、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 以及其内部的 Runtime Capability Forge 路由覆盖调用；保留的纯 `SkillDag` compatibility adapter 不得拥有 production caller 或 worker dispatch。独立 Forge `runtime-match` 必须在 NE-05 另行退役，不能以本条宣称旧 authority 归零；
+- 删除 Executive `_execute_explicit_skill_dag`、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 以及其内部的 Runtime Capability Forge 路由覆盖调用；保留的纯 `SkillDag` compatibility adapter 不得拥有 production caller 或 worker dispatch。独立 Forge approval/runtime-match authority 已在 NE-05 退役，Forge 只可生成 proposal；
 - 删除 `LegacyRuntimeTaskRegistry` 写入和全局 accessor；
 - `task_progress/recent_turn` 改为严格无副作用的 projection/read route，不再借 Executive 执行，也不在 Cortex 直写 visible conversation；需要纳入对话历史时必须先进入 TaskGraph Acceptance；
 - `SubAgentDispatcher` 必须删除全局 handler/gateway/独立日志写 authority，direct dispatch 只可返回稳定的 `LEGACY_SUB_AGENT_DISPATCH_RETIRED`；`intent_agent_handler` 只生成无副作用 handoff，不能以 legacy context 直调模型。恢复正向 Delegate 前，必须重新 admission 为 immutable TaskGraph，当前仅 `pentest_agent` 受治理只读交接可用；
@@ -591,12 +591,34 @@ ReAct 与 Visual 的退役结论、历史 inventory 和测试批次保持各自�
 - 自动生成 input/output contract、风险、工具依赖、verifier、test vectors、rollback；
 - bundle 生成 SBOM 和签名，进入 quarantine sandbox；
 - staged activation/rollback 成为真实生命周期，不靠目录扫描/import；
-- `SkillActivationEvidenceV1` 将 Lab report、Review、SBOM、signature、sandbox、rollback 和 maturity 绑定到 append-only 0109 ledger；
+- `SkillActivationEvidenceV2` 将真实 Lab report/run、Review subject/version、SBOM、signature audit、sandbox/canary、rollback 和 maturity 绑定到 append-only 0141 authority；
 - production IntentDecisionEngine 默认启用 restrict-only maturity policy，缺失或伪造 scorecard 直接最高风险；新能力最高 L1/L2；
 - promotion/degradation 由 durable evidence 与 Review 决定；
 - 退役旧 Capability Forge 平行 routing authority，只保留 proposal source。
 
-当前进度：确定性 `SkillDraftV1`、0109 evidence/receipt ledger、fenced activate/degrade/rollback service 和 active-only content-addressed registry 已落地。V1 rollback 只能重开目标 bundle 自己此前不可变 `ACTIVATED` receipt 所绑定的 evidence；从未独立激活或跨 skill kind/name 的 target 均失败关闭，不能复制被替换版本的 Lab/Review/SBOM/signature/sandbox 证据。该修复不把 URI 当成真实审批 authority，也不提供 Supply Chain 状态、evidence 与 terminal receipt 的同一 SQLite UoW；外部 provider sandbox canary、真实 Review/实验报告生产接线和 bundle import 仍未完成。最终完成条件仍是：至少一份 Markdown 和一条 accepted trace 各生成一个 draft；隔离验证、拒绝、staged activation、降级和 rollback 都有 receipt；未经审批自动升级为 0。
+当前进度：NE-05 代码波次已经完成并进入本地验收状态。Compiler 可从
+Markdown、API contract、script 与受约束的 accepted trace 确定性生成
+`SkillDraftV1`、inventory、CycloneDX SBOM、签名申请和 content-addressed
+bundle；raw thought、私密正文和签名私钥不会进入产物。连续 migration
+`0141_skill_lifecycle_authority.sql` 建立 canary operation/outbox、activation
+evidence、maturity decision、operation、active projection 与 terminal receipt。
+激活在一个 SQLite UoW 中真实重开 0138 Lab report/run/sandbox、proposal、
+ReviewItem subject/version/evidence、Supply Chain SBOM/signature/canary；exact
+replay 先查 operation，过期 canary claim 进入 reconciliation。rollback 只能
+重开目标旧版本自己的历史 evidence。
+
+生产 Host lifespan 通过 `LifecycleBoundSkillRegistry` 只解析 V2 active
+projection；当前唯一允许的外部映射协议为 `builtin-skill-alias.v1`，未知
+adapter/protocol、缺 handler 或 maturity 超过静态风险上限均启动失败关闭。
+运行时目录扫描、外部 Python 直接 import、V1 mutation service/repository、
+Supply Chain 公共 activate/reject 和 Capability Forge approval/runtime route
+authority 已退役；Forge 只保留 proposal source。受影响波次最终为
+`181 passed, 1 skipped in 51.82s`，跳过项为 Windows symlink 权限。真实外部
+bundle/provider canary 与 NE-07 服务栈尚未运行，故状态为
+`CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`，不得写成生产
+全栈 `PASS`。架构 Gate 3 首跑拒绝 1,834 行未分类仓储；本波没有加白名单，
+而是把无连接/无事务的 evidence/projection validator 拆出，SQLite writer
+降为 1,492 行，最终 Gate 1～14 全部通过。
 
 ### NE-06：Experience Feedback、Knowledge OS 与 Identity Migration
 

@@ -92,7 +92,7 @@ def test_obs_capability_forge_read_endpoints_and_removed_mutations(monkeypatch) 
         ),
         (
             f"/obs/capability-gaps/forge-proposals/{proposal_id}/approve",
-            {"approval_token_ref": seeded["governor_gate"]["approval_token_ref"]},
+            {"approval_token_ref": "retired"},
         ),
         (
             f"/obs/capability-gaps/forge-proposals/{proposal_id}/rollback",

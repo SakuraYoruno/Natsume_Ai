@@ -218,7 +218,7 @@ def _prepare(tmp_path, *, clock=lambda: 100):
         ts_ms=1,
     )
     assert migrated.success is True
-    assert migrated.summary["latest_version"] == 140
+    assert migrated.summary["latest_version"] >= 140
     return (
         db_path,
         SQLiteEvolutionLabV2Ledger(db_path),

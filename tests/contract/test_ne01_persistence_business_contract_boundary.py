@@ -20,9 +20,9 @@ REPOSITORY_IMPORT_BOUNDARIES = {
         "host_brain.evolution_lab",
         "host_brain.contracts.evolution_lab",
     ),
-    "host_brain/persistence/skill_lifecycle_repository.py": (
-        "host_brain.skills.skill_lifecycle",
-        "host_brain.contracts.skill_lifecycle",
+    "host_brain/persistence/skill_lifecycle_v2_repository.py": (
+        "host_brain.skills.skill_lifecycle_v2",
+        "host_brain.contracts.skill_lifecycle_v2",
     ),
     "host_brain/persistence/world_observation_journal.py": (
         "host_brain.runtime.context_contracts",
@@ -34,6 +34,7 @@ CONTRACT_MODULES = (
     "host_brain/contracts/evolution.py",
     "host_brain/contracts/evolution_lab.py",
     "host_brain/contracts/skill_lifecycle.py",
+    "host_brain/contracts/skill_lifecycle_v2.py",
     "host_brain/contracts/runtime_context.py",
 )
 
@@ -85,7 +86,6 @@ COMPATIBILITY_MODULES = {
 IDENTITY_PAIRS = (
     ("host_brain.contracts.evolution", "host_brain.evolution"),
     ("host_brain.contracts.evolution_lab", "host_brain.evolution_lab"),
-    ("host_brain.contracts.skill_lifecycle", "host_brain.skills.skill_lifecycle"),
     ("host_brain.contracts.runtime_context", "host_brain.runtime.context_contracts"),
 )
 
@@ -137,17 +137,6 @@ def test_compatibility_modules_do_not_redefine_contract_types() -> None:
             if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
         }
         assert local_definitions.isdisjoint(migrated_names)
-
-    skill_tree = _tree("host_brain/skills/skill_lifecycle.py")
-    skill_class_names = {
-        node.name for node in skill_tree.body if isinstance(node, ast.ClassDef)
-    }
-    assert {
-        "SkillActivationEvidenceV1",
-        "SkillLifecycleError",
-        "SkillLifecycleReceiptV1",
-    }.isdisjoint(skill_class_names)
-
 
 def test_legacy_and_neutral_contract_exports_have_identical_objects() -> None:
     for canonical_name, compatibility_name in IDENTITY_PAIRS:

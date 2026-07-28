@@ -40,7 +40,7 @@ def _prepare(tmp_path: Path, *, clock=lambda: 100):
         ts_ms=1,
     )
     assert migrated.success is True
-    assert migrated.summary["latest_version"] == 140
+    assert migrated.summary["latest_version"] >= 140
     ledger = SQLiteTrustedEvolutionLabLedger(db_path, clock=clock)
     reader = SQLiteTrustedRedactedDatasetReader(db_path)
     service = TrustedTraceRedactionService(

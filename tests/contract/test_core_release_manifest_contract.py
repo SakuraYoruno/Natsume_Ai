@@ -32,7 +32,7 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0140_evolution_lab_redacted_dataset.sql"
+        "0141_skill_lifecycle_authority.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
     assert (
@@ -155,6 +155,11 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert (
         "host_brain/audit/migrations/"
         "0140_evolution_lab_redacted_dataset.sql"
+        in migration_files
+    )
+    assert (
+        "host_brain/audit/migrations/"
+        "0141_skill_lifecycle_authority.sql"
         in migration_files
     )
     assert "host_brain/audit/migrations/0103_retire_llm_node_call_log.sql" in migration_files
