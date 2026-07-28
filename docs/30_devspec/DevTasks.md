@@ -3,7 +3,7 @@
 
 # 当前架构程序注册表
 
-版本：v4.4
+版本：v4.5
 维护日期：2026-07-28
 状态：`ONE_ACTIVE_PROGRAM`
 
@@ -18,13 +18,15 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-02_CODE_COMPLETE_LOCAL`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-03_CODE_COMPLETE_LOCAL`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
 使用户 observation 先落 journal、再可选形成七海自身 CARE/CONCERN 等 self-affect，
-而非镜像用户标签。关系后效应、流式表达、三模态计划与旧兼容 writer 清零仍由
-DL-03～DL-06 交付。此前 NE-01～NE-07 的 Universal Runtime、搜索、
+而非镜像用户标签。DL-03 已把 accepted reply 的 provisional relation episode、
+下一次输入的 aftereffect、boundary/repair/proactive permission 和 Surface 的可信关系
+约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。主动陪伴、
+流式表达、三模态计划与旧兼容 writer 清零仍由 DL-04～DL-06 交付。此前 NE-01～NE-07 的 Universal Runtime、搜索、
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。

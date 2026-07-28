@@ -15,6 +15,7 @@ class SurfaceRuntimePorts:
     get_ledger: Callable[[], Any]
     get_life_command_service: Callable[[], Any]
     get_life_snapshot_reader: Callable[[], Any]
+    get_relationship_lifecycle_service: Callable[[], Any]
     get_persistence_settings: Callable[[], Any]
     build_surface_context_packet: Callable[..., dict[str, Any]]
     build_user_preference_pack: Callable[..., dict[str, Any]]

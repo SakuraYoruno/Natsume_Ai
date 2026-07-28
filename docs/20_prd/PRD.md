@@ -3,7 +3,7 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.3
+版本：v4.4
 日期：2026-07-16
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
@@ -60,10 +60,12 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 最终表达应保持人格连续、语境适配、关系边界和用户主权。
 - 用户情绪观察与 Natsume 自身 Affect 必须使用不同类型和 writer。
 - 用户情绪观察必须带模态、置信度、有效期与 workspace/person/session scope；原始音频、图像和正文不得进入情感 journal，冲突观察必须保留而非静默覆盖。
+- 已接受的回复才可建立 provisional 关系 episode；下一次用户输入才能形成该回应的 aftereffect。沉默、离线和技术投递失败不得被解释为拒绝、不得扣信任或产生催促义务。
+- 关系连续性必须按 workspace 与 relationship subject 隔离；session 只作事件上下文。浪漫、排他和依赖默认未授权，不能由 Bond 分数、互动次数、模型措辞或单次道歉自动升级。
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
 - 人格核心和关系边界不得由单次模型输出、后台里程碑或交互统计直接修改。
 
-验收：同一已裁决输入在冻结版本下可复现表达控制；人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。
+验收：同一已裁决输入在冻结版本下可复现表达控制；relationship episode/aftereffect 的重复、重启和 response-loss reconcile 不得重复写入；边界与未完成修复的表达不得含负罪施压、威胁、排他控制或回应义务。人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。
 
 ### FR-MEMORY：生活记忆
 

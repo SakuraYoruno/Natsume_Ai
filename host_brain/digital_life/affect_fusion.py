@@ -238,6 +238,8 @@ class AffectFusionResult:
     self_affect: Mapping[str, Any]
     receipts: tuple[LifeCommandReceipt, ...]
     reason_codes: tuple[str, ...]
+    relationship_state: Mapping[str, Any] | None = None
+    relationship_aftereffect: Mapping[str, Any] | None = None
 
     def as_emotion_context(self) -> dict[str, Any]:
         components = list(_safe_mapping(self.self_affect).get("components") or [])
@@ -267,6 +269,13 @@ class AffectFusionResult:
                     f"life-command://{receipt.command_id}"
                     for receipt in self.receipts
                 ],
+                "relationship_life": {
+                    "schema_version": "relationship_turn_context.v1",
+                    "workspace_id": self.scope.workspace_id,
+                    "relationship_subject_id": self.scope.relationship_subject_id,
+                    "state": dict(self.relationship_state or {}),
+                    "aftereffect": dict(self.relationship_aftereffect or {}),
+                },
             },
             # These bridge keys are intentionally derived from Natsume's
             # canonical self-affect, never from the user's observation tag.
@@ -321,10 +330,14 @@ class AffectFusionService:
         *,
         command_service_provider: Callable[[], LifeCommandService],
         snapshot_reader_provider: Callable[[], LifeSnapshotReader],
+        relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
         self._command_service_provider = command_service_provider
         self._snapshot_reader_provider = snapshot_reader_provider
+        self._relationship_lifecycle_service_provider = (
+            relationship_lifecycle_service_provider
+        )
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
 
     def resolve_request(
@@ -342,6 +355,35 @@ class AffectFusionService:
                 "message": _text(getattr(request_body, "message", None), limit=8_000),
             }
         )[:32]
+        relationship_state: Mapping[str, Any] | None = None
+        relationship_aftereffect: Mapping[str, Any] | None = None
+        relationship_reason_code = ""
+        relationship_service = self._relationship_lifecycle_service()
+        if relationship_service is not None:
+            record_followup = getattr(relationship_service, "record_followup", None)
+            if not callable(record_followup):
+                raise RuntimeError("RELATIONSHIP_LIFECYCLE_SERVICE_NOT_INJECTED")
+            relationship_result = record_followup(
+                request_body=request_body,
+                request_id=stable_request_id,
+            )
+            relationship_reason_code = str(
+                getattr(relationship_result, "reason_code", "") or ""
+            ).strip()
+            raw_aftereffect = getattr(relationship_result, "aftereffect", None)
+            if callable(getattr(raw_aftereffect, "as_dict", None)):
+                relationship_aftereffect = raw_aftereffect.as_dict()
+            relationship_scope = getattr(relationship_result, "scope", None)
+            aggregate_id = str(
+                getattr(relationship_scope, "aggregate_id", "") or ""
+            ).strip()
+            if aggregate_id:
+                relationship_snapshot = self._require_snapshot_reader().get_snapshot(
+                    aggregate_id
+                )
+                relationship_state = _safe_mapping(
+                    _safe_mapping(relationship_snapshot.state).get("relationship_v2")
+                )
         drafts, source_reasons = _collect_observation_drafts(
             request_body=request_body,
             now_ms=now_ms,
@@ -382,6 +424,8 @@ class AffectFusionService:
         appraisal_id: str | None = None
         path = "FAST"
         reason_codes = list(source_reasons)
+        if relationship_reason_code:
+            reason_codes.append(relationship_reason_code)
         if candidates:
             path = "DEEP"
             selected = candidates[0]
@@ -416,6 +460,8 @@ class AffectFusionService:
             self_affect=affective,
             receipts=tuple(receipts),
             reason_codes=tuple(dict.fromkeys(reason_codes))[:8],
+            relationship_state=relationship_state,
+            relationship_aftereffect=relationship_aftereffect,
         )
 
     def _require_command_service(self) -> LifeCommandService:
@@ -429,6 +475,14 @@ class AffectFusionService:
         if not isinstance(reader, LifeSnapshotReader):
             raise RuntimeError("AFFECTIVE_LIFE_SNAPSHOT_READER_NOT_INJECTED")
         return reader
+
+    def _relationship_lifecycle_service(self) -> Any | None:
+        if self._relationship_lifecycle_service_provider is None:
+            return None
+        service = self._relationship_lifecycle_service_provider()
+        if service is None:
+            raise RuntimeError("RELATIONSHIP_LIFECYCLE_SERVICE_NOT_INJECTED")
+        return service
 
     def _submit(
         self,

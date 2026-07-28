@@ -26,6 +26,11 @@ def surface_runtime_ports_factory():
             "get_ledger": lambda: SimpleNamespace(canonical_db_path=":memory:"),
             "get_life_command_service": lambda: SimpleNamespace(),
             "get_life_snapshot_reader": lambda: SimpleNamespace(),
+            # Unit callers that only exercise the legacy direct-Surface seam
+            # deliberately omit the new accepted-response lifecycle.  The
+            # production composition always injects the real service; the
+            # DL-03 integration tests cover that durable path explicitly.
+            "get_relationship_lifecycle_service": lambda: None,
             "get_persistence_settings": lambda: SimpleNamespace(canonical_db_path=":memory:"),
             "build_surface_context_packet": lambda **_kwargs: {},
             "build_user_preference_pack": lambda **_kwargs: {},

@@ -106,6 +106,7 @@ def _submit_surface_foreground_completed(
     *,
     life_command_service: Any,
     life_snapshot_reader: Any,
+    relationship_lifecycle_service: Any | None = None,
     agent_input: Any,
     result: SurfaceMainChainResult,
     envelope: Any,
@@ -124,6 +125,7 @@ def _submit_surface_foreground_completed(
 
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
     person_id = str(getattr(agent_input, "person_id", "") or "").strip() or "default"
+    workspace_id = str(getattr(agent_input, "workspace_id", "") or "").strip() or "workspace::default"
     session_id = str(getattr(agent_input, "session_id", "") or "").strip()
     user_message = str(getattr(agent_input, "user_message", "") or "")
     reply_channel = str(
@@ -159,6 +161,7 @@ def _submit_surface_foreground_completed(
         "request_id": request_id,
         "session_id": session_id,
         "person_id": person_id,
+        "workspace_id": workspace_id,
         "user_message": user_message,
         "assistant_reply": str(narrative or ""),
         "completed_at_ms": completed_at_ms,
@@ -351,11 +354,38 @@ def _submit_surface_foreground_completed(
                 }
             ],
         }
-    return submit_life_command(
+    foreground_receipt = submit_life_command(
         service=life_command_service,
         reader=life_snapshot_reader,
         **command_payload,
     )
+    if relationship_lifecycle_service is None:
+        return foreground_receipt
+    provision = getattr(
+        relationship_lifecycle_service,
+        "provision_accepted_response",
+        None,
+    )
+    if not callable(provision):
+        raise RuntimeError("RELATIONSHIP_LIFECYCLE_SERVICE_NOT_INJECTED")
+    episode_receipt = provision(
+        workspace_id=workspace_id,
+        relationship_subject_id=person_id,
+        session_id=session_id or "session::unknown",
+        request_id=request_id or str(foreground_receipt.get("command_id") or ""),
+        response_receipt=foreground_receipt,
+        response_text=str(narrative or ""),
+    )
+    return {
+        **dict(foreground_receipt),
+        "relationship_episode": {
+            "command_id": episode_receipt.command_id,
+            "event_id": episode_receipt.event_id,
+            "state_version": episode_receipt.state_version,
+            "receipt_ref": f"life-event://{episode_receipt.event_id}",
+            "replayed": bool(episode_receipt.replayed),
+        },
+    }
 
 
 def _surface_delivery_authorization(

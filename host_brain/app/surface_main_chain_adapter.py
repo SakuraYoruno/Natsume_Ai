@@ -428,6 +428,9 @@ async def surface_main_chain_sse_generator(
                 _submit_surface_foreground_completed,
                 life_command_service=ports.get_life_command_service(),
                 life_snapshot_reader=ports.get_life_snapshot_reader(),
+                relationship_lifecycle_service=(
+                    ports.get_relationship_lifecycle_service()
+                ),
                 agent_input=agent_input,
                 result=result,
                 envelope=envelope,

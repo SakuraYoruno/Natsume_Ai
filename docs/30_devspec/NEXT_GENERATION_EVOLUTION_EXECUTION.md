@@ -3,13 +3,13 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v4.2
+版本：v4.3
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-02_CODE_COMPLETE_LOCAL / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-03_CODE_COMPLETE_LOCAL / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
-已经拥有持续情感生命”推导为完成。本合同以当前 `dev@d77cdb33e` 为基线，
+已经拥有持续情感生命”推导为完成。本合同以当前 `dev@fcb8997fa` 为基线，
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。
 
 ## 1. 产品结果
@@ -117,11 +117,33 @@ raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life ev
 
 退出：用户的悲伤、生气或快乐不会自动使七海拥有同一情绪。
 
-### DL-03：关系、记忆与后效应
+### DL-03：关系、记忆与后效应（代码完成，本地证据）
 
-- 以 `RelationshipEpisodeV1` 取代积分即亲密。stage 仅是描述投影，不能授予亲密或浪漫权限。
-- trust/safety 慢增、rupture 可快升；道歉不自动修复，必须等待后续用户反应。
-- accepted response/proactive delivery 写 provisional episode；下一次入站或 timeout 写 aftereffect。沉默不扣信任，投递失败不算拒绝。
+- `RelationshipEpisodeV1`、`RelationalAftereffectV1` 与 `RelationshipStateV2`
+  已进入既有 `LifeCommand → life_event_journal → CAS snapshot → replay` 链。migration
+  `0144_relationship_life_kernel.sql` 只从 canonical Life event 触发派生只读 head，
+  direct insert、update、delete 和 event identity 漂移均失败关闭。
+- `RelationshipLifecycleService` 以 `workspace_id + relationship_subject_id` 建立长期
+  aggregate；`session_id` 仅作为事件上下文。因此同一用户的跨 session 关系可连续，
+  不同 workspace 不会共享关系头。已接受的 Surface 或 governed foreground reply
+  先取得 Life receipt，才写 provisional episode；response-loss/reconcile 只重开同一
+  deterministic command，不重复创建 episode。
+- 下一次用户输入只以 opaque digest 关联最近 active episode，形成 `HELPFUL`、
+  `BOUNDARY`、`MISUNDERSTOOD`、`REPAIR_ACCEPTED` 或 `REPAIR_UNRESOLVED` aftereffect。
+  `SILENCE` 和 `DELIVERY_FAILED` 不降低信任、安全或主动权限；道歉本身不自动完成修复。
+  浪漫、排他、依赖同意默认均为 `NOT_GRANTED`，本切片不因积分或互动次数升级它们。
+- 生产 Host 的 `HostBondRuntime` 默认关闭 automatic stage transition；旧 Bond
+  score/stage 只保留兼容描述，不能把分数自动推进为亲密、恋人或依赖。Surface reply
+  compiler 仅在 Input runtime 加入的内部 provenance hand-off 存在时，读取关系状态并
+  注入“尊重空间、不得情感索取、不得负罪施压、不得宣布修复完成”等写作约束；外部
+  `emotion_context` 不能伪造这些约束或写入关系状态。
+
+本地定向集合 `54 passed in 20.50s` 覆盖关系 reducer、duplicate/replay、真实
+file-backed SQLite restart、accepted foreground reconciliation、workspace/session
+隔离、Bond 自动阶段兼容边界与 Surface 约束注入。远程 CI 固定为
+`NOT_RUN_ACCOUNT_QUOTA`。这不是主动陪伴、真实模型、语音/Avatar、真人体验或
+全服务栈验收；volatile Bond queue、旧 relationship projection 和完整旧 writer
+清零仍属于 DL-06。
 
 退出：裂痕、修复、主动权限和关系纹理跨重启恢复，跨用户泄漏=0。
 

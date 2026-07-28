@@ -72,6 +72,7 @@ def test_host_bond_runtime_owner_reuses_exact_epoch_and_reopens_after_close() ->
     assert owner.require_update_queue() is queue
     assert stage.ledger is ledger
     assert stage.stage_thresholds == {"FRIEND": 0, "CONFIDANT": 10}
+    assert stage.automatic_stage_transitions is False
     assert writer.ledger is ledger
     assert writer.neo4j_client is client
     assert writer.stage_engine is stage
@@ -181,6 +182,7 @@ def test_host_bond_runtime_settings_are_frozen_from_explicit_environment() -> No
             "HOST_BOND_SCORE_MAP": '{"INTERACTION_ENGAGED":7}',
             "HOST_BOND_QUEUE_MAX_SIZE": "3",
             "HOST_BOND_QUEUE_ENABLED": "false",
+            "HOST_BOND_AUTO_STAGE_TRANSITIONS": "true",
         }
     )
 
@@ -188,6 +190,7 @@ def test_host_bond_runtime_settings_are_frozen_from_explicit_environment() -> No
     assert settings.score_map["INTERACTION_ENGAGED"] == 7
     assert settings.max_queue_size == 8
     assert settings.worker_enabled is False
+    assert settings.automatic_stage_transitions is True
 
 
 def test_host_bond_client_builder_supports_memory_and_migrated_sqlite(

@@ -67,8 +67,10 @@ def build_production_acceptance_effect_handlers(
     conversation_turn_reader: Any | None = None,
     conversation_event_reader: Any | None = None,
     preference_store: Any | None = None,
+    life_command_service_provider: Callable[[], Any] | None = None,
     life_receipt_reader_provider: Callable[[], Any] | None = None,
     life_projection_dispatcher: Any | None = None,
+    relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
     gateway_reply_query_port: Callable[..., Any] | None = None,
     terminal_reconciliation_service: Any | None = None,
     terminal_reconciliation_store: Any | None = None,
@@ -104,8 +106,12 @@ def build_production_acceptance_effect_handlers(
             projection_dispatcher=life_projection_dispatcher,
         ),
         "life.foreground_completed": _AcceptedLifeForegroundHandler(
+            command_service_provider=life_command_service_provider,
             receipt_reader_provider=life_receipt_reader_provider,
             projection_dispatcher=life_projection_dispatcher,
+            relationship_lifecycle_service_provider=(
+                relationship_lifecycle_service_provider
+            ),
         ),
         "surface.reply_delivery": _AcceptedSurfaceReplyDeliveryHandler(
             query_port=gateway_reply_query_port,
@@ -467,16 +473,26 @@ class _AcceptedLifeForegroundHandler:
     def __init__(
         self,
         *,
+        command_service_provider: Callable[[], Any] | None,
         receipt_reader_provider: Callable[[], Any] | None,
         projection_dispatcher: Any | None,
+        relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
     ) -> None:
+        self._command_service_provider = command_service_provider
         self._receipt_reader_provider = receipt_reader_provider
         self._projection_dispatcher = projection_dispatcher
+        self._relationship_lifecycle_service_provider = (
+            relationship_lifecycle_service_provider
+        )
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         value = _accepted_life_request(payload)
         try:
-            command_receipt = _submit_accepted_life_foreground(payload)
+            command_receipt = _submit_accepted_life_foreground(
+                payload,
+                command_service_provider=self._command_service_provider,
+                snapshot_reader=self._reader(),
+            )
         except Exception as exc:
             try:
                 command_receipt = _reconcile_accepted_life_foreground(
@@ -490,13 +506,18 @@ class _AcceptedLifeForegroundHandler:
                     f"{_opaque_failure(reconciliation)}"
                 ) from exc
         try:
-            return await dispatch_and_require_life_projection_barrier(
+            relationship_episode = self._provision_relationship_episode(
+                value=value,
+                foreground_receipt=command_receipt,
+            )
+            projected = await dispatch_and_require_life_projection_barrier(
                 reader=self._reader(),
                 dispatcher=self._projection_dispatcher,
                 command_receipt=command_receipt,
                 command_payload=value["payload"],
                 correlation_id=value["correlation_id"],
             )
+            return self._with_relationship_episode(projected, relationship_episode)
         except Exception as exc:
             try:
                 return self.reconcile(payload)
@@ -514,12 +535,17 @@ class _AcceptedLifeForegroundHandler:
             receipt_reader_provider=self._receipt_reader_provider,
         )
         try:
-            return require_life_projection_barrier(
+            projected = require_life_projection_barrier(
                 reader=self._reader(),
                 command_receipt=command_receipt,
                 command_payload=value["payload"],
                 correlation_id=value["correlation_id"],
             )
+            relationship_episode = self._reconcile_relationship_episode(
+                value=value,
+                foreground_receipt=command_receipt,
+            )
+            return self._with_relationship_episode(projected, relationship_episode)
         except Exception as exc:
             raise AcceptanceEffectOutcomeUnknown(
                 "Life foreground requires exact read-only projection "
@@ -532,6 +558,116 @@ class _AcceptedLifeForegroundHandler:
                 "Life foreground requires an app-local projection reader"
             )
         return self._receipt_reader_provider()
+
+    def _relationship_service(self) -> Any | None:
+        if self._relationship_lifecycle_service_provider is None:
+            return None
+        if not callable(self._relationship_lifecycle_service_provider):
+            raise RuntimeError("RELATIONSHIP_LIFECYCLE_SERVICE_PROVIDER_INVALID")
+        service = self._relationship_lifecycle_service_provider()
+        if service is None:
+            raise RuntimeError("RELATIONSHIP_LIFECYCLE_SERVICE_NOT_INJECTED")
+        return service
+
+    def _relationship_inputs(
+        self,
+        *,
+        value: Mapping[str, Any],
+        foreground_receipt: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        payload = _json_object(
+            value.get("payload"),
+            "life.foreground_completed.payload",
+        )
+        return {
+            "workspace_id": str(payload.get("workspace_id") or "workspace::default").strip(),
+            "relationship_subject_id": str(value.get("person_id") or "").strip(),
+            "session_id": str(payload.get("session_id") or "session::unknown").strip(),
+            "request_id": str(value.get("correlation_id") or "").strip(),
+            "response_receipt": dict(foreground_receipt),
+            # The legacy foreground payload already has this visible reply for
+            # its conversation projection.  The relationship kernel consumes
+            # it only transiently to derive an opaque digest reference.
+            "response_text": str(payload.get("assistant_reply") or ""),
+        }
+
+    def _provision_relationship_episode(
+        self,
+        *,
+        value: Mapping[str, Any],
+        foreground_receipt: Mapping[str, Any],
+    ) -> Mapping[str, Any] | None:
+        service = self._relationship_service()
+        if service is None:
+            return None
+        provision = getattr(service, "provision_accepted_response", None)
+        if not callable(provision):
+            raise RuntimeError("RELATIONSHIP_LIFECYCLE_SERVICE_NOT_INJECTED")
+        receipt = provision(
+            **self._relationship_inputs(
+                value=value,
+                foreground_receipt=foreground_receipt,
+            )
+        )
+        return _relationship_episode_receipt(receipt)
+
+    def _reconcile_relationship_episode(
+        self,
+        *,
+        value: Mapping[str, Any],
+        foreground_receipt: Mapping[str, Any],
+    ) -> Mapping[str, Any] | None:
+        service = self._relationship_service()
+        if service is None:
+            return None
+        reconcile = getattr(service, "reconcile_accepted_response", None)
+        if not callable(reconcile):
+            raise RuntimeError("RELATIONSHIP_LIFECYCLE_RECONCILIATION_NOT_INJECTED")
+        receipt = reconcile(
+            **self._relationship_inputs(
+                value=value,
+                foreground_receipt=foreground_receipt,
+            )
+        )
+        return _relationship_episode_receipt(receipt)
+
+    @staticmethod
+    def _with_relationship_episode(
+        projected: Mapping[str, Any],
+        relationship_episode: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        result = dict(projected)
+        if relationship_episode is not None:
+            result["relationship_episode"] = dict(relationship_episode)
+        return result
+
+
+def _relationship_episode_receipt(receipt: Any) -> dict[str, Any]:
+    projected = (
+        dict(receipt)
+        if isinstance(receipt, Mapping)
+        else dict(receipt.as_dict())
+        if callable(getattr(receipt, "as_dict", None))
+        else None
+    )
+    if not isinstance(projected, Mapping):
+        raise TypeError("relationship episode receipt is not mapping-compatible")
+    event_id = str(projected.get("event_id") or "").strip()
+    command_id = str(projected.get("command_id") or "").strip()
+    if (
+        str(projected.get("status") or "").strip().upper() != "APPLIED"
+        or not command_id
+        or not event_id
+    ):
+        raise RuntimeError("RELATIONSHIP_EPISODE_RECEIPT_INVALID")
+    return {
+        "command_id": command_id,
+        "event_id": event_id,
+        "state_version": int(projected.get("state_version") or 0),
+        "state_digest": str(projected.get("state_digest") or ""),
+        "receipt_ref": _canonical_id_ref("life-event", event_id),
+        "replayed": bool(projected.get("replayed")),
+    }
 
 
 
@@ -948,14 +1084,40 @@ def _life_conversation_command_fields(
     }
 
 
-def _submit_accepted_life_foreground(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
+def _submit_accepted_life_foreground(
+    payload: Mapping[str, Any],
+    *,
+    command_service_provider: Callable[[], Any] | None = None,
+    snapshot_reader: Any | None = None,
+) -> Mapping[str, Any]:
+    """Submit through the app-local Life authority when one is composed.
 
+    The process provider remains a compatibility fallback for older isolated
+    adapters.  The production governed composition injects the app-local
+    command service, so acceptance effects do not rediscover mutable process
+    state during a Host lifespan.
+    """
     value = _accepted_life_request(payload)
-    life = PROCESS_LIFE_PROVIDER.require()
+    if command_service_provider is not None:
+        if not callable(command_service_provider):
+            raise RuntimeError(
+                "LIFE_FOREGROUND_COMMAND_SERVICE_PROVIDER_INVALID"
+            )
+        service = command_service_provider()
+        if service is None:
+            raise RuntimeError("LIFE_FOREGROUND_COMMAND_SERVICE_NOT_INJECTED")
+        if snapshot_reader is None:
+            raise RuntimeError("LIFE_FOREGROUND_SNAPSHOT_READER_NOT_INJECTED")
+        reader = snapshot_reader
+    else:
+        from host_brain.composition.life import PROCESS_LIFE_PROVIDER  # noqa: PLC0415
+
+        life = PROCESS_LIFE_PROVIDER.require()
+        service = life.command_service
+        reader = snapshot_reader or life.snapshot_reader
     receipt = submit_life_command(
-        service=life.command_service,
-        reader=life.snapshot_reader,
+        service=service,
+        reader=reader,
         command_type=str(value.get("command_type") or ""),
         person_id=str(value.get("person_id") or ""),
         command_id=str(value.get("command_id") or ""),

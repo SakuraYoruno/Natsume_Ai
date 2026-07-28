@@ -13,6 +13,9 @@ from host_brain.persona.surface_main_chain import (
 from host_brain.persona.response_form_contract import normalize_response_form
 import re
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+from host_brain.digital_life.relationship_guidance import (
+    build_relationship_reply_guidance,
+)
 
 _MEMORY_RECALL_SURFACE_REASONS = {
     "anaphoric_selection_recall",
@@ -430,6 +433,13 @@ def _surface_task_control_from_reply_plan(
     )
     if isinstance(trace_stage_meta, dict) and life_director_pack:
         trace_stage_meta["life_director"] = dict(life_director_pack)
+    relationship_guidance = build_relationship_reply_guidance(
+        _safe_mapping(getattr(agent_input, "emotion_context", None))
+    )
+    if isinstance(trace_stage_meta, dict) and relationship_guidance.available:
+        trace_stage_meta["relationship_life_guidance"] = (
+            relationship_guidance.trace()
+        )
     task_facts = _task_facts(
         reply_plan=reply_plan,
         agent_input=agent_input,
@@ -445,6 +455,13 @@ def _surface_task_control_from_reply_plan(
         task_facts = _clean_list(
             [
                 *life_fact_lines,
+                *task_facts,
+            ]
+        )
+    if relationship_guidance.facts:
+        task_facts = _clean_list(
+            [
+                *relationship_guidance.facts,
                 *task_facts,
             ]
         )
@@ -517,6 +534,7 @@ def _surface_task_control_from_reply_plan(
             *_surface_pragmatic_guidance_must_not_do(agent_input, ports=ports),
             *(() if preference_query_owned else _surface_memory_acceptance_must_not_do(agent_input)),
             *_surface_dream_context_must_not_do(agent_input),
+            *relationship_guidance.must_not_do,
         ]
     )
     if morning_greeting_mismatch:
@@ -573,6 +591,7 @@ def _surface_task_control_from_reply_plan(
                     if preference_query_owned
                     else _surface_memory_acceptance_must_include(agent_input, ports=ports)
                 ),
+                *relationship_guidance.must_include,
             ]
         ),
         "must_not_do": task_must_not_do,
@@ -589,6 +608,7 @@ def _surface_task_control_from_reply_plan(
                 "日期/近期集合追问要保留用户指定时间范围，并点出集合里的具体条目。" if memory_plan_reason == "collection_memory_recall" else "",
                 "失败追问只能解释召回事实里的失败结果和证据，不要猜新的根因。" if memory_plan_reason == "failure_debug_recall" else "",
                 "证据审查追问必须回答结论和依据；不要改写成日期集合列表，也不要夹带不相关的推荐条目。" if memory_plan_reason == "evidence_review_recall" else "",
+                *relationship_guidance.style_anchor,
                 _first_nonempty(reply_plan.get("style_anchor"), ""),
             ]
         ),

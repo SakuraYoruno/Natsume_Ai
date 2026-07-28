@@ -128,8 +128,14 @@ def compose_internal_runtime(
         secure_ingress_authority_resolver=command_ingress.store,
         runtime_owner_id=canonical_owner,
         scheduler_operation_handler=scheduler_operation_handler,
+        life_command_service_provider=(
+            lambda: life_authority_provider()[0]
+        ),
         life_receipt_reader_provider=life_receipt_reader_provider,
         life_projection_dispatcher=life_projection_dispatcher,
+        relationship_lifecycle_service_provider=(
+            surface_runtime_ports.get_relationship_lifecycle_service
+        ),
         agent_runtime_ports=agent_runtime_ports,
         internal_agent_artifact_store=artifact_store,
         internal_agent_workspace_runtime=workspace_runtime,
