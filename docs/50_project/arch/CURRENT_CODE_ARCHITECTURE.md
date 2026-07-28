@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.68
+版本：v5.69
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -61,7 +61,17 @@ allocator 继续拒绝 managed root 与 source repository 同目录或互为父�
 没有为验收放宽生产隔离。`start_host_side.ps1` 现接受独立
 `AgentWorkspaceRoot`，在启动 Docker/Host 前规范化并验证父/子/同目录重叠，
 合法外部根才进入进程环境和 secret-safe runtime snapshot；启动摘要也返回该
-路径。该代码定向合同为 `23 passed in 3.91s`，仍未形成第四次真实通过回执。
+路径。该代码定向合同为 `23 passed in 3.91s`。
+
+`b56d4d78` 上的第四次启动已证明外部 Workspace root 生效；Service Catalog
+仍回滚是因为验收进程把 provider 显式设为 disabled，Host health 因此正确把
+Governor/LLM 两个 required dependency 标为失败。当前 public health 的
+cold-start 映射只在以下机械条件同时成立时降为 `DEGRADED`：配置选择非
+disabled provider、显式允许 cold start、实际 required failure 行数与 summary
+一致，且每一行 reason 都是 `SERVICE_UNAVAILABLE_COLD_START`。原 service
+row 和 required count 不会被改成可用；任何本地或混合 required failure 以及
+Guardian durability failure 仍为 `FAILED`。受影响合同为
+`41 passed in 25.17s`，尚未形成第五次真实通过回执。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

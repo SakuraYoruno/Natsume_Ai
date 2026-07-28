@@ -77,9 +77,14 @@ AUDIT→ENFORCE 候选，旧首探针会把中间候选当成最终 Host。启�
 lease 已释放；它暴露 acceptance Workspace 根位于源码仓库内部，触发既有
 `WORKSPACE_AUTHORITY_INVALID` 隔离门禁。启动器现增加独立
 `AgentWorkspaceRoot`，在启动 Docker/Host 前同时拒绝源码子目录、源码父目录
-和同目录，并把合法外部根写入无秘密 runtime snapshot。当前定向合同为
-`23 passed in 3.91s`；第四次真实启动仍待本修复提交后执行，因此前三次尝试
-都不能记为通过。
+和同目录，并把合法外部根写入无秘密 runtime snapshot。第四次真实启动确认
+外部 Workspace 根已生效，旧重叠错误不再出现；但验收环境显式设置
+`HOST_LLM_PROVIDER=disabled`，Host 正确把 Governor/LLM Gateway 记为本地
+required failure，AUDIT 因 `SERVICE_CATALOG_POST_HEALTH_FAILED` 回滚，仍未
+误报成功。health 现只允许“选中真实 provider、仅缺凭据且显式允许 cold
+start”的纯 `SERVICE_UNAVAILABLE_COLD_START` 映射为 `DEGRADED`；SQLite、
+Guardian、Workspace、disabled provider 或混合 required failure 仍为
+`FAILED`。受影响集为 `41 passed in 25.17s`；第五次真实启动仍待执行。
 `npm audit` 的 8 项依赖告警仍开放，不能据此宣称前后端验收通过。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime

@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.38
+版本：v3.39
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -32,9 +32,14 @@ identity digest；不得以 readiness、metrics 或端口监听兜底。第三�
 `ROLLED_BACK`，head 为空且 lease 已释放；新阻断是 acceptance Workspace 根
 位于源码 worktree 内部。既有 allocator 门禁保持不变，启动器新增独立
 `AgentWorkspaceRoot` 和进程启动前的父/子/同目录重叠拒绝，合法外部根才写入
-runtime snapshot。第四次真实启动仍须重跑。
+runtime snapshot。`b56d4d78` 的第四次启动确认该修复成立，但显式
+provider=disabled 使 Governor/LLM required health 失败，AUDIT 以
+`SERVICE_CATALOG_POST_HEALTH_FAILED` durable rollback。当前 health 只把
+“非 disabled provider 已选、显式允许 cold start、且 required failure 全为
+缺外部凭据”映射为 `DEGRADED`；本地 authority 或混合失败仍是 `FAILED`。
+第五次仍须重跑。
 Monitor 依赖还有 8 项 npm audit 告警，因此该项保持
-`THREE_REAL_STARTS_FAILED / FIX_CODE_COMPLETE / RERUN_PENDING`。
+`FOUR_REAL_STARTS_FAILED / FIX_CODE_COMPLETE / RERUN_PENDING`。
 
 NE-01 的剩余差距已从“本地代码/恢复未封口”收窄为 NE-07 部署验收。
 当前提交的七路线同库收据全部 `PASS`，24 个去重恢复用例通过；因此实现依赖

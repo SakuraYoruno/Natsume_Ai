@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.40
+版本：v0.41
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -54,12 +54,20 @@
   同目录、源码子目录和源码父目录都必须在 Docker/Host 启动前失败关闭，且
   不得创建非法目录。显式外部根必须以 resolved identity 写入 runtime
   snapshot 和启动摘要。
+- T-NE07-HOST-09：只有选择 non-disabled 的真实 provider、显式允许 cold
+  start，并且 required failure 集合非空、数量与 summary 一致且全部 reason
+  都是 `SERVICE_UNAVAILABLE_COLD_START` 时，public health 才能降为
+  `DEGRADED`；原 service row 和 required count 必须保留。disabled provider、
+  本地或混合 required failure、Guardian durability failure 必须保持
+  `FAILED`。
 - 首次真实启动已暴露 HMAC 配置矛盾与旧脚本假成功，跑次结论为 `FAIL`。
   `b6b341be` 的第二次启动确认密钥修复和失败关闭有效，并暴露中间 stage
   误判。第三次正确拒绝中间 stage，但暴露 acceptance Workspace 根与源码
   重叠；三个 AUDIT operation 均 durable rollback，head 为空、lease 已释放。
-  更新后定向单元为 `23 passed in 3.91s`，Workspace ASGI 前序定向集成为
-  `5 passed in 5.45s`；第四次真实重跑仍未执行。
+  `b56d4d78` 的第四次启动确认外部 Workspace 根修复有效，但
+  provider=disabled 令 required health 失败并触发第四个 AUDIT durable
+  rollback。cold-start health 受影响集为 `41 passed in 25.17s`，Workspace
+  ASGI 前序定向集成为 `5 passed in 5.45s`；第五次真实重跑仍待执行。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

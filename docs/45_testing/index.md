@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.48
+版本：v2.49
 维护日期：2026-07-28
 状态：当前证据
 
@@ -51,7 +51,15 @@
 - 启动器新增 `-AgentWorkspaceRoot`：Docker/Host 启动前拒绝 managed root 与
   source 的同目录、父子目录重叠，合法外部根才进入 runtime snapshot。更新后
   定向单元为 `23 passed in 3.91s`，Workspace ASGI 前序定向集成为
-  `5 passed in 5.45s`；第四次真实启动仍待执行。
+  `5 passed in 5.45s`。
+- `b56d4d78` 的第四次启动证明外部 Workspace 根已生效，但
+  `HOST_LLM_PROVIDER=disabled` 令 Governor/LLM required health 为
+  `FAILED`，AUDIT receipt 因 `SERVICE_CATALOG_POST_HEALTH_FAILED` 回滚。
+- health 现只允许“选择真实 provider + 显式允许 cold start + required
+  failures 全部为缺凭据”映射为 `DEGRADED`；disabled provider、混合
+  required failure 和 durable Guardian failure 仍失败关闭。旧 health contract
+  同步到 app-local provider fixture，最终受影响集为
+  `41 passed in 25.17s`；第五次真实启动仍待执行。
 
 ## NE-05 Skill 生命周期本地代码波次
 

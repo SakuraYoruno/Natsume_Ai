@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.18
+版本：v9.19
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -126,8 +126,11 @@ flowchart TD
 - Persona 演化：`CODE_COMPLETE_LOCAL / PROPOSAL_ONLY_RUNTIME / REVIEWED_VERSION_ACTIVATION / ACCEPTANCE_PENDING_NE07`。
 - 长期演化程序：NE-03～NE-06 本地代码波次已形成各自受限 authority；
   Knowledge 默认 SHADOW；NE-07 三个外部数据服务的独立真实读写已通过，
-  Host 三次真实启动均失败关闭。最新失败来自 acceptance Workspace 根与源码
-  仓库重叠，启动器已增加外部根参数和进程启动前重叠门禁，仍须实栈重跑。
+  Host 四次真实启动均失败关闭。第三次暴露的 Workspace/source 重叠已由
+  外部根修复，第四次因显式 provider=disabled 形成 required health failure
+  而正确回滚。只有选中真实 provider、显式允许 cold start 且全部 required
+  failure 都是缺外部凭据时才可降级为 `DEGRADED`；其它失败口径保持不变，
+  仍须实栈重跑。
   Edge/Gateway、真实部署和全栈验收尚未完成，程序整体仍为
   `INCOMPLETE`。
 - Agent 模型预算：Chat、Internal 与 governed Agent Skill 已共享

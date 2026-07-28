@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.40
+版本：v3.41
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_THREE_STARTS_FAILED / WORKSPACE_ROOT_FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_FOUR_STARTS_FAILED / COLD_START_HEALTH_FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1355,4 +1355,31 @@ allocator 按既有安全合同拒绝“managed root 与 Git source repository �
 - Host 返回的启动摘要记录实际 Workspace 根，但不包含密钥。
 
 更新后的定向合同为 `23 passed in 3.91s`，其中动态 PowerShell 合同证明非法
-根不会被创建、外部 sibling 根可创建；第四次真实启动仍须绑定本修复提交。
+根不会被创建、外部 sibling 根可创建。
+
+提交 `b56d4d78` 上的第四次真实启动已使用源码树外 Workspace 根，旧
+`WORKSPACE_AUTHORITY_INVALID` 不再出现，因此该修复成立。Service Catalog
+仍在 AUDIT 后回滚，terminal receipt 明确写入
+`SERVICE_CATALOG_POST_HEALTH_FAILED`。本次配置把
+`HOST_LLM_PROVIDER=disabled`，所以 Host live health 把 Governor 与 LLM
+Gateway 都列为 required dependency failure；rollout 拒绝它是正确行为，不应
+通过放宽 catalog identity 或伪造 key 绕过。
+
+为满足“本地强制服务可验收、外部凭据缺失单独标记
+`ACCEPTANCE_PENDING_EXTERNAL`”的合同，Host health 现作精确区分：
+
+- 必须先选中非 disabled 的真实 provider，且
+  `HOST_COLD_START_ALLOWED=true`；
+- required failure 集合必须非空并且逐项都是
+  `SERVICE_UNAVAILABLE_COLD_START`，数量还必须与 summary 一致；
+- 只有该集合可将 public health 从 `FAILED` 调整为 `DEGRADED`，原 service
+  row 仍保持 `DOWN`、`required_unavailable` 仍保留；
+- provider=disabled、SQLite、Guardian、Workspace 或任意混合 required
+  failure 一律继续 `FAILED`；
+- Runtime Guardian durability `FAILED` 仍可覆盖 cold-start 并失败关闭。
+
+旧 health contract 已改为构造 app-local typed providers，不再导入全局 ASGI
+app 或 patch 已退役的 process probe symbol。受影响 health、Guardian、
+Service Catalog real-socket、配置和 bootstrap 集合为
+`41 passed in 25.17s`；第五次真实启动须使用 provider=openai、无伪造凭据的
+合法 cold-start 配置。

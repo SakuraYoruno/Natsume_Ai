@@ -124,6 +124,14 @@ Agent Workspace 是源码 Git worktree 的受控派生目录，不能与源码�
 `HOST_AGENT_WORKSPACE_MANAGED_ROOT` 的 runtime snapshot。Host runtime root
 仍可承载日志、PID 和 canonical SQLite，但不能顺便作为 Git Workspace 根。
 
+缺少外部模型凭据时不得写入假 key 或改用 disabled provider 冒充可用。
+只有已选择非 disabled 的真实 provider、显式允许 cold start，并且全部 required
+failure 都精确为 `SERVICE_UNAVAILABLE_COLD_START` 时，Host public health
+才可为 `DEGRADED`；失败 service row 仍保持 `DOWN`，required unavailable
+计数仍保留，最终验收只能进入 `ACCEPTANCE_PENDING_EXTERNAL`。provider
+disabled、本地 authority、混合 required failure 或 durability failure 一律保持
+`FAILED`。
+
 ### 4.2 Edge
 
 [edge_client/__main__.py](../../../edge_client/__main__.py) 本身不加载 dotenv；直接启动时只消费现有进程环境、默认值和秘密配置。PowerShell 启动器负责注入 `.env` 或运行时覆盖。远端主服务脚本会写入 `runtime/edge/edge.runtime.env`，并可能把环境值写进动态 CMD/PowerShell 启动文件。
