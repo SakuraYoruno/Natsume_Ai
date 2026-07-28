@@ -5,15 +5,15 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.33
+版本：v3.34
 日期：2026-07-28
-状态：`NE-05_CODE_COMPLETE_LOCAL_WAVE_PASS / NE-06_NEXT / PROGRAM_INCOMPLETE`
+状态：`NE-06_COMPLETED / CODE_COMPLETE_LOCAL_WAVE_PASS / NE-07_NEXT / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
-干净 NE-05 实现提交 `6f78e25c2` 的 migration 0141 同库七路线收据全部
+干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
 `PASS`，receipt
 digest 为
-`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`；
+`sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`；
 一次去重恢复波次以 `24 passed in 165.99s` 覆盖一般图形、跨进程 checkpoint、
 签名 unknown-effect/cancellation、并行 failure/Budget/Review 和真实 Git
 Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE-01 生产
@@ -21,8 +21,9 @@ Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE
 与 Docker 全栈仍必须在 NE-07 完成。`DEGRADE/REVIEW` 没有 runtime state
 machine，继续 proposal-only 且零 mutation 失败关闭；unknown effect 必须
 签名对账，不把自动归因列为完成条件。NE-02 已完成本地机械波次并保持
-`ACCEPTANCE_PENDING_EXTERNAL`；当前唯一活动实现波为 NE-02 的真实
-Research/Code/Pentest cohort 验收。
+`ACCEPTANCE_PENDING_EXTERNAL`；NE-03～NE-05 已合入，NE-06 已完成本地
+代码与波次验证。当前下一实施波为 NE-07 真实 Docker 与全服务栈验收；
+外部 Research/Code/Pentest cohort 仍按外部条件独立保持待验收。
 
 当前批次封闭 outer settlement 前进程崩溃的 mixed-terminal 窗口：
 
@@ -228,7 +229,7 @@ Operator 的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/eve
 | Durable DAG | `PARTIAL_ATOMIC_DEFAULT / SIGNED_GENERAL_ACCEPTANCE_EFFECT_RECONCILIATION_LOCAL_PROVEN / NE01_IN_PROGRESS`：新生产 Graph 默认声明 `ATOMIC_GRAPH_SUCCESS_V1`。Operation 预留后的 known-interruption、canonical WorkerProjection signed `COMMIT` 与 exact raw-failure `RELEASE` 保持受限。0128 另为 cancellation-independent `GENERAL_UNKNOWN_EFFECT` 接通 evidence ref/digest、风险 4 Review、Preview、Verification、外层 Acceptance 和 post-Acceptance signed proof/target Effect/Outbox UoW；这不是自动归因，也不替代 cancellation-bound 模式。DAG scheduler 既有多节点 continuation 仍只覆盖 exact canonical COMMITTED checkpoint 的 `EXACT_ACCEPTED / EXACT_REJECTED / MISSING`。一般 `RELEASE`、general multi-node/batch recovery、bounded fan-out、部署 key 与真实 canary仍未完成 |
 | Budget | Host/Scheduler/Internal 已接 graph/node 预留与 usage ledger；Chat 的 ModelAttempt/WorkerProjection/父子 usage 已由正式收据验证并为 `PASS`。legacy Skill 内部调用、未来有端口的 Delegate、Scheduler handler、完整 Internal 模型消耗以及 program-wide 策略仍缺。8/16/32 线程与跨进程竞争只允许一个 `EXCEEDED` winner/Outbox；concurrency、DEGRADE/REVIEW 仍未完整 |
 | Review | `WIRED_TASK_BOUND / CANARY_NOT_RUN`：0096 coordination、surface continuation、PRE optional Attempt、POST no-rerun、exact Task-authority hand-off 与独立 `review:decide` 已接通；Operator 部署/真实 canary 未完成，也不代表 cancellation reconciliation 完成 |
-| Persona 演化 authority | `CENTRAL_FENCE_WIRED`：legacy runtime writer 已被中央拒绝；当前只保留无副作用候选，proposal/Review/版本激活将在 NE-06 建立 |
+| Persona 演化 authority | `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：legacy runtime writer 与旧 rollback 已被中央拒绝；stage、milestone、interaction、emergent 和显式 response feedback 只生成 proposal，0142 只有在真实 Lab + Review 通过后才切换版本化 Persona/表达 policy，并支持 exact previous rollback |
 | PlanningSearch | 公共内核与显式 Host capability 竞争切片存在；该窄路径可在 canonical `FAILED` predecessor/evidence 校验后显式创建 `graph_revision + 1`，但不自动触发、也不按失败自适应换候选；普通 Host Plan、跨领域生产切流和收益证明仍未完成 |
 | Pentest L3 | 强制 shadow-only；0105 通用 durable calibration 可显式注入并跨重启重放，但默认兼容 ledger 仍在内存，outcome 是 `UNVERIFIED_RUNTIME_RECORD`，不能影响真实动作或生成 capability-unlocking 后继 |
 | Code/Research | Code 已有动态纯 shadow catalog、`PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 双 worktree、0106 cleanup-gated ledger，以及 D19 预注册固定 pytest argv 的受信子进程验证；Research 的 D20a/D20b 现有公开 metadata 动态 catalog、可信实验根/manifest 的 readonly-file loader、exact snapshot/manifest/source handshake 与 fresh-loader UTF-8 citation verifier。D20c 新 RunSpec 只持久化 cohort key digest，账本 owner 在 SQLite 事务内随机化顺序且精确 replay 不重取熵，旧 RunSpec/receipt 只读；paired runner 只消费该 owner-randomized 规格，并有 canonical ModelAttempt adapter 与 SQLite audit reopen。D20c 没有真实外部凭据或 production prompt/workload，故固定 `ACCEPTANCE_PENDING_EXTERNAL`；两域都仍没有 paired cohort、独立信任域 verifier、成本/延迟收益对照或生产 influence；D19 也没有 durable historical cohort、受控模型/工具、hermetic Python 或 OS/container sandbox |
@@ -638,7 +639,11 @@ bundle/provider canary 与 NE-07 服务栈尚未运行，故状态为
 - 删除其余吞异常的局部反馈链；
 - proposal 进入 Lab、Review，再更新版本化 policy/maturity/knowledge。
 
-当前进度：`FeedbackProposalV1` 已补齐 canonical digest/to_dict；0110 append-only ledger 已持久化 STAGED、Lab/Review APPLIED 和 ROLLED_BACK 事件，Prefrontal 的旧 `on_interaction_cycle()` 参数漂移已改为有界 `interaction_stats`。stage、milestone、emergent weekly 仍只产生候选，尚未全部改成 proposal adapter。
+当前进度：0142 已成为 Feedback 的唯一写 authority，0110 只读保留。
+Task outcome、Verification、用户拒绝、工具可靠性、显式 response feedback、
+stage、milestone、interaction 与 emergent weekly 均只生成 proposal；只有重新
+打开真实 Lab/Review 后才能切换 versioned Persona/表达 policy，失败写 durable
+evidence，exact rollback 恢复前一版本。
 
 #### Knowledge OS
 
@@ -647,7 +652,11 @@ bundle/provider canary 与 NE-07 服务栈尚未运行，故状态为
 - 支持去重、过期、冲突、promotion、deprecation 与项目摘要；
 - 重大架构选择生成 ADR/Decision Record，不把 Canon 当普通事实库。
 
-当前进度：0110 已提供 life-memory/project-knowledge 双 namespace 的 proposal→Lab/Review→active/deprecate 事件和只读 active projection，并保留同 conflict group 的 competing refs；旧 Memory/Markdown KB/Canon/Pentest 资产尚未完成 shadow compare 与读切换。
+当前进度：0142 V2 已提供 life-memory/project-knowledge 双 namespace、
+active winner、cursor、supersedes、deprecation、dedup、conflict、TTL、
+DecisionRecord、backfill 与 shadow compare。Host reader 已支持
+SHADOW/CANARY/ENFORCE，默认 SHADOW；真实部署切流与旧资产读 authority
+归零留给 NE-07。
 
 #### Identity
 
@@ -656,7 +665,11 @@ bundle/provider canary 与 NE-07 服务栈尚未运行，故状态为
 - 重大变化默认阻断，激活后保留前一 release rollback ref；
 - 记忆正文和私密 thought 不进入 snapshot。
 
-当前进度：`IdentityMigrationPlanV1` 已支持显式 no-change release，0110 已持久化 PROPOSED→ACTIVE→ROLLED_BACK 事件并要求 regression report 与 Review；现有 IdentitySnapshot/Review owner 尚未接入生产 activation。
+当前进度：`IdentityMigrationPlanV2` 与 production
+`IdentityReleaseActivationService` 已接入现有 IdentitySnapshot/Diff、
+regression、真实 Lab/Review、canonical snapshot owner 和 exact previous
+rollback；no-change 可发布，重大差异默认阻断。真实 release pair 和部署恢复
+仍由 NE-07 验收。
 
 完成条件：T-PERSONA-PROPOSAL-01 通过；至少一条真实任务经验走完整 proposal→Lab→Review→versioned apply；一个项目知识冲突被识别并处置；一次 identity no-change 与一次重大差异阻断/回滚演练通过。
 
@@ -1168,3 +1181,66 @@ Pentest facade、0131 receipt-loss replay 缺口和 D19 失败 arm 旧断言。
 真实 Research/Code provider cohort、授权 Pentest lab、Review 和 activation
 均未执行，因此本波状态只能是
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_EXTERNAL`。
+
+## 18. NE-06 当前实施结果：统一版本激活 authority
+
+NE-06 使用连续 migration
+`0142_evolution_activation_authority.sql` 建立新的唯一写 authority。
+0110 V1 表保留历史查询能力，但数据库 trigger 和只读 repository 同时禁止
+新增 mutation。V2 将不可变 version/proposal/snapshot 与可变 active
+projection 分离；每次 APPLY、ACTIVATE、ROLLBACK 或 DEPRECATE 都在同一个
+SQLite UoW 内提交：
+
+```text
+真实 Lab / Review / regression / version evidence
+  → VersionActivationDecisionV1
+  → idempotency operation
+  → exact active projection CAS
+  → EvolutionTransitionReceiptV1
+```
+
+Feedback 当前覆盖 Task outcome、Verification、用户拒绝、工具可靠性、显式
+response feedback、Bond stage/milestone、interaction cycle 和 emergent
+weekly。所有入口只生成 `FeedbackProposalV1`；运行期不再直接改 trait，
+旧 apply/rollback writer 都由中央围栏和静态扫描拒绝。只有重新打开 0138
+trusted Lab report、匹配 target kind/version 的 proposal，以及 exact
+ReviewItem subject/status version/evidence 后，才能切换 Persona、表达偏好或
+反馈 policy 的 active version。异步/辅助链失败会写入隐私有界 durable failure
+evidence，Obs 只展示计数和稳定 reason；显式反馈失败不会阻断主 Chat。
+
+Knowledge OS 使用 `life-memory://person/...` 与
+`project-knowledge://workspace/...` 两类 workspace-scoped namespace，
+实现 active winner、keyset cursor、supersedes、deprecation、dedup、冲突、
+TTL、backfill、shadow compare 和 `DecisionRecordV1`。Host lifespan 装饰同一
+semantic recall port，读取模式只有 SHADOW、CANARY、ENFORCE；默认 SHADOW，
+因此本地代码通过不等于生产已切换。旧 `add_document(s)` 直接 writer 在该
+生产 wrapper 上失败关闭。
+
+Identity release adapter 将现有 IdentitySnapshot/Diff 接入 V2：
+regression 失败或重大差异默认阻断，no-change release 可继续；migration plan
+必须绑定真实 Lab、Review、regression 与 previous/proposed snapshot digest。
+ACTIVATED 会原子切换 canonical snapshot owner，ROLLED_BACK 恢复 exact
+previous snapshot/version；同一 identity 可完成 apply→rollback→新版本 apply，
+不会复用旧事件身份。
+
+波次去重集合为 `199 passed in 73.74s`。为修正本轮首次架构 Gate 暴露的
+application→app 反向依赖，SemanticHit/Result 已迁入中立 contracts；为避免
+扩大巨石白名单，Prefrontal 环境/冷却/偏好纯策略已拆成 201 行 focused module，
+Agent owner 为 1,879 行。修正后的重叠回归为
+`51 passed in 28.16s`，完整架构 Gate 1～14=`PASS`、
+`failed_gates=[]`，Persona writer scan 零违规，migration fresh head=0142。
+实现提交落定后，既有 accepted 七路线 snapshot 经 SQLite backup 复制并只
+追加 0142，再由 query-only collector 在 `08a172da` 上重开；七路线全部
+`PASS`，receipt digest 为
+`sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`，
+没有重跑 accepted worker。
+收据、coverage、迁移、V2 integration、合同分层、文档 authority 与 Persona
+writer 的最终重叠集合为 `53 passed in 45.10s`；架构 Gate 1～14 和统一
+`static_scan,doc_gate` 再次通过，失败清单为空。
+
+本波结论仅为
+`CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`。尚未运行真实
+Docker Neo4j/Chroma/Redis、Host/Obs/Nginx Monitor、完整 Edge/Gateway、
+Knowledge ENFORCE 部署、真实 release pair 或外部模型/硬件；这些只能在
+NE-07 的隔离全服务栈中决定最终 `PASS / ACCEPTANCE_PENDING_EXTERNAL /
+FAIL`。远程 CI 继续如实记录 `NOT_RUN_ACCOUNT_QUOTA`。

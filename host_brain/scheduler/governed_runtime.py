@@ -51,6 +51,9 @@ from host_brain.orchestration.node_grants import (
     DurableNodeGrantVerifier,
     NodeBoundGrantService,
 )
+from host_brain.evolution.task_feedback import (
+    decorate_task_acceptance,
+)
 from host_brain.scheduler.command_service import (
     ClaimResultStorePort,
     SCHEDULER_COMMAND_REPLAY,
@@ -701,10 +704,13 @@ def build_governed_scheduler_runtime(
         occurrence_repository=definitions,
         definition_repository=definitions,
     )
-    acceptance = SchedulerOperationPlanAcceptance(
-        projection_store=projection_store,
-        occurrence_repository=definitions,
-        definition_repository=definitions,
+    acceptance = decorate_task_acceptance(
+        SchedulerOperationPlanAcceptance(
+            projection_store=projection_store,
+            occurrence_repository=definitions,
+            definition_repository=definitions,
+        ),
+        task_runtime_container=task_runtime_container,
     )
     command_repository = task_runtime_container.command_repository
     coordinator = GovernedTaskCoordinator(

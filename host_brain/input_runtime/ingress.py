@@ -299,24 +299,108 @@ async def receive_input(
             ts_ms=ts_ms,
         )
         if feedback_record:
+            proposal_status = "NOT_CONFIGURED"
+            proposal_id = ""
+            if callable(ports.get_evolution_activation_service):
+                workspace_id, _owner_id = (
+                    ports.require_evolution_scope()
+                )
+                proposal_result = dict(
+                    ports.require_evolution_activation_service()
+                    .stage_expression_feedback(
+                        workspace_id=workspace_id,
+                        subject_id=(
+                            str(payload.get("person_id") or "").strip()
+                            or session_id
+                        ),
+                        target_request_id=str(
+                            feedback_record.get(
+                                "target_request_id"
+                            )
+                            or ""
+                        ).strip(),
+                        target_text_hash=str(
+                            feedback_record.get("target_text_hash")
+                            or ""
+                        ).strip(),
+                        feedback_score=float(
+                            feedback_record.get("feedback_score")
+                            or 0.0
+                        ),
+                        feedback_tags=tuple(
+                            str(item)
+                            for item in list(
+                                feedback_record.get(
+                                    "feedback_tags"
+                                )
+                                or []
+                            )
+                        ),
+                        feedback_source=str(
+                            feedback_record.get(
+                                "feedback_source"
+                            )
+                            or "user_explicit"
+                        ),
+                    )
+                )
+                proposal_status = str(
+                    proposal_result.get("status") or ""
+                ).strip()
+                proposal_id = str(
+                    dict(proposal_result.get("proposal") or {}).get(
+                        "proposal_id"
+                    )
+                    or ""
+                ).strip()
             _log_input_event(
                 ledger=_get_ledger_safe(ports=ports),
                 request_id=request_id,
                 session_id=session_id,
                 source=source,
                 input_payload=payload,
-                phase="INPUT_FEEDBACK_SHADOW_LOGGED",
-                status="LOGGED",
-                reason_code="EXPLICIT_RESPONSE_FEEDBACK_SHADOW",
+                phase="INPUT_FEEDBACK_PROPOSAL_STAGED",
+                status=(
+                    "STAGED"
+                    if proposal_status == "STAGED"
+                    else "LOGGED"
+                ),
+                reason_code=(
+                    "EXPLICIT_RESPONSE_FEEDBACK_PROPOSAL_ONLY"
+                    if proposal_status == "STAGED"
+                    else "EXPLICIT_RESPONSE_FEEDBACK_COMPAT_LOG_ONLY"
+                ),
                 detail=(
-                    "response feedback shadow logged for latest persona reply "
+                    "response feedback normalized for latest persona reply "
                     f"target_request_id={str(feedback_record.get('target_request_id') or '').strip()} "
-                    f"score={float(feedback_record.get('feedback_score') or 0.0):.2f}"
+                    f"score={float(feedback_record.get('feedback_score') or 0.0):.2f} "
+                    f"proposal_status={proposal_status} "
+                    f"proposal_id={proposal_id}"
                 ),
                 ts_ms=ts_ms,
             )
     except Exception as feedback_exc:
-        _logger.debug("input_routes: response feedback record degraded request_id=%s: %s", request_id, feedback_exc)
+        _log_input_event(
+            ledger=_get_ledger_safe(ports=ports),
+            request_id=request_id,
+            session_id=session_id,
+            source=source,
+            input_payload=payload,
+            phase="INPUT_FEEDBACK_PROPOSAL_FAILED",
+            status="FAILED",
+            reason_code="EXPLICIT_RESPONSE_FEEDBACK_PERSIST_FAILED",
+            detail=(
+                f"{type(feedback_exc).__name__}:"
+                f"{str(feedback_exc)[:512]}"
+            ),
+            ts_ms=ts_ms,
+        )
+        _logger.error(
+            "input_routes: response feedback proposal failed "
+            "request_id=%s: %s",
+            request_id,
+            feedback_exc,
+        )
 
     if source == "GATEWAY" and not list(payload.get("attachments") or []):
         _maybe_restore_recent_gateway_multimodal(session_id=session_id, text=text, payload=payload)

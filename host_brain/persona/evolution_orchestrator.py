@@ -364,16 +364,31 @@ class EvolutionOrchestrator:
                         milestone_key=milestone_key,
                         ts_ms=ts_ms,
                     )
-                    if growth_result.applied:
-                        result.traits_changed = True
+                    growth_payload = growth_result.as_dict()
+                    candidate_delta = dict(
+                        dict(
+                            growth_payload.get("guard_result") or {}
+                        ).get("candidate_delta")
+                        or {}
+                    )
+                    if growth_result.applied or candidate_delta:
+                        if growth_result.applied:
+                            result.traits_changed = True
                         result.growth_results.append({
                             "type": "milestone",
                             "key": milestone_key,
-                            **growth_result.as_dict(),
+                            **growth_payload,
                         })
-                        _logger.info("里程碑成长触发: %s", milestone_key)
+                        _logger.info(
+                            "里程碑成长候选生成: %s applied=%s",
+                            milestone_key,
+                            bool(growth_result.applied),
+                        )
                 except Exception as exc:
                     _logger.warning("里程碑检查失败 %s: %s", milestone_key, exc)
+                    result.errors.append(
+                        f"milestone_growth:{milestone_key}:{exc}"
+                    )
         except Exception as exc:
             _logger.warning("里程碑成长步骤失败（降级）: %s", exc)
             result.errors.append(f"milestone_growth: {exc}")
@@ -398,13 +413,25 @@ class EvolutionOrchestrator:
                 interaction_stats=interaction_stats,
                 ts_ms=ts_ms,
             )
-            if growth_result.applied:
-                result.traits_changed = True
+            growth_payload = growth_result.as_dict()
+            candidate_delta = dict(
+                dict(
+                    growth_payload.get("guard_result") or {}
+                ).get("candidate_delta")
+                or {}
+            )
+            if growth_result.applied or candidate_delta:
+                if growth_result.applied:
+                    result.traits_changed = True
                 result.growth_results.append({
                     "type": "interaction_cycle",
-                    **growth_result.as_dict(),
+                    **growth_payload,
                 })
-                _logger.info("交互驱动成长触发: %s", growth_result.reason[:80])
+                _logger.info(
+                    "交互驱动成长候选生成: applied=%s reason=%s",
+                    bool(growth_result.applied),
+                    growth_result.reason[:80],
+                )
         except Exception as exc:
             _logger.warning("交互驱动成长失败（降级）: %s", exc)
             result.errors.append(f"interaction_growth: {exc}")

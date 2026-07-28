@@ -26,6 +26,9 @@ from host_brain.composition.host_bond_runtime import (
 from host_brain.composition.host_governance_runtime import (
     HostGovernanceRuntimeOwner,
 )
+from host_brain.composition.host_evolution_runtime import (
+    HostEvolutionRuntimeOwner,
+)
 from host_brain.composition.host_memory_runtime import HostMemoryRuntimeOwner
 from host_brain.contracts.host_lifecycle import HostLifecycleApplicationPorts
 from host_brain.core.meta_learning_loop import MetaLearningLoop
@@ -219,6 +222,11 @@ def build_production_host_application_ports(
         update_queue_factory=process_application_ports.bond_update_queue_factory,
         client_factory=build_host_bond_client,
     )
+    evolution_runtime_owner = HostEvolutionRuntimeOwner(
+        persistence_db_path_provider=(
+            process_application_ports.persistence_db_path
+        ),
+    )
     memory_runtime_owner = HostMemoryRuntimeOwner(
         ledger_provider=ledger_provider,
         memory_guard_factory=process_application_ports.memory_guard_factory,
@@ -234,6 +242,9 @@ def build_production_host_application_ports(
         ),
         semantic_recaller_factory=(
             process_application_ports.semantic_recaller_factory
+        ),
+        semantic_recaller_decorator=(
+            evolution_runtime_owner.decorate_semantic_recaller
         ),
     )
     emotion_context_runtime = _app_local_lazy_provider(
@@ -313,6 +324,10 @@ def build_production_host_application_ports(
             session_tactic_ledger_store=session_tactic_ledger_store,
             tts_context_router=_app_local_provider(tts_context_router),
             meta_learning_loop=_app_local_provider(meta_learning_loop),
+            evolution_activation_service=(
+                evolution_runtime_owner.require_service
+            ),
+            evolution_scope=evolution_runtime_owner.require_scope,
             probe_edge_rpc_health=(
                 process_application_ports.probe_edge_rpc_health
             ),

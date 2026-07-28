@@ -85,6 +85,9 @@ from host_brain.task_runtime.worker_registry import (
     GovernedWorkerRegistryError,
     GovernedWorkerRoute,
 )
+from host_brain.evolution.task_feedback import (
+    decorate_task_acceptance,
+)
 from host_brain.app.internal_startup_checkpoint_continuation import (
     InternalStartupCheckpointContinuation,
 )
@@ -1231,8 +1234,11 @@ def build_governed_internal_runtime(
         verifier=InternalAgentProposalVerifier(
             projection_store=projection_store,
         ),
-        acceptance=InternalAgentProposalAcceptance(
-            projection_store=projection_store,
+        acceptance=decorate_task_acceptance(
+            InternalAgentProposalAcceptance(
+                projection_store=projection_store,
+            ),
+            task_runtime_container=task_runtime_container,
         ),
         projection_reader=projection_store,
         review_runtime=TaskNodeReviewRuntime.for_task_store(

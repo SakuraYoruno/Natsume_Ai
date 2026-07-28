@@ -12,6 +12,22 @@ REPOSITORY_IMPORT_BOUNDARIES = {
         "host_brain.evolution",
         "host_brain.contracts.evolution",
     ),
+    "host_brain/persistence/evolution_activation_v2_feedback.py": (
+        "host_brain.evolution",
+        "host_brain.contracts.evolution",
+    ),
+    "host_brain/persistence/evolution_activation_v2_knowledge.py": (
+        "host_brain.evolution",
+        "host_brain.contracts.evolution",
+    ),
+    "host_brain/persistence/evolution_activation_v2_identity.py": (
+        "host_brain.evolution",
+        "host_brain.contracts.evolution",
+    ),
+    "host_brain/persistence/evolution_activation_v2_decision.py": (
+        "host_brain.evolution",
+        "host_brain.contracts.evolution",
+    ),
     "host_brain/persistence/evolution_lab_ledger_repository.py": (
         "host_brain.evolution_lab",
         "host_brain.contracts.evolution_lab",
@@ -36,14 +52,20 @@ CONTRACT_MODULES = (
     "host_brain/contracts/skill_lifecycle.py",
     "host_brain/contracts/skill_lifecycle_v2.py",
     "host_brain/contracts/runtime_context.py",
+    "host_brain/contracts/semantic_recall.py",
 )
 
 COMPATIBILITY_MODULES = {
     "host_brain/evolution/contracts.py": {
+        "DecisionRecordV1",
+        "EvolutionTransitionReceiptV1",
         "FeedbackProposalV1",
+        "IdentityMigrationPlanV2",
         "IdentityMigrationPlanV1",
+        "KnowledgeEntryV2",
         "KnowledgeEntryV1",
         "KnowledgeEvolutionContractError",
+        "VersionActivationDecisionV1",
     },
     "host_brain/evolution_lab/contracts.py": {
         "CounterfactualPairV1",
@@ -87,6 +109,7 @@ IDENTITY_PAIRS = (
     ("host_brain.contracts.evolution", "host_brain.evolution"),
     ("host_brain.contracts.evolution_lab", "host_brain.evolution_lab"),
     ("host_brain.contracts.runtime_context", "host_brain.runtime.context_contracts"),
+    ("host_brain.contracts.semantic_recall", "host_brain.app.recall.semantic_recall"),
 )
 
 

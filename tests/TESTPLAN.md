@@ -11,9 +11,9 @@
 - T-NE01-CWC-01：当前权威 evidence commit 必须是 HEAD 的祖先。以 SQLite
   backup 复制既有 accepted 七路线快照，只允许 append-only migration 到
   repository head 后由 query-only collector 重开；不得重跑 accepted worker。
-  当前绑定为 `dev@7e9b090b3`、migration `0140`、七路线 `PASS`、零 reason
+  当前绑定为 `08a172da`、migration `0142`、七路线 `PASS`、零 reason
   code 和不含正文/secret 的 receipt
-  `sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`。
+  `sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`。
 - T-NE01-CWC-02：一次去重恢复波次固定运行 24 个真实 SQLite、Windows
   `spawn` 和 Git Workspace 用例，必须覆盖菱形、八根、pre-Operation、
   committed checkpoint、unknown effect、cancellation、parallel terminal
@@ -519,6 +519,18 @@
 - T-PERSONA-FENCE-01：NE-01 safety fence 后，Bond stage/milestone、interaction cycle、emergent weekly 和后续新增入口在 `PersonaEngine.apply_growth_delta()` 中央 authority 边界全部 fail closed，trait mutation 为 0；静态扫描证明不存在绕开中央门禁的新 writer，运行时负测覆盖全部已知入口。
 - T-PERSONA-PROPOSAL-01：NE-06 replacement 后，旧 Persona growth caller 只生成 `FeedbackProposal`，并完成 proposal → Lab/shadow → Review → versioned activation → rollback；普通后台任务无直接 trait mutation authority。
 - T-NE06-GOVERNANCE-01：0110 V1 ledger 只验证 Feedback/Knowledge/Identity 事件行的 append-only/replay/tamper；真实 Lab/Review authority resolution、version owner activation 和 exact previous-state rollback 必须由 V2 测试另行证明。
+- T-NE06-ACTIVATION-V2-02：0142 必须使 0110 mutation 只读失败关闭，并将 `VersionActivationDecisionV1`、幂等 operation、active projection 与 `EvolutionTransitionReceiptV1` 放入同一 SQLite UoW。Feedback APPLY、Knowledge ACTIVATE/DEPRECATE、Identity ACTIVATE/ROLLBACK 都必须重新打开真实 0138 Lab report/proposal、exact ReviewItem subject/status version/evidence、target version/digest 和 rollback target；URI 字符串本身无资格。响应丢失只能 exact replay，同 idempotency key payload drift、generation drift、篡改和 UoW 故障必须零写。
+- T-NE06-FEEDBACK-03：Task outcome、Verification、用户拒绝、工具可靠性、显式 response feedback、stage/milestone、interaction 与 emergent weekly 只能生成 proposal。APPLIED 后 active policy/Persona projection 才变化；legacy apply/rollback writer 均失败关闭。pipeline error 必须写 privacy-bounded durable failure evidence 并进入 Obs summary，辅助 feedback 失败不得阻断主 Chat command。
+- T-NE06-KNOWLEDGE-04：`life-memory://person/...` 与 `project-knowledge://workspace/...` 必须隔离；active winner、cursor、supersedes、deprecation、dedup、conflict refs、TTL 与 DecisionRecord 必须由 0142 owner 验证。Host reader 支持 SHADOW/CANARY/ENFORCE，默认 SHADOW；legacy `add_document(s)` 在 production wrapper 上拒绝。过期 entry 不得激活，已激活 entry 到期后不得继续召回。
+- T-NE06-IDENTITY-05：Identity release 必须覆盖 no-change、重大差异默认阻断、regression、真实 Lab/Review binding、canonical snapshot owner switch、apply→rollback→新版本 apply 和 exact previous snapshot/version rollback。release gate 默认开启，显式关闭只能 fail closed。
+- T-NE06-WAVE-06：本波去重集合为 `199 passed in 73.74s`；分层修正后的 `51 passed in 28.16s` 与前者重叠，不相加；legacy release/env 回归 `27 passed in 0.99s` 也独立报告。fresh migration head=0142、Persona writer scan 零违规、完整架构 Gate 1～14=`PASS`、`failed_gates=[]`。真实 Docker/Host/Obs/Monitor/Edge/Gateway、Knowledge ENFORCE、真实 release pair、外部模型和硬件均未运行，状态只能是 `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- T-NE06-RECEIPT-07：0142 实现提交落定后，必须从既有 accepted 七路线
+  SQLite snapshot 做 backup，只追加 0142，再由 query-only collector 绑定
+  干净实现提交；不得重跑 accepted worker。当前 `08a172da` 收据七路线全部
+  `PASS`，digest 为
+  `sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`。
+  收据落定后的最终重叠回归为 `53 passed in 45.10s`，架构 Gate 1～14 与
+  统一 static/doc Gate 均通过；该 53 项与 199 项波次集合不得相加。
 - T-NE05-SKILL-COMPILER-01：Markdown、API contract、script 与 accepted trace 必须确定性生成 `SkillDraftV1`、inventory、CycloneDX SBOM、签名申请和 content-addressed bundle；accepted trace 必须精确绑定已验收 receipt/artifact digest，raw thought、消息正文、secret 和签名私钥不得进入产物。
 - T-NE05-SKILL-LIFECYCLE-V2-02：0141 必须 checksum-bound 建立 canary operation/outbox、activation evidence、maturity decision、operation、active projection 与 terminal receipt。activate 必须在一个 SQLite UoW 中真实重开 0138 Lab report/run/sandbox、proposal、exact ReviewItem subject/version/evidence 与 Supply Chain SBOM/signature/canary；任一漂移零写。exact replay 先查 operation；过期 canary claim 只能进入 reconciliation；rollback 使用目标旧版本自己的历史 evidence。
 - T-NE05-SKILL-RUNTIME-CUTOVER-03：生产 Host 只能通过 `LifecycleBoundSkillRegistry` 解析 V2 active projection。当前只接受 `builtin-skill-alias.v1`；未知 adapter/protocol、缺 handler 或 maturity 超过静态风险上限必须在启动时失败关闭。V1 mutation service/repository、hot loader、Supply Chain 公共 activate/reject 以及 Forge approval/rollback/runtime-result/route-override 公共 authority 必须物理不存在。真实外部 bundle/provider canary 未运行时状态只能是 `ACCEPTANCE_PENDING_NE07`。

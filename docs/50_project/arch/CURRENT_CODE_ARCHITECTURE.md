@@ -239,9 +239,9 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 | 对话副作用 | `POST_ACCEPTANCE_EVENTUAL / AUTHENTICATED_SURFACE_QUERY` | Acceptance 原子写 effect intents；visible turn、Preference 与 Life projection 分别执行并 exact 对账。Preference store gate 缺失/非 `bool` 失败关闭且零写；配置 false/malformed env 保守映射为 disabled，只写零 event/profile 的 `DISABLED` receipt；0118 将 event、append-only profile child version、evaluation receipt 放在同一 UoW，并以 sealed-child + full-set reconcile 拒绝篡改。推荐反馈只绑定 admitted-time 以前的 exact conversation/session delivery 及 canonical digest。Surface query 从 Gateway 同一 SQLite payload 精确校验 `effect_id`；`NOT_FOUND` 保持 `UNKNOWN`。各 effect 仍是最终一致，不是跨域全局事务 |
 | Embodiment / Edge receipt | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | Host 0104 让新 outbox 行绑定 canonical DB 派生的 `runtime_scope_id`，同 scope 只有一个持 durable runtime lease/fence 的进程可执行，第二实例失败关闭；enqueue、claim、过期、收口与对账均在同一写事务复验该 authority。精确 Edge session/owner/lease/fence 由 Host 持久保存；替代 runtime 必须在开放路由前 exact reconnect、轮换 Edge fence 并验证新 lease/`fence+1`。Edge 0002 冻结 command owner，receipt query v2 受 owner/current session/lease/fence 和 command/key 精确约束，legacy ownerless 返回 `NOT_FOUND`；`IN_DOUBT` 仅可只读 CAS 对账、绝不重放。loopback TCP/HMAC/SQLite 查询与重启 exact replay 已测；真实设备仍 `NOT_TESTED` |
 | Composition | `INCOMPLETE / PRODUCTION_LOCATOR_PHYSICALLY_RETIRED / TRIBE_AGENT_CATALOG_APP_LOCAL / RESOURCE_MANAGER_STATUS_DURABLE` | 每个 Host ASGI app 拥有独立 Lifecycle/HardState/Authority/Bond/Memory/Governance runtime owner；Lifecycle、Tribe shared runtime/Agent catalog、Input、Agent、Context、Startup、Multimodal 与 heartbeat 使用显式 provider；ResourceManager status 由 0123 journal 绑定 exact Host fence。生产 locator module/field/lock/ref=`0/0/0/0`，测试桥仅在 pytest 安装。外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它外部资源恢复、并发 multi-Host compatibility context、legacy Executive generic delegate、真实 workspace-bound executor 和 Host/Worker/Obs authority 仍未闭环；canary/wave integration 未运行，NE-01 不得封板 |
-| 当前结构 Gate | `PASS_GATES_1_TO_14 / PROGRAM_INCOMPLETE` | Research ledger 已拆为1271/512/108行职责边界且未扩白名单；feature-canary 与 Host lifecycle 共享类型已迁至 neutral contracts，Persistence/Composition 的两条反向边清零。fresh Gate 1 issues/SCC=`[]`、Gate 3 PASS、`failed_gates=[]`。Acceptance owner 当前为966行，sys-mode handler为368行；general Effect persistence为1426+716行，Runtime为793+88+34行，仍借用唯一 authority。ASGI/Scheduler 的1389/2942行以及更早1262行 Acceptance 数字只作历史证据。NE-01 保持 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA` |
-| Persona 演化 authority | `CENTRAL_FENCE_WIRED` | `PersonaEngine` 已中央拒绝非迁移写入；stage/milestone、interaction 与 emergent 只返回候选，不改变 trait 或消费 one-time/history；NE-06 proposal/Review/版本激活尚未实现 |
-| 长期演化能力 | `PARTIAL_OR_MISSING` | World/Scene/Intent/Guardian、Action Preview、Host Catalog 与 0137 长期目标 authority 已进入生产对象图；长期目标受治理激活/撤销与 Context/Intent 重开已本地定向通过，Bond 原始证据、部署 canary和后续 Lab、Skill、Knowledge、Identity 闭环仍未完成 |
+| 当前结构 Gate | `PASS_GATES_1_TO_14 / PROGRAM_INCOMPLETE` | Research ledger 与 NE-05 repository 已按职责拆分；NE-06 又将 Semantic recall result 移入 neutral contracts，并把 Prefrontal 纯运行策略拆为 201 行 focused module，Agent owner 为 1,879 行。fresh Gate 1 issues/SCC=`[]`、Gate 3 PASS、`failed_gates=[]`，未扩大白名单。静态通过不替代 NE-07 运行验收，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA` |
+| Persona 演化 authority | `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07` | `PersonaEngine` 中央拒绝非迁移 apply/rollback；stage、milestone、interaction、emergent 与显式 response feedback 只生成 proposal。0142 只有在真实 Lab + Review 通过后才切换 versioned Persona/表达 policy，并可 exact rollback |
+| 长期演化能力 | `CODE_COMPLETE_NE03_TO_NE06_LOCAL / PROGRAM_INCOMPLETE` | World/Scene/Intent/Guardian、Evolution Lab、Skill lifecycle 与 0142 Feedback/Knowledge/Identity authority 已进入生产对象图。Knowledge reader 默认仍 SHADOW；部署 canary、真实数据库/网络/模型/设备与完整恢复必须由 NE-07 验收 |
 
 ### 1.1 Tribe runtime scope 当前事实
 
@@ -708,16 +708,33 @@ Edge session/owner 不是默认的进程字符串：Host 从 normalized canonica
 | Capability Maturity | scorecard/provider/Governor adapter、production composition fail-closed wiring | production IntentDecisionEngine 默认启用 restrict-only policy；缺 durable promotion/degradation lifecycle |
 | Capability Forge | `app/capability_forge.py` | 只产生 proposal/gap candidate；approval、rollback、runtime result 和 route override 公共 authority 为 0，不得绕过 Lab/Review/0141 lifecycle |
 | Evolution Lab | 0108 V1、0122 structural V2；0138 trusted ledger；0139 trusted redaction repair；0140 redacted dataset；`contracts/evolution_lab_redaction.py`、`evolution_lab/{docker_executor,golden_datasets,redacted_trace,golden_worker,golden_verifier,golden_experiments,trusted_runner,production_composition}.py`、`persistence/evolution_lab_{redacted_dataset,trusted_query}_repository.py`；Obs/Monitor Operator projection | 0108/0122 只读且不可晋级；0139 消除 trusted/V1 redaction 同名冲突，0140 只保存 content-addressed sanitized dataset、Manifest 与 digest-only Receipt，raw trace 不落库；纯规则位于 contracts，SQLite reader 只位于 persistence。专用 executor 只接受 digest-pinned Docker，重新验证 engine/image/container/command/inspect、禁网、只读 rootfs/dataset/runtime、非 root、临时 bind output、资源限制和零 effect audit；不允许 host subprocess fallback。三类 Golden Experiment 共六个独立容器 arm、本机真实 Docker response-loss exact reopen、unknown-effect reconciliation、脱敏重启/篡改/回滚已通过；query-only repository、Obs producer/route 与 Monitor 页面只展示 proposal-only 证据。clean-commit suite 绑定 `b68a8b9dd` 与 receipt `020c8fc0…`，exact replay 后 18 张 Lab 表、收据哈希和容器计数不变；状态为 `LOCAL_ACCEPTANCE_PASS / PROPOSAL_ONLY / PROGRAM_INCOMPLETE` |
-| Feedback | response/persona/recommendation feedback + 0110 proposal ledger | `FeedbackProposalV1` 已可持久化 STAGED/APPLIED/ROLLED_BACK；Prefrontal 参数漂移已修复，旧增长 caller 尚未全部转为 proposal adapter |
-| Persona Growth | `persona_growth.py`、Bond stage、Evolution Orchestrator、emergent growth skill | legacy 入口已被 `PersonaEngine` 中央围栏和静态扫描封禁；当前只产生经 drift guard 检查的无副作用 candidate，尚未接入 proposal/Review/版本激活 |
-| Knowledge OS | `KnowledgeEntryV1`、0110 namespace event ledger | active winner、cursor、supersedes/deprecation/dedup/conflict resolution 与生产 retrieval 均未接线 |
-| Identity | `release/identity_snapshot.py`、`IdentityMigrationPlanV1`、0110 event ledger | ACTIVE/ROLLED_BACK 仅是事件名；现有 snapshot owner 未切换，exact previous identity 未恢复 |
+| Feedback | 0142、`evolution/task_feedback.py`、`evolution/version_activation_feedback.py` | 全部启用入口 proposal-only；APPLIED 查询真实 Lab/Review 并切换 versioned Persona/表达/反馈 policy。失败写 durable evidence，0110 只读 |
+| Persona Growth | `persona_growth.py`、Bond stage、Evolution Orchestrator、emergent growth skill | legacy apply/rollback 被中央围栏和静态扫描封禁；候选进入 FeedbackProposal，Review 后 activation 通过显式 migration authority 修改 traits，exact rollback 恢复前一版本 |
+| Knowledge OS | `KnowledgeEntryV2`、`DecisionRecordV1`、0142 active projection、`KnowledgeOSSemanticRecaller` | active winner、cursor、supersedes/deprecation/dedup/conflict/TTL 已实现；Host 支持 SHADOW/CANARY/ENFORCE，默认 SHADOW，NE-07 前不宣称部署切流完成 |
+| Identity | `release/identity_snapshot.py`、`release/identity_activation.py`、`IdentityMigrationPlanV2`、0142 | regression、no-change、重大差异阻断、真实 Lab/Review binding、canonical snapshot activation 与 exact previous rollback 已本地证明；真实 release deployment 留到 NE-07 |
 | Runtime Guardian / Catalog | 0112、0113、`runtime/runtime_guardian.py`、`service_catalog/host_startup.py`、`ServiceHealthHeartbeat` | Host lifespan 绑定 runtime lease/fence；每个 lifespan 自有 heartbeat task、可选 keepalive、Guardian observer、probe cache 与 HTTP transport，关闭不影响其他 Host scope；未注入 observer 的 compatibility probe 只写自己的兼容 cache，不能写全局 degradation reducer。独立 Obs health projection 与 probe registry 只读 durable ledger/projection，不读取 Host 内存 cache。fresh DB 逐级启动五阶段并保留 ENFORCE 候选。兼容顶层 helper 不是 Host production authority；显式 legacy adapter、Windows graceful stop 与部署多实例 canary 仍未收口 |
 | Workspace Isolation | `workspace_paths.py`、`workspace_policy.py`、`workspace_allocator.py`、`workspace_write_promotion.py`、`workspace_runtime.py`、`artifact_store.py`、`governed_skill_work_order.py`、`plan_workspace_acceptance_effect.py`、`skill_artifact_terminal_reconciliation.py`、`agent_workspace_acceptance_effect.py`、0116 repositories | D0/W0/W1 继续生效。W2 为认证 Internal 与三条 risk-4 Agent Skill 派生 graph workspace、冻结 source 并创建独立 worktree；Lease、heartbeat、handoff/takeover、cleanup 已接线。Direct Skill success/failure 与 Plan 单写节点 whole-graph success/downstream failure/downstream post-review cancellation 均密封 bounded patch 并由 shared lifecycle cleaner 跨 runtime 收口，accepted HEAD 不移动源分支且再次重启零重放。其它 terminal matrix、多 Workspace、Domain Pack/其它 Skill、逐操作 fence/强杀及 OS/container/tenant/handle 隔离仍缺；状态为 `PARTIAL_DIRECT_AND_SINGLE_PLAN_WRITE_SUCCESS_FAILURE_CANCELLATION_LIFECYCLE / GENERAL_CROSS_ROUTE_INCOMPLETE` |
 
 ### NE-06 生产证据链状态
 
-0110 `evolution_governance_ledger` 把 Feedback、Knowledge、Identity 的 proposal 与事件行分开持久化，`PrefrontalAgent` 也已改用有界 interaction_stats 调用 `PersonaGrowthTracker`。复审确认这只是 V1 ledger：Lab/Review/regression URI 未查询真实 authority，状态机允许非法顺序，分页和 repeated release identity 不完整，APPLIED/ACTIVE/ROLLED_BACK 都没有修改真实 owner。它不能作为生产激活或 exact rollback 证据。
+0110 `evolution_governance_ledger` 现在是只读历史资产，0142 trigger 会拒绝
+任何新 V1 mutation。V2 repository 将版本、proposal、Knowledge、Decision、
+Identity snapshot/regression/plan、decision、operation、active projection、
+receipt、failure evidence 与 shadow compare 分表持久化；只有唯一 repository
+UoW 能修改 active projection。
+
+`EvolutionVersionActivationService` 会在 mutation 前重新打开 0138 trusted
+Lab report/proposal、exact ReviewItem subject/status version/evidence、target
+version/digest、regression 和 rollback target。apply→rollback→新版本 apply
+使用独立 operation identity；响应丢失重开 exact receipt。Host lifespan 持有
+唯一 `HostEvolutionRuntimeOwner`，Input、Tribe、Task acceptance、Scheduler
+和 semantic recall 均消费同一 service/repository identity。
+
+本地波次为 `199 passed in 73.74s`；分层修复后重叠集合为
+`51 passed in 28.16s`。fresh Gate 1～14 全部通过，Persona writer scan 为零
+违规。真实部署、Knowledge ENFORCE、Identity release pair、Docker 和外部服务
+仍未运行，因此状态为
+`CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`。
 
 ## 9. 仓库边界
 
@@ -728,15 +745,15 @@ Edge session/owner 不是默认的进程字符串：Host 从 normalized canonica
 
 ## 10. 当前最高优先级缺口
 
-1. 守护 B5C cancellation、Operation/Effect reconciliation、0098 immutable overlay 与 0099 case/proof/supersession、graph-wide fence、canonical schema/codec 合同；对目标部署盘点并修复/隔离 legacy inventory，补齐密钥生命周期、Operator 凭据与生产故障矩阵；此前不启用 canary。
-2. 持续守护 0099 stable system proof、healthy closure 零写入、0090 唯一与 0091/0092 完整 validator；持续守护 0096 PRE optional-attempt、POST no-rerun 与 claim-fenced continuation。
-3. 维持 0093/0095 故障矩阵：deterministic legacy identity、升级 ID/key 稳定、revisioned/legacy payload、trigger/index readiness、source-ref 一对一、append-success/complete-loss exact replay、零重复 Event、per-revision 顺序和 Event/Review/Operator exact read；不得把 delivery claim 误当成 0092 cancellation claim。
-4. 为 safe-retry contract path 接入可证明无副作用的现实 resolver 瞬态来源；持续守护无前置 Review 到期 retry 的 promotion+claim 单事务与 Review 不绕过边界，完成历史半状态 reconciliation，以及当前 exact operation-free Attempt 窄窗之外的 general/multi-node/batch recovery。两类 higher-fence takeover 都不得被泛化为这一项已完成。
-5. 对 0096 Review continuation 做跨进程故障矩阵与 canary，确保 enqueue 原子性、过期扫描、takeover/stale fence、surface 路由、grant renewal 与关闭顺序持续成立。
-6. 删除全局 Service Locator，建立 Host/Obs/Worker 显式 composition scopes；把 D8 未覆盖的 legacy direct embodiment adapter 迁入 app-owned runtime，并在真实设备环境单独验证物理效果，不能把 queued ack 或 Edge SQLite receipt 当作设备成功。
-7. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
-8. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
-9. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
+1. 在隔离 acceptance 数据根启动固定版本 Docker Neo4j/Chroma/Redis，并完成真实写、读、重启读取和 namespace 清理。
+2. 构建 Monitor UI，启动 Host、Obs、Nginx Monitor、完整 Edge 与 Unified Gateway；真实 HTTP 链必须贯通 TaskGraph、Budget、Verification、Acceptance、Effect、Outbox 和 receipt。
+3. 在同一运行窗口执行 Chat、Skill、Delegate、Plan、Scheduler、Internal、Operator，以及 Lab、Skill lifecycle、Feedback、Knowledge、Identity golden flows。
+4. 注入 Host/Edge/数据库崩溃、Lease 过期、Budget 竞争、未知副作用、网络中断和 rollback failure，证明不重跑已提交 worker、不重复外发。
+5. 在真实 Chroma/Neo4j 下从 Knowledge SHADOW 走 CANARY；只有 read compare、恢复和隐私检查通过后才允许 ENFORCE。
+6. 使用真实 release snapshot pair 执行 Identity no-change、重大差异阻断、activation 与 exact rollback。
+7. 在外部条件可用时执行 PlanningSearch 24/20/30 cohort、外部 Skill provider canary、模型、ASR/TTS 与 Avatar；缺失时只能标 `ACCEPTANCE_PENDING_EXTERNAL/NOT_TESTED`。
+8. 完成跨 workspace、授权提升、Preview 绕过、供应链、secret/隐私扫描和冻结基线性能比较。
+9. 生成 `FullStackAcceptanceReceiptV1` 并按强制 Gate 得出 `PASS / ACCEPTANCE_PENDING_EXTERNAL / FAIL`；NE-07 前不得宣称 Full Architecture DONE。
 
 ## NE-05 当前生产对象图
 

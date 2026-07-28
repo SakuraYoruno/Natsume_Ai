@@ -273,10 +273,10 @@ Windows graceful stop 与 NE-07 真实服务栈尚未运行，因此本表保持
 | Capability Maturity | `V2_AUTHORITY_WIRED_FAIL_CLOSED_LOCAL_WAVE_PASS` | scorecard/provider/Governor adapter、0141 maturity decision、Host lifecycle Registry | 生产门禁默认开启；缺失/伪造 scorecard 最高风险，新能力最高 L1/L2，active version 超过静态风险上限会令 Host 启动失败关闭 | NE-07 外部 canary |
 | Capability Forge | `PROPOSAL_ONLY / RUNTIME_AUTHORITY_RETIRED` | `app/capability_forge.py`、Obs 只读 projection、NE-05 static contract | approval、rollback、runtime result 和 route override 公共 authority 为 0；运行统计固定 `authority=PROPOSAL_ONLY`、applied=0，只能生成 proposal | NE-06 消费 proposal；不得恢复平行 route authority |
 | Skill Compiler | `CODE_COMPLETE_DETERMINISTIC_UNSIGNED_BUNDLE_LOCAL_WAVE_PASS` | `host_brain/skills/skill_compiler.py`、`SkillDraftV1`、`SkillBundleCompilationV1`、NE-05 tests | Markdown/API/script/accepted trace 生成确定性 draft、inventory、CycloneDX SBOM、签名申请与 content-addressed bundle；不保存 raw thought、正文或私钥，不拥有 activation | NE-07 真实外部签名/bundle canary |
-| Experience Feedback | `LEDGER_ONLY_NO_ACTIVATION_AUTHORITY` | 0110 V1 ledger、Prefrontal adapter | APPLIED 不切 versioned policy/persona；Lab/Review 未解析；旧 caller 仍待替换 | NE-06 |
-| Knowledge OS | `LEDGER_ONLY_NO_ACTIVE_AUTHORITY` | `KnowledgeEntryV1`、0110 namespace ledger | active winner、cursor、supersedes/deprecation/dedup/conflict 与旧 reader cutover 均缺失 | NE-06 |
-| Identity Snapshot | `PARTIAL` | `release/identity_snapshot.py` | 合同丰富，但 gate 默认关闭，未由 release 主链生成/持久化 | NE-06 |
-| Identity Migration | `LEDGER_ONLY_NO_ACTIVATION_AUTHORITY` | `IdentityMigrationPlanV1`、0110 identity event ledger | ACTIVE 不切 snapshot owner，ROLLED_BACK 不恢复 exact previous version，transition identity 不支持重复 release | NE-06 |
+| Experience Feedback | `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07` | 0142、Task acceptance decorator、Input/Tribe/Scheduler proposal adapters、V2 activation service | APPLIED 已查询真实 Lab/Review 并切 versioned Persona/表达/反馈 policy；错误持久化并投影 Obs。真实部署与全栈故障验收未运行 | NE-07 |
+| Knowledge OS | `CODE_COMPLETE_LOCAL / DEFAULT_SHADOW / ACCEPTANCE_PENDING_NE07` | `KnowledgeEntryV2`、`DecisionRecordV1`、0142 active projection、Host semantic recall decorator | active winner、cursor、supersedes/deprecation/dedup/conflict/TTL 已完成；真实 Chroma/Neo4j shadow compare、CANARY→ENFORCE 与重启验收仍缺 | NE-07 |
+| Identity Snapshot | `CODE_COMPLETE_LOCAL_RELEASE_GATE_DEFAULT_ENFORCE` | `release/identity_snapshot.py`、0142 snapshot/active projection | 显式关闭会 fail closed；真实 release pair 还未在部署服务栈执行 | NE-07 |
+| Identity Migration | `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07` | `IdentityMigrationPlanV2`、`release/identity_activation.py`、0142 decision/operation/receipt | no-change、重大差异阻断、真实 evidence binding、canonical owner switch 与 exact previous rollback 已本地证明；真实发布演练未运行 | NE-07 |
 
 ## 5. 历史证据的正确解释
 

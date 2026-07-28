@@ -24,6 +24,9 @@ from host_brain.app.governed_frozen_skill_runtime import (
     _WorkerCommitAcceptance,
     _WorkerCommitVerifier,
 )
+from host_brain.evolution.task_feedback import (
+    decorate_task_acceptance,
+)
 from host_brain.app.governed_operator_contracts import (
     GOVERNED_OPERATOR_GOVERNOR_REJECTED,
     GOVERNED_OPERATOR_RUNTIME_INVALID,
@@ -947,8 +950,11 @@ def build_governed_operator_runtime(
         outbox_factory=OutboxMessage,
         worker_resolver=GovernedWorkerRegistry(delegate=worker),
         verifier=_WorkerCommitVerifier(projection_reader=projection_store),
-        acceptance=_WorkerCommitAcceptance(
-            projection_reader=projection_store
+        acceptance=decorate_task_acceptance(
+            _WorkerCommitAcceptance(
+                projection_reader=projection_store
+            ),
+            task_runtime_container=task_runtime_container,
         ),
         projection_reader=projection_store,
         review_runtime=TaskNodeReviewRuntime.for_task_store(

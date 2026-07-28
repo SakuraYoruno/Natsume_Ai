@@ -923,24 +923,34 @@ runtime authority 已删除。外部 provider 的真实 canary 尚未在 NE-07 �
 
 ### 4.4 Feedback、Knowledge 与 Identity 演化（NE-06）
 
-NE-06 把长期变化限定为 proposal 流：旧增长入口只生成 FeedbackProposal，Knowledge 先以 namespace-scoped proposal 保存，Identity 先注册 migration plan。0110 ledger 以 append-only event 记录 `PROPOSED/STAGED → Lab + Review → ACTIVE/APPLIED → ROLLED_BACK/DEPRECATED`，任何读取只看已激活 projection。
+NE-06 把长期变化限定为 proposal 流：旧增长入口只生成
+`FeedbackProposalV1`，Knowledge 先保存 workspace-scoped
+`KnowledgeEntryV2/DecisionRecordV1`，Identity 先注册
+`IdentityMigrationPlanV2`。0110 只读保留；0142 是唯一 mutation authority，
+负责真实证据解析、active projection CAS 与 terminal receipt。
 
 ```mermaid
 flowchart LR
     Outcome[任务结果 / 用户反馈] --> Feedback[FeedbackProposal]
     Fact[Life 或 Project 事实] --> Knowledge[KnowledgeEntry proposal]
     Snapshot[Identity snapshot + diff] --> Identity[MigrationPlan]
-    Feedback --> Ledger[0110 Evolution Governance Ledger]
+    Feedback --> Ledger[0142 immutable version / proposal ledger]
     Knowledge --> Ledger
     Identity --> Ledger
-    Lab[Lab evidence] --> Gate{Review + evidence gate}
+    Lab[0138 trusted Lab / regression] --> Gate{Review + evidence resolver}
     Ledger --> Gate
     Gate -->|拒绝 / 保持 proposal| Pending[只读 proposal]
-    Gate -->|通过| Active[版本化 active projection]
-    Active --> Rollback[durable rollback / deprecation event]
+    Gate -->|通过| UoW[decision + operation + active CAS + receipt]
+    UoW --> Active[版本化 active projection]
+    Active --> Rollback[exact previous rollback / deprecation]
 ```
 
-反馈、知识和人格都没有直接生产 writer；当前 repository/composition 已能回放 apply/rollback，旧 Memory、IdentitySnapshot owner 和所有增长 caller 的完整切流仍待完成。
+运行时反馈、知识和人格入口都没有直接 active writer。Input、Tribe、
+Task acceptance 与 Scheduler 只 stage proposal；V2 service 必须重开真实
+Lab/Review/version 后才能切换 active truth。Knowledge reader 已接入 Host
+lifespan，默认 SHADOW，可按 CANARY/ENFORCE 切流；旧直接 add writer 失败关闭。
+Identity release 激活会切换真实 snapshot owner，rollback 恢复 exact previous
+snapshot/version。真实部署切流和全服务栈仍待 NE-07。
 
 ### 4.5 Delegate
 
@@ -1563,9 +1573,17 @@ Graph Acceptance
 
 [persona_growth.py](../../../host_brain/persona/persona_growth.py) 的 stage/milestone、interaction cycle，以及 [emergent_growth_engine.py](../../../host_brain/persona/emergent_growth_engine.py) 的 emergent weekly 当前只生成经过 drift guard 的 candidate；它们不会消费 one-time 标志、weekly cumulative、change history 或 feedback buffer。显式历史迁移只能通过带 `migration_id`、actor 和 evidence 的 `apply_migration_growth_delta()` 写入，并产生结构化审计。
 
-`T-PERSONA-FENCE-01` 会拒绝生产代码重新调用 legacy writer、在迁移命名空间之外构造迁移 authority，或绕过引擎直接修改 `_user_traits`。当前定级为 `CENTRAL_FENCE_WIRED`：旧直写已归零，但 `proposal → Lab/shadow → Review → version activation → rollback` 尚待 NE-06 实现，因此人格长期演化仍不可用。
+`T-PERSONA-FENCE-01` 会拒绝生产代码重新调用 legacy writer、legacy rollback、
+在迁移命名空间之外构造 authority，或绕过引擎直接修改 `_user_traits`。
+0142 已实现
+`proposal → trusted Lab → Review → version activation → exact rollback`；
+显式 migration authority 是唯一 trait mutation path。当前定级为
+`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。
 
-[prefrontal_agent.py](../../../host_brain/tribe/prefrontal_agent.py) 对 `PersonaGrowthTracker.on_interaction_cycle()` 的调用参数与真实签名不匹配，`TypeError` 会被吞掉/降级。该 experience-feedback 分支是 `PARTIAL_BROKEN_PATH`，不能作为人格演化已闭环的证据。
+[prefrontal_agent.py](../../../host_brain/tribe/prefrontal_agent.py) 已修正
+`PersonaGrowthTracker.on_interaction_cycle()` 参数链，并将 stage、milestone、
+interaction、emergent 与 response feedback 归一为 proposal-only。异常写入
+0142 privacy-bounded failure evidence 并由 Obs 汇总，不能再静默冒充成功。
 
 ### 9.4 Scene
 

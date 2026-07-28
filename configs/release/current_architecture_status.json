@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "9ddeadc1e4d9c45459374bc11bee300e883a7c3c",
+    "dev_commit": "2c67f143a44eb08cdeb66123a899011105fa93fc",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE05_SKILL_LIFECYCLE_V2_LOCAL_WAVE_PASS_EXTERNAL_CANARY_PENDING_NE07_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE06_EVOLUTION_ACTIVATION_V2_LOCAL_WAVE_PASS_FULL_STACK_PENDING_NE07_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-05",
-  "active_wave_status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
-  "active_wave_detail": "NE05_V2_ACTIVATION_MATURITY_ACTIVE_PROJECTION_AND_HOST_RESOLVER_WIRED_181_PASS_1_SYMLINK_SKIP_REAL_EXTERNAL_BUNDLE_PROVIDER_CANARY_NOT_RUN",
-  "next_wave": "NE-06",
+  "active_wave": "NE-06",
+  "active_wave_status": "COMPLETED",
+  "active_wave_detail": "NE06_V2_FEEDBACK_KNOWLEDGE_IDENTITY_ACTIVATION_AND_EXACT_ROLLBACK_WIRED_199_PASS_ARCHITECTURE_GATES_1_TO_14_PASS_REAL_FULL_STACK_NOT_RUN",
+  "next_wave": "NE-07",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -26,6 +26,52 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne06_evolution_activation_v2_current_validation": {
+      "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
+      "implementation_parent": "origin/dev@2c67f143a44eb08cdeb66123a899011105fa93fc",
+      "migration_head": "0142_evolution_activation_authority.sql",
+      "authority": "ONE_SQLITE_UOW_FOR_VERSION_DECISION_IDEMPOTENCY_OPERATION_ACTIVE_PROJECTION_AND_TERMINAL_TRANSITION_RECEIPT",
+      "legacy_v1_boundary": "0110_TABLES_QUERY_ONLY_AND_PHYSICALLY_FENCED_AGAINST_NEW_MUTATION",
+      "feedback": "TASK_VERIFICATION_USER_REJECTION_TOOL_RELIABILITY_RESPONSE_FEEDBACK_STAGE_MILESTONE_INTERACTION_AND_EMERGENT_SIGNALS_ARE_PROPOSAL_ONLY_UNTIL_REAL_LAB_AND_REVIEW_ACTIVATION_SWITCH_THE_VERSIONED_POLICY_OR_PERSONA_PROJECTION",
+      "failure_evidence": "PIPELINE_ERRORS_PERSIST_PRIVACY_BOUNDED_FAILURE_EVIDENCE_AND_SURFACE_BODY_FREE_COUNTS_TO_OBS_WITHOUT_BLOCKING_THE_PRIMARY_CHAT_COMMAND",
+      "knowledge": "WORKSPACE_SCOPED_LIFE_AND_PROJECT_NAMESPACES_ACTIVE_WINNER_CURSOR_SUPERSEDES_DEPRECATION_DEDUP_CONFLICT_TTL_DECISION_RECORD_BACKFILL_SHADOW_COMPARE_CANARY_AND_ENFORCE_READER",
+      "knowledge_cutover": "DEFAULT_SHADOW_PRODUCTION_READER_CANARY_AND_ENFORCE_REQUIRE_NE07_REAL_SERVICE_ACCEPTANCE_LEGACY_DIRECT_WRITERS_FAIL_CLOSED",
+      "identity": "RELEASE_CHAIN_PREPARE_REGRESSION_REAL_LAB_AND_REVIEW_BINDING_ATOMIC_ACTIVE_SNAPSHOT_SWITCH_NO_CHANGE_RELEASE_MAJOR_DIFF_BLOCK_AND_EXACT_PREVIOUS_SNAPSHOT_ROLLBACK",
+      "persona_writer_boundary": "ALL_LEGACY_RUNTIME_APPLY_AND_ROLLBACK_ENTRY_POINTS_FAIL_CLOSED_ONLY_EXPLICIT_MIGRATION_AUTHORITY_CAN_CHANGE_TRAITS",
+      "migration_smoke": "FRESH_0001_TO_0142_PASS",
+      "seven_route_receipt_commit": "08a172da662df11d34fb42ea6e25a651f84da141",
+      "seven_route_receipt_migration": "0142_evolution_activation_authority.sql",
+      "seven_route_receipt_run_id": "universal-runtime-acceptance://sha256/1f2b37fe2d4bae5e988546daa82d65fdf53ee1254bc27f8485fe65b570271b04",
+      "seven_route_receipt_digest": "sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f",
+      "seven_route_receipt_boundary": "EXISTING_ACCEPTED_SQLITE_BACKUP_APPEND_ONLY_MIGRATED_FROM_0141_THROUGH_0142_AND_QUERY_ONLY_REOPENED_WITHOUT_ACCEPTED_WORKER_REEXECUTION",
+      "wave_validation": "199_PASSED_IN_73_74_SECONDS",
+      "post_layering_validation": "51_PASSED_IN_28_16_SECONDS_OVERLAPS_WAVE_AND_IS_NOT_ADDED",
+      "post_receipt_validation": "53_PASSED_IN_45_10_SECONDS_OVERLAPS_WAVE_AND_IS_NOT_ADDED",
+      "legacy_release_environment_regression": "27_PASSED_IN_0_99_SECONDS_OVERLAPPING_NOT_ADDED",
+      "architecture_static_gates": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_FINAL_POST_RECEIPT_RERUN",
+      "static_and_doc_gate": "PASS_FAILURES_EMPTY_FINAL_POST_RECEIPT_RERUN",
+      "persona_authority_scan": "PASS_ZERO_VIOLATIONS",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "not_run": [
+        "NE-07 real Docker Neo4j Chroma Redis and full service stack",
+        "deployed Knowledge OS ENFORCE cutover",
+        "real release deployment identity activation and rollback",
+        "external model provider and hardware acceptance"
+      ],
+      "evidence_refs": [
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "host_brain/contracts/evolution.py",
+        "host_brain/evolution/version_activation.py",
+        "host_brain/evolution/knowledge_recaller.py",
+        "host_brain/evolution/task_feedback.py",
+        "host_brain/persistence/evolution_activation_v2_repository.py",
+        "host_brain/release/identity_activation.py",
+        "host_brain/composition/host_evolution_runtime.py",
+        "tests/integration/test_ne06_evolution_activation_v2.py",
+        "tests/integration/test_ne06_evolution_governance_ledger.py",
+        "docs/45_testing/test_reports/ne01_universal_route_acceptance_0142_20260728.json"
+      ]
+    },
     "ne05_skill_lifecycle_v2_current_validation": {
       "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "migration_head": "0141_skill_lifecycle_authority.sql",
@@ -148,11 +194,11 @@
       "static_and_doc_gate": "PASS_FAILURES_EMPTY_IN_114_5_SECONDS_FINAL_RERUN",
       "coverage_manifest_first_run": "23_PASSED_9_FAILED_STALE_0135_BINDING_FAIL_CLOSED",
       "coverage_manifest_final_run": "32_PASSED_IN_4_71_SECONDS",
-      "seven_route_receipt_commit": "6f78e25c24a2bc148aa8a0a12016558a6e492a7a",
-      "seven_route_receipt_migration": "0141_skill_lifecycle_authority.sql",
-      "seven_route_receipt_run_id": "universal-runtime-acceptance://sha256/4d0023bdfb4becd9cc69710798375b09cbcfbb13b8652db8fdbaa08c09fcd00b",
-      "seven_route_receipt_digest": "sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986",
-      "seven_route_receipt_boundary": "EXISTING_ACCEPTED_SQLITE_BACKED_UP_AND_APPEND_ONLY_MIGRATED_FROM_0140_THROUGH_0141_THEN_QUERY_ONLY_REOPENED_ON_CLEAN_IMPLEMENTATION_COMMIT_WITHOUT_ACCEPTED_WORKER_REEXECUTION",
+      "seven_route_receipt_commit": "08a172da662df11d34fb42ea6e25a651f84da141",
+      "seven_route_receipt_migration": "0142_evolution_activation_authority.sql",
+      "seven_route_receipt_run_id": "universal-runtime-acceptance://sha256/1f2b37fe2d4bae5e988546daa82d65fdf53ee1254bc27f8485fe65b570271b04",
+      "seven_route_receipt_digest": "sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f",
+      "seven_route_receipt_boundary": "EXISTING_ACCEPTED_SQLITE_BACKED_UP_AND_APPEND_ONLY_MIGRATED_FROM_0141_THROUGH_0142_THEN_QUERY_ONLY_REOPENED_ON_CLEAN_NE06_IMPLEMENTATION_COMMIT_WITHOUT_ACCEPTED_WORKER_REEXECUTION",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
       "not_run": [
         "deployed multi-instance canary",
@@ -318,14 +364,14 @@
     },
     "ne01_code_wave_closeout_current_validation": {
       "status": "CODE_COMPLETE_LOCAL_ACCEPTANCE_PENDING_NE07",
-      "base_commit": "6f78e25c24a2bc148aa8a0a12016558a6e492a7a",
+      "base_commit": "08a172da662df11d34fb42ea6e25a651f84da141",
       "route_acceptance": "PASS_ALL_SEVEN_ROUTES_ONE_FILE_BACKED_CANONICAL_SQLITE_QUERY_ONLY_RECEIPT",
-      "route_acceptance_run_id": "universal-runtime-acceptance://sha256/4d0023bdfb4becd9cc69710798375b09cbcfbb13b8652db8fdbaa08c09fcd00b",
-      "route_acceptance_receipt_digest": "sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986",
+      "route_acceptance_run_id": "universal-runtime-acceptance://sha256/1f2b37fe2d4bae5e988546daa82d65fdf53ee1254bc27f8485fe65b570271b04",
+      "route_acceptance_receipt_digest": "sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f",
       "route_acceptance_snapshot_digest": "sha256:a2f6b759d64960d78d6cbb54cd1157168f18e8deeff8f9579a7bd3f9cfa2750c",
-      "migration_head": "0141_skill_lifecycle_authority.sql",
+      "migration_head": "0142_evolution_activation_authority.sql",
       "coverage_rebind_initial_validation": "10_FAILED_32_PASSED_OLD_708AA845_EVIDENCE_COMMIT_NOT_CURRENT_HEAD_ANCESTOR_FAIL_CLOSED_AS_DESIGNED",
-      "coverage_rebind_final_validation": "PASS_CURRENT_6F78E25C_CLEAN_IMPLEMENTATION_COMMIT_AND_0141_RECEIPT_NO_ACCEPTED_WORKER_REEXECUTION",
+      "coverage_rebind_final_validation": "PASS_CURRENT_08A172DA_CLEAN_NE06_IMPLEMENTATION_COMMIT_AND_0142_RECEIPT_NO_ACCEPTED_WORKER_REEXECUTION",
       "post_merge_route_regression": "UNIVERSAL_REMAINING_ROUTE_1_PASSED_IN_19_11_SECONDS_AND_GR05_HOST_1_PASSED_IN_33_01_SECONDS",
       "documentation_validation": "13_PASSED_IN_6_28_SECONDS_AND_DOC_GATE_PASS_FAILURES_EMPTY",
       "recovery_wave": "24_PASSED_IN_165_99_SECONDS",
@@ -333,7 +379,7 @@
       "exactly_once_boundary": "FRESH_PROCESS_RECOVERY_REOPENS_CANONICAL_ATTEMPT_LEASE_BUDGET_VERIFICATION_ACCEPTANCE_EFFECT_AND_RECEIPT_WITHOUT_REPLAYING_ACCEPTED_WORKERS",
       "budget_boundary": "BLOCK_IS_THE_ONLY_ENABLED_RUNTIME_ACTION_DEGRADE_AND_REVIEW_FAIL_CLOSED_BEFORE_MUTATION_AND_REMAIN_PROPOSAL_ONLY",
       "unknown_effect_boundary": "NO_AUTOMATIC_ATTRIBUTION_SIGNED_CASE_BOUND_RECONCILIATION_IS_REQUIRED_BY_DESIGN",
-      "local_evidence_root": "artifacts/local-gates/6f78e25c24a2bc148aa8a0a12016558a6e492a7a/ne01-coverage-v2",
+      "local_evidence_root": "artifacts/local-gates/08a172da662df11d34fb42ea6e25a651f84da141/ne06-coverage",
       "production_activation": "ACCEPTANCE_PENDING_NE07_SIGNED_FEATURE_PROMOTION_REAL_HTTP_NETWORK_PROVIDER_DOCKER_AND_EXTERNAL_NAMESPACE",
       "docker_full_stack": "NOT_RUN_NE07",
       "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
@@ -3887,14 +3933,14 @@
       "scope": ["chat", "skill", "plan", "delegate", "scheduler", "internal", "operator"],
       "coverage_gate": {
         "schema_version": "natsume.universal-governed-runtime-coverage.v2",
-        "evaluated_commit_sha": "6f78e25c24a2bc148aa8a0a12016558a6e492a7a",
-        "migration_head": "0141_skill_lifecycle_authority.sql",
+        "evaluated_commit_sha": "08a172da662df11d34fb42ea6e25a651f84da141",
+        "migration_head": "0142_evolution_activation_authority.sql",
         "route_status": "CHAT_SKILL_PLAN_AND_DELEGATE_ENABLED_SCOPES_COMPLETE_REMAINING_THREE_INCOMPLETE",
-        "commit_bound_acceptance": "PASS_ALL_SEVEN_CLEAN_SHA_QUERY_ONLY_FILE_BACKED_SQLITE_APPEND_ONLY_MIGRATED_0140_TO_0141_RECEIPT_SHA256_F42F5FEF85FD754DAF8E523DE6479F09EC94373118F9401CAA9A53A46C980986",
+        "commit_bound_acceptance": "PASS_ALL_SEVEN_CLEAN_SHA_QUERY_ONLY_FILE_BACKED_SQLITE_APPEND_ONLY_MIGRATED_0141_TO_0142_RECEIPT_SHA256_161B860FD67D47945C44FF403304742C5619BC6A590CD76DD12B119E1E29F15F",
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA"
       },
       "authenticated_ingress_lineage": "WIRED_FOR_OUTER_HOST_ADMISSION: before Governor, the Secure Ingress principal is frozen into the intent; direct chat/skill/delegate and approved-plan admission preserve the same derived surface, principal, paired claim/audit refs, and body SHA-256. Plan and direct admission read-only preflight the durable parent Governor binding before their first HostCommand/TaskGraph write, and child-grant derivation repeats the check. GATEWAY requires Gateway source plus paired refs; other authenticated input is HOST_INPUT; malformed digest, half-bound refs, or parent-principal drift fail closed.",
-      "end_to_end_boundary": "The v2 coverage matrix covers chat/skill/plan/delegate/scheduler/internal/operator. The v3 ledger reopens one file-backed canonical SQLite database in mode=ro/query_only and requires exact clean Git HEAD, repository/applied migration head, strict Command, WorkOrder and TaskGraph JSON plus digest identity, completed Graph, accepted Nodes, latest successful Attempts, terminal Leases, committed Operation receipts, graph/child Budget lineage, durable Verification/Acceptance, Artifact/WorkerProjection, committed Effects, published Outboxes and zero current recovery/cancellation ambiguity. The existing accepted seven-route 0140 snapshot was copied with SQLite backup semantics, append-only migrated only through 0141, then reopened on clean implementation commit 6f78e25c24a2bc148aa8a0a12016558a6e492a7a without re-executing an accepted worker. Internal, Operator and Scheduler each independently reopen exactly one content-addressed control policy; the other routes expose zero. The privacy-safe receipt validates all seven PASS with no reason codes and makes all seven commit_bound_acceptance controls PASS. Chat, Skill, enabled CAPABILITY_SEARCH_V1 Plan and enabled read-only pentest_agent Delegate are COMPLETE. Scheduler, Internal, Operator and NE-01 remain incomplete at production acceptance because their other controls or deployed canaries are still partial. The controlled terminal provider is runtime-governance evidence only; deployed-key HTTP/network canary, real external model quality, generic PlanningSearch benefit, external Skill canary and NE-07 remain incomplete.",
+      "end_to_end_boundary": "The v2 coverage matrix covers chat/skill/plan/delegate/scheduler/internal/operator. The v3 ledger reopens one file-backed canonical SQLite database in mode=ro/query_only and requires exact clean Git HEAD, repository/applied migration head, strict Command, WorkOrder and TaskGraph JSON plus digest identity, completed Graph, accepted Nodes, latest successful Attempts, terminal Leases, committed Operation receipts, graph/child Budget lineage, durable Verification/Acceptance, Artifact/WorkerProjection, committed Effects, published Outboxes and zero current recovery/cancellation ambiguity. The existing accepted seven-route snapshot was copied with SQLite backup semantics, append-only migrated from 0141 through 0142, then reopened on clean NE-06 implementation commit 08a172da662df11d34fb42ea6e25a651f84da141 without re-executing an accepted worker. Internal, Operator and Scheduler each independently reopen exactly one content-addressed control policy; the other routes expose zero. The privacy-safe receipt validates all seven PASS with no reason codes and makes all seven commit_bound_acceptance controls PASS. Chat, Skill, enabled CAPABILITY_SEARCH_V1 Plan and enabled read-only pentest_agent Delegate are COMPLETE. Scheduler, Internal, Operator and NE-01 remain incomplete at production acceptance because their other controls or deployed canaries are still partial. The controlled terminal provider is runtime-governance evidence only; deployed-key HTTP/network canary, real external model quality, generic PlanningSearch benefit, external Skill canary and NE-07 remain incomplete.",
       "evidence_refs": [
         "host_brain/agent_runtime/cortex_runtime.py",
         "host_brain/app/governed_task_adapter.py",
@@ -3915,7 +3961,7 @@
         "tests/contract/test_universal_route_acceptance.py",
         "tests/contract/test_universal_governed_runtime_coverage.py",
         "configs/release/universal_governed_runtime_coverage.json",
-        "docs/45_testing/test_reports/ne01_universal_route_acceptance_0141_20260728.json",
+        "docs/45_testing/test_reports/ne01_universal_route_acceptance_0142_20260728.json",
         "docs/45_testing/test_reports/ne01_skill_policy_route_acceptance_20260727.json",
         "docs/45_testing/test_reports/ne01_plan_delegate_route_acceptance_20260727.json",
         "docs/45_testing/test_reports/ne01_scheduler_clock_control_route_acceptance_20260727.json"
@@ -6136,55 +6182,65 @@
       "boundary": "Markdown/API/script/accepted-trace metadata compiles to deterministic SkillDraftV1, inventory, CycloneDX SBOM, signature request and content-addressed bundle with contracts, verifier, test vectors, budget and rollback metadata. Accepted trace requires accepted receipt/artifact digest binding; raw thought, private body, secrets and signing private keys are rejected. The compiler never imports or activates source."
     },
     "experience_feedback_pipeline": {
-      "status": "LEDGER_ONLY_NO_ACTIVATION_AUTHORITY",
+      "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "evidence_refs": [
         "host_brain/tribe/prefrontal_agent.py",
-        "host_brain/evolution/contracts.py",
-        "host_brain/persistence/evolution_governance_ledger.py",
-        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
-        "tests/integration/test_ne06_evolution_governance_ledger.py"
+        "host_brain/evolution/task_feedback.py",
+        "host_brain/evolution/version_activation_feedback.py",
+        "host_brain/persistence/evolution_activation_v2_feedback.py",
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
       ],
-      "reason": "PR #83 fixes one bounded interaction_stats call and stores event-named V1 rows, but APPLIED does not switch a versioned policy/persona projection and Lab/Review refs are not resolved against real authorities."
+      "boundary": "Every enabled feedback source stages an immutable proposal; APPLIED reopens a trusted Lab report and exact ReviewItem before changing the active versioned policy/persona projection. Failures are durable and visible to Obs. Real deployed provider/full-stack acceptance remains NE-07."
     },
     "persona_growth_authority": {
-      "status": "CENTRAL_FENCE_WIRED",
+      "status": "CODE_COMPLETE_PROPOSAL_ONLY_RUNTIME_AND_REVIEWED_VERSION_ACTIVATION",
       "legacy_direct_writers": "BLOCKED",
       "migration_path": "EXPLICIT_AUDITED_ONLY",
-      "proposal_activation": "PENDING_NE_06",
-      "blocked_entry_classes": [
+      "proposal_activation": "WIRED_REAL_LAB_REVIEW_AND_EXACT_ROLLBACK",
+      "proposal_entry_classes": [
         "bond stage or milestone candidate",
         "interaction cycle candidate",
         "scheduler-allowed emergent weekly candidate"
       ],
-      "reason": "PersonaEngine centrally rejects every legacy runtime growth write; current stage, milestone, interaction, and emergent paths return candidates without mutating traits or consuming one-time/history state.",
+      "boundary": "Runtime growth entry points only stage FeedbackProposalV1. PersonaEngine centrally rejects direct apply and rollback; only an exact migration authority may change traits after the V2 activation service commits a reviewed version receipt.",
       "evidence_refs": [
         "host_brain/persona/persona_engine.py",
+        "host_brain/evolution/version_activation_feedback.py",
         "tools/static_scan/persona_growth_authority_scan.py",
-        "tests/unit/test_ne01_persona_growth_authority.py"
-      ],
-      "required_action": "REPLACE_BLOCKED_CANDIDATES_WITH_GOVERNED_PROPOSAL_PIPELINE_IN_NE_06"
+        "tests/unit/test_ne01_persona_growth_authority.py",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
+      ]
     },
     "knowledge_os": {
-      "status": "LEDGER_ONLY_NO_ACTIVE_AUTHORITY",
+      "status": "CODE_COMPLETE_LOCAL_DEFAULT_SHADOW_ACCEPTANCE_PENDING_NE07",
       "evidence_refs": [
-        "host_brain/evolution/contracts.py",
-        "host_brain/persistence/evolution_governance_ledger.py",
-        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
-        "tests/integration/test_ne06_evolution_governance_ledger.py"
+        "host_brain/contracts/evolution.py",
+        "host_brain/evolution/version_activation_knowledge.py",
+        "host_brain/evolution/knowledge_recaller.py",
+        "host_brain/persistence/evolution_activation_v2_knowledge.py",
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
       ],
-      "boundary": "PR #83 stores two namespace event rows, but active winner, cursor paging, supersedes, deprecation, dedup, conflict resolution and production retrieval cutover are not implemented. Existing Memory, Markdown KB, Canon and Pentest stores remain the active readers/writers."
+      "boundary": "V2 owns workspace-scoped life/project namespaces, active winner, cursor paging, supersedes, deprecation, dedup, conflicts, TTL and DecisionRecord. Host retrieval is wired through shadow/canary/enforce modes, but defaults to SHADOW until NE-07 validates real Chroma/Neo4j and deployment cutover."
     },
-    "identity_snapshot": {"status": "PARTIAL", "release_gate_default": "DISABLED"},
+    "identity_snapshot": {
+      "status": "CODE_COMPLETE_LOCAL_RELEASE_GATE_DEFAULT_ENFORCE",
+      "release_gate_default": "ENABLED",
+      "boundary": "Explicit disable now fails release closed. Production deployment of a real release pair remains an NE-07 acceptance item."
+    },
     "identity_migration": {
-      "status": "LEDGER_ONLY_NO_ACTIVATION_AUTHORITY",
+      "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "evidence_refs": [
-        "host_brain/evolution/contracts.py",
-        "host_brain/evolution/production_composition.py",
-        "host_brain/persistence/evolution_governance_ledger.py",
-        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
-        "tests/integration/test_ne06_evolution_governance_ledger.py"
+        "host_brain/contracts/evolution.py",
+        "host_brain/evolution/version_activation_identity.py",
+        "host_brain/release/identity_snapshot.py",
+        "host_brain/release/identity_activation.py",
+        "host_brain/persistence/evolution_activation_v2_identity.py",
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
       ],
-      "boundary": "PR #83 persists event-named V1 rows only. ACTIVE does not switch the IdentitySnapshot owner, ROLLED_BACK does not restore the exact previous snapshot/version, evidence refs are not resolved, and the transition identity cannot represent repeated releases safely."
+      "boundary": "IdentityMigrationPlanV2 reopens real trusted Lab, Review, regression and snapshot authorities; activation changes the canonical snapshot owner atomically and rollback restores the exact previous snapshot/version. No-change passes and major differences block by default. Real release deployment remains NE-07."
     }
   },
   "full_stack_acceptance": {

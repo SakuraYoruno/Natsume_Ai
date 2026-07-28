@@ -38,6 +38,7 @@ class TribeApplicationPorts:
     build_conversation_experience_read_pack: ServiceProvider | None = None
     build_conversation_understanding_pack: ServiceProvider | None = None
     allocate_intent_seq: ServiceProvider | None = None
+    evolution_activation_service: ServiceProvider | None = None
 
     def require(self, name: str) -> ServiceProvider:
         provider = getattr(self, str(name), None)

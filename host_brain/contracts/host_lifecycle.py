@@ -62,6 +62,8 @@ class HostLifecycleApplicationPorts:
     session_tactic_ledger_store: ServiceProvider | None = None
     tts_context_router: ServiceProvider | None = None
     meta_learning_loop: ServiceProvider | None = None
+    evolution_activation_service: ServiceProvider | None = None
+    evolution_scope: ServiceProvider | None = None
     probe_edge_rpc_health: ServiceProvider | None = None
     build_edge_dependency_probe_statuses: EdgeDependencyStatusBuilder | None = None
 

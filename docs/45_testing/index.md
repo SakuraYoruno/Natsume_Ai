@@ -41,16 +41,16 @@
 
 ## NE-01 代码波次封口
 
-- 当前权威收据在 `6f78e25c24a2bc148aa8a0a12016558a6e492a7a`
-  上，以 SQLite backup 复制既有 accepted 七路线 0140 快照，仅追加 migration
-  0141 后 query-only 重开。七路线仍全部 `PASS`，receipt digest 为
-  `sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`，
+- 当前权威收据在 `08a172da662df11d34fb42ea6e25a651f84da141`
+  上，以 SQLite backup 复制既有 accepted 七路线快照，从 0141 仅追加
+  migration 0142 后 query-only 重开。七路线仍全部 `PASS`，receipt digest 为
+  `sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`，
   accepted worker 没有重跑。
 - 恢复波次去重后为 24 个用例，结果 `24 passed in 165.99s`。范围包括
   `test_ne01_general_multinode_recovery.py`、四类跨进程签名恢复、fan-out、
   parallel terminal、cancellation continuation 和真实 Git Workspace。
 - 当前收据证据保存在忽略目录
-  `artifacts/local-gates/6f78e25c24a2bc148aa8a0a12016558a6e492a7a/ne01-coverage-v2/`；
+  `artifacts/local-gates/08a172da662df11d34fb42ea6e25a651f84da141/ne06-coverage/`；
   恢复波次仍保留在其原 commit-bound 目录，不提交 SQLite、日志或用户数据。
   状态为
   `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`；远程 CI 为
@@ -1152,4 +1152,33 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   仍均为 `PASS`，receipt digest 为
   `sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
 - 部署多实例 canary、Windows graceful stop 与 NE-07 真实服务栈尚未运行，
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### NE-06 Feedback、Knowledge 与 Identity V2
+
+- migration `0142_evolution_activation_authority.sql` 从 fresh 0001 连续应用
+  成功；0110 V1 mutation trigger、V2 append-only 表和 active projection UDF
+  guard 均已验证。
+- 波次去重命令覆盖 V2 activation、V1 read-only、Input/Prefrontal/Scheduler、
+  Persona 围栏、Identity release、migration/Core Release 与 NE-05 回归，
+  得到 `199 passed in 73.74s`。
+- 首次架构 Gate 如实发现 Knowledge reader 的 application→app 反向依赖和
+  Prefrontal 1,985 行超限；SemanticHit/Result 迁入中立 contract、纯运行策略
+  拆分后，重叠定向集合为 `51 passed in 28.16s`，完整 Gate 1～14 为
+  `PASS / failed_gates=[]`，没有修改阈值或扩大白名单。
+- Persona growth static scan 返回零违规；`compileall`、JSON 与
+  `git diff --check` 通过。
+- 0142 实现提交落定后，accepted 七路线 snapshot 经 SQLite backup 复制并
+  只追加 0142，在 `08a172da662df11d34fb42ea6e25a651f84da141` 上
+  query-only 重开；七路线全部 `PASS`，receipt digest 为
+  `sha256:161b860fd67d47945c44ff403304742c5619bc6a590cd76dd12b119e1e29f15f`，
+  accepted worker 没有重跑。
+- 收据落定后的最终重叠回归为 `53 passed in 45.10s`；架构 Gate 1～14、
+  统一 `static_scan,doc_gate`、`compileall`、JSON 与 diff check 全部通过。
+- 证据证明 proposal→真实 Lab/Review→version apply→exact rollback、
+  Knowledge conflict/TTL/DecisionRecord/shadow cutover，以及 Identity
+  no-change/重大差异阻断/active owner/exact rollback。
+- 真实 Docker/Host/Obs/Monitor/Edge/Gateway、Knowledge ENFORCE、真实 release
+  pair、外部模型与硬件尚未执行，结论为
+  `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`；
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

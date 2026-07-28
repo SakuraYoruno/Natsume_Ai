@@ -650,6 +650,12 @@ def create_app(
                         )
                     ),
                     authenticated_outcome_lookup=authenticated_outcome_lookup,
+                    evolution_activation_service_provider=(
+                        host_services.evolution_activation_service
+                    ),
+                    evolution_scope_provider=(
+                        host_services.evolution_scope
+                    ),
                 )
                 obs_composition = (
                     security.obs_command_composition
