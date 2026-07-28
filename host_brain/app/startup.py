@@ -580,11 +580,9 @@ def warmup_chat_runtime_basics(
 
         if eager_persona:
             from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
-            from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
             PersonaEngine.get_instance()
             ports.silence_engine()
-            get_body_sense_model()
             warmed_parts.append("persona_runtime=ready")
         else:
             warmed_parts.append("persona_runtime=lazy")

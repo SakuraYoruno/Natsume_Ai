@@ -21,7 +21,7 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
 偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
@@ -55,8 +55,10 @@ Monitor 审核、旧 writer 清零、受治理预算流的 provider-final canoni
 仍未完成。当前生产 Host 已移除 `HostEmotionRuntime`，而 canonical Tribe authority 又令 Limbic 的
 legacy persistence、metabolism、timeline、decay 和 Bond callback 统一拒写并返回
 `RETIRED_CANONICAL_LIFE`；Endocrine 的 legacy delta、last-state、hint 与 fan-out 也已在 canonical
-mode 退役，且 Circadian/MirrorNeuron 不再直写其私有字段。BodySense、Motive 与 Bond queue 仍是下一条
-清理边界。
+mode 退役，且 Circadian/MirrorNeuron 不再直写其私有字段。生产 Surface 和 startup 现在不再解析或预热
+全局 `BodySenseModel`；它们只按当前 relationship subject 读取 Life snapshot 并作无时钟、无写入的身体
+在场投影。旧 BodySense mutation 返回 `RETIRED_CANONICAL_LIFE` 且不再发 EventBus update。Motive 与
+Bond queue 仍是下一条清理边界。
 
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user

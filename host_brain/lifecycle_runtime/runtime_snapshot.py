@@ -274,7 +274,11 @@ def build_digital_life_runtime_snapshot(
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        body_sense = _as_plain_dict(get_limbic_agent().resolve_body_sense_state())
+        body_sense = _as_plain_dict(
+            get_limbic_agent().resolve_body_sense_state(
+                person_id=persona_user_id
+            )
+        )
         slot_status["body_sense"] = "live"
     except Exception as exc:
         _record_snapshot_status(

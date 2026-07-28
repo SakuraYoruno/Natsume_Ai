@@ -36,6 +36,12 @@
   immune 与 generic delta 输入均显式退役。Circadian/MirrorNeuron 的邻接测试还验证它们改为调用受控
   compatibility port，而非写 Endocrine 私有字段。该受影响集合为 `72 passed in 2.11s`；它不证明
   BodySense、Motive、Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_limbic_agent.py` 现额外验证 canonical mode 下的 BodySense 只能从 exact
+  relationship subject 的 Life snapshot 纯投影，不会解析 global `BodySenseModel`、写 Tribe state、
+  调整 silence penalty 或把 legacy BODY_SENSE_UPDATED 再推进 self-affect；缺 subject 明确
+  `UNAVAILABLE`。`test_body_sense_skill_tribe_events.py` 验证 retired tick 不会发布伪 update。
+  本次最终单一受影响集合为 `187 passed in 28.59s`；它是本地代码证据，
+  不证明 Motive、Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
 - 上述 Host/Limbic/Endocrine、fusion 与旧 organ 邻接文件的最终合并定向回归为
   `149 passed in 33.81s`。它是覆盖重叠后的单一集合，不能与前述批次相加，也不构成波次集成或真实服务栈验收。
 - `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted

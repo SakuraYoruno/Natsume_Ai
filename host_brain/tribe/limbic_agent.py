@@ -50,6 +50,29 @@ def _read_canonical_inner_world(person_id: str, *, reader: Any) -> dict[str, Any
     return project_inner_world_state(read_life_snapshot(person_id, reader=reader))
 
 
+def _read_canonical_body_sense(person_id: str, *, reader: Any) -> dict[str, Any]:
+    """Project body presence from one scoped Life snapshot without mutation."""
+
+    from host_brain.digital_life.application_boundary import read_life_snapshot  # noqa: PLC0415
+    from host_brain.persona.body_sense import (  # noqa: PLC0415
+        project_body_sense_from_life_snapshot,
+    )
+
+    snapshot = read_life_snapshot(person_id, reader=reader)
+    projection = project_body_sense_from_life_snapshot(snapshot).as_dict()
+    projection.update(
+        {
+            "status": "OK",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "projection": "READ_ONLY",
+            "relationship_subject_id": str(person_id),
+            "life_version": int(snapshot.get("version") or 0),
+            "life_state_digest": str(snapshot.get("state_digest") or ""),
+        }
+    )
+    return projection
+
+
 def _is_trusted_runtime_emotion_source(
     *,
     emotion_source: str,
@@ -109,6 +132,56 @@ class LimbicAgent:
             "operation": str(operation),
             "source": str(source or "limbic_agent"),
         }
+
+    @staticmethod
+    def _retired_body_sense_result(
+        *,
+        operation: str,
+        person_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Describe a retired mutable BodySense operation without hiding it.
+
+        The old global BodySense model remains available only to isolated
+        compatibility fixtures.  Returning an explicit receipt prevents a
+        scheduler or legacy skill from treating a no-op as a durable update.
+        """
+
+        result = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_BODY_SENSE_MUTATION_RETIRED",
+            "operation": str(operation),
+        }
+        if str(person_id or "").strip():
+            result["relationship_subject_id"] = str(person_id).strip()
+        return result
+
+    def _canonical_body_sense_projection(
+        self,
+        *,
+        person_id: str | None,
+    ) -> dict[str, Any]:
+        """Read one relationship-scoped, canonical body projection.
+
+        A missing subject must never fall back to the former process-global
+        model: that would make one user's embodied context visible to another
+        request.  The caller can deliberately degrade instead.
+        """
+
+        subject_id = str(person_id or "").strip()
+        if not subject_id:
+            return {
+                "status": "UNAVAILABLE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "CANONICAL_BODY_SENSE_SUBJECT_REQUIRED",
+                "body_sense": {},
+            }
+        if self.application_ports is None:
+            raise RuntimeError("TRIBE_APPLICATION_PORTS_NOT_CONFIGURED")
+        return _read_canonical_body_sense(
+            subject_id,
+            reader=self.application_ports.require("life_snapshot_reader")(),
+        )
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -376,9 +449,13 @@ class LimbicAgent:
         return payload
 
     def apply_body_sense_penalty(self, *, penalty: float) -> None:
+        if self._legacy_self_affect_writes_retired():
+            return
         self.application_ports.require("silence_engine")().apply_body_sense_penalty(float(penalty))
 
-    def resolve_body_sense_state(self) -> dict[str, Any]:
+    def resolve_body_sense_state(self, *, person_id: str | None = None) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            return self._canonical_body_sense_projection(person_id=person_id)
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         state = get_body_sense_model().get_state()
@@ -394,6 +471,8 @@ class LimbicAgent:
         return payload
 
     def tick_body_sense(self, *, current_hour: int | None = None) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            return self._retired_body_sense_result(operation="body_sense_tick")
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -427,7 +506,21 @@ class LimbicAgent:
         result["body_sense"] = payload
         return result
 
-    def update_body_sense_loneliness(self, *, loneliness_value: float) -> dict[str, Any]:
+    def update_body_sense_loneliness(
+        self,
+        *,
+        loneliness_value: float,
+        person_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            result = self._retired_body_sense_result(
+                operation="body_sense_loneliness_update",
+                person_id=person_id,
+            )
+            if str(person_id or "").strip():
+                projection = self._canonical_body_sense_projection(person_id=person_id)
+                result["body_sense"] = projection
+            return result
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -469,6 +562,22 @@ class LimbicAgent:
         mood_state: str | None,
         offline_loneliness: float | int | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            projection = self._canonical_body_sense_projection(person_id=person_id)
+            result = self._retired_body_sense_result(
+                operation="conversation_body_sense_start",
+                person_id=person_id,
+            )
+            result.update(
+                {
+                    "body_sense": projection,
+                    "is_active": bool(projection.get("is_active")),
+                    "willingness_penalty": float(
+                        projection.get("willingness_penalty") or 0.0
+                    ),
+                }
+            )
+            return result
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -891,6 +1000,14 @@ class LimbicAgent:
         person_id: str | None = None,
         duration_minutes: float | int | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            projection = self._canonical_body_sense_projection(person_id=person_id)
+            result = self._retired_body_sense_result(
+                operation="conversation_body_sense_end",
+                person_id=person_id,
+            )
+            result["body_sense"] = projection
+            return result
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -1217,6 +1334,12 @@ class LimbicAgent:
         T-139：body_sense 更新时，除更新沉默意愿外，还通过 drive_emotion_metabolism()
         将疲劳/孤独感转化为情绪代谢信号，打通 body_sense → LimbicAgent 联动链路。
         """
+        if self._legacy_self_affect_writes_retired():
+            # A legacy scheduler/skill may still emit this compatibility event
+            # during the rollback window.  It must not adjust silence or
+            # recreate an affect transition after canonical Life has taken
+            # ownership; the current turn reads the scoped Life projection.
+            return
         try:
             payload = dict(event.payload or {})
             penalty = float(payload.get("willingness_penalty") or 0.0)

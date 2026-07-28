@@ -642,8 +642,11 @@ authority 存在时均经 `AffectFusionService` 形成 scoped observation/apprai
 `TribeApplicationPorts` 也成为 Limbic compatibility writer 的 gate：旧 persistence/metabolism/
 timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
 回调追加为另一个 self-affect 事实。Endocrine 的 delta buffer/last-state/hint/fan-out 也由同一 gate
-拒绝；Circadian/MirrorNeuron 不再直写其私有字段。BodySense、Motive、Bond queue 与旧 timeline 的只读
-投影仍未清零。
+拒绝；Circadian/MirrorNeuron 不再直写其私有字段。BodySense 生产读取现改为
+`relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
+没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
+`RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive、Bond queue 与旧 timeline 的
+只读投影仍未清零。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal

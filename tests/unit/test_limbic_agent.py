@@ -81,6 +81,105 @@ def test_limbic_agent_retires_bond_callbacks_with_canonical_life() -> None:
     assert agent.state_registry.get_state("limbic") is None
 
 
+def test_limbic_agent_projects_body_sense_from_canonical_life_without_global_mutation(
+    monkeypatch,
+) -> None:
+    class _Reader:
+        def get_snapshot(self, person_id: str):
+            assert person_id == "person-a"
+            return {
+                "version": 7,
+                "state_digest": "life-digest-a",
+                "state": {
+                    "affective": {
+                        "mood": {"energy": 0.5},
+                        "needs": {"rest": 0.72},
+                    },
+                    "affect": {"fatigue": 0.12, "loneliness": 0.66},
+                    "life_pressure": {"fatigue": 0.4},
+                    "clock": {"day_phase": "night"},
+                },
+            }
+
+    class _SilenceEngine:
+        def __init__(self) -> None:
+            self.penalties: list[float] = []
+
+        def apply_body_sense_penalty(self, penalty: float) -> None:
+            self.penalties.append(penalty)
+
+    monkeypatch.setattr(
+        "host_brain.persona.body_sense.get_body_sense_model",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not resolve global BodySense")
+        ),
+    )
+    silence = _SilenceEngine()
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            life_snapshot_reader=lambda: _Reader(),
+            silence_engine=lambda: silence,
+        ),
+    )
+
+    projection = agent.resolve_body_sense_state(person_id="person-a")
+    started = agent.capture_conversation_body_sense(
+        request_id="request-a",
+        session_id="session-a",
+        person_id="person-a",
+        emotion_tag="SAD",
+        mood_state="low",
+        offline_loneliness=0.99,
+    )
+    ended = agent.on_conversation_ended(person_id="person-a", duration_minutes=45)
+    loneliness = agent.update_body_sense_loneliness(
+        person_id="person-a",
+        loneliness_value=0.99,
+    )
+    tick = agent.tick_body_sense(current_hour=2)
+    asyncio.run(
+        agent._on_body_sense_updated(
+            SimpleNamespace(payload={"fatigue": 1.0, "loneliness": 1.0})
+        )
+    )
+
+    assert projection["status"] == "OK"
+    assert projection["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert projection["projection"] == "READ_ONLY"
+    assert projection["life_version"] == 7
+    assert projection["fatigue"] == 0.72
+    assert projection["drowsiness"] == 0.68
+    assert projection["loneliness"] == 0.66
+    for result in (started, ended, loneliness, tick):
+        assert result["status"] == "RETIRED_CANONICAL_LIFE"
+        assert result["reason_code"] == "LEGACY_BODY_SENSE_MUTATION_RETIRED"
+    assert started["body_sense"]["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert ended["body_sense"]["relationship_subject_id"] == "person-a"
+    assert silence.penalties == []
+    assert agent.state_registry.get_state("limbic") is None
+
+
+def test_limbic_agent_requires_relationship_subject_for_canonical_body_projection() -> None:
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            life_snapshot_reader=lambda: (_ for _ in ()).throw(
+                AssertionError("missing subject must not read a default aggregate")
+            ),
+        ),
+    )
+
+    result = agent.resolve_body_sense_state()
+
+    assert result == {
+        "status": "UNAVAILABLE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "CANONICAL_BODY_SENSE_SUBJECT_REQUIRED",
+        "body_sense": {},
+    }
+
+
 def test_tribe_ports_reject_unknown_affective_life_authority() -> None:
     ports = TribeApplicationPorts(affective_life_authority="unexpected")
 

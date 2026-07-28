@@ -254,7 +254,9 @@ def run_proactive_intent_dispatch(
                     offline_persona_id = "natsume_ai"
             offline_state = limbic_agent.resolve_offline_state(person_id=offline_persona_id)
             silence_state = limbic_agent.resolve_silence_state(current_topic=current_topic)
-            body_sense = limbic_agent.resolve_body_sense_state()
+            body_sense = limbic_agent.resolve_body_sense_state(
+                person_id=offline_persona_id
+            )
             render_policy = dict(
                 build_reply_plan_from_inputs(
                     silence_state=silence_state,

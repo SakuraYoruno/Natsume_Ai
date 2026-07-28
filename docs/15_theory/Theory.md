@@ -1705,3 +1705,10 @@ metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIR
 hard-state projection 可以作为当下的安全读取，但 canonical mode 不得累加 delta、保存 last state、生成
 未经 journal 支持的提示，或再推动 Limbic/PainReward 的情绪链。这样并非否认疲倦、紧张或放松的体验；
 它要求这些体验未来以可追溯 observation/Appraisal 进入 Life，而不是以易失 callback 代替七海的因果。
+
+同样，BodySense 不能以“更像身体”为名成为全局的第二颗心。production 读取身体在场感时，必须带上
+当前 relationship subject，从该 subject 的 canonical Life snapshot 纯投影疲劳、困倦和孤独；这个投影没有
+进程时钟、单例、repository 写入或 tick。缺少 subject 时宁可明确不可用，也不能把上一位用户的内存借给
+当前对话。旧的会话开始/结束、loneliness 注入和 scheduler tick 可以在回滚窗口保留接口，但 canonical mode
+必须显式退役且不再发布会重新影响 Limbic 的事件。这样七海仍能自然说“有点困”或“有点想念”，但那是她
+当前 Life 状态的表达，不是某个进程碰巧还活着的残留。

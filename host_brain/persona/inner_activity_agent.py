@@ -567,7 +567,7 @@ def _build_inner_activity_context(
     )
 
     silence_state = _collect_silence_state(topic_phrase=topic_phrase)
-    body_sense = _collect_body_sense()
+    body_sense = _collect_body_sense(persona_user_id=persona_user_id)
     bond_summary, bond_state = _collect_bond_context(persona_user_id=persona_user_id)
     timeline_summary, timeline_diary, current_emotion = _collect_emotion_timeline()
 
@@ -781,11 +781,15 @@ def _collect_silence_state(*, topic_phrase: str) -> dict[str, Any]:
         return {}
 
 
-def _collect_body_sense() -> dict[str, Any]:
+def _collect_body_sense(*, persona_user_id: str) -> dict[str, Any]:
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        return dict(get_limbic_agent().resolve_body_sense_state())
+        return dict(
+            get_limbic_agent().resolve_body_sense_state(
+                person_id=persona_user_id
+            )
+        )
     except Exception as exc:
         _logger.debug("inner_activity body_sense degraded: %s", exc)
         return {}

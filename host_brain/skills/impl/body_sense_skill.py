@@ -40,6 +40,11 @@ def execute_body_sense_tick(
     except (TypeError, ValueError):
         current_hour = None
     result = dict(get_limbic_agent().tick_body_sense(current_hour=current_hour) or {})
+    # Compatibility ticks may remain scheduled during the rollback window, but
+    # canonical Life retirement is not an update and must not re-enter the
+    # event bus as if the former global singleton had changed.
+    if str(result.get("status") or "").strip().upper() != "OK":
+        return result
     # Phase 1：向 TribeEventBus 发布 BODY_SENSE_UPDATED 事件，供订阅方（LimbicAgent 等）消费
     try:
         from host_brain.tribe.ans_agent import get_ans_agent  # noqa: PLC0415
@@ -75,7 +80,9 @@ def execute_body_sense_conversation_start(
         or {}
     )
     return {
-        "status": "OK",
+        "status": str(result.get("status") or "OK"),
+        "authority": result.get("authority"),
+        "reason_code": result.get("reason_code"),
         "body_sense": dict(result.get("body_sense") or {}),
     }
 
@@ -102,7 +109,9 @@ def execute_body_sense_conversation_end(
         or {}
     )
     return {
-        "status": "OK",
+        "status": str(result.get("status") or "OK"),
+        "authority": result.get("authority"),
+        "reason_code": result.get("reason_code"),
         "duration_minutes": duration_minutes,
         "body_sense": dict(result.get("body_sense") or {}),
     }
@@ -128,6 +137,7 @@ def execute_body_sense_update_loneliness(
     result = dict(
         get_limbic_agent().update_body_sense_loneliness(
             loneliness_value=loneliness_value,
+            person_id=(context or {}).get("user_id"),
         )
         or {}
     )
