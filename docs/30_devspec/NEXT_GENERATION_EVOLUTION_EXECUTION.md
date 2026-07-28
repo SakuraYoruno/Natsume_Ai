@@ -5,7 +5,7 @@
 
 版本：v5.0
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -258,8 +258,10 @@ cortisol/oxytocin buffer、`_last_state`、hormonal hint 和 downstream fan-out 
 构造无写入 projection；无 subject 失败关闭。legacy tick、loneliness 与 conversation mutation 返回
 `RETIRED_CANONICAL_LIFE` 并且 retired tick 不发布 EventBus update。Motive 与 production volatile
 Bond queue 已退役：production factory 不再构造 real queue/writer，Surface/Cortex legacy path 只报告
-`RETIRED_CANONICAL_LIFE`，`/bond/event` 写入固定拒绝，score/stage 仅可读取。legacy emotion timeline
-和其它 compatibility projection 仍未清零，不能把这些局部切断写成 DL-06 完成。
+`RETIRED_CANONICAL_LIFE`，`/bond/event` 写入固定拒绝，score/stage 仅可读取。production Host 也已停止
+从旧 action log 预热 mutable `EmotionTimeline`；它只暴露显式 retired 空投影，Lifecycle/proactive 忽略 marker，
+canonical Limbic/Prefrontal 不会 resolve/cached 该投影，user profile 不得覆盖七海 self-affect。其它
+compatibility projection 的生产读取审计与 runtime 使用计量仍未清零，不能把这些局部切断写成 DL-06 完成。
 
 退出：Soul digest 不变，低风险 apply→rollback 真实影响后续表达，旧 writer runtime 使用量=0。
 

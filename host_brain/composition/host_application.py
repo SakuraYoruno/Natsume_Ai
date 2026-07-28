@@ -247,6 +247,10 @@ def build_production_host_application_ports(
         semantic_recaller_decorator=(
             evolution_runtime_owner.decorate_semantic_recaller
         ),
+        # The mutable timeline is retained only for explicitly legacy/offline
+        # roots.  Production Host must not hydrate historical, mixed affect
+        # rows as if they were Natsume's current emotional state.
+        legacy_emotion_timeline_enabled=False,
     )
     governance_runtime_owner = HostGovernanceRuntimeOwner(
         ledger_provider=ledger_provider,

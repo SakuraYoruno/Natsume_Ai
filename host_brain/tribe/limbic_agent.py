@@ -239,6 +239,22 @@ class LimbicAgent:
         summary_window_ms: int | None = None,
         diary_window_ms: int | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            # Do not resolve or cache a historical mixed-affect projection in
+            # production.  Canonical request fusion owns the scoped
+            # self-affect hand-off; NEUTRAL is intentionally not emitted as a
+            # fake substitute fact.
+            del summary_window_ms, diary_window_ms
+            return {
+                **self._retired_legacy_affect_result(
+                    source="resolve_emotion_timeline_snapshot",
+                    operation="emotion_timeline_read",
+                ),
+                "reason_code": "LEGACY_EMOTION_TIMELINE_READ_RETIRED",
+                "summary": {},
+                "diary": {},
+                "dominant_emotion": "",
+            }
         timeline = self.application_ports.require("emotion_timeline")()
         if timeline is None:
             return {

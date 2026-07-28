@@ -10,7 +10,10 @@ from threading import RLock
 from typing import Any
 from urllib.parse import urlparse
 
-from host_brain.core.emotion_timeline import EmotionTimeline
+from host_brain.core.emotion_timeline import (
+    EmotionTimeline,
+    RetiredEmotionTimelineProjection,
+)
 from host_brain.core.ids import now_ms
 from host_brain.memory.chroma_client import embed_text, load_chroma_runtime_config
 from host_brain.persistence.emotion_timeline_query_repository import (
@@ -92,6 +95,7 @@ class HostMemoryRuntimeOwner:
         embedder: Factory = embed_text,
         emotion_timeline_factory: Factory = EmotionTimeline,
         emotion_query_repository_factory: Factory = EmotionTimelineQueryRepository,
+        legacy_emotion_timeline_enabled: bool = True,
         clock_ms: Callable[[], int] = now_ms,
     ) -> None:
         self._ledger_provider = ledger_provider
@@ -106,6 +110,9 @@ class HostMemoryRuntimeOwner:
         self._embedder = embedder
         self._emotion_timeline_factory = emotion_timeline_factory
         self._emotion_query_repository_factory = emotion_query_repository_factory
+        self._legacy_emotion_timeline_enabled = bool(
+            legacy_emotion_timeline_enabled
+        )
         self._clock_ms = clock_ms
         self._lock = RLock()
         self._ledger: Any | None = None
@@ -238,14 +245,21 @@ class HostMemoryRuntimeOwner:
     def require_emotion_timeline(self) -> Any:
         with self._lock:
             if self._emotion_timeline is None:
-                self._emotion_timeline = build_host_emotion_timeline(
-                    ledger=self._require_ledger(),
-                    timeline_factory=self._emotion_timeline_factory,
-                    query_repository_factory=(
-                        self._emotion_query_repository_factory
-                    ),
-                    clock_ms=self._clock_ms,
-                )
+                if not self._legacy_emotion_timeline_enabled:
+                    # Production affect comes only from the canonical Digital
+                    # Life journal.  Do not even open the old ledger here:
+                    # prewarming its entries would recreate a second,
+                    # user/self-mixed emotional truth.
+                    self._emotion_timeline = RetiredEmotionTimelineProjection()
+                else:
+                    self._emotion_timeline = build_host_emotion_timeline(
+                        ledger=self._require_ledger(),
+                        timeline_factory=self._emotion_timeline_factory,
+                        query_repository_factory=(
+                            self._emotion_query_repository_factory
+                        ),
+                        clock_ms=self._clock_ms,
+                    )
             return self._emotion_timeline
 
     def _require_ledger(self) -> Any:

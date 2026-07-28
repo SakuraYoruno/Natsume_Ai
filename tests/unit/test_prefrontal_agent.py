@@ -3,7 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
-from host_brain.tribe.application_ports import TribeApplicationPorts
+from host_brain.tribe.application_ports import (
+    CANONICAL_AFFECT_LIFE_JOURNAL,
+    TribeApplicationPorts,
+)
 from host_brain.tribe.tribe_state import TribeStateRegistry
 from host_brain.persona.personality_traits import DEFAULT_BASELINE
 
@@ -100,6 +103,58 @@ def test_prefrontal_run_evolution_cycle_success(monkeypatch) -> None:
     assert kwargs["timeline_summary"]["status"] == "ok"
     assert kwargs["bond_summary"]["stage"] == "trusted"
     assert len(logger.info_calls) == 1
+
+
+def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _ForbiddenTimeline:
+        def rebuild_summary(self, **_kwargs):
+            raise AssertionError("canonical Life must not read legacy timeline")
+
+        def build_daily_diary(self, **_kwargs):
+            raise AssertionError("canonical Life must not read legacy timeline")
+
+    class _FakeOrchestrator:
+        def run_evolution_cycle(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                cycle_id="evo_canonical",
+                traits_changed=False,
+                growth_awareness={},
+                errors=[],
+            )
+
+    class _FakeSocial:
+        def resolve_bond_snapshot(self, *, person_id: str):
+            assert person_id == "user_x"
+            return {"bond_state_obj": None, "bond_summary": {}}
+
+        def resolve_scheduler_bond_summary(self, **_kwargs):
+            return {}
+
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.get_social_brain_agent",
+        lambda: _FakeSocial(),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            emotion_timeline=lambda: _ForbiddenTimeline(),
+        ),
+    )
+    agent._evolution_orchestrator = _FakeOrchestrator()
+
+    result = agent.run_evolution_cycle(
+        system_intent={"args": {"user_id": "user_x", "date": "2026-04-09"}},
+        logger=_FakeLogger(),
+    )
+
+    assert result["status"] == "OK"
+    assert captured["timeline_summary"] == {}
+    assert captured["timeline_diary"] == {}
 
 
 def test_prefrontal_run_evolution_cycle_degraded_on_error(monkeypatch) -> None:

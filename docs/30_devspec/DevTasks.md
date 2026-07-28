@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -106,8 +106,10 @@ legacy conversation/tick/loneliness mutation 统一返回 `RETIRED_CANONICAL_LIF
 turn 的情感 authority。production Host 随后删除 `ProcessApplicationPorts` 对 real
 `BondDynamicsWriter`/`BondUpdateQueue` 的 construction factory；Host runtime、Surface hook 与
 Cortex canonical mode 都只返回 explicit retired adapter，`/bond/event` legacy write 为 `410`，没有 worker、
-backlog 或失败后直写 fallback。stage/graph 只读投影和 legacy emotion timeline 仍待处理；这一事实不是
-DL-06 或真实陪伴验收完成。
+backlog 或失败后直写 fallback。production Host 现在也不再从旧 action log 预热 mutable
+`EmotionTimeline`：retired empty projection 不含伪造的 `NEUTRAL`，Lifecycle/proactive 会忽略它，canonical
+Limbic/Prefrontal 不会读取或缓存它，user profile 也不能覆盖七海 self-affect。其它 compatibility projection
+的生产读取审计、Monitor/Review 与真实服务验收仍待处理；这一事实不是 DL-06 或真实陪伴验收完成。
 
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与

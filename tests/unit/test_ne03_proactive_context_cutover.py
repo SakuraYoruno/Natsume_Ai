@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from host_brain.core.emotion_timeline import RetiredEmotionTimelineProjection
 from host_brain.lifecycle_runtime import proactive_dispatch
 from host_brain.lifecycle_runtime.proactive_dispatch import (
     _require_proactive_runtime_context,
@@ -194,6 +195,57 @@ def test_proactive_dispatch_uses_exact_frozen_scene_and_ignores_caller_scene(
     assert result["scene_awareness"]["source"] == "SceneDecisionV2"
     assert result["scene_awareness"]["scene_tags"] == ["casual_chat"]
     assert result["delivery_intent"]["payload"]["scene_tags"] == ["casual_chat"]
+
+
+def test_proactive_dispatch_omits_retired_legacy_timeline_from_context(
+    monkeypatch,
+) -> None:
+    frozen = _frozen_scene()
+    authority = _RuntimeContextAuthority(frozen)
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(proactive_dispatch, "_load_recent_topics", lambda **_: [])
+    monkeypatch.setattr(proactive_dispatch, "_load_recent_diary_snippet", lambda: "")
+    monkeypatch.setattr(proactive_dispatch, "_load_recent_dream_snippet", lambda **_: "")
+
+    def execute(_args, context):
+        captured["context"] = dict(context or {})
+        return {"status": "EXECUTED"}
+
+    monkeypatch.setattr(
+        "host_brain.skills.impl.proactive_talk.execute_proactive_talk",
+        execute,
+    )
+    ports = SimpleNamespace(
+        get_user_emotion_profile=lambda: SimpleNamespace(to_summary=lambda: {}),
+        emotion_timeline=RetiredEmotionTimelineProjection(),
+    )
+
+    result = run_proactive_intent_dispatch(
+        {
+            "skill_name": "proactive_talk",
+            "request_id": "scheduler-retired-timeline",
+            "args": {"idle_threshold_ms": 0},
+        },
+        ports=ports,
+        logger=SimpleNamespace(
+            debug=lambda *_args, **_kwargs: None,
+            warning=lambda *_args, **_kwargs: None,
+        ),
+        get_ledger=lambda: object(),
+        retention_policy=None,
+        ui_pusher=lambda _message: {"status": "OK"},
+        llm_generator_override=lambda _payload: {"greeting": "我来陪你一会儿。"},
+        last_interaction_ts_override=0,
+        motive_state_override={},
+        render_policy_override={},
+        execution_context=_execution_context(frozen),
+        runtime_context_application=authority,
+    )
+
+    assert result["status"] == "EXECUTED"
+    emotion_context = dict(captured["context"]["emotion_context"])
+    assert "emotion_timeline_summary" not in emotion_context
+    assert "emotion_diary" not in emotion_context
 
 
 def test_proactive_dispatch_fails_closed_before_generation_without_frozen_scene() -> None:

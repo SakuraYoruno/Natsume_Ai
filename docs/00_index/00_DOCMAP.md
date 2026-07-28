@@ -21,7 +21,7 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
 偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
@@ -59,8 +59,10 @@ mode 退役，且 Circadian/MirrorNeuron 不再直写其私有字段。生产 Su
 全局 `BodySenseModel`；它们只按当前 relationship subject 读取 Life snapshot 并作无时钟、无写入的身体
 在场投影。旧 BodySense mutation 返回 `RETIRED_CANONICAL_LIFE` 且不再发 EventBus update。Motive
 已降为每次调用新建的纯规则投影，不能缓存任何跨 turn 状态；production Host 的 volatile Bond queue
-及其 writer 已改为无 worker、无 backlog 的明确 retired adapter，旧 score/stage 仅可读取；legacy
-emotion timeline projection 是下一条清理边界。
+及其 writer 已改为无 worker、无 backlog 的明确 retired adapter，旧 score/stage 仅可读取。production
+Host 现在也不再从旧 action log 预热 `EmotionTimeline`：它只暴露显式 retired 空投影，Lifecycle/
+proactive 忽略该标记，canonical Limbic/Prefrontal 不会解析它；user profile 保持用户观察，不能覆盖
+七海 self-affect。剩余的是其它兼容读取审计与 runtime 使用计量，不是 DL-06 或真实服务验收完成。
 
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user

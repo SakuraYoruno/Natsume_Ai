@@ -654,16 +654,24 @@ class PrefrontalAgent:
 
             timeline_summary: dict[str, Any] = {}
             timeline_diary: dict[str, Any] = {}
-            try:
-                timeline = self.application_ports.require("emotion_timeline")()
-                timeline_summary = timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
-                timeline_diary = timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
-            except Exception as exc:
-                self._record_evolution_failure(
-                    user_id=user_id,
-                    operation="READ_EMOTION_TIMELINE",
-                    exc=exc,
-                )
+            ports = self.application_ports
+            uses_canonical_affective_life = bool(
+                isinstance(ports, TribeApplicationPorts)
+                and ports.uses_canonical_affective_life()
+            )
+            if not uses_canonical_affective_life:
+                try:
+                    if not isinstance(ports, TribeApplicationPorts):
+                        raise RuntimeError("TRIBE_APPLICATION_PORTS_NOT_CONFIGURED")
+                    timeline = ports.require("emotion_timeline")()
+                    timeline_summary = timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
+                    timeline_diary = timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
+                except Exception as exc:
+                    self._record_evolution_failure(
+                        user_id=user_id,
+                        operation="READ_EMOTION_TIMELINE",
+                        exc=exc,
+                    )
 
             bond_state = None
             bond_summary: dict[str, Any] = {}

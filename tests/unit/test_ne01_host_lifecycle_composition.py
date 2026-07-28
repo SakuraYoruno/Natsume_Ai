@@ -335,6 +335,11 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     # a process-wide user profile would also violate scope isolation.
     assert ports.lifecycle.emotion_context_runtime is None
     assert ports.lifecycle.user_emotion_profile is None
+    timeline_projection = ports.lifecycle.emotion_timeline()
+    assert getattr(timeline_projection, "status", "") == "RETIRED_CANONICAL_LIFE"
+    assert timeline_projection.rebuild_summary()["reason_code"] == (
+        "LEGACY_EMOTION_TIMELINE_RETIRED"
+    )
     with pytest.raises(
         HostLifecycleScopeError,
         match="HOST_SERVICE_PROVIDER_NOT_INJECTED:emotion_context_runtime",

@@ -188,14 +188,24 @@ def run_proactive_intent_dispatch(
             profile = profile_provider()
             emotion_context["user_emotion_profile"] = profile.to_summary()
         try:
-            emotion_context["emotion_timeline_summary"] = ports.emotion_timeline.rebuild_summary(
+            timeline_summary = dict(ports.emotion_timeline.rebuild_summary(
                 window_ms=6 * 3600 * 1000
-            )
+            ) or {})
+            if not _is_retired_legacy_emotion_timeline(timeline_summary):
+                emotion_context["emotion_timeline_summary"] = timeline_summary
         except Exception:
             pass
         try:
-            diary = ports.emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
-            if diary.get("diary_text"):
+            diary = dict(
+                ports.emotion_timeline.build_daily_diary(
+                    window_ms=24 * 3600 * 1000
+                )
+                or {}
+            )
+            if (
+                not _is_retired_legacy_emotion_timeline(diary)
+                and diary.get("diary_text")
+            ):
                 emotion_context["emotion_diary"] = {
                     "diary_text": str(diary["diary_text"])[:120],
                     "dominant_emotion": diary.get("dominant_emotion"),

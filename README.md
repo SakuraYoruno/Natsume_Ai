@@ -453,7 +453,15 @@ canonical Life snapshot 纯投影 fatigue、drowsiness 与 loneliness；缺 subj
 情感/关系上下文。随后 production Host 也不再构造真正的 `BondDynamicsWriter` 或进程内
 `BondUpdateQueue`：旧 Surface hook、Cortex fallback 和 `/bond/event` 均返回明确的
 `RETIRED_CANONICAL_LIFE`/`410`，旧 stage/graph 只保留读取投影。它仍不代表 legacy emotion timeline、
-Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成。
+Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成；下段记录随后完成的 timeline read cutover。
+
+最新的 `DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER` 也已完成：production
+`HostMemoryRuntimeOwner` 不再打开旧 SQLite action log 来预热 mutable `EmotionTimeline`，而是返回带
+`RETIRED_CANONICAL_LIFE / LEGACY_EMOTION_TIMELINE_RETIRED` 的空只读投影；Lifecycle snapshot 与
+proactive dispatch 会忽略该 marker，canonical Limbic 和 Prefrontal 更不会解析它。Runtime snapshot
+保留 user profile 仅作用户观察，不能再把其 top emotion 或 volatility 写成七海的 `emotion_tag`/强度。
+离线/test compatibility root 仍可显式创建旧 timeline，作为一个回滚窗口；这不代表其它 compatibility
+reader、Monitor/Review、真实模型、远端 Edge 或 DL-07 服务栈已经完成。
 
 内部旁车到 Governance owner 的既有批次都只作提交绑定历史。当前 Authority owner 集合证明每个 Host root 的 canonical SQLite connection、Memory stores、ModelAttempt 与 CapabilityBroker runtime identity 均隔离，Prompt/Route catalog 也不再共享可变实例；关闭失败会保留未完成资源并阻断新 epoch。生产 locator facade/Container 已物理清零，测试桥不属于可发布产品对象图；Chroma 与 Neo4j 仍使用配置级共享 namespace，所以不能外推为 tenant isolation、资源崩溃恢复、事务化 Chat、波次集成或 production canary 已完成。当前 fresh 完整架构静态 Gate 1～14 已全部 `PASS`、`failed_gates=[]`：Task Runtime feature-canary 合同和 Host lifecycle ports 已迁入中立 `host_brain/contracts/`，Persistence 与 Composition 分别直接依赖 canonical contract；旧导入路径只保留同一对象重导出，因此 application/persistence 与 app/composition 两个 SCC 均已消除。Gate 3 继续由 Research shadow ledger 的 1271/512/108 行职责拆分保持通过，没有扩大白名单。该结论只表示静态分层收口，不代表 Universal Runtime 七路线、NE-01 或完整架构项目完成。
 

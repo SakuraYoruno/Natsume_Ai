@@ -103,21 +103,16 @@ def build_digital_life_runtime_snapshot(
                 profile.to_summary() if hasattr(profile, "to_summary") else profile
             )
             if profile_summary:
+                # A user-affect profile is an observation about the user, not
+                # a self-affect source for Natsume.  Keep it separately so
+                # OBS consumers cannot accidentally present it as her mood.
                 emotion_context["user_emotion_profile"] = profile_summary
-                top_emotions = list(profile_summary.get("top_emotions") or [])
-                if top_emotions and isinstance(top_emotions[0], dict):
-                    emotion_context["emotion_tag"] = str(
-                        top_emotions[0].get("tag") or emotion_context["emotion_tag"]
-                    ).upper()
-                try:
-                    emotion_context["emotion_intensity"] = float(
-                        profile_summary.get("volatility") or 0.0
-                    )
-                except (TypeError, ValueError):
-                    pass
 
         timeline_summary = dict(ports.emotion_timeline.rebuild_summary(window_ms=6 * 3600 * 1000) or {})
-        if timeline_summary:
+        timeline_retired = _is_retired_legacy_emotion_timeline(
+            timeline_summary
+        )
+        if timeline_summary and not timeline_retired:
             emotion_context["emotion_timeline_summary"] = timeline_summary
             dominant_emotion = str(timeline_summary.get("dominant_emotion") or "").strip().upper()
             if dominant_emotion:
@@ -133,13 +128,22 @@ def build_digital_life_runtime_snapshot(
                 pass
 
         timeline_diary = dict(ports.emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000) or {})
-        if timeline_diary:
+        timeline_retired = timeline_retired or _is_retired_legacy_emotion_timeline(
+            timeline_diary
+        )
+        if timeline_diary and not timeline_retired:
             emotion_context["emotion_diary"] = {
                 "dominant_emotion": timeline_diary.get("dominant_emotion"),
                 "diary_text": str(timeline_diary.get("diary_text") or "")[:160],
             }
 
-        slot_status["emotion_context"] = "live"
+        if timeline_retired:
+            # Retirement is an intentional production boundary, not a
+            # runtime-health failure.  The status remains observable without
+            # turning a healthy Host into a false degraded state.
+            slot_status["emotion_context"] = "retired"
+        else:
+            slot_status["emotion_context"] = "live"
     except Exception as exc:
         _record_snapshot_status(
             slot_status,

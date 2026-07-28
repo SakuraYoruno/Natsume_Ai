@@ -130,7 +130,10 @@ legacy BodySense tick、loneliness 和 conversation mutation 统一 `RETIRED_CAN
 再经 EventBus 影响 silence 或 self-affect。Motive factory 已移除模块级 instance，每次仅对当前输入
 做无状态规则投影；production volatile Bond queue 及 score writer 已完成 no-write cutover：
 `ProcessApplicationPorts` 不再构造它们，Host/Cortex/Surface 只得到显式 retired result，stage/graph
-保留只读兼容；legacy emotion timeline projection 尚未完成 cutover。
+保留只读兼容。`DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER` 已令 production
+`HostMemoryRuntimeOwner` 不再从旧 action log 预热 mutable timeline，而是返回带 explicit retirement
+marker 的空投影；Lifecycle/proactive 忽略 marker，canonical Limbic/Prefrontal 不会解析它，user profile
+也不能被提升为七海 self-affect。其余 compatibility reader、Monitor/Review 与真实服务验收仍未完成。
 
 0148 的 `CompanionProfileIngress` 现在把一条更窄的直接控制路径加入同一 composition：
 `POST /v1/digital-life/relationship/companion-profile` 经 `host.companion-profile` 验证
