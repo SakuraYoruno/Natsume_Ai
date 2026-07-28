@@ -39,6 +39,31 @@ async def handle_life_projection(
             "plan_id": str(payload.get("plan_id") or ""),
             "sentence_index": payload.get("sentence_index"),
         }
+    if target == "surface.expression_delivery_protocol":
+        # DL-05 only acknowledges the durable Host protocol here.  A remote
+        # Edge device is not started by this projection worker and must later
+        # return its own channel-bound receipt before anyone can claim audio
+        # played or an avatar transitioned.
+        trace = _mapping(payload.get("delivery_trace"))
+        return {
+            "status": "HOST_PROTOCOL_STAGED",
+            "target": target,
+            "intent_id": message.intent_id,
+            "plan_id": str(payload.get("plan_id") or ""),
+            "synchronization_id": str(payload.get("synchronization_id") or ""),
+            "self_affect_revision": _integer(payload.get("self_affect_revision")),
+            "delivery_kind": str(payload.get("delivery_kind") or ""),
+            "channels": [
+                str(item).upper()
+                for item in list(trace.get("channels") or [])
+                if str(item).strip()
+            ],
+            "delivery_ids": [
+                str(item)
+                for item in list(trace.get("delivery_ids") or [])
+                if str(item).strip()
+            ],
+        }
     if target in {
         "work.environment",
         "life.experience",

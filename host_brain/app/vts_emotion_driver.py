@@ -24,6 +24,17 @@ _logger = logging.getLogger("Natsume.vts_emotion_driver")
 _stream_vts_rate_limiter = VTSRateLimiter(max_per_second=2.0, burst_size=2.0)
 _stream_vts_rate_limit_per_second = 2.0
 
+_VTS_TAG_BY_AVATAR_EXPRESSION = {
+    "SOFT_COMFORT": "CALM",
+    "CONTAINED_HURT": "SAD",
+    "GENTLE_BOUNDARY": "THINKING",
+    "REPAIR_OPEN": "CALM",
+    "GIVE_SPACE": "CALM",
+    "QUIET_PRESENCE": "CALM",
+    "SHARED_JOY": "HAPPY",
+    "CALM_ATTENTIVE": "CALM",
+}
+
 # 回复内容简单情感推断
 _EMOTION_INFER_KEYWORDS: list[tuple[str, str]] = [
     ("HAPPY", "哈哈|开心|高兴|嘿嘿|笑|太好了|耶"),
@@ -82,6 +93,24 @@ def _get_stream_vts_rate_limiter() -> VTSRateLimiter:
         _stream_vts_rate_limiter.update_rate(max_per_second=expected, burst_size=expected)
         _stream_vts_rate_limit_per_second = expected
     return _stream_vts_rate_limiter
+
+
+def _previous_durable_avatar_tag(emotion_context: Dict[str, Any] | None) -> str | None:
+    """Read only the internal frozen expression plan for a VTS transition.
+
+    ``_prev_emotion_tag`` belongs to the legacy emotion context and can carry
+    user affect.  It is intentionally not read here: a transition must start
+    from the prior avatar expression staged by the canonical Life plan, or
+    have no known predecessor at all.
+    """
+
+    raw = (emotion_context or {}).get("_affective_expression_internal")
+    if not isinstance(raw, dict):
+        return None
+    if str(raw.get("schema_version") or "").strip() != "expression_plan.v1":
+        return None
+    expression = str(raw.get("previous_avatar_expression") or "").strip().upper()
+    return _VTS_TAG_BY_AVATAR_EXPRESSION.get(expression)
 
 
 async def _drive_stream_vts_emotion(
@@ -148,7 +177,7 @@ async def _drive_stream_vts_emotion(
         transition_frames: list[dict[str, Any]] = []
         try:
             from host_brain.channels.vts import build_emotion_transition_frames  # noqa: PLC0415
-            _prev_tag = str((emotion_context or {}).get("_prev_emotion_tag") or "").strip().upper()
+            _prev_tag = _previous_durable_avatar_tag(emotion_context)
             if receipt.success:
                 frames = build_emotion_transition_frames(
                     from_tag=_prev_tag or None,

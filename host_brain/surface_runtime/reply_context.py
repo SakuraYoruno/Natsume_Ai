@@ -133,6 +133,22 @@ def _surface_emotion_context(
         emotion["affective_synchronization_id"] = str(
             expression.get("synchronization_id") or ""
         ).strip()
+        # Compatibility embodiment code may still render a transition while
+        # DL-05 rolls out channel workers.  Give it only the frozen expression
+        # projection selected by the canonical plan; it must not read the old
+        # mutable ``_prev_emotion_tag`` field (which could describe a user
+        # observation rather than a previous avatar state).
+        emotion["_affective_expression_internal"] = {
+            "schema_version": "expression_plan.v1",
+            "synchronization_id": str(expression.get("synchronization_id") or "").strip(),
+            "avatar_expression": str(expression.get("avatar_expression") or "").strip(),
+            "previous_avatar_expression": str(
+                expression.get("previous_avatar_expression") or ""
+            ).strip(),
+            "previous_expression_source": str(
+                expression.get("previous_expression_source") or ""
+            ).strip(),
+        }
         return emotion
 
     # A public ChatRequest emotion tag is a user observation or a rendering

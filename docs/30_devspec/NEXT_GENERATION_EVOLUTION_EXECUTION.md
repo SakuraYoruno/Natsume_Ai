@@ -3,9 +3,9 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v4.3
+版本：v4.4
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-04_NATIVE_STREAM_LOCAL_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-05_HOST_EXPRESSION_PROTOCOL_LOCAL_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -64,8 +64,8 @@ TTS、Avatar 和 Bond 只能提交观察、读取投影或消费冻结计划。
 `emotion_context` 仅表示用户观察或自述；`render_policy` 不能覆盖自我情感、
 关系边界或安全策略。
 
-若 migration catalog 未被并行合并推进，DL-01～DL-05 使用连续 `0143`、
-`0144`、`0145`；每波开始必须重新读取 next-free 编号。不得重写旧 migration。
+DL-01～DL-05 已连续使用 `0143`、`0144`、`0145`、`0146`；每波开始仍必须重新读取
+next-free 编号。不得重写旧 migration。
 
 ## 3. 实施顺序
 
@@ -167,13 +167,24 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
 Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。
 
-### DL-05：语音与 Avatar 同轮表达
+### DL-05：语音与 Avatar 同轮表达（Host 协议本地切片已接线，未封板）
 
-- `ExpressionPlanV1` 同时定义文本节奏、TTS 韵律和 Avatar 表情、动作、视线与过渡。
-- 接入 `tts.speak`、Avatar transition/cancel/release receipt，移除 governed Chat 对 TTS/VTS 的无条件 suppression。
-- 单通道失败独立降级，不能把整轮情绪归零。
+- `ExpressionPlanV1` 现同时冻结文本节奏、TTS 韵律、Avatar 表情、视线、姿态和过渡；
+  planner 只从 exact-scope 的 durable avatar transition head 读取上次表达，缺失时明确记录
+  neutral/unavailable fallback，旧 `_prev_emotion_tag` 不再作为 VTS transition 的来源。
+- 每个 native 稳定句先编译 Voice `SPEAK` 与 Avatar `TRANSITION` 的成对
+  `ExpressionDeliveryIntentV1`，共享 `synchronization_id` 与 `self_affect_revision`；随后才
+  SSE 可见文本。完成和打断分别写 `RELEASE`/`CANCEL`，并带对应的 Host staging receipt。
+- `0146_affective_expression_delivery.sql` 只从 immutable Life event 投影 protocol identity、
+  avatar predecessor 和 Host receipt status，不复制文字、原始音视频或模型推理；它支持重启、
+  作用域隔离和下一轮稳定读取，但不是 Edge physical receipt。
+- Governed Chat 不再无条件设置 TTS/VTS suppression；它仍在 Task Acceptance 前保持 speculative，
+  因此仅把同一冻结协议附入 acceptance effect，不能提前发送或驱动设备。
+- 单通道不可用只能标记通道降级，不能把 self-affect 改写为 `NEUTRAL`。当前远端 Edge 位于
+  另一台电脑，本波只完成 Host 接线、合同测试与可回放 protocol evidence，未启动远端服务。
 
-退出：文本、语音、Avatar 使用同一个 sync id 与 self-affect revision。
+退出：文本、语音、Avatar 使用同一个 sync id 与 self-affect revision，并有真实 Edge 的
+`EDGE_APPLIED/DEGRADED/REJECTED` channel receipt；当前只达到前半段 Host protocol staging。
 
 ### DL-06：主动陪伴与可逆成长
 

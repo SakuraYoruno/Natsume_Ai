@@ -108,3 +108,35 @@ def test_journal_native_projection_targets_do_not_call_legacy_writers() -> None:
         "target": "life.experience",
         "intent_id": "intent-1",
     }
+
+
+def test_expression_protocol_projection_only_acknowledges_host_staging() -> None:
+    result = asyncio.run(
+        handle_life_projection(
+            _message(
+                "surface.expression_delivery_protocol",
+                {
+                    "plan_id": "plan-1",
+                    "synchronization_id": "sync-1",
+                    "self_affect_revision": 8,
+                    "delivery_kind": "INTENT",
+                    "delivery_trace": {
+                        "channels": ["VOICE", "AVATAR"],
+                        "delivery_ids": ["voice-1", "avatar-1"],
+                    },
+                },
+            )
+        )
+    )
+
+    assert result == {
+        "status": "HOST_PROTOCOL_STAGED",
+        "target": "surface.expression_delivery_protocol",
+        "intent_id": "intent-1",
+        "plan_id": "plan-1",
+        "synchronization_id": "sync-1",
+        "self_affect_revision": 8,
+        "delivery_kind": "INTENT",
+        "channels": ["VOICE", "AVATAR"],
+        "delivery_ids": ["voice-1", "avatar-1"],
+    }

@@ -429,7 +429,7 @@ Life 状态、关系后效应、人格策略和最终文本不是同一种 autho
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0145_affective_turn_delivery.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill 与 version activation authority；0143 保存 affective observation/appraisal/self-affect head；0144 只从 canonical Life event 派生 relationship episode、aftereffect 与有界状态 head；0145 从同一 immutable journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only read model。后续资产都不拥有 Task activation authority。
+当前连续 SQLite migration head 为 `0146_affective_expression_delivery.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill 与 version activation authority；0143 保存 affective observation/appraisal/self-affect head；0144 只从 canonical Life event 派生 relationship episode、aftereffect 与有界状态 head；0145 从同一 immutable journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only read model；0146 再派生 Voice/Avatar Host protocol intent、cancel/release 与 scoped predecessor read head。0146 的 Host staging 不拥有物理 Edge action authority，也不能声明设备已应用。后续资产都不拥有 Task activation authority。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 

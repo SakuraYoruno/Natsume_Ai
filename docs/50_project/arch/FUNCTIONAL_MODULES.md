@@ -10,7 +10,7 @@
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> `NE-08 / DL-04_NATIVE_STREAM_LOCAL_SLICE` 已把实时情感陪伴设为当前产品主线。
+> `NE-08 / DL-05_HOST_EXPRESSION_PROTOCOL_LOCAL_SLICE` 已把实时情感陪伴设为当前产品主线。
 > Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
 > head：`EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
 > Regulation`；ASGI Input composition 又将 `AffectFusionService` 接入输入入口。
@@ -21,11 +21,14 @@
 > aftereffect 写入相同 journal；Surface 只从内部 provenance hand-off 获取关系边界，
 > 不接受请求伪造。HostEmotionRuntime、Limbic、BodySense、Endocrine、Motive、Bond
 > 与 Surface 仍有兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
-> episode、ExpressionPlan 与三模态闭环仍待后续 DL 波。
+> episode 与旧 writer 清零仍待后续 DL 波。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`
 > 接到 Surface 主链：普通低歧义文本在可见前逐句落 journal，模型输出不能回写
-> self-affect；高歧义回合只能两候 buffered selection。`ExpressionPlanV1` 当前只
-> 统一文本侧 revision/sync，TTS/Avatar 消费、真实 Edge 以及旧 writer 清零仍未完成。
+> self-affect；高歧义回合只能两候 buffered selection。DL-05 使 `ExpressionPlanV1`
+> 在同一 revision/sync 上编译 Voice `SPEAK` 与 Avatar `TRANSITION` 的 Host protocol，
+> 并将 `CANCEL`/`RELEASE` 与隐私最小化 0146 projection 接到 canonical Life journal。
+> 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
+> physical receipt 以及旧 writer 清零仍未完成。
 
 Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
 `PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名

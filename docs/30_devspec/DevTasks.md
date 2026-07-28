@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-04_NATIVE_STREAM_LOCAL_SLICE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-05_HOST_EXPRESSION_PROTOCOL_LOCAL_SLICE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -29,8 +29,10 @@ Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的�
 DL-04 已将可信 hand-off 冻结为 `AffectiveTurnPlanV1`，普通低歧义文本可使用
 `ModelAttemptService.stream()` 逐句输出；每个稳定句先写 canonical Life delivery
 intent，候选模型输出和纯文本 fallback 均不能改写 self-affect，高歧义/边界/修复仅
-允许恰好两候 buffered selection。受治理预算流、TTS/Avatar、连接恢复和旧兼容 writer
-清零仍由 DL-04 收口与 DL-05～DL-06 交付。此前 NE-01～NE-07 的 Universal Runtime、搜索、
+允许恰好两候 buffered selection。DL-05 已将同一冻结 `ExpressionPlanV1` 编译为 Voice
+`SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，并在结束/打断时追加
+`RELEASE`/`CANCEL`；0146 只投影 Host staging，远端 Edge 尚未启动，因此不能声称播放或
+Avatar 已执行。受治理预算流、连接恢复和旧兼容 writer 清零仍由后续 DL-06～DL-07 交付。此前 NE-01～NE-07 的 Universal Runtime、搜索、
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。

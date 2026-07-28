@@ -145,6 +145,47 @@ def _record_sentence_guard_trace(
     trace["surface_native_sentence_guards"] = prior[-16:]
 
 
+def _expression_delivery_sse(
+    receipt: Mapping[str, Any] | None,
+    *,
+    sentence_index: int | None = None,
+) -> dict[str, Any] | None:
+    """Expose only Host-staged delivery identity, never utterance payload.
+
+    The remote Edge deliberately is not contacted in this Host stream.  This
+    event tells a local consumer that the paired Voice/Avatar protocol was
+    made durable before the associated text becomes visible.
+    """
+
+    delivery = _safe_mapping(_safe_mapping(receipt).get("expression_delivery"))
+    trace = _safe_mapping(delivery.get("trace"))
+    if not trace:
+        traces = list(delivery.get("traces") or [])
+        trace = _safe_mapping(traces[0]) if traces else {}
+    if not trace:
+        return None
+    event: dict[str, Any] = {
+        "phase": "DELIVERY",
+        "delivery_state": str(delivery.get("status") or "HOST_PROTOCOL_STAGED"),
+        "synchronization_id": str(trace.get("synchronization_id") or ""),
+        "self_affect_revision": max(
+            0,
+            _coerce_int(trace.get("self_affect_revision"), default=0),
+        ),
+        "channels": [
+            str(item).upper()
+            for item in list(trace.get("channels") or [])
+            if str(item).strip()
+        ],
+        "delivery_ids": [
+            str(item) for item in list(trace.get("delivery_ids") or []) if str(item).strip()
+        ],
+    }
+    if sentence_index is not None:
+        event["sentence_index"] = max(0, int(sentence_index))
+    return event
+
+
 def _sanitize_native_stream_sentence(
     sentence: str,
     *,
@@ -388,9 +429,18 @@ async def _native_affective_sentence_stream(
                         "event_id": sentence_receipt.get("event_id"),
                         "sentence_index": sent_sentence_count,
                         "replayed": bool(sentence_receipt.get("replayed")),
+                        "expression_delivery": _safe_mapping(
+                            sentence_receipt.get("expression_delivery")
+                        ),
                     }
                 )
                 narrative_parts.append(gate.sentence)
+                delivery_event = _expression_delivery_sse(
+                    sentence_receipt,
+                    sentence_index=sent_sentence_count,
+                )
+                if delivery_event is not None:
+                    yield _sse(delivery_event)
                 yield _sse({"phase": "RENDER", "chunk": gate.sentence})
                 yield _sse(
                     {
@@ -430,9 +480,18 @@ async def _native_affective_sentence_stream(
                     "event_id": sentence_receipt.get("event_id"),
                     "sentence_index": sent_sentence_count,
                     "replayed": bool(sentence_receipt.get("replayed")),
+                    "expression_delivery": _safe_mapping(
+                        sentence_receipt.get("expression_delivery")
+                    ),
                 }
             )
             narrative_parts.append(gate.sentence)
+            delivery_event = _expression_delivery_sse(
+                sentence_receipt,
+                sentence_index=sent_sentence_count,
+            )
+            if delivery_event is not None:
+                yield _sse(delivery_event)
             yield _sse({"phase": "RENDER", "chunk": gate.sentence})
             yield _sse(
                 {
@@ -599,6 +658,9 @@ async def _native_affective_sentence_stream(
         "outbox_count": foreground_receipt.get("outbox_count"),
         "replayed": bool(foreground_receipt.get("replayed")),
     }
+    release_delivery_event = _expression_delivery_sse(foreground_receipt)
+    if release_delivery_event is not None:
+        yield _sse(release_delivery_event)
     effect_intents = [
         dict(item)
         for item in list(foreground_receipt.get("effect_intents") or [])
@@ -1153,6 +1215,9 @@ async def surface_main_chain_sse_generator(
             "reason_code": "REPLY_NOT_PERSISTABLE",
         }
     if narrative:
+        delivery_event = _expression_delivery_sse(foreground_receipt)
+        if delivery_event is not None:
+            yield _sse(delivery_event)
         yield _sse({"phase": "RENDER", "chunk": narrative})
         yield _sse({"phase": "SENTENCE", "sentence": narrative, "sentence_index": 0})
     yield _sse(

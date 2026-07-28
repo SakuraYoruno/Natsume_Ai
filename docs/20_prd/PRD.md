@@ -68,6 +68,10 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。
+- Voice `SPEAK`、Avatar `TRANSITION` 与文本必须从同一 `ExpressionPlan`、同步编号和
+  self-affect revision 编译；Host 暂存、取消与释放 receipt 必须与物理 Edge receipt 分开。
+  某个通道不可用只能独立降级，不能将七海 self-affect 中性化或把 `HOST_PROTOCOL_STAGED`
+  描述为已经播放、已经驱动 Avatar。
 - 人格核心和关系边界不得由单次模型输出、后台里程碑或交互统计直接修改。
 
 验收：同一已裁决输入在冻结版本下可复现表达控制；relationship episode/aftereffect 的重复、重启和 response-loss reconcile 不得重复写入；可见文本能追溯到冻结的情感计划且取消/重放不重复投递；边界与未完成修复的表达不得含负罪施压、威胁、排他控制或回应义务。人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。

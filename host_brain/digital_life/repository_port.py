@@ -53,6 +53,23 @@ class LifeCommandRepositoryPort(Protocol):
         after_event_id: str = "",
         limit: int = 100,
     ) -> list[dict[str, Any]]: ...
+    def list_affective_expression_delivery_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        after_delivery_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]: ...
+    def last_affective_expression_delivery_head(
+        self,
+        person_id: str,
+        *,
+        workspace_id: str,
+        relationship_subject_id: str,
+        session_id: str,
+    ) -> dict[str, Any] | None: ...
     def list_unadopted_projection_person_ids(self, *, limit: int = 1_000) -> list[str]: ...
     def try_claim_command(self, command: LifeCommand, **kwargs: Any) -> LifeCommandClaim | LifeCommandReceipt: ...
     def release_command_claim(self, claim: LifeCommandClaim) -> None: ...

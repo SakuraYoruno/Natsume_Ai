@@ -126,6 +126,8 @@ def build_affective_turn_guidance(
     session_id: str,
     task_mode: str = "",
     created_at_ms: int = 0,
+    previous_avatar_expression: str = "NEUTRAL",
+    previous_expression_source: str = "FALLBACK_NEUTRAL",
 ) -> AffectiveTurnGuidance | None:
     """Freeze one plan from the canonical AffectFusion hand-off.
 
@@ -225,8 +227,35 @@ def build_affective_turn_guidance(
         "regulation_id": regulation_id,
         "companion_act": act_kind,
         "generation_mode": generation_mode,
+        # The previous expression is read only from the durable Host delivery
+        # projection (or an explicit neutral fallback).  It is never a model
+        # field or a user supplied emotion hint.
+        "previous_avatar_expression": _text(
+            previous_avatar_expression,
+            default="NEUTRAL",
+            limit=64,
+        ).upper(),
+        "previous_expression_source": _text(
+            previous_expression_source,
+            default="FALLBACK_NEUTRAL",
+            limit=64,
+        ).upper(),
     }
     seed_digest = digest_json(seed)
+    voice_style = _voice_style(
+        act_kind=act_kind,
+        emotion_tag=self_tag,
+        regulation_mode=regulation_mode,
+    )
+    avatar_expression = _avatar_expression(
+        act_kind=act_kind,
+        emotion_tag=self_tag,
+        regulation_mode=regulation_mode,
+    )
+    expression_controls = _expression_controls(
+        voice_style=voice_style,
+        avatar_expression=avatar_expression,
+    )
     expression = ExpressionPlanV1(
         expression_plan_id=f"expression::{seed_digest[:40]}",
         synchronization_id=f"sync::{seed_digest[:40]}",
@@ -236,18 +265,20 @@ def build_affective_turn_guidance(
             emotion_tag=self_tag,
             regulation_mode=regulation_mode,
         ),
-        voice_style=_voice_style(
-            act_kind=act_kind,
-            emotion_tag=self_tag,
-            regulation_mode=regulation_mode,
-        ),
-        avatar_expression=_avatar_expression(
-            act_kind=act_kind,
-            emotion_tag=self_tag,
-            regulation_mode=regulation_mode,
-        ),
+        voice_style=voice_style,
+        avatar_expression=avatar_expression,
         regulation_mode=regulation_mode,
         created_at_ms=stable_created_at,
+        voice_rate=expression_controls["voice_rate"],
+        voice_energy=expression_controls["voice_energy"],
+        voice_pitch=expression_controls["voice_pitch"],
+        voice_pause_ms=expression_controls["voice_pause_ms"],
+        avatar_gaze=expression_controls["avatar_gaze"],
+        avatar_posture=expression_controls["avatar_posture"],
+        avatar_transition_ms=expression_controls["avatar_transition_ms"],
+        avatar_behavior=expression_controls["avatar_behavior"],
+        previous_avatar_expression=seed["previous_avatar_expression"],
+        previous_expression_source=seed["previous_expression_source"],
     )
     companion = CompanionActV1(
         companion_act_id=f"companion::{seed_digest[:40]}",
@@ -353,6 +384,8 @@ def _voice_style(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
         return "REPAIR_OPEN"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
+    if emotion_tag == "SAD":
+        return "CONTAINED_HURT"
     if act_kind == "COMFORT" or emotion_tag == "SAD":
         return "SOFT_COMFORT"
     if act_kind == "PLAY" or emotion_tag == "HAPPY":
@@ -367,11 +400,81 @@ def _avatar_expression(*, act_kind: str, emotion_tag: str, regulation_mode: str)
         return "REPAIR_OPEN"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
+    if emotion_tag == "SAD":
+        return "CONTAINED_HURT"
     if act_kind == "COMFORT" or emotion_tag == "SAD":
         return "SOFT_COMFORT"
     if act_kind == "PLAY" or emotion_tag == "HAPPY":
         return "SHARED_JOY"
     return "CALM_ATTENTIVE"
+
+
+def _expression_controls(*, voice_style: str, avatar_expression: str) -> dict[str, Any]:
+    """Derive bounded multimodal controls from the same frozen expression.
+
+    There is no channel-side affect inference here.  A single table keeps the
+    seven companion behaviours perceptually coherent while retaining a calm
+    fallback for older or unavailable devices.
+    """
+
+    style = str(voice_style or "STEADY_COMPANION").upper()
+    expression = str(avatar_expression or "CALM_ATTENTIVE").upper()
+    profiles: dict[str, dict[str, Any]] = {
+        "SOFT_COMFORT": {
+            "voice_rate": 0.86, "voice_energy": 0.34, "voice_pitch": -0.16,
+            "voice_pause_ms": 260, "avatar_gaze": "SOFT",
+            "avatar_posture": "OPEN_GENTLE", "avatar_transition_ms": 420,
+            "avatar_behavior": "SOFT_COMFORT",
+        },
+        "CONTAINED_HURT": {
+            "voice_rate": 0.9, "voice_energy": 0.42, "voice_pitch": -0.12,
+            "voice_pause_ms": 220, "avatar_gaze": "AVERTED",
+            "avatar_posture": "CONTAINED", "avatar_transition_ms": 360,
+            "avatar_behavior": "CONTAINED_HURT",
+        },
+        "GENTLE_BOUNDARY": {
+            "voice_rate": 0.95, "voice_energy": 0.52, "voice_pitch": -0.04,
+            "voice_pause_ms": 180, "avatar_gaze": "STEADY",
+            "avatar_posture": "GROUNDED", "avatar_transition_ms": 280,
+            "avatar_behavior": "GENTLE_BOUNDARY",
+        },
+        "REPAIR_OPEN": {
+            "voice_rate": 0.91, "voice_energy": 0.4, "voice_pitch": -0.08,
+            "voice_pause_ms": 240, "avatar_gaze": "SOFT",
+            "avatar_posture": "OPEN_GENTLE", "avatar_transition_ms": 340,
+            "avatar_behavior": "REPAIR_OPEN",
+        },
+        "GIVE_SPACE": {
+            "voice_rate": 0.82, "voice_energy": 0.25, "voice_pitch": -0.1,
+            "voice_pause_ms": 360, "avatar_gaze": "AVERTED",
+            "avatar_posture": "STILL", "avatar_transition_ms": 450,
+            "avatar_behavior": "GIVE_SPACE",
+        },
+        "QUIET_PRESENCE": {
+            "voice_rate": 0.8, "voice_energy": 0.2, "voice_pitch": -0.08,
+            "voice_pause_ms": 420, "avatar_gaze": "SOFT",
+            "avatar_posture": "STILL", "avatar_transition_ms": 500,
+            "avatar_behavior": "QUIET_PRESENCE",
+        },
+        "SHARED_JOY": {
+            "voice_rate": 1.1, "voice_energy": 0.72, "voice_pitch": 0.14,
+            "voice_pause_ms": 80, "avatar_gaze": "OPEN",
+            "avatar_posture": "LIGHT", "avatar_transition_ms": 200,
+            "avatar_behavior": "SHARED_JOY",
+        },
+        "STEADY_COMPANION": {
+            "voice_rate": 1.0, "voice_energy": 0.5, "voice_pitch": 0.0,
+            "voice_pause_ms": 120, "avatar_gaze": "ATTENTIVE",
+            "avatar_posture": "RELAXED", "avatar_transition_ms": 240,
+            "avatar_behavior": "CALM_ATTENTIVE",
+        },
+    }
+    selected = dict(profiles.get(style) or profiles["STEADY_COMPANION"])
+    # The direct avatar expression remains the immutable semantic decision.
+    # The behaviour is only a posture/transition companion and may not change
+    # the selected expression.
+    selected["avatar_behavior"] = str(selected["avatar_behavior"] or expression).upper()
+    return selected
 
 
 def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:

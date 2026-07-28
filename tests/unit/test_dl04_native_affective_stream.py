@@ -122,6 +122,7 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
     ]
 
     sentences = [event for event in events if event.get("phase") == "SENTENCE"]
+    deliveries = [event for event in events if event.get("phase") == "DELIVERY"]
     commit = next(event for event in events if event.get("phase") == "COMMIT")
     command_types = [str(item["command_type"]) for item in submitted]
 
@@ -136,6 +137,13 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
         "foreground_completed",
     ]
     assert [event["sentence_index"] for event in sentences] == [0, 1]
+    assert [event["delivery_state"] for event in deliveries] == [
+        "HOST_PROTOCOL_STAGED",
+        "HOST_PROTOCOL_STAGED",
+        "HOST_RELEASE_STAGED",
+    ]
+    assert all(event["channels"] == ["VOICE", "AVATAR"] for event in deliveries)
+    assert all("sentence" not in event for event in deliveries)
     assert {event["synchronization_id"] for event in sentences} == {
         submitted[0]["payload"]["affective_turn_plan"]["expression_plan"]["synchronization_id"]
     }
@@ -143,6 +151,12 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
     assert commit["audit_refs"]["path"] == "surface_reply:native_affective_stream"
     assert commit["audit_refs"]["surface_main_chain"]["streaming"] is True
     foreground = submitted[-1]["payload"]
+    first_sentence_protocol = submitted[1]["payload"]["expression_delivery_intents"]
+    assert [item["channel"] for item in first_sentence_protocol] == ["VOICE", "AVATAR"]
+    assert {item["synchronization_id"] for item in first_sentence_protocol} == {
+        submitted[0]["payload"]["affective_turn_plan"]["expression_plan"]["synchronization_id"]
+    }
+    assert foreground["expression_delivery_controls"]
     assert foreground["emotion_context"]["emotion_tag"] == "CALM"
     assert foreground["emotion_context"]["emotion_source"] == "affective_turn_plan"
     assert foreground["surface_result"]["plan_id"] == submitted[0]["payload"]["affective_turn_plan"]["plan_id"]

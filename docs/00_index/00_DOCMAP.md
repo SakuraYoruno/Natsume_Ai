@@ -21,7 +21,7 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-04_NATIVE_STREAM_LOCAL_SLICE`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-05_HOST_EXPRESSION_PROTOCOL_LOCAL_SLICE`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
 偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
@@ -31,8 +31,11 @@ workspace/subject 连续，session 只保留事件上下文，边界和误解不
 请求伪造。DL-04 进一步在可信 hand-off 后冻结 `AffectiveTurnPlanV1`；普通低歧义
 文本可通过生产 `ModelAttemptService.stream()` 逐句输出，每个稳定句先写 canonical
 Life delivery intent，再对外可见，高歧义/修复回合保持恰好两候的 buffered selection。
-模型候选和纯文本 fallback 均不能改写七海 self-affect。受治理预算流尚缺 provider-final
-canonical usage，TTS/Avatar、连接恢复、主动陪伴与真实服务验收均未完成。此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
+模型候选和纯文本 fallback 均不能改写七海 self-affect。DL-05 让同一份
+`ExpressionPlanV1` 编译出 Voice `SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，
+在文本可见前持久化；流结束/打断分别有 `RELEASE`/`CANCEL` 控制和 0146 的隐私最小化
+投影。它只说明 Host 已暂存协议，不能冒充远端 TTS 播放或 Avatar 已应用。受治理预算流尚缺 provider-final
+canonical usage，连接恢复、主动陪伴与真实服务验收均未完成。此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
 不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。
 
@@ -58,7 +61,7 @@ governed manifest 入口。NE-05 另以 0141 V2 lifecycle authority 约束版本
 `builtin-skill-alias.v1` 指向可信内置 handler；外部 bundle 不被目录扫描或
 直接 import。
 
-当前文档 catalog 基线为 migration head `0145_affective_turn_delivery.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset；0141 原子持有 Skill canary、activation evidence、maturity、active projection、operation 与 terminal receipt；0142 原子持有 Feedback/Knowledge/Identity 的真实 evidence resolution、version decision、operation、active projection 与 transition receipt，并将 0110 V1 mutation 冻结为只读；0143 把七海的 typed observation/appraisal/self-affect episode head 投影到既有 immutable Life journal；0144 只从 canonical Life event 派生 workspace/subject-scoped relationship episode、aftereffect 和状态 head；0145 再从同一 journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only 读模型。0145 不会升级旧 NE-01 七路线收据：该历史收据仍精确绑定 0142，coverage manifest 会同时声明 accepted head 与 current catalog head。
+当前文档 catalog 基线为 migration head `0146_affective_expression_delivery.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset；0141 原子持有 Skill canary、activation evidence、maturity、active projection、operation 与 terminal receipt；0142 原子持有 Feedback/Knowledge/Identity 的真实 evidence resolution、version decision、operation、active projection 与 transition receipt，并将 0110 V1 mutation 冻结为只读；0143 把七海的 typed observation/appraisal/self-affect episode head 投影到既有 immutable Life journal；0144 只从 canonical Life event 派生 workspace/subject-scoped relationship episode、aftereffect 和状态 head；0145 再从同一 journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only 读模型；0146 只从同一 immutable event 派生 Voice/Avatar Host protocol intent、cancel/release 和同步身份的隐私最小化投影。0146 不会升级旧 NE-01 七路线收据：该历史收据仍精确绑定 0142，coverage manifest 会同时声明 accepted head 与 current catalog head。
 
 当前 Chat 文档基线为 exact Life projection barrier：assistant turn 与 LifeMemory admission 的 durable receipts是 external reply的必要前置条件；首次调用可完成 exact pending intent，reclaimed reconciliation只读。该项只关闭 Chat 的 `transactional_side_effects` 控制，不改变七路线 `INCOMPLETE`、external eventual delivery、wave integration或 NE-07状态。
 

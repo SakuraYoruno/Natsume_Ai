@@ -17,6 +17,11 @@ from host_brain.digital_life.application_boundary import (
     read_life_snapshot,
     submit_life_command,
 )
+from host_brain.digital_life.affective_expression_delivery import (
+    build_expression_delivery_controls,
+    build_sentence_expression_delivery,
+    expression_delivery_trace,
+)
 import time
 
 from host_brain.surface_runtime.common import (
@@ -316,9 +321,74 @@ def _submit_surface_foreground_completed(
             "payload": post_process_payload,
         }
     ]
+    expression_intents: list[dict[str, Any]] = []
+    expression_controls: list[dict[str, Any]] = []
+    expression_receipts: list[dict[str, Any]] = []
+    expression_traces: list[dict[str, Any]] = []
+    # The native stream already stages every gated sentence before it becomes
+    # visible.  Buffered/governed Chat reaches this function only after Task
+    # Acceptance, so stage its one accepted utterance here rather than using
+    # the retired direct TTS/VTS side path.
+    native_sentence_stream = str(_safe_mapping(stream_summary).get("mode") or "") == "native_sentence_stream"
+    buffered_expression_segments: list[str] = []
+    if affective_turn_plan and narrative and not native_sentence_stream:
+        buffered_expression_segments = _bounded_expression_segments(str(narrative or ""))
+        for sentence_index, segment in enumerate(buffered_expression_segments):
+            intents, receipts, trace = _expression_sentence_protocol(
+                plan=affective_turn_plan,
+                sentence=segment,
+                sentence_index=sentence_index,
+                created_at_ms=completed_at_ms,
+            )
+            expression_intents.extend(intents)
+            expression_receipts.extend(receipts)
+            expression_traces.append(trace)
+            projection_intents.append(
+                _expression_protocol_projection_intent(
+                    plan=affective_turn_plan,
+                    trace=trace,
+                    delivery_kind="INTENT",
+                )
+            )
+    # A complete foreground response releases the paired protocol after its
+    # accepted output is recorded.  This remains a Host-staged receipt until
+    # a future Edge worker returns a physical channel receipt.
+    if affective_turn_plan and narrative:
+        sent_sentence_count = (
+            len(buffered_expression_segments)
+            if buffered_expression_segments
+            else max(
+                1,
+                _coerce_int(
+                    _safe_mapping(stream_summary).get("sentence_count"),
+                    default=1,
+                ),
+            )
+        )
+        controls, receipts, trace = _expression_control_protocol(
+            plan=affective_turn_plan,
+            action="RELEASE",
+            sent_sentence_count=sent_sentence_count,
+            created_at_ms=completed_at_ms,
+        )
+        expression_controls.extend(controls)
+        expression_receipts.extend(receipts)
+        expression_traces.append(trace)
+        projection_intents.append(
+            _expression_protocol_projection_intent(
+                plan=affective_turn_plan,
+                trace=trace,
+                delivery_kind="RELEASE",
+            )
+        )
     deliveries: list[dict[str, Any]] = []
     embodiment_target = _safe_mapping(life_director.get("embodiment_target"))
-    if embodiment_target and delivery_authorization is not None:
+    # A canonical affective plan owns the expression protocol.  Do not also
+    # enqueue the retired life-director VTS/MateEngine delivery here: that
+    # would create a second channel authority and could duplicate a future
+    # Edge application.  Compatibility-only calls without a frozen plan keep
+    # their existing delivery behavior until DL-06 retires the old path.
+    if embodiment_target and delivery_authorization is not None and not affective_turn_plan:
         delivery_request_base = request_id or session_id or person_id
         deliveries.extend(
             [
@@ -374,6 +444,10 @@ def _submit_surface_foreground_completed(
         "surface_result": surface_result_trace,
         "affective_turn_plan": affective_turn_plan,
         "affective_turn_plan_digest": affective_turn_plan_digest,
+        "expression_delivery_intents": expression_intents,
+        "expression_delivery_controls": expression_controls,
+        "expression_delivery_receipts": expression_receipts,
+        "legacy_direct_embodiment_delivery_retired": bool(affective_turn_plan),
         "timings_ms": dict(timings_ms),
         "total_latency_ms": max(0, int(total_latency_ms or 0)),
         "llm_latency_ms": max(0, int(llm_latency_ms or 0)),
@@ -396,6 +470,7 @@ def _submit_surface_foreground_completed(
             "reply_sendable": bool(envelope.sendable),
             "reply_persistable": bool(envelope.persistable),
             "delivery_authorized": delivery_authorization is not None,
+            "legacy_direct_embodiment_delivery_retired": bool(affective_turn_plan),
         },
     }
     if bool(getattr(agent_input, "defer_effects_to_task_runtime", False)):
@@ -418,6 +493,21 @@ def _submit_surface_foreground_completed(
         reader=life_snapshot_reader,
         **command_payload,
     )
+    if expression_traces:
+        expression_status = (
+            "HOST_PROTOCOL_STAGED"
+            if expression_intents
+            else "HOST_RELEASE_STAGED"
+            if expression_controls
+            else "HOST_PROTOCOL_STAGED"
+        )
+        foreground_receipt = {
+            **dict(foreground_receipt),
+            "expression_delivery": {
+                "status": expression_status,
+                "traces": expression_traces,
+            },
+        }
     if relationship_lifecycle_service is None:
         return foreground_receipt
     provision = getattr(
@@ -479,6 +569,119 @@ def _surface_stream_scope(agent_input: Any, plan: Mapping[str, Any]) -> tuple[st
     ):
         raise RuntimeError("AFFECTIVE_TURN_STREAM_SCOPE_MISMATCH")
     return person_id, workspace_id, session_id, request_id
+
+
+def _expression_protocol_projection_intent(
+    *,
+    plan: Mapping[str, Any],
+    trace: Mapping[str, Any],
+    delivery_kind: str,
+) -> dict[str, Any]:
+    """Build a projection acknowledgement without exposing channel content.
+
+    The canonical command retains a text sentence only where DL-04 already
+    needs it for exact visible-delivery recovery.  The downstream projection
+    gets delivery identity and channel state, never the text or raw media.
+    """
+
+    return {
+        "target": "surface.expression_delivery_protocol",
+        "payload": {
+            "plan_id": str(plan.get("plan_id") or ""),
+            "synchronization_id": str(trace.get("synchronization_id") or ""),
+            "self_affect_revision": max(
+                0,
+                _coerce_int(trace.get("self_affect_revision"), default=0),
+            ),
+            "delivery_kind": str(delivery_kind or "").upper(),
+            "delivery_trace": dict(trace),
+        },
+    }
+
+
+def _expression_sentence_protocol(
+    *,
+    plan: Mapping[str, Any],
+    sentence: str,
+    sentence_index: int,
+    created_at_ms: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Compile one immutable sentence to paired Host-staged channels."""
+
+    try:
+        intents, receipts = build_sentence_expression_delivery(
+            affective_turn_plan=plan,
+            sentence=sentence,
+            sentence_index=sentence_index,
+            created_at_ms=created_at_ms,
+        )
+    except ValueError as exc:
+        raise RuntimeError(f"AFFECTIVE_EXPRESSION_PROTOCOL_INVALID:{exc}") from exc
+    trace = expression_delivery_trace(intents, receipts)
+    return (
+        [intent.as_dict() for intent in intents],
+        [receipt.as_dict() for receipt in receipts],
+        trace,
+    )
+
+
+def _bounded_expression_segments(narrative: str, *, maximum: int = 2_000) -> list[str]:
+    """Split a buffered accepted reply without silently dropping its tail.
+
+    Native streaming already yields stable sentences.  A governed/buffered
+    reply becomes visible only after Acceptance, so it may be compiled here.
+    The Voice protocol retains its per-intent bound; a long reply is split at
+    a nearby natural boundary, falling back to a bounded Unicode slice.
+    """
+
+    remaining = str(narrative or "").strip()
+    if not remaining:
+        return []
+    maximum = max(64, int(maximum))
+    segments: list[str] = []
+    separators = "。！？!?；;，,、\n"
+    while remaining:
+        if len(remaining) <= maximum:
+            segments.append(remaining)
+            break
+        window = remaining[:maximum]
+        boundary = max(window.rfind(marker) for marker in separators)
+        cut = boundary + 1 if boundary >= maximum // 2 else maximum
+        segment = remaining[:cut].strip()
+        if not segment:  # defensive only; a non-empty source always advances
+            segment = remaining[:maximum]
+            cut = len(segment)
+        segments.append(segment)
+        remaining = remaining[cut:].lstrip()
+    return segments
+
+
+def _expression_control_protocol(
+    *,
+    plan: Mapping[str, Any],
+    action: str,
+    sent_sentence_count: int,
+    created_at_ms: int,
+    reason_code: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+    """Compile cancel/release controls without resurrecting an Edge client."""
+
+    try:
+        intents, receipts = build_expression_delivery_controls(
+            affective_turn_plan=plan,
+            action=action,
+            sent_sentence_count=sent_sentence_count,
+            created_at_ms=created_at_ms,
+            reason_code=reason_code,
+        )
+    except ValueError as exc:
+        raise RuntimeError(f"AFFECTIVE_EXPRESSION_CONTROL_INVALID:{exc}") from exc
+    trace = expression_delivery_trace(intents, receipts)
+    return (
+        [intent.as_dict() for intent in intents],
+        [receipt.as_dict() for receipt in receipts],
+        trace,
+    )
 
 
 def _submit_surface_affective_turn_planned(
@@ -558,6 +761,13 @@ def _submit_surface_sentence_delivery_intent(
     plan_id = str(plan["plan_id"])
     expression = _safe_mapping(plan.get("expression_plan"))
     sentence_digest = digest_json({"sentence": text})
+    created_at_ms = int(time.time() * 1000)
+    expression_intents, expression_receipts, expression_trace = _expression_sentence_protocol(
+        plan=plan,
+        sentence=text,
+        sentence_index=index,
+        created_at_ms=created_at_ms,
+    )
     payload = {
         "affective_turn_plan_ref": plan_id,
         "synchronization_id": str(expression.get("synchronization_id") or ""),
@@ -575,6 +785,8 @@ def _submit_surface_sentence_delivery_intent(
             0,
             _coerce_int(plan.get("self_affect_revision"), default=0),
         ),
+        "expression_delivery_intents": expression_intents,
+        "expression_delivery_receipts": expression_receipts,
         "projection_intents": [
             {
                 "target": "surface.sentence_delivery_intent",
@@ -586,10 +798,15 @@ def _submit_surface_sentence_delivery_intent(
                     "sentence_digest": sentence_digest,
                     "request_id": request_id,
                 },
-            }
+            },
+            _expression_protocol_projection_intent(
+                plan=plan,
+                trace=expression_trace,
+                delivery_kind="INTENT",
+            ),
         ],
     }
-    return submit_life_command(
+    receipt = submit_life_command(
         service=life_command_service,
         reader=life_snapshot_reader,
         command_type="surface_sentence_delivery_intent",
@@ -597,7 +814,7 @@ def _submit_surface_sentence_delivery_intent(
         command_id=f"life::surface_sentence::{plan_id}::{index}",
         correlation_id=request_id or None,
         payload=payload,
-        created_at_ms=int(time.time() * 1000),
+        created_at_ms=created_at_ms,
         metadata={
             "source": "surface_native_sentence_stream",
             "workspace_id": workspace_id,
@@ -605,6 +822,13 @@ def _submit_surface_sentence_delivery_intent(
             "sentence_digest": sentence_digest,
         },
     )
+    return {
+        **dict(receipt),
+        "expression_delivery": {
+            "status": "HOST_PROTOCOL_STAGED",
+            "trace": expression_trace,
+        },
+    }
 
 
 def _submit_surface_stream_cancelled(
@@ -624,7 +848,15 @@ def _submit_surface_stream_cancelled(
     person_id, workspace_id, session_id, request_id = _surface_stream_scope(agent_input, plan)
     plan_id = str(plan["plan_id"])
     expression = _safe_mapping(plan.get("expression_plan"))
-    return submit_life_command(
+    created_at_ms = int(time.time() * 1000)
+    expression_controls, expression_receipts, expression_trace = _expression_control_protocol(
+        plan=plan,
+        action="CANCEL",
+        sent_sentence_count=max(0, int(sent_sentence_count)),
+        created_at_ms=created_at_ms,
+        reason_code=str(reason_code or "SURFACE_STREAM_CANCELLED")[:120],
+    )
+    receipt = submit_life_command(
         service=life_command_service,
         reader=life_snapshot_reader,
         command_type="surface_stream_cancelled",
@@ -644,14 +876,30 @@ def _submit_surface_stream_cancelled(
             "relationship_subject_id": person_id,
             "sent_sentence_count": max(0, int(sent_sentence_count)),
             "reason_code": str(reason_code or "SURFACE_STREAM_CANCELLED")[:120],
+            "expression_delivery_controls": expression_controls,
+            "expression_delivery_receipts": expression_receipts,
+            "projection_intents": [
+                _expression_protocol_projection_intent(
+                    plan=plan,
+                    trace=expression_trace,
+                    delivery_kind="CANCEL",
+                )
+            ],
         },
-        created_at_ms=int(time.time() * 1000),
+        created_at_ms=created_at_ms,
         metadata={
             "source": "surface_native_sentence_stream",
             "workspace_id": workspace_id,
             "session_id": session_id,
         },
     )
+    return {
+        **dict(receipt),
+        "expression_delivery": {
+            "status": "HOST_CANCEL_STAGED",
+            "trace": expression_trace,
+        },
+    }
 
 
 def _surface_delivery_authorization(
