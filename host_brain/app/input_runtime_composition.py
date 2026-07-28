@@ -28,6 +28,7 @@ from host_brain.app.surface_reply_preprocessor import (
 )
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
+from host_brain.digital_life.affect_fusion import AffectFusionService
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
 
@@ -41,6 +42,7 @@ def build_input_runtime_application_ports(
         Callable[[], AgentRuntimeApplicationPorts | None] | None
     ) = None,
     tribe_runtime_agent_ports: TribeRuntimeAgentPorts | None = None,
+    life_command_service_provider: Callable[[], Any] | None = None,
 ) -> InputRuntimeApplicationPorts:
     """Build one immutable dependency graph for one Host application."""
 
@@ -58,6 +60,14 @@ def build_input_runtime_application_ports(
         "evolution_scope",
     )
     get_emotion_context_runtime = _emotion_runtime_provider(host_services)
+    affect_fusion_service = (
+        AffectFusionService(
+            command_service_provider=life_command_service_provider,
+            snapshot_reader_provider=get_life_snapshot_reader,
+        )
+        if callable(life_command_service_provider)
+        else None
+    )
     reply_form_decider = ResponseFormDecider()
     get_thalamus_agent = _tribe_agent_provider(
         tribe_runtime_agent_ports,
@@ -103,6 +113,7 @@ def build_input_runtime_application_ports(
     def resolve_chat_emotion_context_with_runtime(**kwargs: Any) -> dict[str, Any]:
         return resolve_chat_emotion_context(
             runtime=get_emotion_context_runtime(),
+            affect_fusion_service=affect_fusion_service,
             **kwargs,
         )
 

@@ -7,7 +7,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 > 当前唯一产品主线是“实时情感陪伴数字生命”（`NE-08 / DL-00～DL-07`）。工程治理、任务、模型、Gateway、Edge 和观测是支撑七海连续情感、关系与自然表达的底座，不是产品完成的替代品。现有 NE-01～NE-07 记录均为范围受限的历史基础证据；它们不能证明七海已拥有自身情感因果、长期修复或文本/语音/Avatar 同轮一致性。
 
-当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE`、fixture、目录数量或静态合同推导。DL-01 已在 canonical Life journal 内完成有界 mixed affect、episode、mood、need 与 regulation 的本地内核验证，但 Host ingress/Fusion 尚未接入，旧兼容 writer 仍存在；远端 Edge 位于另一台电脑，未在本波启动。
+当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE`、fixture、目录数量或静态合同推导。DL-01 已在 canonical Life journal 内完成有界 mixed affect、episode、mood、need 与 regulation；DL-02 已把 Host Input 的用户观察、Fusion 与 Appraisal 接入该 journal，用户 SAD/ANGRY 不会被直接镜像为七海的自我情绪。关系后效应、流式文本、TTS/Avatar 同轮计划和旧兼容 writer 清零仍未完成；远端 Edge 位于另一台电脑，未在本波启动。
 
 ## 历史基础设施状态（范围受限）
 

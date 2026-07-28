@@ -9,6 +9,7 @@ import pytest
 from starlette.requests import Request
 
 from host_brain.app.emotion_context import (
+    HostEmotionRuntime,
     build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
@@ -91,6 +92,13 @@ def _input_runtime_ports(
 
     resolved_thalamus = thalamus_agent or _FakeThalamusAgent()
     resolved_ans = ans_agent or SimpleNamespace(emit_task_success=_unused)
+    emotion_runtime = HostEmotionRuntime()
+
+    def resolve_emotion_with_app_runtime(**kwargs: Any) -> dict[str, Any]:
+        return resolve_chat_emotion_context(
+            runtime=emotion_runtime,
+            **kwargs,
+        )
 
     return InputRuntimeApplicationPorts(
         get_intent_engine=lambda: intent_engine,
@@ -105,7 +113,7 @@ def _input_runtime_ports(
         ),
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_chat_governance_snapshot=build_chat_governance_snapshot,
-        resolve_chat_emotion_context=resolve_chat_emotion_context,
+        resolve_chat_emotion_context=resolve_emotion_with_app_runtime,
         chat_request_factory=ChatRequest,
         cortex_orchestrator_sse_generator=_unused,
         create_multimodal_job=_unused,

@@ -844,6 +844,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "reconciliation_public_keys": {"reconciler-v1": b"k" * 32},
             "feature_canary_public_keys": {},
             "terminal_reconciliation_auto_enabled": False,
+            "evolution_activation_service_provider": None,
+            "evolution_scope_provider": None,
         }
         events.append("task-runtime-built")
         return task_runtime_container

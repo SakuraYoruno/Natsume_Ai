@@ -53,8 +53,16 @@ async def _run_cortex_orchestrator_pipeline(
 
     request_body = ChatRequest(
         message=message_text,
+        workspace_id=str(payload.get("workspace_id") or "").strip() or None,
         person_id=person_id,
         session_id=session_id,
+        emotion_tag=str(payload.get("emotion_tag") or "").strip() or None,
+        emotion_intensity=payload.get("emotion_intensity"),
+        emotion_context=(
+            dict(payload.get("emotion_context") or {})
+            if isinstance(payload.get("emotion_context"), dict)
+            else None
+        ),
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
@@ -69,7 +77,10 @@ async def _run_cortex_orchestrator_pipeline(
         multimodal_observations=dict(multimodal_observations or {}),
         attachment_summary=str(payload.get("attachment_summary") or "").strip(),
     )
-    emotion_context = resolve_chat_emotion_context(request_body=request_body)
+    emotion_context = resolve_chat_emotion_context(
+        request_body=request_body,
+        request_id=request_id,
+    )
     emotion_snapshot = build_chat_emotion_snapshot(
         emotion_context=emotion_context,
         source=f"input_routes.{str(source or '').lower()}",

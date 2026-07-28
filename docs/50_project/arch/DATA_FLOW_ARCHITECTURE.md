@@ -495,41 +495,39 @@ flowchart LR
 
 `NO_SIDE_EFFECT` 必须绑定 executor quiescence，目标 Effect 只能回到带专用 reason 的可重试 `PENDING`；`SIDE_EFFECT_CONFIRMED` 必须绑定 durable downstream receipt，目标 Effect 才可固定为 `COMMITTED`。Review 前不写 proof，response loss 只重开相同 evidence/proof/effect/handler receipt。0128 在数据库边界禁止 evidence/case/proof UPDATE/DELETE，并拒绝 subject、signature、proof/outbox 或 target Effect identity 漂移。该流只覆盖 `GENERAL_UNKNOWN_EFFECT`，取消绑定的 Effect 对账继续使用 0098 合同；部署 key、真实 HTTP/network canary 与多节点恢复未运行。
 
-情感数据流现在分成有副作用的 admission 与无副作用的 replay 两条。生产 admission 为 `Input/Tribe → HostLifecycleApplicationPorts.emotion_context_runtime → HostEmotionRuntime.ingest → current vector/timeline/profile`；同一 Host root 共享同一 identity，不同 root 不共享状态。`normalize_chat_emotion_context(raw)` 不带 runtime 时只计算归一化、echo 和 trigger，不追加 Timeline、不改变画像或前一标签。回复形态为 `Input composition → owned ResponseFormDecider → locked quota check+record`，不再经过进程 singleton。
-
-DL-01 同时新增一条已经可由 generic Life service 真实执行、但尚未接入 Host
-ingress 的 canonical kernel 流。它不是对上面 Host-local emotion runtime 的
-替代声明：在 DL-02 之前，入口不会自动生成这些命令。
+DL-02 后，情感 admission 的 canonical 路径已从生产 ASGI Input composition
+进入 Life kernel，而 replay/render 仍无副作用。`AffectFusionService` 将
+`ChatRequest` 中的文本、自述或允许的结构化声学/视觉摘要解析为**用户观察**；
+它按 `workspace_id + relationship_subject_id + session_id` 建立 opaque aggregate
+scope（跨 session 的关系连续性留给 DL-03），保留冲突 ref 和 TTL，且不将 raw audio/image/text/model-chain 写入
+journal。深路径至多生成两个 appraisal 候选；选定 appraisal 的自身意义、边界
+和关系判断才会形成七海的 mixed self-affect。没有内部 provenance marker 的
+外部 affective context 只能作为不可信输入，不能伪造 canonical head。
 
 ~~~mermaid
 flowchart LR
-    O["typed UserAffectObservationV1"] --> C["affective_observation_recorded"]
+    I["Secure Input / Chat / Gateway"] --> P["InputRuntimeApplicationPorts"]
+    P --> F["AffectFusionService"]
+    F --> O["UserAffectObservationV1\nTTL / confidence / conflict ref"]
+    O --> C["affective_observation_recorded"]
     C --> J["immutable life_event_journal"]
-    A["typed EventAppraisalV1 + EmotionEpisodeV1"] --> E["affective_event_appraised"]
+    F --> A["bounded EventAppraisalV1\n最多两个候选"]
+    A --> E["affective_event_appraised"]
     E --> J
-    J --> S["CAS state.affective\nmixed component / mood / need"]
-    J --> P["0143 affective_life_event_v1\nread-only event head"]
-    R["RegulationDecisionV1"] --> G["affective_regulation_decided"]
-    G --> J
-    S -. "DL-02 ingress pending" .-> H["Host Fusion / Appraisal"]
+    J --> S["CAS state.affective\nself component / episode / mood / need"]
+    J --> H["0143 affective_life_event_v1\nread-only head"]
+    S --> N["trusted internal normalize bridge"]
+    N --> G["Governor / Surface"]
 ~~~
 
-affective_time_advanced 只按 command timestamp 和 episode half-life 衰减；
-affective_episode_resolved 只删除对应 active head 并留下 immutable journal
-evidence。snapshot 不保存 raw text/audio/image/model-chain；0143 projection
-也只有 event/subject/ref digest 与 cursor 字段。旧 HostEmotionRuntime 流仍
-是 compatibility 路径，DL-06 才能在真实替换证据后清零其 writer 使用量。
-
-```mermaid
-flowchart LR
-    A["真实 Host admission"] --> P["Host-local emotion runtime provider"]
-    P --> E["HostEmotionRuntime ingest"]
-    E --> V["连续向量 / Timeline / 用户画像"]
-    R["Replay / Prompt / Projection"] --> N["纯 normalize"]
-    N -. "不推进状态" .-> V
-    I["Input composition"] --> D["owned ResponseFormDecider"]
-    D --> Q["原子额度检查 + 记账"]
-```
+`affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
+`affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
+evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor
+字段。`normalize_chat_emotion_context(raw)` 对 replay/render 和 trusted fused
+context 都不写状态。旧 `HostEmotionRuntime.ingest → vector/timeline/profile` 流在
+未注入 fusion service 的 compatibility 调用中仍可使用；DL-06 之前不得把它的
+writer 使用量写为零。`ResponseFormDecider` 继续由 Input composition 独占并做
+原子额度检查，不是 affect authority。
 
 Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Secure Ingress → immutable `BLOCKED` cancellation intent → trusted `CANCELLED` final decision → restart terminal worker → deterministic nonacceptance claim → tombstone/Workspace cleanup。intent 不能冒充 final decision，任何 lineage 漂移均 fail-closed；该流不处理一般取消、多节点或 unknown effect。
 
