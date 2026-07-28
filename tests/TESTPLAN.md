@@ -14,8 +14,9 @@
   root 必须可独立配置；非默认 project 自动派生隔离 identity，不得复用或停止
   用户长期 `natsume-ext` 容器。
 - T-NE07-EXT-03：三个服务必须声明容器 healthcheck；启动器在 `up` 前执行
-  `docker compose config`，进程级 acceptance 配置必须优先于 checked-in
-  `.env`，启动结果不得回显运行期密码。
+  `docker compose config --quiet`，进程级 acceptance 配置必须优先于
+  checked-in `.env`；直接运行期用户名/密码必须成对提供，成功或失败诊断
+  均不得回显认证引用或密码。
 - 当前静态合同为 `6 passed in 0.61s`，PowerShell parser 与真实 Docker
   `compose config --quiet` 通过。acceptance 容器的真实写/读/重启尚未执行，
   因此状态仅为 `IN_PROGRESS_ISOLATED_STACK_PREFLIGHT`。

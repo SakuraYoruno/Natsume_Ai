@@ -349,16 +349,25 @@ $neo4jUri = if ($env:BOND_NEO4J_URI) { [string]$env:BOND_NEO4J_URI } elseif ($en
 $neo4jPort = Get-PortFromUri -UriText $neo4jUri -DefaultPort 17687
 $neo4jHttpPort = if ($Neo4jHttpPort -gt 0) { [int]$Neo4jHttpPort } elseif ($env:NATSUME_NEO4J_HTTP_PORT) { [int]$env:NATSUME_NEO4J_HTTP_PORT } else { 7474 }
 $neo4jAuthRef = if ($env:BOND_NEO4J_AUTH_REF) { [string]$env:BOND_NEO4J_AUTH_REF } elseif ($envValues.ContainsKey("BOND_NEO4J_AUTH_REF")) { [string]$envValues["BOND_NEO4J_AUTH_REF"] } else { "" }
-$neo4jAuthValue = Resolve-Neo4jAuth -AuthRef $neo4jAuthRef -RepoRoot $repoRoot
-if (-not $neo4jAuthValue) {
-  throw "failed to resolve BOND_NEO4J_AUTH_REF=$neo4jAuthRef"
+$neo4jUser = [string]$env:NATSUME_NEO4J_USER
+$neo4jPassword = [string]$env:NATSUME_NEO4J_PASSWORD
+if ([bool]$neo4jUser -xor [bool]$neo4jPassword) {
+  throw "runtime Neo4j username and password must be supplied together"
 }
-$authParts = [string]$neo4jAuthValue -split ":", 2
-if ($authParts.Length -ne 2 -or -not $authParts[0] -or -not $authParts[1]) {
-  throw "neo4j auth must be 'username:password', got: $neo4jAuthRef"
+if ($neo4jUser -and $neo4jPassword) {
+  $neo4jAuthRef = "RUNTIME_ENV"
+} else {
+  $neo4jAuthValue = Resolve-Neo4jAuth -AuthRef $neo4jAuthRef -RepoRoot $repoRoot
+  if (-not $neo4jAuthValue) {
+    throw "failed to resolve configured BOND_NEO4J_AUTH_REF"
+  }
+  $authParts = [string]$neo4jAuthValue -split ":", 2
+  if ($authParts.Length -ne 2 -or -not $authParts[0] -or -not $authParts[1]) {
+    throw "configured Neo4j auth must contain a username and password"
+  }
+  $neo4jUser = [string]$authParts[0]
+  $neo4jPassword = [string]$authParts[1]
 }
-$neo4jUser = [string]$authParts[0]
-$neo4jPassword = [string]$authParts[1]
 
 # Windows 常保留 8000/8100 等端口，Chroma 默认改用 18000
 $chromaDefaultPort = 18000
@@ -433,7 +442,7 @@ $composeExitCode = 0
 try {
   $ErrorActionPreference = "Continue"
   $PSNativeCommandUseErrorActionPreference = $false
-  $composeConfigOutput = & $dockerExe compose -f $ComposeFile -p $ProjectName config 2>&1
+  $composeConfigOutput = & $dockerExe compose -f $ComposeFile -p $ProjectName config --quiet 2>&1
   $composeConfigExitCode = [int]$LASTEXITCODE
   if ($composeConfigExitCode -ne 0) {
     if ($composeConfigOutput) {

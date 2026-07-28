@@ -270,6 +270,10 @@ Host 主进程 → OBS → Monitor Proxy
 Compose 的 project、三个 container name、network、端口与数据根现在都可独立
 参数化，三个服务也有容器 healthcheck。仍未提供资源限制、备份任务或跨版本
 数据迁移策略；这些不能由 healthcheck 替代。
+启动前配置校验固定使用 `docker compose config --quiet`，避免失败诊断路径
+输出展开后的运行期认证。隔离验收优先经进程级
+`NATSUME_NEO4J_USER/NATSUME_NEO4J_PASSWORD` 注入；错误只报告配置类别，
+不拼接认证引用或认证值。
 
 ### 8.1 已收口的端口契约
 

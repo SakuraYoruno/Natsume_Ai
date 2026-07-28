@@ -48,7 +48,10 @@ def test_docker_start_exports_acceptance_scope_without_secret_echo() -> None:
     ):
         assert parameter in source
     assert '$env:NATSUME_DOCKER_DATA_ROOT = $DataRoot' in source
+    assert "config --quiet" in source
     assert "docker compose config failed" in source
+    assert '$neo4jPassword = [string]$env:NATSUME_NEO4J_PASSWORD' in source
+    assert "BOND_NEO4J_AUTH_REF=$neo4jAuthRef" not in source
     assert '"RUNTIME_INJECTED_REDACTED"' in source
     assert "auth_value" not in source.lower()
 
