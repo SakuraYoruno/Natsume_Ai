@@ -66,6 +66,23 @@ class LifeSnapshotReader:
             limit=limit,
         )
 
+    def list_affective_turn_delivery_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """Read privacy-minimised DL-04 plan/sentence delivery receipts."""
+
+        return self.repository.list_affective_turn_delivery_event_heads(
+            person_id,
+            after_created_at_ms=after_created_at_ms,
+            after_event_id=after_event_id,
+            limit=limit,
+        )
+
     def get_receipt(self, command_id: str) -> LifeCommandReceipt | None:
         return self.repository.get_receipt(command_id)
 

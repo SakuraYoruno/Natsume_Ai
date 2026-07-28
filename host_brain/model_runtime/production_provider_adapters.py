@@ -268,9 +268,39 @@ class VaultBackedSingleAttemptAdapter:
         return self._stream(request)
 
     async def _stream(self, request: ProviderAttemptRequest):
-        response = await self.complete(request)
-        if response.content:
-            yield response.content
+        """Use the real provider stream for unguarded live Surface calls.
+
+        ``ModelAttemptService`` keeps guarded calls on ``complete`` until the
+        provider stream protocol carries a final canonical usage record.  This
+        adapter therefore never weakens a budget guard; it only removes the
+        old accidental buffering for ordinary production text streams.
+        """
+
+        credential = str(self._credential_resolver(self._provider) or "").strip()
+        if not credential and self._provider != "codex":
+            raise ProductionProviderConfigurationError(
+                f"provider credential unavailable: {self._provider}"
+            )
+        if request.model_budget_guard is not None and self._provider == "codex" and not credential:
+            raise ProductionProviderConfigurationError(
+                "guarded Codex CLI calls do not expose a hard output cap"
+            )
+        from host_brain.integrations.llm_helpers import astream_llm_chunks  # noqa: PLC0415
+
+        provider_name = "openai" if self._provider == "openai_compatible" else self._provider
+        base_url_override = self._base_url_resolver(self._provider)
+        async for chunk in astream_llm_chunks(
+            provider_name=provider_name,
+            model_id=request.target.model_id,
+            api_key=credential,
+            timeout_ms=request.timeout_ms,
+            messages=request.prompt.as_message_dicts(),
+            gen_params=_transport_generation_parameters(request),
+            base_url_override=base_url_override,
+        ):
+            text = str(chunk or "")
+            if text:
+                yield text
 
 
 def _transport_identity(*, provider: str, base_url: str | None) -> tuple[str, bool]:

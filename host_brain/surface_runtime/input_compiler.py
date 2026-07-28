@@ -24,7 +24,7 @@ from host_brain.surface_runtime.fact_compiler import (
     _necessary_facts,
     _surface_boundary_must_not_do,
 )
-from host_brain.surface_runtime.common import _safe_mapping
+from host_brain.surface_runtime.common import _coerce_int, _safe_mapping
 from host_brain.surface_runtime.life_context import (
     _surface_autonomous_self_task,
 )
@@ -49,6 +49,10 @@ from host_brain.surface_runtime.reply_context import (
     _surface_task_control_from_reply_plan,
 )
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+from host_brain.digital_life.affective_turn_planner import (
+    AffectiveTurnPlanError,
+    build_affective_turn_guidance,
+)
 
 
 def _limit_surface_text(value: Any, *, limit: int) -> str:
@@ -300,6 +304,11 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
+    task_control = _apply_affective_turn_guidance(
+        task_control,
+        agent_input=agent_input,
+        trace_stage_meta=trace_stage_meta,
+    )
     _surface_sync_reply_plan(
         agent_input=agent_input,
         trace_stage_meta=trace_stage_meta,
@@ -429,3 +438,62 @@ def build_surface_main_chain_input_from_surface_reply_input(
         liveliness=_liveliness,
         active_loops=_active_loops,
     )
+
+
+def _apply_affective_turn_guidance(
+    task_control: Any,
+    *,
+    agent_input: Any,
+    trace_stage_meta: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Append only safe, frozen affect constraints to the Surface packet.
+
+    ``render_policy`` remains a task/format input; it never gets to replace
+    the self-affect, relationship permission or regulation selected by the
+    canonical Life hand-off.
+    """
+
+    control = _safe_mapping(
+        task_control.as_dict() if callable(getattr(task_control, "as_dict", None)) else task_control
+    )
+    emotion_context = _safe_mapping(getattr(agent_input, "emotion_context", None))
+    is_internal = bool(emotion_context.get("_affective_life_internal"))
+    try:
+        guidance = build_affective_turn_guidance(
+            emotion_context=emotion_context,
+            request_id=str(getattr(agent_input, "request_id", "") or ""),
+            workspace_id=str(getattr(agent_input, "workspace_id", "") or ""),
+            relationship_subject_id=str(getattr(agent_input, "person_id", "") or ""),
+            session_id=str(getattr(agent_input, "session_id", "") or ""),
+            task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
+            created_at_ms=_coerce_int(getattr(agent_input, "ts_ms", 0), default=0),
+        )
+    except AffectiveTurnPlanError as exc:
+        # A caller that presents an internal marker but fails scope or schema
+        # validation must not silently fall back to a user-supplied emotion tag.
+        if is_internal:
+            raise RuntimeError(str(exc)) from exc
+        guidance = None
+
+    if guidance is None:
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["affective_turn_plan"] = {
+                "status": "COMPATIBILITY_NO_CANONICAL_AFFECT",
+            }
+        return control
+
+    def merge(name: str, values: tuple[str, ...]) -> list[str]:
+        existing = [
+            str(item).strip()
+            for item in list(control.get(name) or [])
+            if str(item).strip()
+        ]
+        return list(dict.fromkeys([*existing, *values]))
+
+    control["facts"] = merge("facts", guidance.facts)
+    control["must_not_do"] = merge("must_not_do", guidance.must_not_do)
+    control["style_anchor"] = merge("style_anchor", guidance.style_anchor)
+    if isinstance(trace_stage_meta, dict):
+        trace_stage_meta["affective_turn_plan"] = guidance.plan.as_dict()
+        trace_stage_meta["affective_turn_guidance"] = guidance.trace()
+    return control

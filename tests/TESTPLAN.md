@@ -71,7 +71,28 @@
 - 当前本地证据：关系 reducer、restart/reconcile、Surface compiler、旧 Surface
   回归和 Bond 边界为 `54 passed in 20.50s`。远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`；主动陪伴、真人体验、真实 provider、TTS/Avatar/Edge
-  与 DL-07 服务栈不在这项证据范围内。
+   与 DL-07 服务栈不在这项证据范围内。
+
+## T-DL04-STREAMING-AFFECTIVE-TEXT
+
+- T-DL04-01：可信 `AffectFusion` hand-off 必须在模型调用前冻结 scope-bound
+  `AffectiveTurnPlanV1`；用户 observation、外部 `emotion_tag`、模型
+  `natsume_emotion_tag` 和纯文本 fallback 均不得覆盖 canonical self-affect。
+- T-DL04-02：普通低歧义且无 governed Budget guard 的回合只能采用一个候选的 native
+  sentence stream；每个稳定句必须先写 `surface_sentence_delivery_intent`，后才可 SSE
+  `RENDER/SENTENCE`。取消不得发送未 intent 的句子，已展示句子不得重复。
+- T-DL04-03：高歧义、冲突、边界或修复回合必须冻结为恰好两个 buffered candidates；
+  不满足数量或含威胁、排他、负罪施压、回应义务或内部计划泄漏的候选必须在可见前拒绝。
+- T-DL04-04：0145 `affective_turn_delivery_event_v1` 只能由 immutable
+  `life_event_journal` 派生 plan/sentence/cancel/foreground digest；读模型不得保存原始
+  分句，direct insert、UPDATE/DELETE、scope/digest drift 和不连续 cursor 必须失败关闭。
+- T-DL04-05：native stream 的 plan、sentence、foreground 和 restart/replay 必须保持
+  同一 synchronization id、self-affect revision 与 digest；受治理 Budget 请求在缺少
+  provider-final canonical usage 时必须保持 usage-safe buffered，不得假称流式完成。
+- 当前本地证据：provider stream、turn planner、两候本地选择、native stream、受影响
+  Surface 回归与真实 SQLite restart 的完整集合 `73 passed in 8.82s`；文档 authority
+  gate `7 passed in 3.56s`。远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`；真实 provider、连接
+  恢复、TTS/Avatar、远端 Edge 与 DL-07 服务栈仍未运行。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 

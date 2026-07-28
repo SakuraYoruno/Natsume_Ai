@@ -752,6 +752,45 @@ class LifeCommandRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def list_affective_turn_delivery_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Read DL-04 plan/sentence delivery identity without exposing text."""
+
+        cursor_ms = max(0, int(after_created_at_ms))
+        cursor_event_id = str(after_event_id or "")
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, person_id, self_id, workspace_id,
+                       relationship_subject_id, session_id, delivery_kind,
+                       plan_id, synchronization_id, self_affect_revision,
+                       sentence_index, sentence_digest, plan_digest,
+                       event_digest, payload_digest, created_at_ms
+                FROM affective_turn_delivery_event_v1
+                WHERE person_id = ?
+                  AND (
+                      created_at_ms > ?
+                      OR (created_at_ms = ? AND event_id > ?)
+                  )
+                ORDER BY created_at_ms ASC, event_id ASC
+                LIMIT ?
+                """,
+                (
+                    _required_text(person_id, "person_id"),
+                    cursor_ms,
+                    cursor_ms,
+                    cursor_event_id,
+                    max(1, min(int(limit), 1_000)),
+                ),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def list_replay_rows(self, person_id: str) -> list[dict[str, Any]]:
         with self._operation(write=False) as conn:
             rows = conn.execute(

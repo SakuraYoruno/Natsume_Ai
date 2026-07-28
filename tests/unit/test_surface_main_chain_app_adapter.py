@@ -977,14 +977,16 @@ async def test_surface_main_chain_sse_generator_calls_chat_surface_pool(monkeypa
     command = foreground_commands[0]
     assert command["command_type"] == "foreground_completed"
     assert command["payload"]["reply_plan"]["task_mode"] == "technical_help"
-    assert command["payload"]["emotion_context"]["emotion_tag"] == "THINKING"
-    assert command["payload"]["emotion_context"]["surface_user_emotion_tag"] == "ANXIOUS"
-    assert command["payload"]["emotion_context"]["surface_vts_expression_id"]
+    # Model candidate fields remain trace/audit material only.  A public
+    # request's emotion hint cannot become Natsume's self-affect writer.
+    assert command["payload"]["emotion_context"]["emotion_tag"] == "NEUTRAL"
+    assert command["payload"]["emotion_context"]["emotion_source"] == "compatibility_no_canonical_self_affect"
+    assert "surface_user_emotion_tag" not in command["payload"]["emotion_context"]
     assert len(command["payload"]["projection_intents"]) == 1
     post_process = command["payload"]["projection_intents"][0]
     assert post_process["target"] == "surface.post_process"
     assert post_process["payload"]["reply_plan"]["task_mode"] == "technical_help"
-    assert post_process["payload"]["emotion_context"]["emotion_tag"] == "THINKING"
+    assert post_process["payload"]["emotion_context"]["emotion_tag"] == "NEUTRAL"
     assert post_process["payload"]["reply_envelope"]["kind"] == "final_reply"
     assert post_process["payload"]["model_audit"]["model_id"] == "mock-chat"
     assert commit["audit_refs"]["trace_stage_meta"]["life_causality"]["status"] == "APPLIED"

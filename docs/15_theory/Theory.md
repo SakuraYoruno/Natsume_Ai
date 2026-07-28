@@ -557,6 +557,14 @@ Observation/Event
 
 当前 [AffectStateBlock](../../host_brain/persona/context/affect_state.py) 将 emotion、body、offline 与 silence 信号归一为可消费状态，[AffectPolicyDecision](../../host_brain/persona/affect_policy.py) 将它转为表达上限和趋避约束。这比把 `HAPPY/SAD` 直接拼进 prompt 更接近真实的状态—策略分离。
 
+DL-04 把这条理论再向前推进一层：在模型措辞前冻结
+[`AffectiveTurnPlanV1`](../../natsume_contracts/life/affective_turn.py)。它将当轮
+self-affect revision、调节方式、陪伴动作和 `ExpressionPlan` 绑定成同一 identity；
+模型不能用 `natsume_emotion_tag`、候选 JSON 或纯文本 fallback 倒灌状态。低歧义文本
+可以逐句送达，但每个稳定句必须先成为可重放的 delivery intent；因此“实时”不等于先
+说出去、以后再补写。高歧义、修复和边界场景宁可保留两候选择，也不以低延迟跳过分寸。
+语音与 Avatar 将在同一 plan/sync 上消费这个表达决定，而不是各自把文本标签再解释一次。
+
 情感系统必须满足：
 
 - 有时间衰减，不能无限携带单轮情绪；
