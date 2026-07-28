@@ -159,7 +159,6 @@ def test_profile_canary_activation_changes_next_turn_and_exact_rollback(
     assert candidate is not None
     assert started.state.active_profile.is_baseline is True
 
-    canary_ids: list[str] = []
     for ordinal in range(5, 10):
         clock["now"] += DAY_MS
         aftereffect_id = _helpful_aftereffect(
@@ -167,7 +166,6 @@ def test_profile_canary_activation_changes_next_turn_and_exact_rollback(
             clock=clock,
             ordinal=ordinal,
         )
-        canary_ids.append(aftereffect_id)
         recorded = profile.record_eligible_canary_aftereffect(
             workspace_id="workspace-profile",
             relationship_subject_id="person-profile",
@@ -176,16 +174,19 @@ def test_profile_canary_activation_changes_next_turn_and_exact_rollback(
             aftereffect_id=aftereffect_id,
         )
         assert recorded.receipt is not None
-        assert len(recorded.state.canary_accepted_interaction_ids) == ordinal - 4
-
-    activated = profile.activate_canary(
-        workspace_id="workspace-profile",
-        relationship_subject_id="person-profile",
-        session_id="session-profile-activate",
-        request_id="profile-activate",
-    )
-    assert activated.state.active_profile.profile_id == candidate.profile_id
-    assert activated.state.canary_profile is None
+        if ordinal < 9:
+            assert len(recorded.state.canary_accepted_interaction_ids) == ordinal - 4
+            assert (
+                recorded.reason_code
+                == "COMPANION_PROFILE_CANARY_INTERACTION_RECORDED"
+            )
+        else:
+            assert (
+                recorded.reason_code
+                == "COMPANION_PROFILE_CANARY_AUTO_ACTIVATED"
+            )
+            assert recorded.state.active_profile.profile_id == candidate.profile_id
+            assert recorded.state.canary_profile is None
 
     # A normal Host fusion reads the relationship-scoped active profile. The
     # next frozen plan carries the same profile identity into text, voice and

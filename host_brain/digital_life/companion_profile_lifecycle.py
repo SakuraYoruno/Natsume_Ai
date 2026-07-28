@@ -271,28 +271,52 @@ class CompanionProfileLifecycleService:
                 interaction.observed_at_ms + 1,
             ),
         )
-        return CompanionProfileLifecycleResult(
+        state = self._read_state(scope)
+        if len(state.canary_accepted_interaction_ids) < 5:
+            return CompanionProfileLifecycleResult(
+                scope=scope,
+                receipt=receipt,
+                state=state,
+                reason_code="COMPANION_PROFILE_CANARY_INTERACTION_RECORDED",
+            )
+        if (
+            state.canary_profile is None
+            or state.canary_profile.profile_id != candidate.profile_id
+        ):
+            raise RuntimeError("COMPANION_PROFILE_CANARY_STATE_DRIFT")
+        # Promotion is deliberately driven by the fifth canonical post-canary
+        # aftereffect, not by a second public route or an in-memory counter.
+        # The deterministic request identity means a crash between this
+        # interaction and promotion can only reopen the same activation.
+        activation_request_id = _digest(
+            {
+                "schema": "companion-profile-auto-activate.v1",
+                "scope": scope.aggregate_id,
+                "profile_id": candidate.profile_id,
+                "canary_interaction_ids": list(
+                    state.canary_accepted_interaction_ids
+                ),
+            }
+        )[:32]
+        return self._activate_completed_canary(
             scope=scope,
-            receipt=receipt,
-            state=self._read_state(scope),
-            reason_code="COMPANION_PROFILE_CANARY_INTERACTION_RECORDED",
+            request_id=activation_request_id,
         )
 
-    def activate_canary(
+    def _activate_completed_canary(
         self,
         *,
-        workspace_id: Any,
-        relationship_subject_id: Any,
-        session_id: Any,
+        scope: RelationshipScope,
         request_id: Any,
     ) -> CompanionProfileLifecycleResult:
-        """Promote exactly a completed five-interaction canary."""
+        """Atomically promote the exact completed candidate after canary evidence.
 
-        scope = self._scope(
-            workspace_id=workspace_id,
-            relationship_subject_id=relationship_subject_id,
-            session_id=session_id,
-        )
+        This is intentionally internal.  The only production trigger is
+        ``record_eligible_canary_aftereffect`` after its fifth independent,
+        strong and boundary-safe observation.  No HTTP body, natural-language
+        classifier or caller-selected profile ID may request activation.
+        """
+
         current = self._read_state(scope)
         candidate = current.canary_profile
         if candidate is None:
@@ -301,9 +325,12 @@ class CompanionProfileLifecycleService:
             raise ValueError("COMPANION_PROFILE_CANARY_NOT_COMPLETE")
         stable_request_id = _text(request_id) or _digest(
             {
-                "schema": "companion-profile-activate.v1",
+                "schema": "companion-profile-auto-activate.v1",
                 "scope": scope.aggregate_id,
                 "profile_id": candidate.profile_id,
+                "canary_interaction_ids": list(
+                    current.canary_accepted_interaction_ids
+                ),
             }
         )[:32]
         now_ms = self._next_created_at(scope)
@@ -319,7 +346,11 @@ class CompanionProfileLifecycleService:
             scope=scope,
             receipt=receipt,
             state=self._read_state(scope),
-            reason_code="COMPANION_PROFILE_ACTIVATED",
+            reason_code=(
+                "COMPANION_PROFILE_CANARY_AUTO_ACTIVATION_REPLAYED"
+                if receipt.replayed
+                else "COMPANION_PROFILE_CANARY_AUTO_ACTIVATED"
+            ),
         )
 
     def rollback_active(

@@ -43,8 +43,8 @@
   relationship/proactive 回归及 Secure Ingress service 回归，合计 `47 passed in 27.69s`；这是本地
   定向代码证据，不包含真实 Gateway、Monitor、provider、Edge 或 DL-07 服务栈。
 - 本次 `test_dl06_companion_profile_lifecycle.py` 在真实 SQLite migration `0147` 上覆盖：五条独立、
-  跨三天、强且守住边界的 canonical aftereffect 才能启动 candidate；五次后续 canary interaction 后
-  才能 activate；冻结 profile 确实影响下一轮 text anchor、TTS rate 和 Avatar motion，rollback 精确恢复
+  跨三天、强且守住边界的 canonical aftereffect 才能启动 candidate；第五次合格后续 canary interaction 会
+  自动 activate；冻结 profile 确实影响下一轮 text anchor、TTS rate 和 Avatar motion，rollback 精确恢复
   baseline；journal replay/restart digest 一致且 projection 禁止直接改写。该文件 `3 passed in 11.76s`；
   与 relationship/proactive 邻接集合合计 `11 passed in 17.99s`，两组不得相加。
 - 证据 fixture 明确替换了 relation classifier 才产生 `0.91` 的强后效应；生产保守文本 classifier 的
@@ -62,11 +62,12 @@
   或 DL-07 服务栈。
 - `test_dl06_companion_feedback_ingress.py` 以真实 SQLite、Host route 和 Secure Ingress 验证：一条
   signed `HELPFUL` 必须同时绑定 `companion:feedback:write`、exact user/subject、tenant/workspace 与
-  仍 active 的 response receipt，才可写入 `0.95` canonical aftereffect；它随后只推进已经存在的
-  profile CANARY。HTTP duplicate、进程重启和 claim-result 恢复不会重复写 aftereffect 或 canary
-  interaction；service principal、跨 scope body、失活 receipt 和额外 `rating` 字段全部失败关闭。
-  该文件 `2 passed in 8.98s`；随后与 profile/permission/proactive/relationship/Secure Ingress 邻接集合
-  共 `29 passed in 59.14s`。这仍不是真实用户盲评、Monitor UI、Gateway、provider、Edge 或 DL-07 证据。
+  仍 active 的 response receipt，才可写入 `0.95` canonical aftereffect；它推进既有 profile CANARY，
+  第五条合格 canary interaction 会由 canonical lifecycle 自动 activation。HTTP duplicate、进程重启和
+  claim-result 恢复不会重复写 aftereffect、canary interaction 或 activation；service principal、跨 scope
+  body、失活 receipt 和额外 `rating` 字段全部失败关闭。当前 feedback/profile lifecycle 的直接集合为
+  `5 passed in 22.54s`；与 profile/permission/proactive/relationship/Secure Ingress 邻接集合为
+  `29 passed in 60.87s`。这仍不是真实用户盲评、Monitor UI、Gateway、provider、Edge 或 DL-07 证据。
 
 ## NE-07 隔离外部服务栈
 

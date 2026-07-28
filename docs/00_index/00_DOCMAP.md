@@ -21,7 +21,7 @@ README、理论、系统总览、模块地图和数据流负责解释系统，�
 
 ## 当前执行焦点
 
-当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_SIGNED_RESPONSE_FEEDBACK_CANARY_EVIDENCE_SLICE`：以七海的实时
+当前唯一产品主线为 `NE-08_IN_PROGRESS / DL-06_AUTOMATIC_PROFILE_CANARY_ACTIVATION_SLICE`：以七海的实时
 情感陪伴为目标，建立“用户情绪观察 → 七海 Appraisal → 自身 mixed affect /
 关系 episode → 调节与陪伴动作 → 同轮文本、语音、Avatar 表达 → 后效应与可逆
 偏好学习”的唯一持久链。DL-03 已把 accepted reply 的 provisional relationship
@@ -47,7 +47,7 @@ Ingress 验证后，必须证明 `user principal == relationship subject` 且 `t
 才可将 `ALLOWED/DENIED` 写入 canonical relationship journal；duplicate/restart 只返回同一
 Life receipt。它不是自然语言许可识别，也尚无面向用户的 Monitor 控件。0147 现把低风险表达偏好
 作为 canonical Life profile：五条独立、跨三天、`HELPFUL`、守住边界且置信下界至少 `0.85` 的
-aftereffect 才能开始五次真实互动 canary，随后才可激活或精确回滚到 profile 自己指定的旧版本。
+aftereffect 才能开始五次真实互动 canary；第五条合格 canary 后效应会自动激活，并可精确回滚到 profile 自己指定的旧版本。
 该 profile 只收紧或调整称呼、长度、追问、安慰、主动时段、语速和动作强度；它不能修改 Soul、
 relationship consent 或 self-affect。CANARY/ACTIVE identity 会冻结进入后续文本/Voice/Avatar Host
 plan 与 delivery intent；生产的保守文本分类仅为 `0.72`，不会自动伪造强偏好证据。直接反馈入口、
@@ -63,7 +63,7 @@ head。该 route 不是 Monitor 审核界面，也不直接 activation；远端 
 `POST /v1/digital-life/relationship/response-feedback` 是 profile evidence 的唯一强用户反馈入口：
 它仅接受针对一条仍在 canonical provisional episode 内的 `life-event://` 或 `life-delivery://` receipt
 的四种 bounded 评价。`HELPFUL` 经 `companion:feedback:write`、exact user/subject 与 tenant/workspace
-认证后才写为 `0.95` aftereffect；它只会推进既有 CANARY，不能自动创建/激活 profile，也不会把输入
+认证后才写为 `0.95` aftereffect；它只会推进既有 CANARY；第五条合格后效应才会自动激活，外部请求不能创建或指定激活 profile，也不会把输入
 文本、persona proposal 或自然语言 classifier 当成强证据。
 此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前

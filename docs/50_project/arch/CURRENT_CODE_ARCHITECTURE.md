@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_SIGNED_RESPONSE_FEEDBACK_CANARY_EVIDENCE_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_AUTOMATIC_PROFILE_CANARY_ACTIVATION_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -44,7 +44,7 @@
 > 它没有自然语言解析、模型或 Bond 旁路，也尚无 Monitor 端用户控件。0147 新增的
 > `CompanionProfileLifecycleService` 同样只通过 Life command 写入：它从 canonical relation
 > aftereffect chain 重开五条独立、跨至少三天、`HELPFUL`、boundary-safe 且 `>=0.85` 的证据，
-> 才能建立五互动 canary；随后才能 activate，并只能 exact rollback 到候选创建时绑定的旧 profile。
+> 才能建立五互动 canary；第五条合格 canary 后效应会自动 activate，并只能 exact rollback 到候选创建时绑定的旧 profile。
 > profile 仅含低风险表达偏好和 opaque refs；其 ID/digest/revision 会进入下一次冻结的文本、
 > Voice 与 Avatar plan，不能修改 Soul、consent 或 self-affect。生产文本 classifier 的 `0.72`
 > 不满足门槛，不能被当成自动成长成功。
@@ -66,7 +66,8 @@
 > 验证 `companion:feedback:write`、exact user/relationship subject 和 tenant/workspace。其 strict body
 > 只能引用一个仍为 active provisional episode 的 accepted receipt，并给出四种 bounded outcome；只有
 > explicit `HELPFUL` 生成 `0.95` 的 canonical aftereffect。该证据最多推进已有 companion-profile
-> CANARY，不能创建/activation profile 或写 Soul、consent、self-affect；旧关键词 classifier 与 persona
+> CANARY；只有第五条合格 canary 后效应会由 lifecycle 自动 activation，外部请求不能创建或指定 activation profile，
+> 也不能写 Soul、consent、self-affect；旧关键词 classifier 与 persona
 > proposal 没有该权限。
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与

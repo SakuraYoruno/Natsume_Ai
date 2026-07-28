@@ -1643,7 +1643,7 @@ canary 请求**：它只能列出完整且有界的称呼、长度、幽默、�
 该请求的认证主体必须就是关系对象，租户必须就是 workspace，并由独立 scope 授权。系统
 也不能相信请求中自报的“我之前喜欢这样”：Host 只从 canonical relationship aftereffect
 journal 重新选取足够独立、跨日、强且 boundary-safe 的证据。满足门槛时只开始五次互动的
-CANARY；每次后效应仍决定是否可以 activation，任何时刻都能精确回到候选创建时绑定的旧
+CANARY；第五条独立、合格的后效应会以 deterministic receipt 自动 activation，任何时刻都能精确回到候选创建时绑定的旧
 profile。Secure Ingress audit ref 与 profile version 同时写入 append-only Life journal，所以
 duplicate、重启或 claim-result 中断只会重开同一 receipt，而不是制造第二次成长。
 
@@ -1660,7 +1660,7 @@ canonical provisional relationship episode 中的 response receipt；反馈本�
 情绪标签和 Soul patch 都不进入这个证据入口。
 
 经过独立 scope 认证的 `HELPFUL` 可以成为该回应的高置信 aftereffect，但它不创建
-profile、更不 activation profile。它至多推进一个已经由独立历史证据启动的 CANARY；
+profile，也不能由请求指定 activation profile。它至多推进一个已经由独立历史证据启动的 CANARY；第五条合格 canary 后效应才由 canonical lifecycle 自动 activation；
 普通聊天中的关键词分类和 persona proposal 继续是保守、低权重的理解信号。这样，
 七海能从“这次有没有接住我”学习低风险表达方式，却不会把一次点赞、一次误解或
 一段模型推断误当成对人格、亲密身份、关系许可或 self-affect 的授权。

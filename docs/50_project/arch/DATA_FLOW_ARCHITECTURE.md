@@ -559,7 +559,7 @@ sync、self-affect revision、avatar predecessor 与 Host staging status，绝�
 或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only
 `relational_aftereffect_recorded` 事件：五条独立 user-input ref、跨至少三 UTC 日、`HELPFUL`、
 boundary-safe 且 `helpfulness>=0.85` 的证据才能建立 candidate；candidate 再收集五次后续
-strong aftereffect 才可 active。每个 learned profile 的 rollback ref 固定指向候选创建时的 active
+strong aftereffect 后会由同一 canonical lifecycle 自动 active。每个 learned profile 的 rollback ref 固定指向候选创建时的 active
 profile，不能挑一个方便的旧版本。普通文本 classifier 仅 `0.72`，因此不会写入或推进这条成长链。
 planner 从 trusted relationship hand-off 读取 CANARY 或 ACTIVE profile，把同一 profile id/digest/
 revision 冻结进 `AffectiveTurnPlanV1`、`ExpressionPlanV1`、Voice `SPEAK` 和 Avatar `TRANSITION`；
@@ -589,7 +589,7 @@ flowchart LR
     SI --> R["active provisional response receipt\n精确 scope 验证"]
     R --> A["relational_aftereffect_recorded\nopaque audit + response refs"]
     A --> C["已有 CANARY 才可计一次\ncanary interaction"]
-    C --> P["五次后由独立 lifecycle activation"]
+    C --> P["第五次合格后由 canonical lifecycle 自动 activation"]
 ```
 
 `HELPFUL` 是唯一映射为 `0.95` 的 strong aftereffect；其余反馈仍会正常影响关系修复/边界状态，

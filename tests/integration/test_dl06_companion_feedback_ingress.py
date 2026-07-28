@@ -316,7 +316,7 @@ def _http_headers(request: object) -> dict[str, str]:
     }
 
 
-def test_signed_feedback_is_receipt_bound_replay_safe_and_advances_canary(
+def test_signed_feedback_is_receipt_bound_replay_safe_and_auto_activates_canary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -351,14 +351,6 @@ def test_signed_feedback_is_receipt_bound_replay_safe_and_advances_canary(
         source_control_ref="companion-profile-request://feedback-history-canary",
     )
     assert started.state.canary_profile is not None
-    response_ref = _open_response(
-        relationship=relationship,
-        clock=clock,
-        ordinal=99,
-    )
-    clock.value += 1_000
-    raw_body = _body(response_receipt_ref=response_ref)
-    request = _signed_request(raw_body, issued_at_ms=clock.value)
     monkeypatch.setattr(routes.time, "time", lambda: clock.value / 1_000)
     app = FastAPI()
     app.include_router(
@@ -366,26 +358,60 @@ def test_signed_feedback_is_receipt_bound_replay_safe_and_advances_canary(
             HostRoutePorts(companion_feedback_ingress_provider=lambda: ingress)
         )
     )
+    final_request: object | None = None
+    final_body: bytes | None = None
     try:
         with TestClient(app) as client:
-            first = client.post(PATH, content=raw_body, headers=_http_headers(request))
-            duplicate = client.post(PATH, content=raw_body, headers=_http_headers(request))
-        assert first.status_code == 200, first.text
-        assert first.json()["feedback"] == "HELPFUL"
-        assert first.json()["aftereffect_outcome"] == "HELPFUL"
-        assert first.json()["replayed"] is False
-        assert duplicate.status_code == 200, duplicate.text
-        assert duplicate.json()["replayed"] is True
-        assert duplicate.json()["aftereffect_id"] == first.json()["aftereffect_id"]
+            for offset in range(5):
+                response_ref = _open_response(
+                    relationship=relationship,
+                    clock=clock,
+                    ordinal=99 + offset,
+                )
+                clock.value += 1_000
+                raw_body = _body(response_receipt_ref=response_ref)
+                request = _signed_request(
+                    raw_body,
+                    issued_at_ms=clock.value,
+                    request_id=f"companion.feedback.request.canary.{offset}",
+                    idempotency_key=f"companion.feedback.idempotency.canary.{offset}",
+                    nonce=f"companion.feedback.nonce.canary.{offset}",
+                )
+                first = client.post(
+                    PATH,
+                    content=raw_body,
+                    headers=_http_headers(request),
+                )
+                assert first.status_code == 200, first.text
+                assert first.json()["feedback"] == "HELPFUL"
+                assert first.json()["aftereffect_outcome"] == "HELPFUL"
+                assert first.json()["replayed"] is False
+                if offset == 0:
+                    duplicate = client.post(
+                        PATH,
+                        content=raw_body,
+                        headers=_http_headers(request),
+                    )
+                    assert duplicate.status_code == 200, duplicate.text
+                    assert duplicate.json()["replayed"] is True
+                    assert duplicate.json()["aftereffect_id"] == first.json()["aftereffect_id"]
+                final_request = request
+                final_body = raw_body
+                clock.value += 1_000
 
         state = reader.get_snapshot(scope.aggregate_id).state["companion_profile"]
-        assert state["canary_accepted_interaction_ids"]
+        assert state["canary_profile"] is None
+        assert state["active_profile"]["is_baseline"] is False
+        assert state["canary_accepted_interaction_ids"] == []
         events = reader.list_events(scope.aggregate_id, limit=100)
         assert [event.event_type for event in events].count(
             "relational_aftereffect_recorded"
-        ) == 6
+        ) == 10
         assert [event.event_type for event in events].count(
             "companion_profile_canary_interaction_recorded"
+        ) == 5
+        assert [event.event_type for event in events].count(
+            "companion_profile_activated"
         ) == 1
 
         command_ingress.close()
@@ -401,9 +427,11 @@ def test_signed_feedback_is_receipt_bound_replay_safe_and_advances_canary(
             clock_ms=clock,
         )
         try:
+            assert final_request is not None
+            assert final_body is not None
             replay = restarted.submit(
-                request=request,
-                raw_body=raw_body,
+                request=final_request,
+                raw_body=final_body,
                 received_at_ms=clock.value,
             )
         finally:
@@ -411,7 +439,10 @@ def test_signed_feedback_is_receipt_bound_replay_safe_and_advances_canary(
         assert replay.replayed is True
         assert [
             event.event_type for event in reader.list_events(scope.aggregate_id, limit=100)
-        ].count("companion_profile_canary_interaction_recorded") == 1
+        ].count("companion_profile_canary_interaction_recorded") == 5
+        assert [
+            event.event_type for event in reader.list_events(scope.aggregate_id, limit=100)
+        ].count("companion_profile_activated") == 1
     finally:
         if not getattr(command_ingress, "_closed", True):
             command_ingress.close()
