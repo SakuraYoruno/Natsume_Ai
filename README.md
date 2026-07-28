@@ -85,11 +85,16 @@ required failure，AUDIT 因 `SERVICE_CATALOG_POST_HEALTH_FAILED` 回滚，仍�
 start”的纯 `SERVICE_UNAVAILABLE_COLD_START` 映射为 `DEGRADED`；SQLite、
 Guardian、Workspace、disabled provider 或混合 required failure 仍为
 `FAILED`。受影响集为 `41 passed in 25.17s`。提交 `f48afe1b` 上的第五次
-真实 Host 进程启动已通过：AUDIT、SHADOW、PREFLIGHT、CANARY、ENFORCE
-全部写入 durable `STARTED`，active head 为 ENFORCE；Host/Obs/Nginx
-Monitor 与真实代理路由均返回 200，三个 Docker 容器继续健康。Host 只保留
-一个缺 OPENAI 凭据的 required cold-start failure，因此状态为可审计的
-`DEGRADED`，不是模型 PASS。该跑次同时发现安全 runtime snapshot 会过滤
+真实 Host 进程启动已使 AUDIT、SHADOW、PREFLIGHT、CANARY、ENFORCE
+全部写入 durable `STARTED`，active head 为 ENFORCE；Host、Nginx Monitor
+与真实代理路由返回 200，三个 Docker 容器继续健康。Host 只保留一个缺
+OPENAI 凭据的 required cold-start failure，因此状态为可审计的 `DEGRADED`，
+不是模型 PASS。继续核验发现 Obs 虽返回 200，内部 projection daemon 却因
+空 Life snapshot 在同一 cursor=0 生成不同 wall-clock digest 而持续
+`QueryProjectionError`，所以本跑次整体仍不能 PASS。Life 空源投影现固定
+`generated_at_ms=0`，保持同 cursor 同 digest，相关回归
+`29 passed in 23.25s`；须重启后确认 daemon 恢复。该跑次同时发现安全
+runtime snapshot 会过滤
 Neo4j 密码却残留用户名，直接复用时形成半套凭据；snapshot writer 现同时
 排除两项 direct auth，只保留 `sec://` ref，相关合同为
 `18 passed in 3.82s`。真实重启和带临时 Operator 会话的浏览器验收仍待执行。

@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.70
+版本：v5.71
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -73,12 +73,19 @@ row 和 required count 不会被改成可用；任何本地或混合 required fa
 Guardian durability failure 仍为 `FAILED`。受影响合同为
 `41 passed in 25.17s`。
 
-`f48afe1b` 上的第五次真实 Host 进程启动已经形成首个本地栈成功证据：
-canonical Service Catalog 的 AUDIT→ENFORCE 五阶段全部 `STARTED`，active
-head 为 ENFORCE；Host、Obs、Nginx Monitor 与真实 metrics/static 代理均为
-200，三个 Docker 容器保持 healthy。Host status 为 `DEGRADED` 的唯一原因是
-缺 OPENAI 凭据，原 LLM row 仍 DOWN、required count=1、Guardian durability
-为 READY。因此该证据关闭本地首启，不关闭真实模型或全栈验收。
+`f48afe1b` 上的第五次真实 Host 进程启动使 canonical Service Catalog 的
+AUDIT→ENFORCE 五阶段全部 `STARTED`，active head 为 ENFORCE；Host、Obs、
+Nginx Monitor 与真实 metrics/static 代理均为 200，三个 Docker 容器保持
+healthy。Host status 为 `DEGRADED` 的唯一原因是缺 OPENAI 凭据，原 LLM row
+仍 DOWN、required count=1、Guardian durability 为 READY。
+
+但 Obs health 的深入核对发现 projection daemon 不是健康状态：
+`life-evolution` 对缺失 canonical Life snapshot 以 cursor 0 读取，却把 wall
+clock 写入 payload；首次 digest 已绑定 cursor 0 后，后续每轮 payload 变化，
+被 Projection Store 单调门禁作为 cursor conflict 拒绝。当前 loader 对空源
+固定 `generated_at_ms=0`，真实源仍绑定 `updated_at_ms`，同 cursor 可 exact
+replay；`29 passed in 23.25s`。因此这次只关闭 Host ENFORCE 首启，不关闭
+Obs 或本地整栈，须重启确认 daemon 恢复。
 
 首启过程中还验证出 secret-safe runtime snapshot 过去会排除 Neo4j password
 但保留 username，复用时构成无效的半套 direct credential。当前 writer 将两

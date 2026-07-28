@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.50
+版本：v2.51
 维护日期：2026-07-28
 状态：当前证据
 
@@ -61,8 +61,13 @@
   同步到 app-local provider fixture，最终受影响集为
   `41 passed in 25.17s`。
 - `f48afe1b` 的第五次真实 Host 进程启动已通过五阶段 durable rollout；
-  Host/Obs/Nginx Monitor、真实代理路由和三个 Docker 容器均独立核对成功。
+  Host/Nginx Monitor、真实代理路由和三个 Docker 容器均独立核对成功。
   Host 精确保留一个缺外部模型凭据的 cold-start failure，不能记模型 PASS。
+  Obs HTTP 虽为 200，但 health 暴露 `life-evolution` projection daemon
+  连续 cursor conflict，因此不能记 Obs PASS。
+- 空 Life snapshot 现以 source time 0 生成确定性 payload，不再用 wall clock
+  改写同 cursor digest；domain/canonical/live-source 回归为
+  `29 passed in 23.25s`，仍须真实 daemon 重启恢复验证。
 - 直接复用旧安全 snapshot 的预检暴露 Neo4j 用户名/密码被过滤成半套
   credential；writer 现同时排除 direct username/password，只保留 `sec://`
   ref。启动脚本合同为 `18 passed in 3.82s`，真实 snapshot restart 与无拦截

@@ -122,7 +122,6 @@ def test_security_gets_never_initialize_agent(tmp_path, monkeypatch) -> None:  #
 
 
 def test_skill_catalog_get_never_initializes_registry(tmp_path, monkeypatch) -> None:  # noqa: ANN001
-    from host_brain.composition import process_services as dependencies
     from host_brain.app import obs_routes_platform as routes
 
     store = _store(tmp_path)
@@ -144,10 +143,9 @@ def test_skill_catalog_get_never_initializes_registry(tmp_path, monkeypatch) -> 
         source_cursor=now,
         freshness_ts_ms=now,
     )
-    def forbidden(*_args, **_kwargs):  # noqa: ANN002, ANN003
-        raise AssertionError("Skill Catalog GET initialized the registry")
-
-    monkeypatch.setattr(dependencies, "get_skill_registry", forbidden)
+    assert tuple(inspect.signature(routes.get_skill_catalog_stats).parameters) == (
+        "projection_store",
+    )
 
     response = routes.get_skill_catalog_stats(store)
 
@@ -239,6 +237,38 @@ def test_background_loaders_project_canonical_life_and_skill_pack_catalog() -> N
     assert cursor > 0
     assert catalog["skills"][0]["name"] == "skill.one"
     assert catalog["domain_packs"][0]["pack_id"] == "pack.one"
+
+
+def test_missing_canonical_life_projection_is_deterministic_at_zero_cursor(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    first, first_cursor = load_life_evolution_projection_source(
+        snapshot_reader=lambda _person_id: {},
+    )
+    second, second_cursor = load_life_evolution_projection_source(
+        snapshot_reader=lambda _person_id: {},
+    )
+
+    assert first_cursor == second_cursor == 0
+    assert first["generated_at_ms"] == 0
+    assert first["world"]["status"] == "UNAVAILABLE"
+    assert first == second
+
+    store = _store(tmp_path)
+    first_document = store.upsert(
+        LIFE_EVOLUTION_KIND,
+        "default",
+        first,
+        source_cursor=first_cursor,
+    )
+    replayed_document = store.upsert(
+        LIFE_EVOLUTION_KIND,
+        "default",
+        second,
+        source_cursor=second_cursor,
+    )
+    assert replayed_document.projection_version == first_document.projection_version == 1
+    assert replayed_document.source_digest == first_document.source_digest
 
 
 def test_life_background_loader_requires_the_explicit_snapshot_reader(monkeypatch) -> None:  # noqa: ANN001

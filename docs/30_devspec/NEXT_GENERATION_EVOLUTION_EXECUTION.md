@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.42
+版本：v3.43
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_OBS_MONITOR_FIRST_REAL_START_PASS / RESTART_AND_AUTH_UI_PENDING / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_ENFORCE_START_PASS / OBS_LIFE_PROJECTION_FIX_PENDING_RERUN / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1396,7 +1396,9 @@ API key 和源码树外 Workspace 根完成。独立核对结果为：
   row 仍为 DOWN、required count 仍为 1、Guardian durability 为 READY；
 - Host、Obs、Nginx Monitor 分别监听隔离端口 18080/18082/18180，
   `/obs/metrics`、`/monitor/index.html` 与 Nginx 代理后的 metrics 均为真实
-  200；Neo4j、Chroma、Redis 三个验收容器继续 healthy；
+  200；Neo4j、Chroma、Redis 三个验收容器继续 healthy。但继续读取 Obs
+  health 发现 projection daemon 已连续失败，故这里仅证明进程/路由，不证明
+  Obs read model 健康；
 - 无凭据模型没有被提升为 PASS，整体仍须按
   `ACCEPTANCE_PENDING_EXTERNAL` 处理。
 
@@ -1409,3 +1411,15 @@ writer 现同时排除 `NATSUME_NEO4J_USER` 和密码，只保留
 定向合同为 `18 passed in 3.82s`、PowerShell parse 通过；下一跑次必须直接
 复用新快照完成真实重启，并注入仅存于进程内的 Operator token digest 做无
 网络拦截浏览器验收。
+
+继续核对 Obs health 后确认，唯一失败 job 为 `life-evolution`，每一轮都抛出
+`QueryProjectionError`。canonical projection document 已把 cursor 0 绑定到
+首次空 Life snapshot 的 digest；loader 在 source 缺失时却以 wall clock
+生成 `generated_at_ms` 和 `view_id`，下一轮仍提交 cursor 0 但 payload digest
+变化，Projection Store 正确以 `OPERATOR_PROJECTION_CURSOR_CONFLICT` 拒绝。
+修复不放宽 Store 单调门禁，而是让空 snapshot 的投影时间固定为 0；真实
+Life snapshot 仍使用其 `updated_at_ms`。同一空源现在机械地产生相同 payload
+和 digest。相邻 domain projection、canonical persistence 与 live-source
+集合为 `29 passed in 23.25s`。只有重启后 projection daemon
+`last_success_ts_ms` 出现、failure wave 清零且 Obs health 为 OK，才能恢复
+Host/Obs/Monitor 栈通过口径。
