@@ -1,10 +1,10 @@
 services:
   neo4j:
-    image: neo4j:5.26-community
-    container_name: natsume-neo4j
+    image: "${NATSUME_NEO4J_IMAGE:-neo4j@sha256:409728716bc239f9fa046368ac6ce6ef280f9e5f0bcb7cdd75031a4465cc192d}"
+    container_name: "${NATSUME_NEO4J_CONTAINER_NAME:-natsume-neo4j}"
     restart: unless-stopped
     environment:
-      NEO4J_AUTH: "${NATSUME_NEO4J_USER:-neo4j}/${NATSUME_NEO4J_PASSWORD:-NatsuNeo4j!20260306}"
+      NEO4J_AUTH: "${NATSUME_NEO4J_USER:-neo4j}/${NATSUME_NEO4J_PASSWORD:-}"
       NEO4J_server_memory_heap_initial__size: "512m"
       NEO4J_server_memory_heap_max__size: "512m"
       NEO4J_dbms_security_auth__minimum__password__length: "8"
@@ -13,12 +13,24 @@ services:
       - "${NATSUME_NEO4J_HTTP_PORT:-7474}:7474"
       - "${NATSUME_NEO4J_BOLT_PORT:-17687}:7687"
     volumes:
-      - ../../runtime/docker/neo4j/data:/data
-      - ../../runtime/docker/neo4j/logs:/logs
+      - type: bind
+        source: "${NATSUME_DOCKER_DATA_ROOT:-../../runtime/docker}/neo4j/data"
+        target: /data
+      - type: bind
+        source: "${NATSUME_DOCKER_DATA_ROOT:-../../runtime/docker}/neo4j/logs"
+        target: /logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:7474 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 20s
+    networks:
+      - natsume-external
 
   chroma:
-    image: chromadb/chroma:latest
-    container_name: natsume-chroma
+    image: "${NATSUME_CHROMA_IMAGE:-chromadb/chroma@sha256:3a9bcbc609ba6bd42fe3699c2441765d2393143087e814361c5ce5614863419f}"
+    container_name: "${NATSUME_CHROMA_CONTAINER_NAME:-natsume-chroma}"
     restart: unless-stopped
     environment:
       IS_PERSISTENT: "TRUE"
@@ -28,14 +40,38 @@ services:
     ports:
       - "${NATSUME_CHROMA_PORT:-18000}:8000"
     volumes:
-      - ../../runtime/docker/chroma/data:/chroma/chroma
+      - type: bind
+        source: "${NATSUME_DOCKER_DATA_ROOT:-../../runtime/docker}/chroma/data"
+        target: /chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - natsume-external
 
   redis:
-    image: redis:7-alpine
-    container_name: natsume-redis
+    image: "${NATSUME_REDIS_IMAGE:-redis@sha256:8b81dd37ff027bec4e516d41acfbe9fe2460070dc6d4a4570a2ac5b9d59df065}"
+    container_name: "${NATSUME_REDIS_CONTAINER_NAME:-natsume-redis}"
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
     ports:
       - "${NATSUME_REDIS_PORT:-6379}:6379"
     volumes:
-      - ../../runtime/docker/redis/data:/data
+      - type: bind
+        source: "${NATSUME_DOCKER_DATA_ROOT:-../../runtime/docker}/redis/data"
+        target: /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - natsume-external
+
+networks:
+  natsume-external:
+    name: "${NATSUME_DOCKER_NETWORK_NAME:-natsume-ext_default}"

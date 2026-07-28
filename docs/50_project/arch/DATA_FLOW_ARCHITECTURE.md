@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.35
+版本：v3.36
 
 核对日期：2026-07-28
 
@@ -1639,6 +1639,24 @@ flowchart LR
 `attestation_signature` 与 key ID 仅存在于 0119 专用权威表；WorkOrder、TaskGraph、Review 和 Effect payload 只携带不敏感的 ref/digest。风险级别 4 触发 durable Review，风险级别 5 仍是不可批准的绝对阻断。Review 前 0099 proof 与目标 Budget 不变化；Acceptance 后 handler 才能重开并执行。当前证据来自真实 SQLite 的本地集成，未覆盖 HTTP/network canary 或 NE-07 全服务栈。
 
 0113 Service Catalog 的应用数据流现在通过 [rollout_authority.py](../../../host_brain/service_catalog/rollout_authority.py) 中的 repository Protocol 进入 [SQLiteServiceCatalogRolloutRepository](../../../host_brain/persistence/service_catalog_rollout_repository.py)。authority 只拥有合同、Protocol 和 Guardian Observer；具体 SQLite 连接、SQL 与事务归 persistence repository。Host 生产入口以 ENFORCE 为默认目标，但 fresh DB 必须逐级真实启动 AUDIT→SHADOW→PREFLIGHT→CANARY→ENFORCE，每阶段通过真实 HTTP Host/Guardian identity 后才推进 head，中间 listener 关闭后才进入下一阶段。Pending health 必须同时绑定 exact operation ID digest、snapshot、stage 与 candidate；另一个健康 listener 不得替它推进 head。`REGISTERED` 崩溃以同 operation ID 续跑；stop 失败或 listener 未停时维持 `STARTING` 等待对账，绝不伪造 `ROLLED_BACK`。`ACTIVATION_STARTED` receipt 与 rollout head 在同一 repository 事务内提交，任一写入失败共同回滚；Store 与 SQLite trigger 继续拒绝非法 event/status、terminal-first、第二终态、stage/rank 漂移、runtime-scope/activation identity 漂移、rollback-ref replay drift 与 stage skip/regression。`host_startup.py` 与 ASGI 仍是 concrete repository wiring，typed composition 和部署多实例 canary 均未完成。
+
+Windows 强杀后的 Host 替换流现在是：
+
+```mermaid
+flowchart LR
+    K["旧 Host 被强杀\nshutdown hook 未运行"] --> L["30 秒 embodiment Lease 仍存活"]
+    L --> W["replacement 仅重试精确 authority unavailable\n默认 35 秒有界等待"]
+    W -->|"旧 heartbeat 仍活跃"| B["超时失败\n不抢占"]
+    W -->|"Lease 自然到期"| F["repository 原子取得更高 fence"]
+    F --> C["继续 Service Catalog candidate 启动"]
+    C --> H["最终 stage / owner / digest health identity"]
+```
+
+`ForceRestart` 在新 Host 前先按同一显式 runtime root 停止旧 Monitor/Obs 并
+复核端口；首次 catalog 等待同时观察 launcher PID，进程退出即失败。配置、
+存储、Edge rebind 等非 authority 错误不进入等待循环。该流已通过
+`33 passed in 34.32s` 的定向合同，但更高 fence 的真实服务栈接管仍待重跑，
+因此不是恢复 `PASS`。
 
 0112 Runtime Context 的 schema readiness 也已沿同一分层方向迁移：runtime 只通过 `RuntimeEventStore` readiness port 发起检查，具体 SQLite/schema 读取归 `RuntimeEventRepository`；World Observation 的 `_write_lock` 只是 `RLock` 命名误判，现为 `_transition_lock`，不形成第二数据库 writer。该切片无新 migration。Global SQLite boundary 与 Gate 10 已 `PASS`。
 

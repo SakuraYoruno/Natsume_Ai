@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$LogDir = "",
   [string]$BindHost = "",
   [int]$Port = 0,
@@ -177,18 +178,23 @@ if (-not $EnvFile) {
   }
 }
 
-$runtimeRoot = Join-Path $repoRoot "runtime\host"
-Ensure-Directory -Path $runtimeRoot
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
+}
+Ensure-Directory -Path $RuntimeRoot
+$RuntimeRoot = (Resolve-Path -Path $RuntimeRoot).Path
 
 if (-not $LogDir) {
-  $LogDir = Join-Path $runtimeRoot "logs"
+  $LogDir = Join-Path $RuntimeRoot "logs"
 }
 Ensure-Directory -Path $LogDir
 
-$pidFile = Join-Path $runtimeRoot "obs.pid"
+$pidFile = Join-Path $RuntimeRoot "obs.pid"
 $stdoutLog = Join-Path $LogDir "obs.stdout.log"
 $stderrLog = Join-Path $LogDir "obs.stderr.log"
-$runtimeEnvFile = Join-Path $runtimeRoot "host.runtime.env"
+$runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
 
@@ -396,6 +402,7 @@ $result = [ordered]@{
   port = $Port
   health_url = $healthUrl
   env_file = $EnvFile
+  runtime_root = $RuntimeRoot
   runtime_env_file = $runtimeEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog

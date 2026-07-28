@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import json
 import logging
 from pathlib import Path
 import secrets
@@ -36,6 +37,12 @@ AGENT_WORKSPACE_START_ROLLBACK_RETRY_REQUIRED = (
 AGENT_WORKSPACE_SHUTDOWN_RETRY_REQUIRED = (
     "AGENT_WORKSPACE_SHUTDOWN_RETRY_REQUIRED"
 )
+AGENT_WORKSPACE_SECRET_STORE = (
+    Path(__file__).resolve().parents[2]
+    / "configs"
+    / "secrets"
+    / "secret_store.runtime.local.json"
+)
 
 
 class AgentWorkspaceLifecycleError(RuntimeError):
@@ -45,6 +52,56 @@ class AgentWorkspaceLifecycleError(RuntimeError):
         self.reason_code = str(reason_code)
         self.detail = dict(detail)
         super().__init__(self.reason_code)
+
+
+def resolve_agent_workspace_token_secret(runtime_settings: Any) -> bytes:
+    """Resolve the process-local Workspace HMAC key without persisting it.
+
+    ``HOST_AGENT_WORKSPACE_HMAC_SECRET`` remains a compatibility input for
+    embedded/test runtimes. Production launchers should persist only
+    ``HOST_AGENT_WORKSPACE_HMAC_SECRET_REF`` in their runtime snapshot; the
+    Host resolves that opaque reference from the ignored local secret store.
+    """
+
+    direct_setting = getattr(runtime_settings, "agent_workspace_hmac_secret", None)
+    direct_reader = getattr(direct_setting, "get_secret_value", None)
+    direct_value = str(direct_reader() if callable(direct_reader) else "").strip()
+    secret_ref = str(
+        getattr(runtime_settings, "agent_workspace_hmac_secret_ref", "") or ""
+    ).strip()
+    if direct_value and secret_ref:
+        raise DurableWorkspaceRuntimeError(
+            WORKSPACE_RUNTIME_BINDING_INVALID,
+            "workspace token secret source is ambiguous",
+        )
+    if direct_value:
+        return direct_value.encode("utf-8")
+    if not secret_ref.startswith("sec://"):
+        raise DurableWorkspaceRuntimeError(
+            WORKSPACE_RUNTIME_BINDING_INVALID,
+            "workspace token secret ref is required",
+        )
+    try:
+        raw_store = json.loads(
+            AGENT_WORKSPACE_SECRET_STORE.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise DurableWorkspaceRuntimeError(
+            WORKSPACE_RUNTIME_BINDING_INVALID,
+            "workspace token secret store is unavailable",
+        ) from exc
+    if not isinstance(raw_store, dict):
+        raise DurableWorkspaceRuntimeError(
+            WORKSPACE_RUNTIME_BINDING_INVALID,
+            "workspace token secret store is invalid",
+        )
+    secret_value = raw_store.get(secret_ref)
+    if not isinstance(secret_value, str) or not secret_value.strip():
+        raise DurableWorkspaceRuntimeError(
+            WORKSPACE_RUNTIME_BINDING_INVALID,
+            "workspace token secret ref is unresolved",
+        )
+    return secret_value.strip().encode("utf-8")
 
 
 class WorkspaceCleanupContinuationWorker:
@@ -369,11 +426,7 @@ def compose_agent_workspace_application_scope(
             heartbeat_interval_ms=runtime_settings.agent_workspace_heartbeat_ms,
             cleanup_interval_ms=runtime_settings.agent_workspace_cleanup_poll_ms,
             cleanup_observer=cleanup_observer,
-            token_secret=(
-                runtime_settings.agent_workspace_hmac_secret
-                .get_secret_value()
-                .encode("utf-8")
-            ),
+            token_secret=resolve_agent_workspace_token_secret(runtime_settings),
         )
         deferred_cleanup = [
             item
@@ -523,6 +576,7 @@ def build_process_agent_workspace_container(
 
 __all__ = [
     "AGENT_WORKSPACE_SHUTDOWN_RETRY_REQUIRED",
+    "AGENT_WORKSPACE_SECRET_STORE",
     "AGENT_WORKSPACE_START_FAILED",
     "AGENT_WORKSPACE_START_ROLLBACK_RETRY_REQUIRED",
     "AgentWorkspaceLifecycleError",
@@ -533,5 +587,6 @@ __all__ = [
     "build_process_agent_workspace_container",
     "compose_agent_workspace_application_scope",
     "quiesce_agent_workspace_application_scope",
+    "resolve_agent_workspace_token_secret",
     "start_agent_workspace_application_scope",
 ]

@@ -3,9 +3,85 @@
 
 # 测试与验收目录
 
-版本：v2.43
+版本：v2.52
 维护日期：2026-07-28
 状态：当前证据
+
+## NE-07 隔离外部服务栈
+
+- 默认端口上已有用户长期 `natsume-ext` Neo4j、Chroma、Redis；本轮明确不
+  停止、不写入、不计入验收。
+- acceptance project `natsume-ne07-555ead6d` 使用独立 container names、
+  network、27474/27687/28000/26379 端口和 `runtime/acceptance/...` 数据根。
+- 三个默认镜像已固定 digest，Neo4j 密码只允许运行期注入并在启动结果中脱敏；
+  三个服务均声明容器 healthcheck。
+- 真实 Docker `compose config --quiet`、PowerShell parser 与静态合同
+  `9 passed in 0.88s` 通过。
+- 外部服务 persistence runner 已进入代码，强制校验隔离 identity、端口和
+  Compose project 标签；其真实执行结果必须另存 ignored acceptance receipt，
+  不能由 runner 存在性替代。
+- 提交 `14f015bd` 的跑次 `ne07-ext-20260728-01` 已真实完成 Neo4j、
+  Chroma、Redis 写入、容器重启、持久读取、更新/查询和清理，耗时
+  38,984 ms；receipt digest 为 `sha256:7af6e6a0…2f71`。独立复核的三类
+  探针残留均为 0，明文 secret 未进入 receipt/日志，用户默认栈未重启。
+- Host、Obs、Nginx Monitor、Edge、Gateway 和后续故障注入仍未运行，不能
+  把三库子 Gate 外推为完整全栈通过。
+
+## NE-07 Host / Obs / Monitor 启动前验证
+
+- Monitor UI：`npm ci`、Operator client check、lint、typecheck、15 项
+  read-model test 和 production build 全部通过。
+- Host、Obs、Monitor 六个启停脚本支持显式 acceptance runtime root；该模式
+  不扫描其它 Host，运行环境快照排除 secret 值并保留安全 `sec://` 引用。
+- PowerShell parser 通过；定向合同为 `13 passed in 3.33s`。
+- 官方 Nginx 1.31.3 已安装并记录 executable SHA-256。
+- `npm audit` 的 6 high 构建链和 2 moderate React Router 告警保持开放；
+  Host 首次真实启动因 Workspace HMAC 缺少安全引用入口而退出，且暴露旧脚本
+  会把短暂健康误报为 `started`。该跑次为 `FAIL`，不是 preflight PASS。
+- Workspace 现支持只落盘 `sec://` 引用并在 Host 进程内解析；启动器在
+  sidecar 启动后连续五次核对 Host PID、监听与 health/readiness payload，
+  同时要求真实 Obs、Monitor 端点继续可用，失败会定向清理 acceptance 根。
+- `b6b341be` 的第二次真实启动确认 Workspace 引用已生效且稳定性 Gate 正确
+  拒绝假成功；进一步发现 Service Catalog 中间 rollout candidate 被旧首探针
+  误认成最终 Host。首探针现必须验证最终 stage、`host.main` owner 及
+  operation/snapshot digest，禁止用 readiness、metrics 或监听端口兜底。
+- 第三次真实启动已拒绝中间 candidate，但因 acceptance Workspace managed
+  root 位于源码 worktree 内部而被既有隔离门禁拒绝。三个 AUDIT operation
+  均留下 `ROLLED_BACK` receipt，head 为空、lease 已释放，没有删库恢复。
+- 启动器新增 `-AgentWorkspaceRoot`：Docker/Host 启动前拒绝 managed root 与
+  source 的同目录、父子目录重叠，合法外部根才进入 runtime snapshot。更新后
+  定向单元为 `23 passed in 3.91s`，Workspace ASGI 前序定向集成为
+  `5 passed in 5.45s`。
+- `b56d4d78` 的第四次启动证明外部 Workspace 根已生效，但
+  `HOST_LLM_PROVIDER=disabled` 令 Governor/LLM required health 为
+  `FAILED`，AUDIT receipt 因 `SERVICE_CATALOG_POST_HEALTH_FAILED` 回滚。
+- health 现只允许“选择真实 provider + 显式允许 cold start + required
+  failures 全部为缺凭据”映射为 `DEGRADED`；disabled provider、混合
+  required failure 和 durable Guardian failure 仍失败关闭。旧 health contract
+  同步到 app-local provider fixture，最终受影响集为
+  `41 passed in 25.17s`。
+- `f48afe1b` 的第五次真实 Host 进程启动已通过五阶段 durable rollout；
+  Host/Nginx Monitor、真实代理路由和三个 Docker 容器均独立核对成功。
+  Host 精确保留一个缺外部模型凭据的 cold-start failure，不能记模型 PASS。
+  Obs HTTP 虽为 200，但 health 暴露 `life-evolution` projection daemon
+  连续 cursor conflict，因此不能记 Obs PASS。
+- 空 Life snapshot 现以 source time 0 生成确定性 payload，不再用 wall clock
+  改写同 cursor digest；domain/canonical/live-source 回归为
+  `29 passed in 23.25s`，仍须真实 daemon 重启恢复验证。
+- 直接复用旧安全 snapshot 的预检暴露 Neo4j 用户名/密码被过滤成半套
+  credential；writer 现同时排除 direct username/password，只保留 `sec://`
+  ref。启动脚本合同为 `18 passed in 3.82s`，真实 snapshot restart 与无拦截
+  认证 Playwright 尚待下一跑次。
+- 第六次 `ForceRestart` 不再受半套 Neo4j credential 阻断，但旧 Host 被
+  强杀后留下 30 秒 embodiment authority Lease；replacement 单次 acquire
+  失败并退出，ENFORCE operation durable `ACTIVATION_FAILED`，旧 Lease
+  随后自然过期。启动器未观察 launcher 退出而空等约 240 秒，旧 Obs/Nginx
+  也未在前置阶段清理；本跑次结论为 `FAIL`。
+- takeover builder 现在只对精确 authority-unavailable 做默认 35 秒有界
+  重试，必须在 predecessor 到期后取得更高 fence，live heartbeat 不可抢占；
+  `ForceRestart` 先定向停止同 runtime root 的 Monitor/Obs，首次 catalog
+  等待监视 launcher PID。authority、配置、隔离和启动脚本集合为
+  `33 passed in 34.32s`，真实 crash restart 与 Obs daemon 恢复仍待重跑。
 
 ## NE-05 Skill 生命周期本地代码波次
 

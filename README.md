@@ -55,7 +55,63 @@ Review/activation 尚未执行，因此 NE-02 仍是
 `static_scan,doc_gate` 为 `PASS / failures=[]`，耗时 109.4 秒；fresh 架构
 Gate 1～14 为 `PASS / failed_gates=[]`，耗时 25.6 秒。
 
-NE-03～NE-05 的本地生产接线波次已经合入；当前活动实现波为 NE-06。
+NE-03～NE-06 的本地生产接线波次已经合入；当前活动实现波为 NE-07。
+独立 acceptance project 的真实 Neo4j、Chroma、Redis 已在提交
+`14f015bd` 完成写入、容器重启、持久读取、更新/查询和清理，receipt digest
+为 `sha256:7af6e6a0…2f71`；用户默认 `natsume-ext` 栈未被复用或重启。
+Host、Obs、Nginx Monitor、Edge 与 Unified Gateway 仍待本轮继续启动，因此
+整体状态仍为 `INCOMPLETE`。
+Monitor UI 的锁文件安装、client 合同、lint、类型检查、15 项 read-model
+测试与生产构建已通过；Host/Obs/Monitor 启停也已支持独立 runtime root，
+且运行环境快照不再落盘 password、Token、auth 或 key。首次真实启动中，
+Obs 与 Nginx 曾正常拉起，但 Host 因 Workspace HMAC 只有明文配置入口、而
+安全快照又禁止持久化明文而退出；旧启动器在退出前短暂健康后仍错误返回
+`started`。当前代码已增加 `sec://` Workspace 密钥解析和 Host/Obs/Monitor
+启动后的五次连续 identity/进程/监听稳定性 Gate，失败会只清理本 acceptance
+运行根。提交 `b6b341be` 的第二次真实启动确认 Workspace 密钥已正常接通，且
+新 Gate 没有再返回假成功；它进一步发现 Service Catalog 会依次启动并停止
+AUDIT→ENFORCE 候选，旧首探针会把中间候选当成最终 Host。启动器现必须先从
+响应头核对最终 catalog stage、owner、operation digest 与 snapshot digest，
+再启动 sidecar，并在最终五轮检查中保持同一身份。第三次真实启动没有误报
+成功，三个 AUDIT operation 均持久化为 `ROLLED_BACK`、rollout head 为空且
+lease 已释放；它暴露 acceptance Workspace 根位于源码仓库内部，触发既有
+`WORKSPACE_AUTHORITY_INVALID` 隔离门禁。启动器现增加独立
+`AgentWorkspaceRoot`，在启动 Docker/Host 前同时拒绝源码子目录、源码父目录
+和同目录，并把合法外部根写入无秘密 runtime snapshot。第四次真实启动确认
+外部 Workspace 根已生效，旧重叠错误不再出现；但验收环境显式设置
+`HOST_LLM_PROVIDER=disabled`，Host 正确把 Governor/LLM Gateway 记为本地
+required failure，AUDIT 因 `SERVICE_CATALOG_POST_HEALTH_FAILED` 回滚，仍未
+误报成功。health 现只允许“选中真实 provider、仅缺凭据且显式允许 cold
+start”的纯 `SERVICE_UNAVAILABLE_COLD_START` 映射为 `DEGRADED`；SQLite、
+Guardian、Workspace、disabled provider 或混合 required failure 仍为
+`FAILED`。受影响集为 `41 passed in 25.17s`。提交 `f48afe1b` 上的第五次
+真实 Host 进程启动已使 AUDIT、SHADOW、PREFLIGHT、CANARY、ENFORCE
+全部写入 durable `STARTED`，active head 为 ENFORCE；Host、Nginx Monitor
+与真实代理路由返回 200，三个 Docker 容器继续健康。Host 只保留一个缺
+OPENAI 凭据的 required cold-start failure，因此状态为可审计的 `DEGRADED`，
+不是模型 PASS。继续核验发现 Obs 虽返回 200，内部 projection daemon 却因
+空 Life snapshot 在同一 cursor=0 生成不同 wall-clock digest 而持续
+`QueryProjectionError`，所以本跑次整体仍不能 PASS。Life 空源投影现固定
+`generated_at_ms=0`，保持同 cursor 同 digest，相关回归
+`29 passed in 23.25s`；须重启后确认 daemon 恢复。该跑次同时发现安全
+runtime snapshot 会过滤
+Neo4j 密码却残留用户名，直接复用时形成半套凭据；snapshot writer 现同时
+排除两项 direct auth，只保留 `sec://` ref，相关合同为
+`18 passed in 3.82s`。
+
+第六次真实 `ForceRestart` 已使用修正后的 snapshot，但在旧 Host 被强杀后，
+其 30 秒 durable embodiment authority Lease 尚未到期；新进程只尝试一次
+acquire 就以 `EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE` 退出，Service
+Catalog 将本次 ENFORCE operation 持久收口为 `ACTIVATION_FAILED`。启动器
+没有观察已退出的 launcher，继续空等约 240 秒，旧 Obs/Nginx 也残留在
+acceptance 端口。这次结果明确为 `FAIL`。当前修复只对这一精确 authority
+冲突做最多 35 秒的异步等待，Lease 到期后必须取得更高 fence；仍在 heartbeat
+的 live owner 不会被抢占，其他配置、存储或 Edge 重绑错误仍立即失败关闭。
+`ForceRestart` 还会先定向停止同一 runtime root 的 Obs/Nginx，并在首次
+catalog 探针期间检测 launcher 退出，避免再次空等。新边界定向验证为
+`33 passed in 34.32s`；真实重启、Obs daemon 恢复和带临时 Operator 会话的
+浏览器验收仍待下一跑次。
+`npm audit` 的 8 项依赖告警仍开放，不能据此宣称前后端验收通过。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime
 scope/owner/lease/fence 约束单一 append-only SQLite owner，持有
@@ -621,7 +677,7 @@ flowchart LR
 | Edge RPC | `python -m edge_client` | ASR、TTS、Avatar、桌面与设备 actuator | 物理副作用必须回传 receipt |
 | Unified Gateway | Edge lifecycle 中的 `edge_client/gateway/bootstrap.py` | 平台 webhook、消息归一化、Host 回流与出站投递 | 平台适配器不拥有 Host 业务状态 |
 | Desktop Pet | `desktop_pet/main.cjs` | Electron + Live2D 本地表现 | 只消费状态和动作，不裁决事实 |
-| External Services | `scripts/runtime/docker-compose.external.yml` | Neo4j、Chroma、Redis | 日常启动可按配置降级；NE-07 最终验收必须启动真实固定版本容器并完成写入、读取、重启持久性和清理，不允许内存 fallback |
+| External Services | `scripts/runtime/docker-compose.external.yml` | Neo4j、Chroma、Redis | 镜像默认绑定 digest，project/container/network/data root/port 可隔离；日常启动可按配置降级，NE-07 必须在独立 acceptance project 完成真实写入、读取、重启持久性和清理，不允许内存 fallback |
 
 Host 与 Edge 之间的共享数据结构位于 `natsume_contracts/`。该目录是跨进程版本化合同，不是重复实现或可删除的临时目录。
 
@@ -806,11 +862,12 @@ NATSUME_AUDIT_DB=runtime/host/audit.sqlite3
 ### 3. 可选外部服务
 
 ```powershell
-docker compose -f scripts/runtime/docker-compose.external.yml up -d
-docker compose -f scripts/runtime/docker-compose.external.yml ps
+.\scripts\runtime\start_docker_services.ps1 -EnvFile .env
+docker compose -f scripts/runtime/docker-compose.external.yml -p natsume-ext ps
 ```
 
-该 Compose 只启动外部依赖，不会代替 Host、Obs、Edge 或前端进程。
+启动器从本地 secret store 或运行期注入解析 Neo4j 认证；Compose 不再提供默认
+密码。该 Compose 只启动外部依赖，不会代替 Host、Obs、Edge 或前端进程。
 
 ### 4. 启动后端
 

@@ -455,3 +455,12 @@ TASK-0076~0083 的风险点从 DevTasks.md 阶段 8 任务描述与代码审查�
 | WARN-BE-004 | `ServiceHealthResult.to_dict()` 返回字段名 `name`，契约要求 `service_name` | P2 | 修正 `to_dict()` 返回字段名 |
 | WARN-BE-006 | `session_query.py` 的 `_fmt_ts` 使用本地时区，跨时区部署时显示错误时间 | P2 | 改为 UTC 时间或 ISO 8601 格式 |
 | WARN-BE-007 | `metrics_timeseries.py` 延迟分布仅有 Overall 维度，缺少 ASR/TTS/LLM 分解 | P2 | 从各服务审计表分别聚合 P50/P95 |
+
+---
+
+## 25. NE-07 真实服务栈开放风险
+
+| # | 风险描述 | 等级 | 当前缓解 | 关闭条件 | 状态 |
+|---|---|---|---|---|---|
+| NE07-UI-AUDIT-001 | Monitor `npm audit` 报告 6 个 high 构建链依赖与 2 个 moderate React Router 依赖；自动修复要求 major 版本变化 | P1 | 不使用 `npm audit fix --force`；锁文件构建、lint、类型、read-model 和 production build 已通过 | 受控升级后重跑全部 UI 合同、真实 Nginx 路由与 Playwright，`npm audit` 清零或形成逐项风险接受 | OPEN |
+| NE07-HOST-START-001 | 前五次依次暴露 Workspace secret、短暂健康假成功、中间 catalog candidate、Workspace/source 重叠、disabled provider required failure 与 Obs 空 Life cursor conflict。第六次 `ForceRestart` 暴露被强杀 Host 的 30 秒 embodiment Lease：replacement 单次 acquire 后退出、launcher 空等约 240 秒且旧 sidecar 残留 | P0 | `sec://` ref、最终 catalog identity、外部 Workspace 根、严格 cold-start、原子 Neo4j auth ref 与确定性空 Life payload已生效；replacement 只对精确 authority unavailable 有界等待并要求更高 fence，live owner 不可抢占；ForceRestart 前置停止同根 sidecar，launcher 退出立即失败 | 真实重跑证明更高 fence takeover、Obs daemon 成功 wave、认证 API/UI、崩溃恢复和停止残留检查；真实模型仍单列外部验收 | MITIGATED_CODE_CRASH_TAKEOVER_AND_OBS_RERUN_PENDING |

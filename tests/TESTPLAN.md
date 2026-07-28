@@ -1,10 +1,100 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.37
+版本：v0.44
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
+
+## T-NE07-ISOLATED-EXTERNAL-STACK
+
+- T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；
+  Compose 不得包含 Chroma `latest`、Redis 浮动 tag 或仓库默认 Neo4j 密码。
+- T-NE07-EXT-02：project、三个 container name、network、host ports 与 data
+  root 必须可独立配置；非默认 project 自动派生隔离 identity，不得复用或停止
+  用户长期 `natsume-ext` 容器。
+- T-NE07-EXT-03：三个服务必须声明容器 healthcheck；启动器在 `up` 前执行
+  `docker compose config --quiet`，进程级 acceptance 配置必须优先于
+  checked-in `.env`；直接运行期用户名/密码必须成对提供，成功或失败诊断
+  均不得回显认证引用或密码。
+- 当前静态合同为 `9 passed in 0.88s`，PowerShell parser 与真实 Docker
+  `compose config --quiet` 通过。
+- T-NE07-EXT-04：正式 runner 必须拒绝默认容器 identity、默认端口和非
+  loopback endpoint；必须重开 Compose project 标签，逐库完成真实写入、
+  容器重启、持久读取、更新/查询与 namespace 清理。Neo4j 密码只能由进程
+  环境读取，CLI、标准输出和 receipt 不得携带明文。
+- T-NE07-EXT-04 的真实跑次为 `ne07-ext-20260728-01@14f015bd`：
+  Neo4j、Chroma、Redis 均完成写→容器重启→持久读→更新/查询→清理，
+  receipt digest=`sha256:7af6e6a0…2f71`；独立复核三类残留均为 0，secret
+  scan 通过。该结果只使外部三库子 Gate 通过。
+
+## T-NE07-HOST-STACK-ISOLATION
+
+- T-NE07-HOST-01：Host、Obs、Monitor start/stop 必须接受显式
+  `RuntimeRoot`，PID、日志、runtime env 与 Nginx prefix 全部位于该根。
+- T-NE07-HOST-02：显式 runtime root 的 ForceRestart/stop 只能处理该根 PID
+  或指定端口，不得扫描并终止其它 Host 实例。
+- T-NE07-HOST-03：runtime env 快照不得包含 password、secret、Token、auth
+  或 key 值；只有 `sec://` 引用可以持久化。
+- T-NE07-HOST-04：Monitor 必须完成锁文件安装、Operator client check、
+  lint、typecheck、read-model test、production build，并由真实 Nginx 服务。
+- T-NE07-HOST-05：Workspace HMAC 的生产启动只允许 runtime snapshot 保存
+  `sec://` 引用，Host 在进程内从 ignored local store 解析；明文与引用双来源、
+  非法引用、store 缺失或引用不存在必须失败关闭且不能回显 secret。
+- T-NE07-HOST-06：Obs/Monitor 启动完成后必须连续五次验证 Host 进程
+  identity、监听 PID、`/health` 与 `/ready` payload identity；真实 Obs/
+  Monitor 端点也必须继续可用。任一失败不得返回 `started`，并且只能清理
+  本次显式 acceptance runtime root。
+- T-NE07-HOST-07：Service Catalog 多阶段 rollout 期间，启动器不得把
+  AUDIT/SHADOW/PREFLIGHT/CANARY 中间 candidate 误认成最终 Host。首次放行
+  与最终连续 Gate 都必须匹配配置的目标 stage、`host.main` owner、
+  operation/snapshot SHA-256 响应头；不得以 `/ready`、`/obs/metrics` 或
+  监听端口兜底。
+- T-NE07-HOST-08：Agent Workspace managed root 必须位于源码仓库树外；
+  同目录、源码子目录和源码父目录都必须在 Docker/Host 启动前失败关闭，且
+  不得创建非法目录。显式外部根必须以 resolved identity 写入 runtime
+  snapshot 和启动摘要。
+- T-NE07-HOST-09：只有选择 non-disabled 的真实 provider、显式允许 cold
+  start，并且 required failure 集合非空、数量与 summary 一致且全部 reason
+  都是 `SERVICE_UNAVAILABLE_COLD_START` 时，public health 才能降为
+  `DEGRADED`；原 service row 和 required count 必须保留。disabled provider、
+  本地或混合 required failure、Guardian durability failure 必须保持
+  `FAILED`。
+- T-NE07-HOST-10：secret-safe runtime snapshot 必须同时排除 Neo4j direct
+  username/password，只保留可原子解析的 `sec://` auth ref；生成 snapshot
+  直接复用时不得因半套 credential 阻断 Docker/Host 重启。
+- T-NE07-HOST-11：canonical Life snapshot 缺失时，Life Evolution loader
+  必须以 source cursor/time 0 生成确定性 payload；禁止把 wall clock 写入
+  同 cursor 的 view/digest。Projection Store 的 cursor conflict 门禁不得为
+  此场景放宽。
+- T-NE07-HOST-12：被强杀 Host 留下的 embodiment authority Lease 只能在
+  TTL 到期后由 replacement 取得更高 fencing token；只允许精确
+  `EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE` 进入默认 35 秒、最大 40 秒的
+  有界等待。live heartbeat 不得被抢占，其他初始化错误必须立即失败。
+- T-NE07-HOST-13：`ForceRestart` 必须在新 Host 前定向停止同一显式 runtime
+  root/端口的 Obs 与 Monitor，并复核端口为空；首次 catalog identity 等待
+  必须监视 launcher PID，子进程退出后立即失败，禁止继续空等总超时。
+- 首次真实启动已暴露 HMAC 配置矛盾与旧脚本假成功，跑次结论为 `FAIL`。
+  `b6b341be` 的第二次启动确认密钥修复和失败关闭有效，并暴露中间 stage
+  误判。第三次正确拒绝中间 stage，但暴露 acceptance Workspace 根与源码
+  重叠；三个 AUDIT operation 均 durable rollback，head 为空、lease 已释放。
+  `b56d4d78` 的第四次启动确认外部 Workspace 根修复有效，但
+  provider=disabled 令 required health 失败并触发第四个 AUDIT durable
+  rollback。cold-start health 受影响集为 `41 passed in 25.17s`，Workspace
+  ASGI 前序定向集成为 `5 passed in 5.45s`。
+- `f48afe1b` 的第五次真实 Host 进程启动已通过 AUDIT→ENFORCE 五阶段
+  durable rollout，Host/Nginx Monitor、真实代理路由与三个 Docker 容器
+  独立核对通过。Host 仅有一个缺外部模型凭据的 cold-start failure，状态
+  保持 `DEGRADED`。Obs HTTP 200 后的深入 health 核对发现 Life projection
+  daemon 持续 cursor conflict，故整栈仍未 PASS。空源投影确定性修复的
+  domain/canonical/live-source 集合为 `29 passed in 23.25s`。旧 snapshot
+  的半套 Neo4j direct credential 已由
+  writer 修复，脚本合同为 `18 passed in 3.82s`；真实 snapshot restart、
+  Operator 认证 Playwright 和崩溃恢复仍待执行。
+- 第六次真实 `ForceRestart` 因旧 30 秒 authority Lease 正确失败，但旧实现
+  单次 acquire、空等约 240 秒且遗留 sidecar。新增 T-NE07-HOST-12/13 的
+  authority、配置、隔离与启动编排集合为 `33 passed in 34.32s`；该结果是
+  修复代码证据，不替代真实更高 fence 接管与进程残留复核。
 
 ## T-NE01-CODE-WAVE-CLOSEOUT
 

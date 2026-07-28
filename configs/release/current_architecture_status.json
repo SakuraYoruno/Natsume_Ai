@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "2c67f143a44eb08cdeb66123a899011105fa93fc",
+    "dev_commit": "555ead6d7dc78d376fc21fa49335ae64206de10a",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE06_EVOLUTION_ACTIVATION_V2_LOCAL_WAVE_PASS_FULL_STACK_PENDING_NE07_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE07_EXTERNAL_PERSISTENCE_PASS_HOST_ENFORCE_START_PASS_OBS_AND_CRASH_TAKEOVER_FIXES_PENDING_RERUN_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-06",
-  "active_wave_status": "COMPLETED",
-  "active_wave_detail": "NE06_V2_FEEDBACK_KNOWLEDGE_IDENTITY_ACTIVATION_AND_EXACT_ROLLBACK_WIRED_199_PASS_ARCHITECTURE_GATES_1_TO_14_PASS_REAL_FULL_STACK_NOT_RUN",
-  "next_wave": "NE-07",
+  "active_wave": "NE-07",
+  "active_wave_status": "IN_PROGRESS",
+  "active_wave_detail": "EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS_HOST_ENFORCE_START_PASS_SIXTH_FORCE_RESTART_CRASH_AUTHORITY_TAKEOVER_FAILURE_FIX_CODE_COMPLETE_RERUN_PENDING",
+  "next_wave": "PROGRAM_ACCEPTANCE",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -26,6 +26,106 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne07_isolated_external_stack_preflight": {
+      "status": "PASS_REAL_PERSISTENCE",
+      "implementation_parent": "origin/dev@555ead6d7dc78d376fc21fa49335ae64206de10a",
+      "implementation_commit": "14f015bd2814d4ad853286db24c180dc686edeb0",
+      "existing_user_stack_boundary": "RUNNING_NATSUME_EXT_NEO4J_CHROMA_REDIS_ON_DEFAULT_PORTS_BELONG_TO_USER_DATA_AND_ARE_NOT_REUSED_STOPPED_OR_COUNTED_AS_ACCEPTANCE",
+      "acceptance_project": "natsume-ne07-555ead6d",
+      "acceptance_ports": "NEO4J_HTTP_27474_BOLT_27687_CHROMA_28000_REDIS_26379",
+      "isolation": "DEDICATED_PROJECT_CONTAINER_NAMES_NETWORK_AND_RUNTIME_ACCEPTANCE_DATA_ROOT",
+      "images": "NEO4J_CHROMA_REDIS_DEFAULTS_PINNED_BY_SHA256_DIGEST",
+      "secret_boundary": "NEO4J_PASSWORD_MUST_BE_RUNTIME_INJECTED_AND_IS_REDACTED_FROM_START_RESULT",
+      "compose_validation": "PASS_REAL_DOCKER_COMPOSE_CONFIG_QUIET",
+      "targeted_validation": "9_PASSED_IN_0_88_SECONDS",
+      "powershell_parse": "PASS",
+      "real_run_id": "ne07-ext-20260728-01",
+      "real_run_duration_ms": 38984,
+      "real_run_receipt_digest": "sha256:7af6e6a0c13d738547d5ea17f2fe4fbbee7d9dab30bad530aee10a44bd3a2f71",
+      "real_run_result": "NEO4J_CHROMA_REDIS_WRITE_RESTART_PERSISTED_READ_UPDATE_OR_QUERY_AND_NAMESPACE_CLEANUP_PASS",
+      "independent_cleanup_reopen": "NEO4J_PROBE_ROWS_0_CHROMA_PROBE_COLLECTIONS_0_REDIS_PROBE_KEYS_0",
+      "secret_evidence_scan": "PASS_PLAINTEXT_ABSENT_FROM_RECEIPT_AND_LOGS",
+      "existing_user_stack_after_run": "UNCHANGED_AND_CONTINUOUSLY_RUNNING",
+      "not_run": [
+        "Host Obs Nginx Monitor",
+        "full Edge and Unified Gateway",
+        "full route and evolution golden flows",
+        "fault injection and performance"
+      ],
+      "evidence_refs": [
+        "scripts/runtime/docker-compose.external.yml",
+        "scripts/runtime/start_docker_services.ps1",
+        "scripts/runtime/start_host_side.ps1",
+        "scripts/runtime/run_ne07_external_services_acceptance.py",
+        "tests/unit/test_ne07_external_service_isolation.py",
+        "tests/unit/test_d8_external_compose_port_alignment.py",
+        "tests/unit/test_ne07_external_services_acceptance_runner.py",
+        "runtime/acceptance/ne07-555ead6d/evidence/external-services-14f015bd.json (ignored local evidence)"
+      ]
+    },
+    "ne07_host_stack_isolation_preflight": {
+      "status": "HOST_ENFORCE_START_PASS_CRASH_TAKEOVER_AND_OBS_FIXES_RERUN_PENDING",
+      "implementation_parent": "origin/codex/ne07-full-acceptance@b83c62c36",
+      "runtime_root": "HOST_OBS_MONITOR_START_AND_STOP_ACCEPT_EXPLICIT_ISOLATED_RUNTIME_ROOT",
+      "process_boundary": "EXPLICIT_RUNTIME_ROOT_FORCE_RESTART_AND_STOP_DO_NOT_SCAN_OR_TERMINATE_OTHER_HOST_INSTANCES",
+      "secret_snapshot": "PASSWORD_PASSWD_SECRET_TOKEN_AUTH_KEY_AND_COUPLED_NEO4J_DIRECT_USERNAME_EXCLUDED_SAFE_SEC_REFS_ONLY",
+      "first_real_start": "FAIL_HOST_EXITED_AFTER_TRANSIENT_HEALTH_BECAUSE_WORKSPACE_HMAC_HAD_ONLY_FILTERED_PLAINTEXT_INPUT",
+      "first_real_start_sidecars": "OBS_AND_NGINX_STARTED_TRANSIENTLY_BUT_DO_NOT_COUNT_AS_ACCEPTANCE",
+      "false_success_finding": "OLD_ORCHESTRATOR_RETURNED_STARTED_AFTER_HOST_EXIT",
+      "workspace_secret_source": "HOST_AGENT_WORKSPACE_HMAC_SECRET_REF_RESOLVED_IN_PROCESS_FROM_IGNORED_LOCAL_STORE_DIRECT_AND_REF_AMBIGUITY_FAILS_CLOSED",
+      "second_real_start": "FAIL_CLOSED_WORKSPACE_SECRET_RESOLVED_OBS_AND_MONITOR_HEALTHY_SERVICE_CATALOG_INTERMEDIATE_CANDIDATE_WAS_NOT_FINAL_HOST",
+      "second_real_start_false_success": "PREVENTED_BY_POST_SIDECAR_STABILITY_GATE",
+      "final_catalog_identity_gate": "INITIAL_AND_FIVE_CONSECUTIVE_CHECKS_REQUIRE_TARGET_STAGE_HOST_MAIN_OWNER_OPERATION_AND_SNAPSHOT_SHA256_HEADERS_WITH_NO_READY_METRICS_OR_LISTENER_FALLBACK",
+      "third_real_start": "FAIL_CLOSED_FINAL_CATALOG_STAGE_NOT_REACHED_BECAUSE_ACCEPTANCE_WORKSPACE_MANAGED_ROOT_OVERLAPPED_SOURCE_WORKTREE",
+      "third_real_start_rollout_ledger": "THREE_AUDIT_OPERATIONS_PREPARED_STARTING_ROLLED_BACK_ACTIVE_HEAD_EMPTY_COORDINATOR_LEASE_RELEASED",
+      "workspace_root_preflight": "EXPLICIT_AGENT_WORKSPACE_ROOT_NORMALIZED_AND_PARENT_CHILD_OR_EQUAL_SOURCE_OVERLAP_REJECTED_BEFORE_DOCKER_OR_HOST_START_VALID_EXTERNAL_ROOT_EXPORTED_TO_RUNTIME_SNAPSHOT",
+      "fourth_real_start": "FAIL_CLOSED_EXTERNAL_WORKSPACE_ROOT_EFFECTIVE_AUDIT_ROLLED_BACK_BECAUSE_PROVIDER_DISABLED_MADE_GOVERNOR_AND_LLM_REQUIRED_HEALTH_FAILED",
+      "fourth_real_start_receipt_reason": "SERVICE_CATALOG_POST_HEALTH_FAILED",
+      "cold_start_health_boundary": "ONLY_SELECTED_NON_DISABLED_PROVIDER_EXPLICIT_COLD_START_ALLOWANCE_AND_EXACT_ALL_COLD_START_REQUIRED_FAILURE_SET_MAP_TO_DEGRADED_ROWS_AND_REQUIRED_COUNT_REMAIN_DOWN_LOCAL_MIXED_OR_DURABILITY_FAILURES_REMAIN_FAILED",
+      "fifth_real_start": "PARTIAL_HOST_ENFORCE_NGINX_MONITOR_AND_DOCKER_STARTED_OBS_HTTP_200_BUT_INTERNAL_PROJECTION_DAEMON_FAILED",
+      "fifth_real_start_catalog": "AUDIT_SHADOW_PREFLIGHT_CANARY_AND_ENFORCE_ALL_ACTIVATION_STARTED_ACTIVE_HEAD_ENFORCE_HOST_MAIN",
+      "fifth_real_start_health": "HTTP_200_DEGRADED_EXACT_ONE_REQUIRED_LLM_COLD_START_ROW_DOWN_REQUIRED_UNAVAILABLE_ONE_GUARDIAN_DURABILITY_READY",
+      "fifth_real_start_probes": "HOST_18080_OBS_18082_NGINX_MONITOR_18180_OBS_METRICS_MONITOR_INDEX_AND_PROXY_METRICS_REAL_HTTP_200_THREE_DOCKER_CONTAINERS_HEALTHY",
+      "runtime_snapshot_restart_finding": "OLD_SECRET_SAFE_SNAPSHOT_FILTERED_NEO4J_PASSWORD_BUT_RETAINED_USERNAME_CAUSING_HALF_DIRECT_CREDENTIAL_PREFLIGHT_REJECTION",
+      "runtime_snapshot_restart_fix": "EXCLUDE_BOTH_DIRECT_NEO4J_USERNAME_AND_PASSWORD_PERSIST_ONLY_SEC_AUTH_REF_FOR_ATOMIC_RESOLUTION",
+      "obs_life_projection_finding": "MISSING_CANONICAL_LIFE_SOURCE_CURSOR_ZERO_USED_WALL_CLOCK_IN_PAYLOAD_CAUSING_REPEATED_SAME_CURSOR_DIFFERENT_DIGEST_CONFLICT",
+      "obs_life_projection_fix": "MISSING_SOURCE_USES_DETERMINISTIC_GENERATED_AT_ZERO_REAL_SOURCE_REMAINS_BOUND_TO_UPDATED_AT_CURSOR_STORE_MONOTONIC_GATE_UNCHANGED",
+      "sixth_real_force_restart": "FAIL_CLOSED_SAFE_SNAPSHOT_REUSED_OLD_HOST_FORCE_KILL_LEFT_30_SECOND_EMBODIMENT_AUTHORITY_LEASE_REPLACEMENT_EXITED_WITH_AUTHORITY_UNAVAILABLE_ENFORCE_OPERATION_ACTIVATION_FAILED",
+      "sixth_real_force_restart_orchestrator_finding": "LAUNCHER_EXIT_WAS_NOT_OBSERVED_HEALTH_WAIT_CONTINUED_ABOUT_240_SECONDS_AND_PREVIOUS_OBS_NGINX_REMAINED_LISTENING",
+      "crash_takeover_fix": "ONLY_EXACT_EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE_RETRIES_FOR_DEFAULT_35_SECONDS_MAX_40_SECONDS_EXPIRED_PREDECESSOR_REQUIRES_HIGHER_FENCE_LIVE_HEARTBEAT_CANNOT_BE_STOLEN_OTHER_ERRORS_FAIL_IMMEDIATELY",
+      "force_restart_sidecar_boundary": "STOP_SAME_EXPLICIT_RUNTIME_ROOT_MONITOR_AND_OBS_BEFORE_REPLACEMENT_AND_REQUIRE_BOTH_PORTS_FREE",
+      "launcher_exit_boundary": "INITIAL_FINAL_CATALOG_WAIT_MONITORS_LAUNCHER_PID_AND_FAILS_IMMEDIATELY_AFTER_EXIT",
+      "post_sidecar_stability_gate": "FIVE_CONSECUTIVE_EXPECTED_HOST_PID_LISTENER_FINAL_CATALOG_HEALTH_AND_READINESS_PAYLOAD_IDENTITY_CHECKS_PLUS_REAL_OBS_AND_MONITOR_ENDPOINTS",
+      "failure_cleanup": "EXPLICIT_ACCEPTANCE_RUNTIME_ROOT_ONLY_WITH_SANITIZED_BOUNDED_HOST_LOG_TAIL",
+      "monitor_ui": "NPM_CI_OPERATOR_CLIENT_LINT_TYPECHECK_15_READ_MODEL_TESTS_AND_PRODUCTION_BUILD_PASS",
+      "nginx": "OFFICIAL_NGINX_1_31_3_INSTALLED_BY_WINGET_EXE_SHA256_C9D79164B117B32BE2E184037D8D0B97142A84203CE81183D580A215DC20EDBE",
+      "targeted_validation": "41_HEALTH_GUARDIAN_SERVICE_CATALOG_CONFIG_BOOTSTRAP_PLUS_18_RUNTIME_SNAPSHOT_LAUNCHER_PLUS_29_DOMAIN_CANONICAL_AND_LIVE_SOURCE_PROJECTION_PLUS_33_CRASH_TAKEOVER_CONFIG_ISOLATION_AND_STARTUP_ORCHESTRATION_PASSED_OVERLAPPING_SETS_NOT_ADDED",
+      "powershell_parse": "PASS_SIX_START_STOP_SCRIPTS",
+      "npm_audit": "OPEN_8_TOTAL_6_HIGH_BUILD_TOOLCHAIN_2_MODERATE_REACT_ROUTER_MAJOR_FIX_REQUIRED",
+      "not_run": [
+        "successful generated secret-safe runtime snapshot Host restart with higher-fence crash takeover",
+        "Obs projection daemon successful wave and health OK after deterministic Life fix",
+        "authenticated protected Obs task read model and no-interception Playwright interaction",
+        "Host crash restart and durable projection recovery",
+        "controlled stop and process residue verification"
+      ],
+      "evidence_refs": [
+        "host_brain/app/settings/core.py",
+        "host_brain/app/asgi.py",
+        "host_brain/channels/embodiment.py",
+        "host_brain/composition/agent_workspace.py",
+        "scripts/runtime/start_host_side.ps1",
+        "scripts/runtime/start_obs_side.ps1",
+        "scripts/runtime/start_monitor_proxy.ps1",
+        "scripts/runtime/stop_host_side.ps1",
+        "scripts/runtime/stop_obs_side.ps1",
+        "scripts/runtime/stop_monitor_proxy.ps1",
+        "tests/unit/test_agent_workspace_runtime_secret_ref.py",
+        "tests/unit/test_d8_host_runtime_authority_integration.py",
+        "tests/unit/test_ne07_external_service_isolation.py",
+        "tests/unit/test_runtime_startup_script_composition.py"
+      ]
+    },
     "ne06_evolution_activation_v2_current_validation": {
       "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "implementation_parent": "origin/dev@2c67f143a44eb08cdeb66123a899011105fa93fc",
@@ -6244,7 +6344,7 @@
     }
   },
   "full_stack_acceptance": {
-    "status": "NOT_RUN_NE07",
+    "status": "IN_PROGRESS_EXTERNAL_SERVICES_PASS_HOST_PREFLIGHT_PASS_START_PENDING",
     "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
     "local_mandatory_stack": [
       "Docker Neo4j",
@@ -6256,8 +6356,8 @@
       "Edge",
       "Unified Gateway"
     ],
-    "evidence_receipt": "MISSING",
-    "boundary": "NE-07 has not started. No mock, fake store, port probe or scripted replay may promote this status. A future FullStackAcceptanceReceiptV1 must bind the exact commit, process/container identities, real database writes and restart reads, network roundtrips, failure recovery and performance evidence. External providers and hardware may be NOT_TESTED only after all local mandatory services pass."
+    "evidence_receipt": "PARTIAL_EXTERNAL_SERVICES_sha256:7af6e6a0c13d738547d5ea17f2fe4fbbee7d9dab30bad530aee10a44bd3a2f71",
+    "boundary": "NE-07 isolated Neo4j, Chroma and Redis have passed real persistence. Monitor UI production build and Host/Obs/Monitor runtime-root isolation pass locally. The first real Host attempt started Obs/Nginx transiently but Host exited because the Workspace HMAC plaintext-only input conflicted with the secret-safe runtime snapshot; the old orchestrator falsely returned started. The second run on b6b341be confirmed the opaque sec:// Workspace ref and post-sidecar failure gate, then exposed that the initial generic health probe accepted an intermediate Service Catalog rollout candidate. Initial and final checks now require the configured target catalog stage, host.main owner and operation/snapshot digests with no readiness, metrics or listener fallback, but another clean-commit rerun is pending. Eight npm audit findings remain open. Host stable acceptance, Edge, Unified Gateway, full routes, fault matrix and performance are still pending, so this is not FullStackAcceptanceReceiptV1 and cannot promote the program."
   },
   "active_execution_contract": "docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md",
   "gap_matrix": "docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md"

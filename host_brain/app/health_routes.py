@@ -27,6 +27,7 @@ from host_brain.app.schemas import (
     ReadinessResponse,
 )
 from host_brain.core.errors import (
+    SERVICE_UNAVAILABLE_COLD_START,
     STARTUP_MCP_DEGRADED,
 )
 from host_brain.core.ids import new_request_id
@@ -273,7 +274,11 @@ def _read_degradation_state(
     return resolved
 
 
-def _apply_host_health_status(health_report: dict[str, Any]) -> None:
+def _apply_host_health_status(
+    health_report: dict[str, Any],
+    *,
+    allow_cold_start_degradation: bool = False,
+) -> None:
     """Derive the public Host status from service and durability state."""
 
     summary = dict(health_report.get("summary") or {})
@@ -282,14 +287,32 @@ def _apply_host_health_status(health_report: dict[str, Any]) -> None:
     runtime_component_unavailable = int(
         summary.get("runtime_component_unavailable") or 0
     )
-    public_status = "FAILED" if required_unavailable else (
+    required_failures = tuple(
+        row
+        for row in health_report.get("services") or ()
+        if isinstance(row, Mapping)
+        and bool(row.get("required"))
+        and str(row.get("status") or "").upper() != "UP"
+    )
+    cold_start_only = bool(
+        allow_cold_start_degradation
+        and required_unavailable > 0
+        and len(required_failures) == required_unavailable
+        and all(
+            str(row.get("reason_code") or "") == SERVICE_UNAVAILABLE_COLD_START
+            for row in required_failures
+        )
+    )
+    public_status = "FAILED" if required_unavailable and not cold_start_only else (
         "DEGRADED"
-        if optional_unavailable or runtime_component_unavailable
+        if required_unavailable
+        or optional_unavailable
+        or runtime_component_unavailable
         else "OK"
     )
-    if required_unavailable:
+    if required_unavailable and not cold_start_only:
         summary["overall_status"] = "DOWN"
-    elif optional_unavailable or runtime_component_unavailable:
+    elif required_unavailable or optional_unavailable or runtime_component_unavailable:
         summary["overall_status"] = "DEGRADED"
     else:
         summary["overall_status"] = "UP"
@@ -441,7 +464,14 @@ async def build_live_health_report(
         degradation_state_provider=degradation_state_provider,
         allow_legacy_degradation_provider=allow_legacy_degradation_provider,
     )
-    _apply_host_health_status(health_report)
+    _apply_host_health_status(
+        health_report,
+        allow_cold_start_degradation=bool(
+            _host_result.success
+            and _host_result.config is not None
+            and _host_result.config.cold_start_allowed
+        ),
+    )
     return health_report
 
 

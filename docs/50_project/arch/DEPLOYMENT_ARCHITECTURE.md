@@ -3,7 +3,7 @@
 
 # Natsume AI 部署架构与运行验收
 
-> 基线日期：2026-07-15
+> 基线日期：2026-07-28
 >
 > 事实来源：当前仓库的 Python 入口、PowerShell 运行脚本、类型化设置与外部服务 Compose。
 >
@@ -110,7 +110,39 @@ Host 入口见 [host_brain/__main__.py](../../../host_brain/__main__.py)，OBS �
 4. 类型化 Settings 读取环境与 `.env`；
 5. `--host`、`--port`、`--db-path` 等 CLI 参数覆盖本次进程行为。
 
-[start_host_side.ps1](../../../scripts/runtime/start_host_side.ps1) 会从 `.env`（缺失时回退 `.env.example`）构造运行环境，并把 `HOST_`、`EDGE_`、`Natsume_` 及部分供应商前缀变量写入 `runtime/host/host.runtime.env`。该文件被 Git 忽略且正常停止时会删除，但它是包含潜在秘密的明文快照。
+[start_host_side.ps1](../../../scripts/runtime/start_host_side.ps1) 会从 `.env`
+（缺失时回退 `.env.example`）构造运行环境，并把必要的非秘密配置写入
+`host.runtime.env`。password、passwd、secret、Token、auth 与 key 值不会
+进入快照；只有 `sec://` 引用可保留。文件被 Git 忽略且正常停止时删除，
+真实秘密仍必须由受控 `.env`、secret store 或外部注入提供。
+
+Neo4j direct username/password 是不可拆分的 credential pair。runtime
+snapshot 不能只留下安全但不可独立使用的 username；两项 direct auth 都必须
+排除，只保留 `BOND_NEO4J_AUTH_REF=sec://...`，重启时由 Docker launcher
+原子解析。这样 snapshot 可复用而不会把半套 credential 与 auth ref 混合。
+
+Agent Workspace 是源码 Git worktree 的受控派生目录，不能与源码仓库同目录
+或互为父子目录。普通默认根位于用户目录；隔离验收必须显式传入位于源码树外
+的 `-AgentWorkspaceRoot`。启动器在拉起 Docker 或 Host 前规范化并验证该根，
+发现重叠时以 `HOST_AGENT_WORKSPACE_ROOT_OVERLAPS_SOURCE` 失败关闭，且不创建
+非法目录；合法 resolved 路径才写入
+`HOST_AGENT_WORKSPACE_MANAGED_ROOT` 的 runtime snapshot。Host runtime root
+仍可承载日志、PID 和 canonical SQLite，但不能顺便作为 Git Workspace 根。
+
+缺少外部模型凭据时不得写入假 key 或改用 disabled provider 冒充可用。
+只有已选择非 disabled 的真实 provider、显式允许 cold start，并且全部 required
+failure 都精确为 `SERVICE_UNAVAILABLE_COLD_START` 时，Host public health
+才可为 `DEGRADED`；失败 service row 仍保持 `DOWN`，required unavailable
+计数仍保留，最终验收只能进入 `ACCEPTANCE_PENDING_EXTERNAL`。provider
+disabled、本地 authority、混合 required failure 或 durability failure 一律保持
+`FAILED`。
+
+Host 具身 authority 的 durable Lease TTL 为 30 秒。Windows 强杀不能执行
+ASGI shutdown hook，replacement 因而只允许对精确
+`EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE` 做有界等待：默认
+`HOST_EMBODIMENT_AUTHORITY_TAKEOVER_WAIT_MS=35000`，配置上限 40000 ms。
+Lease 到期后必须取得更高 fencing token；live heartbeat 持续续租时不得
+抢占。任何配置、存储或 Edge rebind 初始化错误不属于 takeover 等待。
 
 ### 4.2 Edge
 
@@ -135,7 +167,8 @@ HOST_NODE_INVENTORY_PATH=configs/deploy/node_inventory_personal_lan.json
 
 ### 4.4 配置安全要求
 
-- `.env`、`host.runtime.env`、`edge.runtime.env`、动态启动器和本地秘密 JSON 必须限制文件 ACL。
+- `.env`、`edge.runtime.env`、动态启动器和本地秘密 JSON 必须限制文件 ACL；
+  `host.runtime.env` 已排除秘密值，但仍按运行配置文件保护。
 - 不得依赖示例秘密或 Compose 内置回退密码。
 - 远端 Edge 绑定 `0.0.0.0` 前，必须在宿主机配置防火墙、可信网段与鉴权；当前部署层不提供 TLS。
 - 运行时快照失败或异常退出后可能残留，应纳入人工清理与秘密轮换流程。
@@ -146,7 +179,7 @@ HOST_NODE_INVENTORY_PATH=configs/deploy/node_inventory_personal_lan.json
 
 | 路径 | 所有者 | 内容 | 生命周期 |
 |---|---|---|---|
-| `runtime/host/` | Host/OBS/Proxy 脚本 | PID、运行环境、日志、Nginx 配置、启动告警 | 运行态；日志保留 |
+| `runtime/host/` 或显式 `RuntimeRoot` | Host/OBS/Proxy 脚本 | PID、非秘密运行配置、日志、Nginx 配置、启动告警 | 运行态；验收可完全隔离 |
 | `runtime/edge/` | Edge 脚本 | PID、运行环境、日志、QQ 状态、微信队列和动态启动器 | 运行态；部分状态持久 |
 | `runtime/docker/neo4j/` | Neo4j 容器 | 图数据与日志 | 持久；`down` 默认保留 |
 | `runtime/docker/chroma/` | Chroma 容器 | 向量数据 | 持久；`down` 默认保留 |
@@ -167,14 +200,22 @@ HOST_NODE_INVENTORY_PATH=configs/deploy/node_inventory_personal_lan.json
 
 [start_host_side.ps1](../../../scripts/runtime/start_host_side.ps1) 的实际行为是：
 
-1. 选择 `.env`，创建 `runtime/host/` 与日志目录；
-2. 默认调用 [start_docker_services.ps1](../../../scripts/runtime/start_docker_services.ps1)，启动并探测 Neo4j、Chroma、Redis；`ExternalServicesBackend=none` 时跳过；
-3. 按配置尝试启动 MateEngine Bridge；
-4. 启动 `python -m host_brain`，可附加 `--startup-check`；
-5. 依次尝试 Host `/health?skip_dependency_probes=1`、`/ready`、错误遗留的 `/obs/metrics` 或端口监听判定；
-6. 启动 OBS，失败只记降级警告；
-7. 探测 OBS、MCP、Canon Sync，失败只记降级警告；
-8. 启动 Nginx Monitor Proxy，失败只记降级警告。
+1. 选择 `.env`，创建默认 `runtime/host/` 或显式 `RuntimeRoot` 与日志目录，
+   并在任何进程前验证 Agent Workspace 与源码不重叠；
+2. 默认调用 [start_docker_services.ps1](../../../scripts/runtime/start_docker_services.ps1)，
+   启动并探测 Neo4j、Chroma、Redis；`ExternalServicesBackend=none` 时跳过；
+3. 使用 `-ForceRestart` 时，先按同一显式 runtime root/端口停止旧 Nginx
+   Monitor 与 OBS，并复核两个监听端口为空；
+4. 按配置尝试启动 MateEngine Bridge；
+5. 启动 `python -m host_brain`，可附加 `--startup-check`；
+6. 首次放行只接受目标 Service Catalog stage、`host.main` owner 和合法
+   operation/snapshot digest 的 `/health?skip_dependency_probes=1`；等待期间
+   launcher PID 一旦退出立即失败，不再等待完整超时；
+7. 启动 OBS 与 Nginx Monitor Proxy，并执行 OBS、MCP、Canon Sync 探针；
+8. 连续五轮核对 Host 进程、监听 PID、最终 catalog health/readiness identity，
+   同时要求启用的 OBS health 与 Monitor 静态页/metrics 真实可用；
+9. 任一强制稳定性条件失败时，只回收本次 runtime root 的
+   Host/OBS/Nginx，并返回脱敏日志尾部，不得输出 `started`。
 
 典型命令：
 
@@ -263,17 +304,63 @@ Host 主进程 → OBS → Monitor Proxy
 
 | 服务 | 镜像 | 宿主端口 | 数据目录 | 当前问题 |
 |---|---|---:|---|---|
-| Neo4j | `neo4j:5.26-community` | HTTP `${NATSUME_NEO4J_HTTP_PORT:-7474}`；Bolt `${NATSUME_NEO4J_BOLT_PORT:-17687}` | `runtime/docker/neo4j/` | Compose 仍带默认密码回退 |
-| Chroma | `chromadb/chroma:latest` | `${NATSUME_CHROMA_PORT:-18000}` | `runtime/docker/chroma/data/` | `latest` 不可复现 |
-| Redis | `redis:7-alpine` | `${NATSUME_REDIS_PORT:-6379}` | `runtime/docker/redis/data/` | 仅 TCP 探测 |
+| Neo4j | `neo4j@sha256:409728…` | HTTP `${NATSUME_NEO4J_HTTP_PORT:-7474}`；Bolt `${NATSUME_NEO4J_BOLT_PORT:-17687}` | `${NATSUME_DOCKER_DATA_ROOT}/neo4j/` | 密码必须由运行期注入；容器内 HTTP healthcheck |
+| Chroma | `chromadb/chroma@sha256:3a9bcb…` | `${NATSUME_CHROMA_PORT:-18000}` | `${NATSUME_DOCKER_DATA_ROOT}/chroma/data/` | digest 固定；容器内 healthcheck，外层仍验证 v2 heartbeat |
+| Redis | `redis@sha256:8b81dd…` | `${NATSUME_REDIS_PORT:-6379}` | `${NATSUME_DOCKER_DATA_ROOT}/redis/data/` | digest 固定；`redis-cli ping` healthcheck |
 
-Compose 没有容器级 `healthcheck`、资源限制、独立网络、备份任务或迁移策略。三个固定 `container_name` 还会削弱 `ProjectName` 的多实例隔离效果。
+Compose 的 project、三个 container name、network、端口与数据根现在都可独立
+参数化，三个服务也有容器 healthcheck。仍未提供资源限制、备份任务或跨版本
+数据迁移策略；这些不能由 healthcheck 替代。
+启动前配置校验固定使用 `docker compose config --quiet`，避免失败诊断路径
+输出展开后的运行期认证。隔离验收优先经进程级
+`BOND_NEO4J_AUTH_REF=sec://...` 原子解析认证；仅当两项同时存在时才允许
+进程级 `NATSUME_NEO4J_USER/NATSUME_NEO4J_PASSWORD` 覆盖，且两项都不进入
+runtime snapshot。错误只报告配置类别，不拼接认证引用或认证值。
 
 ### 8.1 已收口的端口契约
 
 `.env.example`、`start_docker_services.ps1`、`start_host_side.ps1`、`check_external_env.py` 与 Compose 现在共同使用 Neo4j Bolt 默认 `17687`；启动器从 `BOND_NEO4J_URI` 解析端口后传入 `NATSUME_NEO4J_BOLT_PORT`。Chroma 则从 `CHROMA_ENDPOINT` 解析端口并传入 `NATSUME_CHROMA_PORT`，模板的 `CHROMA_ENDPOINT` 与 `CHROMA_PORT` 均为 `18000`。定向回归测试会防止这个默认值再次漂移。
 
-自定义端口时，`BOND_NEO4J_URI` 与 `CHROMA_ENDPOINT` 是运行时探测的权威来源；不要只改 `CHROMA_PORT` 却保留旧 endpoint。该收口只解决端口一致性，不解决 Compose 默认密码、`latest` 镜像、固定容器名或缺少健康检查等运维缺口。
+自定义端口时，`BOND_NEO4J_URI` 与 `CHROMA_ENDPOINT` 是运行时探测的权威来源；
+不要只改 `CHROMA_PORT` 却保留旧 endpoint。进程级变量优先于 checked-in
+`.env`，以便 NE-07 在不碰用户默认数据的情况下创建独立 acceptance project。
+Neo4j 启动结果不回显运行期密码。
+
+### 8.2 NE-07 隔离实例
+
+默认端口上已有的 `natsume-ext` 容器属于用户长期环境，不能作为验收数据源。
+NE-07 使用独立 project、container names、network、ports 和
+`runtime/acceptance/...` 数据根并行启动；默认不删除其 volume/data root。
+只有隔离实例完成真实写入、读取、重启读取和 namespace 清理，才能形成
+`FullStackAcceptanceReceiptV1` 的 Docker 部分。
+该机械链由
+`scripts/runtime/run_ne07_external_services_acceptance.py` 执行；runner
+拒绝默认容器 identity、默认端口和非 loopback endpoint，并重开每个容器的
+Compose project 标签。输出只含 probe digest、container/image identity、
+重启时间和清理结果，不含 Neo4j 密码或探针原文。
+
+当前本机证据：提交 `14f015bd` 的 `ne07-ext-20260728-01` 已真实完成三库
+写入、容器重启、持久读取、更新/查询与 namespace 清理，耗时 38,984 ms，
+receipt digest 为 `sha256:7af6e6a0…2f71`。该结果不包含 Host、Obs、
+Nginx Monitor、Edge 或 Gateway。
+
+Host 栈首次真实启动随后实际拉起 Obs 与 Nginx，Host 短暂响应后因 Workspace
+HMAC 仅支持明文环境变量、而隔离 runtime snapshot 禁止落盘明文 secret 而
+退出。旧编排器只做首次 HTTP 探针，最终错误返回 `started`。该跑次是失败
+证据，不是部分通过。当前代码增加
+`HOST_AGENT_WORKSPACE_HMAC_SECRET_REF=sec://...` 的进程内解析，并在 Obs/
+Monitor 启动后连续五次核对 Host 进程 identity、监听 PID、`/health` 与
+`/ready` payload identity；Obs/Monitor 也必须保持真实可达。任何失败只回收
+显式 acceptance runtime root，并对有限日志尾部脱敏。修复必须在干净提交上
+真实重跑后才能改变状态。
+
+`b6b341be` 的下一次真实运行已消除 Workspace 错误，并由新稳定性 Gate 正确
+拒绝假成功；其 Host `Application startup complete → Shutting down` 是
+Service Catalog 正常停止中间 rollout candidate，而不是最终服务自然退出。
+启动脚本过去在第一个通用 health 响应后过早进入 sidecar 阶段。当前首次
+放行与五轮稳定性检查都必须核对最终目标 stage、`host.main` candidate owner
+以及 operation/snapshot SHA-256 响应头；不再接受 readiness、metrics 或
+单纯监听端口作为 Host 最终身份。
 
 ## 9. 健康与降级语义
 
@@ -298,7 +385,8 @@ Host 的 `--startup-check` 在探测结果为 degraded 时仍继续启动，只�
 - 本地 Edge 脚本在主 Edge 端口之外，仍探测遗留的 `17801 /health`（ASR）和 `17802 /health`（TTS）；当前实现的权威组件状态实际嵌套在 `17800/v1/edge/health`。
 - `start_edge.ps1` 默认可因 17801 探测失败而禁用 ASR 重启；`start_edge_side.ps1` 又默认关闭该自动降级，入口行为不一致。
 - Gateway 在 Edge bootstrap 中失败时只告警，启动脚本也不检查 19000，因此 Edge “started” 不保证平台入口可用。
-- Host 已运行时启动脚本会提前返回，不会补拉已掉线的 OBS 或 Monitor Proxy。
+- `already_running` 入口仍会提前返回，不会补拉已掉线的 OBS 或 Monitor
+  Proxy；本次新增的连续稳定性 Gate只覆盖新启动路径。
 - 多处以“端口正在监听”推断“本服务已运行”，强制停止也可能误杀占用相同端口或命令模式的无关进程。
 
 ## 10. 验收分层
@@ -349,10 +437,10 @@ Monitor UI 源码位于 [host_brain/app/monitor_ui/package.json](../../../host_b
 | Gateway 未纳入启动就绪 | Edge 成功但平台入口不可用 | 启动与验收显式检查 `/v1/gateway/health` |
 | ASR/TTS 探测指向遗留端口 | 虚假降级或错误禁用 ASR | 统一读取 `/v1/edge/health` 的组件状态 |
 | 健康只看 HTTP/端口 | `ready=false` 仍可能被判 started | Gate 校验 payload 状态和版本标识 |
-| 明文运行环境落盘 | 供应商密钥、Token 可能残留 | 最小化快照、ACL、退出清理与秘密轮换 |
+| Edge/远端动态启动仍可能明文落盘 | Edge 密钥、Token 可能残留；Host 快照已过滤秘密值 | Edge 同步最小化快照、ACL、退出清理与秘密轮换 |
 | 远端 Edge 默认全网绑定且无 TLS | 扩大 RPC/Gateway 暴露面 | 默认可信网卡、防火墙、TLS/反代与鉴权验收 |
 | 强杀且无 drain | 任务、Outbox、队列可能停在中间态 | 分阶段停机、超时强杀、恢复一致性实测 |
-| 端口/PID 所有权判断不足 | 误认或误杀无关进程 | PID + 启动标识 + executable + health identity 联合校验 |
+| 默认全局停止模式仍兼容旧行为 | 未显式 runtime root 时可能停止同仓库其它 Host | 验收/多实例必须显式 `RuntimeRoot`；后续增加 PID + executable + health identity 联合校验 |
 
 ### P1：影响可重复部署与运维质量
 

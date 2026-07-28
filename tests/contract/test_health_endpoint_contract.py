@@ -6,17 +6,65 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
-from host_brain.app.asgi import app
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from host_brain.app import health_routes
+
+
+def _guardian_state() -> dict[str, object]:
+    return {
+        "status": "DEGRADED",
+        "durability_required": True,
+        "durability_status": "READY",
+        "durability_authority": "RUNTIME_GUARDIAN_JOURNAL",
+        "guardian_authority": {
+            "authority": "RUNTIME_GUARDIAN",
+            "runtime_scope_id": "health-contract-scope",
+            "fencing_token": 1,
+        },
+    }
 
 
 @pytest.fixture
-def client():
-    return TestClient(app, raise_server_exceptions=False)
+def client(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        health_routes,
+        "load_host_config",
+        lambda: SimpleNamespace(
+            success=True,
+            config=SimpleNamespace(cold_start_allowed=True),
+        ),
+    )
+    monkeypatch.setattr(
+        health_routes,
+        "build_host_runtime_statuses",
+        lambda _config: {},
+    )
+
+    async def dependency_probes() -> dict[str, object]:
+        return {
+            "edge.rpc.gateway": {
+                "available": False,
+                "unavailable_kind": "edge_rpc",
+                "detail": "contract probe unavailable",
+            }
+        }
+
+    app = FastAPI()
+    app.include_router(
+        health_routes.create_health_router(
+            degradation_state_provider=_guardian_state,
+            ledger_provider=lambda: None,
+            dependency_probe_provider=dependency_probes,
+        )
+    )
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        yield test_client
 
 
 class TestHealthEndpointEdgeProbeContract:
@@ -43,8 +91,6 @@ class TestHealthEndpointEdgeProbeContract:
         验证 build_edge_transport_probe_statuses 已被集成到 /health 端点的
         runtime_statuses 构建流程中（不再是孤立的未调用函数）。
         """
-        from unittest.mock import patch, call
-
         probe_call_args = []
 
         def _mock_edge_probe(*, available, detail=None):
@@ -77,8 +123,8 @@ class TestHealthEndpointEdgeProbeContract:
         """T-HEALTH-EP-03：/health?skip_dependency_probes=true 不应触发外部依赖探针。"""
 
         with patch(
-            "host_brain.app.health_routes.collect_dependency_probes",
-            side_effect=AssertionError("collect_dependency_probes should be skipped"),
+            "host_brain.app.health_routes._read_dependency_probes",
+            side_effect=AssertionError("dependency probe port should be skipped"),
         ), patch(
             "host_brain.app.health_routes.build_edge_transport_probe_statuses",
             side_effect=AssertionError("build_edge_transport_probe_statuses should be skipped"),

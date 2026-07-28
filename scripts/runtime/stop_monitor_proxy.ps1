@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$NginxExe = "",
   [int]$Port = 0
 )
@@ -144,8 +145,12 @@ if ($Port -le 0) {
   }
 }
 
-$runtimeRoot = Join-Path $repoRoot "runtime\host\monitor_proxy"
-$nginxPrefix = Join-Path $runtimeRoot "nginx"
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host\monitor_proxy"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
+}
+$nginxPrefix = Join-Path $RuntimeRoot "nginx"
 $pidFile = Join-Path $nginxPrefix "logs\nginx.pid"
 $confPath = Join-Path $nginxPrefix "conf\nginx.conf"
 
@@ -208,5 +213,6 @@ $result = [ordered]@{
   port = $Port
   detail = $detail
   env_file = $EnvFile
+  runtime_root = $RuntimeRoot
 }
 $result | ConvertTo-Json -Depth 8

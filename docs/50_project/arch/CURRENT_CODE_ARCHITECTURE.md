@@ -3,9 +3,9 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.62
+版本：v5.72
 核对日期：2026-07-28
-合并基线：`origin/dev@7e9b090b3`；当前事实以本文所在提交的工作树为准
+合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
@@ -14,14 +14,102 @@
 
 NE-01 当前代码波次为
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`。当前权威收据在
-`dev@7e9b090b3` 上以 migration 0140 query-only 重开同一个 accepted
+`dev@08a172da` 上以 migration 0142 query-only 重开同一个 accepted
 canonical SQLite，七路线全部 `PASS` 且没有重跑 worker；既有代码还通过
 24 个去重的真实 SQLite、Windows 进程和 Git
 Workspace 恢复场景。代码已经具备 bounded fan-out、签名 ambiguity
 reconciliation、原子 terminal settlement 和 Workspace promotion/abandon
 所需路径；部署 feature receipt、真实网络/provider、外部 namespace 与 Docker
 仍未执行，因此 Universal Runtime 的严格生产 Gate 继续为 `INCOMPLETE`。
-当前代码实施焦点转入 NE-02，不改变完整架构 `INCOMPLETE`。
+NE-03～NE-06 本地代码波次已合入，当前实施焦点是 NE-07，不改变完整架构
+`INCOMPLETE`。
+
+NE-07 首个预检切片已将 Neo4j、Chroma、Redis 默认镜像固定到 SHA-256
+digest，并参数化 project、container、network、port 与 data root；Neo4j
+不再有仓库默认密码。默认端口上已有的用户 `natsume-ext` 容器明确排除在
+验收之外，独立 project `natsume-ne07-555ead6d` 的真实 Compose 配置已验证。
+提交 `14f015bd` 已在隔离 project 中完成三库真实写入、容器重启、持久
+读取、更新/查询和 namespace 清理；receipt digest 为
+`sha256:7af6e6a0…2f71`，独立残留复核为 0，用户默认栈未重启。Host/Obs/
+Nginx Monitor/Edge/Gateway 尚未启动，故状态仍为
+`IN_PROGRESS_EXTERNAL_SERVICES_PASS_HOST_STACK_PENDING`。
+
+Host/Obs/Monitor 启停现可绑定显式 acceptance runtime root；该模式下
+ForceRestart/stop 不再全局扫描其它 Host。运行环境快照也已排除秘密值，只
+保留安全 `sec://` 引用。Monitor UI 生产构建和 15 项 read-model test 通过，
+官方 Nginx 1.31.3 已安装。首次真实启动实际拉起 Obs/Nginx，但 Host 因
+Workspace HMAC 只能从被快照过滤的明文变量取得而退出；旧脚本还把退出前
+短暂健康误报为 `started`。当前 Workspace composition 支持从 ignored local
+secret store 解析 `HOST_AGENT_WORKSPACE_HMAC_SECRET_REF`，并拒绝双来源、
+非 `sec://` 与未解析引用；启动器在 sidecar 之后要求五次连续 Host 进程、
+监听及 health/readiness payload identity，同时复核 Obs/Monitor 端点。
+修复尚待干净提交实栈重跑，8 项 npm audit 告警也仍开放，因此这里只记
+`FIRST_REAL_START_FAILED / FIX_CODE_COMPLETE / RERUN_PENDING`。
+
+`b6b341be` 上的第二次真实启动已证明 Workspace ref 解析成功，新增稳定性
+Gate 也阻止了假 `started`；它同时表明 Service Catalog 的五阶段 rollout
+会暂时提供并主动停止中间 Host candidate。启动器过去会在第一个通用 health
+响应后过早启动 sidecar。当前初始探针和最终连续探针都要求响应头匹配目标
+catalog stage、`host.main` owner、operation digest 与 snapshot digest，
+并删除 readiness、metrics 和仅监听端口兜底。第三次真实启动证明该 Gate
+不会接受中间 candidate；三个 AUDIT rollout operation 均在 canonical SQLite
+中收口为 `ROLLED_BACK`，没有 active head，coordinator lease 已释放。
+
+第三次启动的实际失败原因是 acceptance
+`HOST_AGENT_WORKSPACE_MANAGED_ROOT` 位于当前源码 worktree 内。Workspace
+allocator 继续拒绝 managed root 与 source repository 同目录或互为父子目录，
+没有为验收放宽生产隔离。`start_host_side.ps1` 现接受独立
+`AgentWorkspaceRoot`，在启动 Docker/Host 前规范化并验证父/子/同目录重叠，
+合法外部根才进入进程环境和 secret-safe runtime snapshot；启动摘要也返回该
+路径。该代码定向合同为 `23 passed in 3.91s`。
+
+`b56d4d78` 上的第四次启动已证明外部 Workspace root 生效；Service Catalog
+仍回滚是因为验收进程把 provider 显式设为 disabled，Host health 因此正确把
+Governor/LLM 两个 required dependency 标为失败。当前 public health 的
+cold-start 映射只在以下机械条件同时成立时降为 `DEGRADED`：配置选择非
+disabled provider、显式允许 cold start、实际 required failure 行数与 summary
+一致，且每一行 reason 都是 `SERVICE_UNAVAILABLE_COLD_START`。原 service
+row 和 required count 不会被改成可用；任何本地或混合 required failure 以及
+Guardian durability failure 仍为 `FAILED`。受影响合同为
+`41 passed in 25.17s`。
+
+`f48afe1b` 上的第五次真实 Host 进程启动使 canonical Service Catalog 的
+AUDIT→ENFORCE 五阶段全部 `STARTED`，active head 为 ENFORCE；Host、Obs、
+Nginx Monitor 与真实 metrics/static 代理均为 200，三个 Docker 容器保持
+healthy。Host status 为 `DEGRADED` 的唯一原因是缺 OPENAI 凭据，原 LLM row
+仍 DOWN、required count=1、Guardian durability 为 READY。
+
+但 Obs health 的深入核对发现 projection daemon 不是健康状态：
+`life-evolution` 对缺失 canonical Life snapshot 以 cursor 0 读取，却把 wall
+clock 写入 payload；首次 digest 已绑定 cursor 0 后，后续每轮 payload 变化，
+被 Projection Store 单调门禁作为 cursor conflict 拒绝。当前 loader 对空源
+固定 `generated_at_ms=0`，真实源仍绑定 `updated_at_ms`，同 cursor 可 exact
+replay；`29 passed in 23.25s`。因此这次只关闭 Host ENFORCE 首启，不关闭
+Obs 或本地整栈，须重启确认 daemon 恢复。
+
+首启过程中还验证出 secret-safe runtime snapshot 过去会排除 Neo4j password
+但保留 username，复用时构成无效的半套 direct credential。当前 writer 将两
+项 direct auth 都排除，只持久化 `sec://` auth ref；定向合同
+`18 passed in 3.82s`。新 snapshot 的真实重启、Operator 认证 read model 与
+无网络拦截 Playwright 尚未执行。
+
+第六次真实 `ForceRestart` 已证明 snapshot direct-auth 修复不再构成前置
+阻断，但发现 Host crash takeover 仍有缺口：被强杀的旧进程不能释放
+30 秒 `host_embodiment_runtime_lease`，replacement candidate 单次 acquisition
+失败后退出，0113 ENFORCE operation 以
+`SERVICE_CATALOG_START_CALLBACK_FAILED / ACTIVATION_FAILED` durable
+收口；旧 Lease 随后只靠 TTL 自然过期。启动器未感知 launcher 已退出，继续
+等待约 240 秒，且此前 Obs/Nginx 仍监听。
+
+当前代码新增有界 takeover builder：只重试精确
+`EMBODIMENT_RUNTIME_AUTHORITY_UNAVAILABLE`，默认 35 秒且配置上限 40 秒；
+到期后 repository 必须发放更高 fence，仍有 heartbeat 的 live owner 会继续
+阻断 replacement。其他配置、存储和 Edge rebind 错误保持立即失败。Host
+启动器的 `ForceRestart` 先按显式 runtime root/端口停止旧 Obs/Nginx，再
+启动 replacement；首次 catalog 等待同时监视 launcher PID，退出即返回
+失败而非耗尽总超时。authority、配置、隔离和 PowerShell 编排定向集合为
+`33 passed in 34.32s`。真实更高 fence 接管、Obs 修复和 Monitor 交互仍待
+实栈重跑，故不能将这段代码事实提升为恢复 `PASS`。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

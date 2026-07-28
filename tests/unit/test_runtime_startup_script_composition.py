@@ -52,6 +52,221 @@ def test_host_orchestrator_isolates_child_script_process_control() -> None:
     assert "Start-Process -Wait" not in source
 
 
+def test_host_orchestrator_requires_post_sidecar_stability_before_success() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    monitor_start = source.index('if ($monitorProxyEnabled) {', source.index("$monitorProxyResult"))
+    stability_gate = source.index("$hostStable = Test-HostStartupStability")
+    success_result = source.index('$result = [ordered]@{', stability_gate)
+
+    assert monitor_start < stability_gate < success_result
+    assert '-RequiredConsecutiveChecks 5' in source[stability_gate:success_result]
+    assert '"HOST_STACK_STARTUP_STABILITY_FAILED: host=$hostStable; "' in source
+    assert "Stop-ProcessTree -ProcessId $hostPid" in source[stability_gate:success_result]
+    assert '& $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot' in source
+    assert (
+        '-RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")'
+        in source[stability_gate:success_result]
+    )
+    assert source.index("Get-SanitizedLogTail", stability_gate) < success_result
+
+
+def test_host_stability_gate_checks_expected_listener_and_both_payload_identities(
+) -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    function_start = source.index("function Test-HostStartupStability")
+    function_end = source.index("\nfunction Get-SanitizedLogTail", function_start)
+    function_source = source[function_start:function_end]
+
+    for required in (
+        "Is-HostProcess -ProcessId $ExpectedPid",
+        "Get-ListeningPid -ProbePort $ProbePort",
+        "[int]$listeningPid -eq $ExpectedPid",
+        '-ExpectedCatalogStage $ExpectedCatalogStage',
+        '-Kind "health"',
+        '-Kind "readiness"',
+        "$consecutive -ge $RequiredConsecutiveChecks",
+    ):
+        assert required in function_source
+
+
+def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    identity_start = source.index("function Test-HttpPayloadIdentity")
+    identity_end = source.index("\nfunction Wait-HostCatalogStage", identity_start)
+    identity_source = source[identity_start:identity_end]
+    launch_start = source.index("$healthUrl = ")
+    launch_end = source.index("$hostPid = [int]$proc.Id", launch_start)
+    launch_source = source[launch_start:launch_end]
+
+    for header in (
+        "x-natsume-catalog-stage",
+        "x-natsume-catalog-candidate-owner",
+        "x-natsume-catalog-operation-digest",
+        "x-natsume-catalog-snapshot-digest",
+    ):
+        assert header in identity_source
+    assert '$candidateOwner -ne "host.main"' in identity_source
+    assert identity_source.count("sha256:[0-9a-f]{64}") == 2
+    assert "$healthOk = Wait-HostCatalogStage `" in launch_source
+    assert "-ExpectedCatalogStage $catalogTargetStage" in launch_source
+    assert "-ExpectedProcessId ([int]$proc.Id)" in launch_source
+    assert "Wait-Http -Url $healthUrl" not in launch_source
+    assert "/obs/metrics" not in launch_source
+    assert "Get-ListeningPid -ProbePort $Port" not in launch_source
+
+
+def test_host_catalog_wait_stops_when_launched_process_exits() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    function_start = source.index("function Wait-HostCatalogStage")
+    function_end = source.index(
+        "\nfunction Test-HostStartupStability",
+        function_start,
+    )
+    function_source = source[function_start:function_end]
+
+    assert "[int]$ExpectedProcessId = 0" in function_source
+    assert "Get-Process -Id $ExpectedProcessId" in function_source
+    assert function_source.index("Get-Process -Id $ExpectedProcessId") < (
+        function_source.index("Test-HttpPayloadIdentity")
+    )
+
+
+def test_forced_host_restart_stops_existing_sidecars_before_new_host() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    restart_stop = source.index("if ($ForceRestart.IsPresent) {", source.index(
+        'Set-ObjectProperty -Target $localServices -Name "external_services_ready"'
+    ))
+    host_launch = source.index("$proc = Start-HostCommand `", restart_stop)
+    restart_source = source[restart_stop:host_launch]
+
+    assert '& $stopMonitorScript `' in restart_source
+    assert '& $stopObsScript `' in restart_source
+    assert "-Port $MonitorProxyPort" in restart_source
+    assert "-Port $obsBindPort" in restart_source
+    assert "Get-ListeningPid -ProbePort $MonitorProxyPort" in restart_source
+    assert "Get-ListeningPid -ProbePort $obsBindPort" in restart_source
+    assert restart_source.index("& $stopMonitorScript `") < (
+        restart_source.index("& $stopObsScript `")
+    )
+
+
+def test_host_launcher_rejects_workspace_source_overlap_before_creating_root(
+    tmp_path: Path,
+) -> None:
+    source_repository = tmp_path / "source"
+    source_repository.mkdir()
+    nested_workspace = source_repository / "runtime" / "agent-workspaces"
+    parent_workspace = tmp_path
+    external_workspace = tmp_path / "acceptance-workspaces"
+
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Ensure-Directory',
+  'Get-NormalizedDirectoryPath',
+  'Test-DirectoryPathsOverlap',
+  'Assert-AgentWorkspaceRootSeparated'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$source = Get-NormalizedDirectoryPath -Path '{source_repository}' -BasePath '{tmp_path}'
+$nested = Get-NormalizedDirectoryPath -Path '{nested_workspace}' -BasePath '{tmp_path}'
+$parent = Get-NormalizedDirectoryPath -Path '{parent_workspace}' -BasePath '{tmp_path}'
+$external = Get-NormalizedDirectoryPath -Path '{external_workspace}' -BasePath '{tmp_path}'
+$nestedError = ""
+$parentError = ""
+try {{
+  Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $nested -SourceRepository $source
+  Ensure-Directory -Path $nested
+}} catch {{
+  $nestedError = $_.Exception.Message
+}}
+try {{
+  Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $parent -SourceRepository $source
+}} catch {{
+  $parentError = $_.Exception.Message
+}}
+Assert-AgentWorkspaceRootSeparated -WorkspaceRoot $external -SourceRepository $source
+Ensure-Directory -Path $external
+[ordered]@{{
+  nested_error = $nestedError
+  parent_error = $parentError
+  nested_created = Test-Path -LiteralPath $nested
+  external_created = Test-Path -LiteralPath $external
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    expected = "HOST_AGENT_WORKSPACE_ROOT_OVERLAPS_SOURCE"
+    assert expected in payload["nested_error"]
+    assert expected in payload["parent_error"]
+    assert payload["nested_created"] is False
+    assert payload["external_created"] is True
+
+
+def test_host_launcher_exports_explicit_workspace_root_to_runtime_snapshot() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    preflight = source.index("$configuredAgentWorkspaceRoot = ")
+    docker_start = source.index("$startDockerScript = ")
+    runtime_snapshot = source.index(
+        "$null = Write-RuntimeEnvFile",
+        docker_start,
+    )
+
+    assert preflight < docker_start < runtime_snapshot
+    assert (
+        '$env:HOST_AGENT_WORKSPACE_MANAGED_ROOT = $resolvedAgentWorkspaceRoot'
+        in source[preflight:docker_start]
+    )
+    assert (
+        '$envValues["HOST_AGENT_WORKSPACE_MANAGED_ROOT"] = '
+        "$resolvedAgentWorkspaceRoot"
+        in source[preflight:docker_start]
+    )
+    assert "agent_workspace_root = $resolvedAgentWorkspaceRoot" in source
+
+
 def test_child_script_capture_does_not_wait_for_long_lived_descendant(
     tmp_path: Path,
 ) -> None:

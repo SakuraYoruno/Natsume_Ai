@@ -146,7 +146,11 @@ def _canonical_life_view(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         scene_decision=scene,
         action_arbiter_decision={},
         action_preview={},
-        now_ms=updated_at_ms or int(time.time() * 1000),
+        # A missing canonical snapshot has source cursor 0.  Its projection
+        # must therefore also be byte-deterministic at cursor 0; binding the
+        # payload to wall clock time makes every daemon refresh conflict with
+        # the first digest already recorded for that cursor.
+        now_ms=updated_at_ms,
     )
 
 

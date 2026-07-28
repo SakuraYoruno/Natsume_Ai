@@ -3,10 +3,60 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.32
+版本：v3.42
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
+运行期注入 Neo4j secret，project/container/network/port/data root 全部与
+用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`
+通过。提交 `14f015bd` 的独立容器又完成真实写入、重启、持久读取、
+更新/查询与清理，三库子 Gate 为 `PASS`，receipt digest 为
+`sha256:7af6e6a0…2f71`。Host/Obs/Nginx Monitor/Edge/Gateway、故障和
+性能验收尚未运行，不能把该子 Gate 提升为完整架构 `PASS`。
+
+Host/Obs/Monitor 的固定 `runtime/host` 与跨实例误杀缺口已在代码层收敛：
+显式 `RuntimeRoot` 隔离 PID、日志、runtime env 和 Nginx prefix，显式模式
+的 ForceRestart/stop 不做全局 Host sweep；runtime env 也不再保存 secret
+值。首次真实启动暴露 Workspace HMAC 只有明文入口，Host 在短暂健康后退出，
+而旧脚本仍返回成功；该次必须记为 `FAIL`。代码已改为 `sec://` 引用解析，
+并在 sidecar 启动后连续验证 Host PID/监听/health/readiness 与真实 Obs/
+Monitor 端点，失败定向回收 acceptance 根。尚缺修复提交上的真实重跑、
+SQLite migration、网络/浏览器回执和重启恢复。
+`b6b341be` 的第二次跑次确认 secret ref 已生效、新 Gate 正确失败关闭，又
+暴露 Service Catalog 的中间 rollout candidate 被旧首探针提前接受。当前
+首探针和最终五轮 Gate 均要求最终 catalog stage、`host.main` owner 与两类
+identity digest；不得以 readiness、metrics 或端口监听兜底。第三次真实启动
+据此正确失败关闭，rollout ledger 的三个 AUDIT operation 均为
+`ROLLED_BACK`，head 为空且 lease 已释放；新阻断是 acceptance Workspace 根
+位于源码 worktree 内部。既有 allocator 门禁保持不变，启动器新增独立
+`AgentWorkspaceRoot` 和进程启动前的父/子/同目录重叠拒绝，合法外部根才写入
+runtime snapshot。`b56d4d78` 的第四次启动确认该修复成立，但显式
+provider=disabled 使 Governor/LLM required health 失败，AUDIT 以
+`SERVICE_CATALOG_POST_HEALTH_FAILED` durable rollback。当前 health 只把
+“非 disabled provider 已选、显式允许 cold start、且 required failure 全为
+缺外部凭据”映射为 `DEGRADED`；本地 authority 或混合失败仍是 `FAILED`。
+`f48afe1b` 上的第五次真实 Host 进程启动已使五阶段 rollout、Host、Nginx
+Monitor 和真实代理路由启动；唯一 Host required failure 是缺 OPENAI 凭据
+的 cold start，未伪造模型 PASS。但 Obs projection daemon 的 Life job 因
+空源 cursor=0 payload 使用 wall clock 而持续 digest conflict，所以栈整体
+仍未通过。loader 已改为同 cursor 的确定性空投影，待重启验证。该跑次还发现
+runtime snapshot 过滤密码但
+残留 Neo4j 用户名，导致直接复用时在进程前拒绝半套凭据；writer 已改为只
+保留原子 `sec://` auth ref，真实 snapshot restart 尚待重跑。
+Monitor 依赖还有 8 项 npm audit 告警，因此该项保持
+`HOST_ENFORCE_START_PASS / OBS_FIX_AND_RESTART_PENDING`。
+
+第六次 `ForceRestart` 进一步暴露 Host 被强杀后 30 秒 embodiment authority
+Lease 无法由 shutdown hook 释放：新 candidate 单次 acquire 失败并退出，
+启动器仍空等约 240 秒，旧 Obs/Nginx 留在端口。当前代码只对精确 authority
+不可用做 35 秒有界等待，过期后要求更高 fence，live heartbeat 不可抢占；
+启动器在替换前先定向停止同 runtime root 的 sidecar，并在首次探针期间检测
+launcher 退出。定向集合 `33 passed in 34.32s`，但尚未实栈重跑，因此当前
+口径收紧为
+`HOST_ENFORCE_START_PASS / CRASH_TAKEOVER_FIX_PENDING_RERUN /
+OBS_FIX_PENDING_RERUN`。
 
 NE-01 的剩余差距已从“本地代码/恢复未封口”收窄为 NE-07 部署验收。
 当前提交的七路线同库收据全部 `PASS`，24 个去重恢复用例通过；因此实现依赖

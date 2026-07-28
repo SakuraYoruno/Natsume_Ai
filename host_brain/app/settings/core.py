@@ -239,6 +239,10 @@ class CoreSettings(BaseSettings):
         default=SecretStr(""),
         alias="HOST_AGENT_WORKSPACE_HMAC_SECRET",
     )
+    agent_workspace_hmac_secret_ref: str = Field(
+        default="",
+        alias="HOST_AGENT_WORKSPACE_HMAC_SECRET_REF",
+    )
     task_graph_cancellation_operator_enabled: bool = Field(
         default=False,
         alias="HOST_TASK_GRAPH_CANCELLATION_OPERATOR_ENABLED",
@@ -286,6 +290,11 @@ class CoreSettings(BaseSettings):
         )
         if workspace_secret and not 32 <= len(workspace_secret) <= 4_096:
             raise ValueError("AGENT_WORKSPACE_HMAC_SECRET_INVALID")
+        workspace_secret_ref = self.agent_workspace_hmac_secret_ref.strip()
+        if workspace_secret and workspace_secret_ref:
+            raise ValueError("AGENT_WORKSPACE_HMAC_SECRET_SOURCE_AMBIGUOUS")
+        if workspace_secret_ref and not workspace_secret_ref.startswith("sec://"):
+            raise ValueError("AGENT_WORKSPACE_HMAC_SECRET_REF_INVALID")
         public_keys = parse_task_reconciliation_public_keys(
             self.task_reconciliation_ed25519_public_keys_json
         )
@@ -470,7 +479,17 @@ class CoreSettings(BaseSettings):
                     if s.agent_workspace_hmac_secret.get_secret_value()
                     else ""
                 ),
-                is_required=True,
+                is_required=not bool(s.agent_workspace_hmac_secret_ref),
+            ),
+            inspect_setting(
+                domain=domain,
+                field_name="agent_workspace_hmac_secret_ref",
+                env_key="HOST_AGENT_WORKSPACE_HMAC_SECRET_REF",
+                default_value="",
+                current_value=s.agent_workspace_hmac_secret_ref,
+                is_required=not bool(
+                    s.agent_workspace_hmac_secret.get_secret_value()
+                ),
             ),
             inspect_setting(
                 domain=domain,
