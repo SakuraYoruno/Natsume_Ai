@@ -217,6 +217,49 @@ def test_vault_backed_transport_emits_server_owned_external_identity() -> None:
     assert calls[0]["base_url_override"] == "https://api.openai.com/v1"
 
 
+@pytest.mark.asyncio
+async def test_vault_backed_adapter_uses_native_provider_stream(monkeypatch) -> None:
+    received: list[dict[str, object]] = []
+
+    async def _native_stream(**kwargs):  # noqa: ANN003
+        received.append(dict(kwargs))
+        yield "第一句。"
+        yield "第二句。"
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.astream_llm_chunks",
+        _native_stream,
+    )
+    registry = build_vault_backed_provider_registry(
+        ("openai",),
+        credential_resolver=lambda _provider: "stream-key",
+        base_url_resolver=lambda _provider: "https://api.openai.com/v1",
+        transport=lambda **_kwargs: {"content": "buffered fallback must not run"},
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(provider_name="openai", model_id="gpt-stream"),
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-stream",
+        attempt_id="attempt-stream",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    chunks = [chunk async for chunk in registry.get("production.openai").stream(request)]
+
+    assert chunks == ["第一句。", "第二句。"]
+    assert received[0]["model_id"] == "gpt-stream"
+    assert received[0]["base_url_override"] == "https://api.openai.com/v1"
+
+
 @pytest.mark.parametrize(
     "base_url",
     (

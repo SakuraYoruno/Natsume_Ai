@@ -95,22 +95,58 @@ from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_result_must_include,
     _surface_sub_agent_result_must_not_do,
 )
-def _surface_emotion_context(agent_input: Any, *, result: SurfaceMainChainResult | None = None) -> dict[str, Any]:
+def _surface_emotion_context(
+    agent_input: Any,
+    *,
+    result: SurfaceMainChainResult | None = None,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return only an authority-safe self-affect projection for a reply.
+
+    Surface prose used to be allowed to return ``natsume_emotion_tag`` and
+    overwrite the life projection with it.  That made a model's parser output
+    a second writer of Natsume's emotional state (and plain text fallbacks
+    silently reset both parties to ``NEUTRAL``).  A DL-04 affective turn plan,
+    when present, is the sole authority for this turn.  ``result`` remains in
+    the signature for compatibility and audit callers, but can never mutate
+    self-affect.
+    """
+
+    del result
     emotion = _safe_mapping(getattr(agent_input, "emotion_context", None)) or _safe_mapping(
         getattr(agent_input, "emotion_snapshot", None)
     )
-    if "emotion_tag" not in emotion:
+    trace = _safe_mapping(trace_stage_meta)
+    plan = _safe_mapping(trace.get("affective_turn_plan"))
+    expression = _safe_mapping(plan.get("expression_plan"))
+    if plan.get("schema_version") == "affective_turn_plan.v1":
+        self_tag = str(plan.get("self_emotion_tag") or "CALM").strip().upper() or "CALM"
+        emotion["emotion_tag"] = self_tag
+        emotion["emotion_source"] = "affective_turn_plan"
+        emotion["emotion_inference_source"] = "canonical_self_affect"
+        emotion["emotion_inference_confidence"] = 1.0
+        emotion["surface_natsume_emotion_tag"] = self_tag
+        emotion["surface_vts_expression_id"] = str(
+            expression.get("avatar_expression") or ""
+        ).strip()
+        emotion["affective_turn_plan_ref"] = str(plan.get("plan_id") or "").strip()
+        emotion["affective_synchronization_id"] = str(
+            expression.get("synchronization_id") or ""
+        ).strip()
+        return emotion
+
+    # A public ChatRequest emotion tag is a user observation or a rendering
+    # hint, never a self-affect mutation.  Keep legacy paths operational while
+    # making their lack of canonical authority explicit.
+    if not bool(emotion.get("_affective_life_internal")):
         emotion["emotion_tag"] = "NEUTRAL"
-    if result is not None:
-        natsume_tag = str(result.natsume_emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-        user_tag = str(result.user_emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL"
-        emotion["emotion_tag"] = natsume_tag
-        emotion["emotion_source"] = "surface_generation_model"
-        emotion["emotion_inference_source"] = "surface_generation_model"
-        emotion["emotion_inference_confidence"] = float(result.runtime.emotion_confidence or 0.0)
-        emotion["surface_user_emotion_tag"] = user_tag
-        emotion["surface_natsume_emotion_tag"] = natsume_tag
-        emotion["surface_vts_expression_id"] = str(result.vts_expression_id or "")
+        emotion["emotion_source"] = "compatibility_no_canonical_self_affect"
+        emotion["emotion_inference_source"] = "none"
+        emotion["emotion_inference_confidence"] = 0.0
+        return emotion
+
+    emotion.setdefault("emotion_tag", "CALM")
+    emotion.setdefault("emotion_source", "canonical_affect_handoff")
     return emotion
 
 

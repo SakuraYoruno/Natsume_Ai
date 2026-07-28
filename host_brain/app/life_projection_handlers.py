@@ -25,6 +25,21 @@ async def handle_life_projection(
             agent_runtime_ports=agent_runtime_ports,
         )
     if target in {
+        "surface.affective_turn_plan",
+        "surface.sentence_delivery_intent",
+    }:
+        # The live SSE owner has already staged the immutable plan/sentence in
+        # the canonical Life journal before making it visible.  This projection
+        # acknowledgement deliberately does not emit a second message: replay
+        # and connection-resume remain the delivery owner's responsibility.
+        return {
+            "status": "STAGED_BY_LIVE_SURFACE",
+            "target": target,
+            "intent_id": message.intent_id,
+            "plan_id": str(payload.get("plan_id") or ""),
+            "sentence_index": payload.get("sentence_index"),
+        }
+    if target in {
         "work.environment",
         "life.experience",
         "work_event",

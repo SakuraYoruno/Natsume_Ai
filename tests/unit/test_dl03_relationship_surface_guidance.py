@@ -20,6 +20,16 @@ def _trusted_boundary_context() -> dict[str, object]:
         "emotion_intensity": 0.2,
         "affective_life": {
             "schema_version": "affective_turn_context.v1",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace-dl03",
+            "relationship_subject_id": "person-dl03",
+            "session_id": "session-dl03",
+            "self_affect": {
+                "self_id": "natsume_ai",
+                "relationship_subject_id": "person-dl03",
+                "revision": 7,
+                "components": [{"emotion": "CARE", "intensity": 0.2}],
+            },
             "relationship_life": {
                 "schema_version": "relationship_turn_context.v1",
                 "state": {

@@ -17,6 +17,11 @@ from .relationship import (
     RelationshipStateV2,
     RelationalAftereffectV1,
 )
+from .affective_turn import (
+    AffectiveTurnPlanV1,
+    CompanionActV1,
+    ExpressionPlanV1,
+)
 
 __all__ = [
     *_v1_all,
@@ -31,4 +36,7 @@ __all__ = [
     "RelationshipEpisodeV1",
     "RelationshipStateV2",
     "RelationalAftereffectV1",
+    "AffectiveTurnPlanV1",
+    "CompanionActV1",
+    "ExpressionPlanV1",
 ]

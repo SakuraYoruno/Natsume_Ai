@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from natsume_contracts.life import LifeDeliveryAuthorization
+from natsume_contracts.life import LifeDeliveryAuthorization, digest_json
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from host_brain.persona.surface_main_chain import (
     SurfaceMainChain,
@@ -31,7 +31,35 @@ from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_context,
     _surface_sub_agent_id,
 )
-def _public_result_trace(result: SurfaceMainChainResult) -> dict[str, Any]:
+def _public_result_trace(
+    result: SurfaceMainChainResult | None,
+    *,
+    stream_summary: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return a public trace without making model emotion fields authoritative."""
+
+    if result is None:
+        summary = _safe_mapping(stream_summary)
+        return {
+            "streaming": True,
+            "mode": str(summary.get("mode") or "native_sentence_stream"),
+            "sentence_count": max(0, _coerce_int(summary.get("sentence_count"), default=0)),
+            "plan_id": str(summary.get("plan_id") or "").strip(),
+            "synchronization_id": str(summary.get("synchronization_id") or "").strip(),
+            "self_affect_revision": max(
+                0,
+                _coerce_int(summary.get("self_affect_revision"), default=0),
+            ),
+            "first_token_ms": (
+                max(0, _coerce_int(summary.get("first_token_ms"), default=0))
+                if summary.get("first_token_ms") is not None
+                else None
+            ),
+            "provider_usage_status": str(
+                summary.get("provider_usage_status")
+                or "STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE"
+            ),
+        }
     return {
         "selected_text": result.selected_text,
         "natsume_emotion_tag": result.natsume_emotion_tag,
@@ -108,13 +136,16 @@ def _submit_surface_foreground_completed(
     life_snapshot_reader: Any,
     relationship_lifecycle_service: Any | None = None,
     agent_input: Any,
-    result: SurfaceMainChainResult,
+    result: SurfaceMainChainResult | None,
     envelope: Any,
     narrative: str,
     trace_stage_meta: Mapping[str, Any],
     timings_ms: Mapping[str, int],
     total_latency_ms: int,
     llm_latency_ms: int,
+    stream_summary: Mapping[str, Any] | None = None,
+    first_token_ms: int | None = None,
+    buffer_stream: bool = True,
 ) -> dict[str, Any]:
     """Commit one governed command for every durable Surface completion.
 
@@ -140,7 +171,19 @@ def _submit_surface_foreground_completed(
     ).strip()
     request_ts_ms = _coerce_int(getattr(agent_input, "ts_ms", 0), default=0)
     completed_at_ms = int(time.time() * 1000)
-    emotion_context = _surface_emotion_context(agent_input, result=result)
+    surface_result_trace = _public_result_trace(
+        result,
+        stream_summary=stream_summary,
+    )
+    affective_turn_plan = _affective_turn_plan(trace_stage_meta)
+    affective_turn_plan_digest = (
+        digest_json(affective_turn_plan) if affective_turn_plan else ""
+    )
+    emotion_context = _surface_emotion_context(
+        agent_input,
+        result=result,
+        trace_stage_meta=trace_stage_meta,
+    )
     bond_summary = _safe_mapping(getattr(agent_input, "bond_summary", None))
     reply_plan = _selected_reply_plan(agent_input, trace_stage_meta)
     life_director = _safe_mapping(dict(trace_stage_meta or {}).get("life_director"))
@@ -182,7 +225,7 @@ def _submit_surface_foreground_completed(
         "surface_reply_used": True,
         "reply_source": "surface_main_chain",
         "reply_envelope": envelope.as_dict(),
-        "surface_main_chain": _public_result_trace(result),
+        "surface_main_chain": surface_result_trace,
         "timings_ms": dict(timings_ms),
         "skip_heavy_persona_postprocess": True,
     }
@@ -211,8 +254,20 @@ def _submit_surface_foreground_completed(
         "timings_ms": dict(timings_ms),
         "total_latency_ms": max(0, int(total_latency_ms or 0)),
         "llm_latency_ms": max(0, int(llm_latency_ms or 0)),
-        "first_token_ms": max(0, int(llm_latency_ms or 0)) if narrative else None,
-        "buffer_stream": True,
+        "first_token_ms": (
+            max(
+                0,
+                int(
+                    first_token_ms
+                    if first_token_ms is not None
+                    else llm_latency_ms
+                )
+                or 0,
+            )
+            if narrative
+            else None
+        ),
+        "buffer_stream": bool(buffer_stream),
         "delegated_agents": delegated_agents,
         "retrieval_summary": _safe_mapping(
             getattr(agent_input, "retrieval_summary", None)
@@ -233,7 +288,7 @@ def _submit_surface_foreground_completed(
             getattr(agent_input, "pii_egress_stats", None)
         ),
         "llm_input_digest": json.dumps(
-            _public_result_trace(result), ensure_ascii=False
+            surface_result_trace, ensure_ascii=False
         )[:500],
         "motive_state": _safe_mapping(
             dict(trace_stage_meta or {}).get("motive_state")
@@ -252,6 +307,8 @@ def _submit_surface_foreground_completed(
             getattr(agent_input, "attachment_summary", "") or ""
         ).strip(),
         "life_director": life_director,
+        "affective_turn_plan_ref": str(affective_turn_plan.get("plan_id") or ""),
+        "affective_turn_plan_digest": affective_turn_plan_digest,
     }
     projection_intents = [
         {
@@ -314,7 +371,9 @@ def _submit_surface_foreground_completed(
         "reply_plan": reply_plan,
         "life_director": life_director,
         "model_audit": model_audit,
-        "surface_result": _public_result_trace(result),
+        "surface_result": surface_result_trace,
+        "affective_turn_plan": affective_turn_plan,
+        "affective_turn_plan_digest": affective_turn_plan_digest,
         "timings_ms": dict(timings_ms),
         "total_latency_ms": max(0, int(total_latency_ms or 0)),
         "llm_latency_ms": max(0, int(llm_latency_ms or 0)),
@@ -386,6 +445,213 @@ def _submit_surface_foreground_completed(
             "replayed": bool(episode_receipt.replayed),
         },
     }
+
+
+def _affective_turn_plan(trace_stage_meta: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return the frozen DL-04 plan only when it has the canonical shape."""
+
+    plan = _safe_mapping(_safe_mapping(trace_stage_meta).get("affective_turn_plan"))
+    expression = _safe_mapping(plan.get("expression_plan"))
+    companion = _safe_mapping(plan.get("companion_act"))
+    if (
+        plan.get("schema_version") != "affective_turn_plan.v1"
+        or not str(plan.get("plan_id") or "").strip()
+        or not str(plan.get("self_affect_digest") or "").strip()
+        or not str(expression.get("synchronization_id") or "").strip()
+        or not str(companion.get("kind") or "").strip()
+    ):
+        return {}
+    return plan
+
+
+def _surface_stream_scope(agent_input: Any, plan: Mapping[str, Any]) -> tuple[str, str, str, str]:
+    """Validate that streaming persistence cannot cross an affective scope."""
+
+    person_id = str(getattr(agent_input, "person_id", "") or "").strip() or "default"
+    workspace_id = str(getattr(agent_input, "workspace_id", "") or "").strip() or "workspace::default"
+    session_id = str(getattr(agent_input, "session_id", "") or "").strip()
+    request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    if (
+        str(plan.get("workspace_id") or "").strip() != workspace_id
+        or str(plan.get("relationship_subject_id") or "").strip() != person_id
+        or str(plan.get("session_id") or "").strip() != session_id
+        or (request_id and str(plan.get("request_id") or "").strip() != request_id)
+    ):
+        raise RuntimeError("AFFECTIVE_TURN_STREAM_SCOPE_MISMATCH")
+    return person_id, workspace_id, session_id, request_id
+
+
+def _submit_surface_affective_turn_planned(
+    *,
+    life_command_service: Any,
+    life_snapshot_reader: Any,
+    agent_input: Any,
+    trace_stage_meta: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Persist one immutable plan before the first visible stream sentence."""
+
+    plan = _affective_turn_plan(trace_stage_meta)
+    if not plan:
+        raise RuntimeError("AFFECTIVE_TURN_PLAN_REQUIRED_FOR_STREAM")
+    person_id, workspace_id, session_id, request_id = _surface_stream_scope(agent_input, plan)
+    plan_id = str(plan["plan_id"])
+    expression = _safe_mapping(plan.get("expression_plan"))
+    payload = {
+        "affective_turn_plan": plan,
+        "affective_turn_plan_digest": digest_json(plan),
+        "workspace_id": workspace_id,
+        "session_id": session_id,
+        "relationship_subject_id": person_id,
+        "projection_intents": [
+            {
+                "target": "surface.affective_turn_plan",
+                "payload": {
+                    "plan_id": plan_id,
+                    "synchronization_id": str(expression.get("synchronization_id") or ""),
+                    "self_affect_revision": max(
+                        0,
+                        _coerce_int(plan.get("self_affect_revision"), default=0),
+                    ),
+                    "plan_digest": digest_json(plan),
+                },
+            }
+        ],
+    }
+    return submit_life_command(
+        service=life_command_service,
+        reader=life_snapshot_reader,
+        command_type="affective_turn_planned",
+        person_id=person_id,
+        command_id=f"life::affective_turn_planned::{plan_id}",
+        correlation_id=request_id or None,
+        payload=payload,
+        created_at_ms=max(0, _coerce_int(plan.get("created_at_ms"), default=0)),
+        metadata={
+            "source": "surface_native_sentence_stream",
+            "workspace_id": workspace_id,
+            "session_id": session_id,
+        },
+    )
+
+
+def _submit_surface_sentence_delivery_intent(
+    *,
+    life_command_service: Any,
+    life_snapshot_reader: Any,
+    agent_input: Any,
+    trace_stage_meta: Mapping[str, Any],
+    sentence: str,
+    sentence_index: int,
+) -> dict[str, Any]:
+    """Durably stage one already-gated sentence before its SSE emission."""
+
+    plan = _affective_turn_plan(trace_stage_meta)
+    if not plan:
+        raise RuntimeError("AFFECTIVE_TURN_PLAN_REQUIRED_FOR_SENTENCE")
+    text = str(sentence or "").strip()
+    if not text:
+        raise ValueError("surface stream sentence is required")
+    if len(text) > 2_000:
+        raise ValueError("surface stream sentence exceeds 2000 characters")
+    index = max(0, int(sentence_index))
+    person_id, workspace_id, session_id, request_id = _surface_stream_scope(agent_input, plan)
+    plan_id = str(plan["plan_id"])
+    expression = _safe_mapping(plan.get("expression_plan"))
+    sentence_digest = digest_json({"sentence": text})
+    payload = {
+        "affective_turn_plan_ref": plan_id,
+        "synchronization_id": str(expression.get("synchronization_id") or ""),
+        "workspace_id": workspace_id,
+        "session_id": session_id,
+        "relationship_subject_id": person_id,
+        "sentence_index": index,
+        # The sentence is user-visible delivery content, not an affect
+        # observation or raw media artifact.  It is kept for exact replay and
+        # idempotency; projection payloads carry the same immutable content.
+        "sentence": text,
+        "sentence_digest": sentence_digest,
+        "affective_turn_plan_digest": digest_json(plan),
+        "self_affect_revision": max(
+            0,
+            _coerce_int(plan.get("self_affect_revision"), default=0),
+        ),
+        "projection_intents": [
+            {
+                "target": "surface.sentence_delivery_intent",
+                "payload": {
+                    "plan_id": plan_id,
+                    "synchronization_id": str(expression.get("synchronization_id") or ""),
+                    "sentence_index": index,
+                    "sentence": text,
+                    "sentence_digest": sentence_digest,
+                    "request_id": request_id,
+                },
+            }
+        ],
+    }
+    return submit_life_command(
+        service=life_command_service,
+        reader=life_snapshot_reader,
+        command_type="surface_sentence_delivery_intent",
+        person_id=person_id,
+        command_id=f"life::surface_sentence::{plan_id}::{index}",
+        correlation_id=request_id or None,
+        payload=payload,
+        created_at_ms=int(time.time() * 1000),
+        metadata={
+            "source": "surface_native_sentence_stream",
+            "workspace_id": workspace_id,
+            "session_id": session_id,
+            "sentence_digest": sentence_digest,
+        },
+    )
+
+
+def _submit_surface_stream_cancelled(
+    *,
+    life_command_service: Any,
+    life_snapshot_reader: Any,
+    agent_input: Any,
+    trace_stage_meta: Mapping[str, Any],
+    sent_sentence_count: int,
+    reason_code: str,
+) -> dict[str, Any]:
+    """Record an interrupted live stream without claiming unsent content."""
+
+    plan = _affective_turn_plan(trace_stage_meta)
+    if not plan:
+        return {}
+    person_id, workspace_id, session_id, request_id = _surface_stream_scope(agent_input, plan)
+    plan_id = str(plan["plan_id"])
+    expression = _safe_mapping(plan.get("expression_plan"))
+    return submit_life_command(
+        service=life_command_service,
+        reader=life_snapshot_reader,
+        command_type="surface_stream_cancelled",
+        person_id=person_id,
+        command_id=f"life::surface_stream_cancelled::{plan_id}",
+        correlation_id=request_id or None,
+        payload={
+            "affective_turn_plan_ref": plan_id,
+            "affective_turn_plan_digest": digest_json(plan),
+            "synchronization_id": str(expression.get("synchronization_id") or ""),
+            "self_affect_revision": max(
+                0,
+                _coerce_int(plan.get("self_affect_revision"), default=0),
+            ),
+            "workspace_id": workspace_id,
+            "session_id": session_id,
+            "relationship_subject_id": person_id,
+            "sent_sentence_count": max(0, int(sent_sentence_count)),
+            "reason_code": str(reason_code or "SURFACE_STREAM_CANCELLED")[:120],
+        },
+        created_at_ms=int(time.time() * 1000),
+        metadata={
+            "source": "surface_native_sentence_stream",
+            "workspace_id": workspace_id,
+            "session_id": session_id,
+        },
+    )
 
 
 def _surface_delivery_authorization(

@@ -63,9 +63,14 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 已接受的回复才可建立 provisional 关系 episode；下一次用户输入才能形成该回应的 aftereffect。沉默、离线和技术投递失败不得被解释为拒绝、不得扣信任或产生催促义务。
 - 关系连续性必须按 workspace 与 relationship subject 隔离；session 只作事件上下文。浪漫、排他和依赖默认未授权，不能由 Bond 分数、互动次数、模型措辞或单次道歉自动升级。
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
+- 每轮外显前必须冻结同一份 self-affect、CompanionAct 与 ExpressionPlan；模型、请求
+  hint、纯文本解析或任一单通道失败均不得回写或中性化七海自身情感。
+- 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
+  分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
+  选择，不能把内部计划或操控性措辞暴露给用户。
 - 人格核心和关系边界不得由单次模型输出、后台里程碑或交互统计直接修改。
 
-验收：同一已裁决输入在冻结版本下可复现表达控制；relationship episode/aftereffect 的重复、重启和 response-loss reconcile 不得重复写入；边界与未完成修复的表达不得含负罪施压、威胁、排他控制或回应义务。人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。
+验收：同一已裁决输入在冻结版本下可复现表达控制；relationship episode/aftereffect 的重复、重启和 response-loss reconcile 不得重复写入；可见文本能追溯到冻结的情感计划且取消/重放不重复投递；边界与未完成修复的表达不得含负罪施压、威胁、排他控制或回应义务。人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。
 
 ### FR-MEMORY：生活记忆
 

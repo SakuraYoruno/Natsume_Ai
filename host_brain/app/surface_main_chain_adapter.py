@@ -12,6 +12,7 @@ from host_brain.persona.surface_main_chain import (
     compile_surface_main_chain_input,
 )
 import asyncio
+import hashlib
 from host_brain.persona.surface_runtime import evaluate_surface_model_response_for_retry
 import json
 import os
@@ -21,10 +22,15 @@ from host_brain.surface_runtime.delivery_audit import (
     _delegated_agents_from_sub_agent_context,
     _merge_delegated_agent_trace,
     _public_result_trace,
+    _submit_surface_affective_turn_planned,
+    _submit_surface_sentence_delivery_intent,
+    _submit_surface_stream_cancelled,
     _submit_surface_foreground_completed,
     _surface_model_audit_fields,
     _surface_timings_ms,
 )
+from host_brain.app.sentence_splitter import SentenceSplitter
+from host_brain.persona.isolated_surface_harness import build_isolated_surface_messages
 from host_brain.surface_runtime.fact_compiler import (
     _coerce_int,
     _safe_mapping,
@@ -44,6 +50,12 @@ from host_brain.surface_runtime.quality_guards import (
     _memory_packet_payload_for_guard,
     _raw_memory_packet_payload_from_agent_input,
 )
+from host_brain.surface_runtime.affective_streaming import (
+    affective_turn_plan_from_trace,
+    gate_stream_sentence,
+    native_stream_messages,
+    should_use_native_sentence_stream,
+)
 from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_id,
     _surface_sub_agent_result_text,
@@ -60,6 +72,581 @@ def _surface_main_chain_response_format() -> dict[str, str] | None:
     return None
 
 
+def _surface_model_deadline_ms(governed_model_budget: Any | None) -> int:
+    configured = max(
+        1_000,
+        min(
+            120_000,
+            _coerce_int(
+                os.environ.get("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS"),
+                default=60_000,
+            ),
+        ),
+    )
+    if governed_model_budget is None:
+        return configured
+    return min(int(governed_model_budget.deadline_ms), configured)
+
+
+def _record_surface_memory_guard_packet(
+    *,
+    agent_input: Any,
+    surface_input: SurfaceMainChainInput,
+    trace_stage_meta: dict[str, Any] | None,
+) -> None:
+    if not isinstance(trace_stage_meta, dict):
+        return
+    guard_packet = (
+        _raw_memory_packet_payload_from_agent_input(agent_input)
+        or _surface_memory_packet_for_output_guard(
+            agent_input=agent_input,
+            trace_stage_meta=trace_stage_meta,
+        )
+        or _memory_packet_payload_for_guard(surface_input.memory_packet)
+    )
+    if guard_packet and not _safe_mapping(trace_stage_meta.get("surface_memory_recall_packet")):
+        trace_stage_meta["surface_memory_recall_packet"] = guard_packet
+
+
+def _native_affective_stream_preparation(
+    agent_input: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+    trace_stage_meta: dict[str, Any],
+) -> tuple[SurfaceMainChainInput, Any, dict[str, Any]] | None:
+    """Compile once and select the native stream only for a frozen safe plan."""
+
+    governed_model_budget = _governed_model_budget_guard(trace_stage_meta)
+    surface_input = build_surface_main_chain_input_from_surface_reply_input(
+        agent_input,
+        ports=ports,
+        trace_stage_meta=trace_stage_meta,
+    )
+    _record_surface_memory_guard_packet(
+        agent_input=agent_input,
+        surface_input=surface_input,
+        trace_stage_meta=trace_stage_meta,
+    )
+    if not should_use_native_sentence_stream(
+        trace_stage_meta,
+        has_governed_model_budget=governed_model_budget is not None,
+    ):
+        return None
+    plan = affective_turn_plan_from_trace(trace_stage_meta)
+    if not plan:
+        return None
+    return surface_input, compile_surface_main_chain_input(surface_input).request, plan
+
+
+def _record_sentence_guard_trace(
+    trace: dict[str, Any], *, name: str, detail: Mapping[str, Any]) -> None:
+    prior = list(trace.get("surface_native_sentence_guards") or [])
+    prior.append({"name": name, **dict(detail)})
+    trace["surface_native_sentence_guards"] = prior[-16:]
+
+
+def _sanitize_native_stream_sentence(
+    sentence: str,
+    *,
+    agent_input: Any,
+    trace: dict[str, Any],
+) -> str:
+    candidate, account_guard_applied = _sanitize_account_login_reply(
+        sentence,
+        agent_input=agent_input,
+    )
+    candidate = _sanitize_main_chain_meta_reply(candidate, agent_input=agent_input)
+    candidate, quality_guard = _apply_surface_text_quality_guard(
+        candidate,
+        agent_input=agent_input,
+    )
+    candidate, sub_agent_result_guard = _apply_surface_sub_agent_result_guard(
+        candidate,
+        agent_input=agent_input,
+    )
+    if account_guard_applied:
+        _record_sentence_guard_trace(
+            trace,
+            name="account_login",
+            detail={"applied": True},
+        )
+    if quality_guard.get("applied"):
+        _record_sentence_guard_trace(
+            trace,
+            name="text_quality",
+            detail=dict(quality_guard),
+        )
+    if sub_agent_result_guard.get("applied"):
+        _record_sentence_guard_trace(
+            trace,
+            name="sub_agent_result",
+            detail=dict(sub_agent_result_guard),
+        )
+    return str(candidate or "").strip()
+
+
+def _buffered_affective_candidate_count(
+    trace_stage_meta: Mapping[str, Any] | None,
+) -> int | None:
+    plan = affective_turn_plan_from_trace(trace_stage_meta)
+    if str(plan.get("generation_mode") or "").upper() != "BUFFERED_CANDIDATE_SELECTION":
+        return None
+    return 2 if int(plan.get("candidate_count") or 0) == 2 else None
+
+
+def _buffered_affective_candidate_messages(
+    messages: Sequence[Mapping[str, Any]],
+    *,
+    candidate_count: int | None,
+) -> list[dict[str, Any]]:
+    copied = [dict(message) for message in messages]
+    if candidate_count != 2:
+        return copied
+    override = "DL-04 高歧义回合：只输出恰好 2 个候选，JSON 形状必须是 {\"candidates\":[\"候选1\",\"候选2\"]}。不要输出第三个候选、字段解释或情绪标签。"
+    if any(str(message.get("content") or "") == override for message in copied):
+        return copied
+    copied.append({"role": "system", "content": override})
+    return copied
+
+
+def _select_buffered_affective_candidate(
+    *,
+    raw_output: str,
+    compiled_request: Any,
+    expected_candidate_count: int,
+    trace_stage_meta: dict[str, Any] | None = None,
+) -> str:
+    """Select one safe local winner from a frozen two-candidate affective turn.
+
+    Candidate generation is deliberately not an authority to choose a
+    relationship repair or emotional expression.  The ModelAttempt retry gate
+    first enforces exact cardinality; this helper then applies the existing
+    deterministic Surface scorer and the DL-04 non-manipulation gate before
+    returning one plain reply to the legacy buffered renderer.
+    """
+
+    from host_brain.persona.surface.candidate_scoring import (  # noqa: PLC0415
+        parse_surface_candidates,
+        score_isolated_surface_candidates,
+        select_best_isolated_candidate,
+    )
+
+    candidates = parse_surface_candidates(raw_output)
+    if len(candidates) != expected_candidate_count:
+        raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID")
+    scores = score_isolated_surface_candidates(compiled_request, candidates)
+    selected = select_best_isolated_candidate(scores)
+    if (
+        selected is None
+        or bool(selected.hard_fail)
+        or tuple(selected.control_violations)
+    ):
+        raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
+    gate = gate_stream_sentence(selected.text)
+    if not gate.accepted:
+        raise RuntimeError(gate.reason_code)
+    if isinstance(trace_stage_meta, dict):
+        selected_index = next(
+            (
+                index
+                for index, row in enumerate(scores)
+                if row is selected
+            ),
+            -1,
+        )
+        trace_stage_meta["affective_candidate_selection"] = {
+            "schema_version": "affective_candidate_selection.v1",
+            "candidate_count": len(scores),
+            "selected_index": selected_index,
+            "selected_score": round(float(selected.score), 4),
+            "selected_passed": bool(selected.passed),
+            "selected_reason_codes": list(selected.reason_codes)[:16],
+            "candidate_digests": [
+                hashlib.sha256(str(row.text).encode("utf-8")).hexdigest()
+                for row in scores
+            ],
+        }
+    return gate.sentence
+
+
+async def _native_affective_sentence_stream(
+    agent_input: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+    trace: dict[str, Any],
+    surface_input: SurfaceMainChainInput,
+    compiled_request: Any,
+    plan: Mapping[str, Any],
+    started_ms: int,
+) -> AsyncGenerator[str, None]:
+    """Generate plaintext once, stage every sentence, then expose it over SSE.
+
+    The plan and sentence intents are persisted before visibility.  If a model
+    stops after any sentence, the caller receives an explicit partial-stream
+    rejection rather than a second provider attempt that could duplicate what
+    the user already saw.
+    """
+
+    from host_brain.model_runtime.contracts import (  # noqa: PLC0415
+        ModelAttemptRequest,
+        PromptRef,
+    )
+    from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
+        SURFACE_MAIN_TEXT_PROMPT_ID,
+    )
+
+    request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    plan_id = str(plan.get("plan_id") or "").strip()
+    expression = _safe_mapping(plan.get("expression_plan"))
+    synchronization_id = str(expression.get("synchronization_id") or "").strip()
+    try:
+        planned_receipt = await asyncio.to_thread(
+            _submit_surface_affective_turn_planned,
+            life_command_service=ports.get_life_command_service(),
+            life_snapshot_reader=ports.get_life_snapshot_reader(),
+            agent_input=agent_input,
+            trace_stage_meta=trace,
+        )
+    except Exception as exc:
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "AFFECTIVE_TURN_PLAN_COMMIT_FAILED",
+            "error_type": type(exc).__name__,
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "AFFECTIVE_TURN_PLAN_COMMIT_FAILED",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:native_affective_stream",
+                    "durability": "fail_closed_before_stream",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+    trace["affective_turn_plan_receipt"] = {
+        "command_id": planned_receipt.get("command_id"),
+        "event_id": planned_receipt.get("event_id"),
+        "state_version": planned_receipt.get("state_version"),
+        "replayed": bool(planned_receipt.get("replayed")),
+    }
+
+    messages = native_stream_messages(build_isolated_surface_messages(compiled_request))
+    stream_started = time.perf_counter()
+    first_token_ms: int | None = None
+    splitter = SentenceSplitter()
+    narrative_parts: list[str] = []
+    sent_sentence_count = 0
+    sentence_receipts: list[dict[str, Any]] = []
+    try:
+        async for raw_chunk in ports.model_attempt_service().stream(
+            ModelAttemptRequest(
+                request_id=request_id or "surface-main-chain",
+                scene_type="CHAT_SURFACE",
+                cognitive_tier="A",
+                prompt=PromptRef(SURFACE_MAIN_TEXT_PROMPT_ID, {"messages": messages}),
+                deadline_ms=_surface_model_deadline_ms(None),
+                foreground=True,
+                metadata={
+                    "chain": "surface_main_native_sentence_stream",
+                    "affective_turn_plan_id": plan_id,
+                },
+            )
+        ):
+            if first_token_ms is None:
+                first_token_ms = max(
+                    0,
+                    int((time.perf_counter() - stream_started) * 1000),
+                )
+            for raw_sentence in splitter.feed(str(raw_chunk or "")):
+                candidate = _sanitize_native_stream_sentence(
+                    raw_sentence,
+                    agent_input=agent_input,
+                    trace=trace,
+                )
+                gate = gate_stream_sentence(candidate)
+                if not gate.accepted:
+                    raise RuntimeError(gate.reason_code)
+                sentence_receipt = await asyncio.to_thread(
+                    _submit_surface_sentence_delivery_intent,
+                    life_command_service=ports.get_life_command_service(),
+                    life_snapshot_reader=ports.get_life_snapshot_reader(),
+                    agent_input=agent_input,
+                    trace_stage_meta=trace,
+                    sentence=gate.sentence,
+                    sentence_index=sent_sentence_count,
+                )
+                sentence_receipts.append(
+                    {
+                        "command_id": sentence_receipt.get("command_id"),
+                        "event_id": sentence_receipt.get("event_id"),
+                        "sentence_index": sent_sentence_count,
+                        "replayed": bool(sentence_receipt.get("replayed")),
+                    }
+                )
+                narrative_parts.append(gate.sentence)
+                yield _sse({"phase": "RENDER", "chunk": gate.sentence})
+                yield _sse(
+                    {
+                        "phase": "SENTENCE",
+                        "sentence": gate.sentence,
+                        "sentence_index": sent_sentence_count,
+                        "affective_turn_plan_id": plan_id,
+                        "synchronization_id": synchronization_id,
+                    }
+                )
+                sent_sentence_count += 1
+            if len(splitter.buffer) > 2_000:
+                raise RuntimeError("SURFACE_STREAM_SENTENCE_BOUNDARY_REQUIRED")
+
+        remainder = splitter.flush()
+        if remainder:
+            candidate = _sanitize_native_stream_sentence(
+                remainder,
+                agent_input=agent_input,
+                trace=trace,
+            )
+            gate = gate_stream_sentence(candidate)
+            if not gate.accepted:
+                raise RuntimeError(gate.reason_code)
+            sentence_receipt = await asyncio.to_thread(
+                _submit_surface_sentence_delivery_intent,
+                life_command_service=ports.get_life_command_service(),
+                life_snapshot_reader=ports.get_life_snapshot_reader(),
+                agent_input=agent_input,
+                trace_stage_meta=trace,
+                sentence=gate.sentence,
+                sentence_index=sent_sentence_count,
+            )
+            sentence_receipts.append(
+                {
+                    "command_id": sentence_receipt.get("command_id"),
+                    "event_id": sentence_receipt.get("event_id"),
+                    "sentence_index": sent_sentence_count,
+                    "replayed": bool(sentence_receipt.get("replayed")),
+                }
+            )
+            narrative_parts.append(gate.sentence)
+            yield _sse({"phase": "RENDER", "chunk": gate.sentence})
+            yield _sse(
+                {
+                    "phase": "SENTENCE",
+                    "sentence": gate.sentence,
+                    "sentence_index": sent_sentence_count,
+                    "affective_turn_plan_id": plan_id,
+                    "synchronization_id": synchronization_id,
+                }
+            )
+            sent_sentence_count += 1
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(
+                asyncio.to_thread(
+                    _submit_surface_stream_cancelled,
+                    life_command_service=ports.get_life_command_service(),
+                    life_snapshot_reader=ports.get_life_snapshot_reader(),
+                    agent_input=agent_input,
+                    trace_stage_meta=trace,
+                    sent_sentence_count=sent_sentence_count,
+                    reason_code="SURFACE_STREAM_CANCELLED",
+                )
+            )
+        except Exception:
+            # Cancellation must still propagate.  The next connection can
+            # inspect the staged sentence receipts and reconcile the stream.
+            pass
+        raise
+    except Exception as exc:
+        trace["native_sentence_stream"] = {
+            "status": "INTERRUPTED",
+            "reason_code": str(exc).split(":", 1)[0][:160],
+            "sent_sentence_count": sent_sentence_count,
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT" if sent_sentence_count else "NO_REPLY",
+                "reason_code": "SURFACE_STREAM_INTERRUPTED",
+                "narrative": "".join(narrative_parts),
+                "request_id": request_id,
+                "sent_sentence_count": sent_sentence_count,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:native_affective_stream",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    narrative = "".join(narrative_parts).strip()
+    if not narrative:
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "SURFACE_STREAM_EMPTY_RESPONSE",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:native_affective_stream",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    llm_latency_ms = max(0, int((time.perf_counter() - stream_started) * 1000))
+    stream_summary = {
+        "mode": "native_sentence_stream",
+        "sentence_count": sent_sentence_count,
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "self_affect_revision": plan.get("self_affect_revision"),
+        "first_token_ms": first_token_ms,
+        "provider_usage_status": "STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE",
+    }
+    trace["surface_model_attempt"] = {
+        "streaming": True,
+        "prompt_id": SURFACE_MAIN_TEXT_PROMPT_ID,
+        "message_count": len(messages),
+        "generate_elapsed_ms": llm_latency_ms,
+        "first_token_ms": first_token_ms,
+        "provider_usage_status": stream_summary["provider_usage_status"],
+    }
+    trace["native_sentence_stream"] = {
+        "status": "COMPLETED",
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "sent_sentence_count": sent_sentence_count,
+        "sentence_receipts": sentence_receipts,
+    }
+    timings_ms = _surface_timings_ms(
+        total_latency_ms=total_latency_ms,
+        llm_latency_ms=llm_latency_ms,
+    )
+    envelope = ReplyEnvelope.final_reply(
+        text=narrative,
+        response_form="text",
+        source="surface_main_chain_native_stream",
+        audit={
+            "request_id": request_id,
+            "affective_turn_plan_id": plan_id,
+            "synchronization_id": synchronization_id,
+            "self_emotion_tag": str(plan.get("self_emotion_tag") or ""),
+            "companion_act": str(_safe_mapping(plan.get("companion_act")).get("kind") or ""),
+        },
+    )
+    try:
+        foreground_receipt = await asyncio.to_thread(
+            _submit_surface_foreground_completed,
+            life_command_service=ports.get_life_command_service(),
+            life_snapshot_reader=ports.get_life_snapshot_reader(),
+            relationship_lifecycle_service=ports.get_relationship_lifecycle_service(),
+            agent_input=agent_input,
+            result=None,
+            envelope=envelope,
+            narrative=narrative,
+            trace_stage_meta=trace,
+            timings_ms=timings_ms,
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=llm_latency_ms,
+            stream_summary=stream_summary,
+            first_token_ms=first_token_ms,
+            buffer_stream=False,
+        )
+    except Exception as exc:
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "LIFE_FOREGROUND_COMMIT_FAILED_AFTER_STREAM",
+            "error_type": type(exc).__name__,
+            "sent_sentence_count": sent_sentence_count,
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "LIFE_FOREGROUND_COMMIT_FAILED_AFTER_STREAM",
+                "narrative": narrative,
+                "request_id": request_id,
+                "sent_sentence_count": sent_sentence_count,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:native_affective_stream",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    trace["life_causality"] = {
+        "status": str(foreground_receipt.get("status") or "UNKNOWN"),
+        "reason_code": foreground_receipt.get("reason_code"),
+        "command_id": foreground_receipt.get("command_id"),
+        "event_id": foreground_receipt.get("event_id"),
+        "state_version": foreground_receipt.get("state_version"),
+        "outbox_count": foreground_receipt.get("outbox_count"),
+        "replayed": bool(foreground_receipt.get("replayed")),
+    }
+    effect_intents = [
+        dict(item)
+        for item in list(foreground_receipt.get("effect_intents") or [])
+        if isinstance(item, Mapping)
+    ]
+    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    yield _sse(
+        {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "reason_code": envelope.reason_code or None,
+            "narrative": narrative,
+            "request_id": request_id,
+            "reply_envelope": envelope.as_dict(),
+            "acceptance_effect_intents": effect_intents,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "surface_reply:native_affective_stream",
+                "latency_ms": total_latency_ms,
+                "first_token_ms": first_token_ms,
+                "llm_latency_ms": llm_latency_ms,
+                "model_id": model_audit["model_id"],
+                "provider_name": model_audit["provider_name"],
+                "response_form": "text",
+                "timings_ms": timings_ms,
+                "reply_envelope": envelope.as_dict(),
+                "surface_main_chain": _public_result_trace(
+                    None,
+                    stream_summary=stream_summary,
+                ),
+                "trace_stage_meta": {
+                    **trace,
+                    "surface_main_chain_used": True,
+                    "reply_source": "surface_main_chain_native_stream",
+                    "surface_renderer": {
+                        "status": "OK",
+                        "invoked": True,
+                        "affected_output": True,
+                        "source": "surface_main_chain_native_stream",
+                        "reason_code": "",
+                    },
+                },
+            },
+        }
+    )
+
+
 async def run_surface_main_chain_for_surface_reply_input(
     agent_input: Any,
     *,
@@ -74,13 +661,12 @@ async def run_surface_main_chain_for_surface_reply_input(
         trace_stage_meta=trace_stage_meta,
     )
     compiled_request = compile_surface_main_chain_input(surface_input).request
-    if isinstance(trace_stage_meta, dict):
-        guard_packet = _raw_memory_packet_payload_from_agent_input(agent_input) or _surface_memory_packet_for_output_guard(
-            agent_input=agent_input,
-            trace_stage_meta=trace_stage_meta,
-        ) or _memory_packet_payload_for_guard(surface_input.memory_packet)
-        if guard_packet and not _safe_mapping(trace_stage_meta.get("surface_memory_recall_packet")):
-            trace_stage_meta["surface_memory_recall_packet"] = guard_packet
+    _record_surface_memory_guard_packet(
+        agent_input=agent_input,
+        surface_input=surface_input,
+        trace_stage_meta=trace_stage_meta,
+    )
+    affective_candidate_count = _buffered_affective_candidate_count(trace_stage_meta)
 
     async def _generate(messages: list[dict[str, str]]) -> str:
         from host_brain.model_runtime.contracts import (  # noqa: PLC0415
@@ -101,6 +687,28 @@ async def run_surface_main_chain_for_surface_reply_input(
         )
 
         def _retry_evaluator(response: Any, attempt: Any) -> Any:
+            if affective_candidate_count is not None:
+                try:
+                    _select_buffered_affective_candidate(
+                        raw_output=str(response.content or ""),
+                        compiled_request=compiled_request,
+                        expected_candidate_count=affective_candidate_count,
+                    )
+                except RuntimeError as exc:
+                    repaired_messages = _buffered_affective_candidate_messages(
+                        attempt.prompt.messages,
+                        candidate_count=affective_candidate_count,
+                    )
+                    return RetryDirective(
+                        retry=True,
+                        reason=str(exc).split(":", 1)[0],
+                        rendered_prompt=attempt.prompt.with_messages(repaired_messages),
+                        reuse_target=True,
+                        metadata={
+                            "expected_candidate_count": affective_candidate_count,
+                        },
+                    )
+                return RetryDirective.accept()
             evaluation = evaluate_surface_model_response_for_retry(
                 compiled_request,
                 raw_output=str(response.content or ""),
@@ -111,34 +719,18 @@ async def run_surface_main_chain_for_surface_reply_input(
             return RetryDirective(
                 retry=True,
                 reason=evaluation.reason,
-                rendered_prompt=attempt.prompt.with_messages(evaluation.messages),
+                rendered_prompt=attempt.prompt.with_messages(
+                    _buffered_affective_candidate_messages(
+                        evaluation.messages,
+                        candidate_count=affective_candidate_count,
+                    )
+                ),
                 reuse_target=True,
                 metadata={"violation_codes": list(evaluation.violation_codes)},
             )
 
         generate_started = time.perf_counter()
-        model_deadline_ms = min(
-            governed_model_budget.deadline_ms,
-            max(
-                1,
-                min(
-                    120_000,
-                    _coerce_int(
-                        os.environ.get("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS"),
-                        default=60_000,
-                    ),
-                ),
-            ),
-        ) if governed_model_budget is not None else max(
-            1_000,
-            min(
-                120_000,
-                _coerce_int(
-                    os.environ.get("HOST_SURFACE_MODEL_ATTEMPT_DEADLINE_MS"),
-                    default=60_000,
-                ),
-            ),
-        )
+        model_deadline_ms = _surface_model_deadline_ms(governed_model_budget)
         if governed_model_budget is not None and model_deadline_ms <= 0:
             raise RuntimeError("MODEL_BUDGET_DEADLINE_EXHAUSTED")
         result = await ports.model_attempt_service().complete(
@@ -146,7 +738,15 @@ async def run_surface_main_chain_for_surface_reply_input(
                 request_id=request_id or "surface-main-chain",
                 scene_type="CHAT_SURFACE",
                 cognitive_tier="A",
-                prompt=PromptRef(prompt_id, {"messages": messages}),
+                prompt=PromptRef(
+                    prompt_id,
+                    {
+                        "messages": _buffered_affective_candidate_messages(
+                            messages,
+                            candidate_count=affective_candidate_count,
+                        )
+                    },
+                ),
                 deadline_ms=model_deadline_ms,
                 foreground=True,
                 retry_evaluator=_retry_evaluator,
@@ -167,6 +767,8 @@ async def run_surface_main_chain_for_surface_reply_input(
                 (time.perf_counter() - generate_started) * 1000
             )
             attempt_trace["message_count"] = len(messages)
+            if affective_candidate_count is not None:
+                attempt_trace["affective_candidate_count"] = affective_candidate_count
             trace_stage_meta["surface_model_attempt"] = attempt_trace
         if not result.success:
             raise RuntimeError(
@@ -176,6 +778,13 @@ async def run_surface_main_chain_for_surface_reply_input(
         content = str(result.content or "").strip()
         if not content:
             raise RuntimeError("SURFACE_LLM_EMPTY_RESPONSE")
+        if affective_candidate_count is not None:
+            return _select_buffered_affective_candidate(
+                raw_output=content,
+                compiled_request=compiled_request,
+                expected_candidate_count=affective_candidate_count,
+                trace_stage_meta=trace_stage_meta,
+            )
         return content
 
     return await SurfaceMainChain(
@@ -253,6 +862,51 @@ async def surface_main_chain_sse_generator(
             }
         )
         return
+
+    # DL-04 only changes calls that already carry the authenticated Affect
+    # Fusion hand-off.  Legacy inputs deliberately stay on the compatibility
+    # path until DL-06 removes their remaining parallel emotion writers.
+    if bool(_safe_mapping(getattr(agent_input, "emotion_context", None)).get("_affective_life_internal")):
+        try:
+            prepared_stream = _native_affective_stream_preparation(
+                agent_input,
+                ports=ports,
+                trace_stage_meta=trace,
+            )
+        except Exception as exc:
+            yield _sse(
+                {
+                    "phase": "COMMIT",
+                    "done": True,
+                    "decision": "REJECT",
+                    "reason_code": str(exc).split(":", 1)[0][:160] or "AFFECTIVE_TURN_PREPARE_FAILED",
+                    "narrative": "",
+                    "request_id": request_id,
+                    "audit_refs": {
+                        "request_id": request_id,
+                        "path": "surface_reply:native_affective_stream",
+                        "trace_stage_meta": {
+                            **trace,
+                            "surface_main_chain_used": True,
+                            "reply_source": "affective_turn_prepare_reject",
+                        },
+                    },
+                }
+            )
+            return
+        if prepared_stream is not None:
+            surface_input, compiled_request, plan = prepared_stream
+            async for event in _native_affective_sentence_stream(
+                agent_input,
+                ports=ports,
+                trace=trace,
+                surface_input=surface_input,
+                compiled_request=compiled_request,
+                plan=plan,
+                started_ms=started_ms,
+            ):
+                yield event
+            return
     try:
         result = await run_surface_main_chain_for_surface_reply_input(
             agent_input,

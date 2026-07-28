@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-03_CODE_COMPLETE_LOCAL`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-04_NATIVE_STREAM_LOCAL_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -27,6 +27,16 @@
 > Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与 Surface 的其它兼容
 > state 仍未清零，ExpressionPlan、真实模型和三模态服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
+
+DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
+`ExpressionPlanV1`，并在可信 internal AffectFusion hand-off 后由纯 planner 冻结。
+低歧义路径使用 `ModelAttemptService.stream()`，生产 Vault adapter 会调用 provider
+native stream；稳定句先写 `affective_turn_planned` / `surface_sentence_delivery_intent`
+到 canonical Life journal，再通过 SSE 可见。`0145_affective_turn_delivery.sql` 只从
+immutable event 派生 plan/sync/sentence digest projection。Surface model 结果不再拥有
+self-affect 写权；外部 emotion hint 也不会成为七海的情绪。高歧义回合保持两候 buffered
+selection；带 governed budget 的 stream 因缺最终 provider usage 仍禁止启用，TTS/Avatar、
+远端 Edge 和完整恢复验收也仍未完成。
 
 ## 1. 结论
 

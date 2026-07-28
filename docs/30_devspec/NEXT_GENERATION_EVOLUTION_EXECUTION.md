@@ -5,7 +5,7 @@
 
 版本：v4.3
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-03_CODE_COMPLETE_LOCAL / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-04_NATIVE_STREAM_LOCAL_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -147,13 +147,25 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 
 退出：裂痕、修复、主动权限和关系纹理跨重启恢复，跨用户泄漏=0。
 
-### DL-04：流式文本陪伴
+### DL-04：流式文本陪伴（本地切片已接线，未封板）
 
-- Surface 在生成前冻结 `AffectiveTurnPlanV1`；模型只生成自然措辞，不能自报或覆盖七海情绪。
-- 删除 text fallback 将情绪重置为 `NEUTRAL` 的路径；高歧义/修复/边界回合最多两候选选择优。
-- 稳定分句经一致性与非操控 Gate 后进入 durable delivery intent；打断只取消未发送分句。
+- `AffectiveTurnPlanV1`、`CompanionActV1` 与 `ExpressionPlanV1` 已在可信
+  Affect Fusion hand-off 后、模型调用前冻结；模型只负责措辞，Surface completion
+  不再把 `natsume_emotion_tag` 或纯文本 fallback 写回七海 self-affect。
+- 普通低歧义回合可经 `ModelAttemptService.stream()` 和真实 Vault provider stream
+  逐句输出。每个稳定分句先写 `surface_sentence_delivery_intent`，再发 SSE；计划、
+  句子 digest、sync id 与最终 foreground receipt 由 migration
+  `0145_affective_turn_delivery.sql` 从 immutable Life event 派生只读 projection。
+- 高歧义、边界或修复回合冻结为恰好两候的 buffered selection；本地 scorer 必须选择
+  一条后再经非操控 Gate 才可进入既有 buffered renderer。Gate 会在可见前拦截威胁、
+  排他、负罪施压和内部计划泄漏。取消会记录 sent count，不发送未
+  staging 的句子。
+- 本切片没有把受治理 Budget stream 伪装成已完成：当前 provider stream 尚不能返回
+  final canonical usage，带 node-bound guard 的请求仍走 usage-safe buffered path。
+  connection resume、TTS/Avatar、真实 Edge 和完整 Chat 路由实测仍未完成。
 
-退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan。
+退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
+Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。
 
 ### DL-05：语音与 Avatar 同轮表达
 

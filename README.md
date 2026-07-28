@@ -7,7 +7,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 > 当前唯一产品主线是“实时情感陪伴数字生命”（`NE-08 / DL-00～DL-07`）。工程治理、任务、模型、Gateway、Edge 和观测是支撑七海连续情感、关系与自然表达的底座，不是产品完成的替代品。现有 NE-01～NE-07 记录均为范围受限的历史基础证据；它们不能证明七海已拥有自身情感因果、长期修复或文本/语音/Avatar 同轮一致性。
 
-当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE`、fixture、目录数量或静态合同推导。DL-01 已在 canonical Life journal 内完成有界 mixed affect、episode、mood、need 与 regulation；DL-02 已把 Host Input 的用户观察、Fusion 与 Appraisal 接入该 journal，用户 SAD/ANGRY 不会被直接镜像为七海的自我情绪。DL-03 的本地切片已把“已接受回复 → provisional 关系 episode → 下一次用户输入的 aftereffect”写入同一 Life journal：关系按 `workspace + relationship subject` 连续、session 只作事件上下文，边界/误解不会被自动修复，沉默和投递失败不扣信任。Surface 只消费可信 hand-off 生成克制、非操控的回复约束，外部请求不能伪造它。旧 Bond 队列仍是兼容资产，生产默认已关闭按积分自动升级关系；流式文本、TTS/Avatar 同轮计划和旧 writer 清零仍由后续 DL 波次交付。远端 Edge 位于另一台电脑，未在本波启动。
+当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE`、fixture、目录数量或静态合同推导。DL-01 已在 canonical Life journal 内完成有界 mixed affect、episode、mood、need 与 regulation；DL-02 已把 Host Input 的用户观察、Fusion 与 Appraisal 接入该 journal，用户 SAD/ANGRY 不会被直接镜像为七海的自我情绪；DL-03 将“已接受回复 → provisional 关系 episode → 下一次用户输入的 aftereffect”写入同一 Life journal，边界/误解不会被自动修复，沉默和投递失败不扣信任。DL-04 当前完成一个本地真实切片：可信 Affect Fusion hand-off 会先冻结 `AffectiveTurnPlanV1`，普通低歧义回合可经生产 ModelAttempt 流逐句输出；每个稳定句先写入 Life journal 的 delivery intent，模型候选再也不能覆盖七海自己的情绪。高歧义/修复回合限制为两候选择优；受治理预算流因尚缺 provider-final canonical usage 仍保留 usage-safe buffered path。TTS/Avatar、远端 Edge、旧 writer 清零及完整服务栈验收均未完成，整体仍为 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`。远端 Edge 位于另一台电脑，未在本波启动。
 
 ## 历史基础设施状态（范围受限）
 

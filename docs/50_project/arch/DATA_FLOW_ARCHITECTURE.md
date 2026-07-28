@@ -544,6 +544,29 @@ reply compiler 才把它变成“尊重空间、不索取回应、不把修复�
 生产 `HostBondRuntime` 默认关闭 score-driven automatic stage transition；旧 Bond queue
 和 projection 仍为 compatibility，直到 DL-06 才能声称 writer usage=0。
 
+DL-04 的本地文本链只在上述 trusted hand-off 存在时启用 native sentence stream：
+它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由
+plain-text parser 将双方状态重置为 `NEUTRAL`。普通低歧义回合逐句 staging；高歧义、
+边界和修复回合保留两候 buffered selection。`0145_affective_turn_delivery.sql` 只投影
+plan/sync/sentence digest，不复制句子正文、原始观察或私密媒体。
+
+```mermaid
+flowchart LR
+    H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]
+    P -->|"low ambiguity"| M["ModelAttempt native text stream"]
+    P -->|"repair / conflict / boundary"| C["two-candidate buffered selection"]
+    M --> G["local consistency + non-manipulation Gate"]
+    G --> I["surface_sentence_delivery_intent\ncanonical Life journal"]
+    I --> S["SSE visible sentence"]
+    S --> F["foreground_completed + accepted relationship aftereffect"]
+    I --> R["0145 digest-only read projection"]
+```
+
+当前 stream adapter 尚不能携带 provider-final canonical usage；因此带 node-bound
+`ModelBudgetGuard` 的 Governed Chat 保持 usage-safe buffered path，不能为了首 token
+延迟静默去掉预算 authority。TTS、Avatar、connection resume、远端 Edge 与全服务栈
+验收仍不在这条本地文本切片的完成范围。
+
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor
