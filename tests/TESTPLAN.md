@@ -13,6 +13,24 @@
 - T-DL00-03：Motive willingness 映射必须单调：意愿越高，withdraw 增益越低；`0.0/0.2/0.5/0.7/1.0` 为固定边界。
 - T-DL00-04：`tests/fixtures/emotional_companion/dl00_multiturn_baseline_v1.json` 冻结 12 族、72 条合成多轮轨迹。它只定义后续真人/真实模型评估样本，当前状态为 `FROZEN_MEASUREMENT_PENDING`，不能记为体验 PASS。
 
+## T-DL01-AFFECTIVE-LIFE-KERNEL
+
+- T-DL01-01：`affective_observation_recorded` 只能保存 typed、脱敏
+  `UserAffectObservationV1` head；不得改变 self-affect revision、component、
+  mood 或 need。
+- T-DL01-02：只有 `affective_event_appraised` 能以
+  `EventAppraisalV1 + EmotionEpisodeV1` 形成 mixed self-affect；最多 4 个
+  active episode、8 个 component，真实时间推进必须按 episode half-life
+  确定性衰减。
+- T-DL01-03：`state_patch` 不得写 `identity/affective`；raw text/audio/image/
+  model-chain 键必须在 affective command reducer 失败关闭。
+- T-DL01-04：0143 `affective_life_event_v1` 只能由
+  `life_event_journal` trigger 写入，UPDATE/DELETE/direct insert 均必须失败；
+  读侧使用 `created_at_ms + event_id` compound cursor。
+- T-DL01-05：1002 个真实 file-backed SQLite Life event 的 duplicate、replay、
+  restart 必须得到同一 snapshot digest；这只证明 kernel local evidence，
+  不能提升为 Host ingress、真实模型、语音/Avatar 或体验验收 PASS。
+
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 
 - T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；

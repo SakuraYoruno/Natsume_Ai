@@ -28,7 +28,8 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
 
     assert report.status == PROGRAM_INCOMPLETE
     assert report.evaluated_commit_sha == receipt["commit_sha"]
-    assert report.migration_head == "0142_evolution_activation_authority.sql"
+    assert report.migration_head == "0143_affective_life_kernel.sql"
+    assert report.accepted_migration_head == "0142_evolution_activation_authority.sql"
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {
         "chat": "COMPLETE",
@@ -183,7 +184,7 @@ def test_manifest_rejects_unknown_evidence_commit(tmp_path: Path) -> None:
 def test_manifest_rejects_stale_migration_head(tmp_path: Path) -> None:
     payload = json.loads(MANIFEST.read_text(encoding="utf-8"))
     payload["evidence_binding"][
-        "migration_head"
+        "catalog_migration_head"
     ] = "0115_host_hard_state_journal.sql"
     candidate = tmp_path / "coverage.json"
     candidate.write_text(json.dumps(payload), encoding="utf-8")
@@ -215,7 +216,7 @@ def test_route_can_pass_only_with_exact_commit_and_migration_receipt(
     receipt_ref = payload["routes"]["chat"]["acceptance_binding"]["receipt_ref"]
     receipt = json.loads((ROOT / receipt_ref).read_text(encoding="utf-8"))
     payload["evidence_binding"]["evaluated_commit_sha"] = receipt["commit_sha"]
-    payload["evidence_binding"]["migration_head"] = receipt["migration_head"]
+    payload["evidence_binding"]["accepted_migration_head"] = receipt["migration_head"]
     payload["routes"]["chat"]["controls"]["budget_enforcement"] = "PASS"
     payload["routes"]["chat"]["controls"]["transactional_side_effects"] = "PASS"
     payload["routes"]["chat"]["controls"]["commit_bound_acceptance"] = "PASS"
