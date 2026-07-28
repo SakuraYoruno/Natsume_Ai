@@ -44,6 +44,12 @@ def test_t_persona_fence_01_direct_growth_write_fails_closed() -> None:
     assert engine.get_change_log("user-fence") == []
 
 
+def test_t_persona_fence_01_legacy_rollback_fails_closed() -> None:
+    engine = PersonaEngine.get_instance()
+    with pytest.raises(PersonaGrowthAuthorityError):
+        engine.rollback_last_change("user-fence")
+
+
 def test_t_persona_fence_01_migration_requires_complete_audit_authority() -> None:
     engine = PersonaEngine.get_instance()
 
@@ -112,13 +118,17 @@ def test_t_persona_fence_01_static_scan_rejects_new_runtime_writer(
     bad.parent.mkdir(parents=True)
     bad.write_text(
         "def mutate(engine, delta):\n"
-        "    return engine.apply_growth_delta('u', delta, reason='bad')\n",
+        "    engine.apply_growth_delta('u', delta, reason='bad')\n"
+        "    return engine.rollback_last_change('u')\n",
         encoding="utf-8",
     )
 
     violations = scan_file(bad, root=tmp_path)
 
-    assert [row["rule_id"] for row in violations] == ["T-PERSONA-FENCE-01"]
+    assert [row["rule_id"] for row in violations] == [
+        "T-PERSONA-FENCE-01",
+        "T-PERSONA-FENCE-01",
+    ]
     assert "Legacy persona growth write" in violations[0]["message"]
 
 

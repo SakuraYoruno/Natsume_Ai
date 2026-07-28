@@ -666,7 +666,14 @@ flowchart LR
 
 ## 11. 当前过渡边界
 
-NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedback、Knowledge 和 Identity 只能先写 proposal/plan，再由独立 Lab/Review evidence 产生 append-only apply/activation/rollback event。active Knowledge 通过 workspace-scoped read projection 提供，任何旧 Memory、Persona 或 Identity writer 都不能绕过该 ledger；当前仍处于 partial/canary 前阶段。
+NE-06 的长期演化写 authority 已收敛到 0142 V2 repository 与
+`EvolutionVersionActivationService`。Feedback、Knowledge 和 Identity 必须先产生
+proposal/plan，再查询真实 trusted Lab、精确 Review、版本内容、regression 与
+rollback target；decision、幂等 operation、active projection 和 terminal receipt
+在同一 SQLite UoW 提交。0110 V1 仅保留只读历史，数据库 trigger 会拒绝新写。
+active Knowledge 通过 workspace-scoped SHADOW/CANARY/ENFORCE reader 提供，
+当前默认 SHADOW；Identity release service 已进入生产 Composition，但真实部署、
+ENFORCE 与 rollback 演练仍由 NE-07 验收。
 
 系统仍处于迁移期，但 Executive 执行兼容层中的 `route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 与内存任务真相已经退役；其内部的 Forge route override call 和独立 Forge approval/runtime-match authority 也已移除，残留的 runtime/app guard 只能 fail-closed 拒绝，纯 SkillDag adapter 无生产调用。cycle 只能输出空 batch 并在适配层归一为 `PLAN_CYCLE`，不能被重排成串行执行。Forge 只保留 proposal source，prompt intelligence 也只能产生不带执行结果的计划提示：
 
@@ -679,7 +686,7 @@ NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedb
 | Typed task composition；生产 Service Locator 已物理清零；0112 readiness 与 Catalog SQLite 已归 repository，Obs daemon 由 ports claim + 唯一 lifespan 启停并向 `/health` 暴露 app-local secret-free supervision | 外部 namespace、`host_startup.py`/ASGI concrete Catalog wiring、真实 workspace-bound governed executor、daemon durable SLO journal/Guardian acknowledgement/production canary 仍缺 |
 | Acceptance effect intents | 零散 fire-and-forget 后效 |
 | ASGI app-local Runtime Context、0111 World observation/resolver、0112 Scene/Guardian、0137 长期目标 owner、三消费者 Scene identity、durable Intent admission、Action Preview authority、0113 Host Catalog 五阶段及本地波次 | Bond 上游原始证据、Windows graceful stop、其余 Governed Operator 功能迁移、legacy compatibility adapter 清理与部署多实例 canary 尚未收口 |
-| Proposal-driven evolution（目标） | Persona legacy writer 已封口；无副作用 candidate 尚未接 proposal pipeline |
+| 0142 proposal-driven evolution | Persona legacy writer 已封口；Feedback/Knowledge/Identity 已接真实 Lab、Review、版本激活和 exact rollback，本地代码波次通过，部署 ENFORCE 与全栈恢复待 NE-07 |
 
 过渡期文档必须同时画出两侧，并明确哪一侧拥有 authority。隐藏兼容层会制造虚假的完成结论。
 

@@ -215,6 +215,8 @@ class ProcessTaskRuntimeContainer:
     terminal_reconciliation_auto_result: Mapping[str, Any]
     startup_publish_result: Mapping[str, Any]
     owner_process_id: int
+    evolution_activation_service_provider: Callable[[], Any] | None = None
+    evolution_scope_provider: Callable[[], tuple[str, str]] | None = None
     _bound_runtime: Any | None = field(default=None, init=False, repr=False)
     _activated: bool = field(default=False, init=False, repr=False)
     _lifecycle_retry_required: bool = field(
@@ -766,6 +768,8 @@ def build_process_task_runtime_container(
     feature_canary_public_keys: Mapping[str, bytes] | None = None,
     terminal_reconciliation_auto_enabled: bool = False,
     authenticated_outcome_lookup: Callable[[str], Any | None] | None = None,
+    evolution_activation_service_provider: Callable[[], Any] | None = None,
+    evolution_scope_provider: Callable[[], tuple[str, str]] | None = None,
 ) -> ProcessTaskRuntimeContainer:
     """Migrate and construct one fail-closed durable infrastructure graph."""
 
@@ -1019,6 +1023,10 @@ def build_process_task_runtime_container(
         ),
         startup_publish_result=dict(startup_publish_result),
         owner_process_id=os.getpid(),
+        evolution_activation_service_provider=(
+            evolution_activation_service_provider
+        ),
+        evolution_scope_provider=evolution_scope_provider,
     )
 
 

@@ -505,19 +505,54 @@ class PersonaEngine:
             return list(records[-limit:])
 
     def rollback_last_change(self, user_id: str) -> PersonalityTraits | None:
-        """回滚最近一次特质变化（安全机制）。
+        """Reject the former unauthenticated persona rollback writer."""
 
-        Returns:
-            回滚后的特质，如果无变化记录则返回 None
-        """
+        del user_id
+        raise PersonaGrowthAuthorityError()
+
+    def rollback_last_migration_change(
+        self,
+        user_id: str,
+        *,
+        authority: PersonaGrowthMigrationAuthority,
+    ) -> PersonalityTraits | None:
+        """Rollback only the exact migration record named by its authority."""
+
+        if not isinstance(authority, PersonaGrowthMigrationAuthority):
+            raise PersonaGrowthAuthorityError(
+                "persona migration authority is required"
+            )
+        migration_id = str(authority.migration_id or "").strip()
+        actor_id = str(authority.actor_id or "").strip()
+        evidence_ref = str(authority.evidence_ref or "").strip()
+        if (
+            not migration_id.startswith("persona-migration:")
+            or not actor_id
+            or not evidence_ref
+        ):
+            raise PersonaGrowthAuthorityError(
+                "persona migration rollback authority is incomplete"
+            )
         uid = str(user_id).strip()
+        if not uid:
+            raise ValueError("user_id must not be empty")
+        authority_ref = f"{migration_id}|{actor_id}|{evidence_ref}"
         with self._lock:
             records = self._change_log.get(uid, [])
             if not records:
                 _logger.warning("用户 %s 无特质变化记录，无法回滚", uid)
                 return None
 
-            last_record = records.pop()
+            last_record = records[-1]
+            if (
+                last_record.authority_kind != "MIGRATION"
+                or last_record.authority_ref != authority_ref
+            ):
+                raise PersonaGrowthAuthorityError(
+                    "persona migration rollback authority does not "
+                    "match the latest record"
+                )
+            records.pop()
             # 恢复到变化前的状态
             restored = PersonalityTraits.from_dict(last_record.before)
             self._user_traits[uid] = restored

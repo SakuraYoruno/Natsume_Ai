@@ -5,11 +5,31 @@ from types import SimpleNamespace
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
 from host_brain.tribe.application_ports import TribeApplicationPorts
 from host_brain.tribe.tribe_state import TribeStateRegistry
+from host_brain.persona.personality_traits import DEFAULT_BASELINE
 
 
 def _build_prefrontal_agent(**kwargs) -> PrefrontalAgent:
     kwargs.setdefault("state_registry", TribeStateRegistry())
     return PrefrontalAgent(**kwargs)
+
+
+class _FakeEvolutionService:
+    def __init__(self) -> None:
+        self.staged: list[dict[str, object]] = []
+        self.expression_preferences = None
+
+    def resolve_persona_traits(self, **_kwargs):
+        return dict(DEFAULT_BASELINE)
+
+    def resolve_expression_preferences(self, **_kwargs):
+        return self.expression_preferences
+
+    def stage_persona_feedback(self, **kwargs):
+        self.staged.append(dict(kwargs))
+        return {
+            "status": "STAGED",
+            "proposal": {"proposal_id": "feedback-proposal://unit"},
+        }
 
 
 class _FakeLogger:
@@ -274,13 +294,22 @@ def test_prefrontal_run_growth_feedback_cycle(monkeypatch) -> None:
     class _FakeTracker:
         def on_interaction_cycle(self, **kwargs):
             captured["tracker_kwargs"] = kwargs
-            return SimpleNamespace(applied=True, triggered_rules=["rule_A"])
+            return SimpleNamespace(
+                applied=False,
+                triggered_rules=["rule_A"],
+                candidate_delta={"warmth": 0.01},
+            )
 
     monkeypatch.setattr("host_brain.bond.user_identity.resolve_bond_user_id", lambda session_id: f"user::{session_id}")
     monkeypatch.setattr("host_brain.persona.growth_feedback_collector.GrowthFeedbackCollector", _FakeCollector)
     monkeypatch.setattr("host_brain.persona.persona_growth.PersonaGrowthTracker", _FakeTracker)
 
-    result = _build_prefrontal_agent().run_growth_feedback_cycle(
+    evolution = _FakeEvolutionService()
+    result = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            evolution_activation_service=lambda: evolution,
+        ),
+    ).run_growth_feedback_cycle(
         session_id="s-001",
         user_message="continue",
         assistant_reply="ok",
@@ -289,9 +318,16 @@ def test_prefrontal_run_growth_feedback_cycle(monkeypatch) -> None:
     assert result == {
         "user_id": "user::s-001",
         "feedback_count": 2,
-        "applied": True,
+        "applied": False,
+        "proposal": {
+            "status": "STAGED",
+            "proposal": {
+                "proposal_id": "feedback-proposal://unit"
+            },
+        },
         "triggered_rules": ["rule_A"],
     }
+    assert evolution.staged[0]["source_kind"] == "response_feedback"
     assert captured["feedback_calls"] == [
         ("user::s-001", "signal_1"),
         ("user::s-001", "signal_2"),
@@ -302,14 +338,27 @@ def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
     class _FakeTracker:
         def on_stage_promoted(self, **kwargs):  # noqa: ANN003
             assert kwargs["to_stage"] == "CONFIDANT"
-            return SimpleNamespace(applied=True, reason="stage-ok")
+            return SimpleNamespace(
+                applied=False,
+                reason="stage-ok",
+                candidate_delta={"warmth": 0.01},
+            )
 
         def on_milestone(self, **kwargs):  # noqa: ANN003
             assert kwargs["milestone_key"] == "stage_promoted"
-            return SimpleNamespace(applied=True, reason="milestone-ok")
+            return SimpleNamespace(
+                applied=False,
+                reason="milestone-ok",
+                candidate_delta={"curiosity": 0.01},
+            )
 
     monkeypatch.setattr("host_brain.persona.persona_growth.PersonaGrowthTracker", _FakeTracker)
-    agent = _build_prefrontal_agent()
+    evolution = _FakeEvolutionService()
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            evolution_activation_service=lambda: evolution,
+        ),
+    )
 
     promoted = agent.apply_stage_promotion_growth(
         user_id="u-growth",
@@ -323,8 +372,16 @@ def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
         ts_ms=101,
     )
 
-    assert promoted == {"applied": True, "reason": "stage-ok"}
-    assert milestone == {"applied": True, "reason": "milestone-ok"}
+    assert promoted["applied"] is False
+    assert promoted["reason"] == "stage-ok"
+    assert promoted["proposal"]["status"] == "STAGED"
+    assert milestone["applied"] is False
+    assert milestone["reason"] == "milestone-ok"
+    assert milestone["proposal"]["status"] == "STAGED"
+    assert [item["source_kind"] for item in evolution.staged] == [
+        "bond_stage_promotion",
+        "relationship_milestone",
+    ]
 
 
 def test_prefrontal_evolution_event_deferred_by_resource_gate(monkeypatch) -> None:
@@ -437,10 +494,16 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
             return {"relationship_signal_density": 0.8}
 
     class _GrowthResult:
-        applied = True
+        applied = False
+        candidate_delta = {"curiosity": 0.01}
+        guard_result = {"allowed": True}
 
         def as_dict(self):
-            return {"applied": True, "reason": "weekly"}
+            return {
+                "applied": False,
+                "candidate_delta": dict(self.candidate_delta),
+                "reason": "weekly",
+            }
 
     class _Analyzer:
         def __init__(self, llm_fn=None, strict_llm=False):  # noqa: ANN001
@@ -479,7 +542,12 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
         _Analyzer,
     )
 
-    agent = _build_prefrontal_agent()
+    evolution = _FakeEvolutionService()
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            evolution_activation_service=lambda: evolution,
+        ),
+    )
     agent._emergent_growth_engine = _EmergentEngine()
 
     weekly = agent.run_emergent_growth_weekly(
@@ -490,9 +558,10 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
     )
     status = agent.resolve_emergent_growth_status(user_id="user-eg", recent_limit=5)
 
-    assert weekly["status"] == "OK"
+    assert weekly["status"] == "PROPOSED"
     assert weekly["pattern_result"]["relationship_signal_density"] == 0.8
-    assert weekly["growth_result"]["applied"] is True
+    assert weekly["growth_result"]["applied"] is False
+    assert weekly["proposal"]["status"] == "STAGED"
     assert status["growth_summary"]["weekly_cycles"] == 1
     assert status["recent_growth_log"][0]["cycle"] == 1
 
@@ -616,7 +685,60 @@ def test_prefrontal_resolve_persona_expression_hint(monkeypatch) -> None:
         "echo_weight_modifier": 0.15,
         "follow_up_tendency": 0.4,
         "pace_hint": "steady",
+        "preference_policy_active": False,
     }
+
+
+def test_prefrontal_consumes_only_activated_expression_policy(
+    monkeypatch,
+) -> None:
+    class _FakeAdapter:
+        def adapt(self, *_args, **_kwargs):
+            return SimpleNamespace(
+                style_hint="自然回应",
+                tone="gentle",
+                echo_weight_modifier=0.0,
+                follow_up_tendency=0.0,
+                pace_hint="steady",
+            )
+
+    evolution = _FakeEvolutionService()
+    evolution.expression_preferences = {
+        "schema": "natsume.expression-preference-policy.v1",
+        "positive_feedback_count": 0,
+        "negative_feedback_count": 2,
+        "tag_scores": {
+            "template_like": -2,
+            "ai_tone": -1,
+        },
+    }
+    monkeypatch.setattr(
+        "host_brain.persona.expression_adapter.PersonaExpressionAdapter",
+        _FakeAdapter,
+    )
+    monkeypatch.setattr(
+        PrefrontalAgent,
+        "resolve_persona_traits",
+        lambda self, *, persona_user_id: {"uid": persona_user_id},
+    )
+    result = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            evolution_activation_service=lambda: evolution,
+        ),
+    ).resolve_persona_expression_hint(
+        persona_user_id="user-3",
+        bond_stage="FRIEND",
+        user_emotion_tag="HAPPY",
+        user_message="继续",
+        valence=0.4,
+        arousal=0.5,
+        dominance=0.3,
+        ts_ms=123,
+    )
+
+    assert result["preference_policy_active"] is True
+    assert "避免模板化分段" in result["style_hint"]
+    assert "避免机械 AI 腔" in result["style_hint"]
 
 
 def test_prefrontal_resolve_bond_style_instruction(monkeypatch) -> None:

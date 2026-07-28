@@ -109,11 +109,19 @@ class EmergentGrowthResult:
     emergent_growth_note: str = ""
     """成长感知文本（注入 self_reflection_pulse，第一人称）"""
 
+    candidate_delta: dict[str, float] = field(default_factory=dict)
+    """通过门禁但尚未激活的候选，只能进入 Feedback proposal。"""
+
+    guard_result: dict[str, Any] = field(default_factory=dict)
+    """候选门禁证据；不能解释为已应用。"""
+
     def as_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
             "applied": self.applied,
             "skip_reason": self.skip_reason,
             "emergent_growth_note": self.emergent_growth_note,
+            "candidate_delta": dict(self.candidate_delta),
+            "guard_result": dict(self.guard_result),
         }
         if self.record:
             result["record"] = self.record.as_dict()
@@ -357,6 +365,8 @@ class EmergentGrowthEngine:
         )
         return EmergentGrowthResult(
             applied=False,
+            candidate_delta=candidate_delta,
+            guard_result=guard_result_dict,
             skip_reason=(
                 "PERSONA_GROWTH_PROPOSAL_REQUIRED: 候选未应用，等待 "
                 f"proposal/Review/version activation; candidate={candidate_delta}; "

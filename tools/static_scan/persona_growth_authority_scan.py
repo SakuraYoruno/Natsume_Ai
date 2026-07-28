@@ -63,8 +63,20 @@ def scan_file(
                         ),
                     )
                 )
+            elif called == "rollback_last_change":
+                violations.append(
+                    _violation(
+                        path=relative,
+                        node=node,
+                        message=(
+                            "Legacy persona rollback write detected; runtime "
+                            "rollback must use the version activation authority"
+                        ),
+                    )
+                )
             elif called in {
                 "apply_migration_growth_delta",
+                "rollback_last_migration_change",
                 "PersonaGrowthMigrationAuthority",
             } and not relative.startswith(MIGRATION_PREFIX):
                 violations.append(

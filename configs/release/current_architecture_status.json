@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "9ddeadc1e4d9c45459374bc11bee300e883a7c3c",
+    "dev_commit": "2c67f143a44eb08cdeb66123a899011105fa93fc",
     "repository_cleanup_commit": "f0cd1dfd7",
     "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE05_SKILL_LIFECYCLE_V2_LOCAL_WAVE_PASS_EXTERNAL_CANARY_PENDING_NE07_PROGRAM_INCOMPLETE"
+    "evaluated_source": "NE06_EVOLUTION_ACTIVATION_V2_LOCAL_WAVE_PASS_FULL_STACK_PENDING_NE07_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-05",
-  "active_wave_status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
-  "active_wave_detail": "NE05_V2_ACTIVATION_MATURITY_ACTIVE_PROJECTION_AND_HOST_RESOLVER_WIRED_181_PASS_1_SYMLINK_SKIP_REAL_EXTERNAL_BUNDLE_PROVIDER_CANARY_NOT_RUN",
-  "next_wave": "NE-06",
+  "active_wave": "NE-06",
+  "active_wave_status": "COMPLETED",
+  "active_wave_detail": "NE06_V2_FEEDBACK_KNOWLEDGE_IDENTITY_ACTIVATION_AND_EXACT_ROLLBACK_WIRED_199_PASS_ARCHITECTURE_GATES_1_TO_14_PASS_REAL_FULL_STACK_NOT_RUN",
+  "next_wave": "NE-07",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -26,6 +26,44 @@
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
   "active_wave_local_validation": {
+    "ne06_evolution_activation_v2_current_validation": {
+      "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
+      "implementation_parent": "origin/dev@2c67f143a44eb08cdeb66123a899011105fa93fc",
+      "migration_head": "0142_evolution_activation_authority.sql",
+      "authority": "ONE_SQLITE_UOW_FOR_VERSION_DECISION_IDEMPOTENCY_OPERATION_ACTIVE_PROJECTION_AND_TERMINAL_TRANSITION_RECEIPT",
+      "legacy_v1_boundary": "0110_TABLES_QUERY_ONLY_AND_PHYSICALLY_FENCED_AGAINST_NEW_MUTATION",
+      "feedback": "TASK_VERIFICATION_USER_REJECTION_TOOL_RELIABILITY_RESPONSE_FEEDBACK_STAGE_MILESTONE_INTERACTION_AND_EMERGENT_SIGNALS_ARE_PROPOSAL_ONLY_UNTIL_REAL_LAB_AND_REVIEW_ACTIVATION_SWITCH_THE_VERSIONED_POLICY_OR_PERSONA_PROJECTION",
+      "failure_evidence": "PIPELINE_ERRORS_PERSIST_PRIVACY_BOUNDED_FAILURE_EVIDENCE_AND_SURFACE_BODY_FREE_COUNTS_TO_OBS_WITHOUT_BLOCKING_THE_PRIMARY_CHAT_COMMAND",
+      "knowledge": "WORKSPACE_SCOPED_LIFE_AND_PROJECT_NAMESPACES_ACTIVE_WINNER_CURSOR_SUPERSEDES_DEPRECATION_DEDUP_CONFLICT_TTL_DECISION_RECORD_BACKFILL_SHADOW_COMPARE_CANARY_AND_ENFORCE_READER",
+      "knowledge_cutover": "DEFAULT_SHADOW_PRODUCTION_READER_CANARY_AND_ENFORCE_REQUIRE_NE07_REAL_SERVICE_ACCEPTANCE_LEGACY_DIRECT_WRITERS_FAIL_CLOSED",
+      "identity": "RELEASE_CHAIN_PREPARE_REGRESSION_REAL_LAB_AND_REVIEW_BINDING_ATOMIC_ACTIVE_SNAPSHOT_SWITCH_NO_CHANGE_RELEASE_MAJOR_DIFF_BLOCK_AND_EXACT_PREVIOUS_SNAPSHOT_ROLLBACK",
+      "persona_writer_boundary": "ALL_LEGACY_RUNTIME_APPLY_AND_ROLLBACK_ENTRY_POINTS_FAIL_CLOSED_ONLY_EXPLICIT_MIGRATION_AUTHORITY_CAN_CHANGE_TRAITS",
+      "migration_smoke": "FRESH_0001_TO_0142_PASS",
+      "wave_validation": "199_PASSED_IN_73_74_SECONDS",
+      "post_layering_validation": "51_PASSED_IN_28_16_SECONDS_OVERLAPS_WAVE_AND_IS_NOT_ADDED",
+      "legacy_release_environment_regression": "27_PASSED_IN_0_99_SECONDS_OVERLAPPING_NOT_ADDED",
+      "architecture_static_gates": "PASS_GATES_1_TO_14_FAILED_GATES_EMPTY_AFTER_NEUTRAL_SEMANTIC_RECALL_CONTRACT_AND_PREFRONTAL_POLICY_SPLIT",
+      "persona_authority_scan": "PASS_ZERO_VIOLATIONS",
+      "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+      "not_run": [
+        "NE-07 real Docker Neo4j Chroma Redis and full service stack",
+        "deployed Knowledge OS ENFORCE cutover",
+        "real release deployment identity activation and rollback",
+        "external model provider and hardware acceptance"
+      ],
+      "evidence_refs": [
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "host_brain/contracts/evolution.py",
+        "host_brain/evolution/version_activation.py",
+        "host_brain/evolution/knowledge_recaller.py",
+        "host_brain/evolution/task_feedback.py",
+        "host_brain/persistence/evolution_activation_v2_repository.py",
+        "host_brain/release/identity_activation.py",
+        "host_brain/composition/host_evolution_runtime.py",
+        "tests/integration/test_ne06_evolution_activation_v2.py",
+        "tests/integration/test_ne06_evolution_governance_ledger.py"
+      ]
+    },
     "ne05_skill_lifecycle_v2_current_validation": {
       "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "migration_head": "0141_skill_lifecycle_authority.sql",
@@ -6136,55 +6174,65 @@
       "boundary": "Markdown/API/script/accepted-trace metadata compiles to deterministic SkillDraftV1, inventory, CycloneDX SBOM, signature request and content-addressed bundle with contracts, verifier, test vectors, budget and rollback metadata. Accepted trace requires accepted receipt/artifact digest binding; raw thought, private body, secrets and signing private keys are rejected. The compiler never imports or activates source."
     },
     "experience_feedback_pipeline": {
-      "status": "LEDGER_ONLY_NO_ACTIVATION_AUTHORITY",
+      "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "evidence_refs": [
         "host_brain/tribe/prefrontal_agent.py",
-        "host_brain/evolution/contracts.py",
-        "host_brain/persistence/evolution_governance_ledger.py",
-        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
-        "tests/integration/test_ne06_evolution_governance_ledger.py"
+        "host_brain/evolution/task_feedback.py",
+        "host_brain/evolution/version_activation_feedback.py",
+        "host_brain/persistence/evolution_activation_v2_feedback.py",
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
       ],
-      "reason": "PR #83 fixes one bounded interaction_stats call and stores event-named V1 rows, but APPLIED does not switch a versioned policy/persona projection and Lab/Review refs are not resolved against real authorities."
+      "boundary": "Every enabled feedback source stages an immutable proposal; APPLIED reopens a trusted Lab report and exact ReviewItem before changing the active versioned policy/persona projection. Failures are durable and visible to Obs. Real deployed provider/full-stack acceptance remains NE-07."
     },
     "persona_growth_authority": {
-      "status": "CENTRAL_FENCE_WIRED",
+      "status": "CODE_COMPLETE_PROPOSAL_ONLY_RUNTIME_AND_REVIEWED_VERSION_ACTIVATION",
       "legacy_direct_writers": "BLOCKED",
       "migration_path": "EXPLICIT_AUDITED_ONLY",
-      "proposal_activation": "PENDING_NE_06",
-      "blocked_entry_classes": [
+      "proposal_activation": "WIRED_REAL_LAB_REVIEW_AND_EXACT_ROLLBACK",
+      "proposal_entry_classes": [
         "bond stage or milestone candidate",
         "interaction cycle candidate",
         "scheduler-allowed emergent weekly candidate"
       ],
-      "reason": "PersonaEngine centrally rejects every legacy runtime growth write; current stage, milestone, interaction, and emergent paths return candidates without mutating traits or consuming one-time/history state.",
+      "boundary": "Runtime growth entry points only stage FeedbackProposalV1. PersonaEngine centrally rejects direct apply and rollback; only an exact migration authority may change traits after the V2 activation service commits a reviewed version receipt.",
       "evidence_refs": [
         "host_brain/persona/persona_engine.py",
+        "host_brain/evolution/version_activation_feedback.py",
         "tools/static_scan/persona_growth_authority_scan.py",
-        "tests/unit/test_ne01_persona_growth_authority.py"
-      ],
-      "required_action": "REPLACE_BLOCKED_CANDIDATES_WITH_GOVERNED_PROPOSAL_PIPELINE_IN_NE_06"
+        "tests/unit/test_ne01_persona_growth_authority.py",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
+      ]
     },
     "knowledge_os": {
-      "status": "LEDGER_ONLY_NO_ACTIVE_AUTHORITY",
+      "status": "CODE_COMPLETE_LOCAL_DEFAULT_SHADOW_ACCEPTANCE_PENDING_NE07",
       "evidence_refs": [
-        "host_brain/evolution/contracts.py",
-        "host_brain/persistence/evolution_governance_ledger.py",
-        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
-        "tests/integration/test_ne06_evolution_governance_ledger.py"
+        "host_brain/contracts/evolution.py",
+        "host_brain/evolution/version_activation_knowledge.py",
+        "host_brain/evolution/knowledge_recaller.py",
+        "host_brain/persistence/evolution_activation_v2_knowledge.py",
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
       ],
-      "boundary": "PR #83 stores two namespace event rows, but active winner, cursor paging, supersedes, deprecation, dedup, conflict resolution and production retrieval cutover are not implemented. Existing Memory, Markdown KB, Canon and Pentest stores remain the active readers/writers."
+      "boundary": "V2 owns workspace-scoped life/project namespaces, active winner, cursor paging, supersedes, deprecation, dedup, conflicts, TTL and DecisionRecord. Host retrieval is wired through shadow/canary/enforce modes, but defaults to SHADOW until NE-07 validates real Chroma/Neo4j and deployment cutover."
     },
-    "identity_snapshot": {"status": "PARTIAL", "release_gate_default": "DISABLED"},
+    "identity_snapshot": {
+      "status": "CODE_COMPLETE_LOCAL_RELEASE_GATE_DEFAULT_ENFORCE",
+      "release_gate_default": "ENABLED",
+      "boundary": "Explicit disable now fails release closed. Production deployment of a real release pair remains an NE-07 acceptance item."
+    },
     "identity_migration": {
-      "status": "LEDGER_ONLY_NO_ACTIVATION_AUTHORITY",
+      "status": "CODE_COMPLETE_LOCAL_WAVE_PASS_ACCEPTANCE_PENDING_NE07",
       "evidence_refs": [
-        "host_brain/evolution/contracts.py",
-        "host_brain/evolution/production_composition.py",
-        "host_brain/persistence/evolution_governance_ledger.py",
-        "host_brain/audit/migrations/0110_evolution_governance_ledger.sql",
-        "tests/integration/test_ne06_evolution_governance_ledger.py"
+        "host_brain/contracts/evolution.py",
+        "host_brain/evolution/version_activation_identity.py",
+        "host_brain/release/identity_snapshot.py",
+        "host_brain/release/identity_activation.py",
+        "host_brain/persistence/evolution_activation_v2_identity.py",
+        "host_brain/audit/migrations/0142_evolution_activation_authority.sql",
+        "tests/integration/test_ne06_evolution_activation_v2.py"
       ],
-      "boundary": "PR #83 persists event-named V1 rows only. ACTIVE does not switch the IdentitySnapshot owner, ROLLED_BACK does not restore the exact previous snapshot/version, evidence refs are not resolved, and the transition identity cannot represent repeated releases safely."
+      "boundary": "IdentityMigrationPlanV2 reopens real trusted Lab, Review, regression and snapshot authorities; activation changes the canonical snapshot owner atomically and rollback restores the exact previous snapshot/version. No-change passes and major differences block by default. Real release deployment remains NE-07."
     }
   },
   "full_stack_acceptance": {

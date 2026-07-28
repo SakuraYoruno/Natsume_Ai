@@ -20,6 +20,7 @@ from host_brain.persona.personality_traits import (
 )
 from host_brain.persona.persona_engine import (
     PersonaEngine,
+    PersonaGrowthAuthorityError,
     PersonaGrowthMigrationAuthority,
     TraitChangeRecord,
 )
@@ -373,37 +374,46 @@ class TestVIV5_AuditAndRollback:
     def test_rollback_restores_previous_state(self):
         """显式迁移写入后可回滚到先前状态。"""
         before = self.engine.get_traits("user1")
+        authority = _migration_authority("rollback")
         self.engine.apply_migration_growth_delta(
             "user1",
             TraitsDelta(playfulness=0.05),
-            authority=_migration_authority("rollback"),
+            authority=authority,
             reason="legacy state backfill",
         )
         after_growth = self.engine.get_traits("user1")
         assert after_growth.playfulness != before.playfulness
 
-        restored = self.engine.rollback_last_change("user1")
+        restored = self.engine.rollback_last_migration_change(
+            "user1",
+            authority=authority,
+        )
         assert restored is not None
         assert restored.playfulness == pytest.approx(before.playfulness, abs=0.001)
 
     def test_multiple_growths_and_rollback(self):
         """多次迁移写入后逐次回滚。"""
         before = self.engine.get_traits("user1")
+        first_authority = _migration_authority("multi-1")
+        second_authority = _migration_authority("multi-2")
         self.engine.apply_migration_growth_delta(
             "user1",
             TraitsDelta(warmth=0.03),
-            authority=_migration_authority("multi-1"),
+            authority=first_authority,
             reason="legacy state backfill 1",
         )
         self.engine.apply_migration_growth_delta(
             "user1",
             TraitsDelta(humor=0.05),
-            authority=_migration_authority("multi-2"),
+            authority=second_authority,
             reason="legacy state backfill 2",
         )
 
         # 回滚最后一次（CLOSE_FRIEND→CONFIDANT）
-        r1 = self.engine.rollback_last_change("user1")
+        r1 = self.engine.rollback_last_migration_change(
+            "user1",
+            authority=second_authority,
+        )
         assert r1 is not None
         mid = self.engine.get_traits("user1")
         assert mid.warmth == pytest.approx(before.warmth + 0.03, abs=0.001)
@@ -510,7 +520,8 @@ class TestPhaseIV_EndToEnd:
         # 4. 未发生写入，不生成变更审计
         log = self.engine.get_change_log("e2e_user")
         assert log == []
-        assert self.engine.rollback_last_change("e2e_user") is None
+        with pytest.raises(PersonaGrowthAuthorityError):
+            self.engine.rollback_last_change("e2e_user")
 
     def test_guard_protects_immutable_core(self):
         """完整流程中不可变核心保护生效。"""

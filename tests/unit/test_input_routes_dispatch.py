@@ -259,6 +259,135 @@ def test_receive_input_gateway_progress_fastpath_fallbacks_to_dispatch() -> None
     assert dispatch_mock.await_count == 1
 
 
+def test_receive_input_stages_explicit_feedback_as_version_proposal() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_feedback_001",
+        person_id="person-feedback",
+        content="这句话太模板了，不像她",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+    staged: list[dict[str, object]] = []
+
+    class _EvolutionService:
+        def stage_expression_feedback(self, **kwargs):
+            staged.append(dict(kwargs))
+            return {
+                "status": "STAGED",
+                "proposal": {
+                    "proposal_id": "feedback-proposal://sha256/"
+                    + "a" * 64,
+                },
+            }
+
+    with patch(
+        "host_brain.input_runtime.ingress._dispatch_to_graph",
+        new=dispatch_mock,
+    ), patch(
+        "host_brain.input_runtime.ingress."
+        "_record_feedback_for_latest_persona_reply",
+        return_value={
+            "target_request_id": "reply-request-001",
+            "target_text_hash": "b" * 40,
+            "feedback_score": -1.0,
+            "feedback_tags": ["template_like", "out_of_persona"],
+            "feedback_source": "user_explicit",
+        },
+    ), patch(
+        "host_brain.input_runtime.ingress._log_input_event"
+    ) as audit:
+        response = _run(
+            receive_input(
+                body,
+                SimpleNamespace(),
+                ports=_ports(
+                    get_evolution_activation_service=(
+                        lambda: _EvolutionService()
+                    ),
+                    get_evolution_scope=(
+                        lambda: ("workspace-feedback", "natsume_ai")
+                    ),
+                ),
+            )
+        )
+
+    assert response.status == "ACCEPTED"
+    assert dispatch_mock.await_count == 1
+    assert len(staged) == 1
+    assert staged[0]["workspace_id"] == "workspace-feedback"
+    assert staged[0]["subject_id"] == "person-feedback"
+    proposal_events = [
+        call.kwargs
+        for call in audit.call_args_list
+        if call.kwargs.get("phase")
+        == "INPUT_FEEDBACK_PROPOSAL_STAGED"
+    ]
+    assert len(proposal_events) == 1
+    assert proposal_events[0]["status"] == "STAGED"
+
+
+def test_receive_input_records_feedback_failure_without_blocking_command() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq_feedback_failure",
+        person_id="person-feedback",
+        content="不要使用这种表达",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+
+    class _EvolutionService:
+        def stage_expression_feedback(self, **_kwargs):
+            raise RuntimeError("feedback-ledger-unavailable")
+
+    with patch(
+        "host_brain.input_runtime.ingress._dispatch_to_graph",
+        new=dispatch_mock,
+    ), patch(
+        "host_brain.input_runtime.ingress."
+        "_record_feedback_for_latest_persona_reply",
+        return_value={
+            "target_request_id": "reply-request-failure",
+            "target_text_hash": "c" * 40,
+            "feedback_score": -1.0,
+            "feedback_tags": ["style_mismatch"],
+            "feedback_source": "user_explicit",
+        },
+    ), patch(
+        "host_brain.input_runtime.ingress._log_input_event"
+    ) as audit:
+        response = _run(
+            receive_input(
+                body,
+                SimpleNamespace(),
+                ports=_ports(
+                    get_evolution_activation_service=(
+                        lambda: _EvolutionService()
+                    ),
+                    get_evolution_scope=(
+                        lambda: ("workspace-feedback", "natsume_ai")
+                    ),
+                ),
+            )
+        )
+
+    assert response.status == "ACCEPTED"
+    assert dispatch_mock.await_count == 1
+    failed_events = [
+        call.kwargs
+        for call in audit.call_args_list
+        if call.kwargs.get("phase")
+        == "INPUT_FEEDBACK_PROPOSAL_FAILED"
+    ]
+    assert len(failed_events) == 1
+    assert failed_events[0]["status"] == "FAILED"
+    assert (
+        failed_events[0]["reason_code"]
+        == "EXPLICIT_RESPONSE_FEEDBACK_PERSIST_FAILED"
+    )
+
+
 def test_receive_input_gateway_durable_duplicate_is_ignored() -> None:
     body = InputPayload(
         source="GATEWAY",

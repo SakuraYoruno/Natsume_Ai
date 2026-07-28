@@ -49,6 +49,14 @@ def build_input_runtime_application_ports(
     get_life_snapshot_reader = _host_provider(host_services, "life_snapshot_reader")
     get_multimodal_observer = _host_provider(host_services, "multimodal_observer")
     get_multimodal_processor = _host_provider(host_services, "multimodal_processor")
+    get_evolution_activation_service = _optional_host_provider(
+        host_services,
+        "evolution_activation_service",
+    )
+    get_evolution_scope = _optional_host_provider(
+        host_services,
+        "evolution_scope",
+    )
     get_emotion_context_runtime = _emotion_runtime_provider(host_services)
     reply_form_decider = ResponseFormDecider()
     get_thalamus_agent = _tribe_agent_provider(
@@ -126,6 +134,10 @@ def build_input_runtime_application_ports(
         get_thalamus_agent=get_thalamus_agent,
         get_ans_agent=get_ans_agent,
         get_immune_agent=get_immune_agent,
+        get_evolution_activation_service=(
+            get_evolution_activation_service
+        ),
+        get_evolution_scope=get_evolution_scope,
     )
 
 
@@ -136,6 +148,16 @@ def _host_provider(
     if host_services is None:
         return _missing_app_local_provider
     return host_services.require_provider(field_name)
+
+
+def _optional_host_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+    field_name: str,
+) -> Callable[..., Any] | None:
+    if host_services is None:
+        return None
+    provider = getattr(host_services, field_name, None)
+    return provider if callable(provider) else None
 
 
 def _emotion_runtime_provider(

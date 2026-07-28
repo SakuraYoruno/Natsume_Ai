@@ -114,6 +114,9 @@ from host_brain.task_runtime.worker_registry import GovernedWorkerRegistry
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectDispatcher,
 )
+from host_brain.evolution.task_feedback import (
+    decorate_task_acceptance,
+)
 from host_brain.runtime.context_application import RuntimeContextApplicationService
 from natsume_contracts.task import HostCommand, HostCommandSurface
 
@@ -1380,8 +1383,11 @@ def build_governed_host_runtime(
         outbox_factory=OutboxMessage,
         worker_resolver=worker_registry,
         verifier=_WorkerCommitVerifier(projection_reader=projection_reader),
-        acceptance=_WorkerCommitAcceptance(
-            projection_reader=projection_reader
+        acceptance=decorate_task_acceptance(
+            _WorkerCommitAcceptance(
+                projection_reader=projection_reader
+            ),
+            task_runtime_container=task_runtime_container,
         ),
         projection_reader=projection_reader,
         review_runtime=(

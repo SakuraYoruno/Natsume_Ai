@@ -36,6 +36,8 @@ class InputRuntimeApplicationPorts:
     get_thalamus_agent: Callable[[], Any] | None = None
     get_ans_agent: Callable[[], Any] | None = None
     get_immune_agent: Callable[[], Any] | None = None
+    get_evolution_activation_service: Callable[[], Any] | None = None
+    get_evolution_scope: Callable[[], tuple[str, str]] | None = None
 
     def require_thalamus_agent(self) -> Any:
         return _require_runtime_agent(
@@ -67,6 +69,27 @@ class InputRuntimeApplicationPorts:
         if agent is None:
             raise RuntimeError("HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED")
         return agent
+
+    def require_evolution_activation_service(self) -> Any:
+        return _require_runtime_agent(
+            self.get_evolution_activation_service,
+            "HOST_INPUT_EVOLUTION_ACTIVATION_SERVICE_NOT_INJECTED",
+        )
+
+    def require_evolution_scope(self) -> tuple[str, str]:
+        provider = self.get_evolution_scope
+        if not callable(provider):
+            raise RuntimeError(
+                "HOST_INPUT_EVOLUTION_SCOPE_NOT_INJECTED"
+            )
+        value = provider()
+        if (
+            not isinstance(value, tuple)
+            or len(value) != 2
+            or not all(str(item or "").strip() for item in value)
+        ):
+            raise RuntimeError("HOST_INPUT_EVOLUTION_SCOPE_INVALID")
+        return str(value[0]).strip(), str(value[1]).strip()
 
 
 def _require_runtime_agent(

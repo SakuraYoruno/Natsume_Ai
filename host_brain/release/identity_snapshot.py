@@ -1107,8 +1107,8 @@ def evaluate_identity_release_gate(
     diff = diff_identity_snapshots(previous, current)
     candidate = build_identity_review_candidate(diff)
     if not resolved_enabled:
-        status = "DISABLED"
-        publish_allowed = True
+        status = "DISABLED_FAIL_CLOSED"
+        publish_allowed = False
     elif candidate is not None:
         status = "REVIEW_REQUIRED"
         publish_allowed = False
@@ -1145,7 +1145,9 @@ def build_identity_rollback_plan(
 
 def identity_snapshot_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     source = os.environ if env is None else env
-    raw = str(source.get(IDENTITY_SNAPSHOT_FEATURE_FLAG) or "").strip().lower()
+    raw = str(
+        source.get(IDENTITY_SNAPSHOT_FEATURE_FLAG) or "true"
+    ).strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 

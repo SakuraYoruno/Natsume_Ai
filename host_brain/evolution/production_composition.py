@@ -1,4 +1,4 @@
-"""Explicit application-local composition for NE-06 governance writes."""
+"""Explicit application-local composition for NE-06 V2 authority."""
 
 from __future__ import annotations
 
@@ -10,15 +10,29 @@ from host_brain.persistence.evolution_governance_ledger import (
     EvolutionGovernanceLedgerError,
     SQLiteEvolutionGovernanceLedger,
 )
+from host_brain.persistence.evolution_activation_v2_evidence import (
+    EvolutionActivationV2Error,
+)
+from host_brain.persistence.evolution_activation_v2_repository import (
+    SQLiteEvolutionActivationV2Repository,
+)
+from host_brain.release.identity_activation import (
+    IdentityReleaseActivationService,
+)
+
+from .version_activation import EvolutionVersionActivationService
 
 
 @dataclass(frozen=True, slots=True)
 class EvolutionGovernanceComposition:
-    """A durable proposal owner; no direct Persona/Knowledge/Identity writer."""
+    """V2 activation owner plus a read-only V1 history projection."""
 
     enabled: bool
     reason_code: str
     ledger: SQLiteEvolutionGovernanceLedger | None = None
+    repository: SQLiteEvolutionActivationV2Repository | None = None
+    activation_service: EvolutionVersionActivationService | None = None
+    identity_release_service: IdentityReleaseActivationService | None = None
 
     def close(self) -> None:
         # The repository opens short-lived SQLite connections per operation.
@@ -29,11 +43,19 @@ def build_evolution_governance_composition(
     *,
     db_path: str | Path,
 ) -> EvolutionGovernanceComposition:
-    """Construct the NE-06 ledger only when migration 0110 is ready."""
+    """Construct V2 only when 0142 and the V1 read-only fence are ready."""
 
     try:
-        ledger = SQLiteEvolutionGovernanceLedger(db_path)
-    except EvolutionGovernanceLedgerError as exc:
+        repository = SQLiteEvolutionActivationV2Repository(db_path)
+        activation_service = EvolutionVersionActivationService(repository)
+        identity_release_service = IdentityReleaseActivationService(
+            version_activation=activation_service,
+        )
+        legacy_query = SQLiteEvolutionGovernanceLedger(db_path)
+    except (
+        EvolutionActivationV2Error,
+        EvolutionGovernanceLedgerError,
+    ) as exc:
         return EvolutionGovernanceComposition(
             enabled=False,
             reason_code=exc.args[0] if exc.args else "EVOLUTION_GOVERNANCE_COMPOSITION_DISABLED",
@@ -45,8 +67,11 @@ def build_evolution_governance_composition(
         )
     return EvolutionGovernanceComposition(
         enabled=True,
-        reason_code="EVOLUTION_GOVERNANCE_COMPOSITION_ENFORCE",
-        ledger=ledger,
+        reason_code="EVOLUTION_GOVERNANCE_V2_COMPOSITION_ENFORCE",
+        ledger=legacy_query,
+        repository=repository,
+        activation_service=activation_service,
+        identity_release_service=identity_release_service,
     )
 
 

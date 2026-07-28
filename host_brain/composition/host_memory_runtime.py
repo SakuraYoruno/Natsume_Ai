@@ -85,6 +85,7 @@ class HostMemoryRuntimeOwner:
         episodic_store_adapter_factory: Factory,
         distillation_engine_factory: Factory,
         semantic_recaller_factory: Factory,
+        semantic_recaller_decorator: Callable[[Any], Any] | None = None,
         semantic_settings_provider: Callable[
             [], HostSemanticRecallSettings
         ] = lambda: load_host_semantic_recall_settings(),
@@ -100,6 +101,7 @@ class HostMemoryRuntimeOwner:
         self._episodic_store_adapter_factory = episodic_store_adapter_factory
         self._distillation_engine_factory = distillation_engine_factory
         self._semantic_recaller_factory = semantic_recaller_factory
+        self._semantic_recaller_decorator = semantic_recaller_decorator
         self._semantic_settings_provider = semantic_settings_provider
         self._embedder = embedder
         self._emotion_timeline_factory = emotion_timeline_factory
@@ -215,7 +217,7 @@ class HostMemoryRuntimeOwner:
                     )
                     return list(values or [])
 
-                self._semantic_recaller = self._semantic_recaller_factory(
+                semantic_recaller = self._semantic_recaller_factory(
                     collection_name=settings.collection_name,
                     top_k=int(settings.top_k),
                     similarity_threshold=float(
@@ -225,6 +227,11 @@ class HostMemoryRuntimeOwner:
                     chroma_host=settings.chroma_host,
                     chroma_port=int(settings.chroma_port),
                     embed_fn=embed_for_runtime_collection,
+                )
+                self._semantic_recaller = (
+                    self._semantic_recaller_decorator(semantic_recaller)
+                    if self._semantic_recaller_decorator is not None
+                    else semantic_recaller
                 )
             return self._semantic_recaller
 

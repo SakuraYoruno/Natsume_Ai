@@ -269,8 +269,8 @@ def test_t_nle_20_major_canon_difference_is_visible_and_requires_master_review(t
     assert review_item.requester == "release_identity_snapshot"
 
     disabled_gate = evaluate_identity_release_gate(previous, current, enabled=False)
-    assert disabled_gate.status == "DISABLED"
-    assert disabled_gate.publish_allowed is True
+    assert disabled_gate.status == "DISABLED_FAIL_CLOSED"
+    assert disabled_gate.publish_allowed is False
     assert disabled_gate.review_candidate is not None
 
 
@@ -440,9 +440,10 @@ def test_t_nle_20_rollback_selects_exact_previous_release_without_mutation(tmp_p
     assert mismatch.value.reason_code == IDENTITY_PREVIOUS_RELEASE_MISMATCH
 
 
-def test_t_nle_20_feature_flag_defaults_off_and_snapshot_is_immutable(tmp_path: Path) -> None:
-    assert identity_snapshot_gate_enabled({}) is False
+def test_t_nle_20_feature_flag_defaults_on_and_snapshot_is_immutable(tmp_path: Path) -> None:
+    assert identity_snapshot_gate_enabled({}) is True
     assert identity_snapshot_gate_enabled({IDENTITY_SNAPSHOT_FEATURE_FLAG: "true"}) is True
+    assert identity_snapshot_gate_enabled({IDENTITY_SNAPSHOT_FEATURE_FLAG: "false"}) is False
     snapshot = _build(_identity_root(tmp_path))
     with pytest.raises(FrozenInstanceError):
         snapshot.release_ref = "release://tampered"  # type: ignore[misc]

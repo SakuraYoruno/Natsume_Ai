@@ -285,18 +285,22 @@ class TestPersonaEngineGrowth:
         engine = PersonaEngine.get_instance()
         original = engine.get_traits("rollback_user")
         delta = TraitsDelta(warmth=0.1)
+        authority = PersonaGrowthMigrationAuthority(
+            migration_id="persona-migration:phase1-rollback",
+            actor_id="test:phase1",
+            evidence_ref="test:test_persona_engine_phase1",
+        )
         engine.apply_migration_growth_delta(
             "rollback_user",
             delta,
-            authority=PersonaGrowthMigrationAuthority(
-                migration_id="persona-migration:phase1-rollback",
-                actor_id="test:phase1",
-                evidence_ref="test:test_persona_engine_phase1",
-            ),
+            authority=authority,
             reason="to_rollback",
         )
         # 回滚
-        restored = engine.rollback_last_change("rollback_user")
+        restored = engine.rollback_last_migration_change(
+            "rollback_user",
+            authority=authority,
+        )
         assert restored is not None
         for name in TRAIT_NAMES:
             assert getattr(restored, name) == pytest.approx(
@@ -304,10 +308,10 @@ class TestPersonaEngineGrowth:
             )
 
     def test_rollback_no_records(self):
-        """无变化记录时回滚返回 None。"""
+        """旧的无授权回滚入口必须失败关闭。"""
         engine = PersonaEngine.get_instance()
-        result = engine.rollback_last_change("nonexistent_user")
-        assert result is None
+        with pytest.raises(PersonaGrowthAuthorityError):
+            engine.rollback_last_change("nonexistent_user")
 
 
 # ---------------------------------------------------------------------------

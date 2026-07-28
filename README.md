@@ -5,7 +5,7 @@
 
 Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。它把对话、人格表达、长期记忆、关系状态、主动行为、工具执行、设备能力和多平台消息接入放在同一套可审计运行时中，并要求所有真实动作都能回答四个问题：谁批准、执行了什么、依据什么验收、产生了什么副作用。
 
-本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、Internal Agent、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施，但可生产的 Durable DAG 并发/恢复、通用智能规划、受治理人格演化以及完整长期演化闭环仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。Durable 调度恢复会对持久 TaskGraph 重新检查依赖环，发现环以 `PLAN_CYCLE` 失败关闭。新建的 Chat、Skill、Plan、Delegate、Tool、Scheduler、Internal 与 Operator 图默认使用 `ATOMIC_GRAPH_SUCCESS_V1`：0090/0091 分别原子收口失败/成功，节点 `ACCEPTED` 在 Graph 与 graph-scope Budget 同事务终结前只属于内部结果。历史无 policy 图仍按 legacy 只读兼容；`HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED` 继续默认关闭，因此实际 sibling 并发、取消、通用恢复和整波 canary 仍未完成。
+本仓库不是已经完成的“全自动进化 AI”。它已经具备较完整的 Host、Scheduler、Internal Agent、持久化、授权、任务、模型、Gateway、Edge 和观测基础设施；NE-06 的 Feedback、Knowledge 与 Identity 版本 authority 已完成本地代码波次，但真实部署切流、外部服务、设备和完整长期演化验收仍在建设中。当前完成度必须以代码审计和机器状态为准，不能从历史 `PASS/DONE` 或目录数量推导。Durable 调度恢复会对持久 TaskGraph 重新检查依赖环，发现环以 `PLAN_CYCLE` 失败关闭。新建的 Chat、Skill、Plan、Delegate、Tool、Scheduler、Internal 与 Operator 图默认使用 `ATOMIC_GRAPH_SUCCESS_V1`：0090/0091 分别原子收口失败/成功，节点 `ACCEPTED` 在 Graph 与 graph-scope Budget 同事务终结前只属于内部结果。历史无 policy 图仍按 legacy 只读兼容；`HOST_TASK_RUNTIME_BOUNDED_FANOUT_ENABLED` 继续默认关闭，因此实际 sibling 并发、取消、通用恢复和整波 canary 仍未完成。
 
 ## 当前状态
 
@@ -55,8 +55,9 @@ Review/activation 尚未执行，因此 NE-02 仍是
 `static_scan,doc_gate` 为 `PASS / failures=[]`，耗时 109.4 秒；fresh 架构
 Gate 1～14 为 `PASS / failed_gates=[]`，耗时 25.6 秒。
 
-NE-03 的本地生产接线波次已经合入；当前活动实现波为 NE-02，真实外部
-Research/Code/Pentest cohort 仍待验收。NE-03 的 0137 以 Host runtime
+NE-03～NE-05 的本地生产接线波次已经合入；当前活动实现波为 NE-06。
+真实外部 Research/Code/Pentest cohort 仍保持
+`ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime
 scope/owner/lease/fence 约束单一 append-only SQLite owner，持有
 workspace/subject-scoped 长期目标的激活、撤销、版本、约束与 exact replay。
 生产写入只允许
@@ -392,8 +393,8 @@ Edge 指令的旧进程级 owner 已退役，首条正向受治理链也已接�
 | 显式 Composition / 具身执行 | `INCOMPLETE / STATIC_LAYERING_PASS / PRODUCTION_LOCATOR_PHYSICALLY_RETIRED` | 每个 `create_app()` 独立拥有 Lifecycle/HardState、Authority、Governance、Bond、Memory，以及 fresh Tribe state/registry/event bus/23-Agent catalog，并通过 typed Host bundle 供给 Input、Agent、Context、Multimodal、heartbeat、RouteCatalog 与 startup。`HostLifecycleApplicationPorts` 现由中立合同层唯一拥有，旧 App 路径保持对象身份兼容；feature-canary repository 同样只依赖中立合同，fresh Gate 1 的 SCC 为 0。生产 locator inventory 为 named0/0、all-form0、module/field/lock/ref=`0/0/0/0`，旧测试桥只在 pytest 中安装。23 个 Agent backing singleton/setter 及共享状态的无上下文 fallback 已物理删除；EventBus 仍易失，完整 Host multi-app canary、外部 Chroma/Neo4j namespace、完整 Worker scope、真实 executor、事务化 Chat 与资源崩溃恢复未收口，NE-01 继续 `IN_PROGRESS`。 |
 | Planning Search | `PARTIAL_RULED_OBJECTIVE_CAPABILITY_SEARCH_V1 / D20C_ACCEPTANCE_PENDING_EXTERNAL` | Thalamus 现仅把明确的“研究/调研计划”与“前端可用性计划”编译为固定 `target_id=planning_search` 的 server-owned `CAPABILITY_SEARCH_V1`，并让 `task/tag/risk` 经 Governor 严格 schema 绑定；Host 只接受该 catalog-backed 入口，顶层或 `args` 内的 legacy `planned_steps/steps` 会在上下文构造和 admission 前拒绝。Host 再从 app-composed `SkillRegistry` 的冻结、低风险、免确认能力中生成至少两条竞争候选，在虚拟态中选择两项不同 Skill 的有界顺序路径，最后编译为 `skill → skill → chat` immutable TaskGraph。节点的标准 worker 输出是 `receipt_ref + narrative`，路径长度、依赖与候选目录均由服务端冻结，worker 不会二次规划。显式 Governor-bound `failure_replan` 会先由 canonical TaskStore 重开 `FAILED` predecessor 和 evidence，再以同 root 的 `graph_revision + 1` 准入替换图；它不是自动触发或按失败自适应选择不同候选。仅建议、禁止调用工具、通用计划、Code/Pentest 仍不会借此获得执行 authority。Research D20b/D20c 的机械证据链仍不构成真实外部 provider/cohort 或收益/promotion 结论。 |
 | Capability Planning Risk Authority | `LOCAL_TARGETED_PASS / NE-02_PARTIAL` | `CAPABILITY_SEARCH_V1` 的 effective risk ceiling 固定为 `min(intent.planning_max_risk_level, Governor approved binding.risk_level)`；Governor decision/grant reference 与 server-owned 两项执行步数均写入冻结 virtual state，缺失或畸形 binding risk 失败关闭。它只收紧当前 Research/Frontend 窄切片的候选空间，不构成通用规划、真实收益或生产 promotion。 |
-| Persona 演化 | `CENTRAL_FENCE_WIRED` | legacy 直写已中央拒绝；proposal、Review、版本激活和 rollback 替代链尚未实现 |
-| 长期演化 | `INCOMPLETE` | NE-03 的 World/Scene/Intent/Guardian、Action Preview/Catalog 与 0137 长期目标 owner 已进入 Host 对象图；NE-04 已能在真实 digest-pinned Docker 中运行三类隔离双臂，0140 只持久化脱敏 real-trace dataset，Obs/Monitor 只读展示 proposal-only 证据。NE-05 已完成本地代码波次：0141 成为 Skill activation/maturity/active projection 的单一 SQLite authority，Host 只解析已批准 active version；外部 bundle/provider canary、NE-06 与 NE-07 真实全栈仍未完成 |
+| Persona 演化 | `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07` | legacy 直写与旧 rollback 已中央拒绝；stage、milestone、interaction、emergent 和显式 response feedback 只生成 proposal，只有真实 Lab + Review 才能切换版本化 Persona/表达 policy，rollback 恢复 exact previous version |
+| 长期演化 | `INCOMPLETE` | NE-03～NE-05 的本地 authority 保持；NE-06 新增 0142，统一 Feedback、Knowledge、Identity 的 decision/operation/active projection/receipt。Knowledge Host reader 默认仍为 SHADOW，真实 Docker/服务栈、部署 ENFORCE、外部 provider 与设备验收留给 NE-07 |
 
 本轮 NE-01 还收口了一个此前明确缺失的窄窗口：无前置 Review 的到期 `RETRY_PENDING` 不再先独立提交 READY，而是与 Attempt、Lease、Heartbeat 和 claim Outbox 在同一 SQLite writer UoW 中完成；若 Attempt Outbox identity 漂移，READY promotion 也会回滚。需要新 Review 的重试仍先落 durable Review、后续再 claim，不能以原子化为由绕过审批。该证据只覆盖这条 retry 边界，不代表 general/multi-node recovery、生产 canary 或 NE-01 完成。
 
@@ -409,7 +410,7 @@ Plan compatibility 的循环依赖现在也 fail-closed：`PlanIntentSearch` 对
 
 最近一次 post-checkpoint `EXACT_REJECTED` response-loss 回归还修正了 generic failure bundle 与专用 checkpoint Budget 拒绝链的边界：generic bundle 不得替 node/Attempt-bound rejection authority 释放 graph Budget；后者会独立重验 BudgetReservation、rejected BudgetUsage 与 Outbox lineage。`tests/integration/test_ne01_multinode_budget_settlement_hold.py` 与 `tests/integration/test_ne01_operation_online_takeover.py` 的唯一组合复跑为 `26 passed in 69.45s`。这是本地窄切片证据，不与其他批次相加；NE-01 wave integration、真实模型、Docker 全服务栈和远程 CI 仍分别为未运行/`NOT_RUN_ACCOUNT_QUOTA`。
 
-NE-01 前序切片曾将 Acceptance、ASGI、Scheduler 三个 owner 降为1262、1389、2942行，并把 Acceptance owner 降到966行、sys-mode handler 独立为368行。general Effect persistence 也拆成1426行 proof/case authority 与716行 signed-evidence sidecar，Runtime 拆成793行 service、88行 command dispatcher 和34行 port，仍复用唯一 TaskStore UoW。上一 checkpoint UoW 切片把 exact C-boundary read-only reopen 补进 `task_internal_agent_budget_rejection_store.py`；该文件仍只处理受约束的 Budget rejection/replay，WorkerProjection INSERT 仍只有一个物理 owner。那些提交各自绑定的静态结果只作历史。当前活动波次是 NE-02；NE-04 将脱敏 SQLite reader 从应用层迁入 persistence 后，fresh Gate 1～14 为 `PASS`、`failed_gates=[]`，且未扩大白名单。生产 Service Locator 已物理清零；NE-01 代码波次已收口，部署签名、真实模型/provider、外部 namespace 与 NE-07 Docker 全栈仍待统一验收，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+NE-01 前序切片曾将 Acceptance、ASGI、Scheduler 三个 owner 降为1262、1389、2942行，并把 Acceptance owner 降到966行、sys-mode handler 独立为368行。general Effect persistence 也拆成1426行 proof/case authority 与716行 signed-evidence sidecar，Runtime 拆成793行 service、88行 command dispatcher 和34行 port，仍复用唯一 TaskStore UoW。上一 checkpoint UoW 切片把 exact C-boundary read-only reopen 补进 `task_internal_agent_budget_rejection_store.py`；该文件仍只处理受约束的 Budget rejection/replay，WorkerProjection INSERT 仍只有一个物理 owner。那些提交各自绑定的静态结果只作历史。当前活动波次是 NE-06；语义召回共享类型已迁入中立 contract，Prefrontal 运行策略也从 Agent 巨石拆出，fresh Gate 1～14 为 `PASS`、`failed_gates=[]`，且未扩大白名单。生产 Service Locator 已物理清零；NE-01 代码波次已收口，部署签名、真实模型/provider、外部 namespace 与 NE-07 Docker 全栈仍待统一验收，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 第三个切片删除了 Obs 五个模块中的零参数 locator refresher。Tool/MCP authority、Host lifecycle、#89、ReAct、Visual、HardState、Context 与各类 Host owner 的数字均只作提交绑定历史。随后生产 `process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 只消费 fresh 显式 construction ports。fresh 生产库存为 named0/0、all-form0、locator module/field/lock/ref=`0/0/0/0`；pytest-only bridge 不可从 fresh 生产进程加载。三十五项 app-local owner 仍不能外推成外部 namespace 隔离、崩溃恢复或 legacy Executive generic Delegate 切流。
 
@@ -515,7 +516,25 @@ NE-07 全栈尚未执行，因此状态是
 `6f78e25c2` 上 query-only 重开，没有重跑任何 accepted worker。新收据七路线
 全部 `PASS`，digest 为
 `sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
-NE-06 的 0110 V1 ledger 只持久化 Feedback、Knowledge、Identity 的事件名与引用；APPLIED/ACTIVE/ROLLED_BACK 没有切换真实 policy/persona/knowledge/identity owner，引用也未查询 Lab/Review/Snapshot authority。Prefrontal 的一个参数漂移已修复，但 V1 不具备 activation authority。
+NE-06 已用连续 migration `0142_evolution_activation_authority.sql` 取代
+0110 的写 authority；0110 只读保留并由数据库 trigger 阻断新 mutation。
+0142 在同一 SQLite UoW 中提交版本 decision、幂等 operation、active
+projection 与 terminal receipt，真实重开 0138 trusted Lab report、精确
+ReviewItem、版本内容和 rollback target。Task/Verification/用户拒绝/工具可靠性、
+显式 response feedback、stage/milestone/interaction/emergent 均只生成
+`FeedbackProposalV1`；APPLIED 后才切换 Persona 或表达 policy。失败会写
+隐私有界 durable evidence 并由 Obs 统计，辅助反馈失败不会阻断主 Chat。
+
+Knowledge OS 现在分离 person life-memory 与 workspace project-knowledge
+namespace，支持 active winner、cursor、supersedes、deprecation、dedup、
+冲突、TTL 和 `DecisionRecordV1`；生产 Host reader 已具备
+SHADOW/CANARY/ENFORCE，默认仍为 SHADOW，旧直接 writer 失败关闭。Identity
+release adapter 会执行 regression，重大差异默认阻断，no-change 可发布；
+激活切换真实 snapshot owner，rollback 恢复 exact previous snapshot/version。
+NE-06 波次为 `199 passed in 73.74s`，分层修正后的重叠回归为
+`51 passed in 28.16s`，架构 Gate 1～14 和 Persona writer 扫描均通过。
+该结论是 `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`，
+不是 Docker、真实部署或完整架构 `PASS`。
 World projection 现在按 `(key, source_ref)` 去重：不同来源且值不同的观察会保留并显式标记为冲突；同值多来源只作为佐证保留，不伪造冲突。该兼容投影不替代 workspace-scoped `WorldResolver`、Scene 或 Guardian 的生产 authority。
 
 D6 的 ledger-stats 投影只保留每张表按时间戳与持久行身份稳定排序后的最新 5,000 条公开记录；`truncated=true` 表示更旧尾部未物化，不再让整张高流量表永久返回 503。截断后只有 `start_ms` **严格晚于**最老保留记录时间的窗口可被权威回答；相等时间仍可能存在被持久行身份裁掉的同毫秒记录，因此边界窗口、直接全表读取和未命中的 `request_id` 都以 `PROJECTION_SOURCE_TRUNCATED` 失败关闭。投影轮询没有新事实时复用原 `source_cursor/source_digest`，只刷新 freshness，immutable journal 不增长；来源不可用和超出保留期的查询也继续失败关闭。这个边界是“可查询的最新有界窗口”，不是完整历史统计。

@@ -14,6 +14,7 @@ import host_brain.app.host_lifecycle_composition as legacy_host_lifecycle
 import host_brain.composition.host_application as host_application_module
 import host_brain.contracts.host_lifecycle as canonical_host_lifecycle
 from host_brain.audit.sqlite_ledger import SQLiteLedger
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.host_lifecycle_composition import (
     HostLifecycleApplicationPorts,
     HostLifecycleContainer,
@@ -355,6 +356,7 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
 
 def test_production_host_port_root_owns_selected_state_per_app(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     first_episodic_store = object()
     second_episodic_store = object()
@@ -370,9 +372,14 @@ def test_production_host_port_root_owns_selected_state_per_app(
         episodic_store=second_episodic_store,
         model_attempt_service=second_model_attempt_service,
     )
+    persistence_db = tmp_path / "host-app-local.sqlite3"
+    migrated = SQLiteMigrationRunner(
+        db_path=persistence_db
+    ).apply_migrations()
+    assert migrated.success
     construction_ports = replace(
         build_process_application_ports(),
-        persistence_db_path=lambda: ":memory:",
+        persistence_db_path=lambda: persistence_db,
     )
     monkeypatch.setattr(
         host_application_module,

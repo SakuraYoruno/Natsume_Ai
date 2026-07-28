@@ -250,6 +250,10 @@ def build_tribe_application_ports(
         ),
         build_conversation_understanding_pack=build_conversation_understanding_pack,
         allocate_intent_seq=intent_sequence_allocator.allocate,
+        evolution_activation_service=_optional_host_provider(
+            host_services,
+            "evolution_activation_service",
+        ),
     )
 
 
@@ -260,6 +264,16 @@ def _host_provider(
     if host_services is None:
         return _missing_app_local_provider
     return host_services.require_provider(field_name)
+
+
+def _optional_host_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+    field_name: str,
+) -> Callable[..., Any] | None:
+    if host_services is None:
+        return None
+    provider = getattr(host_services, field_name, None)
+    return provider if callable(provider) else None
 
 
 def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:
