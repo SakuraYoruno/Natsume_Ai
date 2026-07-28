@@ -10,14 +10,14 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 ## 当前状态
 
 NE-01 的代码波次封口证据绑定 `27b032f1e`，并已进入当前
-`origin/dev@7e9b090b3`；状态为
+`origin/dev@9ddeadc1e`；状态为
 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，不是生产全栈 `PASS`。
 同一个文件型 canonical SQLite 先运行 Chat、Skill、Delegate、Plan，再追加
 Scheduler、Internal、Operator；只读收据得到七路线全部 `PASS`，
-当前七路线收据绑定 `dev` 合并提交 `7e9b090b3` 与 migration 0140，run id 为
-`universal-runtime-acceptance://sha256/3dc0088b55c7d0dec2d39f21521fb3722024dd553f38de6e065165af0c97909b`，
+当前七路线收据绑定干净 NE-05 实现提交 `6f78e25c2` 与 migration 0141，run id 为
+`universal-runtime-acceptance://sha256/4d0023bdfb4becd9cc69710798375b09cbcfbb13b8652db8fdbaa08c09fcd00b`，
 receipt digest 为
-`sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`。
+`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
 随后一次性执行 24 个真实 SQLite、Windows 跨进程和 Git Workspace
 恢复用例，结果为 `24 passed in 165.99s`；覆盖菱形图、八根 fan-out、
 pre-Operation/committed checkpoint、签名未知副作用、取消交叉、并行
@@ -25,7 +25,7 @@ failure/Budget/Review 以及 accepted HEAD promotion/abandon/restart。
 恢复波次证据位于忽略目录
 `artifacts/local-gates/27b032f1ebc408c8456a7182d456cb98b441a260/ne01-wave/`；
 当前七路线重绑定证据位于
-`artifacts/local-gates/7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8/ne01-coverage-v2/`。
+`artifacts/local-gates/6f78e25c24a2bc148aa8a0a12016558a6e492a7a/ne01-coverage-v2/`。
 Budget 生产动作仍只启用 `BLOCK`；`DEGRADE/REVIEW` 是 proposal-only，
 不得静默执行。未知副作用按设计必须签名对账，不以“自动猜测效果”作为完成项。
 有签名的 fan-out promotion、真实 HTTP/network/provider、外部 namespace 和
@@ -75,10 +75,11 @@ Universal Runtime coverage 首次复跑因仍绑定 0135 而按设计失败关�
 （`23 passed / 9 failed`）；随后以 SQLite backup 复制既有七路线证据，
 只追加应用 0136/0137，并在干净提交 `708aa845` 上 query-only 重开，未重跑
 任何已验收 worker；该 SHA 在后续 PR 合并后不再是 `dev` 祖先，因此旧收据
-只保留作历史校准。当前收据重新从 accepted snapshot 做 SQLite backup，
-只追加 0138～0140，并在干净祖先提交 `7e9b090b3` 上 query-only 重开；七路线
-仍均为 `PASS`，digest 为
-`sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`，
+只保留作历史校准。0140 收据曾从 accepted snapshot 做 SQLite backup 并只追加
+0138～0140。NE-05 推进 migration 后再次 backup 该 accepted snapshot，只追加
+0141，并在干净实现提交 `6f78e25c2` 上 query-only 重开；七路线仍均为
+`PASS`，digest 为
+`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`，
 没有重跑 accepted worker。部署
 多实例 canary、Windows graceful stop 与 NE-07 全栈尚未执行，因此状态只是
 `PRODUCTION_WIRED_LOCAL_WAVE_PASS / PROGRAM_INCOMPLETE`。
@@ -510,8 +511,10 @@ NE-07 全栈尚未执行，因此状态是
 无连接、无事务的 475 行 mixin，唯一 SQLite writer 降为 1,492 行；没有增加
 大型文件白名单，最终 Gate 1～14 全部通过。
 由于 0141 推进了仓库 migration head，既有七路线 0140 收据在本实现提交中按
-设计先失败关闭；实现提交落定后只通过 SQLite backup 追加 0141 并 query-only
-重开，不重跑任何 accepted worker。
+设计先失败关闭；实现提交落定后已通过 SQLite backup 只追加 0141，并在
+`6f78e25c2` 上 query-only 重开，没有重跑任何 accepted worker。新收据七路线
+全部 `PASS`，digest 为
+`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
 NE-06 的 0110 V1 ledger 只持久化 Feedback、Knowledge、Identity 的事件名与引用；APPLIED/ACTIVE/ROLLED_BACK 没有切换真实 policy/persona/knowledge/identity owner，引用也未查询 Lab/Review/Snapshot authority。Prefrontal 的一个参数漂移已修复，但 V1 不具备 activation authority。
 World projection 现在按 `(key, source_ref)` 去重：不同来源且值不同的观察会保留并显式标记为冲突；同值多来源只作为佐证保留，不伪造冲突。该兼容投影不替代 workspace-scoped `WorldResolver`、Scene 或 Guardian 的生产 authority。
 

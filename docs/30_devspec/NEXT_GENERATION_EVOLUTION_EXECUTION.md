@@ -7,12 +7,13 @@
 
 版本：v3.33
 日期：2026-07-28
-状态：`NE-02_IN_PROGRESS / PROGRAM_INCOMPLETE`
+状态：`NE-05_CODE_COMPLETE_LOCAL_WAVE_PASS / NE-06_NEXT / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
-`dev@7e9b090b3` 的 migration 0140 同库七路线收据全部 `PASS`，receipt
+干净 NE-05 实现提交 `6f78e25c2` 的 migration 0141 同库七路线收据全部
+`PASS`，receipt
 digest 为
-`sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`；
+`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`；
 一次去重恢复波次以 `24 passed in 165.99s` 覆盖一般图形、跨进程 checkpoint、
 签名 unknown-effect/cancellation、并行 failure/Budget/Review 和真实 Git
 Workspace 生命周期。该状态只解除 NE-02 的代码依赖，不等于 NE-01 生产
@@ -619,6 +620,10 @@ bundle/provider canary 与 NE-07 服务栈尚未运行，故状态为
 全栈 `PASS`。架构 Gate 3 首跑拒绝 1,834 行未分类仓储；本波没有加白名单，
 而是把无连接/无事务的 evidence/projection validator 拆出，SQLite writer
 降为 1,492 行，最终 Gate 1～14 全部通过。
+实现提交落定后，既有 accepted 0140 SQLite snapshot 通过 backup 复制，只追加
+0141 并在 `6f78e25c2` 上 query-only 重开，没有重跑 accepted worker；七路线
+全部 `PASS`，receipt digest 为
+`sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
 
 ### NE-06：Experience Feedback、Knowledge OS 与 Identity Migration
 
