@@ -3,7 +3,7 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.14
+版本：v9.15
 维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
@@ -100,6 +100,9 @@ flowchart TD
 > 写入、容器重启、持久读取、更新/查询与探针清理，receipt digest 为
 > `sha256:7af6e6a0…2f71`。Host、Obs、Nginx Monitor、Edge、Gateway 尚未
 > 启动，因此当前仍只能是 `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。
+> Monitor UI 生产构建已通过，Host/Obs/Monitor 的独立 runtime root 与
+> secret 快照过滤已接线；这仍是启动前证据，且 8 项 npm audit 告警开放，
+> 不改变上述结论。
 
 > 最新 locator 清点（2026-07-25）：生产具名 consumer/import、全部 import-form consumer、locator 模块、Container 字段/锁/引用均为 0。`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 构造 fresh `ProcessApplicationPorts` 并显式传入 Host root。旧测试只通过 `tests/support/process_service_compat.py` 的 pytest-only bridge 运行，fresh 生产进程不会加载它。`HostAuthorityRuntimeOwner` 继续持有同一 epoch 的 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图。外部 Chroma/Neo4j namespace、Token/MCP durable restart、资源崩溃恢复、事务化 Chat 和完整 Worker/Obs Composition仍未闭环；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 

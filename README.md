@@ -61,6 +61,10 @@ NE-03～NE-06 的本地生产接线波次已经合入；当前活动实现波为
 为 `sha256:7af6e6a0…2f71`；用户默认 `natsume-ext` 栈未被复用或重启。
 Host、Obs、Nginx Monitor、Edge 与 Unified Gateway 仍待本轮继续启动，因此
 整体状态仍为 `INCOMPLETE`。
+Monitor UI 的锁文件安装、client 合同、lint、类型检查、15 项 read-model
+测试与生产构建已通过；Host/Obs/Monitor 启停也已支持独立 runtime root，
+且运行环境快照不再落盘 password、Token、auth 或 key。真实进程尚未启动，
+`npm audit` 的 8 项依赖告警仍开放，不能据此宣称前后端验收通过。
 真实外部 Research/Code/Pentest cohort 仍保持
 `ACCEPTANCE_PENDING_EXTERNAL`。NE-03 的 0137 以 Host runtime
 scope/owner/lease/fence 约束单一 append-only SQLite owner，持有

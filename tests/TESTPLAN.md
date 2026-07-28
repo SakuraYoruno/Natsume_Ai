@@ -28,6 +28,19 @@
   receipt digest=`sha256:7af6e6a0…2f71`；独立复核三类残留均为 0，secret
   scan 通过。该结果只使外部三库子 Gate 通过。
 
+## T-NE07-HOST-STACK-ISOLATION
+
+- T-NE07-HOST-01：Host、Obs、Monitor start/stop 必须接受显式
+  `RuntimeRoot`，PID、日志、runtime env 与 Nginx prefix 全部位于该根。
+- T-NE07-HOST-02：显式 runtime root 的 ForceRestart/stop 只能处理该根 PID
+  或指定端口，不得扫描并终止其它 Host 实例。
+- T-NE07-HOST-03：runtime env 快照不得包含 password、secret、Token、auth
+  或 key 值；只有 `sec://` 引用可以持久化。
+- T-NE07-HOST-04：Monitor 必须完成锁文件安装、Operator client check、
+  lint、typecheck、read-model test、production build，并由真实 Nginx 服务。
+- 当前启动前合同为 `13 passed in 3.33s`，六个 PowerShell 脚本解析通过；
+  真实进程启动和网络回执尚未执行。
+
 ## T-NE01-CODE-WAVE-CLOSEOUT
 
 - T-NE01-CWC-01：当前权威 evidence commit 必须是 HEAD 的祖先。以 SQLite

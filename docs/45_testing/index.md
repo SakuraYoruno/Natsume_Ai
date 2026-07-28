@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.44
+版本：v2.45
 维护日期：2026-07-28
 状态：当前证据
 
@@ -26,6 +26,17 @@
   探针残留均为 0，明文 secret 未进入 receipt/日志，用户默认栈未重启。
 - Host、Obs、Nginx Monitor、Edge、Gateway 和后续故障注入仍未运行，不能
   把三库子 Gate 外推为完整全栈通过。
+
+## NE-07 Host / Obs / Monitor 启动前验证
+
+- Monitor UI：`npm ci`、Operator client check、lint、typecheck、15 项
+  read-model test 和 production build 全部通过。
+- Host、Obs、Monitor 六个启停脚本支持显式 acceptance runtime root；该模式
+  不扫描其它 Host，运行环境快照排除 secret 值并保留安全 `sec://` 引用。
+- PowerShell parser 通过；定向合同为 `13 passed in 3.33s`。
+- 官方 Nginx 1.31.3 已安装并记录 executable SHA-256。
+- `npm audit` 的 6 high 构建链和 2 moderate React Router 告警保持开放；
+  Host/Obs/Monitor 尚未启动，所以这里只是 preflight。
 
 ## NE-05 Skill 生命周期本地代码波次
 

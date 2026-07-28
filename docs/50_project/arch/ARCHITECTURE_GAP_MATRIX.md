@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.34
+版本：v3.35
 核对日期：2026-07-28
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -15,6 +15,13 @@ NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认�
 更新/查询与清理，三库子 Gate 为 `PASS`，receipt digest 为
 `sha256:7af6e6a0…2f71`。Host/Obs/Nginx Monitor/Edge/Gateway、故障和
 性能验收尚未运行，不能把该子 Gate 提升为完整架构 `PASS`。
+
+Host/Obs/Monitor 的固定 `runtime/host` 与跨实例误杀缺口已在代码层收敛：
+显式 `RuntimeRoot` 隔离 PID、日志、runtime env 和 Nginx prefix，显式模式
+的 ForceRestart/stop 不做全局 Host sweep；runtime env 也不再保存 secret
+值。尚缺真实进程启动、SQLite migration、网络/浏览器回执和重启恢复。
+Monitor 依赖还有 8 项 npm audit 告警，因此该项保持
+`CODE_COMPLETE_LOCAL_PREFLIGHT / REAL_START_PENDING`。
 
 NE-01 的剩余差距已从“本地代码/恢复未封口”收窄为 NE-07 部署验收。
 当前提交的七路线同库收据全部 `PASS`，24 个去重恢复用例通过；因此实现依赖

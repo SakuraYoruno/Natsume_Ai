@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.64
+版本：v5.65
 核对日期：2026-07-28
 合并基线：`origin/dev@555ead6d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -33,6 +33,12 @@ digest，并参数化 project、container、network、port 与 data root；Neo4j
 `sha256:7af6e6a0…2f71`，独立残留复核为 0，用户默认栈未重启。Host/Obs/
 Nginx Monitor/Edge/Gateway 尚未启动，故状态仍为
 `IN_PROGRESS_EXTERNAL_SERVICES_PASS_HOST_STACK_PENDING`。
+
+Host/Obs/Monitor 启停现可绑定显式 acceptance runtime root；该模式下
+ForceRestart/stop 不再全局扫描其它 Host。运行环境快照也已排除秘密值，只
+保留安全 `sec://` 引用。Monitor UI 生产构建和 15 项 read-model test 通过，
+官方 Nginx 1.31.3 已安装；真实进程仍未启动，8 项 npm audit 告警开放，
+因此这部分只记 `CODE_COMPLETE_LOCAL_PREFLIGHT / START_PENDING`。
 
 当前系统已经建立较完整的持久化、授权、事件、模型、设备和执行地基，但还不是完整的下一代架构。Universal Runtime 的机器 Gate 已扩展到七条生产路线；Chat、当前启用 Skill、`CAPABILITY_SEARCH_V1` Plan 与只读 `pentest_agent` Delegate 为 `COMPLETE`，Scheduler/Internal/Operator 为 `INCOMPLETE`。
 

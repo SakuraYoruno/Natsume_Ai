@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$PidFile = "",
   [int]$Port = 0
 )
@@ -111,8 +112,13 @@ if (-not $EnvFile) {
   }
 }
 
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
+}
 if (-not $PidFile) {
-  $PidFile = Join-Path $repoRoot "runtime\host\obs.pid"
+  $PidFile = Join-Path $RuntimeRoot "obs.pid"
 }
 
 $envValues = Read-EnvFile -Path $EnvFile
@@ -197,6 +203,7 @@ $result = [ordered]@{
   status = if ($stopped) { "stopped" } else { "not_running" }
   pid = $obsPid
   pid_file = $PidFile
+  runtime_root = $RuntimeRoot
   port = $Port
   detail = $detail
 }

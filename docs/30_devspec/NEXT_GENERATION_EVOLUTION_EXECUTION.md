@@ -5,9 +5,9 @@
 
 > 当前库存纠偏：生产 `process_services` consumer/import 和全部 import-form consumer 为 0；`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除，生产 module/field/lock/ref=`0/0/0/0`。ASGI/CLI fresh 构造 frozen `ProcessApplicationPorts` 并显式传入 Host root，Host builder 没有全局回退。`HostAuthorityRuntimeOwner` 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图；pytest-only bridge 仅服务尚未改写的旧测试，不进入生产对象图。ResourceManager status 已改为 0123 Host-fenced durable journal。Chat 的本地 assistant/LifeMemory 投影屏障与七路线 commit-bound 收据已完成，但外部 namespace、Token/MCP durable restart、其它外部资源恢复、通用 Delegate、路线其余控制和完整 Composition 仍未完成。
 
-版本：v3.36
+版本：v3.37
 日期：2026-07-28
-状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS / HOST_STACK_NEXT / PROGRAM_INCOMPLETE`
+状态：`NE-07_IN_PROGRESS / EXTERNAL_SERVICES_PASS / HOST_STACK_PREFLIGHT_PASS / REAL_START_NEXT / PROGRAM_INCOMPLETE`
 
 NE-01 已达到 `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`：当前
 干净 NE-06 实现提交 `08a172da` 的 migration 0142 同库七路线收据全部
@@ -1277,3 +1277,26 @@ keys 均为 0，receipt/日志无明文 secret；用户默认栈保持连续运�
 该证据只关闭 NE-07 的外部三库子 Gate。Host、Obs、Nginx Monitor、完整
 Edge/Gateway、全路线、故障注入和性能仍未运行，所以当前状态是
 `IN_PROGRESS_EXTERNAL_SERVICES_PASS_HOST_STACK_PENDING`。
+
+## 20. NE-07 Host、Obs 与 Monitor 启动前边界
+
+Monitor UI 已按锁文件完成 `npm ci`、Operator client check、lint、typecheck、
+15 项 read-model test 和 Vite production build。官方 Nginx 1.31.3 已由
+winget 安装，`nginx.exe` SHA-256 为
+`C9D79164B117B32BE2E184037D8D0B97142A84203CE81183D580A215DC20EDBE`。
+
+生产启停脚本已增加显式 `RuntimeRoot`：
+
+- Host、Obs、Nginx prefix、PID、日志和 runtime env 可全部落入独立
+  acceptance 根；
+- 显式 runtime root 下的 ForceRestart/stop 不再扫描并终止其它 Host 实例；
+- `host.runtime.env` 排除 password、passwd、secret、Token、auth 与 key
+  值，只允许 `sec://` 引用继续进入快照；
+- 六个 Host/Obs/Monitor 启停脚本 PowerShell parse 通过，隔离与既有
+  orchestration 合同为 `13 passed in 3.33s`。
+
+`npm audit` 仍报告 8 项：6 个 high 来自 ESLint/minimatch 构建链，2 个
+moderate 来自 React Router；可用修复均要求 major 版本变化，当前登记开放，
+禁止在未跑真实 UI 路由回归前使用 `--force` 盲升。Host、Obs、Monitor 真实
+进程仍未启动，当前只可记
+`HOST_PREFLIGHT_PASS / REAL_START_PENDING / PROGRAM_INCOMPLETE`。

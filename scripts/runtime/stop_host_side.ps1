@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$PidFile = "",
   [int]$Port = 0
 )
@@ -99,6 +100,7 @@ function Stop-ProcessTree {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$runtimeRootWasExplicit = -not [string]::IsNullOrWhiteSpace($RuntimeRoot)
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
   $fallbackEnv = Join-Path $repoRoot ".env.example"
@@ -109,10 +111,15 @@ if (-not $EnvFile) {
   }
 }
 
-if (-not $PidFile) {
-  $PidFile = Join-Path $repoRoot "runtime\host\host.pid"
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
 }
-$runtimeEnvFile = Join-Path $repoRoot "runtime\host\host.runtime.env"
+if (-not $PidFile) {
+  $PidFile = Join-Path $RuntimeRoot "host.pid"
+}
+$runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
 if ($Port -le 0) {
@@ -172,14 +179,16 @@ if (-not $stopped) {
 }
 
 $remainingHostPids = @()
-foreach ($candidatePid in @(Get-HostProcessIds)) {
-  if ($hostPid -ne $null -and [int]$candidatePid -eq [int]$hostPid) {
-    continue
-  }
-  $ok = Stop-ProcessTree -ProcessId ([int]$candidatePid)
-  if ($ok) {
-    $stopped = $true
-    $remainingHostPids += [int]$candidatePid
+if (-not $runtimeRootWasExplicit) {
+  foreach ($candidatePid in @(Get-HostProcessIds)) {
+    if ($hostPid -ne $null -and [int]$candidatePid -eq [int]$hostPid) {
+      continue
+    }
+    $ok = Stop-ProcessTree -ProcessId ([int]$candidatePid)
+    if ($ok) {
+      $stopped = $true
+      $remainingHostPids += [int]$candidatePid
+    }
   }
 }
 if ($remainingHostPids.Count -gt 0) {
@@ -192,7 +201,7 @@ $obsProcessResult = $null
 $stopObsScript = Join-Path $PSScriptRoot "stop_obs_side.ps1"
 if (Test-Path -Path $stopObsScript) {
   try {
-    $obsRaw = & $stopObsScript -EnvFile $EnvFile
+    $obsRaw = & $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot
     $obsJson = ($obsRaw | Out-String).Trim()
     if ($obsJson) {
       try {
@@ -220,7 +229,7 @@ $monitorProxyResult = $null
 $stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"
 if (Test-Path -Path $stopMonitorScript) {
   try {
-    $monitorRaw = & $stopMonitorScript -EnvFile $EnvFile
+    $monitorRaw = & $stopMonitorScript -EnvFile $EnvFile -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")
     $monitorJson = ($monitorRaw | Out-String).Trim()
     if ($monitorJson) {
       try {
@@ -249,6 +258,7 @@ $result = [ordered]@{
   status = if ($stopped) { "stopped" } else { "not_running" }
   pid = $hostPid
   pid_file = $PidFile
+  runtime_root = $RuntimeRoot
   port = $Port
   detail = $detail
   obs_process = $obsProcessResult

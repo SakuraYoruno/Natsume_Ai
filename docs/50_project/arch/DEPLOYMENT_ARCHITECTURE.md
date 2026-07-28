@@ -110,7 +110,11 @@ Host 入口见 [host_brain/__main__.py](../../../host_brain/__main__.py)，OBS �
 4. 类型化 Settings 读取环境与 `.env`；
 5. `--host`、`--port`、`--db-path` 等 CLI 参数覆盖本次进程行为。
 
-[start_host_side.ps1](../../../scripts/runtime/start_host_side.ps1) 会从 `.env`（缺失时回退 `.env.example`）构造运行环境，并把 `HOST_`、`EDGE_`、`Natsume_` 及部分供应商前缀变量写入 `runtime/host/host.runtime.env`。该文件被 Git 忽略且正常停止时会删除，但它是包含潜在秘密的明文快照。
+[start_host_side.ps1](../../../scripts/runtime/start_host_side.ps1) 会从 `.env`
+（缺失时回退 `.env.example`）构造运行环境，并把必要的非秘密配置写入
+`host.runtime.env`。password、passwd、secret、Token、auth 与 key 值不会
+进入快照；只有 `sec://` 引用可保留。文件被 Git 忽略且正常停止时删除，
+真实秘密仍必须由受控 `.env`、secret store 或外部注入提供。
 
 ### 4.2 Edge
 
@@ -135,7 +139,8 @@ HOST_NODE_INVENTORY_PATH=configs/deploy/node_inventory_personal_lan.json
 
 ### 4.4 配置安全要求
 
-- `.env`、`host.runtime.env`、`edge.runtime.env`、动态启动器和本地秘密 JSON 必须限制文件 ACL。
+- `.env`、`edge.runtime.env`、动态启动器和本地秘密 JSON 必须限制文件 ACL；
+  `host.runtime.env` 已排除秘密值，但仍按运行配置文件保护。
 - 不得依赖示例秘密或 Compose 内置回退密码。
 - 远端 Edge 绑定 `0.0.0.0` 前，必须在宿主机配置防火墙、可信网段与鉴权；当前部署层不提供 TLS。
 - 运行时快照失败或异常退出后可能残留，应纳入人工清理与秘密轮换流程。
@@ -146,7 +151,7 @@ HOST_NODE_INVENTORY_PATH=configs/deploy/node_inventory_personal_lan.json
 
 | 路径 | 所有者 | 内容 | 生命周期 |
 |---|---|---|---|
-| `runtime/host/` | Host/OBS/Proxy 脚本 | PID、运行环境、日志、Nginx 配置、启动告警 | 运行态；日志保留 |
+| `runtime/host/` 或显式 `RuntimeRoot` | Host/OBS/Proxy 脚本 | PID、非秘密运行配置、日志、Nginx 配置、启动告警 | 运行态；验收可完全隔离 |
 | `runtime/edge/` | Edge 脚本 | PID、运行环境、日志、QQ 状态、微信队列和动态启动器 | 运行态；部分状态持久 |
 | `runtime/docker/neo4j/` | Neo4j 容器 | 图数据与日志 | 持久；`down` 默认保留 |
 | `runtime/docker/chroma/` | Chroma 容器 | 向量数据 | 持久；`down` 默认保留 |
@@ -167,7 +172,7 @@ HOST_NODE_INVENTORY_PATH=configs/deploy/node_inventory_personal_lan.json
 
 [start_host_side.ps1](../../../scripts/runtime/start_host_side.ps1) 的实际行为是：
 
-1. 选择 `.env`，创建 `runtime/host/` 与日志目录；
+1. 选择 `.env`，创建默认 `runtime/host/` 或显式 `RuntimeRoot` 与日志目录；
 2. 默认调用 [start_docker_services.ps1](../../../scripts/runtime/start_docker_services.ps1)，启动并探测 Neo4j、Chroma、Redis；`ExternalServicesBackend=none` 时跳过；
 3. 按配置尝试启动 MateEngine Bridge；
 4. 启动 `python -m host_brain`，可附加 `--startup-check`；
@@ -376,10 +381,10 @@ Monitor UI 源码位于 [host_brain/app/monitor_ui/package.json](../../../host_b
 | Gateway 未纳入启动就绪 | Edge 成功但平台入口不可用 | 启动与验收显式检查 `/v1/gateway/health` |
 | ASR/TTS 探测指向遗留端口 | 虚假降级或错误禁用 ASR | 统一读取 `/v1/edge/health` 的组件状态 |
 | 健康只看 HTTP/端口 | `ready=false` 仍可能被判 started | Gate 校验 payload 状态和版本标识 |
-| 明文运行环境落盘 | 供应商密钥、Token 可能残留 | 最小化快照、ACL、退出清理与秘密轮换 |
+| Edge/远端动态启动仍可能明文落盘 | Edge 密钥、Token 可能残留；Host 快照已过滤秘密值 | Edge 同步最小化快照、ACL、退出清理与秘密轮换 |
 | 远端 Edge 默认全网绑定且无 TLS | 扩大 RPC/Gateway 暴露面 | 默认可信网卡、防火墙、TLS/反代与鉴权验收 |
 | 强杀且无 drain | 任务、Outbox、队列可能停在中间态 | 分阶段停机、超时强杀、恢复一致性实测 |
-| 端口/PID 所有权判断不足 | 误认或误杀无关进程 | PID + 启动标识 + executable + health identity 联合校验 |
+| 默认全局停止模式仍兼容旧行为 | 未显式 runtime root 时可能停止同仓库其它 Host | 验收/多实例必须显式 `RuntimeRoot`；后续增加 PID + executable + health identity 联合校验 |
 
 ### P1：影响可重复部署与运维质量
 

@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$RuntimeRoot = "",
   [string]$LogDir = "",
   [string]$BindHost = "",
   [int]$Port = 0,
@@ -234,6 +235,31 @@ exit `$childExitCode
   }
 }
 
+function Test-SensitiveRuntimeEnvEntry {
+  param(
+    [string]$Name,
+    [AllowNull()][string]$Value
+  )
+  $normalizedName = ([string]$Name).Trim()
+  $normalizedValue = ([string]$Value).Trim()
+  if (-not $normalizedName) {
+    return $false
+  }
+  if (
+    $normalizedName -match '(?i)_REF$' -and
+    $normalizedValue.StartsWith("sec://", [System.StringComparison]::Ordinal)
+  ) {
+    return $false
+  }
+  if (
+    $normalizedName -match '(?i)(^|_)(PASSWORD|PASSWD|SECRET|TOKEN|AUTH)(_|$)' -or
+    $normalizedName -match '(?i)_KEYS?$'
+  ) {
+    return $true
+  }
+  return $false
+}
+
 function Write-RuntimeEnvFile {
   param(
     [string]$Path,
@@ -243,13 +269,20 @@ function Write-RuntimeEnvFile {
   $snapshot = @{}
   foreach ($entry in [Environment]::GetEnvironmentVariables('Process').GetEnumerator()) {
     $name = [string]$entry.Key
-    if ($name -match '^(HOST_|EDGE_|Natsume_|OPENAI_|GEMINI_|DEEPSEEK_|MINIMAX_|GOOGLE_)') {
-      $snapshot[$name] = [string]$entry.Value
+    $value = [string]$entry.Value
+    if (
+      $name -match '^(HOST_|EDGE_|Natsume_|OPENAI_|GEMINI_|DEEPSEEK_|MINIMAX_|GOOGLE_)' -and
+      -not (Test-SensitiveRuntimeEnvEntry -Name $name -Value $value)
+    ) {
+      $snapshot[$name] = $value
     }
   }
   foreach ($key in $SeedValues.Keys) {
     $value = [Environment]::GetEnvironmentVariable([string]$key, 'Process')
-    if ($null -ne $value) {
+    if (
+      $null -ne $value -and
+      -not (Test-SensitiveRuntimeEnvEntry -Name ([string]$key) -Value ([string]$value)
+    )) {
       $snapshot[[string]$key] = [string]$value
     }
   }
@@ -880,6 +913,7 @@ function Start-MateEngineBridgeRuntime {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$runtimeRootWasExplicit = -not [string]::IsNullOrWhiteSpace($RuntimeRoot)
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
   $fallbackEnv = Join-Path $repoRoot ".env.example"
@@ -890,18 +924,23 @@ if (-not $EnvFile) {
   }
 }
 
-$runtimeRoot = Join-Path $repoRoot "runtime\host"
-Ensure-Directory -Path $runtimeRoot
+if (-not $RuntimeRoot) {
+  $RuntimeRoot = Join-Path $repoRoot "runtime\host"
+} elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
+  $RuntimeRoot = Join-Path $repoRoot $RuntimeRoot
+}
+Ensure-Directory -Path $RuntimeRoot
+$RuntimeRoot = (Resolve-Path -Path $RuntimeRoot).Path
 
 if (-not $LogDir) {
-  $LogDir = Join-Path $runtimeRoot "logs"
+  $LogDir = Join-Path $RuntimeRoot "logs"
 }
 Ensure-Directory -Path $LogDir
 
-$pidFile = Join-Path $runtimeRoot "host.pid"
+$pidFile = Join-Path $RuntimeRoot "host.pid"
 $stdoutLog = Join-Path $LogDir "host.stdout.log"
 $stderrLog = Join-Path $LogDir "host.stderr.log"
-$runtimeEnvFile = Join-Path $runtimeRoot "host.runtime.env"
+$runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
@@ -1145,7 +1184,7 @@ if ($null -ne $listeningPid) {
   Start-Sleep -Milliseconds 500
 }
 
-if ($ForceRestart.IsPresent) {
+if ($ForceRestart.IsPresent -and -not $runtimeRootWasExplicit) {
   foreach ($candidatePid in @(Get-HostProcessIds)) {
     Stop-ProcessTree -ProcessId ([int]$candidatePid) | Out-Null
   }
@@ -1267,6 +1306,7 @@ if ($obsEnabled) {
     try {
       $obsArgs = @{
         EnvFile = $EnvFile
+        RuntimeRoot = $RuntimeRoot
         WaitSeconds = $WaitSeconds
       }
       if ($ForceRestart.IsPresent) {
@@ -1415,6 +1455,7 @@ if ($monitorProxyEnabled) {
     try {
       $monitorArgs = @{
         EnvFile = $EnvFile
+        RuntimeRoot = (Join-Path $RuntimeRoot "monitor_proxy")
         WaitSeconds = $WaitSeconds
         UpstreamHost = $probeHost
         UpstreamPort = $Port
@@ -1485,6 +1526,7 @@ $result = [ordered]@{
   external_services_backend = $ExternalServicesBackend
   health_url = $healthUrl
   env_file = $EnvFile
+  runtime_root = $RuntimeRoot
   runtime_env_file = $runtimeEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
