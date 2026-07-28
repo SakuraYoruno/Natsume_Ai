@@ -67,6 +67,15 @@ Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不�
 自然语言 classifier 的 `0.72` 和旧 ResponseFeedback proposal 保持低权重/proposal-only，均不具备该
 成长 authority。
 
+当前子波改为 `DL-06_SIGNED_PROFILE_ROLLBACK_CONTROL_SLICE`：
+`POST /v1/digital-life/relationship/companion-profile/rollback` 只接受
+`CompanionProfileRollbackRequestV1` 的 current active profile identity，必须另持
+`companion:profile:rollback` 并重验 exact user/relationship subject、tenant/workspace。
+body 没有历史 target；canonical lifecycle 只能恢复 current profile 的 frozen predecessor，且将
+audit-derived `source_control_ref` 写进 immutable rollback event，使 duplicate、claim-result 中断和
+restart 仅重开一个 Life receipt。该入口不改变 Soul、consent 或 self-affect；Monitor/Review、长期
+canary、legacy writer cutover 与真实服务验收仍未完成。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

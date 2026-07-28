@@ -232,6 +232,14 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   绑定。只有 signed `HELPFUL` 生成 `0.95` 的 strong aftereffect，它只能调用既有 canary 的
   `record_eligible_canary_aftereffect`；第五条合格 canary 后效应才会自动 activation，外部请求不能自己创建或指定 activation profile。自然语言 classifier、
   persona response-feedback proposal 和任意 raw rating 均不得进入这条 authority。
+- `POST /v1/digital-life/relationship/companion-profile/rollback` 是与 canary-start 分离的
+  **exact active-version rollback** 入口。`CompanionProfileRollbackRequestV1` 只能声明当前
+  visible profile identity，`host.companion-profile-rollback` 必须验证
+  `companion:profile:rollback`、`user principal == relationship subject` 和
+  `tenant == workspace`。body 不得带 rollback target、Soul patch、consent 或任何 Life command；
+  lifecycle 只取 current active profile 自己的 predecessor。rollback command 固化 audit-derived
+  `source_control_ref`，故 duplicate、claim-result 中断或 restart 只重开同一 receipt；stale active
+  identity、service principal、cross-scope 与 target injection 均失败关闭。
 - 低风险偏好只覆盖称呼、长度、幽默、追问、安慰风格、主动频率、语速和动作强度。
 - 自动升级需至少 5 条独立 aftereffect、跨 3 天、置信下界≥0.85、边界违规=0，并先经历 5 次 canary；核心人格、价值观、亲密身份与敏感推断必须 Review。
 - 清零 HostEmotionRuntime self-state、Limbic metabolism、EmotionPersistence、BodySense、Endocrine、Motive writer 和 volatile Bond queue 的生产 writer 使用量。

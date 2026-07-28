@@ -31,6 +31,7 @@ _FOLLOWUP_RATES = frozenset({"NONE", "OCCASIONAL", "GENTLE"})
 _COMFORT_MODES = frozenset({"ASK_FIRST", "QUIET_FIRST", "PRACTICAL_GENTLE"})
 _PROACTIVE_WINDOWS = frozenset({"OFF", "DAYTIME", "EVENING", "FLEXIBLE"})
 _COMPANION_PROFILE_CONTROL_REQUEST_SCHEMA = "companion_profile_control_request.v1"
+_COMPANION_PROFILE_ROLLBACK_REQUEST_SCHEMA = "companion_profile_rollback_request.v1"
 
 
 def _required(value: Any, field_name: str, *, limit: int = 512) -> str:
@@ -359,6 +360,91 @@ class CompanionProfileControlRequestV1:
             "relationship_subject_id": self.relationship_subject_id,
             "session_id": self.session_id,
             "preferences": self.preferences.as_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionProfileRollbackRequestV1:
+    """Signed request to restore the exact predecessor of one active profile.
+
+    The caller cannot choose an arbitrary historical version.  It only names
+    the profile it currently sees; the canonical lifecycle reopens that active
+    profile's immutable rollback reference and rejects any stale request.
+    """
+
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    expected_active_profile_id: str
+    schema_version: str = _COMPANION_PROFILE_ROLLBACK_REQUEST_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema_version != _COMPANION_PROFILE_ROLLBACK_REQUEST_SCHEMA:
+            raise ValueError("companion profile rollback request schema is invalid")
+        workspace = _required(self.workspace_id, "workspace_id", limit=240)
+        subject = _required(
+            self.relationship_subject_id,
+            "relationship_subject_id",
+            limit=240,
+        )
+        session = _required(self.session_id, "session_id", limit=240)
+        profile_id = _required(
+            self.expected_active_profile_id,
+            "expected_active_profile_id",
+            limit=240,
+        )
+        if not profile_id.startswith("companion-profile::"):
+            raise ValueError(
+                "expected_active_profile_id must name one companion profile"
+            )
+        object.__setattr__(self, "workspace_id", workspace)
+        object.__setattr__(self, "relationship_subject_id", subject)
+        object.__setattr__(self, "session_id", session)
+        object.__setattr__(self, "expected_active_profile_id", profile_id)
+        object.__setattr__(
+            self,
+            "schema_version",
+            _COMPANION_PROFILE_ROLLBACK_REQUEST_SCHEMA,
+        )
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "CompanionProfileRollbackRequestV1":
+        if not isinstance(value, Mapping):
+            raise ValueError("companion profile rollback request must be an object")
+        expected = {
+            "schema_version",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+            "expected_active_profile_id",
+        }
+        if set(value) != expected:
+            raise ValueError("companion profile rollback request field set is invalid")
+        for field_name in expected:
+            raw = value.get(field_name)
+            if not isinstance(raw, str) or raw != raw.strip():
+                raise ValueError(
+                    "companion profile rollback request "
+                    f"{field_name} must be an exact string"
+                )
+        return cls(
+            schema_version=value["schema_version"],
+            workspace_id=value["workspace_id"],
+            relationship_subject_id=value["relationship_subject_id"],
+            session_id=value["session_id"],
+            expected_active_profile_id=value["expected_active_profile_id"],
+        )
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "schema_version": self.schema_version,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "expected_active_profile_id": self.expected_active_profile_id,
         }
 
 
@@ -889,6 +975,7 @@ __all__ = [
     "CompanionProfileCanaryInteractionV1",
     "CompanionProfileControlRequestV1",
     "CompanionProfilePreferencesV1",
+    "CompanionProfileRollbackRequestV1",
     "CompanionProfileStateV1",
     "CompanionProfileVersionV1",
     "baseline_companion_profile",

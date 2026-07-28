@@ -65,6 +65,13 @@ head。该 route 不是 Monitor 审核界面，也不直接 activation；远端 
 的四种 bounded 评价。`HELPFUL` 经 `companion:feedback:write`、exact user/subject 与 tenant/workspace
 认证后才写为 `0.95` aftereffect；它只会推进既有 CANARY；第五条合格后效应才会自动激活，外部请求不能创建或指定激活 profile，也不会把输入
 文本、persona proposal 或自然语言 classifier 当成强证据。
+
+同一 profile 现在有独立的 signed rollback route：
+`POST /v1/digital-life/relationship/companion-profile/rollback` 只接受当前 active profile identity，
+要求 `companion:profile:rollback`、精确 user/relationship subject 与 tenant/workspace 绑定。调用方不
+能指定任意历史 target；canonical lifecycle 只恢复 active profile 的 frozen predecessor，并把 opaque
+Secure Ingress `source_control_ref` 写进 immutable rollback event。duplicate、claim-result 中断与重启只能
+重开同一 receipt；这仍不是 Monitor/Review、长期体验收益、旧 writer cutover 或远端 Edge 验收。
 此前 NE-01～NE-07 的执行、Lab、Skill 和 Docker 记录
 仅是可复用基础资产；不能替代情感生命、关系修复或三模态实测。远端 Edge 当前
 不启动，缺真实 provider 或硬件时只允许 `ACCEPTANCE_PENDING_EXTERNAL`。

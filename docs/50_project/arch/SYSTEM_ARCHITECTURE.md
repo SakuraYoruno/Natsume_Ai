@@ -121,6 +121,14 @@ Host composition 通过 fresh `ProcessApplicationPorts` 与 frozen Host/Agent/Co
 将 Secure Ingress audit ref 写入 immutable profile version；它不能传入自由文本、Soul patch、emotion、
 consent 或直接 activation。该 API 仍不是 Monitor/Review 用户控件，canary evidence 与旧 writer 清零仍待完成。
 
+同一 composition 现在也构造 `CompanionProfileRollbackIngress`：
+`POST /v1/digital-life/relationship/companion-profile/rollback` 经独立
+`host.companion-profile-rollback` policy 验证 `companion:profile:rollback`，并绑定 user/relationship
+subject、tenant/workspace 与当前 active profile identity。请求只证明“我要撤回眼前这个试用版本”，
+不能传入旧版本 target；canonical lifecycle 从 current projection 读取 predecessor，append-only rollback
+event 记录 audit-derived `source_control_ref`。因此 command 已提交但 claim-result 丢失时，重试或替换
+Host 只会重开同一 Life receipt，不能再退一次版本。它不扩大对 Soul、consent 或 self-affect 的写权。
+
 Edge 指令不再由 Host lifespan 创建一个进程共享客户端。Tribe Agent 只提交计划或观察，内部/Obs 兼容入口只返回 fail-closed 状态；`EdgeCommandPusher` 是不可发现的低层 adapter，只有显式 TaskGraph 执行边界持有 exact Preview proof 时才能调用。当前正向 issuer 尚缺，因此结构上清除了第二 authority，但没有把具身执行定级为完成。
 
 Tribe compatibility 面也不再发布一个进程级 active Host。每个 `TribeRuntimeScope` 持有独立 state registry、Host registry、event bus 与 23-Agent catalog；lifespan 为启动/后台 execution、HTTP middleware 为每个请求激活 execution-local `ContextVar`。旧 shared-state/cross-Agent getter 与显式 Agent ports 只能读取当前 execution 的 exact scope；跨 scope 激活、active execution 解绑和 scope 释放后的 stale inherited context 都失败关闭。23 个 Agent backing singleton/setter、state registry、Host registry 与 event bus 的无上下文 fallback 已物理删除，缺 exact context 统一拒绝。两个本地重叠 Tribe scope 已证明 identity 隔离，但这不是完整 Host multi-app production canary；易失 EventBus 仍是待清理边界。

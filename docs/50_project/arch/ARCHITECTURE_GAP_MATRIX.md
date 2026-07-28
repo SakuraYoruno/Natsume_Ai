@@ -15,7 +15,7 @@
 Secure Ingress surface；它要求 `companion:profile:write`、exact user/relationship subject 与
 tenant/workspace 绑定，仅从 canonical strong aftereffect history 启动 profile CANARY，并把 audit ref
 持久化到 immutable head。它不是聊天语义推断、直接 activation 或 Monitor/Review 控件；剩余缺口为
-canary 长期收益、签名 rollback 控制、兼容 writer 清零、provider/Edge 和完整服务栈验收。
+ canary 长期收益、面向用户的 rollback/Review 控件、兼容 writer 清零、provider/Edge 和完整服务栈验收。
 
 **回应反馈修订：** `POST /v1/digital-life/relationship/response-feedback` 已作为
 `host.companion-feedback` 独立 Secure Ingress surface 接入 Host。它要求
@@ -26,6 +26,14 @@ receipt-scoped `0.95` aftereffect，且仅可推进既有 profile CANARY；第�
 生成 evidence、创建或指定 activation profile、改写 Soul、consent 或 self-affect。该路径已有真实
 SQLite、route、跨 scope、service principal、malformed body 与 restart replay 的定向证据；
 它不是 Monitor 用户界面、人工 Review、canary 长期收益、旧 writer 清零或真实服务栈验收。
+
+**签名回滚修订：** `POST /v1/digital-life/relationship/companion-profile/rollback` 已接入独立
+`host.companion-profile-rollback` surface。它要求 `companion:profile:rollback`、exact
+user/relationship subject、tenant/workspace 和 current active profile identity；body 不含历史 target，
+canonical lifecycle 只恢复 active profile 的 frozen predecessor。immutable rollback command 带有
+audit-derived `source_control_ref`，故 duplicate、claim-result 中断和重启只重开同一 receipt；stale head、
+service principal、cross-scope 与 target injection 均拒绝。这是本地 Host/SQLite 合同证据，不能升级为
+Monitor/Review、canary 长期收益、旧 writer cutover 或真实服务栈通过。
 
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与

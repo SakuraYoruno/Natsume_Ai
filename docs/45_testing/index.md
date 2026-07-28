@@ -68,6 +68,13 @@
   body、失活 receipt 和额外 `rating` 字段全部失败关闭。当前 feedback/profile lifecycle 的直接集合为
   `5 passed in 22.54s`；与 profile/permission/proactive/relationship/Secure Ingress 邻接集合为
   `29 passed in 60.87s`。这仍不是真实用户盲评、Monitor UI、Gateway、provider、Edge 或 DL-07 证据。
+- `test_dl06_companion_profile_ingress.py` 现额外覆盖 signed exact rollback：真实 SQLite 的 active
+  CANARY→第五条后效应自动 activation 之后，只有 `companion:profile:rollback`、精确 user/subject 与
+  tenant/workspace 绑定的 current active identity 才能经过 Host route 恢复 predecessor。HTTP duplicate、
+  进程重建与同一 audit ref 只重开一个 `companion_profile_rolled_back` event；stale identity、service
+  principal、cross-scope body 与 caller-supplied target 字段都失败关闭。此为本地合同/路由证据，仍不代表
+  Monitor 操作界面、长期用户体验、旧 writer cutover、真实 Gateway/Edge/provider 或 DL-07。本次完整
+  受影响集合为 `35 passed in 79.78s`；其中没有 Docker、远端 Edge 或外部模型调用。
 
 ## NE-07 隔离外部服务栈
 

@@ -129,7 +129,10 @@ def _companion_profile_http_status(reason_code: str) -> int:
         marker in reason for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT")
     ):
         return 409
-    if any(marker in reason for marker in ("THRESHOLD", "CANARY", "RELATIONSHIP")):
+    if any(
+        marker in reason
+        for marker in ("THRESHOLD", "CANARY", "RELATIONSHIP", "ROLLBACK", "DRIFT")
+    ):
         return 409
     return 401
 
@@ -785,6 +788,52 @@ async def digital_life_companion_profile(
     return result.as_dict()
 
 
+async def digital_life_companion_profile_rollback(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Restore only the exact predecessor of a signed user's active profile.
+
+    The body names the profile currently visible to the relationship; it never
+    names a rollback target.  The canonical lifecycle rejects a stale active
+    profile and reopens the same durable rollback receipt after claim loss.
+    """
+
+    provider = _route_ports.companion_profile_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionProfileIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit_rollback,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionProfileIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_profile_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
 async def digital_life_companion_feedback(
     request: Request,
     *,
@@ -1002,6 +1051,11 @@ def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
     add(
         "/v1/digital-life/relationship/companion-profile",
         digital_life_companion_profile,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/companion-profile/rollback",
+        digital_life_companion_profile_rollback,
         methods=["POST"],
     )
     add(

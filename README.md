@@ -13,6 +13,15 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 本次又接入 `POST /v1/digital-life/relationship/response-feedback`：用户只能对一条仍处于 provisional 状态、已有 canonical receipt 的回复提交 `HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY`。它要求独立的 `companion:feedback:write`、精确 user/subject 与 tenant/workspace 绑定；`HELPFUL` 才会成为 `0.95` 的 receipt-scoped 强 aftereffect，且只能推进一个已经存在的 profile CANARY；第五条合格后效应才会由 lifecycle 自动激活它，外部请求不能创建或指定激活 profile。自然语言关键词识别仍是保守的 `0.72`，只用于普通关系理解；它不能伪装为学习证据。
 
+本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
+要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
+`tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；
+canonical lifecycle 只能恢复该 active profile 自身冻结的 predecessor。回滚 event 持久化 opaque
+Secure Ingress `source_control_ref`，因此 HTTP duplicate、claim-result 间断或进程重启只会重开同一
+Life receipt，绝不二次回滚；过期 active identity、跨作用域、service principal 和额外 target 字段都
+失败关闭。它仍不改写 Soul、关系许可或 self-affect，也不代表 Monitor 审核、长期 canary 收益、旧
+writer 清零、远端 Edge 或完整服务栈已经完成。
+
 ## 历史基础设施状态（范围受限）
 
 NE-01 的代码波次封口证据绑定 `27b032f1e`，并已进入当前

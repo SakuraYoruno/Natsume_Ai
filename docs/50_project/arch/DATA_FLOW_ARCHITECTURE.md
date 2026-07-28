@@ -597,6 +597,20 @@ flowchart LR
 或额外 rating 字段都会失败关闭。feedback 的 Secure Ingress audit ref 是 crash/retry 的重开键，而非原始
 对话正文。
 
+profile rollback 也不允许 caller 选择历史版本；它以当前 head 作为唯一可验证输入：
+
+```mermaid
+flowchart LR
+    U["signed current active profile identity"] --> SI["host.companion-profile-rollback\nSecure Ingress"]
+    SI --> B["user / subject / tenant / workspace\ncompanion:profile:rollback"]
+    B --> H["current active profile\nfrozen predecessor only"]
+    H --> R["companion_profile_rolled_back\nsource_control_ref + Life receipt"]
+    R --> D["duplicate / restart\nreopen exact receipt"]
+```
+
+`rollback_profile_id` 从不属于 wire body。current identity 已漂移、service principal、跨 scope 或额外
+target 字段均 fail closed；Voice/Avatar/文本随后只读新的 active profile projection。
+
 ```mermaid
 flowchart LR
     H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]

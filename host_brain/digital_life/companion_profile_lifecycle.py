@@ -360,8 +360,16 @@ class CompanionProfileLifecycleService:
         relationship_subject_id: Any,
         session_id: Any,
         request_id: Any,
+        expected_active_profile_id: Any = None,
+        source_control_ref: Any = None,
     ) -> CompanionProfileLifecycleResult:
-        """Restore the exact version referenced by the current active profile."""
+        """Restore the exact predecessor of one active profile.
+
+        Public Host controls bind both an authenticated opaque control ref and
+        the profile identity currently visible to that relationship.  The
+        caller cannot nominate a rollback target; stale views and response-loss
+        retries reopen or reject against the immutable journal instead.
+        """
 
         scope = self._scope(
             workspace_id=workspace_id,
@@ -369,6 +377,37 @@ class CompanionProfileLifecycleService:
             session_id=session_id,
         )
         current = self._read_state(scope)
+        expected = _text(expected_active_profile_id, limit=240)
+        stable_request_id = _text(request_id) or _digest(
+            {
+                "schema": "companion-profile-rollback.v1",
+                "scope": scope.aggregate_id,
+                # Internal callers which do not supply a request id must still
+                # get a distinct control origin for each active profile.  A
+                # signed Host control always supplies its request id and its
+                # explicit expected identity.
+                "expected_active_profile_id": expected
+                or current.active_profile.profile_id,
+            }
+        )[:32]
+        control_ref = self._source_control_ref(
+            source_control_ref,
+            scope=scope,
+            request_id=stable_request_id,
+        )
+        existing = self._existing_rollback_control_receipt(
+            scope=scope,
+            source_control_ref=control_ref,
+        )
+        if existing is not None:
+            return CompanionProfileLifecycleResult(
+                scope=scope,
+                receipt=existing.as_replayed(),
+                state=self._read_state(scope),
+                reason_code="COMPANION_PROFILE_ROLLBACK_REPLAYED",
+            )
+        if expected and expected != current.active_profile.profile_id:
+            raise ValueError("COMPANION_PROFILE_ROLLBACK_ACTIVE_PROFILE_DRIFT")
         target_id = current.active_profile.rollback_profile_id
         if not target_id:
             raise ValueError("COMPANION_PROFILE_ROLLBACK_NOT_AVAILABLE")
@@ -376,14 +415,25 @@ class CompanionProfileLifecycleService:
         target = known.get(target_id)
         if target is None:
             raise ValueError("COMPANION_PROFILE_ROLLBACK_TARGET_MISSING")
-        stable_request_id = _text(request_id) or _digest(
-            {
-                "schema": "companion-profile-rollback.v1",
-                "scope": scope.aggregate_id,
-                "active_profile_id": current.active_profile.profile_id,
-                "target_profile_id": target.profile_id,
-            }
-        )[:32]
+
+        expected_active_id = current.active_profile.profile_id
+
+        def _assert_current_predecessor(snapshot: Any) -> None:
+            """Revalidate inside the aggregate claim before a write commits.
+
+            Two independently signed requests can observe the same active
+            profile before either reaches ``submit_next``.  The outer read
+            rejects ordinary stale requests, but the canonical UoW must repeat
+            that identity/predecessor check after it owns the aggregate; a
+            second rollback must never be admitted from an obsolete head.
+            """
+
+            at_commit = self._state_from_snapshot(scope, snapshot)
+            if at_commit.active_profile.profile_id != expected_active_id:
+                raise ValueError("COMPANION_PROFILE_ROLLBACK_ACTIVE_PROFILE_DRIFT")
+            if at_commit.active_profile.rollback_profile_id != target.profile_id:
+                raise ValueError("COMPANION_PROFILE_ROLLBACK_TARGET_DRIFT")
+
         now_ms = self._next_created_at(scope)
         receipt = self._submit(
             scope=scope,
@@ -393,8 +443,10 @@ class CompanionProfileLifecycleService:
             payload={
                 "profile": target.as_dict(),
                 "rollback_profile_id": current.active_profile.profile_id,
+                "source_control_ref": control_ref,
             },
             created_at_ms=now_ms,
+            snapshot_validator=_assert_current_predecessor,
         )
         return CompanionProfileLifecycleResult(
             scope=scope,
@@ -418,6 +470,15 @@ class CompanionProfileLifecycleService:
 
     def _read_state(self, scope: RelationshipScope) -> CompanionProfileStateV1:
         snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
+        return self._state_from_snapshot(scope, snapshot)
+
+    @staticmethod
+    def _state_from_snapshot(
+        scope: RelationshipScope,
+        snapshot: Any,
+    ) -> CompanionProfileStateV1:
+        """Decode the profile head from one already-claimed Life snapshot."""
+
         raw_relationship = _mapping(snapshot.state.get("relationship_v2"))
         if raw_relationship and (
             _text(raw_relationship.get("workspace_id")) not in {
@@ -510,6 +571,37 @@ class CompanionProfileLifecycleService:
             if not isinstance(profile, Mapping):
                 continue
             if _text(profile.get("source_control_ref"), limit=512) != source_control_ref:
+                continue
+            receipt = reader.get_receipt(event.command_id)
+            if receipt is None:
+                raise RuntimeError("COMPANION_PROFILE_REPLAY_RECEIPT_MISSING")
+            return receipt
+        return None
+
+    def _existing_rollback_control_receipt(
+        self,
+        *,
+        scope: RelationshipScope,
+        source_control_ref: str,
+    ) -> LifeCommandReceipt | None:
+        """Reopen one rollback that committed before its ingress claim result.
+
+        Once rollback succeeds the active profile no longer exposes its former
+        rollback target, so recomputing from the current head would incorrectly
+        report ``NOT_AVAILABLE``.  The immutable Secure Ingress audit ref is
+        the only replay key; it neither exposes user content nor lets a caller
+        choose a historical profile.
+        """
+
+        reader = self._require_snapshot_reader()
+        for event in self._iter_scope_events(scope):
+            if event.event_type != "companion_profile_rolled_back":
+                continue
+            payload = _mapping(_mapping(event.payload).get("command_payload"))
+            if (
+                _text(payload.get("source_control_ref"), limit=512)
+                != source_control_ref
+            ):
                 continue
             receipt = reader.get_receipt(event.command_id)
             if receipt is None:
@@ -667,6 +759,7 @@ class CompanionProfileLifecycleService:
         ordinal: int,
         payload: Mapping[str, Any],
         created_at_ms: int,
+        snapshot_validator: Callable[[Any], None] | None = None,
     ) -> LifeCommandReceipt:
         command_seed = {
             "schema": "companion-profile-life-command.v1",
@@ -679,6 +772,8 @@ class CompanionProfileLifecycleService:
         command_id = f"companion_profile_{_digest(command_seed)[:40]}"
 
         def build(snapshot: Any) -> LifeCommand:
+            if snapshot_validator is not None:
+                snapshot_validator(snapshot)
             return LifeCommand(
                 command_id=command_id,
                 person_id=scope.aggregate_id,

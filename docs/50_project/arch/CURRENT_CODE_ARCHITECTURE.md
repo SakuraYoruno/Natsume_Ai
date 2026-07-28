@@ -70,6 +70,15 @@
 > 也不能写 Soul、consent、self-affect；旧关键词 classifier 与 persona
 > proposal 没有该权限。
 
+> `CompanionProfileRollbackRequestV1` 以另一条 server-owned Secure Ingress surface 接入：
+> `POST /v1/digital-life/relationship/companion-profile/rollback` 要求
+> `companion:profile:rollback`、exact user/relationship subject、tenant/workspace 和当前 active
+> profile identity。body 不能指定历史 target；lifecycle 只读取 current profile 的 frozen predecessor。
+> `companion_profile_rolled_back` command 保存 audit-derived `source_control_ref`，所以 duplicate 或
+> restart 会重开同一 receipt；stale active identity、service principal、cross-scope 与 target injection
+> 全部失败关闭。它不改变 Soul、consent 或 self-affect，且仍不等于 Monitor/Review 或 legacy writer
+> cutover 已完成。
+
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 `ExpressionPlanV1`，并在可信 internal AffectFusion hand-off 后由纯 planner 冻结。
 低歧义路径使用 `ModelAttemptService.stream()`，生产 Vault adapter 会调用 provider

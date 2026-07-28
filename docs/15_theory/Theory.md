@@ -1670,3 +1670,17 @@ Secure Ingress audit ref 与 aftereffect 一起进入 append-only Life journal�
 `BOUNDARY` 同样应保留为可见的关系事实；它们不能被沉默、投递失败或一次道歉自动
 冲销。真正的 Monitor 反馈界面、人工 Review、canary 的长期体验结果和 legacy writer
 退役仍需后续波次证明。
+
+## 33. 撤销表达偏好只能回到刚才的自己，不能重写历史
+
+用户可以撤销当前试用中的称呼、语速或动作强度，但“撤销”不能成为一个任意选择历史人格版本的
+后门。故 Host 只接受签名的 `CompanionProfileRollbackRequestV1`：它必须携带用户当前实际看到的
+active profile identity，并同时满足独立 `companion:profile:rollback`、关系主体与 workspace tenant
+绑定。请求没有 target profile 字段；canonical lifecycle 只能读取 current active profile 自己冻结的
+`rollback_profile_id`。
+
+回滚 command 将 opaque Secure Ingress audit-derived control ref 一并写进 append-only Life journal。
+如果命令已经提交、但 HTTP claim-result 尚未写回，duplicate 或重启会靠这条 immutable control ref
+精确重开原 receipt，而不会依据已经变化的 active head 再次猜测或执行一次回滚。过期 profile identity、
+跨用户/workspace、service principal 和额外历史 target 一律拒绝。这个机制只撤回低风险表达版本；
+Soul、关系许可、亲密身份和七海自身情感仍不受用户偏好 API 改写。

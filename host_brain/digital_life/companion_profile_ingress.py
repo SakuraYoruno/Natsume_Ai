@@ -25,7 +25,11 @@ from host_brain.secure_ingress import (
     SecureIngressAuthorityEvaluator,
     SecureIngressHttpAuthorityAdapter,
 )
-from natsume_contracts.life import CompanionProfileControlRequestV1, LifeCommandReceipt
+from natsume_contracts.life import (
+    CompanionProfileControlRequestV1,
+    CompanionProfileRollbackRequestV1,
+    LifeCommandReceipt,
+)
 
 
 COMPANION_PROFILE_INGRESS_UNAVAILABLE = "COMPANION_PROFILE_INGRESS_UNAVAILABLE"
@@ -52,9 +56,9 @@ class CompanionProfileIngressError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class CompanionProfileIngressResult:
-    """Accepted profile-canary receipt without private conversation content."""
+    """Accepted profile lifecycle receipt without private conversation content."""
 
-    request: CompanionProfileControlRequestV1
+    request: CompanionProfileControlRequestV1 | CompanionProfileRollbackRequestV1
     lifecycle: CompanionProfileLifecycleResult
     receipt: LifeCommandReceipt
     receipt_ref: str
@@ -76,6 +80,11 @@ class CompanionProfileIngressResult:
             "profile_digest": profile.profile_digest,
             "profile_revision": state.revision,
             "profile_stage": "CANARY" if candidate is not None else "ACTIVE",
+            "action": (
+                "ROLLBACK"
+                if isinstance(self.request, CompanionProfileRollbackRequestV1)
+                else "CANARY_START"
+            ),
             "command_id": self.receipt.command_id,
             "event_id": self.receipt.event_id,
             "state_version": self.receipt.state_version,
@@ -134,6 +143,22 @@ def _request_from_raw_body(raw_body: bytes) -> CompanionProfileControlRequestV1:
         ) from exc
 
 
+def _rollback_request_from_raw_body(
+    raw_body: bytes,
+) -> CompanionProfileRollbackRequestV1:
+    try:
+        return CompanionProfileRollbackRequestV1.from_mapping(
+            _strict_json_object(raw_body)
+        )
+    except CompanionProfileIngressError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise CompanionProfileIngressError(
+            COMPANION_PROFILE_BODY_INVALID,
+            "request does not satisfy companion profile rollback v1",
+        ) from exc
+
+
 def _rejection_ref(*, authority: SecureIngressAuthority, reason_code: str) -> str:
     material = {
         "schema_version": "companion_profile_rejection.v1",
@@ -173,6 +198,10 @@ class CompanionProfileIngress:
         self._authority_adapter = SecureIngressHttpAuthorityAdapter(
             evaluator=evaluator,
             surface=IngressSurface.COMPANION_PROFILE,
+        )
+        self._rollback_authority_adapter = SecureIngressHttpAuthorityAdapter(
+            evaluator=evaluator,
+            surface=IngressSurface.COMPANION_PROFILE_ROLLBACK,
         )
         self._complete_claim = complete_claim
         self._companion_profile_lifecycle_service_provider = (
@@ -281,11 +310,113 @@ class CompanionProfileIngress:
             replayed=bool(authority.duplicate or receipt.replayed),
         )
 
+    def submit_rollback(
+        self,
+        *,
+        request: Any,
+        raw_body: bytes,
+        received_at_ms: int | None = None,
+    ) -> CompanionProfileIngressResult:
+        """Authenticate one user-requested exact rollback of an active profile."""
+
+        now_ms = max(
+            0,
+            int(self._clock_ms() if received_at_ms is None else received_at_ms),
+        )
+        authority = self._rollback_authority_adapter.evaluate(
+            request=request,
+            raw_body=bytes(raw_body),
+            received_at_ms=now_ms,
+        )
+        if not authority.admissible:
+            raise CompanionProfileIngressError(authority.reason_code)
+        try:
+            control = _rollback_request_from_raw_body(raw_body)
+            self._assert_user_scope(authority=authority, control=control)
+        except CompanionProfileIngressError as exc:
+            self._complete_rejection(
+                authority=authority,
+                reason_code=exc.reason_code,
+                at_ms=now_ms,
+            )
+            raise
+
+        lifecycle = self._companion_profile_lifecycle_service_provider()
+        if not isinstance(lifecycle, CompanionProfileLifecycleService):
+            raise CompanionProfileIngressError(
+                COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+                "canonical companion profile lifecycle service is unavailable",
+            )
+        audit_ref = str(authority.audit_ref or "").strip()
+        request_id = str(authority.request_id or "").strip()
+        claim_ref = str(authority.claim_ref or "").strip()
+        if not audit_ref or not audit_ref.startswith("secure-ingress-audit://"):
+            self._complete_rejection(
+                authority=authority,
+                reason_code=COMPANION_PROFILE_EVIDENCE_UNAVAILABLE,
+                at_ms=now_ms,
+            )
+            raise CompanionProfileIngressError(
+                COMPANION_PROFILE_EVIDENCE_UNAVAILABLE,
+                "Secure Ingress did not provide durable profile-rollback evidence",
+            )
+        if not request_id or not claim_ref:
+            raise CompanionProfileIngressError(
+                COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+                "Secure Ingress did not provide replay authority",
+            )
+        try:
+            lifecycle_result = lifecycle.rollback_active(
+                workspace_id=control.workspace_id,
+                relationship_subject_id=control.relationship_subject_id,
+                session_id=control.session_id,
+                request_id=request_id,
+                expected_active_profile_id=control.expected_active_profile_id,
+                source_control_ref=audit_ref,
+            )
+        except (RuntimeError, ValueError) as exc:
+            reason_code = self._lifecycle_reason(exc)
+            self._complete_rejection(
+                authority=authority,
+                reason_code=reason_code,
+                at_ms=now_ms,
+            )
+            raise CompanionProfileIngressError(reason_code) from exc
+        receipt = lifecycle_result.receipt
+        if receipt is None or receipt.status.value != "APPLIED":
+            raise CompanionProfileIngressError(
+                COMPANION_PROFILE_COMMAND_NOT_APPLIED,
+                "canonical companion profile rollback was not applied",
+            )
+        receipt_ref = f"life-command://{receipt.command_id}"
+        existing_result_ref = str(authority.existing_result_ref or "").strip()
+        if existing_result_ref and existing_result_ref != receipt_ref:
+            raise CompanionProfileIngressError(
+                COMPANION_PROFILE_RESULT_CONFLICT,
+                "Secure Ingress result does not match canonical profile rollback receipt",
+            )
+        self._complete_success(
+            authority=authority,
+            receipt_ref=receipt_ref,
+            at_ms=now_ms,
+        )
+        return CompanionProfileIngressResult(
+            request=control,
+            lifecycle=lifecycle_result,
+            receipt=receipt,
+            receipt_ref=receipt_ref,
+            ingress_audit_ref=audit_ref,
+            ingress_claim_ref=claim_ref,
+            replayed=bool(authority.duplicate or receipt.replayed),
+        )
+
     @staticmethod
     def _assert_user_scope(
         *,
         authority: SecureIngressAuthority,
-        control: CompanionProfileControlRequestV1,
+        control: (
+            CompanionProfileControlRequestV1 | CompanionProfileRollbackRequestV1
+        ),
     ) -> None:
         if str(authority.principal_kind or "").strip().lower() != "user":
             raise CompanionProfileIngressError(
