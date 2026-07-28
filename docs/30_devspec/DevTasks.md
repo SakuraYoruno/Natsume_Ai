@@ -15,12 +15,14 @@
 - 执行合同：`NEXT_GENERATION_EVOLUTION_EXECUTION.md`
 - 机器状态：`../../configs/release/current_architecture_status.json`
 
-当前执行波为 NE-00～NE-07。NE 是端到端 Architecture Wave，不拆回逐个 TASK Seal。
+当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
+Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-03`。NE-01 已达到
-`CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`，其目标部署 promotion、
-真实网络、附属服务和回滚仍由 NE-07 统一验收；该口径不是把 NE-01 标成
-production `COMPLETED`。
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-00_IN_PROGRESS`：以实时情感陪伴
+数字生命为唯一产品主线。此前 NE-01～NE-07 的 Universal Runtime、搜索、Lab、
+Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
+情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
+的段落是历史范围说明，不再决定当前执行顺序。
 
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与

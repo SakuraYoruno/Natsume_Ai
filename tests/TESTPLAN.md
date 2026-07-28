@@ -6,6 +6,13 @@
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
 
+## T-DL00-EMOTIONAL-DIGITAL-LIFE-BASELINE
+
+- T-DL00-01：`foreground_completed` 可以记录脱敏用户 Affect observation，但不得将用户 VAD 直接写入七海 self-affect。
+- T-DL00-02：Life tick 只能按本次新增未互动时间累积 loneliness/contact，连续 tick 不得重复计算历史空闲窗口。
+- T-DL00-03：Motive willingness 映射必须单调：意愿越高，withdraw 增益越低；`0.0/0.2/0.5/0.7/1.0` 为固定边界。
+- T-DL00-04：`tests/fixtures/emotional_companion/dl00_multiturn_baseline_v1.json` 冻结 12 族、72 条合成多轮轨迹。它只定义后续真人/真实模型评估样本，当前状态为 `FROZEN_MEASUREMENT_PENDING`，不能记为体验 PASS。
+
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 
 - T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；

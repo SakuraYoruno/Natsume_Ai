@@ -2,16 +2,16 @@
   "schema_version": "natsume.current-architecture-status.v1",
   "as_of_date": "2026-07-28",
   "source_baseline": {
-    "dev_commit": "555ead6d7dc78d376fc21fa49335ae64206de10a",
+    "dev_commit": "9834d6621d129ae261c3ca88827ecb134535e9a0",
     "repository_cleanup_commit": "f0cd1dfd7",
-    "role": "REVISED_IMPLEMENTATION_BASELINE",
-    "evaluated_source": "NE07_EXTERNAL_PERSISTENCE_PASS_HOST_ENFORCE_START_PASS_OBS_AND_CRASH_TAKEOVER_FIXES_PENDING_RERUN_PROGRAM_INCOMPLETE"
+    "role": "EMOTIONAL_DIGITAL_LIFE_IMPLEMENTATION_BASELINE",
+    "evaluated_source": "NE08_EMOTIONAL_DIGITAL_LIFE_DL00_IN_PROGRESS_PROGRAM_INCOMPLETE"
   },
   "overall_status": "INCOMPLETE",
-  "active_wave": "NE-07",
+  "active_wave": "NE-08",
   "active_wave_status": "IN_PROGRESS",
-  "active_wave_detail": "EXTERNAL_SERVICES_REAL_PERSISTENCE_PASS_HOST_ENFORCE_START_PASS_SIXTH_FORCE_RESTART_CRASH_AUTHORITY_TAKEOVER_FAILURE_FIX_CODE_COMPLETE_RERUN_PENDING",
-  "next_wave": "PROGRAM_ACCEPTANCE",
+  "active_wave_detail": "EMOTIONAL_DIGITAL_LIFE_DL00_BASELINE_AND_AUTHORITY_SEPARATION_IN_PROGRESS",
+  "next_wave": "DL-01_AFFECTIVE_LIFE_KERNEL",
   "status_authority": "CURRENT_CODE_AUDIT",
   "historical_receipts_are_scope_bound": true,
   "delivery_protocol": {
@@ -25,7 +25,17 @@
     "local_metadata_gate": "WIRED_FAIL_CLOSED",
     "local_metadata_gate_script": "scripts/ci/check_delivery_metadata.py"
   },
-  "active_wave_local_validation": {
+  "emotional_digital_life": {
+    "status": "PARTIAL",
+    "active_subwave": "DL-00",
+    "self_affect_authority": "MULTIPLE_COMPATIBILITY_WRITERS_PENDING_CONSOLIDATION",
+    "user_affect_separation": "FOREGROUND_COMPATIBILITY_PROJECTION_ONLY",
+    "relationship_continuity": "VOLATILE_BOND_PATH_PENDING_REPLACEMENT",
+    "text_voice_avatar_alignment": "NOT_YET_WIRED",
+    "real_edge_status": "NOT_STARTED_REMOTE_MACHINE",
+    "acceptance_status": "NOT_RUN"
+  },
+  "historical_platform_validation": {
     "ne07_isolated_external_stack_preflight": {
       "status": "PASS_REAL_PERSISTENCE",
       "implementation_parent": "origin/dev@555ead6d7dc78d376fc21fa49335ae64206de10a",

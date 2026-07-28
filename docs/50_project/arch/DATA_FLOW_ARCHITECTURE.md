@@ -13,6 +13,13 @@
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
+> 情感链路当前为 `PARTIAL`。现行 foreground Life effect 可记录脱敏的用户
+> Affect compatibility observation，但该 observation 不再直接改变七海的
+> `affect.valence/arousal`。因此当前流还不是目标中的
+> `Observation → Appraisal → SelfAffect → Regulation → ExpressionPlan`；
+> Host-local runtime、Limbic 与 Surface 的旧情感上下文只可作为待替换的
+> compatibility 输入，不能被解释为 canonical self-affect writer。
+
 NE-01 代码封口后的证据流固定为：
 
 ```text

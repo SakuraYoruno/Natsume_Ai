@@ -10,6 +10,8 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-00`。现有代码具备 Digital Life、Host-local `HostEmotionRuntime`、Limbic、BodySense、Endocrine、Motive、Bond 和 Surface 等情感相关部件，但它们仍是多套兼容状态；用户情绪可经 foreground 路径影响 self-affect，Bond/主动后效应与文本/语音/Avatar 同轮表达尚未形成生产闭环。因此情感数字生命状态为 `PARTIAL`，下文 NE-01～NE-07 内容均是范围受限基础事实。
+
 ## 1. 结论
 
 NE-01 当前代码波次为

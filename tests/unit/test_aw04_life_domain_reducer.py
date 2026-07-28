@@ -66,7 +66,21 @@ def test_foreground_derives_all_kernel_domains_without_mutating_input() -> None:
     assert first["intent"]["kind"] == "respond"
     assert first["clock"]["last_user_seen_ms"] == NOW
     assert first["relationship"]["warmth"] > 0.42
-    assert first["embodiment"]["emotion_tag"] == "HAPPY"
+    # The HAPPY value belongs to the user observation.  Foreground presence may
+    # reduce contact pressure, but cannot mirror it into Natsume's self affect.
+    assert first["affect"]["valence"] == 0.18
+    assert first["affect"]["arousal"] == 0.24
+    assert first["embodiment"]["emotion_tag"] == "NEUTRAL"
+    assert first["observations"]["last_user_affect"] == {
+        "version": "user_affect_observation.v0",
+        "emotion_tag": "HAPPY",
+        "emotion_intensity": 0.0,
+        "valence": 0.8,
+        "arousal": 0.55,
+        "confidence": 0.0,
+        "source": "compatibility_projection",
+        "observed_at_ms": NOW,
+    }
     assert first["life_action"]["source_command_id"] == "life::domain::unit"
 
 
@@ -99,6 +113,35 @@ def test_tick_evolves_homeostasis_from_command_time_only() -> None:
     assert after["needs"]["contact"] > before["needs"]["contact"]
     assert after["homeostasis"]["balance"] < before["homeostasis"]["balance"]
     assert after["world"]["source_command_id"] == "life::tick::one"
+
+
+def test_tick_accumulates_loneliness_only_for_new_unattended_time() -> None:
+    before = _reduce(
+        {"person_id": "person-domain", "version": 0},
+        command_type="foreground_completed",
+        payload={"user_message": "在吗"},
+        command_id="life::foreground::seed",
+        now_ms=NOW,
+    )
+    first_tick = _reduce(
+        before,
+        command_type="tick",
+        payload={"scheduled_at_ms": NOW + 8 * 3_600_000},
+        command_id="life::tick::eight-hours",
+        now_ms=NOW + 8 * 3_600_000,
+    )
+    second_tick = _reduce(
+        first_tick,
+        command_type="tick",
+        payload={"scheduled_at_ms": NOW + 16 * 3_600_000},
+        command_id="life::tick::sixteen-hours",
+        now_ms=NOW + 16 * 3_600_000,
+    )
+
+    first_delta = first_tick["affect"]["loneliness"] - before["affect"]["loneliness"]
+    second_delta = second_tick["affect"]["loneliness"] - first_tick["affect"]["loneliness"]
+    assert round(first_delta, 4) == round(second_delta, 4)
+    assert second_tick["affect"]["loneliness"] == 0.12
 
 
 def test_experience_appraises_signal_and_updates_visible_continuity() -> None:
