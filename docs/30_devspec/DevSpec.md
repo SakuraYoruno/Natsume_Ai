@@ -438,6 +438,10 @@ ModelRequest
 
 Scenario、benchmark、shadow 和 counterfactual 只输出 `ExperimentReport`/proposal，不直接切生产。
 
+可信实验使用 0138 operation/event authority：每个 `(spec, variant)` 只有首次 fenced claim 允许启动外部容器；活租约 exact replay 只返回不可执行 claim，过期 operation 转入 `RECONCILIATION_REQUIRED`。0139 通过独立 `evolution_lab_trusted_redaction_receipt` 修复 0138 与 0108 redaction 表的命名碰撞，保留 0108 兼容形状且不重写既有 migration；0140 再以同一 repository UoW 原子提交 digest-only redaction receipt、manifest 与 content-addressed sanitized dataset，raw trace 不落库。可信 receipt 必须绑定 digest-pinned image、Docker engine/container/command、sanitized inspect facts、禁网、只读 rootfs/dataset、临时 output、`no-new-privileges`、`cap-drop ALL`、PID/内存上限、零 effect audit 与独立 verifier。operation event、run、report、proposal、redaction、redacted dataset 和 golden-suite receipt 都是 append-only；0108/0122 不被迁移或提升为可信证据。
+
+可信 production composition 只能包含 synthetic/redacted DatasetReader、受限 trace intake、digest-pinned Docker executor、独立 Verifier、0122 spec registry 和 0138～0140 evidence repository，不得注入生产 writer、TokenService、CapabilityBroker effect port、Edge actuator 或 activation port。Docker executor 禁止复用可能降级为 host subprocess 的 Airlock 路径；真实 inspect 必须重新验证镜像/container/command、network、rootfs、user、capability、security option、PID/内存/CPU 以及 dataset/runtime/output 三个挂载，并把 worker 与临时 output source digest 绑定 attestation。完成 receipt 提交后才允许清理；任何容器终态不确定性先进入 reconciliation。Operator 只能从 query-only repository 经 Obs projection 读取隐私有界的 suite/report/arm/proposal，不得读取 dataset 正文或取得 activation authority。
+
 ### 11.2 Feedback
 
 成功、失败、用户拒绝、工具可靠性和表达偏好统一转为 `FeedbackProposal`。Proposal 绑定 trace/outcome/confidence/suggested change/rollback，经过 Lab、Review 后才更新版本化 policy、maturity、knowledge 或 identity。

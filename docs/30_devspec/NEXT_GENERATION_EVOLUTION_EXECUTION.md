@@ -577,7 +577,7 @@ ReAct 与 Visual 的退役结论、历史 inventory 和测试批次保持各自�
 
 完成条件：Research planning、主动行为、记忆写入三类实验可重复；同 seed/dataset digest 结果稳定；Lab 外部副作用为 0。
 
-当前边界：0122 已并行新增 `ExperimentSpecV2`、frozen `DatasetManifestV1`、sandbox/effect-audit/verifier receipt 与 append-only V2 evidence ledger。runner 会重算 dataset digest，拒绝 verifier identity/evidence 或 sandbox profile 漂移；evidence 与 run receipt 在同一 SQLite 事务写入。该切片仅是本地结构性证据边界，`promotion_eligible=false`，没有真实隔离 worker/container、外部模型、三条 Golden Experiment、Review 或 activation，不能当作 NE-04 完成或生产副作用为零的实测证明。
+当前边界：总体波次状态保持 `NE-04_IN_PROGRESS`。0108 V1 与 0122 structural V2 保持只读且永久 `benefit_eligible=false`。0138 独占 trusted operation/event 与 append-only run/report/proposal/golden-suite，0139 另建 trusted redaction receipt namespace 并移除 0138 对 0108 表的误拦截，0140 原子持久化 sanitized real-trace dataset、Manifest 与 digest-only Receipt；migration head 为 0140，raw trace 不落库。只有首次 fenced claim 可启动 sandbox，活租约重放不可执行，过期或未知终态进入 reconciliation，完成后只重开 exact receipt。专用 production composition 现已接入 synthetic/redacted DatasetReader、受限 trace intake、digest-pinned Docker executor、独立 verifier 与两个 SQLite authority，并明确不复用可降级为 subprocess 的 Airlock。Research Planning、Proactive、Memory Write 六个真实容器 arm、response-loss exact reopen 和 0140 restart/tamper/atomic rollback 均通过。query-only repository、Obs 第 22 个 producer、GET route 与 Monitor 页面已经接通，只公开 proposal-only 证据。当前最终 Python 波次为 `84 passed in 182.60s`，包含真实 Docker 且不与此前回归批次相加；正式 commit-bound suite receipt 必须在实现提交后生成，故证据子状态为 `LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS / COMMIT_BOUND_SUITE_PENDING_POST_COMMIT`，整个演化计划仍为 `IN_PROGRESS`。
 
 ### NE-05：Skill Compiler、成熟度与签名供应链
 

@@ -108,7 +108,7 @@ def test_ne04_v2_ledger_replays_exact_evidence_and_remains_parallel_to_v1(tmp_pa
     db_path = tmp_path / "evolution-lab-v2.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="ne04-v2-ledger")
     assert result.success is True
-    assert result.summary["latest_version"] == 122
+    assert result.summary["latest_version"] >= 122
 
     ledger = SQLiteEvolutionLabV2Ledger(db_path)
     spec = _spec()

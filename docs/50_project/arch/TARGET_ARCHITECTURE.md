@@ -112,6 +112,16 @@ World Model 统一表达用户、项目、环境、任务和长期目标事实�
 
 Lab 只能读取脱敏快照和可复放 trace，输出 `ExperimentReport` 或 proposal；不得持有生产 TokenService、CapabilityBroker writer、Memory writer 或 Edge actuator。
 
+真实 trace intake 必须在持久化前完成确定性字段投影。原始正文只参与
+source digest，不进入 Lab 数据库；规则版本/摘要、输出 dataset digest、
+Manifest 和 Redaction Receipt 原子提交。Operator Lab 使用独立只读连接重验
+完整证据链，只展示 proposal、arm 差异、成本、风险、验证和 Review 引用，
+不展示原始/sanitized dataset 正文，也不提供直接激活入口。
+
+可信 Lab worker 必须运行在可重新检查的隔离容器中；镜像以 digest 固定，dataset 只读、output 临时、网络关闭、rootfs 只读，并删除 capability、限制 PID/内存。运行前由 durable operation ledger 签发唯一 fence；响应丢失重开原 receipt，未知结果进入 reconciliation。Docker/Verifier receipt 只使报告具备“可提交 Review”的资格，不授予 activation。
+
+隔离输出采用 acceptance-root 下的单次 bind mount，以便容器退出后仍可由独立 host reader 重开；其 source path 不进入公开收据，只保留 digest，并在 run receipt durable commit 后删除。worker 本身只读挂载且源码 digest 纳入 sandbox profile。实现不得将 Docker 不可用降级为本机 subprocess。
+
 ### 4.6 Capability Lifecycle
 
 职责：从文档、轨迹、脚本和 API 合同生成 Skill Draft；完成签名、SBOM、隔离验证、成熟度、staged activation 与 rollback。

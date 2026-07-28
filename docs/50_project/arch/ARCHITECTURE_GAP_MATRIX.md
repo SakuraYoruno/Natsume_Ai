@@ -268,8 +268,8 @@ Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界�
 运行得到 `271 passed, 2 warnings in 332.52s`。部署多实例 canary、
 Windows graceful stop 与 NE-07 真实服务栈尚未运行，因此本表保持
 `PARTIAL / IN_PROGRESS`。
-| Evolution Lab | `SELF_ATTESTED_SHADOW_NO_PRODUCTION_CALLER` | 0108 V1 ledger、runner | dataset digest 未独立重算、verifier 可补 hash、隔离可绕过且无 production composition | NE-04 |
-| Counterfactual | `LEDGER_CONTRACT_ONLY` | V1 ExperimentReport | 没有可信独立双臂、sandbox/effect audit 或 promotion authority | NE-04 |
+| Evolution Lab | `LOCAL_WAVE_CODE_AND_REAL_DOCKER_PASS / COMMIT_BOUND_SUITE_PENDING_POST_COMMIT` | 0108/0122 只读；0138 trusted ledger；0139 namespace repair；0140 sanitized dataset UoW；专用 Docker executor、typed composition、query-only Obs/Monitor | raw trace 不落库；六个真实 digest-pinned container arm、响应丢失 exact reopen、unknown-effect reconciliation、0140 restart/tamper/rollback 和只读 Operator 展示已通过；Gate 1～14 与统一 static/doc Gate 通过，仅实现提交后的正式 clean-commit suite receipt 待生成 | NE-04 |
+| Counterfactual | `LOCAL_WAVE_CODE_PASS / PROPOSAL_ONLY` | 0138 trusted report + `CounterfactualPairV2` + 三类 Golden service + query-only Operator projection | outcome/evidence/cost/latency/risk/verification 的真实隔离 baseline→candidate 比较已产出；Operator 可只读展示 arm diff 与 proposal，不提供激活；正式 commit-bound aggregate 仍待实现提交后生成 | NE-04 |
 | Capability Maturity | `PARTIAL_NE05_PRODUCTION_FAIL_CLOSED` | scorecard/provider/Governor adapter + production IntentDecisionEngine wiring | 生产门禁默认开启且缺失/伪造 scorecard 最高风险；仍缺 durable promotion/degradation authority | NE-05 |
 | Capability Forge | `PARTIAL_LEGACY_RUNTIME_OVERRIDE_REMAINS` | `app/capability_forge.py`、Obs `runtime-match` route | Executive 内 call site 已删除，但服务仍能生成/批准 blueprint、维护 canary 状态并输出 runtime route override；这违反 Forge 仅生成 EvolutionProposal 的目标，必须在 NE-05 退役/改为 proposal-only | NE-05 |
 | Skill Compiler | `PARTIAL_NE05_DETERMINISTIC_DRAFT` | `host_brain/skills/skill_compiler.py`、`SkillDraftV1`、NE-05 tests | typed draft 与确定性 digest 已有；SBOM/signature request、sandbox、activation 全链由独立 lifecycle 继续补齐 | NE-05 |

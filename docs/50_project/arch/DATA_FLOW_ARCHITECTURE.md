@@ -2253,3 +2253,80 @@ evidence/proof，不再次访问来源 ledger。报告写入前由 SQL trigger �
 共同要求精确成员数，重开时重新计算 evidence-set digest。promotion evidence
 和 proposal 在一个事务中写入；任何报告缺失、eligibility 不足或 digest 漂移
 均整体回滚。真实模型/实验没有在本流中被 fixture 替代。
+
+## NE-04 可信隔离实验操作与证据流
+
+```mermaid
+sequenceDiagram
+    participant R as "Trusted Lab Runner"
+    participant L as "0138 Operation Ledger"
+    participant D as "Docker Sandbox"
+    participant V as "Independent Verifier"
+    participant Q as "Query-only Obs Projection"
+    participant O as "Operator / Review"
+
+    R->>L: reserve(spec digest, variant, owner, lease)
+    alt 首次 claim
+        L-->>R: RUNNING + fence + execution_authorized
+        R->>D: create digest-pinned isolated container
+        D-->>R: output + sanitized inspect facts
+        R->>V: frozen dataset + output digest
+        V-->>R: verification receipt
+        R->>L: atomic trusted run + COMPLETED event/head
+    else 活租约重复请求
+        L-->>R: replayed RUNNING, execution_authorized=false
+    else 租约过期或外部终态未知
+        L-->>R: RECONCILIATION_REQUIRED + new fence
+    else 已完成响应丢失
+        L-->>R: exact durable receipt
+    end
+    R->>L: append report + proposal only
+    Q->>L: mode=ro + query_only reopen full evidence chain
+    L-->>Q: privacy-bounded suite/report/arm/proposal
+    Q-->>O: read-only evidence, production influence=false
+```
+
+0138 不会把 0108/0122 记录升级成可信证据。0139 把 trusted redaction receipt
+移入独立 namespace；0140 将 digest-only receipt、manifest 与 sanitized
+dataset 放进同一 repository UoW，raw trace 不落库。operation head 与
+append-only event chain 同事务 CAS；只有新 claim 能启动容器。实际生产
+composition 已把 synthetic/redacted dataset reader、受限 trace intake、
+专用 digest-pinned Docker executor、独立 verifier 和两个 repository 接成
+闭合对象图；executor 不使用 Airlock 的 subprocess fallback。
+六个真实 arm 已重新绑定 image/engine/container/command/inspect、只读
+dataset/runtime/rootfs、隔离临时 bind output、禁网、非 root、security option、
+cap drop、资源限制和零 effect audit。容器完成后先持久 receipt 再清理；
+response loss 重开原 receipt，未知结果保留容器事实并进入 reconciliation。
+Obs 的第 22 个 producer 只用 SQLite `mode=ro/query_only` 重开 suite、report、
+spec、run、operation event/head 和 proposal，再把隐私有界结果写入 Query
+Projection；Monitor 的“演化实验室”页面没有激活控件。clean-commit 正式
+suite receipt 仍必须在实现提交后独立生成；本波 Gate 1～14 与统一
+static/doc Gate 已通过，但不能只凭流图宣称整个演化计划完成。
+
+```mermaid
+flowchart LR
+    T["Raw real trace（仅进程内）"]
+    R["Deterministic redactor"]
+    D["source/rules digest"]
+    U["0140 atomic UoW"]
+    S["Sanitized content-addressed dataset"]
+    M["DatasetManifest + RedactionReceipt"]
+    T --> R --> D --> U
+    R --> S --> U
+    U --> M
+    T -. "禁止写入" .-> X["Durable DB"]
+```
+
+```mermaid
+flowchart LR
+    S["Frozen ExperimentSpecV2"]
+    R["0138 fenced claim"]
+    D["Digest-pinned Docker"]
+    I["Reopened inspect facts"]
+    V["Independent verifier"]
+    L["Trusted run/report ledger"]
+    P["Review-required proposal"]
+    S --> R --> D --> I --> V --> L --> P
+    D -. "unknown terminal" .-> X["RECONCILIATION_REQUIRED"]
+    L -. "exact replay" .-> E["same receipt; no new container"]
+```

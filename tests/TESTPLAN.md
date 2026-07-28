@@ -1381,3 +1381,121 @@ Budget 回归或整批 PASS，必须在独立提交审计实际 authority 后更
   `59 passed in 8.75s`；统一 static/doc Gate 与架构 Gate 1～14 均通过且
   失败清单为空。真实 24/20/30 实验、Review、activation 和
   NE-07 不由本地 fixture 提升。
+
+## T-NE04-TRUSTED-LEDGER：可信隔离实验的持久操作权威
+
+- T-NE04-TL-01：fresh migration catalog 必须从既有 head 前向应用到
+  `0138_evolution_lab_trusted_sandbox` 和
+  `0139_evolution_lab_trusted_redaction_repair`，再到
+  `0140_evolution_lab_redacted_dataset`；0108/0122 表和 receipt 不得重写、
+  backfill 或获得 promotion eligibility，raw trace 不得进入 0140。
+- T-NE04-TL-02：每个 exact `(spec digest, variant)` 只有首次 reserve 返回
+  `execution_authorized=true`；活租约重复请求必须返回不可执行 replay，
+  不得因 owner 不同而复制 fence 或启动第二个容器。
+- T-NE04-TL-03：租约过期必须 append `RECONCILIATION_REQUIRED` 并推进 fence；
+  旧 claim 不得提交 receipt。已完成 operation 的 response-loss replay 只能
+  重开同一 receipt，operation/head/event/run 行数不得增长。
+- T-NE04-TL-04：可信 sandbox receipt 必须绑定 digest-pinned image、
+  Docker engine/container/command、sanitized inspect evidence、禁网、只读
+  rootfs/dataset、临时 output、`no-new-privileges`、`cap-drop ALL`、
+  PID/内存上限和零 effect audit；tag-only image、inspect/effect drift 或弱化
+  任一隔离条件均失败关闭。
+- T-NE04-TL-05：trusted report 必须覆盖注册 spec 的全部 variants，并由
+  baseline 对每个 alternative 形成 outcome/evidence/cost/latency/risk/
+  verification 比较。report、proposal 和 golden suite 固定
+  `production_influence_enabled=false`。
+- T-NE04-TL-06：event/run/report/proposal/redaction/redacted-dataset/
+  golden-suite 均 append-only；
+  普通 SQLite connection 无 repository UDF 时不能写，event/head/receipt
+  篡改必须失败关闭。
+- T-NE04-TL-07：0138/0139 历史切片定向合同与 ledger 为
+  `22 passed in 22.07s`，fresh 0001→0139 migration smoke 通过。0139
+  必须保留 0108 redaction 表原形，并把 trusted redaction 写入独立表；该
+  历史回执只证明 0138/0139 authority，不证明后续 0140、真实 Docker、
+  production composition、Operator projection 或 NE-04 完成；
+  fresh architecture Gate 1～14 全部通过且未扩大 allowlist，统一
+  `static_scan,doc_gate` 为 `PASS / failures=[] in 112.6s`；
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## T-NE04-DOCKER-GOLDEN：真实隔离容器与三类 Golden Experiment
+
+- T-NE04-DG-01：production composition 只允许 synthetic/redacted
+  DatasetReader、受限 trace intake、专用 Docker executor、独立 Verifier、
+  0122 spec registry 与 0138～0140 evidence repository；静态测试禁止生产
+  writer、TokenService、CapabilityBroker effect、Edge actuator、activation
+  port 和 ProcessServiceContainer。
+- T-NE04-DG-02：image 必须为 digest-pinned reference。真实 inspect 必须逐项
+  复验 container/image/command、`network=none`、只读 rootfs、非 root user、
+  `no-new-privileges`、`cap-drop ALL`、PID/内存/CPU 与 dataset/runtime/output
+  三个 mount；worker source 和临时 output source 只以 digest 入 receipt。
+- T-NE04-DG-03：Docker 或任何隔离条件不可用时失败关闭，禁止降级到 Airlock
+  host subprocess。容器终态不确定时 append `RECONCILIATION_REQUIRED`；
+  第二次调用不能再启动 executor。
+- T-NE04-DG-04：completion 已提交但响应丢失时，runner 必须从 0138 重开
+  exact receipt，容器只运行一次；完成后删除对应容器和隔离临时目录。
+- T-NE04-DG-05：Research Planning、Proactive、Memory Write 各运行独立
+  baseline/candidate，共六个容器；相同 spec/dataset/seed 的 output digest
+  稳定，candidate quality 至少高 0.2，candidate policy/severe error 均为 0。
+- T-NE04-DG-06：report 必须比较 outcome/evidence/cost/latency/risk/
+  verification，且只能 append Review-required proposal；所有 receipt 的
+  `production_side_effects=false`、`production_influence_enabled=false`。
+- T-NE04-DG-07：0138/0139 Docker 切片的历史非 Docker 集合为
+  `40 passed in 32.98s`，真实 Docker 集合为 `2 passed in 11.86s`。
+  加入 0140 与 Operator 后，当前最终 Python 波次为
+  `84 passed in 182.60s`，包含真实 digest-pinned 六 arm、真实 completion
+  response loss、全迁移、query route 和 release manifest；不同集合有重叠，
+  不得相加。clean-commit 正式 suite receipt 仍须在实现提交后生成，且本波
+  证据不代替 NE-07 完整服务栈。
+
+## T-NE04-REDACTED-TRACE：真实轨迹的隐私有界重放
+
+- T-NE04-RT-01：raw trace 只能在 intake 进程内参与 canonical source digest；
+  SQLite、日志和 receipt 不得出现 prompt/content/email/phone/provider token。
+- T-NE04-RT-02：规则必须版本化并绑定 digest；未知字段全部丢弃，允许字段按
+  bool/number/bounded identifier 类型重验，高熵 token、邮箱、电话和 secret
+  pattern 必须删除。
+- T-NE04-RT-03：`redaction_id` 与 `dataset_id` 必须由
+  `workspace + source digest + rules digest` 确定；每条输出只带不可逆
+  `record_ref`，不得带原始 record identity。
+- T-NE04-RT-04：0140 必须在一个 `BEGIN IMMEDIATE` 中提交 digest-only
+  Redaction Receipt、DatasetManifest 与 sanitized dataset；dataset insert
+  失败时 receipt 行数也必须为 0。
+- T-NE04-RT-05：新进程以 `mode=ro/query_only` 重开后必须重新计算 dataset、
+  schema、manifest、receipt、source/rules identity；exact replay 不增加行数，
+  source/rules/output/index 任一漂移均失败关闭。
+- T-NE04-RT-06：普通 SQLite 的 INSERT/UPDATE/DELETE 以及 query-only
+  connection 的写入必须被 trigger/SQLite 拒绝。
+- T-NE04-RT-07：production composite reader 只接受 code-backed synthetic
+  或 0140 `redacted_trace`；其它 source kind 失败关闭。
+- T-NE04-RT-08：脱敏、重启、原子回滚、直接写拒绝、三类篡改和 production
+  composition 均包含在当前 84 项波次；此前独立聚焦回归为
+  `35 passed in 46.66s`。Gate 10 首跑发现 SQLite reader 位于应用层后，
+  reader 已迁入 persistence、纯规则迁入 contracts，修复后聚焦回归为
+  `13 passed in 19.40s`，架构 Gate 1～14 全部通过。三组有重叠不得相加，
+  首次 Gate 10 失败不得从记录中删除。
+
+## T-NE04-OPERATOR：只读演化实验室投影
+
+- T-NE04-OP-01：canonical query repository 必须以 SQLite
+  `mode=ro + query_only` 打开，并重验 suite→report→registered spec→run→
+  operation event/head→proposal 的完整摘要链；缺表、断链、索引漂移或
+  tamper 均失败关闭。
+- T-NE04-OP-02：公开 payload 不包含 dataset id/records、raw output、
+  rationale、source body 或完整 sandbox attestation；只允许 suite、arm、
+  comparison、成本、风险、verification、proposal 和已有 Review ref。
+- T-NE04-OP-03：Obs 注册第 22 个 `evolution-lab-operator` producer，
+  `/obs/evolution-lab/suites` 只读取 Query Projection，支持有界 cursor 与
+  workspace filter；source 不可用返回 503，不得回读 writer。
+- T-NE04-OP-04：Monitor `/operations/evolution-lab` 必须 fail-closed
+  校验 `read_only=true`、`proposal_only=true`、
+  `production_influence_enabled=false`；发现禁用正文键或不完整证据时停止
+  渲染，页面不得提供 activation 控件。
+- T-NE04-OP-05：Review 链接只在真实 `review_ref` 存在时显示；当前 proposal
+  尚未创建 durable ReviewItem 时必须明确显示等待，而不是伪造可点击审批。
+- T-NE04-OP-06：`npm ci`、Operator client check、lint、typecheck、
+  15 项 read-model 测试和 Vite production build 必须通过。生产依赖审计当前
+  为 0 high/critical、2 个既有 moderate React Router 告警，修复要求 semver
+  major；本波不以 `--force` 扩大范围，也不得把该结果写成依赖安全 PASS。
+- T-NE04-OP-07：最终架构 Gate 1～14 必须全部通过，统一
+  `static_scan,doc_gate` 必须为 `PASS / failures=[]`。当前统一 Gate 为
+  `PASS in 113.3s`；后续只允许在机器状态更新后复跑文档 Gate，不重复大波次。

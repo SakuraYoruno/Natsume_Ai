@@ -33,6 +33,20 @@ from .v2_runner import (
     V2DatasetReader,
     V2LabVerifier,
 )
+from .production_composition import (
+    TrustedEvolutionLabComposition,
+    build_trusted_evolution_lab_composition,
+)
+from .redacted_trace import (
+    REDACTION_RULES_VERSION,
+    TrustedCompositeDatasetReader,
+    TrustedRedactedTraceDataset,
+    TrustedTraceRedactionError,
+    TrustedTraceRedactionService,
+)
+from host_brain.persistence.evolution_lab_redacted_dataset_repository import (
+    SQLiteTrustedRedactedDatasetReader,
+)
 
 __all__ = [
     "CounterfactualPairV1",
@@ -67,4 +81,12 @@ __all__ = [
     "LabSandboxExecutionV1",
     "V2DatasetReader",
     "V2LabVerifier",
+    "TrustedEvolutionLabComposition",
+    "build_trusted_evolution_lab_composition",
+    "REDACTION_RULES_VERSION",
+    "SQLiteTrustedRedactedDatasetReader",
+    "TrustedCompositeDatasetReader",
+    "TrustedRedactedTraceDataset",
+    "TrustedTraceRedactionError",
+    "TrustedTraceRedactionService",
 ]

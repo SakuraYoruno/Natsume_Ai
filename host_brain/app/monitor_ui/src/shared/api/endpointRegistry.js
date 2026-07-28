@@ -28,6 +28,14 @@ function retiredCommand(commandId, replacementAuthority, replacementWave, risk =
 }
 
 export const ENDPOINT_REGISTRY = Object.freeze({
+  evolutionLab: {
+    suites: {
+      service: 'obs',
+      path: '/obs/evolution-lab/suites',
+      queryOnly: true,
+      risk: 'low',
+    },
+  },
   governance: {
     snapshot: { service: 'obs', path: '/obs/governance/snapshot', risk: 'low' },
   },
