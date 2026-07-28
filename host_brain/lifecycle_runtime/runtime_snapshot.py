@@ -96,17 +96,25 @@ def build_digital_life_runtime_snapshot(
     timeline_summary: dict[str, Any] = {}
     timeline_diary: dict[str, Any] = {}
     try:
-        profile = ports.get_user_emotion_profile()
-        profile_summary = _as_plain_dict(profile.to_summary() if hasattr(profile, "to_summary") else profile)
-        if profile_summary:
-            emotion_context["user_emotion_profile"] = profile_summary
-            top_emotions = list(profile_summary.get("top_emotions") or [])
-            if top_emotions and isinstance(top_emotions[0], dict):
-                emotion_context["emotion_tag"] = str(top_emotions[0].get("tag") or emotion_context["emotion_tag"]).upper()
-            try:
-                emotion_context["emotion_intensity"] = float(profile_summary.get("volatility") or 0.0)
-            except (TypeError, ValueError):
-                pass
+        profile_provider = ports.get_user_emotion_profile
+        if callable(profile_provider):
+            profile = profile_provider()
+            profile_summary = _as_plain_dict(
+                profile.to_summary() if hasattr(profile, "to_summary") else profile
+            )
+            if profile_summary:
+                emotion_context["user_emotion_profile"] = profile_summary
+                top_emotions = list(profile_summary.get("top_emotions") or [])
+                if top_emotions and isinstance(top_emotions[0], dict):
+                    emotion_context["emotion_tag"] = str(
+                        top_emotions[0].get("tag") or emotion_context["emotion_tag"]
+                    ).upper()
+                try:
+                    emotion_context["emotion_intensity"] = float(
+                        profile_summary.get("volatility") or 0.0
+                    )
+                except (TypeError, ValueError):
+                    pass
 
         timeline_summary = dict(ports.emotion_timeline.rebuild_summary(window_ms=6 * 3600 * 1000) or {})
         if timeline_summary:

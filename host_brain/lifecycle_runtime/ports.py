@@ -37,7 +37,7 @@ class LifecycleRuntimeApplicationPorts:
     get_life_memory_store: ServiceProvider
     get_model_attempt_service: ServiceProvider
     emotion_timeline: EmotionTimelinePort
-    get_user_emotion_profile: ServiceProvider
+    get_user_emotion_profile: ServiceProvider | None = None
 
 
 __all__ = [

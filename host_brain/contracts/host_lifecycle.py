@@ -44,12 +44,18 @@ class HostLifecycleApplicationPorts:
     silence_engine: ServiceProvider | None = None
     state_write_arbiter: ServiceProvider | None = None
     emotion_timeline: ServiceProvider | None = None
+    # Retained only for explicitly legacy/offline compositions.  The
+    # production Host must leave this unset and route affect through the
+    # canonical Digital Life journal instead of constructing HostEmotionRuntime.
     emotion_context_runtime: ServiceProvider | None = None
     bond_stage_engine: ServiceProvider | None = None
     bond_neo4j_client: ServiceProvider | None = None
     shared_memory_index: ServiceProvider | None = None
     milestone_tracker: ServiceProvider | None = None
     prompt_registry: ServiceProvider | None = None
+    # A process-wide user profile cannot preserve workspace/person/session
+    # boundaries.  Canonical production composition leaves this unset; old
+    # projections must tolerate its absence during the rollback window.
     user_emotion_profile: ServiceProvider | None = None
     intent_engine: ServiceProvider | None = None
     multimodal_observer: ServiceProvider | None = None

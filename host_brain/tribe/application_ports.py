@@ -33,6 +33,7 @@ class TribeApplicationPorts:
     model_attempt_service: ServiceProvider | None = None
     prompt_registry: ServiceProvider | None = None
     resolve_chat_emotion_context: ServiceProvider | None = None
+    canonical_affect_fusion: ServiceProvider | None = None
     build_chat_emotion_snapshot: ServiceProvider | None = None
     build_user_preference_pack: ServiceProvider | None = None
     build_conversation_experience_read_pack: ServiceProvider | None = None

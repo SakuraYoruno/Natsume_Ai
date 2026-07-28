@@ -5,7 +5,7 @@
 
 版本：v4.8
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-06_AUTOMATIC_PROFILE_CANARY_ACTIVATION_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -243,6 +243,10 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
 - 低风险偏好只覆盖称呼、长度、幽默、追问、安慰风格、主动频率、语速和动作强度。
 - 自动升级需至少 5 条独立 aftereffect、跨 3 天、置信下界≥0.85、边界违规=0，并先经历 5 次 canary；核心人格、价值观、亲密身份与敏感推断必须 Review。
 - 清零 HostEmotionRuntime self-state、Limbic metabolism、EmotionPersistence、BodySense、Endocrine、Motive writer 和 volatile Bond queue 的生产 writer 使用量。
+
+当前已完成其中的首个生产切断：Host root 不再构造 `HostEmotionRuntime`，并且 ASGI
+Tribe 与 Input 都在有 Life authority 时走 canonical `AffectFusionService`；global user profile
+port 在 production 留空。其余 organ/bond writer 仍未清零，不能把该切断写成 DL-06 完成。
 
 退出：Soul digest 不变，低风险 apply→rollback 真实影响后续表达，旧 writer runtime 使用量=0。
 

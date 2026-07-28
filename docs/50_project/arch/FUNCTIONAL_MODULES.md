@@ -187,6 +187,12 @@ Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskSto
 
 情感上下文模块现在分为 canonical fusion 与 legacy compatibility 两个清晰边界。生产 ASGI 在 `InputRuntimeApplicationPorts` 提供 `LifeCommandService` 后，会构造 app-local `AffectFusionService`：它把 `ChatRequest` 的文本、自述和允许的结构化声学/视觉摘要转换为 `UserAffectObservationV1`，以 workspace-scoped opaque aggregate key 持久化，再最多产生两个 `EventAppraisalV1` 候选；只有后者可推进 `state.affective`。只要该 fusion service 存在，Input composition 就不再解析 `HostEmotionRuntime`。`normalize_chat_emotion_context()` 对 fused internal context 与 replay/render 均只读，外部无法以伪造 `affective_life` 字段越过该边界。`HostEmotionRuntime` 仍管理旧连续向量、前一标签、Timeline、用户画像和日记节流，但仅是未提供 fusion service 时的 app-local compatibility fallback，不是 canonical self-affect。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。上述模块均不拥有 Persona/Feedback 的永久写 authority。
 
+当前 production Host root 不再实例化该 compatibility runtime；`user_emotion_profile` 也不再
+作为 process-wide port 发布。`build_tribe_application_ports()` 接收 ASGI 的 lazy Life command
+provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime。只在
+没有 Life authority 的 offline/test composition 中才可显式创建 `HostEmotionRuntime`。这不是完整
+organ 退役：Limbic、Endocrine、BodySense、Motive 和 Bond queue 的兼容写权仍列为 DL-06 后续项。
+
 Internal terminal recovery 模块除 #114 的精确后置审核取消外，当前还拥有一个独立的 signed raw-failure claim contract：它只从无取消意图、零投影/Effect、单节点和单 Budget 的原子失败终态生成 deterministic result，并要求先结算 Secure Ingress claim、再清理 Workspace/stage。该模块不拥有一般 failure/cancellation/multi-node/unknown-effect recovery authority。
 
 Operation reconciliation 模块现由五个互不越权的 owner 组成：0126 evidence store 负责写入时验签和 append-only 保存，`OperationReacquisitionService` 负责同 Attempt/higher-fence/Budget segment 的重获规则，`OperationCheckpointReconciliationService` 只确认 canonical WorkerProjection checkpoint，`OperationFailureReconciliationService` 处理精确无副作用节点失败，route-specific continuation 负责继续原图或消费已终结结果。单节点 failure Store 可终结整图；多节点只在第一 UoW 关闭 Operation/Attempt/Node/Lease，Graph/Budget 继续由 0090 parallel-settlement owner 终结。Operator/TaskGraph 只传 evidence ref/digest，Accepted handler 在执行时重开完整证据；v4 receipt 只绑定不可变 node failure，故 0090 从 PENDING 到 COMMITTED 不改变摘要。0127 禁止 WorkerProjection UPDATE/DELETE。任何模块都不能靠 ref、Preview 或 Review 单独取得执行权。

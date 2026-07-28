@@ -20,6 +20,11 @@
 - `test_dl02_affect_fusion.py` 验证 production fusion composition 不会解析
   `HostEmotionRuntime` provider；compatibility runtime 仅在不存在 Life authority 的
   明确 fallback 调用中可用。
+- `test_ne01_host_lifecycle_composition.py` 与 `test_dl02_affect_fusion.py` 现额外验证
+  production Host root 不再构造或发布 mutable `HostEmotionRuntime` / global user profile，
+  ASGI Tribe 具备 Life authority 时会和 Input 一样走 canonical fusion，且不会解析旧 runtime。
+  本切片连同 Host lifecycle、hard-state 与 ASGI composition 定向集合为 `85 passed in 34.06s`；
+  这不是 Limbic、Endocrine、BodySense、Motive、Bond queue 清零或真实服务栈证据。
 - `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted
   reply 与 `CompanionProactiveTargetV1` 同一 relation command 写入；只有显式 `ALLOWED`
   且 provisional episode 被后效应关闭后，read-only registry 才返回 scope-valid target。

@@ -634,6 +634,13 @@ flowchart LR
 真实 TTS/Avatar channel receipt、connection resume 与全服务栈验收仍不在这条本地 Host
 protocol 切片的完成范围。
 
+`DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE` 已令 production Host root 不再构造
+`HostEmotionRuntime`，且 ASGI 为 Input 与 Tribe 都注入 lazy Life command provider；二者在
+authority 存在时均经 `AffectFusionService` 形成 scoped observation/appraisal。因而 global
+`user_emotion_profile` 在 production 留空，不能跨 workspace/person/session 汇总并反馈为七海的
+感受。旧 runtime 只存在于显式 offline/test compatibility composition；Limbic 等其它 legacy
+writer 尚未清零。
+
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor

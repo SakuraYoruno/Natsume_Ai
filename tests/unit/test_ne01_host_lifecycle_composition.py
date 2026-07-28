@@ -323,13 +323,16 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
         ports.lifecycle.build_edge_dependency_probe_statuses
         is edge_status_builder
     )
-    emotion_runtime = ports.lifecycle.emotion_context_runtime()
-    assert isinstance(emotion_runtime, HostEmotionRuntime)
-    assert ports.lifecycle.emotion_context_runtime() is emotion_runtime
-    assert (
-        ports.lifecycle.user_emotion_profile()
-        is emotion_runtime.user_emotion_profile()
-    )
+    # Production Host no longer constructs the mutable compatibility runtime.
+    # Canonical request paths receive affect through the Digital Life journal;
+    # a process-wide user profile would also violate scope isolation.
+    assert ports.lifecycle.emotion_context_runtime is None
+    assert ports.lifecycle.user_emotion_profile is None
+    with pytest.raises(
+        HostLifecycleScopeError,
+        match="HOST_SERVICE_PROVIDER_NOT_INJECTED:emotion_context_runtime",
+    ):
+        ports.lifecycle.require_provider("emotion_context_runtime")
     with pytest.raises(RuntimeError, match="LIFE_MEMORY_SERVICE_NOT_COMPOSED"):
         ports.lifecycle.life_memory_service()
     memory_service = object()

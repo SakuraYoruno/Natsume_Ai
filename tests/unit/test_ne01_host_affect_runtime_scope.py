@@ -121,4 +121,6 @@ def test_production_affect_modules_have_no_mutable_singleton_authority() -> None
     assert "\ndef get_reply_form_decider" not in reply_source
     assert "\ndef get_response_form_decider" not in reply_source
     assert "host_brain.app.emotion_context" not in host_root_source
-    assert "emotion_runtime_factory" in host_root_source
+    assert "emotion_runtime_factory" not in host_root_source
+    assert "HostEmotionRuntime" not in host_root_source
+    assert "user_emotion_profile" not in host_root_source

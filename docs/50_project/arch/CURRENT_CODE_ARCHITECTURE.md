@@ -389,6 +389,14 @@ Operator 平面的 `scheduler.task.enable/disable`、`sys_mode.auto_rules.update
 
 Host 情感上下文有两层边界。生产 ASGI 的 `InputRuntimeApplicationPorts` 通过惰性 `LifeCommandService` provider 构造 `AffectFusionService`；当该 service 存在时，Input composition 不再解析或调用 compatibility `HostEmotionRuntime`，`resolve_chat_emotion_context(..., affect_fusion_service=...)` 会直接将输入归一为 `UserAffectObservationV1`，用 `workspace_id + relationship_subject_id + session_id` 形成不含原始身份的 aggregate key，并先持久化 observation，再有界生成至多两个 `EventAppraisalV1` 候选。只有 appraisal command 才能推进 canonical `state.affective`。视觉、声学、文本/自述各自有 3/5/30 秒 TTL；journal 只接受脱敏摘要和 digest ref，原始音频、图像、文本和模型链字段会失败关闭。`normalize_chat_emotion_context()` 对内部 fused context 只读；外部伪造 marker 不会取得 canonical authority。旧 `HostEmotionRuntime` 只在未注入 Life authority 的明确 compatibility composition 中使用，管理 Host epoch 内 vector/timeline/profile；它不是 durable self-affect authority。回复形态 `ResponseFormDecider` 继续由 Input composition 独占，并发语音额度检查与记账在同一锁内完成。
 
+最新 DL-06 切片使这个 fallback 不再进入 production Host object graph：
+`ProcessApplicationPorts` 和 `build_production_host_application_ports()` 已删除
+`emotion_runtime_factory` 与 runtime/profile publication。ASGI 同时把 lazy Life command provider
+传给 Tribe composition；Tribe 与 Input 在有 authority 时都 resolve `AffectFusionService`，不会
+解析或调用 `HostEmotionRuntime`。Lifecycle 的 global profile consumer 现为 optional read-only
+compatibility slot，production 留空。该事实不等于全量旧 writer 清零：Limbic、EmotionPersistence、
+BodySense、Endocrine、Motive、Bond queue 和 timeline compatibility projection 仍待后续切断。
+
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 
 | 能力 | 当前定级 | 代码事实 |

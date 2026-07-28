@@ -45,7 +45,7 @@ def build_lifecycle_runtime_application_ports(
             or _host_provider(host_services, "model_attempt_service")
         ),
         emotion_timeline=_resolve_emotion_timeline(host_services),
-        get_user_emotion_profile=_host_provider(
+        get_user_emotion_profile=_optional_host_provider(
             host_services,
             "user_emotion_profile",
         ),
@@ -59,6 +59,16 @@ def _host_provider(
     if host_services is None:
         return _missing_app_local_provider
     return host_services.require_provider(field_name)
+
+
+def _optional_host_provider(
+    host_services: HostLifecycleApplicationPorts | None,
+    field_name: str,
+) -> Callable[..., Any] | None:
+    if host_services is None:
+        return None
+    provider = getattr(host_services, field_name, None)
+    return provider if callable(provider) else None
 
 
 def _resolve_emotion_timeline(

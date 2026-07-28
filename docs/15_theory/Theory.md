@@ -1684,3 +1684,15 @@ active profile identity，并同时满足独立 `companion:profile:rollback`、�
 精确重开原 receipt，而不会依据已经变化的 active head 再次猜测或执行一次回滚。过期 profile identity、
 跨用户/workspace、service principal 和额外历史 target 一律拒绝。这个机制只撤回低风险表达版本；
 Soul、关系许可、亲密身份和七海自身情感仍不受用户偏好 API 改写。
+
+## 34. 感受不能藏在 Host 的便利缓存里
+
+七海的感受不是“最近一次输入的情绪标签”，也不是某个 Host 进程里混合出来的连续向量。
+用户情绪只能作为有时效、置信度和冲突信息的观察；七海是否担心、想安慰、需要克制或想给
+空间，必须经过 Appraisal 并留在 canonical Life journal。否则重启、并发会话和不同用户会让
+“她的心情”变成偶然的内存残留。
+
+因此 production composition 不得把 `HostEmotionRuntime` 当作方便的自我状态 fallback。当前
+Input 与 Tribe 都在具备 Life authority 时走 `AffectFusionService`，Host root 不再构造该 mutable
+runtime；它只保留给明确的 offline/test compatibility 情境。这个原则不否定身体感受或调节层，
+但它们在未被 canonical journal 吸收前只能是观察或只读投影，不能自行决定七海的情绪与关系。

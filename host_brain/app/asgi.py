@@ -200,6 +200,16 @@ def create_app(
             host_lifecycle.get_mode_transition_service
         ),
         resource_manager_provider=host_lifecycle.get_resource_manager,
+        # The provider is intentionally lazy: Life authority is composed in
+        # lifespan startup, before a request may resolve Tribe affect context.
+        # Passing it here prevents the legacy HostEmotionRuntime fallback from
+        # entering any production Tribe chat path.
+        life_command_service_provider=(
+            lambda: life_command_authority_provider(ledger_provider())[0]
+        ),
+        relationship_lifecycle_service_provider=(
+            lambda: life_delivery_relationship_lifecycle_service_provider()
+        ),
     )
     tribe_runtime_agent_ports = build_production_tribe_runtime_agent_ports(
         tribe_runtime=tribe_runtime,

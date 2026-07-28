@@ -183,8 +183,10 @@ def run_proactive_intent_dispatch(
     try:
         emotion_context["emotion_tag"] = system_intent.get("emotion_tag", "NEUTRAL")
         emotion_context["mood_state"] = system_intent.get("mood_state", "steady")
-        profile = ports.get_user_emotion_profile()
-        emotion_context["user_emotion_profile"] = profile.to_summary()
+        profile_provider = ports.get_user_emotion_profile
+        if callable(profile_provider):
+            profile = profile_provider()
+            emotion_context["user_emotion_profile"] = profile.to_summary()
         try:
             emotion_context["emotion_timeline_summary"] = ports.emotion_timeline.rebuild_summary(
                 window_ms=6 * 3600 * 1000

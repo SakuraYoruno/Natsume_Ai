@@ -430,7 +430,14 @@ NE-01 的预算 authority 已从“只有一条图级共享记录”推进到父
 
 前一切片接入的 `scheduler.task.enable/disable` 与 `sys_mode.auto_rules.update/event.submit` 四条 Operator 命令及 0129 Host mode-policy journal 边界保持不变。Operator inventory 仍是 `14/37`，其余 `23/37` 继续失败关闭；Scheduler HTTP 切流不会虚增 Operator 数量。当前管理命令主批次为 `34 passed in 139.12s`；Scheduler occurrence/dispatcher/Preview/UoW 扩展回归为 `57 passed in 54.81s`，两组语义重叠且不相加。部署凭据、真实 HTTP/network canary、完整 Host 进程重启、Scheduler mutable batch 与全部 failure/cancellation 组合恢复、波次集成及 NE-07 全栈均未运行，所以 Scheduler 与 NE-01 仍为 `INCOMPLETE / IN_PROGRESS`。
 
-当前分支继续清除了 Host 情感与回复形态的进程级可变状态：每个 Host root 惰性持有一个 `HostEmotionRuntime`，Input、Tribe 与 Lifecycle 共享该精确实例；情绪连续向量、前一情绪标签、用户情感画像、时间线与日记节流均不再由模块全局变量拥有。只有真实 Host admission 会推进连续状态，回放、Prompt 渲染和只读归一化保持纯函数。每个 Input composition 另行拥有一个 `ResponseFormDecider`，语音额度的检查与计数使用同一锁原子执行。该切片只证明 app-local identity、并发计数和负向库存；情感状态仍是单 Host 进程内连续状态，不是 NE-06 长期人格资产，也尚未经过波次集成、真实多 Host canary 或 NE-07 全栈验收。
+当前 DL-06 首个旧 writer 切断已将 mutable `HostEmotionRuntime` 从 production Host root
+移除：`build_production_host_application_ports()` 不再构造或发布它，也不再发布 process-wide
+`user_emotion_profile`。ASGI 为 Input 与 Tribe 同时注入 lazy Life authority；两条 Chat context
+路径在 authority 存在时都走 `AffectFusionService → canonical Life journal`，不会把旧 runtime
+当 fallback。`HostEmotionRuntime` 只保留给明确的 offline/test compatibility composition。
+`ResponseFormDecider` 仍由每个 Input composition 独占，回放和 render 保持纯读取。这个切片
+只清除了 Host runtime 写权；Limbic metabolism、EmotionPersistence、BodySense、Endocrine、Motive、
+volatile Bond queue、Monitor/Review、真实多 Host canary 与 DL-07 全栈验收仍未完成。
 
 内部旁车到 Governance owner 的既有批次都只作提交绑定历史。当前 Authority owner 集合证明每个 Host root 的 canonical SQLite connection、Memory stores、ModelAttempt 与 CapabilityBroker runtime identity 均隔离，Prompt/Route catalog 也不再共享可变实例；关闭失败会保留未完成资源并阻断新 epoch。生产 locator facade/Container 已物理清零，测试桥不属于可发布产品对象图；Chroma 与 Neo4j 仍使用配置级共享 namespace，所以不能外推为 tenant isolation、资源崩溃恢复、事务化 Chat、波次集成或 production canary 已完成。当前 fresh 完整架构静态 Gate 1～14 已全部 `PASS`、`failed_gates=[]`：Task Runtime feature-canary 合同和 Host lifecycle ports 已迁入中立 `host_brain/contracts/`，Persistence 与 Composition 分别直接依赖 canonical contract；旧导入路径只保留同一对象重导出，因此 application/persistence 与 app/composition 两个 SCC 均已消除。Gate 3 继续由 Research shadow ledger 的 1271/512/108 行职责拆分保持通过，没有扩大白名单。该结论只表示静态分层收口，不代表 Universal Runtime 七路线、NE-01 或完整架构项目完成。
 

@@ -169,6 +169,8 @@ def build_tribe_application_ports(
     hard_state_provider: Callable[[], Any] | None = None,
     mode_transition_service_provider: Callable[[], Any | None] | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
+    life_command_service_provider: Callable[[], Any] | None = None,
+    relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
 ) -> TribeApplicationPorts:
     from host_brain.app.context.conversation_belief_tracker import (
         build_conversation_understanding_pack,
@@ -183,6 +185,7 @@ def build_tribe_application_ports(
     )
     from host_brain.app.intent_seq import IntentSequenceAllocator
     from host_brain.app.user_preference_store import build_user_preference_pack
+    from host_brain.digital_life.affect_fusion import AffectFusionService
 
     resolved_activity_monitor_provider = (
         activity_monitor_provider or _missing_app_local_provider
@@ -194,7 +197,23 @@ def build_tribe_application_ports(
     intent_sequence_allocator = IntentSequenceAllocator(
         ledger_provider=ledger_provider
     )
-    if host_services is None:
+    canonical_affect_fusion = None
+    if callable(life_command_service_provider):
+        # All production callers that can reach the canonical Life command
+        # authority must use it.  Do not construct the legacy runtime as a
+        # "backup": that would revive a second mutable self-affect writer.
+        canonical_affect_fusion = AffectFusionService(
+            command_service_provider=life_command_service_provider,
+            snapshot_reader_provider=_host_provider(
+                host_services,
+                "life_snapshot_reader",
+            ),
+            relationship_lifecycle_service_provider=(
+                relationship_lifecycle_service_provider
+            ),
+        )
+        emotion_runtime_provider = None
+    elif host_services is None:
         local_emotion_runtime = HostEmotionRuntime()
         emotion_runtime_provider = lambda: local_emotion_runtime
     else:
@@ -221,6 +240,13 @@ def build_tribe_application_ports(
         )
 
     def resolve_chat_emotion_context_with_runtime(**kwargs: Any) -> dict[str, Any]:
+        if canonical_affect_fusion is not None:
+            return resolve_chat_emotion_context(
+                affect_fusion_service=canonical_affect_fusion,
+                **kwargs,
+            )
+        if emotion_runtime_provider is None:
+            raise RuntimeError("CANONICAL_AFFECT_FUSION_NOT_INJECTED")
         runtime = emotion_runtime_provider()
         if not isinstance(runtime, HostEmotionRuntime):
             raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
@@ -243,6 +269,11 @@ def build_tribe_application_ports(
         model_attempt_service=_host_provider(host_services, "model_attempt_service"),
         prompt_registry=_host_provider(host_services, "prompt_registry"),
         resolve_chat_emotion_context=resolve_chat_emotion_context_with_runtime,
+        canonical_affect_fusion=(
+            (lambda: canonical_affect_fusion)
+            if canonical_affect_fusion is not None
+            else None
+        ),
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_user_preference_pack=build_user_preference_pack_with_ledger,
         build_conversation_experience_read_pack=(
