@@ -563,7 +563,12 @@ self-affect revision、调节方式、陪伴动作和 `ExpressionPlan` 绑定成
 模型不能用 `natsume_emotion_tag`、候选 JSON 或纯文本 fallback 倒灌状态。低歧义文本
 可以逐句送达，但每个稳定句必须先成为可重放的 delivery intent；因此“实时”不等于先
 说出去、以后再补写。高歧义、修复和边界场景宁可保留两候选择，也不以低延迟跳过分寸。
-语音与 Avatar 将在同一 plan/sync 上消费这个表达决定，而不是各自把文本标签再解释一次。
+DL-05 已把这条约束落实到 Host protocol：每个稳定句在文本可见前编译出配对的 Voice
+`SPEAK` 和 Avatar `TRANSITION`，并在结束或打断时追加 `RELEASE`/`CANCEL`。它们共享
+同一个 sync/self-affect revision，且下一轮只从 exact-scope 的 durable avatar head 读取前一
+表达；旧 `_prev_emotion_tag` 不能再把用户观察伪装成 Avatar 的起点。`HOST_*_STAGED` 仅说明
+Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由独立 Edge receipt 说明，不能各自把
+文本标签再解释一次。
 
 情感系统必须满足：
 

@@ -485,7 +485,7 @@ async def test_plan_chat_consumes_only_digest_bound_dependency_artifacts() -> No
 
 
 @pytest.mark.asyncio
-async def test_chat_executor_strips_delivery_authority_and_forces_edge_suppression() -> None:
+async def test_chat_executor_strips_delivery_authority_but_keeps_expression_protocol_eligible() -> None:
     captured: dict[str, Any] = {}
 
     async def stream(**kwargs):  # noqa: ANN003
@@ -529,11 +529,14 @@ async def test_chat_executor_strips_delivery_authority_and_forces_edge_suppressi
     assert not hasattr(request_body, "delivery_authorization")
     assert request_body.reply_channel is None
     assert request_body.reply_target is None
-    assert request_body.suppress_edge_tts is True
-    assert request_body.suppress_edge_vts is True
+    assert request_body.suppress_edge_tts is False
+    assert request_body.suppress_edge_vts is False
     assert request_body.defer_effects_to_task_runtime is True
     assert events[0]["decision"] == "REJECT"
     assert events[0]["audit_refs"]["delivery_authorized"] is False
+    assert events[0]["audit_refs"]["edge_tts_suppressed"] is False
+    assert events[0]["audit_refs"]["edge_vts_suppressed"] is False
+    assert events[0]["audit_refs"]["affective_delivery_mode"] == "deferred_to_task_acceptance"
 
 
 @pytest.mark.asyncio

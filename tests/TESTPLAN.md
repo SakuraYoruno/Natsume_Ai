@@ -94,6 +94,32 @@
   gate `7 passed in 3.56s`。远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`；真实 provider、连接
   恢复、TTS/Avatar、远端 Edge 与 DL-07 服务栈仍未运行。
 
+## T-DL05-VOICE-AVATAR-HOST-PROTOCOL
+
+- T-DL05-01：同一 `AffectiveTurnPlanV1` 的每个已 gate 稳定句必须在 SSE `RENDER` 前
+  产生一对 `ExpressionDeliveryIntentV1`：Voice `SPEAK` 与 Avatar `TRANSITION` 的
+  `synchronization_id`、self-affect revision、workspace、subject、session 和 sentence index
+  必须完全一致；SSE `DELIVERY` 只能含 channel/id/status，不能泄漏句子或原始媒体。
+- T-DL05-02：`CANCEL` 与 `RELEASE` 只能覆盖已暂存的 completed prefix；重试的 delivery id
+  必须稳定，未可见文本不得进入 control payload。`HOST_PROTOCOL_STAGED`、
+  `HOST_CANCEL_STAGED`、`HOST_RELEASE_STAGED` 均不得写成 `EDGE_APPLIED`。
+- T-DL05-03：0146 `affective_expression_delivery_event_v1` 只能从 immutable
+  `life_event_journal` trigger 派生，必须拒绝 direct insert、UPDATE/DELETE、digest/scope drift；
+  read projection 不得含文字、原始音视频、模型推理或 physical receipt。restart/replay 后
+  exact-scope Avatar transition head 必须一致，跨 session/workspace 查询必须为空。
+- T-DL05-04：受治理 Chat 不得再无条件 suppress TTS/VTS；但 Task Acceptance 前只能返回
+  deferred protocol/effect，不能提前联系 Edge。旧 `_prev_emotion_tag` 不得参与 VTS transition，
+  只能消费内部 frozen expression predecessor。
+- T-DL05-05：远端 Edge 在另一台电脑且本波未启动，因此本波证据只允许标记
+  `HOST_PROTOCOL_STAGED`。真实 TTS/Avatar/ASR、barge-in 物理停止、`EDGE_APPLIED`、通道
+  降级和三模态起始偏差留待用户允许远端 Edge 后的 DL-07 验收。
+
+当前本地证据：DL-05 新增合同、迁移和受控 Chat 回归 `30 passed in 5.05s`；相邻
+VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 passed in
+51.32s`；文档 Gate `7 passed in 3.01s`。同时通过目标模块 `py_compile`、机器状态 JSON
+校验和 `git diff --check`。这些都是 Host 本地协议证据；远程 CI 固定为
+`NOT_RUN_ACCOUNT_QUOTA`，不能记为 PASS。
+
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 
 - T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；

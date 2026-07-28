@@ -243,8 +243,13 @@ class FrozenChatRouteExecutor:
             {
                 "governed_frozen_route": True,
                 "source_event_count": event_count,
-                "edge_tts_suppressed": True,
-                "edge_vts_suppressed": True,
+                # DL-05 removed the unconditional channel suppression.  The
+                # worker is still speculative (effects remain deferred until
+                # Task Acceptance), but the accepted foreground command now
+                # carries the same frozen expression protocol as native Chat.
+                "edge_tts_suppressed": False,
+                "edge_vts_suppressed": False,
+                "affective_delivery_mode": "deferred_to_task_acceptance",
                 "delivery_authorized": False,
             }
         )
@@ -275,8 +280,8 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         response_form=str(raw_body.get("response_form") or input_pack.get("response_form") or "text").strip(),
         reply_channel=None,
         reply_target=None,
-        suppress_edge_tts=True,
-        suppress_edge_vts=True,
+        suppress_edge_tts=False,
+        suppress_edge_vts=False,
         defer_effects_to_task_runtime=True,
         render_policy=_safe_mapping(raw_body.get("render_policy") or input_pack.get("render_policy")),
         surface_task_control={},

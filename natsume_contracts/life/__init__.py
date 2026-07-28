@@ -22,6 +22,10 @@ from .affective_turn import (
     CompanionActV1,
     ExpressionPlanV1,
 )
+from .affective_delivery import (
+    ExpressionDeliveryIntentV1,
+    ExpressionDeliveryReceiptV1,
+)
 
 __all__ = [
     *_v1_all,
@@ -39,4 +43,6 @@ __all__ = [
     "AffectiveTurnPlanV1",
     "CompanionActV1",
     "ExpressionPlanV1",
+    "ExpressionDeliveryIntentV1",
+    "ExpressionDeliveryReceiptV1",
 ]

@@ -307,6 +307,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
     task_control = _apply_affective_turn_guidance(
         task_control,
         agent_input=agent_input,
+        ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
     _surface_sync_reply_plan(
@@ -444,6 +445,7 @@ def _apply_affective_turn_guidance(
     task_control: Any,
     *,
     agent_input: Any,
+    ports: SurfaceRuntimePorts,
     trace_stage_meta: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Append only safe, frozen affect constraints to the Surface packet.
@@ -458,6 +460,10 @@ def _apply_affective_turn_guidance(
     )
     emotion_context = _safe_mapping(getattr(agent_input, "emotion_context", None))
     is_internal = bool(emotion_context.get("_affective_life_internal"))
+    previous_expression, previous_expression_source = _previous_avatar_expression(
+        agent_input=agent_input,
+        ports=ports,
+    )
     try:
         guidance = build_affective_turn_guidance(
             emotion_context=emotion_context,
@@ -467,6 +473,8 @@ def _apply_affective_turn_guidance(
             session_id=str(getattr(agent_input, "session_id", "") or ""),
             task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
             created_at_ms=_coerce_int(getattr(agent_input, "ts_ms", 0), default=0),
+            previous_avatar_expression=previous_expression,
+            previous_expression_source=previous_expression_source,
         )
     except AffectiveTurnPlanError as exc:
         # A caller that presents an internal marker but fails scope or schema
@@ -497,3 +505,45 @@ def _apply_affective_turn_guidance(
         trace_stage_meta["affective_turn_plan"] = guidance.plan.as_dict()
         trace_stage_meta["affective_turn_guidance"] = guidance.trace()
     return control
+
+
+def _previous_avatar_expression(
+    *,
+    agent_input: Any,
+    ports: SurfaceRuntimePorts,
+) -> tuple[str, str]:
+    """Read a prior accepted Host expression without trusting request metadata.
+
+    The old VTS helper read ``_prev_emotion_tag`` from a mutable emotion
+    context.  That field may describe a user observation or a legacy runtime,
+    not the avatar that was actually staged.  DL-05 uses only the bounded
+    canonical delivery projection; when it is absent we explicitly start from
+    neutral rather than inventing a previous embodiment.
+    """
+
+    workspace_id = str(getattr(agent_input, "workspace_id", "") or "").strip()
+    person_id = str(getattr(agent_input, "person_id", "") or "").strip()
+    session_id = str(getattr(agent_input, "session_id", "") or "").strip()
+    if not workspace_id or not person_id or not session_id:
+        return "NEUTRAL", "UNAVAILABLE"
+    try:
+        reader = ports.get_life_snapshot_reader()
+        lookup = getattr(reader, "last_affective_expression_delivery_head", None)
+        if not callable(lookup):
+            return "NEUTRAL", "UNAVAILABLE"
+        row = lookup(
+            person_id,
+            workspace_id=workspace_id,
+            relationship_subject_id=person_id,
+            session_id=session_id,
+        )
+        if not isinstance(row, dict):
+            return "NEUTRAL", "FALLBACK_NEUTRAL"
+        expression = str(row.get("avatar_expression") or "").strip().upper()
+        if not expression:
+            return "NEUTRAL", "FALLBACK_NEUTRAL"
+        return expression[:64], "DURABLE_LAST_ACCEPTED"
+    except Exception:
+        # Read unavailability must not let a legacy runtime or request field
+        # enter the plan.  The resulting plan records that it started neutral.
+        return "NEUTRAL", "UNAVAILABLE"

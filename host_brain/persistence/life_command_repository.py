@@ -791,6 +791,107 @@ class LifeCommandRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def list_affective_expression_delivery_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        after_delivery_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Read the DL-05 Host expression protocol without raw media/text."""
+
+        cursor_ms = max(0, int(after_created_at_ms))
+        cursor_event_id = str(after_event_id or "")
+        cursor_delivery_id = str(after_delivery_id or "")
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, delivery_id, person_id, self_id, workspace_id,
+                       relationship_subject_id, session_id, delivery_kind,
+                       channel, action, plan_id, synchronization_id,
+                       self_affect_revision, sentence_index,
+                       avatar_expression, previous_avatar_expression,
+                       previous_expression_source, receipt_status,
+                       event_digest, payload_digest, created_at_ms
+                FROM affective_expression_delivery_event_v1
+                WHERE person_id = ?
+                  AND (
+                      created_at_ms > ?
+                      OR (
+                          created_at_ms = ?
+                          AND (
+                              event_id > ?
+                              OR (event_id = ? AND delivery_id > ?)
+                          )
+                      )
+                  )
+                ORDER BY created_at_ms ASC, event_id ASC, delivery_id ASC
+                LIMIT ?
+                """,
+                (
+                    _required_text(person_id, "person_id"),
+                    cursor_ms,
+                    cursor_ms,
+                    cursor_event_id,
+                    cursor_event_id,
+                    cursor_delivery_id,
+                    max(1, min(int(limit), 1_000)),
+                ),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def last_affective_expression_delivery_head(
+        self,
+        person_id: str,
+        *,
+        workspace_id: str,
+        relationship_subject_id: str,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the last Host-staged avatar transition in an exact scope.
+
+        This is not an Edge-applied state.  It gives the next immutable
+        expression plan a deterministic prior transition only when the
+        canonical Life journal already accepted it.
+        """
+
+        with self._operation(write=False) as conn:
+            row = conn.execute(
+                """
+                SELECT event_id, delivery_id, person_id, self_id, workspace_id,
+                       relationship_subject_id, session_id, delivery_kind,
+                       channel, action, plan_id, synchronization_id,
+                       self_affect_revision, sentence_index,
+                       avatar_expression, previous_avatar_expression,
+                       previous_expression_source, receipt_status,
+                       event_digest, payload_digest, created_at_ms
+                FROM affective_expression_delivery_event_v1
+                WHERE person_id = ?
+                  AND workspace_id = ?
+                  AND relationship_subject_id = ?
+                  AND session_id = ?
+                  AND channel = 'AVATAR'
+                  AND action = 'TRANSITION'
+                  AND delivery_kind = 'INTENT'
+                  AND receipt_status = 'HOST_PROTOCOL_STAGED'
+                  AND avatar_expression <> ''
+                ORDER BY created_at_ms DESC, event_id DESC, delivery_id DESC
+                LIMIT 1
+                """,
+                (
+                    _required_text(person_id, "person_id"),
+                    _required_text(workspace_id, "workspace_id"),
+                    _required_text(
+                        relationship_subject_id,
+                        "relationship_subject_id",
+                    ),
+                    _required_text(session_id, "session_id"),
+                ),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
     def list_replay_rows(self, person_id: str) -> list[dict[str, Any]]:
         with self._operation(write=False) as conn:
             rows = conn.execute(

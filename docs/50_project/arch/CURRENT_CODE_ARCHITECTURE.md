@@ -10,7 +10,7 @@
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-04_NATIVE_STREAM_LOCAL_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-05_HOST_EXPRESSION_PROTOCOL_LOCAL_SLICE`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -25,7 +25,7 @@
 > 未接住和修复状态会收紧 Surface 话术；沉默、投递失败和单次道歉不会自动修复。
 > `HostBondRuntime` 的生产默认已关闭积分自动阶段升级。`HostEmotionRuntime`、
 > Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与 Surface 的其它兼容
-> state 仍未清零，ExpressionPlan、真实模型和三模态服务也尚未闭环。因此状态仍为
+> state 仍未清零，真实模型和三模态物理服务也尚未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
@@ -34,9 +34,15 @@ DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 native stream；稳定句先写 `affective_turn_planned` / `surface_sentence_delivery_intent`
 到 canonical Life journal，再通过 SSE 可见。`0145_affective_turn_delivery.sql` 只从
 immutable event 派生 plan/sync/sentence digest projection。Surface model 结果不再拥有
-self-affect 写权；外部 emotion hint 也不会成为七海的情绪。高歧义回合保持两候 buffered
-selection；带 governed budget 的 stream 因缺最终 provider usage 仍禁止启用，TTS/Avatar、
-远端 Edge 和完整恢复验收也仍未完成。
+self-affect 写权；外部 emotion hint 也不会成为七海的情绪。DL-05 已将同一份
+`ExpressionPlanV1` 编译成成对的 `ExpressionDeliveryIntentV1`：native 稳定句在 SSE
+可见前先把 Voice `SPEAK` 与 Avatar `TRANSITION` 写入 canonical Life command，完成/打断
+再写 `RELEASE`/`CANCEL`。`0146_affective_expression_delivery.sql` 从相同 immutable event
+派生隐私最小化 Host protocol head，下一轮只在 exact person/workspace/subject/session scope
+读取上次已暂存 Avatar expression；VTS compatibility transition 不再读取 legacy
+`_prev_emotion_tag`。`HOST_PROTOCOL_STAGED` 只表示 Host 持久化了协议，不表示远端已播放或
+已改变 Avatar。高歧义回合保持两候 buffered selection；带 governed budget 的 stream 因缺最终
+provider usage 仍禁止启用，远端 Edge、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
 ## 1. 结论
 
@@ -314,7 +320,7 @@ reconciler 与 repository 重开唯一 Acceptance/artifact/Operation/projection
 路径、源分支不变与第二次重启零重放。多个写 owner、其它
 failure/cancellation/unknown-effect 组合及强隔离仍未完成。
 
-当前连续 migration head 为 `0140_evolution_lab_redacted_dataset.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset，均不改变 Task execution authority。
+当前连续 migration head 为 `0146_affective_expression_delivery.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill/version activation authority；0143～0145 保存七海的 affect、关系与文本 delivery projection；0146 保存 Voice/Avatar Host protocol projection，均不改变 Task execution authority。
 
 无 cancellation intent 的 signed `RELEASE + NO_SIDE_EFFECT` 已从单节点整图终态扩展为通用节点终态。`TaskOperationFailureReconciliationStoreMixin` 的第一事务只释放 Operation、失败目标 Attempt/Node、过期原 Lease并写四条 Outbox；只有单节点兼容路径在同一事务关闭 Graph/Budget。多节点 Graph/Budget 保持 ACTIVE，重启后的 `DurableDagSchedulingRuntime` 先重建 failed outcome，再让现有 0090 writer 原子提交 Graph/Budget 失败终态。Acceptance v4 receipt 不摘要会变化的 Graph settlement 字段，因此 `PENDING→COMMITTED` 后仍精确重放；0090 decision 或 Graph/Budget Outbox 漂移会失败关闭。双根、并发额度1的真实 SQLite 测试证明 READY sibling 未执行；并发额度2的双失败测试证明非 selected 失败节点仍由同一 decision outcome 精确覆盖并可重开。该链不自动判定副作用，也不覆盖其它 failure/cancellation。
 
@@ -336,7 +342,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 
 | 能力 | 当前定级 | 代码事实 |
 |---|---|---|
-| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0140_evolution_lab_redacted_dataset.sql`。0133～0135 收口 Task Verification/Acceptance/Review denial；0136 增加 proposal-only PlanningSearch cohort evidence；0137 增加长期目标 event/head；0138～0140 增加 proposal-only trusted Lab 数据链。这些资产不代表外部收益或整体生产验收 |
+| Core Infrastructure | `AVAILABLE` | migration、journal、outbox、model attempt、capability broker、Life、Edge、Query 等主干已存在；当前连续 migration head 为 `0146_affective_expression_delivery.sql`。0133～0135 收口 Task Verification/Acceptance/Review denial；0136 增加 proposal-only PlanningSearch cohort evidence；0137 增加长期目标 event/head；0138～0140 增加 proposal-only trusted Lab 数据链；0141～0142 增加 Skill/version activation；0143～0146 依次增加 affect、关系、文本及 Voice/Avatar Host protocol projection。这些资产不代表外部收益或整体生产验收 |
 | Universal Runtime 七路线 | `CHAT + SKILL + PLAN + DELEGATE COMPLETE / THREE INCOMPLETE / SEVEN_ROUTE_GATE_ACTIVE` | v2 Gate 精确覆盖 `chat/skill/plan/delegate/scheduler/internal/operator`。`7e9b090b3` 同库收据在 migration 0140 query-only 重开，使七路 commit binding 与三控制 policy 继续通过且未重跑 accepted worker。Scheduler/Internal/Operator 仍有部署/其它控制缺口；Operator inventory 为 `16 active / 23 retired / 39 known / blocked=0` |
 | Scheduler | `PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE` | Clock/Manual occurrence 进入 HostCommand/TaskGraph 后，worker 只生成不可变 operation plan；Graph Acceptance 与 `scheduler.operation.execute` 在 TaskStore canonical UoW 原子 staging，真实 handler 由共享 app-local dispatcher 在 Acceptance 后执行，结果仍写既有 immutable Scheduler result ledger。0117 令 live DUE claim 在 admission UoW 内原子转为 occurrence-bound claim；执行前/中 renew，实际 failure clock 决定 backoff，过期 lease、第二实例与 stale fence 不能 dispatch 或收口。definition/admin authority、mutable batch freezing、通用未知效果人工归因、commit-bound 集成和 canary 未完成 |
 | Internal Agent | `PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP` | 外部入口只接受未准入 v2 描述；显式 V3 或顶层 graph identity 以 `INTERNAL_RUNTIME_PRE_ADMITTED_WORK_ORDER_FORBIDDEN` 拒绝，随后编译为 V3。受治理 frozen worker 将同一 `WorkOrderV3` 直接交给 `AgentRuntimeExecutor`、prompt、review 和 Workspace，已没有 V3→`AgentWorkOrder` 回投。V3 顶层 graph identity 与遗留 metadata 冲突时失败关闭。`artifact_store_read_model.py` 提供无写 authority 的密封清单/promotion/recovery/tombstone读取，`workspace_write_promotion.py` 密封 bounded safe-path manifest 与 binary patch并确定性生成 accepted HEAD；源 branch 不移动。`internal_startup_checkpoint_continuation.py` 提供 exact scan，`periodic_durable_continuation.py` 只托管 timer/wake/stop；`internal_agent_sealed_checkpoint_recovery.py` 仍以完整 lineage 与更高 fence 重建 projection 而不重跑 worker。composition-owned `InternalAgentCheckpointUnitOfWorkPort` 独占公开checkpoint mutation并复用WorkerProjection唯一SQL writer；A/B/C三段分别原子，response-loss只读重开且不二次mutation。终态 worker 除精确 sealed abandon/cleanup 外，只对 finalized cancellation 且符合共享中立合同两类 exact signed terminal 的未封存单节点先关闭 claim、再 cleanup/discard；失败顺序不会删除证据。一般 unknown effect、其它 crash-left/取消 closeout 与 general `settle_worker` crash bundle 仍缺；handle-level TOCTOU、OS/container isolation、canary与七路线验收也未完成 |
@@ -1145,7 +1151,7 @@ scheduler 出现三次独立 lifecycle 写；Plan writer 的
 ## 12. NE-02 固定 cohort authority 当前事实
 
 NE-02 cohort migration 为 `0136_planning_search_cohort_ledger.sql`；
-仓库当前 migration head 为 `0140_evolution_lab_redacted_dataset.sql`。新增
+仓库当前 migration head 为 `0146_affective_expression_delivery.sql`。新增
 `SQLitePlanningSearchCohortLedger` 是三个固定 cohort 的唯一本地 writer：
 它持有 registration、member proof、report 与 promotion proposal；连接和
 `BEGIN IMMEDIATE` 仍只在 repository owner 中。support 模块仅做无连接的

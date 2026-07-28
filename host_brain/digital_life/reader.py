@@ -83,6 +83,45 @@ class LifeSnapshotReader:
             limit=limit,
         )
 
+    def list_affective_expression_delivery_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        after_delivery_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """Read privacy-minimised DL-05 Host expression delivery heads."""
+
+        return self.repository.list_affective_expression_delivery_event_heads(
+            person_id,
+            after_created_at_ms=after_created_at_ms,
+            after_event_id=after_event_id,
+            after_delivery_id=after_delivery_id,
+            limit=limit,
+        )
+
+    def last_affective_expression_delivery_head(
+        self,
+        person_id: str,
+        *,
+        workspace_id: str,
+        relationship_subject_id: str,
+        session_id: str,
+    ) -> dict[str, object] | None:
+        """Return the exact-scope durable Host avatar-transition head.
+
+        The row records protocol staging, not physical device application.
+        """
+
+        return self.repository.last_affective_expression_delivery_head(
+            person_id,
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+            session_id=session_id,
+        )
+
     def get_receipt(self, command_id: str) -> LifeCommandReceipt | None:
         return self.repository.get_receipt(command_id)
 

@@ -544,11 +544,15 @@ reply compiler 才把它变成“尊重空间、不索取回应、不把修复�
 生产 `HostBondRuntime` 默认关闭 score-driven automatic stage transition；旧 Bond queue
 和 projection 仍为 compatibility，直到 DL-06 才能声称 writer usage=0。
 
-DL-04 的本地文本链只在上述 trusted hand-off 存在时启用 native sentence stream：
+DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由
 plain-text parser 将双方状态重置为 `NEUTRAL`。普通低歧义回合逐句 staging；高歧义、
 边界和修复回合保留两候 buffered selection。`0145_affective_turn_delivery.sql` 只投影
-plan/sync/sentence digest，不复制句子正文、原始观察或私密媒体。
+plan/sync/sentence digest，不复制句子正文、原始观察或私密媒体。DL-05 在同一 immutable
+plan 下为每个稳定句生成 Voice `SPEAK` 和 Avatar `TRANSITION` 成对 Host protocol；结束和
+打断生成 `RELEASE`/`CANCEL`。`0146_affective_expression_delivery.sql` 只投影 channel/action、
+sync、self-affect revision、avatar predecessor 与 Host staging status，绝不复制文本、原始媒体
+或模型推理。该读模型的 “last accepted” 是**最后一次 Host 暂存**，不是远端设备实际状态。
 
 ```mermaid
 flowchart LR
@@ -557,15 +561,19 @@ flowchart LR
     P -->|"repair / conflict / boundary"| C["two-candidate buffered selection"]
     M --> G["local consistency + non-manipulation Gate"]
     G --> I["surface_sentence_delivery_intent\ncanonical Life journal"]
-    I --> S["SSE visible sentence"]
-    S --> F["foreground_completed + accepted relationship aftereffect"]
-    I --> R["0145 digest-only read projection"]
+    I --> E["Voice SPEAK + Avatar TRANSITION\nHOST_PROTOCOL_STAGED"]
+    E --> S["SSE visible sentence"]
+    S --> F["foreground_completed\nRELEASE or accepted relationship aftereffect"]
+    I --> R["0145 text delivery digest projection"]
+    E --> X["0146 expression protocol projection\nnot an Edge-applied receipt"]
 ```
 
 当前 stream adapter 尚不能携带 provider-final canonical usage；因此带 node-bound
 `ModelBudgetGuard` 的 Governed Chat 保持 usage-safe buffered path，不能为了首 token
-延迟静默去掉预算 authority。TTS、Avatar、connection resume、远端 Edge 与全服务栈
-验收仍不在这条本地文本切片的完成范围。
+延迟静默去掉预算 authority。Governed Chat 已不再无条件抑制 TTS/VTS，但仍只把 protocol
+随 Task Acceptance effect 暂存，不能在 speculative worker 中提前触发物理输出。远端 Edge、
+真实 TTS/Avatar channel receipt、connection resume 与全服务栈验收仍不在这条本地 Host
+protocol 切片的完成范围。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal

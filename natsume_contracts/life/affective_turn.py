@@ -32,6 +32,13 @@ _COMPANION_ACT_KINDS = frozenset(
 )
 _TEXT_PACING = frozenset({"STEADY", "SOFT", "BRISK", "SPARSE"})
 _GENERATION_MODES = frozenset({"STREAM_ONE", "BUFFERED_CANDIDATE_SELECTION"})
+_AVATAR_GAZES = frozenset({"ATTENTIVE", "SOFT", "AVERTED", "OPEN", "STEADY"})
+_AVATAR_POSTURES = frozenset(
+    {"RELAXED", "OPEN_GENTLE", "CONTAINED", "GROUNDED", "LIGHT", "STILL"}
+)
+_PREVIOUS_EXPRESSION_SOURCES = frozenset(
+    {"DURABLE_LAST_ACCEPTED", "FALLBACK_NEUTRAL", "UNAVAILABLE"}
+)
 
 
 def _required(value: Any, field_name: str, *, limit: int = 240) -> str:
@@ -57,6 +64,45 @@ def _unit(value: Any, field_name: str) -> float:
     if not 0.0 <= normalized <= 1.0:
         raise ValueError(f"{field_name} must be between 0 and 1")
     return round(normalized, 6)
+
+
+def _signed_unit(value: Any, field_name: str) -> float:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number") from exc
+    if not -1.0 <= normalized <= 1.0:
+        raise ValueError(f"{field_name} must be between -1 and 1")
+    return round(normalized, 6)
+
+
+def _bounded_float(
+    value: Any,
+    field_name: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number") from exc
+    if not minimum <= normalized <= maximum:
+        raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
+    return round(normalized, 6)
+
+
+def _bounded_int(
+    value: Any,
+    field_name: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    normalized = _non_negative_int(value, field_name)
+    if not minimum <= normalized <= maximum:
+        raise ValueError(f"{field_name} must be between {minimum} and {maximum}")
+    return normalized
 
 
 def _non_negative_int(value: Any, field_name: str) -> int:
@@ -139,7 +185,14 @@ class CompanionActV1:
 
 @dataclass(frozen=True, slots=True)
 class ExpressionPlanV1:
-    """One revision shared by text, voice and avatar delivery later in DL-05."""
+    """One immutable expression revision shared by text, voice and avatar.
+
+    The plan is intentionally an *instruction*, not a receipt that claims a
+    remote TTS engine or avatar has already applied it.  Delivery receipts are
+    recorded separately.  Keeping all three modalities here prevents a model
+    response, a legacy text emotion parser, or a later channel failure from
+    silently rewriting Natsume's frozen self-affect.
+    """
 
     expression_plan_id: str
     synchronization_id: str
@@ -149,6 +202,16 @@ class ExpressionPlanV1:
     avatar_expression: str
     regulation_mode: str
     created_at_ms: int
+    voice_rate: float = 1.0
+    voice_energy: float = 0.5
+    voice_pitch: float = 0.0
+    voice_pause_ms: int = 120
+    avatar_gaze: str = "ATTENTIVE"
+    avatar_posture: str = "RELAXED"
+    avatar_transition_ms: int = 240
+    avatar_behavior: str = "CALM_ATTENTIVE"
+    previous_avatar_expression: str = "NEUTRAL"
+    previous_expression_source: str = "FALLBACK_NEUTRAL"
 
     def __post_init__(self) -> None:
         pacing = _required(self.text_pacing, "text_pacing", limit=48).upper()
@@ -174,6 +237,71 @@ class ExpressionPlanV1:
             _required(self.regulation_mode, "regulation_mode", limit=64).upper(),
         )
         object.__setattr__(self, "created_at_ms", _non_negative_int(self.created_at_ms, "created_at_ms"))
+        object.__setattr__(
+            self,
+            "voice_rate",
+            _bounded_float(
+                self.voice_rate,
+                "voice_rate",
+                minimum=0.7,
+                maximum=1.3,
+            ),
+        )
+        object.__setattr__(self, "voice_energy", _unit(self.voice_energy, "voice_energy"))
+        object.__setattr__(self, "voice_pitch", _signed_unit(self.voice_pitch, "voice_pitch"))
+        object.__setattr__(
+            self,
+            "voice_pause_ms",
+            _bounded_int(
+                self.voice_pause_ms,
+                "voice_pause_ms",
+                minimum=0,
+                maximum=3_000,
+            ),
+        )
+        gaze = _required(self.avatar_gaze, "avatar_gaze", limit=64).upper()
+        if gaze not in _AVATAR_GAZES:
+            raise ValueError(f"avatar_gaze must be one of {sorted(_AVATAR_GAZES)}")
+        posture = _required(self.avatar_posture, "avatar_posture", limit=64).upper()
+        if posture not in _AVATAR_POSTURES:
+            raise ValueError(f"avatar_posture must be one of {sorted(_AVATAR_POSTURES)}")
+        object.__setattr__(self, "avatar_gaze", gaze)
+        object.__setattr__(self, "avatar_posture", posture)
+        object.__setattr__(
+            self,
+            "avatar_transition_ms",
+            _bounded_int(
+                self.avatar_transition_ms,
+                "avatar_transition_ms",
+                minimum=0,
+                maximum=5_000,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "avatar_behavior",
+            _required(self.avatar_behavior, "avatar_behavior", limit=64).upper(),
+        )
+        object.__setattr__(
+            self,
+            "previous_avatar_expression",
+            _required(
+                self.previous_avatar_expression,
+                "previous_avatar_expression",
+                limit=64,
+            ).upper(),
+        )
+        previous_source = _required(
+            self.previous_expression_source,
+            "previous_expression_source",
+            limit=64,
+        ).upper()
+        if previous_source not in _PREVIOUS_EXPRESSION_SOURCES:
+            raise ValueError(
+                "previous_expression_source must be one of "
+                f"{sorted(_PREVIOUS_EXPRESSION_SOURCES)}"
+            )
+        object.__setattr__(self, "previous_expression_source", previous_source)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -186,6 +314,16 @@ class ExpressionPlanV1:
             "avatar_expression": self.avatar_expression,
             "regulation_mode": self.regulation_mode,
             "created_at_ms": self.created_at_ms,
+            "voice_rate": self.voice_rate,
+            "voice_energy": self.voice_energy,
+            "voice_pitch": self.voice_pitch,
+            "voice_pause_ms": self.voice_pause_ms,
+            "avatar_gaze": self.avatar_gaze,
+            "avatar_posture": self.avatar_posture,
+            "avatar_transition_ms": self.avatar_transition_ms,
+            "avatar_behavior": self.avatar_behavior,
+            "previous_avatar_expression": self.previous_avatar_expression,
+            "previous_expression_source": self.previous_expression_source,
         }
 
 
