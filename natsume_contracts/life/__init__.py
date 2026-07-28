@@ -13,6 +13,7 @@ from .affect import (
     UserAffectObservationV1,
 )
 from .relationship import (
+    CompanionProactivePermissionRequestV1,
     CompanionProactiveTargetV1,
     RelationshipEpisodeV1,
     RelationshipStateV2,
@@ -38,6 +39,7 @@ __all__ = [
     "RegulationDecisionV1",
     "SelfAffectStateV2",
     "UserAffectObservationV1",
+    "CompanionProactivePermissionRequestV1",
     "CompanionProactiveTargetV1",
     "RelationshipEpisodeV1",
     "RelationshipStateV2",

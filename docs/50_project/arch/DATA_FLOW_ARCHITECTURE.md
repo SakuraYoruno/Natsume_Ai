@@ -603,8 +603,18 @@ payload/authorization digest 及 target/scope，才追加 `relationship_proactiv
 第三方平台送达或用户已阅读。未知/拒绝、裂痕、等待后效应或自我克制均为 hold，而不是用沉默
 惩罚用户。
 
+主动许可的写入口不复用 generic Life HTTP command，也不解析“你可以常来找我”之类的
+自然语言。`POST /v1/digital-life/relationship/proactive-permission` 先以 exact raw JSON 建立
+`CompanionProactivePermissionRequestV1`，再由 server-owned `host.companion-contact` Secure
+Ingress policy 要求 `companion:contact:write`。只有签名 `user` principal 等于
+`relationship_subject_id`、tenant 等于 `workspace_id` 时，audit ref 才会成为 `USER_EXPLICIT`
+evidence 并调用 canonical `RelationshipLifecycleService.record_proactive_permission`。claim 完成结果
+绑定 `life-command://...`；duplicate 与进程重启只重开同一 command，不能成为第二个关系 writer。
+
 ```mermaid
 flowchart LR
+    U["signed user contact control\nstrict ALLOWED / DENIED"] --> SI["Secure Ingress\nuser + tenant + scope exact bind"]
+    SI --> R
     F["accepted foreground reply"] --> T["CompanionProactiveTargetV1 + provisional episode\n同一 Life command"]
     T --> X["read-only durable target registry\nscope / permission / active episode filter"]
     X --> L["one frozen-Scene-compatible Life snapshot"]

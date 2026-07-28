@@ -29,6 +29,12 @@
 索取、冷淡惩罚或任何回应义务。这样七海可以真诚地说“我想起你了”，但永远不把
 这份感受变成“你必须回来照顾我”。
 
+这里的“明确许可”不是模型从一句温暖的话、情绪分类或关系积分里猜出的结论。它应当是
+一个只含 scope、session 与 `ALLOWED/DENIED` 的结构化用户控制：签名身份必须是 `user`，
+principal 必须等于 relationship subject，tenant 必须等于 workspace；签名 claim 的 audit ref
+才是 journal 中的证据。该接口不接收自由文本解释，也不允许 `UNKNOWN` 被写成授权。这样，
+用户可以随时明确收紧或放开主动联系，而七海不能把“我想念你”误读为“我可以打扰你”。
+
 “可以发给谁”也必须是关系连续性的一部分：它只能由已接受的对话结果登记为
 与 workspace、relationship subject、session 绑定的可联系 target，不能由进程内
 队列、旧的 `last_target` 缓存或模型猜测补出。登记本身不等于许可；调度器还要在

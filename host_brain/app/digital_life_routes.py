@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 import time
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from host_brain.app.host_life_route_authority import (
     HostLifeRouteAuthority,
@@ -20,6 +20,18 @@ from host_brain.digital_life.application_boundary import (
     read_life_events,
     read_life_snapshot,
     submit_life_command,
+)
+from host_brain.digital_life.companion_permission_ingress import (
+    COMPANION_PERMISSION_BODY_INVALID,
+    COMPANION_PERMISSION_COMMAND_NOT_APPLIED,
+    COMPANION_PERMISSION_EVIDENCE_UNAVAILABLE,
+    COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+    COMPANION_PERMISSION_PRINCIPAL_KIND_DENIED,
+    COMPANION_PERMISSION_RESULT_CONFLICT,
+    COMPANION_PERMISSION_RESULT_RECORD_UNAVAILABLE,
+    COMPANION_PERMISSION_SCOPE_BINDING_DENIED,
+    CompanionPermissionIngress,
+    CompanionPermissionIngressError,
 )
 from natsume_contracts.life import LifeDeliveryAuthorization
 from host_brain.orchestration.governor_grant import (
@@ -44,6 +56,31 @@ _UNTRUSTED_INTENT_FIELDS = frozenset(
         "created_at_ms",
     }
 )
+
+
+def _companion_permission_http_status(reason_code: str) -> int:
+    """Map redacted user-control failures without exposing auth material."""
+
+    reason = str(reason_code or "").strip().upper()
+    if reason in {
+        COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        COMPANION_PERMISSION_EVIDENCE_UNAVAILABLE,
+        COMPANION_PERMISSION_RESULT_RECORD_UNAVAILABLE,
+        COMPANION_PERMISSION_COMMAND_NOT_APPLIED,
+    } or "UNAVAILABLE" in reason or "ENFORCE_REQUIRED" in reason:
+        return 503
+    if reason == COMPANION_PERMISSION_BODY_INVALID:
+        return 422
+    if reason in {
+        COMPANION_PERMISSION_PRINCIPAL_KIND_DENIED,
+        COMPANION_PERMISSION_SCOPE_BINDING_DENIED,
+    } or "SCOPE" in reason or "PRINCIPAL" in reason:
+        return 403
+    if reason == COMPANION_PERMISSION_RESULT_CONFLICT or any(
+        marker in reason for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT")
+    ):
+        return 409
+    return 401
 
 
 def _life_projection_enabled() -> bool:
@@ -580,6 +617,51 @@ async def digital_life_proactive_attempt(
     )
 
 
+async def digital_life_proactive_permission(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Record only a signed, explicitly structured contact decision.
+
+    This intentionally does not accept natural-language consent, inferred
+    warmth, Bond, emotion tags or an arbitrary Life command payload.
+    """
+
+    provider = _route_ports.companion_permission_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionPermissionIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionPermissionIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_permission_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
 async def digital_life_proactive_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
@@ -740,6 +822,11 @@ def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
     add(
         "/v1/digital-life/proactive/attempt",
         digital_life_proactive_attempt,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/proactive-permission",
+        digital_life_proactive_permission,
         methods=["POST"],
     )
     add(

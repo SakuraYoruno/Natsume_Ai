@@ -14,6 +14,7 @@ from .models import SecureIngressRequest
 
 class IngressSurface(str, Enum):
     HOST = "host"
+    COMPANION_CONTACT = "companion_contact"
     TOOL = "tool"
     OBS = "obs"
     GATEWAY = "gateway"
@@ -44,6 +45,14 @@ SECURE_INGRESS_SURFACE_POLICIES: Mapping[
         action="host:input",
         required_scopes=("host:write",),
         default_path="/v1/host/input",
+    ),
+    IngressSurface.COMPANION_CONTACT: IngressSurfacePolicy(
+        surface=IngressSurface.COMPANION_CONTACT,
+        surface_id="host.companion-contact",
+        audience="host",
+        action="companion:contact:write",
+        required_scopes=("companion:contact:write",),
+        default_path="/v1/digital-life/relationship/proactive-permission",
     ),
     IngressSurface.TOOL: IngressSurfacePolicy(
         surface=IngressSurface.TOOL,

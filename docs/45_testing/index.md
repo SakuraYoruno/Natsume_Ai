@@ -30,11 +30,20 @@
   才关闭该 episode 并写 aftereffect。它还注入 receipt 已落库但关系对账回调崩溃的窗口，验证
   恢复扫描只重开 deterministic relationship command、不会第二次调用 transport；篡改私有 target
   context 会失败关闭。
+- `test_dl06_companion_permission_ingress.py` 使用真实 SQLite migration、Secure Ingress
+  principal/credential store、Host route 和 canonical Life journal 验证：只有具有
+  `companion:contact:write` 的 `user` principal，且 principal/tenant 精确绑定
+  `relationship_subject_id/workspace_id` 时，strict JSON `ALLOWED/DENIED` 才能写入关系状态。
+  同一签名请求经过 HTTP duplicate 与进程重启后只重开同一 Life command；跨用户 scope、
+  service principal、重复 JSON key 与 `UNKNOWN` 均失败关闭，且不产生关系事件。
 - 本次新增定向集合为 delivery reconciliation/policy/registry/relationship/outbox `28 passed in
   26.13s`，邻接 recovery、Surface/Acceptance、scheduler、fusion 回归 `91 passed in 49.91s`。
   两组有重叠，不能相加；历史大合同文件在 60 秒窗口未完成，仍未记为通过。
+- 本次 permission ingress 切片额外运行 `test_dl06_companion_permission_ingress.py`、DL-06
+  relationship/proactive 回归及 Secure Ingress service 回归，合计 `47 passed in 27.69s`；这是本地
+  定向代码证据，不包含真实 Gateway、Monitor、provider、Edge 或 DL-07 服务栈。
 - 本切片的 receipt 只表示 Host/Gateway transport accepted，不证明第三方平台送达、用户阅读或
-  真实 Gateway 运行；面向用户的显式许可入口、5 次 canary/rollback、旧 writer 清零、真实模型和
+  真实 Gateway 运行；Monitor 用户控件、5 次 canary/rollback、旧 writer 清零、真实模型和
   DL-07 服务栈仍未运行，不能由这些定向测试推导为主动陪伴完成。
 
 ## NE-07 隔离外部服务栈

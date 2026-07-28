@@ -31,6 +31,9 @@ _AFTEREFFECT_OUTCOMES = frozenset(
 )
 _PROACTIVE_PERMISSIONS = frozenset({"UNKNOWN", "ALLOWED", "DENIED"})
 _CONSENT_STATES = frozenset({"NOT_GRANTED", "REVIEW_REQUIRED", "GRANTED"})
+_COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA = (
+    "companion_proactive_permission_request.v1"
+)
 
 
 def _required(value: Any, name: str, *, limit: int = 240) -> str:
@@ -73,6 +76,88 @@ def _refs(value: Any, name: str) -> tuple[str, ...]:
     if len(set(result)) != len(result):
         raise ValueError(f"{name} must not contain duplicates")
     return result
+
+
+@dataclass(frozen=True)
+class CompanionProactivePermissionRequestV1:
+    """One structured, user-authenticated proactive-contact decision.
+
+    This narrow wire contract deliberately excludes free-form explanation,
+    message bodies, inferred feeling and routing target. The Host derives its
+    evidence from the signed Secure Ingress claim and the canonical
+    relationship aggregate owns the resulting state transition.
+    """
+
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    proactive_permission: str
+    schema_version: str = _COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema_version != _COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA:
+            raise ValueError("companion proactive permission request schema is invalid")
+        permission = _required(
+            self.proactive_permission,
+            "proactive_permission",
+            limit=64,
+        ).upper()
+        if permission not in {"ALLOWED", "DENIED"}:
+            raise ValueError("proactive_permission must be ALLOWED or DENIED")
+        object.__setattr__(self, "workspace_id", _required(self.workspace_id, "workspace_id"))
+        object.__setattr__(
+            self,
+            "relationship_subject_id",
+            _required(self.relationship_subject_id, "relationship_subject_id"),
+        )
+        object.__setattr__(self, "session_id", _required(self.session_id, "session_id"))
+        object.__setattr__(self, "proactive_permission", permission)
+        object.__setattr__(
+            self,
+            "schema_version",
+            _COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA,
+        )
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CompanionProactivePermissionRequestV1":
+        if not isinstance(value, Mapping):
+            raise ValueError("companion proactive permission request must be an object")
+        expected = {
+            "schema_version",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+            "proactive_permission",
+        }
+        if set(value) != expected:
+            raise ValueError("companion proactive permission request field set is invalid")
+        for field_name in expected:
+            if not isinstance(value.get(field_name), str):
+                raise ValueError(
+                    f"companion proactive permission request {field_name} must be a string"
+                )
+            if value[field_name] != value[field_name].strip():
+                raise ValueError(
+                    f"companion proactive permission request {field_name} cannot have outer whitespace"
+                )
+        if value["proactive_permission"] not in {"ALLOWED", "DENIED"}:
+            raise ValueError("companion proactive permission request permission must be exact")
+        return cls(
+            schema_version=value["schema_version"],
+            workspace_id=value["workspace_id"],
+            relationship_subject_id=value["relationship_subject_id"],
+            session_id=value["session_id"],
+            proactive_permission=value["proactive_permission"],
+        )
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "schema_version": self.schema_version,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "proactive_permission": self.proactive_permission,
+        }
 
 
 @dataclass(frozen=True)
@@ -340,6 +425,7 @@ class RelationshipStateV2:
 
 
 __all__ = [
+    "CompanionProactivePermissionRequestV1",
     "CompanionProactiveTargetV1",
     "RelationshipEpisodeV1",
     "RelationshipStateV2",

@@ -329,6 +329,30 @@ def create_app(
             snapshot_reader=snapshot_reader,
         )
 
+    def companion_permission_ingress_provider() -> Any | None:
+        """Bind user contact consent to this Host lifespan's ingress store.
+
+        The lifecycle provider is deliberately resolved only when the route is
+        called, after the app-local canonical Life authority has been
+        composed.  No module-global service locator participates.
+        """
+
+        current = command_ingress_container
+        if current is None:
+            return None
+        from host_brain.digital_life.companion_permission_ingress import (  # noqa: PLC0415
+            CompanionPermissionIngress,
+        )
+
+        return CompanionPermissionIngress(
+            evaluator=current.evaluator,
+            complete_claim=current.store.complete_claim,
+            relationship_lifecycle_service_provider=(
+                lambda: life_delivery_relationship_lifecycle_service_provider()
+            ),
+            clock_ms=now_ms,
+        )
+
     route_ports = HostRoutePorts(
         ledger_provider=ledger_provider,
         life_command_authority_provider=life_route_authority_provider,
@@ -347,6 +371,9 @@ def create_app(
         ),
         embodiment_runtime_provider=embodiment_runtime_provider,
         security_immune_agent_provider=application_ports.security_immune_agent,
+        companion_permission_ingress_provider=(
+            companion_permission_ingress_provider
+        ),
     )
     host_obs_route_ports = ObsRoutePorts(
         query_projection_store_provider=lambda: host_query_projection_store,
