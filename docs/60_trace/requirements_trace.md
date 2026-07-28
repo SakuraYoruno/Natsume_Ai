@@ -18,7 +18,8 @@ willingness 映射必须随意愿升高单调降低 withdraw。代码位于
 `digital_life/domain_reducer.py` 与 `persona/motive_engine.py`，覆盖为
 `test_aw04_life_domain_reducer.py`、`test_dl00_motive_willingness.py` 与
 `test_dl00_emotional_baseline_manifest.py`。72 条合成多轮轨迹已冻结，但真人
-盲评、真实模型、语音和 Avatar 证据均为 `NOT_RUN`；状态为
+盲评、真实模型、语音和 Avatar 证据均为 `NOT_RUN`；Motive factory 已验证没有模块级
+engine、相同冻结输入跨新实例得到相同投影；状态为
 `LOCAL_TARGETED_PASS / EMOTIONAL_DIGITAL_LIFE_PARTIAL`。
 
 TRACE-DL01（唯一 Affective Life Kernel）：`UserAffectObservationV1`、

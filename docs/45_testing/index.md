@@ -42,6 +42,10 @@
   `UNAVAILABLE`。`test_body_sense_skill_tribe_events.py` 验证 retired tick 不会发布伪 update。
   本次最终单一受影响集合为 `187 passed in 28.59s`；它是本地代码证据，
   不证明 Motive、Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_dl00_motive_willingness.py` 现额外验证 `get_motive_engine()` 每次返回不同的
+  无状态规则对象，同一冻结输入仍得到相同动机投影；配合 Motive/Limbic 定向集合为
+  `37 passed in 1.55s`。这只证明模块级缓存已退役，不证明 volatile Bond queue、关系后效应、
+  真实 Edge/provider 或 DL-07 服务栈完成。
 - 上述 Host/Limbic/Endocrine、fusion 与旧 organ 邻接文件的最终合并定向回归为
   `149 passed in 33.81s`。它是覆盖重叠后的单一集合，不能与前述批次相加，也不构成波次集成或真实服务栈验收。
 - `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted

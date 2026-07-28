@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_MOTIVE_GLOBAL_SINGLETON_RETIREMENT_SLICE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -101,8 +101,9 @@ mode 均返回 `RETIRED_CANONICAL_LIFE`；Circadian/MirrorNeuron 已停止直接
 已在同一 canonical authority 下让 production Surface/startup 不再 warmup 或读取 global
 `BodySenseModel`：每次读取都必须提供 relationship subject，并从对应 Life snapshot 做纯读 projection。
 legacy conversation/tick/loneliness mutation 统一返回 `RETIRED_CANONICAL_LIFE`，retired tick 不再发
-`BODY_SENSE_UPDATED`，因此不能重新驱动 silence 或 legacy metabolism。Motive 和 volatile Bond queue
-仍待处理；这一事实不是 DL-06 或真实陪伴验收完成。
+`BODY_SENSE_UPDATED`，因此不能重新驱动 silence 或 legacy metabolism。随后 Motive 已去除模块级
+`_engine`：兼容工厂每次创建无状态规则对象，所有动机只能由本次传入的快照纯投影，不能作为跨用户或跨
+turn 的情感 authority。volatile Bond queue 仍待处理；这一事实不是 DL-06 或真实陪伴验收完成。
 
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与

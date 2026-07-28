@@ -429,17 +429,16 @@ def _clamp(v: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, v))
 
 
-# ── 单例工厂 ──────────────────────────────────────────────────────────────────
-
-_engine: MotiveEngine | None = None
-
-
 def get_motive_engine() -> MotiveEngine:
-    """返回全局 MotiveEngine 实例。"""
-    global _engine
-    if _engine is None:
-        _engine = MotiveEngine()
-    return _engine
+    """返回一次纯计算所需的无状态引擎。
+
+    ``MotiveEngine`` 不持有关系、情绪、时间或学习状态。生产路径必须从
+    canonical Life snapshot 传入完整输入，而不能通过模块级单例残留上一轮或
+    另一位用户的上下文。保留此工厂只为兼容既有调用方；每次调用均产生新的
+    纯规则对象。
+    """
+
+    return MotiveEngine()
 
 
 def compute_motive_state(inp: MotiveInput) -> MotiveState:

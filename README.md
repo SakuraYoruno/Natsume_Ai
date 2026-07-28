@@ -448,8 +448,9 @@ MirrorNeuron 也不再触碰 Endocrine 私有字段。第四条切断进一步�
 `BodySenseModel`：Surface 不再 warmup 或读取该单例，而是按当前 `relationship_subject_id` 从
 canonical Life snapshot 纯投影 fatigue、drowsiness 与 loneliness；缺 subject 会明确不可用，绝不回退到
 其他会话的 global state。legacy BodySense tick、loneliness 注入和会话开始/结束只返回
-`RETIRED_CANONICAL_LIFE`，也不会再向 EventBus 发布伪更新。它仍不代表 Motive、volatile Bond queue、
-Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成。
+`RETIRED_CANONICAL_LIFE`，也不会再向 EventBus 发布伪更新。随后 `MotiveEngine` 的兼容工厂也不再
+缓存模块级实例：每次计算只读取调用方提供的快照并产生新的纯规则对象，不能保存、恢复或串接任一用户的
+情感/关系上下文。它仍不代表 volatile Bond queue、Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成。
 
 内部旁车到 Governance owner 的既有批次都只作提交绑定历史。当前 Authority owner 集合证明每个 Host root 的 canonical SQLite connection、Memory stores、ModelAttempt 与 CapabilityBroker runtime identity 均隔离，Prompt/Route catalog 也不再共享可变实例；关闭失败会保留未完成资源并阻断新 epoch。生产 locator facade/Container 已物理清零，测试桥不属于可发布产品对象图；Chroma 与 Neo4j 仍使用配置级共享 namespace，所以不能外推为 tenant isolation、资源崩溃恢复、事务化 Chat、波次集成或 production canary 已完成。当前 fresh 完整架构静态 Gate 1～14 已全部 `PASS`、`failed_gates=[]`：Task Runtime feature-canary 合同和 Host lifecycle ports 已迁入中立 `host_brain/contracts/`，Persistence 与 Composition 分别直接依赖 canonical contract；旧导入路径只保留同一对象重导出，因此 application/persistence 与 app/composition 两个 SCC 均已消除。Gate 3 继续由 Research shadow ledger 的 1271/512/108 行职责拆分保持通过，没有扩大白名单。该结论只表示静态分层收口，不代表 Universal Runtime 七路线、NE-01 或完整架构项目完成。
 

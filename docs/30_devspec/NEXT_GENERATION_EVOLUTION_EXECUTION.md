@@ -3,9 +3,9 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v4.8
+版本：v4.9
 日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-06_MOTIVE_GLOBAL_SINGLETON_RETIREMENT_SLICE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -143,7 +143,8 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 隔离、Bond 自动阶段兼容边界与 Surface 约束注入。远程 CI 固定为
 `NOT_RUN_ACCOUNT_QUOTA`。这不是主动陪伴、真实模型、语音/Avatar、真人体验或
 全服务栈验收；volatile Bond queue、旧 relationship projection 和完整旧 writer
-清零仍属于 DL-06。
+清零仍属于 DL-06。Motive 的模块级 `_engine` 已删除：其 factory 每次只创建无状态
+规则投影，不保存任何关系、情绪、时间或学习上下文，因此不能再成为隐性 self-affect writer。
 
 退出：裂痕、修复、主动权限和关系纹理跨重启恢复，跨用户泄漏=0。
 

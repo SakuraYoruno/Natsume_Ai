@@ -20,7 +20,7 @@
 > DL-03 再将 accepted reply 的 provisional relationship episode 与下一次用户输入的
 > aftereffect 写入相同 journal；Surface 只从内部 provenance hand-off 获取关系边界，
 > 不接受请求伪造。HostEmotionRuntime、Limbic、Endocrine 与 global BodySense 的 production mutation 已逐项切断；
-> BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive、Bond 与 Surface
+> BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪，Bond 与 Surface
 > 仍有兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
 > episode 与旧 writer 清零仍待后续 DL 波。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`

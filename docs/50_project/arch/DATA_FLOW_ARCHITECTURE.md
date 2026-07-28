@@ -645,8 +645,8 @@ timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_
 拒绝；Circadian/MirrorNeuron 不再直写其私有字段。BodySense 生产读取现改为
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
 没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
-`RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive、Bond queue 与旧 timeline 的
-只读投影仍未清零。
+`RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive 每次只对当前输入快照新建
+无状态投影，已不再保存模块级 engine；volatile Bond queue 与旧 timeline 的只读投影仍未清零。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal

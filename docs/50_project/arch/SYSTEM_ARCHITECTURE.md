@@ -127,7 +127,8 @@ mode 退役，只可返回无状态 hard-state projection；Circadian/MirrorNeur
 production BodySense 也已完成 read-only cutover：Surface/startup 不再构造或读取 global model，Limbic 只通过
 typed Life snapshot reader 按 exact relationship subject 纯投影身体在场；缺 scope 不能回退到 default/global。
 legacy BodySense tick、loneliness 和 conversation mutation 统一 `RETIRED_CANONICAL_LIFE`，retired tick 不会
-再经 EventBus 影响 silence 或 self-affect。Motive 和 volatile Bond queue 尚未完成 cutover。
+再经 EventBus 影响 silence 或 self-affect。Motive factory 已移除模块级 instance，每次仅对当前输入
+做无状态规则投影；volatile Bond queue 尚未完成 cutover。
 
 0148 的 `CompanionProfileIngress` 现在把一条更窄的直接控制路径加入同一 composition：
 `POST /v1/digital-life/relationship/companion-profile` 经 `host.companion-profile` 验证
