@@ -654,7 +654,7 @@ class SQLiteSkillSupplyChainStore:
             )
             return self._mutation_result(conn, operation, SupplyChainAcceptance.NEW)
 
-    def activate_bundle(
+    def _legacy_activate_bundle(
         self,
         *,
         bundle_id: str,
@@ -665,6 +665,9 @@ class SQLiteSkillSupplyChainStore:
         idempotency_key: str,
         reason_code: str = "BUNDLE_ACTIVATED",
     ) -> dict[str, Any]:
+        raise SkillSupplyChainStoreError(
+            "SKILL_SUPPLY_CHAIN_ACTIVATION_RETIRED_USE_V2"
+        )
         normalized_id = _required_text(
             bundle_id, "SKILL_SUPPLY_CHAIN_BUNDLE_ID_REQUIRED", max_length=255
         )
@@ -791,7 +794,7 @@ class SQLiteSkillSupplyChainStore:
             )
             return self._mutation_result(conn, operation, SupplyChainAcceptance.NEW)
 
-    def reject_bundle(
+    def _legacy_reject_bundle(
         self,
         *,
         bundle_id: str,
@@ -800,6 +803,9 @@ class SQLiteSkillSupplyChainStore:
         idempotency_key: str,
         reason_code: str,
     ) -> dict[str, Any]:
+        raise SkillSupplyChainStoreError(
+            "SKILL_SUPPLY_CHAIN_TERMINAL_WRITE_RETIRED_USE_V2"
+        )
         normalized_id = _required_text(
             bundle_id, "SKILL_SUPPLY_CHAIN_BUNDLE_ID_REQUIRED", max_length=255
         )

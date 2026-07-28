@@ -400,11 +400,16 @@ Effect fence 的证据规则为 fail closed：一般 handler/transport `FAILED` 
 
 - `host_brain/model_runtime/`：prompt contract、provider route、ModelAttempt、重试与用量证据。
 - `host_brain/capability_plane/`：Capability Broker、descriptor policy、execution journal。
-- `host_brain/skills/`：内置 Skill 定义、executor、确定性 SkillDraft 编译器和签名供应链资产。外部 bundle 经过 0109 evidence gate 才能进入 active content-addressed registry；运行时不扫描目录、不直接 import。
+- `host_brain/skills/`：内置 Skill 定义、executor、确定性 SkillDraft/bundle 编译器和签名供应链资产。0141 真实重开 Lab、Review、Supply Chain 与 canary evidence 后才写 active projection；Host 运行时只解析批准的 version binding，不扫描目录、不直接 import 外部 Python。
 - `host_brain/tools/`、`host_brain/mcp/`、`host_brain/lsp/`：具体工具和协议 adapter。
 - `host_brain/airlock/`：外部 bundle 的验证、隔离和 quarantine。
 
-模型建议和工具返回值都是执行材料，不自动成为事实。Capability 执行必须有 grant、attempt 和 receipt；外部 bundle 当前只允许安全接收和隔离，完整 staged activation/rollback 尚未闭环。
+模型建议和工具返回值都是执行材料，不自动成为事实。Capability 执行必须有
+grant、attempt 和 receipt。NE-05 的本地生产对象图已接通 staged
+activation/degrade/rollback：Compiler 不持有签名私钥；0141 将 evidence、
+maturity、active projection、operation 和 terminal receipt 原子提交；Host 只
+允许 `builtin-skill-alias.v1` 绑定可信内置 handler。真实外部 bundle/provider
+canary 尚未执行，不能把本地 fixture 视为生产外部激活。
 
 ### 3.6 数字生命与表达层
 
@@ -663,7 +668,7 @@ flowchart LR
 
 NE-06 的长期演化写入被收敛到 0110 Evolution Governance Ledger：Feedback、Knowledge 和 Identity 只能先写 proposal/plan，再由独立 Lab/Review evidence 产生 append-only apply/activation/rollback event。active Knowledge 通过 workspace-scoped read projection 提供，任何旧 Memory、Persona 或 Identity writer 都不能绕过该 ledger；当前仍处于 partial/canary 前阶段。
 
-系统仍处于迁移期，但 Executive 执行兼容层中的 `route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 与内存任务真相已经退役；其内部的 Forge route override call 也已移除，残留的 runtime/app guard 只能 fail-closed 拒绝，纯 SkillDag adapter 无生产调用。cycle 只能输出空 batch 并在适配层归一为 `PLAN_CYCLE`，不能被重排成串行执行。独立 Forge `runtime-match` 仍是待退役边界。prompt intelligence 也只能产生不带执行结果的计划提示：
+系统仍处于迁移期，但 Executive 执行兼容层中的 `route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 与内存任务真相已经退役；其内部的 Forge route override call 和独立 Forge approval/runtime-match authority 也已移除，残留的 runtime/app guard 只能 fail-closed 拒绝，纯 SkillDag adapter 无生产调用。cycle 只能输出空 batch 并在适配层归一为 `PLAN_CYCLE`，不能被重排成串行执行。Forge 只保留 proposal source，prompt intelligence 也只能产生不带执行结果的计划提示：
 
 | 新主干 | 待退役/修复 |
 |---|---|

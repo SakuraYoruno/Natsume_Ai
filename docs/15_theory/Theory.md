@@ -1531,3 +1531,30 @@ content-addressed proposal；proposal 不得拥有 activation authority 或直�
 改变 L3 production influence。真实 provider、授权实验环境和隐藏 verifier
 缺失时，正确状态是 `ACCEPTANCE_PENDING_EXTERNAL`，不是用本地构造出的合格
 数字填补证据。
+
+## 30. 可编译能力不等于可执行能力
+
+Skill 的材料、草稿、bundle、已激活版本和运行时 handler 是五种不同对象。
+编译器可以确定性地产生 I/O 合同、风险、预算、测试向量、inventory、SBOM
+和签名申请，但它不能持有签名私钥，也不能因为编译成功而改变生产 Registry。
+accepted trace 只能引用已经验收的 receipt/artifact 摘要；raw thought、会话
+正文和未验收轨迹既不是能力证据，也不应进入 bundle。
+
+生产激活必须由一个 durable authority 同时重开：
+
+- 可信 Lab report、独立 run/sandbox receipt 与 proposal；
+- exact ReviewItem 的 subject、version、状态、有效期和 evidence refs；
+- Supply Chain 的 bundle digest、SBOM、签名审计和 canary receipt；
+- maturity decision、previous version 和 rollback target。
+
+这些证据必须和 active projection、operation、terminal receipt 在同一原子
+事务中提交。exact replay 先按 operation identity 重开，不能先查看“当前已经
+ACTIVE”再误报冲突；外部 canary 响应丢失进入 reconciliation，不能重新发送。
+rollback 重新使用目标旧版本自己的证据，绝不能把新版本证据复制给旧版本。
+
+运行时只消费 active projection，不扫描目录，也不加载未批准 bundle Python。
+Registry adapter 是一条显式协议边界：未知 adapter、protocol drift、缺少
+本地 handler 或 maturity 超过静态风险上限都应令应用启动失败关闭。能力成熟度
+可以自动维持或下降，新能力最高只能进入 L1/L2；升级仍必须经 Lab 和 Review。
+Capability Forge 因而只能产生 proposal，不能批准自身、调整运行 route 或把
+运行统计反向写成激活证据。

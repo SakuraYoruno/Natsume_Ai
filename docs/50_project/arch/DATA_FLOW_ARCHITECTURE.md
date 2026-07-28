@@ -884,29 +884,42 @@ frozen chat execution
 
 Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加载授权，再执行 frozen governed skill。之后它记录 governed skill execution，校验 durable receipt projection，并返回 worker commit 和可计量 budget usage。
 
-这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。Executive legacy SkillDag 生产执行、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 和进程内 registry 已删除；Executive 内 Forge route override call 也已删除，留下的纯 SkillDag adapter 不拥有 worker 或 production caller。它检测到 dependency cycle 时只保留空 batch，admission 返回 `PLAN_CYCLE`，绝不改写为串行执行。独立 Forge `runtime-match` 仍须在 NE-05 退役。后续约束重点是把 Internal 与领域兼容入口全部迁入同一 lineage。
+这条链建立了 `command → graph/node → attempt → child grant → worker receipt` lineage。Executive legacy SkillDag 生产执行、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix 和进程内 registry 已删除；Executive 内 Forge route override call 与独立 Forge approval/runtime-match authority 也已删除，留下的纯 SkillDag adapter 不拥有 worker 或 production caller。它检测到 dependency cycle 时只保留空 batch，admission 返回 `PLAN_CYCLE`，绝不改写为串行执行。后续约束重点是完成真实外部 canary 与全程序验收。
 
 ### 4.3 外部 Skill 生命周期（NE-05）
 
-外部 bundle 不会因为存在于目录中就进入运行时。签名接收先完成 quarantine/stage；0109 ledger 再把 Lab report、Review、SBOM、signature、sandbox、rollback 和 maturity 固定为不可变 evidence。只有 fenced Supply Chain Repository 成功推进 `STAGED → ACTIVE` 后，content-addressed registry 才能返回该版本；降级和回滚同样必须留下 durable receipt。回滚会重开目标版本自己此前的 `ACTIVATED` receipt 与精确 evidence，拒绝从未独立激活或跨 skill kind/name 的 target；它不得复制当前版本的证据来授权旧版本。
+外部 bundle 不会因为存在于目录中就进入运行时。Compiler 只生成 unsigned
+content-addressed bundle、inventory、CycloneDX SBOM 与签名申请；签名接收先
+完成 quarantine/stage。外部 canary 通过 0141 pending operation 和 Outbox
+派发，只有有效 fence 能结算；响应不明或 claim 过期进入 reconciliation。
+activate 会在同一 SQLite UoW 中重开 Supply Chain、0138 Lab
+report/run/sandbox、proposal 与 exact ReviewItem，再提交 evidence、maturity、
+active projection、operation 和 terminal receipt。回滚重开目标旧版本自己的
+历史 evidence，不能复制当前版本证据。
 
 ```mermaid
 flowchart LR
     Intake[签名 Intake] --> Verify[签名 / SBOM / Sandbox 验证]
     Verify --> Quarantine[Quarantine]
     Quarantine --> Stage[STAGED]
-    Lab[Lab Report] --> Evidence[0109 SkillActivationEvidence]
+    Lab[0138 Lab Report / Run / Sandbox] --> Evidence[0141 SkillActivationEvidenceV2]
     Review[Review] --> Evidence
     Stage --> Evidence
-    Evidence --> Gate{fenced activation gate}
-    Gate -->|拒绝| Rejected[REJECTED receipt]
-    Gate -->|通过| Active[ACTIVE content-addressed version]
-    Active --> Runtime[Runtime 只解析 active 版本]
+    Canary[0141 Canary Outbox] --> Evidence
+    Evidence --> Gate{atomic activation gate}
+    Gate -->|拒绝| Rejected[零 lifecycle mutation]
+    Gate -->|通过| Active[active projection + terminal receipt]
+    Active --> Runtime[Host 只解析 active version binding]
     Active --> Degrade[DEGRADED receipt]
     Active --> Rollback[ROLLED_BACK receipt]
 ```
 
-该链已经在 repository/service/contract 层可回放；V1 的 URI reference 仍不是对真实 Lab/Review authority 的查询，Supply Chain 状态、evidence 与 terminal receipt 也还不是同一 UoW。外部 provider 的真实 sandbox canary、Review production route 和 bundle import 仍标记为未验收，不能把 stage 或测试 fixture 写成生产激活。
+Host 当前只允许 `builtin-skill-alias.v1` 把批准版本绑定到可信内置 handler；
+未知 adapter/protocol、缺 handler 或 maturity 超出静态风险上限会令启动失败。
+运行时不扫描目录，也不 import 外部 bundle Python。旧 V1 mutation
+service/repository、hot loader、Supply Chain 公共 activate/reject 与 Forge
+runtime authority 已删除。外部 provider 的真实 canary 尚未在 NE-07 服务栈中
+执行，所以本链只能定级为本地代码波次通过，不能把 fixture 写成生产外部激活。
 
 ### 4.4 Feedback、Knowledge 与 Identity 演化（NE-06）
 

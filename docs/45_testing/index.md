@@ -3,22 +3,54 @@
 
 # 测试与验收目录
 
-版本：v2.41
+版本：v2.43
 维护日期：2026-07-28
 状态：当前证据
 
+## NE-05 Skill 生命周期本地代码波次
+
+- migration `0141_skill_lifecycle_authority.sql` 通过 fresh 0001→0141
+  真实 SQLite smoke；V2 authority 覆盖 canary operation/outbox、
+  activation evidence、maturity decision、idempotency operation、active
+  projection 和 terminal receipt。
+- `test_ne05_skill_lifecycle_v2.py` 真实重开 0138 Lab
+  report/run/sandbox、proposal、ReviewItem 和 Supply Chain 证据，覆盖原子
+  activate、exact replay、degrade、使用目标自身 evidence 的 rollback、
+  forged Review 零写、过期 canary reconciliation 以及 Host active-version
+  resolver。
+- Compiler、Supply Chain、安全接收、V2 lifecycle、Host composition、
+  maturity、Forge proposal-only 和持久化分层的最终受影响集合为
+  `181 passed, 1 skipped in 51.82s`。唯一 skip 是 Windows symlink 创建权限，
+  不计为通过。
+- 架构 Gate 3 首跑拒绝了 1,834 行未分类 V2 repository；没有增加白名单。
+  证据/投影校验被拆到不持有连接或事务的 475 行 mixin，SQLite transaction
+  owner 降为 1,492 行。拆分后的重叠定向回归为
+  `12 passed in 13.79s`，fresh Gate 1～14 最终
+  `PASS / failed_gates=[]`。
+- 全仓 collect-only 收集到 11,419 项；唯一 error 是 `origin/dev` 已有的
+  `test_long_memory_quality_regressions.py` 导入缺失。该基线错误未被计入
+  NE-05 通过，也未在本波扩范围修改。
+- 外部 bundle/provider canary、真实签名基础设施和 NE-07 全栈没有运行；
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。当前结论为
+  `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`。
+- 0141 使既有七路线 0140 coverage receipt 按设计失效；干净实现提交落定后，
+  已以 SQLite backup 复制 accepted snapshot、只追加 0141，并在
+  `6f78e25c24a2bc148aa8a0a12016558a6e492a7a` 上 query-only 重开，没有重跑
+  accepted worker。七路线全部 `PASS`，receipt digest 为
+  `sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
+
 ## NE-01 代码波次封口
 
-- 当前权威收据在 `7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8`
-  上，以 SQLite backup 复制既有 accepted 七路线快照，仅追加 migration
-  0138～0140 后 query-only 重开。七路线仍全部 `PASS`，receipt digest 为
-  `sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`，
+- 当前权威收据在 `6f78e25c24a2bc148aa8a0a12016558a6e492a7a`
+  上，以 SQLite backup 复制既有 accepted 七路线 0140 快照，仅追加 migration
+  0141 后 query-only 重开。七路线仍全部 `PASS`，receipt digest 为
+  `sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`，
   accepted worker 没有重跑。
 - 恢复波次去重后为 24 个用例，结果 `24 passed in 165.99s`。范围包括
   `test_ne01_general_multinode_recovery.py`、四类跨进程签名恢复、fan-out、
   parallel terminal、cancellation continuation 和真实 Git Workspace。
 - 当前收据证据保存在忽略目录
-  `artifacts/local-gates/7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8/ne01-coverage-v2/`；
+  `artifacts/local-gates/6f78e25c24a2bc148aa8a0a12016558a6e492a7a/ne01-coverage-v2/`；
   恢复波次仍保留在其原 commit-bound 目录，不提交 SQLite、日志或用户数据。
   状态为
   `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`；远程 CI 为
@@ -1113,10 +1145,11 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   既有七路线数据库，只追加应用 0136/0137，并在干净提交
   `708aa845ef68b9f7df931b2aba8c204cf6e9946a` 上 query-only 重开，未重跑
   accepted worker；该 SHA 在后续 PR 合并后不再是 `dev` 祖先，所以收据仅作
-  历史校准。当前权威收据再次 backup 同一 accepted snapshot，只追加
-  0138～0140，并在干净祖先提交
-  `7e9b090b3fcaf6e8a6d8cf9b2e0ab4ae702b08b8` 上 query-only 重开；七路线
+  历史校准。0140 收据再次 backup 同一 accepted snapshot 并只追加
+  0138～0140；NE-05 推进 migration 后又 backup 该 snapshot，只追加 0141，
+  并在干净实现提交
+  `6f78e25c24a2bc148aa8a0a12016558a6e492a7a` 上 query-only 重开；七路线
   仍均为 `PASS`，receipt digest 为
-  `sha256:8da27bc8056533c2a4005356f26518be6f47209ba6ba24f345d81f6a5f06d9e3`。
+  `sha256:f42f5fef85fd754daf8e523de6479f09ec94373118f9401caa9a53a46c980986`。
 - 部署多实例 canary、Windows graceful stop 与 NE-07 真实服务栈尚未运行，
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

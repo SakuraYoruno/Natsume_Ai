@@ -368,7 +368,7 @@ post-COMMIT settlement 的 canonical BudgetUsage 仍只按 `EXACT_ACCEPTED / EXA
 
 `task_progress` 直接读取 `DurableTaskStatusProjection`，`recent_turn` 直接读取 durable conversation window；两者只返回暂态 projection，不创建 Task、Attempt 或第二套执行 authority，也不在 Cortex 写入 user/assistant visible turn、Memory、Life、Preference、Outbox 或 Delivery。未知 legacy route 在 Cortex 以 `RUNTIME_ROUTE_UNSUPPORTED` fail closed。若未来需要将查询结果纳入对话历史，必须先经 TaskGraph Acceptance，不能恢复 read-route 直写。
 
-Executive 已从生产 Cortex application ports 删除。旧 `_execute_explicit_skill_dag`、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、进程内任务 registry、factory、accessor 和相关生产写入均已删除；Executive 内对 Runtime Capability Forge 自动 gap synthesis/replan/route override 的调用也已移除。Cortex 内 contextual-session/style、clarification、LLM unavailable 与异步 post-process 的直答 compatibility branch，及 Surface 的 `schedule_async_post_process()` fire-and-forget 入口同样已物理删除：canonical route 必须先通过 Governed Runtime `supports()`，否则在可见对话写入前拒绝；通过后只能把冻结上下文交给 TaskGraph，提交后的投影经 durable `surface.post_process` outbox 处理。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只保留 fail-closed 拒绝边界，也不再是生产路由器。纯 `SkillDag` 类型及 adapter 仅保留为零生产调用者的兼容合同，不能调度 worker。独立 Forge `runtime-match` 端点仍待 NE-05 退役，因此不能将本切片称为旧 authority 清零。`app/intelligent_runtime.py` 已物理删除，不能成为隐藏的规划或执行入口；`SkillComposer` 也不再暴露 `execute()`。这是旧 authority 的部分负向退役，不证明 PlanningSearch、全路线 receipt 或 NE-01 完成。
+Executive 已从生产 Cortex application ports 删除。旧 `_execute_explicit_skill_dag`、`route_planning`、`conversation_execution`、application `composition`、application port wiring、legacy diagnostic direct-skill matrix、进程内任务 registry、factory、accessor 和相关生产写入均已删除；Executive 内对 Runtime Capability Forge 自动 gap synthesis/replan/route override 的调用也已移除。Cortex 内 contextual-session/style、clarification、LLM unavailable 与异步 post-process 的直答 compatibility branch，及 Surface 的 `schedule_async_post_process()` fire-and-forget 入口同样已物理删除：canonical route 必须先通过 Governed Runtime `supports()`，否则在可见对话写入前拒绝；通过后只能把冻结上下文交给 TaskGraph，提交后的投影经 durable `surface.post_process` outbox 处理。`executive_runtime/runtime.py` 与 `app/executive_runtime.py` 只保留 fail-closed 拒绝边界，也不再是生产路由器。纯 `SkillDag` 类型及 adapter 仅保留为零生产调用者的兼容合同，不能调度 worker。NE-05 又移除了独立 Forge 的 approval/runtime-result/runtime-route 公共 authority，Forge 只产生 proposal。`app/intelligent_runtime.py` 已物理删除，不能成为隐藏的规划或执行入口；`SkillComposer` 也不再暴露 `execute()`。这些负向退役不证明真实外部 canary 或完整程序验收。
 
 历史 `SubAgentDispatcher` 同样已降为无状态拒绝门：它不再保存 handler map、构造模型 gateway 或写独立 `skill_exec_log`，direct dispatch 固定返回 `LEGACY_SUB_AGENT_DISPATCH_RETIRED` 且不读取请求 context。Executive compatibility ports、runtime wiring 与 legacy `_dispatch_to_sub_agent` 已删除相应 request factory/accessor，因此没有再把该拒绝门作为可注入 Delegate 端口。`intent_agent_handler` 只投影 governed handoff，legacy source 和传入 gateway 都不能触发模型调用。保留的 `SubAgentRequest`/registry view 仅用于兼容 codec 与迁移诊断；真正的 Delegate 必须重新进入 `HostCommand → immutable TaskGraph`，目前仅 `pentest_agent` 的只读 adapter 被准入。这只关闭旧直调 authority，不等于一般 Delegate、模型预算或七路线验收完成。
 
@@ -706,7 +706,7 @@ Edge session/owner 不是默认的进程字符串：Host 从 normalized canonica
 | Action Preview | `runtime/action_preview_authority.py`、`runtime/action_preview_resolver.py`、执行/terminal front doors | 重开 Command/Task/Attempt/Lease/Grant/Context/Scene/Guardian 与 Acceptance claim；derived terminal 递归重开 origin Attempt/Lease，descriptor 只收紧；Acceptance Gateway 仅允许 exact minimal text，拒绝未绑定 `raw_extra`/媒体/二次变换；公开具身 submit/enqueue 也必须 exact proof。既有 sys-mode、长期目标、terminal、Edge、Operation/Effect reconciliation、`task.operator_control` 与 `operator.state_control` 都必须携带 typed terminal proof；旧任务/effect、reply-performance/Gateway voice/Avatar 直通失败关闭 |
 | Obs Preview / Shadow | `governor/action_preview.py`、Obs route | Obs 端点仍是单独的 dry-run eligibility 视图，固定 `would_execute=false`；它不替代 Host lifespan 的 canonical authority，也没有统一 shadow runner |
 | Capability Maturity | scorecard/provider/Governor adapter、production composition fail-closed wiring | production IntentDecisionEngine 默认启用 restrict-only policy；缺 durable promotion/degradation lifecycle |
-| Capability Forge | `app/capability_forge.py` | 仍只产生 proposal/gap candidate；不得绕过 Lab/Review/0109 lifecycle，Skill Compiler 仍只产 SkillDraft |
+| Capability Forge | `app/capability_forge.py` | 只产生 proposal/gap candidate；approval、rollback、runtime result 和 route override 公共 authority 为 0，不得绕过 Lab/Review/0141 lifecycle |
 | Evolution Lab | 0108 V1、0122 structural V2；0138 trusted ledger；0139 trusted redaction repair；0140 redacted dataset；`contracts/evolution_lab_redaction.py`、`evolution_lab/{docker_executor,golden_datasets,redacted_trace,golden_worker,golden_verifier,golden_experiments,trusted_runner,production_composition}.py`、`persistence/evolution_lab_{redacted_dataset,trusted_query}_repository.py`；Obs/Monitor Operator projection | 0108/0122 只读且不可晋级；0139 消除 trusted/V1 redaction 同名冲突，0140 只保存 content-addressed sanitized dataset、Manifest 与 digest-only Receipt，raw trace 不落库；纯规则位于 contracts，SQLite reader 只位于 persistence。专用 executor 只接受 digest-pinned Docker，重新验证 engine/image/container/command/inspect、禁网、只读 rootfs/dataset/runtime、非 root、临时 bind output、资源限制和零 effect audit；不允许 host subprocess fallback。三类 Golden Experiment 共六个独立容器 arm、本机真实 Docker response-loss exact reopen、unknown-effect reconciliation、脱敏重启/篡改/回滚已通过；query-only repository、Obs producer/route 与 Monitor 页面只展示 proposal-only 证据。clean-commit suite 绑定 `b68a8b9dd` 与 receipt `020c8fc0…`，exact replay 后 18 张 Lab 表、收据哈希和容器计数不变；状态为 `LOCAL_ACCEPTANCE_PASS / PROPOSAL_ONLY / PROGRAM_INCOMPLETE` |
 | Feedback | response/persona/recommendation feedback + 0110 proposal ledger | `FeedbackProposalV1` 已可持久化 STAGED/APPLIED/ROLLED_BACK；Prefrontal 参数漂移已修复，旧增长 caller 尚未全部转为 proposal adapter |
 | Persona Growth | `persona_growth.py`、Bond stage、Evolution Orchestrator、emergent growth skill | legacy 入口已被 `PersonaEngine` 中央围栏和静态扫描封禁；当前只产生经 drift guard 检查的无副作用 candidate，尚未接入 proposal/Review/版本激活 |
@@ -737,6 +737,35 @@ Edge session/owner 不是默认的进程字符串：Host 从 normalized canonica
 7. 为 Persona 的无副作用 candidate 保持中央 fail-close，NE-06 再接入 proposal、Review、版本激活与 rollback，不恢复直接 writer。
 8. 让 PlanningSearch 从真实目标生成可竞争后继，并以 Research/Code production shadow 证明收益。
 9. 在上述执行地基闭环后，再推进 Evolution Lab、Skill Compiler、Knowledge OS 与 Identity Migration。
+
+## NE-05 当前生产对象图
+
+生产 Host 在 lifespan 内构造 `SQLiteSkillLifecycleV2Repository`，再以
+`LifecycleBoundSkillRegistry` 包装可信内置 Registry。包装器启动时一次性重开
+workspace 的 V2 active projection，并验证 adapter、protocol、handler 和
+maturity ceiling；任何一项漂移都会阻止 Host 开放路由。运行期只返回带
+`SkillVersionBinding` 的 metadata/handler，不扫描磁盘目录，也不动态 import
+外部 bundle。
+
+0141 把外部 canary 的 pending operation/outbox/reconciliation 与本地
+activation authority 分开。canary 只有有效 fence 可结算；claim 过期后状态是
+`RECONCILIATION_REQUIRED`，不能再次派发。activate/degrade/rollback 各自有
+idempotency operation；activation evidence、Supply Chain terminal、maturity
+decision、active projection 和 lifecycle receipt 共用一个 SQLite UoW。
+rollback 查询目标版本自己的历史 evidence，不复制当前版本证据。
+
+该 SQLite writer 首版达到 1,834 行并被架构 Gate 3 正确阻断；本波没有增加
+`cohesive_large_files` 例外。连接和 transaction owner 保留在 1,492 行
+repository，0138/Review/Supply Chain 证据与 active projection 的纯校验拆到
+475 行、无连接无事务的 mixin。拆分后 Gate 1～14 全部通过，writer authority
+仍只有一个。
+
+Compiler 与 activation 没有反向依赖：Compiler 输出 unsigned
+content-addressed bundle、CycloneDX SBOM 和签名申请，生产签名/Review/Lab
+authority 再独立决定是否激活。旧 V1 mutation service/repository、hot loader
+和 Supply Chain 公共 activate/reject 已删除。当前唯一 runtime adapter 是冻结的
+`builtin-skill-alias.v1`；真实外部 adapter/provider canary 留给 NE-07，因此
+本波结论是 `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`。
 
 这些缺口的唯一活动执行顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 

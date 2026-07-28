@@ -7,7 +7,7 @@ import re
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from host_brain.contracts.skill_execution import (
     SkillBudgetPolicy,
@@ -95,6 +95,87 @@ class SkillSchedulerProfile:
 
 
 @dataclass(frozen=True)
+class SkillVersionBinding:
+    """Immutable runtime binding issued by the authoritative V2 lifecycle."""
+
+    bundle_id: str
+    bundle_digest: str
+    bundle_version: str
+    runtime_adapter_id: str
+    runtime_protocol_version: str
+    activation_id: str
+    maturity_decision_id: str
+    maturity_level: int
+    activation_generation: int
+    projection_digest: str
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "SkillVersionBinding":
+        binding = cls(
+            bundle_id=str(value.get("bundle_id") or "").strip(),
+            bundle_digest=str(value.get("bundle_digest") or "").strip(),
+            bundle_version=str(value.get("bundle_version") or "").strip(),
+            runtime_adapter_id=str(
+                value.get("runtime_adapter_id") or ""
+            ).strip(),
+            runtime_protocol_version=str(
+                value.get("runtime_protocol_version") or ""
+            ).strip(),
+            activation_id=str(value.get("activation_id") or "").strip(),
+            maturity_decision_id=str(
+                value.get("maturity_decision_id") or ""
+            ).strip(),
+            maturity_level=int(value.get("maturity_level", -1)),
+            activation_generation=int(
+                value.get("activation_generation", -1)
+            ),
+            projection_digest=str(
+                value.get("projection_digest") or ""
+            ).strip(),
+        )
+        binding.validate()
+        return binding
+
+    def validate(self) -> None:
+        required = (
+            self.bundle_id,
+            self.bundle_version,
+            self.runtime_adapter_id,
+            self.runtime_protocol_version,
+            self.activation_id,
+            self.maturity_decision_id,
+        )
+        if not all(required):
+            raise ValueError("Skill version binding identity is incomplete")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", self.bundle_digest):
+            raise ValueError("Skill version binding bundle digest is invalid")
+        if not re.fullmatch(r"[0-9a-f]{64}", self.projection_digest):
+            raise ValueError(
+                "Skill version binding projection digest is invalid"
+            )
+        if self.maturity_level < 0 or self.maturity_level > 5:
+            raise ValueError("Skill version binding maturity must be in [0,5]")
+        if self.activation_generation < 1:
+            raise ValueError(
+                "Skill version binding activation generation must be positive"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "bundle_id": self.bundle_id,
+            "bundle_digest": self.bundle_digest,
+            "bundle_version": self.bundle_version,
+            "runtime_adapter_id": self.runtime_adapter_id,
+            "runtime_protocol_version": self.runtime_protocol_version,
+            "activation_id": self.activation_id,
+            "maturity_decision_id": self.maturity_decision_id,
+            "maturity_level": self.maturity_level,
+            "activation_generation": self.activation_generation,
+            "projection_digest": self.projection_digest,
+        }
+
+
+@dataclass(frozen=True)
 class SkillMeta:
     skill_name: str
     clearance: str
@@ -118,6 +199,8 @@ class SkillMeta:
     """访问级别"""
     scheduler_profile: dict[str, Any] | SkillSchedulerProfile | None = None
     """调度画像：由 SchedulingCenter 扫描并转成 SchedulerTaskConfig。"""
+    version_binding: SkillVersionBinding | None = None
+    """由 V2 生命周期 active projection 绑定的不可变运行版本。"""
 
     def validate(self) -> None:
         if not self.skill_name or not isinstance(self.skill_name, str):
@@ -177,6 +260,12 @@ class SkillMeta:
             raise ValueError("fallback_policy must be one of {'chat_fallback','same_family','strict_fail','retry_once'}")
         if self.scheduler_profile is not None and not isinstance(self.scheduler_profile, (dict, SkillSchedulerProfile)):
             raise ValueError("scheduler_profile must be dict, SkillSchedulerProfile, or None")
+        if self.version_binding is not None:
+            if not isinstance(self.version_binding, SkillVersionBinding):
+                raise ValueError(
+                    "version_binding must be SkillVersionBinding or None"
+                )
+            self.version_binding.validate()
 
     @property
     def permission_model(self) -> SkillPermissionModel:
@@ -208,7 +297,20 @@ class SkillMeta:
                 if isinstance(self.scheduler_profile, SkillSchedulerProfile)
                 else dict(self.scheduler_profile or {})
             ),
+            "version_binding": (
+                None
+                if self.version_binding is None
+                else self.version_binding.to_dict()
+            ),
         }
+
+    @property
+    def version(self) -> str:
+        return (
+            self.version_binding.bundle_version
+            if self.version_binding is not None
+            else "builtin"
+        )
 
     @property
     def governed_execution_enabled(self) -> bool:

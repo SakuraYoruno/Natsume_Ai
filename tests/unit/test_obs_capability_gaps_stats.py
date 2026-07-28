@@ -67,22 +67,10 @@ def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
         error_code="FAILED",
     )
     forge_service = CapabilityForgeService(telemetry=telemetry)
-    proposal = forge_service.create_proposal(
+    forge_service.create_proposal(
         session_id="sess-gap-1",
         proposer="tester",
         canary_traffic_percent=10,
-    )
-    forge_service.approve_and_promote(
-        proposal_id=proposal["proposal_id"],
-        approval_token_ref=proposal["governor_gate"]["approval_token_ref"],
-        approver="reviewer",
-        target_stage="canary",
-    )
-    forge_service.record_runtime_result(
-        proposal_id=proposal["proposal_id"],
-        success=False,
-        latency_ms=300,
-        error_code="FAILED",
     )
     monkeypatch.setattr(
         "host_brain.app.obs_routes_stats_capability_agent.read_capability_forge_projection_from_store",
@@ -118,7 +106,10 @@ def test_obs_capability_gaps_stats_endpoint(monkeypatch) -> None:
     assert "hotspots" in payload
     assert "forge_candidates" in payload
     assert "forge_runtime_quality" in payload
-    assert payload["forge_runtime_quality"]["summary"]["tracked_proposals"] >= 1
+    assert (
+        payload["forge_runtime_quality"]["summary"]["tracked_proposals"]
+        == 0
+    )
     assert isinstance(payload["forge_runtime_quality"]["items"], list)
     assert "candidate_thresholds" in payload
 

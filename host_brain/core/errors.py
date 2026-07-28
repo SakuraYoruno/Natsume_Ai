@@ -259,12 +259,6 @@ CTX_EVIDENCE_PACK_INVALID = "CTX_EVIDENCE_PACK_INVALID"              # EvidenceP
 # ── M12-C: Reranker（补充） ──
 RETR_RERANK_STAGE_MISSING = "RETR_RERANK_STAGE_MISSING"              # evidence_pack 缺少 rerank_stage 字段
 
-# ── M12-D: SkillHotLoader ──
-HOTLOAD_SKILL_NOT_FOUND = "HOTLOAD_SKILL_NOT_FOUND"                  # 热加载目标 Skill 不存在
-HOTLOAD_META_INVALID = "HOTLOAD_META_INVALID"                        # SkillMeta 字段缺失，拒绝加载
-HOTLOAD_VERSION_NOT_FOUND = "HOTLOAD_VERSION_NOT_FOUND"              # 回滚目标版本不存在
-HOTLOAD_ROLLBACK_FAILED = "HOTLOAD_ROLLBACK_FAILED"                  # 回滚执行失败
-
 # ── M13-A: Bond 阶段引擎 ──
 BOND_STAGE_UNKNOWN = "BOND_STAGE_UNKNOWN"                            # 未知 stage 值
 BOND_EVENT_INVALID = "BOND_EVENT_INVALID"                            # 事件格式不合规

@@ -29,9 +29,12 @@ from host_brain.composition.host_governance_runtime import (
 from host_brain.composition.host_memory_runtime import HostMemoryRuntimeOwner
 from host_brain.contracts.host_lifecycle import HostLifecycleApplicationPorts
 from host_brain.core.meta_learning_loop import MetaLearningLoop
-from host_brain.governor.tokens import TokenService
 from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
+from host_brain.persistence.skill_lifecycle_v2_repository import (
+    SQLiteSkillLifecycleV2Repository,
+)
 from host_brain.persona.emotional_silence import EmotionalSilenceEngine
+from host_brain.skills.lifecycle_registry import LifecycleBoundSkillRegistry
 
 
 ServiceProvider = Callable[[], Any]
@@ -154,7 +157,6 @@ def build_production_host_application_ports(
     capability_forge_service = _app_local_lazy_provider(
         lambda: process_application_ports.capability_forge_service_factory(
             telemetry=capability_gap_telemetry(),
-            token_service=TokenService(),
             ledger=ledger_provider(),
         )
     )
@@ -244,6 +246,10 @@ def build_production_host_application_ports(
         persistence_db_path_provider=(
             process_application_ports.persistence_db_path
         ),
+        skill_lifecycle_repository_factory=(
+            SQLiteSkillLifecycleV2Repository
+        ),
+        lifecycle_skill_registry_factory=LifecycleBoundSkillRegistry,
     )
 
     return HostApplicationPorts(

@@ -217,12 +217,38 @@ class FederatedCapabilityScorecardProvider:
     def _project_skill(self, meta: Any) -> CapabilityScorecard:
         generated = int(self._clock())
         provisional = scorecard_from_skill_meta(meta, maturity_level=0, generated_at_ms=generated)
-        level = _baseline_level(
-            canonical_risk=provisional.canonical_risk,
-            source_kind=SOURCE_SKILL_META,
+        binding = getattr(meta, "version_binding", None)
+        level = (
+            int(binding.maturity_level)
+            if binding is not None
+            else _baseline_level(
+                canonical_risk=provisional.canonical_risk,
+                source_kind=SOURCE_SKILL_META,
+            )
         )
         card = scorecard_from_skill_meta(meta, maturity_level=level, generated_at_ms=generated)
-        return replace(card, evidence=(_baseline_evidence(card, observed_at_ms=generated),))
+        evidence = (
+            CapabilityEvaluationEvidence(
+                capability_id=card.capability_id,
+                suite_id="skill-lifecycle-v2",
+                outcome="PASS",
+                observed_level=level,
+                evidence_ref=binding.maturity_decision_id,
+                source_refs=(
+                    binding.activation_id,
+                    (
+                        "skill-active-projection://sha256/"
+                        f"{binding.projection_digest}"
+                    ),
+                    binding.bundle_id,
+                ),
+                evaluator="skill-lifecycle-v2-authority",
+                observed_at_ms=generated,
+            )
+            if binding is not None
+            else _baseline_evidence(card, observed_at_ms=generated)
+        )
+        return replace(card, evidence=(evidence,))
 
     def _project_tool(self, meta: Any) -> CapabilityScorecard:
         generated = int(self._clock())

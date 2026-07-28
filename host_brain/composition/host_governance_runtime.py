@@ -80,6 +80,8 @@ class HostGovernanceRuntimeOwner:
         scorecard_provider_factory: Factory = FederatedCapabilityScorecardProvider,
         policy_cache_factory: Factory = GovernorPolicyCache,
         intent_engine_factory: Factory = _build_intent_decision_engine,
+        skill_lifecycle_repository_factory: Factory | None = None,
+        lifecycle_skill_registry_factory: Factory | None = None,
     ) -> None:
         self._ledger_provider = ledger_provider
         self._persistence_db_path_provider = persistence_db_path_provider
@@ -93,6 +95,12 @@ class HostGovernanceRuntimeOwner:
         self._scorecard_provider_factory = scorecard_provider_factory
         self._policy_cache_factory = policy_cache_factory
         self._intent_engine_factory = intent_engine_factory
+        self._skill_lifecycle_repository_factory = (
+            skill_lifecycle_repository_factory
+        )
+        self._lifecycle_skill_registry_factory = (
+            lifecycle_skill_registry_factory
+        )
         self._lock = RLock()
         self._active = False
         self._closing = False
@@ -102,6 +110,7 @@ class HostGovernanceRuntimeOwner:
         self._token_service: Any | None = None
         self._mcp_registry: Any | None = None
         self._skill_registry: Any | None = None
+        self._skill_lifecycle_repository: Any | None = None
         self._scorecard_provider: Any | None = None
         self._intent_engine: Any | None = None
 
@@ -176,6 +185,25 @@ class HostGovernanceRuntimeOwner:
                     ),
                     logger=_logger,
                 )
+                if (
+                    self._skill_lifecycle_repository_factory is not None
+                    or self._lifecycle_skill_registry_factory is not None
+                ):
+                    if (
+                        self._skill_lifecycle_repository_factory is None
+                        or self._lifecycle_skill_registry_factory is None
+                    ):
+                        raise RuntimeError(
+                            "SKILL_RUNTIME_LIFECYCLE_COMPOSITION_INVALID"
+                        )
+                    lifecycle = self._skill_lifecycle_repository_factory(
+                        self._persistence_db_path_provider()
+                    )
+                    registry = self._lifecycle_skill_registry_factory(
+                        base_registry=registry,
+                        active_versions=lifecycle,
+                    )
+                    self._skill_lifecycle_repository = lifecycle
                 self._skill_registry = registry
             self._sync_mcp_skills(self._skill_registry)
             return self._skill_registry
@@ -231,6 +259,7 @@ class HostGovernanceRuntimeOwner:
             self._intent_engine = None
             self._scorecard_provider = None
             self._skill_registry = None
+            self._skill_lifecycle_repository = None
             self._mcp_registry = None
             self._token_service = None
             self._tool_catalog = None

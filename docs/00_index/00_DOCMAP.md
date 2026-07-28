@@ -3,8 +3,8 @@
 
 # Natsume AI 文档地图与权威顺序
 
-版本：v9.11
-维护日期：2026-07-27
+版本：v9.12
+维护日期：2026-07-28
 状态：`CURRENT_AUTHORITY_MAP`
 
 ## 1. 权威顺序
@@ -36,9 +36,12 @@ typed Effect。只有 44 个启用项进入运行 manifest；blocked 能力保�
 `c68850f8` v3 收据已使 44 个启用项的 Skill 路线达到 `COMPLETE`，但没有
 授权或完成 49 个 blocked 能力。
 独立 Personality Registry 的 19 项 metadata 与动态 MCP Skill 没有
-governed manifest 入口。
+governed manifest 入口。NE-05 另以 0141 V2 lifecycle authority 约束版本
+激活：Host 只解析批准的 active version binding，当前仅允许
+`builtin-skill-alias.v1` 指向可信内置 handler；外部 bundle 不被目录扫描或
+直接 import。
 
-当前文档基线为 migration head `0140_evolution_lab_redacted_dataset.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset。这些资产都不改变 Task execution authority，多节点 Graph 的普通成功/失败仍由 0090/0091 既有外层 authority 唯一终结。
+当前文档基线为 migration head `0141_skill_lifecycle_authority.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset；0141 原子持有 Skill canary、activation evidence、maturity、active projection、operation 与 terminal receipt。这些资产都不改变 Task execution authority，多节点 Graph 的普通成功/失败仍由 0090/0091 既有外层 authority 唯一终结。
 
 当前 Chat 文档基线为 exact Life projection barrier：assistant turn 与 LifeMemory admission 的 durable receipts是 external reply的必要前置条件；首次调用可完成 exact pending intent，reclaimed reconciliation只读。该项只关闭 Chat 的 `transactional_side_effects` 控制，不改变七路线 `INCOMPLETE`、external eventual delivery、wave integration或 NE-07状态。
 
@@ -98,12 +101,13 @@ flowchart TD
 - Chat retrieval：`PARTIAL_HOST_SCOPED_READ_DEPENDENCIES`。普通 Cortex 检索只接受同一 AgentRuntime scope 提供的会话历史、偏好构造器与 recall factory；helper 不再回读 `process_services`。这不构成 Chat Acceptance、外部 delivery 或全局 locator 删除证据。
 - Scheduler：`PARTIAL / DURABLE_CLOCK_OCCURRENCE_FENCE`；Internal Agent：`PARTIAL / INTERNAL_WRITE_PROMOTION_AND_SIGNED_RAW_FAILURE_CLAIM_BEFORE_CLEANUP`。受治理 Internal 单节点可在首次 activation 和其后的 app-local survivor 周期中，从 seal 后/WorkerProjection 前的密封检查点重开完整 lineage，重建唯一 projection 并继续 Verification、Acceptance、Effect 与 claim，Agent 不重跑。具备 exact Workspace authority 的 write 还会密封 frozen-base path manifest 与 binary patch，Acceptance 重算 deterministic accepted HEAD 并经 0116 晋升，源分支不移动；clean/no-change 路径保持兼容。Host 也在 mandatory boot scan 后周期重扫同一 exact durable admission；live Lease 只延后，到期后无需进程重启即可再次评估。检查点 mutation 已由 composition-owned `InternalAgentCheckpointUnitOfWorkPort` 封口，WorkerProjection 只有一个物理 INSERT owner；A（projection/Operation）、B（Budget charge）、C（rejected terminal bundle）是三个 durable atomic UoW，不是整链单事务。response loss 只读重开，禁止二次 mutation。未 sealed 的取消仅在 exact single-node lineage 下消费两种互斥签名终态：`RELEASED/RELEASE/NO_SIDE_EFFECT/no receipt`，或 `COMMITTED/COMMIT/SIDE_EFFECT_CONFIRMED/durable receipt`；v1 result digest 保持兼容，v2 绑定 receipt，且必须先提交 claim 再清理真实 Git Workspace/stage。一般 unknown effect、其它 cancel/budget claim closeout与 general `settle_worker` crash bundle 仍缺；Domain/Skill/Codex write、handle-level TOCTOU、OS/container isolation与legacy bridge也未完成，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 - Operation 已 `COMMITTED` 后的 Budget settlement 只在 exact checkpoint/版本链可证时续接；共享 `EXCEEDED` 下 missing 只能绑定唯一 winner 补写 `ALREADY_EXCEEDED`。真实 SQLite 已覆盖双 checkpoint、four-root、五节点菱形和八个并行根节点，依赖按 immutable graph order 释放且 worker 不重跑。`CONFLICT`、unknown `RESERVED/RECOVERY_REQUIRED` 和 cancellation crossing 会在新 Lease 前写 0130 append-only hold + Outbox：conflict quarantine，后两类进入各自签名 reconciliation。签名 `RELEASE + NO_SIDE_EFFECT` 现在可只关闭任意多节点图中的目标 Operation/Attempt/Node/Lease；Graph/Budget 保持 ACTIVE，重启后由唯一 0090 decision 原子终结，READY sibling 零执行，Acceptance receipt 在 `PENDING→COMMITTED` 间保持稳定。无限规模、其它 failure/cancellation、自动归因和部署 fan-out仍缺。
-- Governed Operator：`14_ACTIVE_GOVERNED / 0_BLOCKED / 23_RETIRED / NE01_IN_PROGRESS`。生产 manifest、handler、OpenAPI 与生成式 Monitor client 只含 14 条受治理命令；23 个旧 ID 由 replacement policy 独立记录，BFF 返回 410 且零 Secure Ingress。替代 Edge/Tool/Internal/Scheduler 与 NE-05/06 activation 尚未全部完成，部署 key、HTTP/network canary、一般恢复、真实模型与 Docker 全栈仍未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+- Governed Operator：`14_ACTIVE_GOVERNED / 0_BLOCKED / 23_RETIRED / NE01_IN_PROGRESS`。生产 manifest、handler、OpenAPI 与生成式 Monitor client 只含 14 条受治理命令；23 个旧 ID 由 replacement policy 独立记录，BFF 返回 410 且零 Secure Ingress。NE-05 Skill activation 本地代码波次已通过，Forge 只保留 proposal source；替代 Edge/Tool/Internal/Scheduler、NE-06 version activation、部署 key、HTTP/network canary、真实模型与 Docker 全栈仍未全部验收，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 - Durable DAG：`PARTIAL_B5C_DURABLE_CANCELLATION_SHADOW / PRODUCTION_OFF`。B5A/B5B 以显式 `result_node_id`、0091 和 canonical projection 冻结整图成功；B5C 已推进到 0098。Cancellation、Operation 签名对账与 Effect 签名对账均为 `WIRED_DEFAULT_OFF / CANARY_NOT_RUN`，开启 cancellation 时要求两类对账入口、Secure Ingress `ENFORCE`、可用 Gateway 和 verification-only Ed25519 公钥。0098 只追加 immutable case/proof sidecar：PENDING proof 可作为新 cancellation decision evidence；FINALIZED correction 只在 trusted read 验证 immutable legacy decision ref/payload digest，绝不改写旧 decision、fence 或 evidence。proof 的 case/intent/effect/fence/Attempt/resolution/actor/Outbox 与 `graph_revision` 均被签名和物理 trigger 绑定。生产门禁只阻断实际持久化且未修复/未隔离的 legacy inventory；仓库无 SQLite 资产不能证明外部生产数据已清理。Budget 高竞争、部署密钥/凭据、完整 key lifecycle 与真实 canary 仍缺，atomic、bounded 与 cancellation 均保持 OFF。
 - PlanningSearch：内核可用；Code D16 有 dynamic pure-shadow catalog/compile，D17 有 `PRIVATE_BARE_WORKTREE_TRUSTED_PROCESS_ONLY` 的双 detached worktree 本地实验机械链，D18 有独立 0106 preregistration → paired evidence → `VERIFIED_CLEAN` → terminal receipt 的 append-only durable ledger。D19 仅为已预注册的冻结 `python -m pytest -q <repo-relative-test>` 在同一主机受信 worktree 子进程中强制 argv、测试次数和总验证时限，并把无路径命令回执嵌入 arm evidence；它不是模型/插件/网络/文件系统隔离、通用硬预算或 production influence。跨领域真实收益仍 `UNPROVEN`。
 - Capability Planning authority：Research/Frontend 的 `CAPABILITY_SEARCH_V1` 候选上限必须同时满足 intent 请求和 Governor approved binding，effective risk 为二者最小值；冻结目录强制选择两项不同 Skill，再以 `skill → skill → chat` 编译图，grant ref 与步数进入 virtual-state lineage；缺失/畸形 binding risk 失败关闭。该本地定向证据不提升 NE-02 或收益状态。
 - Persona 演化：`CENTRAL_FENCE_WIRED / PROPOSAL_PIPELINE_MISSING`。
-- 长期演化程序：作为整体尚未实现。
+- 长期演化程序：NE-03、NE-04 和 NE-05 本地代码波次已形成各自受限
+  authority；NE-06 与 NE-07 尚未完成，程序整体仍为 `INCOMPLETE`。
 - Agent 模型预算：Chat、Internal 与 governed Agent Skill 已共享
   graph/node/attempt-bound guard；Skill sealed authority 会保留 canonical
   Budget JSON，Agent 多轮请求逐次扣减真实 measurement。该项只关闭局部
