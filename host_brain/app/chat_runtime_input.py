@@ -120,6 +120,7 @@ def _copy_scene_awareness(raw: Mapping[str, Any] | None) -> dict[str, Any]:
 class ChatRuntimeInput:
     request_id: str
     person_id: str
+    workspace_id: str
     session_id: str
     thread_id: str | None
     user_message: str
@@ -165,6 +166,7 @@ class ChatRuntimeInput:
             "request": {
                 "request_id": self.request_id,
                 "person_id": self.person_id,
+                "workspace_id": self.workspace_id,
                 "session_id": self.session_id,
                 "thread_id": self.thread_id,
                 "user_message": self.user_message,
@@ -196,6 +198,7 @@ def build_chat_runtime_input(
     *,
     request_id: str,
     person_id: str = "",
+    workspace_id: str = "",
     session_id: str,
     thread_id: str | None,
     user_message: str,
@@ -227,6 +230,7 @@ def build_chat_runtime_input(
     return ChatRuntimeInput(
         request_id=str(request_id or "").strip(),
         person_id=str(person_id or "").strip(),
+        workspace_id=str(workspace_id or "").strip(),
         session_id=str(session_id or "").strip(),
         thread_id=(str(thread_id).strip() if thread_id else None),
         user_message=str(user_message or ""),

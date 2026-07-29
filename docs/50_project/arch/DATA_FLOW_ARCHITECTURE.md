@@ -661,6 +661,22 @@ component 得到当前 emotion，并把关系纹理作为独立 context；它不
 关系数值误当授权；高连续性 background tick 也不再调用 legacy Limbic metabolism。此数据流仅覆盖 default-mode
 reader，不替代其余 compatibility reader、真实 TTS/Avatar/Edge 或服务栈验收。
 
+普通 Chat 的关系读取流现为：
+
+```text
+AffectFusion internal envelope
+  → scope/schema/self-id validation
+  → CanonicalRelationshipProjection
+  → Prompt Context + Interaction Facts
+  → Surface relationship_state / affect packet
+```
+
+validation 同时绑定 `workspace_id + relationship_subject_id + session_id`，并要求 envelope、relationship turn
+context 与 `RelationshipStateV2` 三层 schema 一致。成功时 legacy prompt vector 只保留 `FRIEND / stepsibling`
+的非浪漫表达纹理；旧 Bond score/stage、consent 或高 trust 不能提升亲密、排他、依赖或主动权限。失败时生成
+`CANONICAL_RELATIONSHIP_REJECTED` 的安全朋友投影，而非读回 Bond fallback。该流与相邻普通 Chat/Surface 回归
+目前为 `179 passed in 63.85s`，不包含真实 provider、Edge、Monitor 或 DL-07 服务栈。
+
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor

@@ -273,6 +273,16 @@ relationship context 与旧 Bond score/stage 分离；空 component 仍由 canon
 集合为 `92 passed in 44.20s`，但仍只说明此 reader 的本地收口，不能取代剩余兼容读取审计、Monitor/Review、
 真实 provider/Edge 或 DL-07。
 
+**普通 Chat 关系投影修订：** Prompt Context Plane 与 Interaction Facts Plane 现在只在
+`_affective_life_internal` 的 AffectiveFusion hand-off 同时满足 `affective_turn_context.v1`、
+`relationship_turn_context.v1`、`relationship_state.v2`，并严格匹配 `natsume_ai`、workspace、relationship
+subject、session 后，才读取 canonical `RelationshipStateV2`。该投影固定为非浪漫的
+`FRIEND / stepsibling`；旧 Bond 的 score/stage（即使为 `SOULMATE`）不再能把 trust、safety 或 attunement
+推导为恋人、排他、依赖或主动许可。repair/rupture 仍可显式收紧为修复状态。claimed canonical hand-off
+损坏或 scope drift 时返回 `CANONICAL_RELATIONSHIP_REJECTED` 的安全朋友投影，而不是回退旧 Bond。Surface
+packet 取得同一结果，因此文字的关系距离仍为 `familiar`。本地受影响集为 `179 passed in 63.85s`；它不证明
+其余 compatibility reader 已清零，也不证明真实 provider、远端 Edge 或 DL-07。
+
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。
 任何遗漏 Life authority 的 Host request 都稳定拒绝为 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不再以

@@ -16,7 +16,12 @@ from host_brain.persona.context.drive_state import DriveStateBlock, resolve_driv
 from .interaction_state import InteractionState, build_interaction_state
 from host_brain.persona.context.interaction_thread import InteractionThreadState, resolve_interaction_thread
 from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet
-from host_brain.persona.context.relationship_state import RelationshipStateBlock, resolve_relationship_state
+from host_brain.persona.context.relationship_state import (
+    RelationshipStateBlock,
+    canonical_relationship_context_claimed,
+    extract_canonical_relationship_projection,
+    resolve_relationship_state,
+)
 from host_brain.persona.context.tactic_ledger import TacticLedgerBlock
 from host_brain.persona.context.topic_ledger import TopicLedgerBlock
 
@@ -180,6 +185,11 @@ class ContextAssembler:
         request_id = str(request_payload.get("request_id") or "").strip()
         session_id = str(request_payload.get("session_id") or "").strip()
         person_id = str(request_payload.get("person_id") or "").strip()
+        workspace_id = str(
+            request_payload.get("workspace_id")
+            or runtime_payload.get("workspace_id")
+            or ""
+        ).strip()
         ab_eval_payload = dict(runtime_payload.get("ab_eval") or {})
         eval_history_turns = [
             dict(item or {})
@@ -359,9 +369,19 @@ class ContextAssembler:
         bond_summary = dict(prompt_context.get("bond_summary") or runtime_payload.get("bond_summary") or {})
         motive_state = dict(runtime_payload.get("motive_state") or {})
         social_brain_state = dict(runtime_payload.get("social_brain_state") or {})
+        canonical_relationship = extract_canonical_relationship_projection(
+            effective_emotion_context,
+            expected_relationship_subject_id=person_id,
+            expected_workspace_id=workspace_id,
+            expected_session_id=session_id,
+        )
         relationship_state = resolve_relationship_state(
             bond_summary=bond_summary,
             social_brain_state=social_brain_state,
+            canonical_relationship=canonical_relationship,
+            canonical_context_claimed=canonical_relationship_context_claimed(
+                effective_emotion_context
+            ),
         )
         relationship = RelationshipBlock(
             state=relationship_state,

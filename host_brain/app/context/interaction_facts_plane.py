@@ -12,7 +12,12 @@ from host_brain.persona.context.drive_state import DriveStateBlock, resolve_driv
 from host_brain.persona.context.emotional_act import EmotionalAct, resolve_emotional_act
 from host_brain.persona.context.interaction_thread import InteractionThreadState, resolve_interaction_thread
 from host_brain.persona.context.perception_packet import PerceptionPacket, build_perception_packet
-from host_brain.persona.context.relationship_state import RelationshipStateBlock, resolve_relationship_state
+from host_brain.persona.context.relationship_state import (
+    RelationshipStateBlock,
+    canonical_relationship_context_claimed,
+    extract_canonical_relationship_projection,
+    resolve_relationship_state,
+)
 from host_brain.persona.context.social_act import SocialAct, resolve_social_act
 from host_brain.persona.context.tactic_ledger import TacticLedgerBlock
 from host_brain.persona.context.topic_ledger import TopicLedgerBlock
@@ -110,6 +115,9 @@ def assemble_interaction_facts_plane(
     request_id = _clean_text(request_payload.get("request_id"))
     session_id = _clean_text(request_payload.get("session_id"))
     person_id = _clean_text(request_payload.get("person_id"))
+    workspace_id = _clean_text(
+        request_payload.get("workspace_id") or payload.get("workspace_id")
+    )
     user_message = _clean_text(request_payload.get("user_message"))
     render_target_lang = _clean_text(payload.get("render_target_lang") or request_payload.get("render_target_lang") or "zh")
     render_target_lang = "ja" if render_target_lang == "ja" else "zh"
@@ -234,9 +242,19 @@ def assemble_interaction_facts_plane(
     )
     prompt_context = _safe_mapping(payload.get("prompt_context"))
     bond_summary = _safe_mapping(prompt_context.get("bond_summary") or payload.get("bond_summary"))
+    canonical_relationship = extract_canonical_relationship_projection(
+        merged_emotion,
+        expected_relationship_subject_id=person_id,
+        expected_workspace_id=workspace_id,
+        expected_session_id=session_id,
+    )
     relationship: RelationshipStateBlock = resolve_relationship_state(
         bond_summary=bond_summary,
         social_brain_state=_safe_mapping(payload.get("social_brain_state")),
+        canonical_relationship=canonical_relationship,
+        canonical_context_claimed=canonical_relationship_context_claimed(
+            merged_emotion
+        ),
     )
     drive: DriveStateBlock = resolve_drive_state(
         motive_state=_safe_mapping(payload.get("motive_state")),

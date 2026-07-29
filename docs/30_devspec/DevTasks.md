@@ -124,6 +124,14 @@ score/stage、亲密或主动许可；projection 也不带 identity、trigger/ev
 44.20s`；它只完成一个 compatibility reader，Monitor/Review、其余 reader、跨进程真实恢复、真实 provider/Edge
 和 DL-07 服务栈仍待后续。
 
+当前继续执行 `DL-06_CANONICAL_RELATIONSHIP_PROMPT_PROJECTION_CUTOVER`：普通 Chat 的 Prompt Context
+Plane、Interaction Facts Plane 与 Surface packet 仅消费经内部 AffectiveFusion provenance、`natsume_ai`、
+workspace、relationship subject、session 和 `v1/v1/v2` schema 共同校验的 `RelationshipStateV2`。该状态只能
+投影成非浪漫 `FRIEND / stepsibling` 文本纹理；旧 Bond `SOULMATE`、分数、trust/attunement 或 consent 无法
+触发 lover、排他、依赖或主动权限。repair/rupture 仍会收紧为修复状态。claimed canonical context 失效时
+fail-closed 为 `CANONICAL_RELATIONSHIP_REJECTED`，不回退 legacy Bond。相邻受影响集为 `179 passed in 63.85s`；
+这只是本地 prompt reader 切流，DL-06、真实 provider/Edge 和 DL-07 均未完成。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

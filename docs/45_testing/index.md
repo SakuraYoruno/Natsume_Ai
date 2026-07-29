@@ -126,6 +126,14 @@
   principal、cross-scope body 与 caller-supplied target 字段都失败关闭。此为本地合同/路由证据，仍不代表
   Monitor 操作界面、长期用户体验、旧 writer cutover、真实 Gateway/Edge/provider 或 DL-07。本次完整
   受影响集合为 `35 passed in 79.78s`；其中没有 Docker、远端 Edge 或外部模型调用。
+- `test_dl06_canonical_relationship_prompt_projection.py` 新增普通 Chat 关系 projection 回归：一个内部
+  `RelationshipStateV2` 必须同时匹配 `natsume_ai`、workspace、relationship subject、session 与三层
+  schema；即使 legacy Bond 声称 `SOULMATE`，Prompt Context、Interaction Facts 与 Surface packet 仍只输出
+  `FRIEND / stepsibling / familiar`，不会从 trust、attunement、consent 或旧分数升级恋人、排他、依赖或主动许可。
+  repair/rupture 保持为显式修复状态；subject/workspace/session drift 或损坏 canonical hand-off 必须以
+  `CANONICAL_RELATIONSHIP_REJECTED` fail-closed，绝不回退旧 Bond。最终普通 Chat、canonical fusion、
+  AffectiveTurn、表达协议、Surface/adapter 与受影响历史回归集合为 `179 passed in 63.85s`，8 条既有
+  Python deprecation warnings；未运行 Docker、真实 provider、远端 Edge、Monitor 或 DL-07。
 
 ## NE-07 隔离外部服务栈
 

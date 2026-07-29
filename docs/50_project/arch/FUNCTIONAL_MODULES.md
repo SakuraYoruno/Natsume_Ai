@@ -31,6 +31,17 @@
 > 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
 > physical receipt 以及旧 writer 清零仍未完成。
 
+**Canonical Relationship Prompt Projection 模块**位于
+[`persona/context/relationship_state.py`](../../../host_brain/persona/context/relationship_state.py)、
+[`app/context/prompt_context_plane.py`](../../../host_brain/app/context/prompt_context_plane.py) 与
+[`app/context/interaction_facts_plane.py`](../../../host_brain/app/context/interaction_facts_plane.py) 之间。它只接受
+经内部 AffectiveFusion provenance、`natsume_ai`、workspace、relationship subject、session 和三层 schema 验证的
+`RelationshipStateV2`；成功后把 canonical trust/safety/attunement/rupture 投影为有界、非浪漫的
+`FRIEND / stepsibling` prompt texture，repair 只收紧为修复状态。该模块不读取或写入 Bond，不把 consent、旧 score
+或 `SOULMATE` stage 解释为恋人、排他、依赖或主动授权；claimed canonical hand-off 无法验证时返回
+`CANONICAL_RELATIONSHIP_REJECTED` 安全投影。Surface context packet 复用这条结果。当前只有
+`LOCAL_TARGETED_179_PASSED / EMOTIONAL_DIGITAL_LIFE_PARTIAL`，不承担真实 Edge、Monitor、Review 或全栈验收。
+
 Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
 `PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名
 reconciliation、并行 terminal 和 Workspace Git 生命周期。模块的本地

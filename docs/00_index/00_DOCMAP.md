@@ -71,6 +71,13 @@ proactive 忽略该标记，canonical Limbic/Prefrontal 不会解析它；user p
 依赖 consent；trust/attunement 也不转换为旧 Bond score。高连续性背景 tick 不再调用 legacy Limbic metabolism。
 92 项本地相邻回归通过（44.20 秒），但这只完成一个兼容 reader 切片，仍非 DL-06 或 DL-07 的完成证据。
 
+普通 Chat 的 Prompt Context 与 Interaction Facts 现也读取同一条 canonical 关系链：只接受同时通过
+七海 identity、workspace、relationship subject、session 和三层 schema 校验的内部 `RelationshipStateV2`。
+该兼容 prompt projection 固定为 `FRIEND / stepsibling`，不会从旧 Bond `score/stage`、高 trust 或 consent
+推导恋人、排他、依赖或主动权限；修复与裂痕只会收紧表达。claimed canonical hand-off 损坏或越界时走
+`CANONICAL_RELATIONSHIP_REJECTED` 的安全朋友投影，不回退旧 Bond。普通 Chat/Surface 相邻本地集合为
+`179 passed in 63.85s`，仍不代表其它 reader、Monitor/Review、真实 provider、远端 Edge 或 DL-07 完成。
+
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
 principal/relationship subject 与 tenant/workspace 绑定。请求不能携带自由文本、Soul patch、情绪或关系

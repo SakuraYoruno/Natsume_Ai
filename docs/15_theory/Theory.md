@@ -570,6 +570,13 @@ Identity 至少包含：
 
 当前 legacy [RelationshipStateBlock](../../host_brain/persona/context/relationship_state.py) 仍会从 Bond 与 social state 派生兼容表达上下文，但它不再是关系长期 authority。DL-03 已把 [`RelationshipEpisodeV1`](../../natsume_contracts/life/relationship.py)、aftereffect 与有界 `RelationshipStateV2` 接入 canonical [Digital Life reducer](../../host_brain/digital_life/domain_reducer.py)：已接受的回复先开 provisional episode，下一次用户输入才以脱敏 digest 记录是否接住、触及边界、误解或被接受修复。Surface 只能从内部 provenance hand-off 把该结果变成表达的收紧约束，不能由请求体、模型或 Bond 分数直接改写关系事实。
 
+普通 Chat 的兼容表达投影也必须遵守这条因果边界。只有同一内部 hand-off 同时证明七海身份、workspace、
+relationship subject、session 和 `AffectFusion → RelationshipStateV2` schema 链完整时，才可将关系纹理
+带入提示。即便历史 Bond 说“灵魂伴侣”，该投影也不能把 trust、safety、attunement、romantic consent 或
+主动许可反推成恋人话术：它最多表达为非浪漫朋友关系中的安全、轻松、修复或给空间。损坏或 scope drift 的
+claimed canonical context 应收敛到安全朋友状态，而不是借旧分数恢复亲密。这里的克制不是中性化七海，而是
+让她可以真诚地关心、受伤或修复，同时不把关系温度伪造成用户欠她回应的义务。
+
 关系状态必须遵守：
 
 - 每次变化可追溯到交互或事件；
