@@ -560,17 +560,21 @@ relationship subject 的**同一条** canonical Life head 投影 OBS 所需的 s
 
 后台人格演化也不再把旧 Bond 当成 canonical 关系的补丁。`PrefrontalAgent.run_evolution_cycle()`
 在 production canonical Life authority 下只识别七海的人格 identity；该 background intent 没有携带
-精确的 workspace + relationship subject，故会明确保留空的关系输入，而不是读取
-`SocialBrain/Bond` score/stage 来生成里程碑或人格成长候选。只有显式 legacy compatibility
-composition 仍保留旧读取，供隔离回滚测试使用；canonical agent 也不再订阅
-`BOND_STAGE_CHANGED`，其旧 stage-growth 直连入口固定拒绝候选。未来若要让背景演化消费关系事实，必须先传入并校验
-精确 scope 的 canonical `RelationshipStateV2`。本地合同测试证明此一读取边界，但不代表剩余
-compatibility reader、长期成长收益、真实 provider、远端 Edge 或 DL-07 已完成。
+精确的 workspace + relationship subject，故直接返回
+`DEFERRED / CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`，不会调用旧的 `EvolutionOrchestrator`、读取
+`SocialBrain/Bond` score/stage，或以空输入制造人格候选。canonical agent 也不订阅
+`EVOLUTION_CYCLE_TRIGGERED`、`BOND_STAGE_CHANGED`、`LONELINESS_SIGNAL` 或 `IMMUNE_BLOCK`；残留 direct
+stage/milestone-growth 入口分别固定拒绝为 `LEGACY_BOND_STAGE_GROWTH_RETIRED` 与
+`LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED`。只有显式 legacy compatibility composition 保留旧读取，供隔离回滚测试使用。
+未来若要让背景演化消费关系事实，必须携带并校验精确 scope 的 canonical `RelationshipStateV2` 与 durable aftereffect
+receipt。本地合同测试证明此一收口，但不代表剩余 compatibility reader、长期成长收益、真实 provider、远端 Edge 或 DL-07 已完成。
 
 同样地，`INTERACTION_RECORDED` 的原始会话文本不能通过 legacy session→Bond identity 直接形成
 Persona proposal。canonical Prefrontal 对这条兼容 feedback hook 返回
 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED` 与 no-candidate；低风险表达偏好的真实学习仍必须从 durable、
-relationship-scoped aftereffect 链获得证据。该退役不等于 Persona/Identity 版本激活、长期 canary 或体验收益已验收。
+relationship-scoped aftereffect 链获得证据。人格漂移仍可收紧 Governor 的安全约束，但 canonical 路线不会再把
+drift 直接写入 Limbic、Endocrine、PainReward 或 Interoception，也不会再发布 `HUMOR_LANDED`/`TASK_SUCCESS`
+旧事件来侧写七海状态。该退役不等于 Persona/Identity 版本激活、长期 canary 或体验收益已验收。
 
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开

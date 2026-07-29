@@ -355,13 +355,14 @@ snapshot 边界与计量；其它 compatibility projection、Monitor/Review、�
 Edge 与 DL-07 仍未完成。
 
 **Prefrontal 背景演化关系输入修订：** `run_evolution_cycle()` 在 canonical Life authority
-下不再读取 `SocialBrain/Bond`。当前 scheduler intent 只有七海 persona identity，没有可验证的
-workspace + relationship subject，故传给 `EvolutionOrchestrator` 的 `bond_state/bond_summary` 固定为空，
-并输出 `CANONICAL_RELATIONSHIP_SCOPE_REQUIRED` provenance；旧 Bond stage/score 不能再触发 milestone
-或人格成长 proposal。canonical agent 不再订阅 `BOND_STAGE_CHANGED`，并将残留 direct stage-growth
-调用固定拒绝为 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。显式 legacy compatibility composition 仍可读取旧 Bond，仅服务隔离回滚测试。
-这不是 canonical relationship-aware evolution：后者必须由未来调用者携带 exact scoped
-`RelationshipStateV2`，并另行验收。该本地切片不证明其余 compatibility consumer、长期 canary、
+下不再读取 `SocialBrain/Bond`，并且不会再调用 legacy `EvolutionOrchestrator`。当前 scheduler intent 只有
+七海 persona identity，没有可验证的 workspace + relationship subject，因此固定返回
+`DEFERRED / CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`，而不是把空 `bond_state/bond_summary` 交给旧编排器。
+canonical agent 不订阅 `EVOLUTION_CYCLE_TRIGGERED`、`BOND_STAGE_CHANGED`、`LONELINESS_SIGNAL` 或
+`IMMUNE_BLOCK`；残留 direct stage/milestone-growth 调用分别固定拒绝为
+`LEGACY_BOND_STAGE_GROWTH_RETIRED`、`LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED`。显式 legacy compatibility
+composition 仍可读取旧 Bond，仅服务隔离回滚测试。这不是 canonical relationship-aware evolution：后者必须由未来调用者携带
+exact scoped `RelationshipStateV2` 与 aftereffect receipt，并另行验收。该本地切片不证明其余 compatibility consumer、长期 canary、
 真实 provider/Edge 或 DL-07。
 
 **Prefrontal session feedback 修订：** canonical Life authority 下的
@@ -369,7 +370,9 @@ workspace + relationship subject，故传给 `EvolutionOrchestrator` 的 `bond_s
 `session → Bond user` 映射或 `PersonaGrowthTracker`。它固定返回
 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的
 no-candidate；真实低风险偏好学习必须引用 durable、relationship-scoped aftereffect，不能由单次夸奖、
-文本分类或 session id 自动生成 Persona proposal。legacy compatibility composition 仅供隔离回滚测试。
+文本分类或 session id 自动生成 Persona proposal。人格 drift 在 canonical 路线仍可收紧 Governor，
+但不得直写 Limbic、Endocrine、PainReward、Interoception，且不再发布 `HUMOR_LANDED`/`TASK_SUCCESS`
+旧事件来侧写 self-affect。legacy compatibility composition 仅供隔离回滚测试。
 
 **默认模式 reader 修订：** `DefaultModeAgent` 现在从一次 canonical Life snapshot 的
 `project_inner_world_state()` 投影读取私密活动所需的 self-affect 与关系纹理。投影标记为

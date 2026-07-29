@@ -86,19 +86,20 @@
 > 其它 compatibility reader、Monitor/Review、真实 provider/Edge 或 DL-07 已完成。
 
 > **DL-06 Prefrontal 背景演化关系输入修订：** Host canonical `TribeApplicationPorts` 下的
-> `PrefrontalAgent.run_evolution_cycle()` 现在不会调用 `SocialBrain` 或读取 Bond snapshot。scheduler
-> intent 目前只有七海 persona identity，缺少 canonical relationship 必需的 workspace + subject scope，
-> 因而明确向 `EvolutionOrchestrator` 传递空 `bond_state/bond_summary`，并返回
-> `CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`。这阻断旧 score/stage 触发里程碑或人格 proposal；不是把
-> 无 scope 的关系换算成新 score，也不是完成 relationship-aware evolution。canonical agent 同时不订阅
-> `BOND_STAGE_CHANGED`，残留直连返回 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。仅显式 legacy compatibility
-> composition 可保留旧读取用于隔离回滚测试。
+> `PrefrontalAgent.run_evolution_cycle()` 既不会调用 `SocialBrain`/读取 Bond snapshot，也不会再调用 legacy
+> `EvolutionOrchestrator`。scheduler intent 目前只有七海 persona identity，缺少 canonical relationship 必需的
+> workspace + subject scope，因此固定返回 `DEFERRED / CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`。canonical 不订阅
+> `EVOLUTION_CYCLE_TRIGGERED`、`BOND_STAGE_CHANGED`、`LONELINESS_SIGNAL`、`IMMUNE_BLOCK`；残留直连 stage/milestone
+> growth 分别返回 `LEGACY_BOND_STAGE_GROWTH_RETIRED`、`LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED`。仅显式 legacy
+> compatibility composition 可保留旧读取用于隔离回滚测试。
 
 > **DL-06 Prefrontal session feedback 修订：** canonical `run_growth_feedback_cycle()` 也不再把
 > `INTERACTION_RECORDED` 的原始文本和 legacy `session → Bond user` identity 送进
 > `PersonaGrowthTracker`。它只返回 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED` 与
 > `CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate；已接受、scope-bound aftereffect 才是
-> 将来低风险表达学习的可用证据。这不等于 Persona/Identity activation 或长期 canary 已完成。
+> 将来低风险表达学习的可用证据。人格 drift 仍能收紧 Governor，却不能在 canonical 路线直写旧
+> Limbic/Endocrine/PainReward/Interoception 或发出 `HUMOR_LANDED`/`TASK_SUCCESS` 旧情绪事件。
+> 这不等于 Persona/Identity activation 或长期 canary 已完成。
 
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为

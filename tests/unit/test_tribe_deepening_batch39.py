@@ -226,7 +226,6 @@ class TestDefaultModeANSLink:
         with patch("host_brain.tribe.default_mode_agent.get_ans_agent", return_value=mock_ans), \
              patch("host_brain.tribe.default_mode_agent.get_glymphatic_agent"), \
              patch("host_brain.tribe.default_mode_agent.get_pain_reward_agent", return_value=MagicMock()), \
-             patch("host_brain.tribe.default_mode_agent.get_limbic_agent", return_value=MagicMock()), \
              patch("host_brain.tribe.default_mode_agent.get_interoception_agent", return_value=MagicMock()), \
              patch("host_brain.tribe.default_mode_agent.emit_tribe_event"), \
              patch("host_brain.persona.motive_runtime.build_offline_state_from_inner_state",

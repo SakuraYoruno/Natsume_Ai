@@ -127,18 +127,20 @@ assembler ID 与 read/suppressed counters，既不包含用户 scope/content，�
 provider/Edge 与服务栈验收仍是未完成项。
 
 **Prefrontal background evolution 关系边界修订：** canonical `TribeApplicationPorts` 的
-`run_evolution_cycle()` 已停止读取 `SocialBrain/Bond`。当前 background intent 只有七海 persona
-identity，无法证明 relation 所属的 workspace + subject，因此显式传入空 `bond_state/bond_summary` 并标记
-`CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`；旧 Bond stage/score 不再能创建 milestone 或 persona proposal。
-canonical agent 不订阅 `BOND_STAGE_CHANGED`，残留 direct stage-growth 调用返回
-`LEGACY_BOND_STAGE_GROWTH_RETIRED`。这是 fail-closed 的 scope 收口，不是 canonical relationship-aware evolution，也不证明长期成长收益或
+`run_evolution_cycle()` 已停止读取 `SocialBrain/Bond`，也不会再调用 legacy `EvolutionOrchestrator`。
+当前 background intent 只有七海 persona identity，无法证明 relation 所属的 workspace + subject，因此固定返回
+`DEFERRED / CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`；旧 Bond stage/score、`LONELINESS_SIGNAL`、`IMMUNE_BLOCK`
+和 generic `EVOLUTION_CYCLE_TRIGGERED` 均不能再触发 milestone 或 Persona proposal。canonical composition 不订阅这些
+EventBus 路由，direct stage/milestone-growth 分别固定退役为 `LEGACY_BOND_STAGE_GROWTH_RETIRED` 与
+`LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED`。这是 fail-closed 的 scope 收口，不是 canonical relationship-aware evolution，也不证明长期成长收益或
 其它 compatibility reader 已清零。仅 legacy compatibility composition 保留隔离回滚读取。
 
 **Prefrontal session feedback 修订：** canonical `run_growth_feedback_cycle()` 已停止把 raw
 `INTERACTION_RECORDED` 文本/session 通过 legacy `session → Bond user` 输入 `PersonaGrowthTracker`。
 生产结果固定为 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`
 的 no-candidate；此处尚未实现真实 aftereffect 驱动的 Persona evolution，也不能从退役结论外推为
-长期 canary、activation 或体验收益通过。
+长期 canary、activation 或体验收益通过。人格 drift 仍可收紧 Governor，但 canonical 路线不再把它直写到旧
+Limbic、Endocrine、PainReward、Interoception，也不再发出 `HUMOR_LANDED`/`TASK_SUCCESS` 旧情绪侧写事件。
 
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与

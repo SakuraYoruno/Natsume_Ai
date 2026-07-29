@@ -656,28 +656,51 @@ class PrefrontalAgent:
         runtime_logger = logger or _logger
         user_id = "natsume_ai"
         try:
-            orchestrator = self._get_evolution_orchestrator()
             args = dict((system_intent or {}).get("args") or {})
             user_id = _resolve_prefrontal_persona_id(args.get("user_id"))
             date = str(args.get("date") or _dt.date.today().isoformat())
 
+            if self._uses_canonical_affective_life():
+                # A generic scheduler/EventBus intent identifies Natsume but
+                # not the exact workspace + relationship subject whose
+                # durable aftereffects could justify a Persona proposal.
+                # Do not run the legacy in-memory orchestrator with empty
+                # relationship inputs merely to manufacture background
+                # "growth".  A future canonical route must carry the exact
+                # aggregate and its receipt refs explicitly.
+                runtime_logger.info(
+                    "canonical evolution deferred: exact relationship scope required "
+                    "user_id=%s date=%s",
+                    user_id,
+                    date,
+                )
+                return {
+                    "status": "DEFERRED",
+                    "reason_code": "CANONICAL_RELATIONSHIP_SCOPE_REQUIRED",
+                    "proposal_only": True,
+                    "proposals": [],
+                    "growth_awareness": {},
+                    "errors": [],
+                    "relationship_input_source": "CANONICAL_RELATIONSHIP_SCOPE_REQUIRED",
+                }
+
+            orchestrator = self._get_evolution_orchestrator()
+
             timeline_summary: dict[str, Any] = {}
             timeline_diary: dict[str, Any] = {}
             ports = self.application_ports
-            uses_canonical_affective_life = self._uses_canonical_affective_life()
-            if not uses_canonical_affective_life:
-                try:
-                    if not isinstance(ports, TribeApplicationPorts):
-                        raise RuntimeError("TRIBE_APPLICATION_PORTS_NOT_CONFIGURED")
-                    timeline = ports.require("emotion_timeline")()
-                    timeline_summary = timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
-                    timeline_diary = timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
-                except Exception as exc:
-                    self._record_evolution_failure(
-                        user_id=user_id,
-                        operation="READ_EMOTION_TIMELINE",
-                        exc=exc,
-                    )
+            try:
+                if not isinstance(ports, TribeApplicationPorts):
+                    raise RuntimeError("TRIBE_APPLICATION_PORTS_NOT_CONFIGURED")
+                timeline = ports.require("emotion_timeline")()
+                timeline_summary = timeline.rebuild_summary(window_ms=24 * 3600 * 1000)
+                timeline_diary = timeline.build_daily_diary(window_ms=24 * 3600 * 1000)
+            except Exception as exc:
+                self._record_evolution_failure(
+                    user_id=user_id,
+                    operation="READ_EMOTION_TIMELINE",
+                    exc=exc,
+                )
 
             # A background evolution intent identifies Natsume's persona, not
             # one exact relationship scope.  Canonical Life relationship
@@ -689,27 +712,22 @@ class PrefrontalAgent:
             # creating persona-growth candidates or relationship milestones.
             bond_state = None
             bond_summary: dict[str, Any] = {}
-            relationship_input_source = (
-                "CANONICAL_RELATIONSHIP_SCOPE_REQUIRED"
-                if uses_canonical_affective_life
-                else "LEGACY_BOND_COMPATIBILITY"
-            )
-            if not uses_canonical_affective_life:
-                try:
-                    social_snapshot = get_social_brain_agent().resolve_bond_snapshot(person_id=user_id)
-                    bond_state = social_snapshot.get("bond_state_obj")
-                    bond_summary = dict(social_snapshot.get("bond_summary") or {})
-                    if not bond_summary:
-                        bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(
-                            session_id="default",
-                            user_id=user_id,
-                        )
-                except Exception as exc:
-                    self._record_evolution_failure(
+            relationship_input_source = "LEGACY_BOND_COMPATIBILITY"
+            try:
+                social_snapshot = get_social_brain_agent().resolve_bond_snapshot(person_id=user_id)
+                bond_state = social_snapshot.get("bond_state_obj")
+                bond_summary = dict(social_snapshot.get("bond_summary") or {})
+                if not bond_summary:
+                    bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(
+                        session_id="default",
                         user_id=user_id,
-                        operation="READ_BOND_SNAPSHOT",
-                        exc=exc,
                     )
+            except Exception as exc:
+                self._record_evolution_failure(
+                    user_id=user_id,
+                    operation="READ_BOND_SNAPSHOT",
+                    exc=exc,
+                )
 
             result = orchestrator.run_evolution_cycle(
                 user_id=user_id,
@@ -1159,6 +1177,18 @@ class PrefrontalAgent:
         milestone_key: str,
         ts_ms: int,
     ) -> dict[str, Any]:
+        if self._uses_canonical_affective_life():
+            # Legacy milestones are derived from Bond/EventBus state and do
+            # not carry canonical relationship scope or aftereffect refs.
+            # Keep this public compatibility entry harmless after cutover.
+            return {
+                "applied": False,
+                "reason": "LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED",
+                "proposal": {
+                    "status": "NO_CANDIDATE",
+                    "reason_code": "LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED",
+                },
+            }
         tracker = self._get_persona_growth_tracker()
         if tracker is None:
             return {"applied": False, "reason": "tracker_unavailable"}
@@ -1337,17 +1367,16 @@ class PrefrontalAgent:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
-            bus.subscribe("EVOLUTION_CYCLE_TRIGGERED", self._on_evolution_cycle_triggered)
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
-            # Legacy Bond stages are not canonical relationship evidence.
-            # Keep the subscription only in explicit compatibility graphs;
-            # production canonical Life must not even receive this trigger.
+            # The remaining EventBus routes below are legacy, unscoped
+            # growth inputs.  In canonical composition neither an inner
+            # world signal, an immune event nor a Bond stage can stand in for
+            # durable relationship aftereffects.
             if not self._uses_canonical_affective_life():
+                bus.subscribe("EVOLUTION_CYCLE_TRIGGERED", self._on_evolution_cycle_triggered)
                 bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_growth)
-            # T-47：订阅孤独感信号，影响决策策略（降低主动性阈值）
-            bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
-            # T-71：订阅免疫拦截事件，触发安全审查成长周期
-            bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_growth)
+                bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
+                bus.subscribe("IMMUNE_BLOCK", self._on_immune_block_growth)
         except Exception as exc:
             self._record_evolution_failure(
                 user_id="natsume_ai",
@@ -1495,6 +1524,13 @@ class PrefrontalAgent:
         由 ANSAgent（inner_world_skill）或 LimbicAgent 发布，
         PrefrontalAgent 订阅后异步执行 evolution_cycle。
         """
+        if self._uses_canonical_affective_life():
+            # A stale subscription or an explicit compatibility caller must
+            # not revive unscoped, in-memory Persona evolution in production.
+            _logger.info(
+                "PrefrontalAgent 忽略 retired 无 scope 演化事件: canonical Life authority",
+            )
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(event.payload or {})
@@ -1559,6 +1595,7 @@ class PrefrontalAgent:
         user_id = "natsume_ai"
         try:
             payload = dict(event.payload or {})
+            uses_canonical_affective_life = self._uses_canonical_affective_life()
             user_id = _resolve_prefrontal_persona_id(payload.get("user_id"))
             user_message = str(payload.get("user_message") or "").strip()
             assistant_reply = str(payload.get("assistant_reply") or "").strip()
@@ -1594,79 +1631,83 @@ class PrefrontalAgent:
                         )
                         _logger.debug("PrefrontalAgent GovernorRulesCache 更新跳过: %s", _gov_exc)
 
-                    try:
-                        limbic = get_limbic_agent()
-                        if hasattr(limbic, "drive_emotion_metabolism"):
-                            # 漂移时情绪向不安/焦虑偏移
-                            severity = 0.15 if drift_alert == "MODERATE" else 0.28
-                            limbic.drive_emotion_metabolism(
-                                valence=-severity,
-                                arousal=severity * 0.6,
-                                dominance=-0.05,
-                                blend_weight=0.25,
-                                event_kind=f"persona_drift:{drift_alert.lower()}",
-                                source="prefrontal_agent",
-                            )
-                    except Exception as exc:
-                        self._record_evolution_failure(
-                            user_id=user_id,
-                            operation="SYNC_DRIFT_LIMBIC",
-                            exc=exc,
-                        )
-                    # T-279：高漂移时联动 EndocrineAgent 记录压力事件（人格漂移是内在压力源）
-                    try:
-                        _endo = get_endocrine_agent()
-                        if hasattr(_endo, "record_stress_event"):
-                            _drift_intensity = 0.20 if drift_alert == "MODERATE" else 0.35
-                            _endo.record_stress_event(
-                                source=f"persona_drift:{drift_alert.lower()}",
-                                intensity=_drift_intensity,
-                            )
-                    except Exception as exc:
-                        self._record_evolution_failure(
-                            user_id=user_id,
-                            operation="SYNC_DRIFT_ENDOCRINE",
-                            exc=exc,
-                        )
-                    # T-336：高漂移时联动 PainRewardAgent 记录深层痛苦（价值漂移是自我认同的痛苦）
-                    try:
-                        _pr = get_pain_reward_agent()
-                        if hasattr(_pr, "record_pain"):
-                            _pain_intensity = 0.22 if drift_alert == "MODERATE" else 0.38
-                            _pr.record_pain(
-                                source=f"persona_drift:{drift_alert.lower()}",
-                                intensity=_pain_intensity,
-                                metadata={
-                                    "drift_alert": drift_alert,
-                                    "session_id": session_id,
-                                    "drift_dims": list(drift_result.get("drift_dims") or []),
-                                },
-                            )
-                    except Exception as exc:
-                        self._record_evolution_failure(
-                            user_id=user_id,
-                            operation="SYNC_DRIFT_PAIN_REWARD",
-                            exc=exc,
-                        )
-                    # T-374：严重漂移（SEVERE）时联动 InteroceptionAgent 注入深层内在压力
-                    # 人格/价值观漂移是最深层的内在压力源（自我认同危机消耗大量认知资源）
-                    if drift_alert == "SEVERE":
+                    # canonical drift remains a safety constraint for the
+                    # Governor, but it must not directly mutate retired
+                    # Limbic/Endocrine/Pain/Interoception state machines.
+                    if not uses_canonical_affective_life:
                         try:
-                            _intero = get_interoception_agent()
-                            if hasattr(_intero, "inject_external_stress"):
-                                _drift_intero = round(min(0.40, len(
-                                    list(drift_result.get("drift_dims") or [])
-                                ) * 0.10 + 0.20), 4)
-                                _intero.inject_external_stress(
-                                    source=f"prefrontal_severe_drift:{session_id[:16]}",
-                                    intensity=_drift_intero,
+                            limbic = get_limbic_agent()
+                            if hasattr(limbic, "drive_emotion_metabolism"):
+                                # 漂移时情绪向不安/焦虑偏移
+                                severity = 0.15 if drift_alert == "MODERATE" else 0.28
+                                limbic.drive_emotion_metabolism(
+                                    valence=-severity,
+                                    arousal=severity * 0.6,
+                                    dominance=-0.05,
+                                    blend_weight=0.25,
+                                    event_kind=f"persona_drift:{drift_alert.lower()}",
+                                    source="prefrontal_agent",
                                 )
                         except Exception as exc:
                             self._record_evolution_failure(
                                 user_id=user_id,
-                                operation="SYNC_DRIFT_INTEROCEPTION",
+                                operation="SYNC_DRIFT_LIMBIC",
                                 exc=exc,
                             )
+                        # T-279：高漂移时联动 EndocrineAgent 记录压力事件（人格漂移是内在压力源）
+                        try:
+                            _endo = get_endocrine_agent()
+                            if hasattr(_endo, "record_stress_event"):
+                                _drift_intensity = 0.20 if drift_alert == "MODERATE" else 0.35
+                                _endo.record_stress_event(
+                                    source=f"persona_drift:{drift_alert.lower()}",
+                                    intensity=_drift_intensity,
+                                )
+                        except Exception as exc:
+                            self._record_evolution_failure(
+                                user_id=user_id,
+                                operation="SYNC_DRIFT_ENDOCRINE",
+                                exc=exc,
+                            )
+                        # T-336：高漂移时联动 PainRewardAgent 记录深层痛苦（价值漂移是自我认同的痛苦）
+                        try:
+                            _pr = get_pain_reward_agent()
+                            if hasattr(_pr, "record_pain"):
+                                _pain_intensity = 0.22 if drift_alert == "MODERATE" else 0.38
+                                _pr.record_pain(
+                                    source=f"persona_drift:{drift_alert.lower()}",
+                                    intensity=_pain_intensity,
+                                    metadata={
+                                        "drift_alert": drift_alert,
+                                        "session_id": session_id,
+                                        "drift_dims": list(drift_result.get("drift_dims") or []),
+                                    },
+                                )
+                        except Exception as exc:
+                            self._record_evolution_failure(
+                                user_id=user_id,
+                                operation="SYNC_DRIFT_PAIN_REWARD",
+                                exc=exc,
+                            )
+                        # T-374：严重漂移（SEVERE）时联动 InteroceptionAgent 注入深层内在压力
+                        # 人格/价值观漂移是最深层的内在压力源（自我认同危机消耗大量认知资源）
+                        if drift_alert == "SEVERE":
+                            try:
+                                _intero = get_interoception_agent()
+                                if hasattr(_intero, "inject_external_stress"):
+                                    _drift_intero = round(min(0.40, len(
+                                        list(drift_result.get("drift_dims") or [])
+                                    ) * 0.10 + 0.20), 4)
+                                    _intero.inject_external_stress(
+                                        source=f"prefrontal_severe_drift:{session_id[:16]}",
+                                        intensity=_drift_intero,
+                                    )
+                            except Exception as exc:
+                                self._record_evolution_failure(
+                                    user_id=user_id,
+                                    operation="SYNC_DRIFT_INTEROCEPTION",
+                                    exc=exc,
+                                )
                 else:
                     # FIX-P1：漂移恢复正常时，重置 GovernorRulesCache 的漂移状态
                     # 避免历史漂移状态永久收紧 Governor 策略
@@ -1685,7 +1726,7 @@ class PrefrontalAgent:
                             )
 
             # T-26：检测 humor/task 成功信号并发布对应事件
-            if assistant_reply:
+            if assistant_reply and not uses_canonical_affective_life:
                 try:
 
                     _reply_lower = assistant_reply.lower()
@@ -1800,6 +1841,11 @@ class PrefrontalAgent:
         触发 EVOLUTION_CYCLE_TRIGGERED 以加速人格成长（孤独感是成长催化剂）。
         孤独感极高时（>0.8）还会触发 milestone 成长节点。
         """
+        if self._uses_canonical_affective_life():
+            _logger.info(
+                "PrefrontalAgent 忽略 retired 孤独成长事件: canonical Life authority",
+            )
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(getattr(event, "payload", None) or {})
@@ -1890,6 +1936,11 @@ class PrefrontalAgent:
         仅在 block_rate > 0.1 或 risk_level 为 high/critical 时触发，
         避免低频拦截过度影响人格演化。
         """
+        if self._uses_canonical_affective_life():
+            _logger.info(
+                "PrefrontalAgent 忽略 retired 免疫成长事件: canonical Life authority",
+            )
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(getattr(event, "payload", None) or {})

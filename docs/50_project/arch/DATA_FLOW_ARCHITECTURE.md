@@ -769,10 +769,11 @@ reader，不替代其余 compatibility reader、真实 TTS/Avatar/Edge 或服务
 Scheduler evolution intent（persona identity）
 → canonical Tribe authority 判断
 → 缺 exact workspace + relationship subject
-→ empty relationship input + CANONICAL_RELATIONSHIP_SCOPE_REQUIRED
-→ EvolutionOrchestrator
+→ DEFERRED + CANONICAL_RELATIONSHIP_SCOPE_REQUIRED
+→ 不调用 legacy EvolutionOrchestrator
 
-禁止：intent 或 BOND_STAGE_CHANGED → SocialBrain / legacy Bond score-stage → milestone / persona proposal
+禁止：intent、EVOLUTION_CYCLE_TRIGGERED、BOND_STAGE_CHANGED、LONELINESS_SIGNAL、IMMUNE_BLOCK
+→ SocialBrain / legacy Bond / legacy EvolutionOrchestrator → milestone / persona proposal
 ```
 
 这不是忽略关系连续性，而是拒绝用无 scope 的旧积分伪造关系事实。只有将来携带并验证 exact canonical
@@ -781,7 +782,9 @@ Scheduler evolution intent（persona identity）
 同一 Prefrontal compatibility hook 的反馈流为：`INTERACTION_RECORDED raw text + session` 在 canonical
 authority 下直接终止为 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED`，不会经过 legacy `session → Bond user`
 或 `PersonaGrowthTracker`。只有已接受回复产生的 durable、relationship-scoped aftereffect 能在未来作为
-低风险表达学习证据；该 future flow 目前尚未由此 compatibility hook 实现。
+低风险表达学习证据；该 future flow 目前尚未由此 compatibility hook 实现。人格 drift 仅可流向
+Governor restrict-only 约束，不能再流向 Limbic、Endocrine、PainReward、Interoception 或
+`HUMOR_LANDED`/`TASK_SUCCESS` 旧状态事件。
 
 普通 Chat 的关系读取流现为：
 

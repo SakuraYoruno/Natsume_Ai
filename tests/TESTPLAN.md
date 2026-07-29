@@ -159,20 +159,25 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   缺失时必须增加 suppressed fallback count 而非复活旧读取。
 - T-DL06-04：canonical Life authority 下的 `PrefrontalAgent.run_evolution_cycle()` 不得读取
   legacy `EmotionTimeline`、`SocialBrain` 或 Bond；由于当前 background intent 不携带 exact
-  workspace + relationship subject，它必须传入空的 relation input 并标记
-  `CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`。同一 agent 不得订阅 `BOND_STAGE_CHANGED`，残留 direct
-  stage-growth 调用必须返回 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。显式 legacy compatibility composition 的读取保留为
+  workspace + relationship subject，它必须返回 `DEFERRED / CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`，且不得调用
+  legacy `EvolutionOrchestrator`。同一 agent 不得订阅 `EVOLUTION_CYCLE_TRIGGERED`、`BOND_STAGE_CHANGED`、
+  `LONELINESS_SIGNAL`、`IMMUNE_BLOCK`；残留 direct stage/milestone-growth 调用必须分别返回
+  `LEGACY_BOND_STAGE_GROWTH_RETIRED`、`LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED`。显式 legacy compatibility composition 的读取保留为
   隔离回滚测试，不能形成 production 人格成长 authority。
 - T-DL06-05：canonical Life authority 下的 `run_growth_feedback_cycle()` 不得解析 legacy
   `session → Bond user` 或从 `INTERACTION_RECORDED` 原始文本生成 Persona proposal；必须返回
   `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED` 与
   `CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。真实低风险学习另由 durable、
-  relationship-scoped aftereffect 生命周期验证。
+  relationship-scoped aftereffect 生命周期验证。若 drift 被检出，只能更新 Governor 的 restrict-only
+  状态；不得直接调用旧 Limbic、Endocrine、PainReward、Interoception，或发布 `HUMOR_LANDED`/`TASK_SUCCESS`。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
   `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
   Edge 或 DL-07 服务栈验收。
 - 本轮增量证据：Prefrontal canonical evolution、Bond-stage/session-feedback retirement、相邻 runtime snapshot/
-  composition/OBS 与文档 Gate 集合 `126 passed in 22.07s`。它仍只证明本地 scope 收口，不能外推为
+  composition/OBS 与文档 Gate 集合 `126 passed in 22.07s`。后续无 scope evolution/旧 organ side-effect
+  退役现已以新的 commit-bound 集合 `175 passed in 25.37s` 验证；它包含 canonical defer、四类 EventBus
+  退订、direct milestone retirement、drift 对旧 organ/event side effect 的阻断，以及 legacy compatibility
+  回归、runtime snapshot/OBS 与文档 Gate。它仍只证明本地 scope 收口，不能外推为
   canonical relationship-aware evolution、长期 canary、真实 provider、远端 Edge 或 DL-07。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
