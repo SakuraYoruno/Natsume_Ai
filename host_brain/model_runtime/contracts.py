@@ -473,6 +473,61 @@ class ProviderResponse:
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
 
 
+class ProviderStreamEventKind(str, Enum):
+    """The only two records permitted by a usage-attested provider stream."""
+
+    DELTA = "DELTA"
+    FINAL = "FINAL"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderStreamEvent:
+    """One provider stream delta or its terminal canonical response.
+
+    A text delta intentionally carries no usage estimate.  The terminal event
+    carries the provider-owned :class:`ProviderResponse`, including the exact
+    usage/transport evidence that a governed Task budget needs.  This keeps a
+    caller from converting token heuristics into a fake final measurement.
+    """
+
+    kind: ProviderStreamEventKind | str
+    text: str = ""
+    response: ProviderResponse | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            kind = (
+                self.kind
+                if isinstance(self.kind, ProviderStreamEventKind)
+                else ProviderStreamEventKind(str(self.kind).upper())
+            )
+        except ValueError as exc:
+            raise ValueError("provider stream event kind is invalid") from exc
+        text = str(self.text or "")
+        if kind is ProviderStreamEventKind.DELTA:
+            if not text:
+                raise ValueError("provider stream delta must contain text")
+            if self.response is not None:
+                raise ValueError("provider stream delta must not carry a response")
+        else:
+            if self.response is None:
+                raise ValueError("provider stream final event requires a response")
+            if not isinstance(self.response, ProviderResponse):
+                raise TypeError("provider stream final event response must be a ProviderResponse")
+            if text:
+                raise ValueError("provider stream final event must not carry delta text")
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "text", text)
+
+    @classmethod
+    def delta(cls, text: str) -> "ProviderStreamEvent":
+        return cls(kind=ProviderStreamEventKind.DELTA, text=text)
+
+    @classmethod
+    def final(cls, response: ProviderResponse) -> "ProviderStreamEvent":
+        return cls(kind=ProviderStreamEventKind.FINAL, response=response)
+
+
 class AttemptStatus(str, Enum):
     STARTED = "started"
     SUCCEEDED = "succeeded"
@@ -607,6 +662,55 @@ class ModelAttemptResult:
         return self.response.content if self.response is not None else ""
 
 
+class ModelAttemptStreamEventKind(str, Enum):
+    """Public result emitted by ``ModelAttemptService.stream_with_result``."""
+
+    DELTA = "DELTA"
+    FINAL = "FINAL"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelAttemptStreamEvent:
+    """One text delta or the audited final result of a model stream."""
+
+    kind: ModelAttemptStreamEventKind | str
+    text: str = ""
+    result: ModelAttemptResult | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            kind = (
+                self.kind
+                if isinstance(self.kind, ModelAttemptStreamEventKind)
+                else ModelAttemptStreamEventKind(str(self.kind).upper())
+            )
+        except ValueError as exc:
+            raise ValueError("model stream event kind is invalid") from exc
+        text = str(self.text or "")
+        if kind is ModelAttemptStreamEventKind.DELTA:
+            if not text or self.result is not None:
+                raise ValueError("model stream delta requires text and no result")
+        else:
+            if self.result is None:
+                raise ValueError("model stream final event requires a result")
+            if not isinstance(self.result, ModelAttemptResult):
+                raise TypeError("model stream final event result must be a ModelAttemptResult")
+            if not self.result.success:
+                raise ValueError("model stream final event requires a successful result")
+            if text:
+                raise ValueError("model stream final event must not carry delta text")
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "text", text)
+
+    @classmethod
+    def delta(cls, text: str) -> "ModelAttemptStreamEvent":
+        return cls(kind=ModelAttemptStreamEventKind.DELTA, text=text)
+
+    @classmethod
+    def final(cls, result: ModelAttemptResult) -> "ModelAttemptStreamEvent":
+        return cls(kind=ModelAttemptStreamEventKind.FINAL, result=result)
+
+
 @runtime_checkable
 class ProviderAdapter(Protocol):
     """One transport call per method; adapters must not retry internally."""
@@ -617,6 +721,16 @@ class ProviderAdapter(Protocol):
     async def complete(self, request: ProviderAttemptRequest) -> ProviderResponse: ...
 
     def stream(self, request: ProviderAttemptRequest) -> AsyncIterator[str]: ...
+
+
+@runtime_checkable
+class ProviderResultStreamingAdapter(Protocol):
+    """Optional capability for streams that end in canonical usage evidence."""
+
+    def stream_with_result(
+        self,
+        request: ProviderAttemptRequest,
+    ) -> AsyncIterator[ProviderStreamEvent]: ...
 
 
 @runtime_checkable
@@ -656,6 +770,8 @@ __all__ = [
     "ModelAttemptRecord",
     "ModelAttemptRequest",
     "ModelAttemptResult",
+    "ModelAttemptStreamEvent",
+    "ModelAttemptStreamEventKind",
     "ModelBudgetGuard",
     "OutputContract",
     "OutputKind",
@@ -664,6 +780,9 @@ __all__ = [
     "ProviderAdapter",
     "ProviderAttemptRequest",
     "ProviderResponse",
+    "ProviderResultStreamingAdapter",
+    "ProviderStreamEvent",
+    "ProviderStreamEventKind",
     "ProviderTarget",
     "RenderedPrompt",
     "RetryDirective",

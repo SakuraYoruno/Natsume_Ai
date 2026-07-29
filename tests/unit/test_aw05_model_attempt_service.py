@@ -13,11 +13,17 @@ from host_brain.model_runtime import (
     ModelBudgetGuard,
     ModelAttemptRequest,
     ModelAttemptService,
+    ModelAttemptStreamEvent,
+    ModelAttemptStreamEventKind,
+    ModelBudgetGuardViolation,
+    ModelStreamInterruptedError,
+    ModelStreamProtocolError,
     OutputContract,
     PromptRef,
     PromptRegistry,
     ProviderAdapterRegistry,
     ProviderResponse,
+    ProviderStreamEvent,
     ProviderTarget,
     RetryDirective,
     RouteDecision,
@@ -90,6 +96,16 @@ def _model_budget_guard(
         max_output_tokens=max_output_tokens,
         max_model_cost_micros=max_model_cost_micros,
     )
+
+
+def test_usage_attested_stream_contracts_reject_untyped_terminal_values() -> None:
+    with pytest.raises(TypeError, match="ProviderResponse"):
+        _ = ProviderStreamEvent.final(object())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="ModelAttemptResult"):
+        _ = ModelAttemptStreamEvent(
+            kind=ModelAttemptStreamEventKind.FINAL,
+            result=object(),  # type: ignore[arg-type]
+        )
 
 
 async def test_complete_resolves_route_once_and_owns_semantic_retry_audit() -> None:
@@ -725,3 +741,215 @@ async def test_failed_start_audit_prevents_provider_side_effect() -> None:
     with pytest.raises(AttemptAuditError, match="audit unavailable"):
         await service.complete(_request())
     assert calls == 0
+
+
+async def test_usage_attested_stream_ends_with_audited_guarded_result() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-stream-result",
+            (ProviderTarget("fake", "provider", "model"),),
+            "stream-result-test",
+            max_attempts=1,
+        )
+    )
+
+    async def _stream_result(_attempt):
+        yield ProviderStreamEvent.delta("先缓一下。")
+        yield ProviderStreamEvent.delta("我在这儿。")
+        yield ProviderStreamEvent.final(
+            ProviderResponse(
+                content="先缓一下。我在这儿。",
+                usage={
+                    "total_tokens": 11,
+                    "completion_tokens": 6,
+                    "model_cost_micros": 27,
+                },
+                metadata={
+                    "provider_latency_ms": 12,
+                    "transport_identity_digest": "a" * 64,
+                    "transport_external": True,
+                },
+            )
+        )
+
+    audit = InMemoryAttemptAuditRepository()
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [
+                CallableProviderAdapter(
+                    "fake",
+                    complete_fn=lambda _attempt: "unused",
+                    stream_result_fn=_stream_result,
+                )
+            ]
+        ),
+        audit_repository=audit,
+    )
+
+    events = [
+        event
+        async for event in service.stream_with_result(
+            _request(model_budget_guard=_model_budget_guard())
+        )
+    ]
+
+    assert [event.kind for event in events] == [
+        ModelAttemptStreamEventKind.DELTA,
+        ModelAttemptStreamEventKind.DELTA,
+        ModelAttemptStreamEventKind.FINAL,
+    ]
+    assert "".join(event.text for event in events[:-1]) == "先缓一下。我在这儿。"
+    final = events[-1].result
+    assert final is not None and final.success is True
+    assert final.content == "先缓一下。我在这儿。"
+    assert final.attempts[0].metadata["provider_budget_measurements"] == {
+        "completion_tokens": 6,
+        "token_count": 11,
+        "model_cost_micros": 27,
+    }
+    assert [record.status for record in audit.records()] == [
+        AttemptStatus.STARTED,
+        AttemptStatus.SUCCEEDED,
+    ]
+
+
+async def test_guarded_stream_without_final_usage_protocol_never_calls_provider() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-stream-unsupported",
+            (ProviderTarget("fake", "provider", "model"),),
+            "stream-unsupported-test",
+            max_attempts=1,
+        )
+    )
+    calls = 0
+
+    async def _complete(_attempt):
+        nonlocal calls
+        calls += 1
+        return "must not run"
+
+    audit = InMemoryAttemptAuditRepository()
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("fake", complete_fn=_complete)]
+        ),
+        audit_repository=audit,
+    )
+
+    with pytest.raises(ModelBudgetGuardViolation) as raised:
+        _ = [
+            event
+            async for event in service.stream_with_result(
+                _request(model_budget_guard=_model_budget_guard())
+            )
+        ]
+
+    assert raised.value.code == "MODEL_BUDGET_STREAM_UNSUPPORTED"
+    assert calls == 0
+    assert audit.records() == ()
+
+
+async def test_unguarded_stream_without_final_usage_protocol_exposes_stable_capability_code() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-stream-unsupported-unguarded",
+            (ProviderTarget("fake", "provider", "model"),),
+            "stream-unsupported-unguarded-test",
+            max_attempts=1,
+        )
+    )
+    audit = InMemoryAttemptAuditRepository()
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("fake", complete_fn=lambda _attempt: "unused")]
+        ),
+        audit_repository=audit,
+    )
+
+    with pytest.raises(ModelStreamProtocolError) as raised:
+        _ = [event async for event in service.stream_with_result(_request())]
+
+    assert raised.value.code == "MODEL_STREAM_RESULT_UNSUPPORTED"
+    assert audit.records() == ()
+
+
+async def test_guarded_stream_missing_terminal_cost_is_audited_and_never_falls_back() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-stream-missing-cost",
+            (
+                ProviderTarget("first", "provider-a", "model-a"),
+                ProviderTarget("second", "provider-b", "model-b"),
+            ),
+            "stream-missing-cost-test",
+            max_attempts=2,
+        )
+    )
+    calls: list[str] = []
+
+    async def _first(_attempt):
+        calls.append("first")
+        yield ProviderStreamEvent.delta("这句已经产生。")
+        yield ProviderStreamEvent.final(
+            ProviderResponse(
+                content="这句已经产生。",
+                usage={"total_tokens": 7, "completion_tokens": 4},
+            )
+        )
+
+    async def _second(_attempt):
+        calls.append("second")
+        yield ProviderStreamEvent.delta("不能选择我。")
+        yield ProviderStreamEvent.final(
+            ProviderResponse(
+                content="不能选择我。",
+                usage={
+                    "total_tokens": 7,
+                    "completion_tokens": 4,
+                    "model_cost_micros": 9,
+                },
+            )
+        )
+
+    audit = InMemoryAttemptAuditRepository()
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [
+                CallableProviderAdapter(
+                    "first",
+                    complete_fn=lambda _attempt: "unused",
+                    stream_result_fn=_first,
+                ),
+                CallableProviderAdapter(
+                    "second",
+                    complete_fn=lambda _attempt: "unused",
+                    stream_result_fn=_second,
+                ),
+            ]
+        ),
+        audit_repository=audit,
+    )
+
+    received: list[str] = []
+    with pytest.raises(ModelStreamInterruptedError):
+        async for event in service.stream_with_result(
+            _request(model_budget_guard=_model_budget_guard(max_provider_attempts=2))
+        ):
+            received.append(event.text)
+
+    assert received == ["这句已经产生。"]
+    assert calls == ["first"]
+    assert [record.status for record in audit.records()] == [
+        AttemptStatus.STARTED,
+        AttemptStatus.REJECTED,
+    ]
+    assert audit.records()[-1].error_code == "MODEL_PROVIDER_USAGE_REQUIRED"

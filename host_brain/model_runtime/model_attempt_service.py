@@ -20,10 +20,13 @@ from host_brain.model_runtime.contracts import (
     ModelAttemptRecord,
     ModelAttemptRequest,
     ModelAttemptResult,
+    ModelAttemptStreamEvent,
     OutputContract,
     OutputKind,
     ProviderAttemptRequest,
     ProviderResponse,
+    ProviderStreamEvent,
+    ProviderStreamEventKind,
     ProviderTarget,
     RenderedPrompt,
     RetryDirective,
@@ -36,7 +39,11 @@ from host_brain.model_runtime.provider_adapters import ProviderAdapterRegistry
 
 
 class ModelAttemptServiceError(RuntimeError):
-    pass
+    """A failed routed model call with a stable, non-secret reason code."""
+
+    def __init__(self, message: str, *, code: str = "MODEL_ATTEMPT_FAILED") -> None:
+        super().__init__(message)
+        self.code = str(code or "MODEL_ATTEMPT_FAILED").strip() or "MODEL_ATTEMPT_FAILED"
 
 
 class AttemptAuditError(ModelAttemptServiceError):
@@ -59,6 +66,14 @@ class ModelBudgetGuardViolation(ModelAttemptServiceError):
 
 class ModelStreamInterruptedError(ModelAttemptServiceError):
     pass
+
+
+class ModelStreamProtocolError(ModelAttemptServiceError):
+    """A usage-attested provider stream violated its terminal contract."""
+
+    def __init__(self, message: str, *, code: str = "MODEL_STREAM_RESULT_INVALID") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -640,8 +655,281 @@ class ModelAttemptService:
                 retry_reason = f"provider_fallback:{str(code).lower()}"
 
         if last_error is None:
-            raise ModelAttemptServiceError("model stream exhausted without a successful attempt")
-        raise ModelAttemptServiceError(_safe_error_message(last_error)) from last_error
+            raise ModelAttemptServiceError(
+                "model stream exhausted without a successful attempt",
+                code="MODEL_STREAM_EXHAUSTED",
+            )
+        raise ModelAttemptServiceError(
+            _safe_error_message(last_error),
+            code=str(getattr(last_error, "code", "MODEL_STREAM_FAILED")),
+        ) from last_error
+
+    async def stream_with_result(
+        self,
+        request: ModelAttemptRequest,
+    ) -> AsyncIterator[ModelAttemptStreamEvent]:
+        """Stream deltas and end with an audited provider-owned result.
+
+        Unlike the compatibility ``stream`` method, this protocol requires a
+        provider terminal response.  Its explicit measurements carry the same
+        canonical usage that ``complete`` uses for a node-bound budget
+        settlement; an unguarded direct call may still be audited but
+        unmeasured when the provider omits a required field.  It does not
+        estimate tokens or costs from text.  A caller may expose a
+        delta only when it has its own durable visibility authority; this
+        method intentionally does not pretend a model stream is accepted
+        merely because its provider has started sending characters.
+        """
+
+        prepared = await self._prepare(request)
+        cached = self._get_cached(prepared.cache_key)
+        if cached is not None:
+            if cached.response.content:
+                yield ModelAttemptStreamEvent.delta(cached.response.content)
+            yield ModelAttemptStreamEvent.final(
+                ModelAttemptResult(
+                    request_id=request.request_id,
+                    success=True,
+                    route_decision=prepared.route,
+                    attempts=(),
+                    response=cached.response,
+                    final_target=cached.target,
+                    cached=True,
+                    metadata={"cache_scope": prepared.prompt.cache_policy.scope.value},
+                )
+            )
+            return
+
+        attempts: list[ModelAttemptRecord] = []
+        guard = request.model_budget_guard
+        budget = min(
+            prepared.route.max_attempts,
+            guard.max_provider_attempts if guard is not None else prepared.route.max_attempts,
+        )
+        target_index = 0
+        retry_reason = "initial"
+        prompt = prepared.prompt
+        last_error: BaseException | None = None
+        last_error_code = "MODEL_STREAM_RESULT_UNSUPPORTED"
+        last_error_message = "route has no provider stream with a final canonical response"
+
+        while len(attempts) < budget and target_index < len(prepared.route.targets):
+            remaining_ms = self._remaining_ms(prepared.deadline_at)
+            if remaining_ms <= 0:
+                last_error_code = "MODEL_DEADLINE_EXCEEDED"
+                last_error_message = "model request deadline exhausted"
+                break
+            target = prepared.route.targets[target_index]
+            adapter = self.provider_adapters.get(target.adapter_id)
+            stream_with_result = getattr(adapter, "stream_with_result", None)
+            capability = getattr(adapter, "supports_canonical_stream_result", None)
+            supported = (
+                bool(capability() if callable(capability) else capability)
+                if capability is not None
+                else callable(stream_with_result)
+            )
+            if not callable(stream_with_result) or not supported:
+                last_error_code = "MODEL_STREAM_RESULT_UNSUPPORTED"
+                last_error_message = "provider stream has no final canonical usage response"
+                target_index += 1
+                continue
+
+            attempt_index = len(attempts) + 1
+            attempt_request, started, started_monotonic = self._begin_attempt(
+                request=request,
+                route=prepared.route,
+                prompt=prompt,
+                target=target,
+                attempt_index=attempt_index,
+                retry_reason=retry_reason,
+                remaining_ms=remaining_ms,
+            )
+            await self._audit(started)
+            chunks: list[str] = []
+            emitted = False
+            response: ProviderResponse | None = None
+            try:
+                stream = stream_with_result(attempt_request)
+                if inspect.isawaitable(stream):
+                    stream = await stream
+                if not hasattr(stream, "__aiter__"):
+                    raise ModelStreamProtocolError(
+                        "provider stream_with_result must return an async iterator"
+                    )
+                saw_final = False
+                async with asyncio.timeout(max(0.001, attempt_request.timeout_ms / 1000.0)):
+                    async for raw_event in stream:
+                        if not isinstance(raw_event, ProviderStreamEvent):
+                            raise ModelStreamProtocolError(
+                                "provider stream_with_result emitted an untyped event"
+                            )
+                        if raw_event.kind is ProviderStreamEventKind.DELTA:
+                            if saw_final:
+                                raise ModelStreamProtocolError(
+                                    "provider stream emitted a delta after its final response"
+                                )
+                            chunks.append(raw_event.text)
+                            emitted = True
+                            yield ModelAttemptStreamEvent.delta(raw_event.text)
+                            continue
+                        if saw_final:
+                            raise ModelStreamProtocolError(
+                                "provider stream emitted more than one final response"
+                            )
+                        saw_final = True
+                        response = raw_event.response
+                if not saw_final or response is None:
+                    raise ModelStreamProtocolError(
+                        "provider stream ended without a final canonical response"
+                    )
+                content = "".join(chunks)
+                if response.content and response.content != content:
+                    raise ModelStreamProtocolError(
+                        "provider final response content differs from emitted stream text"
+                    )
+                response = replace(response, content=content)
+                self._assert_model_budget_guard_response(
+                    response,
+                    guard,
+                    prior_attempts=attempts,
+                )
+                validate_output_contract(response.content, prompt.output_contract)
+                directive = await self._evaluate_retry(request, response, attempt_request)
+                if directive is not None and directive.retry:
+                    if emitted:
+                        raise ModelStreamInterruptedError(
+                            "semantic retry requested after a stream delta; retry is forbidden"
+                        )
+                    terminal = self._terminal_record(
+                        started,
+                        started_monotonic=started_monotonic,
+                        status=AttemptStatus.REJECTED,
+                        response=response,
+                        error_code="SEMANTIC_RETRY_REQUESTED",
+                        error_message=directive.reason,
+                        metadata={"retry_directive": dict(directive.metadata)},
+                    )
+                    await self._audit(terminal)
+                    attempts.append(terminal)
+                    prompt = (
+                        self.prompt_registry.validate_rendered(directive.rendered_prompt)
+                        if directive.rendered_prompt is not None
+                        else prompt
+                    )
+                    retry_reason = directive.reason
+                    if not directive.reuse_target:
+                        target_index += 1
+                    last_error_code = "ATTEMPT_BUDGET_EXHAUSTED"
+                    last_error_message = f"retry requested: {directive.reason}"
+                    continue
+
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=AttemptStatus.SUCCEEDED,
+                    response=response,
+                )
+                await self._audit(terminal)
+                attempts.append(terminal)
+                self._put_cached(prepared.cache_key, prepared.prompt, response, target)
+                yield ModelAttemptStreamEvent.final(
+                    ModelAttemptResult(
+                        request_id=request.request_id,
+                        success=True,
+                        route_decision=prepared.route,
+                        attempts=tuple(attempts),
+                        response=response,
+                        final_target=target,
+                    )
+                )
+                return
+            except asyncio.CancelledError as exc:
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=AttemptStatus.CANCELLED,
+                    error_code="MODEL_ATTEMPT_CANCELLED",
+                    error_message=_safe_error_message(exc),
+                )
+                await asyncio.shield(self._audit(terminal))
+                raise
+            except ModelBudgetGuardViolation as exc:
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=AttemptStatus.REJECTED,
+                    response=response,
+                    error_code=exc.code,
+                    error_message=str(exc),
+                )
+                await self._audit(terminal)
+                attempts.append(terminal)
+                if emitted:
+                    raise ModelStreamInterruptedError(
+                        "provider stream failed its guarded terminal measurement after a delta"
+                    ) from exc
+                raise
+            except AttemptAuditError:
+                raise
+            except BaseException as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+                    terminal = self._terminal_record(
+                        started,
+                        started_monotonic=started_monotonic,
+                        status=AttemptStatus.CANCELLED,
+                        error_code="MODEL_STREAM_CANCELLED",
+                        error_message=_safe_error_message(exc),
+                    )
+                    await asyncio.shield(self._audit(terminal))
+                    raise
+                status = (
+                    AttemptStatus.TIMED_OUT
+                    if isinstance(exc, TimeoutError)
+                    else AttemptStatus.REJECTED
+                    if isinstance(exc, (OutputContractViolation, ModelStreamProtocolError))
+                    else AttemptStatus.FAILED
+                )
+                code = (
+                    "PROVIDER_TIMEOUT"
+                    if isinstance(exc, TimeoutError)
+                    else getattr(exc, "code", type(exc).__name__.upper())
+                )
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=status,
+                    response=response,
+                    error_code=str(code),
+                    error_message=_safe_error_message(exc),
+                )
+                await self._audit(terminal)
+                attempts.append(terminal)
+                last_error = exc
+                last_error_code = str(code)
+                last_error_message = _safe_error_message(exc)
+                if emitted:
+                    raise ModelStreamInterruptedError(
+                        "provider stream failed after a delta; fallback is forbidden"
+                    ) from exc
+                if isinstance(exc, OutputContractViolation) and len(attempts) < budget:
+                    prompt = self._schema_repair_prompt(prompt, response, exc)
+                    retry_reason = "output_schema_repair"
+                    continue
+
+            target_index += 1
+            retry_reason = f"provider_fallback:{last_error_code.lower()}"
+
+        if guard is not None and last_error_code == "MODEL_STREAM_RESULT_UNSUPPORTED":
+            raise ModelBudgetGuardViolation(
+                "guarded stream requires a provider final canonical usage response",
+                code="MODEL_BUDGET_STREAM_UNSUPPORTED",
+            )
+        if last_error is not None:
+            raise ModelAttemptServiceError(
+                last_error_message,
+                code=last_error_code,
+            ) from last_error
+        raise ModelStreamProtocolError(last_error_message, code=last_error_code)
 
     async def _prepare(self, request: ModelAttemptRequest) -> _PreparedCall:
         started_at = self._monotonic()
@@ -929,6 +1217,7 @@ __all__ = [
     "ModelAttemptService",
     "ModelAttemptServiceError",
     "ModelStreamInterruptedError",
+    "ModelStreamProtocolError",
     "OutputContractViolation",
     "validate_output_contract",
 ]

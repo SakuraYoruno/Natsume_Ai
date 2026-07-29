@@ -635,6 +635,14 @@ DL-05 已把这条约束落实到 Host protocol：每个稳定句在文本可见
 Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由独立 Edge receipt 说明，不能各自把
 文本标签再解释一次。
 
+模型流还必须区分“字符已经到达”与“这次调用已可计量”。`ModelAttemptService.stream_with_result()`
+把这两个时刻显式拆开：它只允许 typed delta，结束时必须收到唯一一份 provider-owned
+`ProviderResponse`，再把模型、provider 与 transport 证据，以及 provider 显式给出的 usage 写入 canonical Attempt；任何一项
+缺失都不能由文本长度、字符数或本地价格表补成成本。直连 Host 的 native sentence stream 只会在
+provider 在首个 delta 前明确不支持该合同的情况下回退兼容 stream，并留下无终态 usage 标记。受治理
+Chat 即使拥有终态 result，也仍不能直接把 worker delta 推给用户：它还需要 node/attempt-bound 的可恢复
+visibility receipt、取消语义与重启去重。因此“模型可报告终态用量”不是“所有 Chat 已可实时展示”的同义词。
+
 情感系统必须满足：
 
 - 有时间衰减，不能无限携带单轮情绪；

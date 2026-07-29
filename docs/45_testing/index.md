@@ -1410,3 +1410,24 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   pair、外部模型与硬件尚未执行，结论为
   `CODE_COMPLETE_LOCAL_WAVE_PASS / ACCEPTANCE_PENDING_NE07`；
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### DL-04 流式终态计量协议
+
+- `ProviderStreamEvent` 只允许 `DELTA` 或唯一 `FINAL ProviderResponse`；
+  `ModelAttemptStreamEvent` 只允许 text delta 或成功的 audited final result。final response
+  的 `usage` 与 transport metadata 是唯一可进入 Attempt audit 的计量来源，测试明确拒绝把
+  字符数、tokenizer 估算或缺失成本补成事实。
+- `ModelAttemptService.stream_with_result()` 覆盖 guarded success、缺少 final usage、final
+  content drift、终态后 delta、取消与 route commitment；已输出 delta 后失败不得 provider fallback。
+  没有该 capability 的 guarded call 必须在 provider 调用前拒绝；无 guard 的 call 以稳定
+  `MODEL_STREAM_RESULT_UNSUPPORTED` 表示可供 direct Host 选择兼容流，而不是伪造计量。
+- Surface native sentence stream 覆盖：先写 `affective_turn_planned`、每句 delivery intent
+  和表达协议再 SSE 可见；final result 只在 token、completion token 与 cost 均齐全时才可标为
+  `STREAM_FINAL_USAGE_ATTESTED` 并公开真实 final model/provider 与 provider measurement；缺维度的
+  final result 必须标为 `STREAM_FINAL_RESULT_AUDITED_UNMEASURED`，旧 port 仍保留
+  `STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE`。
+- 本切片的定向命令为
+  `python -m pytest tests/unit/test_aw05_model_attempt_service.py tests/unit/test_aw05_production_provider_route.py tests/unit/test_dl04_native_affective_stream.py -q`，
+  结果 `47 passed in 3.10s`。这是模型合同和 direct Host stream 的本地证据；默认 Vault adapter、
+  governed node 的逐句 visibility/cancel/restart、真实 provider、远端 Edge 与 DL-07 服务栈均未运行。
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

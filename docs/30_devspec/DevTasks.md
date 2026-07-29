@@ -26,9 +26,9 @@ Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的�
 而非镜像用户标签。DL-03 已把 accepted reply 的 provisional relation episode、
 下一次输入的 aftereffect、boundary/repair/proactive permission 和 Surface 的可信关系
 约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。DL-04 已将
-可信 hand-off 冻结为 `AffectiveTurnPlanV1`，普通低歧义文本可使用
-`ModelAttemptService.stream()` 逐句输出；每个稳定句先写 canonical Life delivery
-intent，候选模型输出和纯文本 fallback 均不能改写 self-affect，高歧义/边界/修复仅
+可信 hand-off 冻结为 `AffectiveTurnPlanV1`，普通低歧义文本可优先使用
+`ModelAttemptService.stream_with_result()` 的 typed delta + provider final result（完整字段时才计量）逐句输出；每个稳定句先写 canonical Life delivery
+intent，只有在首个 delta 前明确不支持终态合同才回退兼容 stream 并保留无 usage 标记。候选模型输出和纯文本 fallback 均不能改写 self-affect，高歧义/边界/修复仅
 允许恰好两候 buffered selection。DL-05 已将同一冻结 `ExpressionPlanV1` 编译为 Voice
 `SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，并在结束/打断时追加
 `RELEASE`/`CANCEL`；0146 只投影 Host staging，远端 Edge 尚未启动，因此不能声称播放或
@@ -53,8 +53,8 @@ exact duplicate/restart replay。0147 已将低风险表达 profile 接入 canon
 `companion:profile:write`、`user principal == relationship subject` 与 `tenant == workspace`；它只能
 从 canonical strong aftereffect history 启动 candidate canary，不能从自然语言推断、直接指定 activation
 或改写 Soul/consent/self-affect，Secure Ingress audit ref 与 candidate 一同持久化。Monitor 审核控件、
-canary 真实证据、旧 writer 清零仍未完成，不得称为主动陪伴闭环。受治理预算流与连接恢复仍由后续 DL-06～DL-07
-交付。此前 NE-01～NE-07 的 Universal Runtime、搜索、
+canary 真实证据、旧 writer 清零仍未完成，不得称为主动陪伴闭环。受治理 Chat 的逐句可见性、
+node/attempt-bound cancel/restart 去重与连接恢复仍由后续 DL-06～DL-07 交付；模型终态 result 合同不替代这些 Task Runtime authority。此前 NE-01～NE-07 的 Universal Runtime、搜索、
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。

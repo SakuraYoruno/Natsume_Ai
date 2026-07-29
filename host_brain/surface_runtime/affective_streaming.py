@@ -69,11 +69,13 @@ def should_use_native_sentence_stream(
 ) -> bool:
     """Choose the low-latency route only when its authority is complete.
 
-    A governed budget currently requires provider-final canonical usage.  The
-    existing stream adapter exposes chunks but not that terminal measurement,
-    so it remains on the buffered, usage-safe path until the ModelAttempt
-    streaming protocol is upgraded.  This is intentionally explicit rather
-    than silently dropping the budget guard.
+    ``ModelAttemptService.stream_with_result`` can now carry provider-final
+    canonical usage, but a governed Chat node still buffers its worker events
+    and has no node/attempt-bound, durable *per-sentence visibility* authority.
+    It therefore remains on the buffered acceptance path until that Task
+    Runtime delivery protocol exists.  This is intentionally explicit rather
+    than silently dropping the budget guard or treating a model terminal
+    result as a user-visible receipt.
     """
 
     if has_governed_model_budget:

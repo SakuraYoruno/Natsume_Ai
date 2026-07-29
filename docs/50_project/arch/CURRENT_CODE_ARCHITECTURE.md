@@ -100,19 +100,24 @@
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 `ExpressionPlanV1`，并在可信 internal AffectFusion hand-off 后由纯 planner 冻结。
-低歧义路径使用 `ModelAttemptService.stream()`，生产 Vault adapter 会调用 provider
-native stream；稳定句先写 `affective_turn_planned` / `surface_sentence_delivery_intent`
-到 canonical Life journal，再通过 SSE 可见。`0145_affective_turn_delivery.sql` 只从
-immutable event 派生 plan/sync/sentence digest projection。Surface model 结果不再拥有
-self-affect 写权；外部 emotion hint 也不会成为七海的情绪。DL-05 已将同一份
-`ExpressionPlanV1` 编译成成对的 `ExpressionDeliveryIntentV1`：native 稳定句在 SSE
-可见前先把 Voice `SPEAK` 与 Avatar `TRANSITION` 写入 canonical Life command，完成/打断
-再写 `RELEASE`/`CANCEL`。`0146_affective_expression_delivery.sql` 从相同 immutable event
-派生隐私最小化 Host protocol head，下一轮只在 exact person/workspace/subject/session scope
-读取上次已暂存 Avatar expression；VTS compatibility transition 不再读取 legacy
-`_prev_emotion_tag`。`HOST_PROTOCOL_STAGED` 只表示 Host 持久化了协议，不表示远端已播放或
-已改变 Avatar。高歧义回合保持两候 buffered selection；带 governed budget 的 stream 因缺最终
-provider usage 仍禁止启用，远端 Edge、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
+低歧义路径的稳定句仍先写 `affective_turn_planned` /
+`surface_sentence_delivery_intent` 到 canonical Life journal，再通过 SSE 可见。新增
+`ModelAttemptService.stream_with_result()` 后，明确绑定该 capability 的 provider 只能返回
+typed delta，且必须以唯一 `ProviderResponse` 终止；终态 Attempt 会带模型与 transport 证据，
+只有 token、completion token 与 cost 齐全时才带可计量 usage。直连 native stream 会优先使用这个协议；只有在首个 delta 前得到
+`MODEL_STREAM_RESULT_UNSUPPORTED` 才允许回退旧 `stream()`，并留下
+`STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE`，绝不估算 token/cost。默认 Vault adapter 尚未实现
+该 protocol。`0145_affective_turn_delivery.sql` 只从 immutable event 派生 plan/sync/sentence
+digest projection。Surface model 结果不再拥有 self-affect 写权；外部 emotion hint 也不会成为
+七海的情绪。DL-05 已将同一份 `ExpressionPlanV1` 编译成成对的
+`ExpressionDeliveryIntentV1`：native 稳定句在 SSE 可见前先把 Voice `SPEAK` 与 Avatar
+`TRANSITION` 写入 canonical Life command，完成/打断再写 `RELEASE`/`CANCEL`。
+`0146_affective_expression_delivery.sql` 从相同 immutable event 派生隐私最小化 Host protocol
+head，下一轮只在 exact person/workspace/subject/session scope 读取上次已暂存 Avatar expression；
+VTS compatibility transition 不再读取 legacy `_prev_emotion_tag`。`HOST_PROTOCOL_STAGED` 只表示
+Host 持久化了协议，不表示远端已播放或已改变 Avatar。受治理 Chat 虽有新的模型终态合同，却仍缺
+node/attempt-bound 的逐句可见性、取消与重启去重 authority，因而继续使用 buffered acceptance；
+远端 Edge、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
 ## 1. 结论
 
