@@ -149,7 +149,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   以及 digest-only operator binding 组成。浏览器 session、cookie、截图、trace、原始
   stdout/stderr、用户数据和模型正文均不得进入 runtime snapshot 或 receipt；单纯 HTML/metrics
   只能证明 proxy 可达，不能代替交互证据。
-- 当前本地合同/脚本组合证据为 `30 passed in 5.43s`；`static_scan,doc_gate` 为
+- T-DL07-08：全新 acceptance root 不得用历史 Security Immune state 或 fixture 让 Monitor
+  通过。启动浏览器前必须向同一 loopback Host 发起一次真实 local `hunt/run-once`，将其 evidence
+  写入该 acceptance scope 内的 state dir，并等待独立 Obs projection 报告
+  `security_immune + available + HEALTHY`；超时、不可读或 stale 一律使本次 receipt 失败并回收 stack。
+- 当前本地合同/脚本组合证据为 `68 passed in 42.55s`；`static_scan,doc_gate` 为
   `passed`。这不是实栈 receipt：下一步必须在已提交 SHA 上重新启动隔离 Docker、Host、Obs 和
   Monitor。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
 

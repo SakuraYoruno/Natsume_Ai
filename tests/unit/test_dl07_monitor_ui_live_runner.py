@@ -58,6 +58,7 @@ def test_monitor_live_receipt_uses_only_digests_and_exact_running_identity() -> 
         stdout_digest="sha256:" + "c" * 64,
         stderr_digest="sha256:" + "d" * 64,
         duration_ms=42,
+        security_projection_digest="sha256:" + "e" * 64,
         status="PASS",
         stack_state="RUNNING_FOR_RECEIPT_SEAL",
         stop_status="NOT_REQUIRED",
@@ -71,6 +72,41 @@ def test_monitor_live_receipt_uses_only_digests_and_exact_running_identity() -> 
     }
     assert all("ephemeral" not in str(value) for value in unsigned.values())
     assert unsigned["operator_binding_digest"] == "sha256:" + "b" * 64
+
+
+def test_security_projection_preparation_requires_real_host_hunt_then_healthy_obs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_request(**kwargs: object) -> dict[str, object]:
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            return {"status": "completed"}
+        return {
+            "schema_version": "Natsume.security_immune.runtime.v1",
+            "asset_count": 1,
+            "incident_count": 0,
+            "projection": {
+                "kind": "security_immune",
+                "available": True,
+                "degraded_state": "HEALTHY",
+            },
+        }
+
+    monkeypatch.setattr(MODULE, "_bounded_json_request", fake_request)
+    digest = MODULE._prepare_security_projection(
+        host_url="http://127.0.0.1:18099",
+        monitor_url="http://127.0.0.1:18199",
+        session_secret="only-in-memory",
+        timeout_seconds=10,
+    )
+
+    assert digest.startswith("sha256:")
+    assert calls[0]["url"] == "http://127.0.0.1:18099/internal/security/hunt/run-once"
+    assert calls[0]["method"] == "POST"
+    assert calls[1]["url"] == "http://127.0.0.1:18199/obs/security/runtime"
+    assert calls[1]["session_secret"] == "only-in-memory"
 
 
 @pytest.mark.parametrize(

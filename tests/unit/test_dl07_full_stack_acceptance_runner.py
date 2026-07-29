@@ -72,6 +72,7 @@ def _monitor_ui_receipt(
         "playwright_timed_out": False,
         "playwright_stdout_digest": "sha256:" + "3" * 64,
         "playwright_stderr_digest": "sha256:" + "4" * 64,
+        "security_projection_digest": "sha256:" + "5" * 64,
         "duration_ms": 100,
         "stack_state": "RUNNING_FOR_RECEIPT_SEAL",
         "stop_status": "NOT_REQUIRED",

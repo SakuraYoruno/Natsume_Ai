@@ -341,6 +341,7 @@ def _monitor_ui_receipt_digest(
         "playwright_timed_out",
         "playwright_stdout_digest",
         "playwright_stderr_digest",
+        "security_projection_digest",
         "duration_ms",
         "stack_state",
         "stop_status",
@@ -382,6 +383,7 @@ def _monitor_ui_receipt_digest(
         "operator_binding_digest",
         "playwright_stdout_digest",
         "playwright_stderr_digest",
+        "security_projection_digest",
     ):
         _safe_ref(receipt.get(field), f"Monitor UI {field}")
     if receipt.get("interaction_kind") != "REAL_NGINX_PLAYWRIGHT_TO_OBS":

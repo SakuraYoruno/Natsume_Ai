@@ -393,7 +393,9 @@ Nginx Monitor，以只在浏览器进程期间存在的一次 operator session �
 最后由 `run_dl07_full_stack_acceptance.py` 封存总收据。后者要求 Host `/health`、`/ready`、
 Digital Life runtime health，Obs `/health`，Monitor HTML 和 `/obs/metrics` 都能实际响应，且
 Monitor browser receipt 必须精确匹配同一 commit、run、三个 loopback listener 和三个 PID；
-仅有静态页或 proxy metrics 时拒绝 Monitor `PASS`。两类收据只保留摘要 digest、进程 PID、
+全新 acceptance root 还必须先经同一 Host 的真实 local security hunt 写入隔离 state dir，并等
+独立 Obs 将 `security_immune` projection 刷新为 `available / HEALTHY`；仅有静态页、proxy metrics
+或 fixture 时拒绝 Monitor `PASS`。两类收据只保留摘要 digest、进程 PID、
 容器/image identity 和监听地址；operator session、cookie、screenshot、trace、原始 stdout/stderr
 不得落盘。
 

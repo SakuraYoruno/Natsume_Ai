@@ -24,6 +24,7 @@ import sys
 import time
 from typing import Any, Mapping
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 import secrets
 
 
@@ -105,6 +106,80 @@ def _safe_process_id(value: Any, *, field: str) -> int:
     if parsed <= 0:
         raise ValueError(f"{field} must be a positive process id")
     return parsed
+
+
+def _bounded_json_request(
+    *,
+    url: str,
+    method: str,
+    body: Mapping[str, Any] | None = None,
+    session_secret: str = "",
+) -> dict[str, Any]:
+    encoded = (
+        None
+        if body is None
+        else json.dumps(dict(body), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+    headers = {"Accept": "application/json"}
+    if encoded is not None:
+        headers["Content-Type"] = "application/json"
+    if session_secret:
+        headers["Cookie"] = f"natsume_operator_session={session_secret}"
+    request = Request(url, data=encoded, headers=headers, method=method)
+    with urlopen(request, timeout=30) as response:  # noqa: S310 - exact loopback caller
+        raw = response.read(1_048_577)
+        if response.status != 200 or len(raw) > 1_048_576:
+            raise RuntimeError("bounded acceptance request did not return HTTP 200 JSON")
+    decoded = json.loads(raw.decode("utf-8"))
+    if not isinstance(decoded, dict):
+        raise RuntimeError("bounded acceptance request returned a non-object")
+    return dict(decoded)
+
+
+def _prepare_security_projection(
+    *,
+    host_url: str,
+    monitor_url: str,
+    session_secret: str,
+    timeout_seconds: int = 90,
+) -> str:
+    """Create one real local snapshot and wait for its OBS read projection."""
+
+    _bounded_json_request(
+        url=f"{host_url}/internal/security/hunt/run-once",
+        method="POST",
+        body={"reason": "dl07_monitor_acceptance"},
+    )
+    deadline = time.monotonic() + max(10, int(timeout_seconds))
+    while time.monotonic() < deadline:
+        try:
+            payload = _bounded_json_request(
+                url=f"{monitor_url}/obs/security/runtime",
+                method="GET",
+                session_secret=session_secret,
+            )
+        except BaseException:
+            time.sleep(0.5)
+            continue
+        projection = payload.get("projection")
+        projection_map = dict(projection) if isinstance(projection, Mapping) else {}
+        shape = {
+            "schema_version": str(payload.get("schema_version") or ""),
+            "asset_count": max(0, int(payload.get("asset_count") or 0)),
+            "incident_count": max(0, int(payload.get("incident_count") or 0)),
+            "projection_kind": str(projection_map.get("kind") or ""),
+            "projection_available": bool(projection_map.get("available")),
+            "projection_state": str(projection_map.get("degraded_state") or ""),
+        }
+        if (
+            shape["schema_version"] == "Natsume.security_immune.runtime.v1"
+            and shape["projection_kind"] == "security_immune"
+            and shape["projection_available"] is True
+            and shape["projection_state"] == "HEALTHY"
+        ):
+            return _digest(shape)
+        time.sleep(0.5)
+    raise RuntimeError("real security snapshot did not reach a healthy OBS projection")
 
 
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
@@ -293,6 +368,7 @@ def _unsigned_receipt(
     stdout_digest: str,
     stderr_digest: str,
     duration_ms: int,
+    security_projection_digest: str,
     status: str,
     stack_state: str,
     stop_status: str,
@@ -315,6 +391,7 @@ def _unsigned_receipt(
         "playwright_timed_out": timed_out,
         "playwright_stdout_digest": stdout_digest,
         "playwright_stderr_digest": stderr_digest,
+        "security_projection_digest": security_projection_digest,
         "duration_ms": duration_ms,
         "stack_state": stack_state,
         "stop_status": stop_status,
@@ -374,6 +451,10 @@ def run_live_monitor_acceptance(args: argparse.Namespace) -> dict[str, Any]:
             "HOST_OBS_APP_PORT": str(args.obs_port),
             "HOST_MONITOR_PROXY_HOST": "127.0.0.1",
             "HOST_MONITOR_PROXY_PORT": str(args.monitor_port),
+            # The actual Host scan has a durable local state file.  Keep it
+            # inside this acceptance root rather than silently reusing the
+            # user's normal runtime/security_immune history.
+            "SECURITY_IMMUNE_STATE_DIR": str(runtime_root.parent / "security_immune"),
         }
     )
     start_command = [
@@ -442,9 +523,15 @@ def run_live_monitor_acceptance(args: argparse.Namespace) -> dict[str, Any]:
     timed_out = False
     stdout = ""
     stderr = ""
+    security_projection_digest = _digest({"status": "NOT_READY"})
     stop_status = "NOT_REQUIRED"
     success = False
     try:
+        security_projection_digest = _prepare_security_projection(
+            host_url=host_url,
+            monitor_url=monitor_url,
+            session_secret=session_secret,
+        )
         exit_code, stdout, stderr, timed_out = _run_child(
             command,
             cwd=ROOT / "host_brain" / "app" / "monitor_ui",
@@ -481,6 +568,7 @@ def run_live_monitor_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         stdout_digest=_digest(redacted_stdout),
         stderr_digest=_digest(redacted_stderr),
         duration_ms=finished_at_ms - started_at_ms,
+        security_projection_digest=security_projection_digest,
         status=status,
         stack_state="RUNNING_FOR_RECEIPT_SEAL" if success else "STOPPED_AFTER_FAILURE",
         stop_status=stop_status,

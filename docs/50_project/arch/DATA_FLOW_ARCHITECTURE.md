@@ -1957,7 +1957,8 @@ flowchart LR
     D --> H["隔离 Host\n/health /ready /life health"]
     H --> O["隔离 Obs\n/health"]
     O --> M["真实 Nginx Monitor\nHTML + /obs/metrics"]
-    M --> B["短生命周期 operator session\n真实 Playwright 交互"]
+    M --> S["真实 Host local security hunt\n独立 Obs security projection"]
+    S --> B["短生命周期 operator session\n真实 Playwright 交互"]
     B --> R["FullStackAcceptanceReceiptV1\ncommit + identity + digest"]
     E["远端 Edge / provider / 设备"] -. "未启动或未证明" .-> P["NOT_TESTED /\nACCEPTANCE_PENDING_EXTERNAL"]
     P --> R
