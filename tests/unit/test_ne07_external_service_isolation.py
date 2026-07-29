@@ -20,6 +20,7 @@ RUNTIME_SCRIPTS = (
     ROOT / "scripts/runtime/stop_obs_side.ps1",
     ROOT / "scripts/runtime/stop_monitor_proxy.ps1",
 )
+RELEASE_CATALOG_AUTHORITY = ROOT / "scripts/runtime/release_host_catalog_authority.py"
 
 
 def test_external_images_are_digest_pinned_and_password_has_no_repo_default() -> None:
@@ -102,6 +103,7 @@ def test_host_stack_scripts_accept_an_isolated_runtime_root() -> None:
     for name, source in sources.items():
         assert "[string]$RuntimeRoot" in source, name
     host = sources["start_host_side.ps1"]
+    assert "[string]$CanonicalDbPath" in host
     assert "RuntimeRoot = $RuntimeRoot" in host
     assert 'RuntimeRoot = (Join-Path $RuntimeRoot "monitor_proxy")' in host
     assert "if ($ForceRestart.IsPresent -and -not $runtimeRootWasExplicit)" in host
@@ -116,6 +118,10 @@ def test_host_stack_scripts_accept_an_isolated_runtime_root() -> None:
     assert "Get-ListeningPid -ProbePort $obsBindPort" in restart_source
     stop_host = sources["stop_host_side.ps1"]
     assert "if (-not $runtimeRootWasExplicit)" in stop_host
+    assert "Release-ConfirmedStoppedCatalogAuthority" in stop_host
+    assert "release_host_catalog_authority.py" in stop_host
+    assert '"RELEASED", "NOT_ACTIVE"' in stop_host
+    assert RELEASE_CATALOG_AUTHORITY.is_file()
 
 
 def test_isolated_host_sidecars_and_docker_teardown_keep_the_same_scope() -> None:
@@ -154,7 +160,7 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile(
   '{script}', [ref]$tokens, [ref]$parseErrors
 )
 if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
-foreach ($name in @('Test-SensitiveRuntimeEnvEntry', 'Write-RuntimeEnvFile')) {{
+foreach ($name in @('Test-SafeOperatorQueryAuthBindingsSnapshot', 'Test-SensitiveRuntimeEnvEntry', 'Write-RuntimeEnvFile')) {{
   $definition = $ast.Find({{
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -165,10 +171,12 @@ foreach ($name in @('Test-SensitiveRuntimeEnvEntry', 'Write-RuntimeEnvFile')) {{
 }}
 $env:NATSUME_NEO4J_PASSWORD = 'must-not-be-written'
 $env:NATSUME_NEO4J_USER = 'neo4j'
-$env:OPENAI_API_KEY = 'must-not-be-written'
-$env:EDGE_HMAC_SHARED_KEY = 'must-not-be-written'
-$env:BOND_NEO4J_AUTH_REF = 'sec://neo4j/ne07'
-$env:NATSUME_AUDIT_DB = 'runtime/acceptance/canonical.sqlite3'
+  $env:OPENAI_API_KEY = 'must-not-be-written'
+  $env:EDGE_HMAC_SHARED_KEY = 'must-not-be-written'
+  $env:BOND_NEO4J_AUTH_REF = 'sec://neo4j/ne07'
+  $env:HOST_AGENT_WORKSPACE_HMAC_SECRET_REF = 'sec://workspace/ne07'
+  $env:NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = '[{{"token_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","principal_id":"ops.ne07","tenant_id":"local","principal_kind":"service","scopes":["obs:task-runtime:read"]}}]'
+  $env:NATSUME_AUDIT_DB = 'runtime/acceptance/canonical.sqlite3'
 Write-RuntimeEnvFile -Path '{output.as_posix()}' -SeedValues @{{
   BOND_NEO4J_AUTH_REF = 'ignored'
 }} | Out-Null
@@ -196,4 +204,27 @@ Write-RuntimeEnvFile -Path '{output.as_posix()}' -SeedValues @{{
     assert "must-not-be-written" not in content
     assert "NATSUME_NEO4J_USER=" not in content
     assert "BOND_NEO4J_AUTH_REF=sec://neo4j/ne07" in content
+    assert "HOST_AGENT_WORKSPACE_HMAC_SECRET_REF=sec://workspace/ne07" in content
+    assert "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS=" in content
+    assert '"token_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' in content
     assert "NATSUME_AUDIT_DB=runtime/acceptance/canonical.sqlite3" in content
+
+
+def test_runtime_snapshot_rejects_raw_or_unknown_operator_auth_binding_fields() -> None:
+    source = START_HOST.read_text(encoding="utf-8")
+    assert "Test-SafeOperatorQueryAuthBindingsSnapshot" in source
+    assert "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS" in source
+    assert '"token_sha256"' in source
+    assert "return -not (Test-SafeOperatorQueryAuthBindingsSnapshot" in source
+    assert '$raw.StartsWith("[")' in source
+    assert "must be a digest-only JSON array with explicit scopes" in source
+
+
+def test_explicit_runtime_root_derives_and_binds_one_scoped_canonical_database() -> None:
+    source = START_HOST.read_text(encoding="utf-8")
+    assert "HOST_CANONICAL_DB_OUTSIDE_RUNTIME_SCOPE" in source
+    assert "Join-Path (Split-Path -Parent $RuntimeRoot) \"audit.sqlite3\"" in source
+    assert '"HOST_TASK_RUNTIME_DB_PATH"' in source
+    assert '"HOST_AGENT_REVIEW_DB_PATH"' in source
+    assert '"HOST_RUNTIME_EVENT_DB_PATH"' in source
+    assert '"--db-path", $resolvedCanonicalDbPath' in source

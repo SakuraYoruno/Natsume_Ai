@@ -101,6 +101,77 @@ function Stop-ProcessTree {
   return ($null -eq $left)
 }
 
+function Resolve-PythonExe {
+  param([string]$RepoRoot)
+  $venvPython = Join-Path $RepoRoot '.venv\Scripts\python.exe'
+  if (Test-Path -LiteralPath $venvPython) {
+    return $venvPython
+  }
+  $python = Get-Command python -ErrorAction SilentlyContinue
+  if ($null -eq $python) {
+    return $null
+  }
+  return [string]$python.Source
+}
+
+function Resolve-AuditDbPath {
+  param([hashtable]$RuntimeValues, [hashtable]$EnvValues)
+  foreach ($name in @("NATSUME_AUDIT_DB", "HOST_AUDIT_SQLITE_PATH")) {
+    $candidate = ""
+    if ($RuntimeValues.ContainsKey($name)) {
+      $candidate = [string]$RuntimeValues[$name]
+    } elseif ($EnvValues.ContainsKey($name)) {
+      $candidate = [string]$EnvValues[$name]
+    } else {
+      $candidate = [string][Environment]::GetEnvironmentVariable($name, "Process")
+    }
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+      return $candidate.Trim()
+    }
+  }
+  return ""
+}
+
+function Release-ConfirmedStoppedCatalogAuthority {
+  param(
+    [string]$RepoRoot,
+    [string]$AuditDbPath,
+    [int]$ExpectedHostPid
+  )
+  if ([string]::IsNullOrWhiteSpace($AuditDbPath)) {
+    return [ordered]@{ status = "NOT_ATTEMPTED"; reason = "audit_db_path_missing" }
+  }
+  if (-not (Test-Path -LiteralPath $AuditDbPath)) {
+    return [ordered]@{ status = "NOT_ATTEMPTED"; reason = "audit_db_missing" }
+  }
+  $pythonExe = Resolve-PythonExe -RepoRoot $RepoRoot
+  if ([string]::IsNullOrWhiteSpace($pythonExe)) {
+    return [ordered]@{ status = "NOT_ATTEMPTED"; reason = "python_not_found" }
+  }
+  $releaseScript = Join-Path $RepoRoot "scripts\runtime\release_host_catalog_authority.py"
+  if (-not (Test-Path -LiteralPath $releaseScript)) {
+    return [ordered]@{ status = "NOT_ATTEMPTED"; reason = "release_script_missing" }
+  }
+  try {
+    $raw = & $pythonExe $releaseScript --db-path $AuditDbPath --expected-host-pid $ExpectedHostPid
+    $output = ($raw | Out-String).Trim()
+    if (-not $output) {
+      return [ordered]@{ status = "RELEASE_FAILED"; reason = "empty_release_output" }
+    }
+    try {
+      $result = $output | ConvertFrom-Json
+    } catch {
+      return [ordered]@{ status = "RELEASE_FAILED"; reason = "invalid_release_output" }
+    }
+    if ($LASTEXITCODE -ne 0 -or $null -eq $result -or -not $result.status) {
+      return [ordered]@{ status = "RELEASE_FAILED"; reason = "release_command_failed" }
+    }
+    return $result
+  } catch {
+    return [ordered]@{ status = "RELEASE_FAILED"; reason = "release_command_exception" }
+  }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $runtimeRootWasExplicit = -not [string]::IsNullOrWhiteSpace($RuntimeRoot)
 if (-not $EnvFile) {
@@ -157,6 +228,7 @@ $MonitorProxyPort = Resolve-RuntimePort -ExplicitPort $MonitorProxyPort -Name "H
 $stopped = $false
 $hostPid = $null
 $detail = ""
+$catalogAuthority = [ordered]@{ status = "NOT_REQUIRED" }
 
 if (Test-Path -Path $PidFile) {
   $pidText = (Get-Content -Path $PidFile -Raw -Encoding ascii).Trim()
@@ -215,6 +287,41 @@ if (-not $runtimeRootWasExplicit) {
 }
 if ($remainingHostPids.Count -gt 0) {
   $detail = ("stopped residual host processes: {0}" -f (($remainingHostPids | Sort-Object -Unique) -join ","))
+}
+
+# A forced Windows process stop cannot execute the Host's ``finally`` block.
+# Before another Host is launched, prove that the recorded Host PID and its
+# listener are both absent, then release only that exact durable coordinator
+# fence.  A mismatched owner, a still-bound port, or a failed helper remains a
+# visible degraded shutdown rather than silently shortening or bypassing the
+# Service Catalog lease.
+if ($null -ne $hostPid -and [int]$hostPid -gt 0) {
+  $hostStillAlive = $null -ne (Get-Process -Id ([int]$hostPid) -ErrorAction SilentlyContinue)
+  $listenerAfterStop = Get-ListeningPid -ProbePort $Port
+  if (-not $hostStillAlive -and $null -eq $listenerAfterStop) {
+    $auditDbPath = Resolve-AuditDbPath -RuntimeValues $runtimeValues -EnvValues $envValues
+    $catalogAuthority = Release-ConfirmedStoppedCatalogAuthority `
+      -RepoRoot $repoRoot `
+      -AuditDbPath $auditDbPath `
+      -ExpectedHostPid ([int]$hostPid)
+    if ([string]$catalogAuthority.status -notin @("RELEASED", "NOT_ACTIVE")) {
+      $detail = if ($detail) {
+        "$detail; catalog authority release=$($catalogAuthority.status)"
+      } else {
+        "catalog authority release=$($catalogAuthority.status)"
+      }
+    }
+  } elseif ($stopped) {
+    $catalogAuthority = [ordered]@{
+      status = "NOT_RELEASED"
+      reason = if ($hostStillAlive) { "host_process_still_alive" } else { "host_listener_still_bound" }
+    }
+    $detail = if ($detail) {
+      "$detail; catalog authority release=$($catalogAuthority.status)"
+    } else {
+      "catalog authority release=$($catalogAuthority.status)"
+    }
+  }
 }
 
 $obsProcessResult = $null
@@ -281,9 +388,19 @@ if (Test-Path -Path $stopMonitorScript) {
 
 Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue
 
+$resultStatus = if (
+  $stopped -and [string]$catalogAuthority.status -notin @("RELEASED", "NOT_ACTIVE", "NOT_REQUIRED")
+) {
+  "degraded"
+} elseif ($stopped) {
+  "stopped"
+} else {
+  "not_running"
+}
+
 $result = [ordered]@{
   side = "host"
-  status = if ($stopped) { "stopped" } else { "not_running" }
+  status = $resultStatus
   pid = $hostPid
   pid_file = $PidFile
   runtime_root = $RuntimeRoot
@@ -291,6 +408,7 @@ $result = [ordered]@{
   obs_port = $ObsPort
   monitor_proxy_port = $MonitorProxyPort
   detail = $detail
+  catalog_authority = $catalogAuthority
   obs_process = $obsProcessResult
   monitor_proxy = $monitorProxyResult
 }

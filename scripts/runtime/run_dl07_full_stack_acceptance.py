@@ -41,6 +41,13 @@ _STATUS_CHOICES = (
     "NOT_TESTED",
 )
 _MAX_HTTP_BYTES = 1_048_576
+_MONITOR_UI_LIVE_SCHEMA_VERSION = "natsume.digital-life-monitor-ui-live.v1"
+_MONITOR_UI_PRIVACY = {
+    "contains_user_text": False,
+    "contains_model_output": False,
+    "contains_raw_audio_or_image": False,
+    "contains_secrets": False,
+}
 
 
 def _digest(value: Any) -> str:
@@ -51,6 +58,17 @@ def _digest(value: Any) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _safe_ref(value: Any, field: str) -> str:
+    normalized = str(value or "").strip()
+    if len(normalized) != 71 or not normalized.startswith("sha256:"):
+        raise ValueError(f"{field} must be a sha256 reference")
+    try:
+        int(normalized[7:], 16)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be a sha256 reference") from exc
+    return normalized
 
 
 def _now_ms() -> int:
@@ -291,7 +309,103 @@ def _obs_component(obs_url: str, process_id: int) -> FullStackComponentV1:
     )
 
 
-def _monitor_component(monitor_url: str, process_id: int) -> FullStackComponentV1:
+def _monitor_ui_receipt_digest(
+    receipt: Mapping[str, Any],
+    *,
+    commit_sha: str,
+    run_id: str,
+    host_url: str,
+    obs_url: str,
+    monitor_url: str,
+    host_pid: int,
+    obs_pid: int,
+    monitor_pid: int,
+) -> str:
+    """Fail closed unless the browser proof is exact-scope and privacy bounded."""
+
+    expected = {
+        "schema_version",
+        "status",
+        "commit_sha",
+        "run_id",
+        "host_url",
+        "obs_url",
+        "monitor_url",
+        "host_pid",
+        "obs_pid",
+        "monitor_pid",
+        "host_start_digest",
+        "operator_binding_digest",
+        "interaction_kind",
+        "playwright_exit_code",
+        "playwright_timed_out",
+        "playwright_stdout_digest",
+        "playwright_stderr_digest",
+        "duration_ms",
+        "stack_state",
+        "stop_status",
+        "privacy",
+        "receipt_digest",
+    }
+    if set(receipt) != expected:
+        raise ValueError("Monitor UI receipt field set is invalid")
+    if receipt.get("schema_version") != _MONITOR_UI_LIVE_SCHEMA_VERSION:
+        raise ValueError("Monitor UI receipt schema is unsupported")
+    if receipt.get("status") != "PASS":
+        raise RuntimeError("Monitor UI interaction receipt is not passing")
+    if receipt.get("privacy") != _MONITOR_UI_PRIVACY:
+        raise ValueError("Monitor UI receipt privacy declaration is invalid")
+    if str(receipt.get("commit_sha") or "") != commit_sha or str(receipt.get("run_id") or "") != run_id:
+        raise ValueError("Monitor UI receipt commit or run identity drift")
+    expected_urls = {
+        "host_url": host_url,
+        "obs_url": obs_url,
+        "monitor_url": monitor_url,
+    }
+    for field, expected_url in expected_urls.items():
+        if _ensure_loopback_url(str(receipt.get(field) or "")) != expected_url:
+            raise ValueError("Monitor UI receipt listener identity drift")
+    expected_pids = {
+        "host_pid": host_pid,
+        "obs_pid": obs_pid,
+        "monitor_pid": monitor_pid,
+    }
+    for field, expected_pid in expected_pids.items():
+        try:
+            received_pid = int(receipt.get(field))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Monitor UI receipt process identity is invalid") from exc
+        if received_pid != expected_pid or received_pid <= 0:
+            raise ValueError("Monitor UI receipt process identity drift")
+    for field in (
+        "host_start_digest",
+        "operator_binding_digest",
+        "playwright_stdout_digest",
+        "playwright_stderr_digest",
+    ):
+        _safe_ref(receipt.get(field), f"Monitor UI {field}")
+    if receipt.get("interaction_kind") != "REAL_NGINX_PLAYWRIGHT_TO_OBS":
+        raise ValueError("Monitor UI receipt interaction kind is invalid")
+    if int(receipt.get("playwright_exit_code", -1)) != 0 or receipt.get("playwright_timed_out") is not False:
+        raise RuntimeError("Monitor UI browser interaction did not complete")
+    if int(receipt.get("duration_ms", -1)) < 0:
+        raise ValueError("Monitor UI receipt duration is invalid")
+    if receipt.get("stack_state") != "RUNNING_FOR_RECEIPT_SEAL" or receipt.get("stop_status") != "NOT_REQUIRED":
+        raise ValueError("Monitor UI receipt does not bind a live stack")
+    unsigned = dict(receipt)
+    received_digest = str(unsigned.pop("receipt_digest") or "")
+    expected_digest = _digest(unsigned)
+    if received_digest != expected_digest:
+        raise ValueError("Monitor UI receipt digest is invalid")
+    return received_digest
+
+
+def _monitor_component(
+    monitor_url: str,
+    process_id: int,
+    *,
+    monitor_ui_receipt_digest: str,
+) -> FullStackComponentV1:
     html_meta = _http_html(f"{monitor_url}/monitor/index.html")
     metrics, metrics_meta = _http_json(f"{monitor_url}/obs/metrics")
     if not metrics:
@@ -299,8 +413,14 @@ def _monitor_component(monitor_url: str, process_id: int) -> FullStackComponentV
     return FullStackComponentV1(
         component_id="monitor",
         status="PASS",
-        evidence_kind="REAL_NGINX_MONITOR_HTTP",
-        evidence_digest=_digest({"html": html_meta, "metrics": metrics_meta}),
+        evidence_kind="REAL_NGINX_MONITOR_PLAYWRIGHT_HTTP",
+        evidence_digest=_digest(
+            {
+                "html": html_meta,
+                "metrics": metrics_meta,
+                "browser_interaction": monitor_ui_receipt_digest,
+            }
+        ),
         listener=monitor_url.replace("http://", "loopback://", 1),
         process_id=_assert_process_alive(process_id, name="monitor"),
     )
@@ -311,6 +431,7 @@ def build_receipt(
     commit_sha: str,
     run_id: str,
     docker_receipt: Mapping[str, Any],
+    monitor_ui_receipt: Mapping[str, Any],
     host_url: str,
     obs_url: str,
     monitor_url: str,
@@ -328,6 +449,17 @@ def build_receipt(
     obs_url = _ensure_loopback_url(obs_url)
     monitor_url = _ensure_loopback_url(monitor_url)
     docker_digest, docker_services = _docker_evidence(docker_receipt)
+    monitor_ui_digest = _monitor_ui_receipt_digest(
+        monitor_ui_receipt,
+        commit_sha=commit_sha,
+        run_id=run_id,
+        host_url=host_url,
+        obs_url=obs_url,
+        monitor_url=monitor_url,
+        host_pid=host_pid,
+        obs_pid=obs_pid,
+        monitor_pid=monitor_pid,
+    )
     local = (
         FullStackComponentV1(
             component_id="docker",
@@ -347,7 +479,11 @@ def build_receipt(
         ),
         _host_component(host_url, host_pid),
         _obs_component(obs_url, obs_pid),
-        _monitor_component(monitor_url, monitor_pid),
+        _monitor_component(
+            monitor_url,
+            monitor_pid,
+            monitor_ui_receipt_digest=monitor_ui_digest,
+        ),
     )
     external = tuple(
         _build_external_component(component_id, external_statuses[component_id])
@@ -362,6 +498,7 @@ def build_receipt(
             "obs_pid": int(obs_pid),
             "monitor_pid": int(monitor_pid),
             "docker_project": docker_receipt.get("project_name"),
+            "monitor_ui_receipt": monitor_ui_digest,
             "remote_edge_started": False,
         }
     )
@@ -405,6 +542,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--commit-sha", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--docker-receipt", type=Path, required=True)
+    parser.add_argument("--monitor-ui-receipt", type=Path, required=True)
     parser.add_argument("--host-url", required=True)
     parser.add_argument("--obs-url", required=True)
     parser.add_argument("--monitor-url", required=True)
@@ -434,6 +572,7 @@ def main(argv: list[str] | None = None) -> int:
             commit_sha=args.commit_sha,
             run_id=args.run_id,
             docker_receipt=_load_json(args.docker_receipt),
+            monitor_ui_receipt=_load_json(args.monitor_ui_receipt),
             host_url=args.host_url,
             obs_url=args.obs_url,
             monitor_url=args.monitor_url,

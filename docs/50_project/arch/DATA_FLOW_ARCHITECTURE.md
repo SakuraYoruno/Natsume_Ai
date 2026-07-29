@@ -1957,12 +1957,13 @@ flowchart LR
     D --> H["隔离 Host\n/health /ready /life health"]
     H --> O["隔离 Obs\n/health"]
     O --> M["真实 Nginx Monitor\nHTML + /obs/metrics"]
-    M --> R["FullStackAcceptanceReceiptV1\ncommit + identity + digest"]
+    M --> B["短生命周期 operator session\n真实 Playwright 交互"]
+    B --> R["FullStackAcceptanceReceiptV1\ncommit + identity + digest"]
     E["远端 Edge / provider / 设备"] -. "未启动或未证明" .-> P["NOT_TESTED /\nACCEPTANCE_PENDING_EXTERNAL"]
     P --> R
 ```
 
-Docker receipt 与 Host/Obs/Monitor 读取均只输出脱敏 digest；禁止把用户文本、模型输出、音视频或认证写入收据。Host sidecar 由同一 runtime snapshot 传递解析后的 Obs/Monitor port，Docker teardown 使用启动时的 explicit network name。这样孤立验收不会悄悄复用用户默认容器或遗留 network；远端 Edge 未经用户允许不会启动。
+Docker receipt、Host/Obs/Monitor 读取与浏览器交互均只输出脱敏 digest；禁止把用户文本、模型输出、音视频、operator cookie/session 或认证写入收据。Host sidecar 由同一 runtime snapshot 传递解析后的 Obs/Monitor port，canonical SQLite 也被限制在同一 explicit acceptance scope；Docker teardown 使用启动时的 explicit network name。这样孤立验收不会悄悄复用用户默认容器、数据库或遗留 network；远端 Edge 未经用户允许不会启动。
 
 Service Catalog 分层切片随后把启动数据流固定为 `Host/ASGI → service_catalog/startup_coordinator.py → ServiceCatalogRolloutAuthority Protocol → SQLiteServiceCatalogRolloutRepository`；DTO、校验和 port 从 `contracts/service_catalog.py` 进入，旧 composition/类型路径仅作同对象重导出，`rollout_authority.py` 只观察 Guardian。该流清除了 application→composition 两条与 Catalog persistence→application 一条依赖，Gate 1 SCC 缩为 application/persistence；该切片完成时仍有 11 条 persistence→application 反向依赖（PlanningSearch 7、Evolution/Lab/Skill/World 4）。验证为 contract/unit `61 passed`、真实 socket integration `7 passed`、边界复跑 `7 passed`，集合可能重叠不得相加。
 

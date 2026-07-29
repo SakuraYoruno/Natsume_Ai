@@ -3,7 +3,9 @@ param(
   [string]$EnvFile = "",
   [string]$RuntimeRoot = "",
   [string]$LogDir = "",
+  [string]$CanonicalDbPath = "",
   [string]$AgentWorkspaceRoot = "",
+  [string]$AgentWorkspaceHmacSecretRef = "",
   [string]$BindHost = "",
   [int]$Port = 0,
   [ValidateSet("docker", "none")]
@@ -291,6 +293,81 @@ exit `$childExitCode
   }
 }
 
+function Test-SafeOperatorQueryAuthBindingsSnapshot {
+  param([AllowNull()][string]$Value)
+  $raw = ([string]$Value).Trim()
+  if (-not $raw -or $raw.Length -gt 65536 -or -not $raw.StartsWith("[")) {
+    return $false
+  }
+  try {
+    $decoded = $raw | ConvertFrom-Json -ErrorAction Stop
+  } catch {
+    return $false
+  }
+  $bindings = @($decoded)
+  if ($bindings.Count -lt 1) {
+    return $false
+  }
+  $allowedFields = @(
+    "token_sha256",
+    "principal_id",
+    "tenant_id",
+    "key_id",
+    "principal_kind",
+    "scopes"
+  )
+  foreach ($binding in $bindings) {
+    if ($null -eq $binding) {
+      return $false
+    }
+    $fieldNames = @($binding.PSObject.Properties.Name)
+    if ($fieldNames.Count -lt 3 -or @($fieldNames | Where-Object { $_ -notin $allowedFields }).Count -gt 0) {
+      return $false
+    }
+    if ([string]$binding.token_sha256 -notmatch '^[a-f0-9]{64}$') {
+      return $false
+    }
+    if ([string]$binding.principal_id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,254}$') {
+      return $false
+    }
+    if ($binding.PSObject.Properties.Name -contains "tenant_id" -and [string]$binding.tenant_id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,254}$') {
+      return $false
+    }
+    if ($binding.PSObject.Properties.Name -contains "key_id" -and [string]$binding.key_id -notmatch '^[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,254}$') {
+      return $false
+    }
+    if ($binding.PSObject.Properties.Name -contains "principal_kind" -and [string]$binding.principal_kind -notin @("user", "service")) {
+      return $false
+    }
+    $scopes = @($binding.scopes)
+    if ($scopes.Count -lt 1 -or @($scopes | Where-Object { [string]$_ -notmatch '^[a-z0-9][a-z0-9:._/-]{0,127}$' }).Count -gt 0) {
+      return $false
+    }
+  }
+  return $true
+}
+
+function Test-PathWithinDirectory {
+  param(
+    [string]$Path,
+    [string]$Directory
+  )
+  $comparison = [System.StringComparison]::OrdinalIgnoreCase
+  $candidate = [System.IO.Path]::GetFullPath($Path).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+  )
+  $root = [System.IO.Path]::GetFullPath($Directory).TrimEnd(
+    [System.IO.Path]::DirectorySeparatorChar,
+    [System.IO.Path]::AltDirectorySeparatorChar
+  )
+  $separator = [string][System.IO.Path]::DirectorySeparatorChar
+  return (
+    [string]::Equals($candidate, $root, $comparison) -or
+    $candidate.StartsWith($root + $separator, $comparison)
+  )
+}
+
 function Test-SensitiveRuntimeEnvEntry {
   param(
     [string]$Name,
@@ -319,6 +396,13 @@ function Test-SensitiveRuntimeEnvEntry {
     $normalizedValue.StartsWith("sec://", [System.StringComparison]::Ordinal)
   ) {
     return $false
+  }
+  # An operator query binding holds only SHA-256 digests, identities, and
+  # scopes. It is not an authentication credential and must survive the
+  # detached Host/OBS launch boundary; a raw token field or an unknown field
+  # still fails this exact structural allowlist and remains excluded below.
+  if ([string]::Equals($normalizedName, "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS", [System.StringComparison]::OrdinalIgnoreCase)) {
+    return -not (Test-SafeOperatorQueryAuthBindingsSnapshot -Value $normalizedValue)
   }
   if (
     $normalizedName -match '(?i)(^|_)(PASSWORD|PASSWD|SECRET|TOKEN|AUTH)(_|$)' -or
@@ -1164,6 +1248,83 @@ $runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
 
+$operatorQueryBindings = [string][Environment]::GetEnvironmentVariable(
+  "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS",
+  "Process"
+)
+if (
+  -not [string]::IsNullOrWhiteSpace($operatorQueryBindings) -and
+  -not (Test-SafeOperatorQueryAuthBindingsSnapshot -Value $operatorQueryBindings)
+) {
+  throw "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS must be a digest-only JSON array with explicit scopes"
+}
+
+# An explicit runtime root denotes an isolated Host instance. Its canonical
+# ledger must be explicit or derived inside that same scope; inheriting a
+# checked-in/.env database would silently mix acceptance receipts and user
+# state. Bind all persistence consumers to one path and also pass it via the
+# Host CLI below, so neither a setting alias nor a detached child can drift.
+$configuredCanonicalDbPath = [string]$CanonicalDbPath
+if ([string]::IsNullOrWhiteSpace($configuredCanonicalDbPath)) {
+  if ($runtimeRootWasExplicit) {
+    $configuredCanonicalDbPath = Join-Path (Split-Path -Parent $RuntimeRoot) "audit.sqlite3"
+  } else {
+    $configuredCanonicalDbPath = Get-EnvSetting `
+      -Values $envValues `
+      -Name "NATSUME_AUDIT_DB" `
+      -DefaultValue "host_brain/data/audit.sqlite3"
+  }
+}
+if ([string]::IsNullOrWhiteSpace($configuredCanonicalDbPath) -or $configuredCanonicalDbPath.Trim() -eq ":memory:") {
+  throw "CanonicalDbPath must be a file-backed SQLite path"
+}
+if (-not [System.IO.Path]::IsPathRooted($configuredCanonicalDbPath)) {
+  $configuredCanonicalDbPath = Join-Path $repoRoot $configuredCanonicalDbPath
+}
+$resolvedCanonicalDbPath = [System.IO.Path]::GetFullPath($configuredCanonicalDbPath)
+$canonicalDbParent = Split-Path -Parent $resolvedCanonicalDbPath
+if ($runtimeRootWasExplicit) {
+  $runtimeScopeRoot = Split-Path -Parent $RuntimeRoot
+  if (-not (Test-PathWithinDirectory -Path $canonicalDbParent -Directory $runtimeScopeRoot)) {
+    throw "HOST_CANONICAL_DB_OUTSIDE_RUNTIME_SCOPE: CanonicalDbPath must remain inside the explicit runtime scope"
+  }
+}
+Ensure-Directory -Path $canonicalDbParent
+foreach ($persistenceName in @(
+  "NATSUME_AUDIT_DB",
+  "HOST_AUDIT_SQLITE_PATH",
+  "HOST_AUDIT_DB_PATH",
+  "HOST_TASK_RUNTIME_DB_PATH",
+  "HOST_AGENT_REVIEW_DB_PATH",
+  "HOST_RUNTIME_EVENT_DB_PATH"
+)) {
+  [Environment]::SetEnvironmentVariable($persistenceName, $resolvedCanonicalDbPath, "Process")
+  $envValues[$persistenceName] = $resolvedCanonicalDbPath
+}
+
+# A production Host must receive the Workspace token secret through an opaque
+# local-store reference. In particular, an isolated runtime cannot depend on
+# the parent shell retaining a direct secret after a restart: the snapshot is
+# intentionally secret-free and may persist only this sec:// reference.
+if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceHmacSecretRef)) {
+  $resolvedWorkspaceSecretRef = $AgentWorkspaceHmacSecretRef.Trim()
+  if (-not $resolvedWorkspaceSecretRef.StartsWith("sec://workspace/", [System.StringComparison]::Ordinal)) {
+    throw "AgentWorkspaceHmacSecretRef must use sec://workspace/..."
+  }
+  $configuredDirectWorkspaceSecret = [Environment]::GetEnvironmentVariable(
+    "HOST_AGENT_WORKSPACE_HMAC_SECRET",
+    "Process"
+  )
+  if (-not [string]::IsNullOrWhiteSpace([string]$configuredDirectWorkspaceSecret)) {
+    throw "HOST_AGENT_WORKSPACE_HMAC_SECRET and AgentWorkspaceHmacSecretRef are mutually exclusive"
+  }
+  [Environment]::SetEnvironmentVariable(
+    "HOST_AGENT_WORKSPACE_HMAC_SECRET_REF",
+    $resolvedWorkspaceSecretRef,
+    "Process"
+  )
+}
+
 $configuredAgentWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceRoot)) {
   [string]$AgentWorkspaceRoot
 } else {
@@ -1315,6 +1476,11 @@ $env:HOST_MONITOR_PROXY_PORT = [string]$MonitorProxyPort
 $env:HOST_MONITOR_PROXY_ENABLED = if ($monitorProxyEnabled) { "true" } else { "false" }
 $env:HOST_MAIN_OBS_REDIRECT_ENABLED = if ($obsEnabled) { "true" } else { "false" }
 $env:HOST_MAIN_MONITOR_REDIRECT_ENABLED = if ($monitorProxyEnabled) { "true" } else { "false" }
+# The runtime snapshot is the restart authority. Persist the resolved explicit
+# listener rather than the repository .env defaults, otherwise a forced
+# isolated restart can silently reconstruct a public/default Host declaration.
+$env:HOST_APP_HOST = $BindHost
+$env:HOST_APP_PORT = [string]$Port
 
 $localServices = $null
 $localOllama = Ensure-LocalOllamaRuntime -RepoRoot $repoRoot -EnvValues $envValues
@@ -1395,6 +1561,30 @@ if ($ForceRestart.IsPresent) {
       throw (
         "failed to stop existing obs sidecar on port $obsBindPort " +
         "before forced restart; pid=$remainingObsPid"
+      )
+    }
+  }
+  $stopHostScript = Join-Path $PSScriptRoot "stop_host_side.ps1"
+  if (-not (Test-Path -LiteralPath $stopHostScript)) {
+    throw "stop_host_side.ps1 not found: $stopHostScript"
+  }
+  $restartHostRaw = & $stopHostScript `
+    -EnvFile $EnvFile `
+    -RuntimeRoot $RuntimeRoot `
+    -Port $Port `
+    -ObsPort $obsBindPort `
+    -MonitorProxyPort $MonitorProxyPort
+  $restartHostJson = ($restartHostRaw | Out-String).Trim()
+  if ($restartHostJson) {
+    try {
+      $restartHostResult = $restartHostJson | ConvertFrom-Json
+    } catch {
+      throw "forced restart host shutdown returned invalid JSON"
+    }
+    if ([string]$restartHostResult.status -eq "degraded") {
+      throw (
+        "forced restart refused after Host catalog authority cleanup failed: " +
+        [string]$restartHostResult.detail
       )
     }
   }
@@ -1506,7 +1696,13 @@ $mateengineBridgeResult = Start-MateEngineBridgeRuntime `
   -ShowWindow:$ShowConsoleWindow.IsPresent `
   -Breakaway:$BreakawayFromConsole
 
-$hostArgs = @("-m", "host_brain", "--host", $BindHost, "--port", ([string]$Port), "--log-level", "INFO")
+$hostArgs = @(
+  "-m", "host_brain",
+  "--host", $BindHost,
+  "--port", ([string]$Port),
+  "--log-level", "INFO",
+  "--db-path", $resolvedCanonicalDbPath
+)
 if ($StartupCheck.IsPresent) {
   $hostArgs += "--startup-check"
 }
@@ -1883,6 +2079,7 @@ $result = [ordered]@{
   health_url = $healthUrl
   env_file = $EnvFile
   runtime_root = $RuntimeRoot
+  canonical_db_path = $resolvedCanonicalDbPath
   agent_workspace_root = $resolvedAgentWorkspaceRoot
   runtime_env_file = $runtimeEnvFile
   stdout_log = $stdoutLog

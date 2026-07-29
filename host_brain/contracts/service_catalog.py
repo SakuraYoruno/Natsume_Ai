@@ -230,6 +230,13 @@ class ServiceCatalogRolloutRepository(Protocol):
         now_ms: int | None = None,
     ) -> bool: ...
 
+    def active_authority(
+        self,
+        *,
+        runtime_scope_id: str,
+        now_ms: int | None = None,
+    ) -> CatalogCoordinatorAuthorityV1 | None: ...
+
     def register_operation(
         self,
         operation: CatalogRolloutOperationV1,

@@ -160,6 +160,8 @@ def test_forced_host_restart_stops_existing_sidecars_before_new_host() -> None:
     assert restart_source.index("& $stopMonitorScript `") < (
         restart_source.index("& $stopObsScript `")
     )
+    assert "& $stopHostScript `" in restart_source
+    assert "forced restart refused after Host catalog authority cleanup failed" in restart_source
 
 
 def test_host_launcher_rejects_workspace_source_overlap_before_creating_root(
@@ -265,6 +267,10 @@ def test_host_launcher_exports_explicit_workspace_root_to_runtime_snapshot() -> 
         "$resolvedAgentWorkspaceRoot"
         in source[preflight:docker_start]
     )
+    assert '$env:HOST_APP_HOST = $BindHost' in source[preflight:docker_start]
+    assert '$env:HOST_APP_PORT = [string]$Port' in source[preflight:docker_start]
+    assert '$envValues[$persistenceName] = $resolvedCanonicalDbPath' in source
+    assert '"--db-path", $resolvedCanonicalDbPath' in source
     assert "agent_workspace_root = $resolvedAgentWorkspaceRoot" in source
 
 

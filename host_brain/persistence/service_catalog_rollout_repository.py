@@ -159,6 +159,32 @@ class SQLiteServiceCatalogRolloutRepository:
             )
         return updated.rowcount == 1
 
+    def active_authority(
+        self,
+        *,
+        runtime_scope_id: str,
+        now_ms: int | None = None,
+    ) -> CatalogCoordinatorAuthorityV1 | None:
+        """Return the exact unexpired coordinator authority for one scope.
+
+        This is deliberately a read-only recovery seam.  A local launcher may
+        use the returned immutable authority only after it has independently
+        proved that the owning Host process and listener are gone, then call
+        :meth:`release_authority` with the exact fence.  It must never infer a
+        new authority or release an already superseded coordinator.
+        """
+
+        scope = _text(runtime_scope_id, "runtime_scope_id")
+        now = int(_now_ms() if now_ms is None else now_ms)
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM service_catalog_rollout_coordinator_lease "
+                "WHERE runtime_scope_id = ? AND released_at_ms IS NULL "
+                "AND expires_at_ms > ?",
+                (scope, now),
+            ).fetchone()
+        return self._authority_from_row(row) if row is not None else None
+
     def register_operation(
         self,
         operation: CatalogRolloutOperationV1,

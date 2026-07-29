@@ -305,6 +305,31 @@ def test_preflight_claim_selection_must_name_enabled_typed_listeners() -> None:
     assert ISSUE_CLAIM_SELECTION_INVALID in decision.issue_codes
 
 
+def test_selected_host_candidate_is_not_blocked_by_unselected_remote_listener() -> None:
+    local_host = _endpoint("host.main", owner_id="host.main")
+    remote_edge = _endpoint(
+        "edge.remote",
+        owner_id="edge.rpc",
+        listener_id="edge.rpc",
+        host="192.0.2.10",
+    )
+    snapshot = build_catalog_snapshot((local_host, remote_edge))
+    assert ISSUE_PUBLIC_AUTH_REQUIRED in _codes(validate_catalog(snapshot))
+
+    probe = _BindProbe()
+    decision = preflight_catalog(
+        snapshot,
+        mode=CatalogMode.PREFLIGHT,
+        bind_probe=probe,
+        now_ms=1_000,
+        claim_endpoint_ids=("host.main",),
+    )
+
+    assert decision.start_allowed is True
+    assert ISSUE_PUBLIC_AUTH_REQUIRED not in decision.issue_codes
+    assert probe.inspected == ["host.main"]
+
+
 def test_health_identity_must_name_a_declared_protocol_version() -> None:
     endpoint = _endpoint("endpoint.health-binding")
     endpoint = replace(

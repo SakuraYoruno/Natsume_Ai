@@ -610,7 +610,13 @@ def preflight_catalog(
     normalized_mode, mode_issue = _normalize_mode(mode)
     endpoints = _endpoints(snapshot)
     snapshot_digest = _snapshot_digest(snapshot, endpoints)
-    issues = list(validate_catalog(snapshot))
+    # Keep the complete static catalog available to ``validate_catalog`` callers,
+    # but a candidate startup may only be blocked by declarations it is about to
+    # own.  A remote Edge's intentionally unstarted listener must remain visible
+    # to global audit without preventing the loopback Host candidate from
+    # acquiring its own exact reservation.
+    catalog_issues = validate_catalog(snapshot)
+    issues: list[CatalogIssue] = []
     if mode_issue is not None:
         issues.append(mode_issue)
     claims: list[_Claim] = []
@@ -638,6 +644,21 @@ def preflight_catalog(
                     "claim selection must name one or more enabled typed listeners",
                 )
             )
+
+    if selected_ids is None:
+        issues.extend(catalog_issues)
+    else:
+        for issue in catalog_issues:
+            issue_ids = frozenset(
+                str(endpoint_id or "").strip()
+                for endpoint_id in tuple(issue.endpoint_ids or ())
+                if str(endpoint_id or "").strip()
+            )
+            # Empty endpoint sets describe an invalid catalog shape and remain
+            # global blockers. Multi-endpoint conflicts remain relevant when
+            # any owned endpoint participates.
+            if not issue_ids or issue_ids.intersection(selected_ids):
+                issues.append(issue)
 
     for endpoint in endpoints:
         if not _claims_listener(endpoint):

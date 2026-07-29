@@ -354,6 +354,27 @@ Monitor 启动后连续五次核对 Host 进程 identity、监听 PID、`/health
 显式 acceptance runtime root，并对有限日志尾部脱敏。修复必须在干净提交上
 真实重跑后才能改变状态。
 
+首次在隔离 acceptance 根启动前，必须以
+`scripts/runtime/provision_workspace_secret_ref.py` 创建或重开一个仅用于该运行
+的 `sec://workspace/...` 引用，再通过 `start_host_side.ps1`
+的 `-AgentWorkspaceHmacSecretRef` 传入。工具只向 gitignore 的本地 secret store
+写入随机材料，stdout 仅输出引用和摘要；runtime snapshot 只保存引用。缺引用、
+引用无效、local store 不可读或直接 secret 与引用并存均必须失败关闭，不能临时
+回退成明文环境变量。
+
+Host 的 Service Catalog preflight 只以当前 candidate owner 的 endpoint 声明作为
+启动阻断条件；未启动的远端 Edge/Gateway 仍保留在全局 catalog 审计中，但不能因其
+公开 bind 配置阻止 loopback Host 获取自身 reservation。隔离启动时，snapshot 还必须
+写入显式解析后的 `HOST_APP_HOST/PORT`，不能在重启时回退为 `.env` 的默认公开地址。
+
+显式 `RuntimeRoot` 同时界定 canonical SQLite 的物理范围：未显式传入
+`CanonicalDbPath` 时，Host 只可导出该 root 父目录中的 `audit.sqlite3`，并将
+`NATSUME_AUDIT_DB`、Task、Review、Runtime Event 等所有兼容别名统一绑定到同一文件；
+任何指向 acceptance scope 外的路径都会以
+`HOST_CANONICAL_DB_OUTSIDE_RUNTIME_SCOPE` 拒绝。受控停止在确认 Host PID 与监听已消失后，
+只读取并释放 owner/PID/fencing token 三元组完全匹配的 Service Catalog lease；它不能缩短
+TTL、猜测新 authority 或释放已 supersede 的 lease。
+
 `b6b341be` 的下一次真实运行已消除 Workspace 错误，并由新稳定性 Gate 正确
 拒绝假成功；其 Host `Application startup complete → Shutting down` 是
 Service Catalog 正常停止中间 rollout candidate，而不是最终服务自然退出。
@@ -367,10 +388,14 @@ Service Catalog 正常停止中间 rollout candidate，而不是最终服务自�
 [`FullStackAcceptanceReceiptV1`](../../../natsume_contracts/life/full_stack_acceptance.py)
 把一个完整 Git commit 与两类真实证据绑定：先由
 `run_ne07_external_services_acceptance.py` 对隔离三库做写入、重启、读取和清理，
-再由 `run_dl07_full_stack_acceptance.py` 对实际运行的 Host、Obs 与 Nginx Monitor
-执行 loopback HTTP 读取。后者要求 Host `/health`、`/ready`、Digital Life runtime
-health，Obs `/health`，以及 Monitor HTML 和 `/obs/metrics` 都能实际响应；收据只保留
-摘要 digest、进程 PID、容器/image identity 和监听地址。
+再由 `run_dl07_monitor_ui_live.py` 通过 production launcher 启动同一隔离 Host、Obs 与
+Nginx Monitor，以只在浏览器进程期间存在的一次 operator session 执行真实 Playwright 交互，
+最后由 `run_dl07_full_stack_acceptance.py` 封存总收据。后者要求 Host `/health`、`/ready`、
+Digital Life runtime health，Obs `/health`，Monitor HTML 和 `/obs/metrics` 都能实际响应，且
+Monitor browser receipt 必须精确匹配同一 commit、run、三个 loopback listener 和三个 PID；
+仅有静态页或 proxy metrics 时拒绝 Monitor `PASS`。两类收据只保留摘要 digest、进程 PID、
+容器/image identity 和监听地址；operator session、cookie、screenshot、trace、原始 stdout/stderr
+不得落盘。
 
 acceptance Host 使用自定义端口时，`start_host_side.ps1` 必须把已解析的 Obs port
 显式传给 detached Obs launcher；`stop_host_side.ps1` 先从同一 runtime snapshot

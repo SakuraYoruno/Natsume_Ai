@@ -130,10 +130,25 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   只能得到 `ACCEPTANCE_PENDING_EXTERNAL`，不能借端口、fixture、mock 或 scripted replay 提升。
 - T-DL07-03：runner 只允许 loopback endpoint，实际读取 Host `/health`、`/ready`、Digital
   Life runtime health、Obs `/health`、Nginx Monitor HTML 与 `/obs/metrics`；检查 PID 只能只读，
-  不能意外停止进程。
+  不能意外停止进程。真实 Monitor Playwright 允许 Obs 因声明为 partial 的 read-model 返回
+  `DEGRADED`，但必须同时有 `HEALTHY` projection 且 `missing_jobs/unavailable_jobs` 均为空；
+  不能将该可解释降级伪装为 `OK`。
 - T-DL07-04：acceptance 自定义端口必须从同一 Host runtime snapshot 传给 detached Obs、
   Monitor teardown；Docker cleanup 必须使用启动时 explicit network name。用户默认 Docker
   stack、数据根和远端 Edge 均不在允许范围内。
+- T-DL07-05：隔离 Host 重启前必须重新通过 `sec://workspace/...` opaque reference
+  解析本地 HMAC；provision 工具的 stdout、runtime snapshot、Host/Obs/Monitor 日志和
+  receipt 均不得出现实际 secret。直接 secret 与 ref 并存、ref 非法、store 缺失或
+  ref 未解析必须 fail-closed。
+- T-DL07-06：Host candidate 只验证自己拥有的 listener；未启动的远端 Edge/Gateway
+  可作为全局 catalog audit finding，但不得因其 public bind 阻断 loopback Host 的
+  preflight 或 reservation。isolated snapshot 必须保留显式 Host 监听地址与端口。
+- T-DL07-07：总收据中的 Monitor `PASS` 必须同时绑定
+  `natsume.digital-life-monitor-ui-live.v1`：它由 production launcher 启动的同一
+  Host/Obs/Nginx stack、一次真实 Playwright 交互、完全相同的 commit/run/listener/PID
+  以及 digest-only operator binding 组成。浏览器 session、cookie、截图、trace、原始
+  stdout/stderr、用户数据和模型正文均不得进入 runtime snapshot 或 receipt；单纯 HTML/metrics
+  只能证明 proxy 可达，不能代替交互证据。
 - 当前本地合同/脚本组合证据为 `30 passed in 5.43s`；`static_scan,doc_gate` 为
   `passed`。这不是实栈 receipt：下一步必须在已提交 SHA 上重新启动隔离 Docker、Host、Obs 和
   Monitor。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
