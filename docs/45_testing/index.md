@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.57
+版本：v2.58
 维护日期：2026-07-28
 状态：当前证据
 
@@ -165,6 +165,13 @@
   batch 35/38/43/44/47 与 direct-effect 邻接覆盖 isolated legacy compatibility。当前定向集合为 `78 passed in 3.07s`；
   附加的 AW05 secondary-model 文件因既有未绑定 Tribe runtime context 在 agent 构造前失败，未计入通过证据。它不证明
   canonical proactive 体验、真实 Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
+
+- `test_dl06_proprioception_load_retirement.py` 验证 canonical `ProprioceptionAgent` 不注册 conversation/channel/
+  voice/task EventBus，不将 session、打断、播放或 task success 写入 registry、派生 EventBus 或旧 organ；state、八类
+  callback、hint 和 export 均在副作用前返回 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`。
+  `test_proprioception_agent.py`、batch 35/36/43/44/47、direct-effect 与 Initiative 邻接保留 isolated legacy
+  compatibility 覆盖。当前定向集合为 `76 passed in 3.05s`；它不证明 scoped body/Need 体验、真实 Host/Gateway、
+  provider、远端 Edge、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

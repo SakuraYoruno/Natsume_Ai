@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.40
+版本：v2.41
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -193,6 +193,12 @@ EventBus，不再将旧 vitals、Bond vector 或 process-local recovery 组合�
 read/decision/export 入口显式给出 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`。真正的主动联系继续由
 scope-bound Life permission、relationship episode、Regulation、aftereffect 和 frozen Scene 决定；本退役不证明
 该 canonical 体验的真实 Host/Gateway/Edge 或 DL-07 验收。
+
+`ProprioceptionAgent` 也不再把 conversation/channel interrupt/voice/task-success 事件累积为 global cognitive load、
+continuity、疲惫或主动节律：canonical ports 下不订阅这些 EventBus，不写 registry、不派生 `PROPRIOCEPTION_UPDATED`，
+也不回灌 Limbic、Interoception、Endocrine、ANS、PainReward 或 DefaultMode。显式输入、callback、hint 与 export 仅给
+`LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`。真实 activity monitoring 仍经 app-local 技术 port 提供，
+但不会获得 self-affect、Need、关系或人格写权；未来身体意义只能进入 scoped Appraisal/Life。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

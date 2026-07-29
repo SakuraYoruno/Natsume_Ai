@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.49
+版本：v2.50
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -112,6 +112,13 @@ Life `RegulationDecision`、relationship episode 与 aftereffect，尚未完成�
 recovery state 合成为主动门控；evaluate/read/export 都显式返回 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`，topic
 模型调用和 registry/EventBus/old organ side effect 一并停止。Motor/Cortex 遇到该结果会保守暂缓；真正的主动陪伴仍
 由 canonical Life 的 permission、relationship episode、Regulation、aftereffect 和 frozen Scene 决定，不是该兼容模块。
+
+**Proprioception 兼容负荷边界模块**位于
+[`tribe/proprioception_agent.py`](../../../host_brain/tribe/proprioception_agent.py)。canonical ports 下它不订阅
+conversation/channel/voice/task EventBus，不将 session、打断、任务成功或播放状态写入 `TribeStateRegistry`，也不再
+派生 `PROPRIOCEPTION_UPDATED`、调用旧 organ 或生成 load hint。所有 state/callback/export 入口都给
+`LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`。activity monitor 保留为 app-local 技术事实；它不能把
+服务负荷升级为七海的 fatigue、stress、reward、关系连续性或主动许可。
 
 同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
 `handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；

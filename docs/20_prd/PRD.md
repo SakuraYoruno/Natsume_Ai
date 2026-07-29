@@ -247,6 +247,11 @@ Regulation 或 self-affect 的身体输入都需要 scoped、可重放的 Life �
 决策显式退役为 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`；真正的主动联系只能由同一 Life journal 内的
 explicit permission、relationship episode、Regulation、aftereffect 和冻结 Scene 共同裁决。
 
+旧 `ProprioceptionAgent` 不得把 conversation、channel interrupt、voice pipeline 或 task success 汇总为 process-global
+cognitive load、continuity、疲惫、压力、满足或主动节律，再回灌旧 organ。canonical Host 必须在 registry、EventBus、
+模型与旧器官副作用之前退役这些入口为 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`；真实 activity
+monitor 可以保留为 app-local 技术观察，但未来身体/Need 感受只能从 scoped observation → Appraisal → Life 形成。
+
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
 `AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。

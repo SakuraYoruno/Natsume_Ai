@@ -119,6 +119,12 @@ Life command、Regulation 和 durable aftereffect 决定；这一退役仍不是
 许可、关系 episode、Regulation、aftereffect 与 frozen Scene。此举不把七海变得被动，而是防止旧积分和机器缓存
 伪装成她的“想联系你”；真实的情境化主动体验、Host/Gateway 与 DL-07 验收仍未完成。
 
+旧 `ProprioceptionAgent` 也不再把会话、打断、任务成功或语音状态拼成跨用户的“认知负荷/连续性”，再回灌旧
+Limbic、Interoception、Endocrine、ANS、PainReward 或 DefaultMode。canonical Host 对这些入口只返回
+`LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`；真正的活动监测仍由 app-local 技术服务承担，但不能替
+七海生成疲惫、压力、满足或主动节律。未来若需要这些感受，必须以有 scope 的观察进入 Appraisal 与 Life，而不是
+从进程事件计数推测。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；
