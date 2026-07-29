@@ -126,6 +126,12 @@
 > fail-closed `RetiredEmotionalSilenceEngine`。遗漏 access 固定为 `LEGACY_SILENCE_ENGINE_RETIRED`，不能重新产生
 > process-local response posture。这仍是本地 composition 边界，不是体验或全栈验收。
 
+> **DL-06 Limbic signal/session 回路退役修订：** canonical `LimbicAgent.handle_signal()` 和 `_touch_state()`
+> 均不再写全局 `TribeStateRegistry` 或重发旧 EventBus payload。Surface/AgentRuntime 的 post-process
+> session-end hook 在解析用户 VAD、pending topic 或 default Bond identity 前直接返回
+> `SKIPPED / LEGACY_PERSONA_SESSION_END_RETIRED`；已接受回合的 canonical Life/aftereffect 保留为唯一情感
+> 连续性事实。这是 compatibility projection 清理，不是 provider、Voice/Avatar 或 DL-07 完成声明。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧

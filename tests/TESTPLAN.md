@@ -190,6 +190,13 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
 - T-DL06-09：production Host root 与 chat startup 不得构造或预热 mutable `EmotionalSilenceEngine`；保留的
   lifecycle port 只能返回 fail-closed `RetiredEmotionalSilenceEngine`，任何遗漏的 legacy access 必须为
   `LEGACY_SILENCE_ENGINE_RETIRED`，而不是创建 process-local response posture。
+- T-DL06-10：canonical Life authority 下的 `LimbicAgent.handle_signal()` 与 `_touch_state()` 不得写
+  `TribeStateRegistry` 或重发 EventBus；Surface/AgentRuntime 的 legacy session-end hook 必须在解析 caller VAD、
+  pending topic 或 default Bond identity 前返回 `SKIPPED / LEGACY_PERSONA_SESSION_END_RETIRED`。accepted Life
+  turn/aftereffect 是唯一可用于下一轮的连续性事实。
+- 当前本地证据：Limbic/session hook、BodySense、silence、inner-world、startup 与 Host composition 的最终单一
+  集合为 `119 passed, 4 skipped in 10.95s`。其中四项 skip 是已退役的 legacy recent-turn direct route；该集合不证明
+  真实 provider、Voice/Avatar、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

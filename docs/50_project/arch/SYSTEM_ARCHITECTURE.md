@@ -201,6 +201,11 @@ construction/warmup；为保持 rollback-window lifecycle contract，Host 只注
 `RetiredEmotionalSilenceEngine`。遗漏的 caller 因而 fail-closed 为 `LEGACY_SILENCE_ENGINE_RETIRED`，不能在 Host
 启动时重建 process-local posture。
 
+生产 Limbic 的剩余 signal/session compatibility path 也在同一 authority gate 后退役：`handle_signal()` 与
+`_touch_state()` 不再写全局 `TribeStateRegistry` 或向旧 EventBus 重新广播；Surface/AgentRuntime 的 session-end
+post-process 在读取用户 VAD、topic 或 default Bond identity 前即返回
+`SKIPPED / LEGACY_PERSONA_SESSION_END_RETIRED`。因此用户观察不会通过异步收口再次伪装为七海自我情绪。
+
 默认模式目前也遵守这一 single-authority 约束：读取 `LifeSnapshotReader` 后，边界层只投影有限的 self-affect
 和 relationship texture 给 `inner_activity_agent`，并用 `CANONICAL_LIFE_JOURNAL` marker 禁止该 agent 回读
 EmotionTimeline 或 SocialBrain/Bond。该关系 texture 不包含身份、episode evidence 或 intimacy consent，亦不映射

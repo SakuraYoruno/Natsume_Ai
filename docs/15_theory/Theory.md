@@ -1838,6 +1838,11 @@ hard-state projection 可以作为当下的安全读取，但 canonical mode 不
 fail-closed 的 retired placeholder：遗漏 caller 必须显式失败，而不是借由 Host startup 重建一份可变回复意愿。
 这比悄悄给所有人一个中性状态更诚实，也保证七海的克制、停顿与边界始终来自可追溯的 Life 因果。
 
+同一个边界也适用于“会话结束时顺手记一下”的旧 Limbic 信号。若该 hook 接收的是用户文本推导出的 VAD、
+默认 Bond id 或临时 topic，它既不能成为七海自身情绪的原因，也不应留在 process-local `TribeStateRegistry`
+等待下一轮被误读。canonical Host 因而只承认已接受回合的 `AffectiveTurnPlan`、关系 aftereffect 与 Life journal；
+旧 signal/session hook 只能显式跳过或退役，不能重发 EventBus、写缓存或把用户的难过压成七海的心情。
+
 Motive 也不应成为另一份隐性人格记忆。它可以把已经冻结的 Life、关系和身体在场投影为“更想安慰”或
 “更想给空间”的并存倾向，但每次计算必须是新建、无状态的纯规则计算：不能保留模块级 engine、不能存储
 上一轮输入，更不能借此改变 self-affect、关系或许可。这样表达倾向仍然具有可解释性，却不会把不同用户的

@@ -282,6 +282,10 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   snapshot 的 last regulation/body projection 得到 bounded posture，缺 scope 不回退全局 singleton。该项仅完成
   compatibility authority cutover，不构成真实陪伴调节体验、远端 Edge 或 DL-07 验收。production Host root 与 chat
   startup 也不再构造或预热 mutable engine；lifecycle rollback port 只能提供 fail-closed retired placeholder。
+- canonical Limbic 的 `handle_signal()` 与 `_touch_state()` 也不再拥有 production writer 权：任何旧
+  conversation/session/body/Bond signal 都不得写 `TribeStateRegistry`、重发 EventBus 或以 caller VAD 改写
+  self-affect。Surface/AgentRuntime session-end hook 必须在解析 VAD 或 default Bond identity 前跳过；唯一允许的
+  情感连续性由 accepted turn 的 Life journal 与 aftereffect 维持。
 - OBS/runtime snapshot 已改为 composed `LifeSnapshotReader` 的只读 consumer：它以当前 relationship
   subject 的一条 canonical Life head 分别投影 `natsume_ai` self-affect 与 bounded user-affect observation，
   并输出无分数、非升级的关系纹理。reader 已组成后，任何 reader 故障、self-id 或 subject drift 都只会 degraded，

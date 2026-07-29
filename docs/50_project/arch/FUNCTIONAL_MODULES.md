@@ -99,6 +99,11 @@ state。三个 silence 写入口与四个 BodySense mutation Skill 都在解析 
 production Host root 和 startup 也不构造/预热 mutable engine；lifecycle port 仅保留 fail-closed retired placeholder。
 isolated compatibility composition 仍可用于 rollback，但它不构成 self-affect、关系、调节或主动权限 authority。
 
+同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
+`handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；
+[`persona/session_hooks.py`](../../../host_brain/persona/session_hooks.py) 会在推导用户 VAD 或 default Bond id 前跳过
+旧 session-end/body hook。真实连续性只能继续读取 accepted turn 的 Life/aftereffect，不由诊断缓存补写。
+
 同一模块的 `run_growth_feedback_cycle()` 在 canonical authority 下已退役 legacy session feedback：
 `INTERACTION_RECORDED` 的 raw text/session 不再解析 Bond user 或调用 `PersonaGrowthTracker`，而是返回
 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。

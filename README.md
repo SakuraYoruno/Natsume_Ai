@@ -602,6 +602,12 @@ production Host root 现在也不再实例化该可变 engine，chat startup 不
 `LEGACY_SILENCE_ENGINE_RETIRED`，而非恢复一份进程内回复意愿。Host composition、startup 和上述相邻边界集合
 `88 passed in 11.33s`；这同样只是本地退役证据，不替代真实陪伴验收。
 
+本轮再关闭 Limbic 的全局信号和 post-process session-end 兼容回路：canonical Host 中
+`LimbicAgent.handle_signal()` 与 `_touch_state()` 不会写 `TribeStateRegistry` 或重发旧 EventBus payload；
+Surface/AgentRuntime 在推导用户 VAD、压缩 relationship subject 或调用 legacy session/body hook 前会直接跳过，
+返回 `LEGACY_PERSONA_SESSION_END_RETIRED`。已接受的 `AffectiveTurnPlan`、关系 aftereffect 与 canonical Life
+journal 才是本轮情感因果；这一清理不等于已完成真实模型、Voice/Avatar 或 DL-07 验收。
+
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开
 SocialBrain。原先未被生产代码导入的重复 `app/input_service_ack.py` 已删除。该收口只覆盖本地 helper

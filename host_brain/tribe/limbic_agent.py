@@ -233,6 +233,31 @@ class LimbicAgent:
             result["relationship_subject_id"] = str(person_id).strip()
         return result
 
+    @staticmethod
+    def _retired_legacy_signal_result(
+        *,
+        event_type: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        """Refuse the retired global Limbic signal bus in a canonical Host.
+
+        The old signal path wrote user-derived VAD, Bond deltas and body
+        hints to ``TribeStateRegistry`` before fanning them back through the
+        event bus.  It is neither durable nor scoped enough to represent
+        Natsume's affect.  A canonical Host therefore acknowledges the
+        compatibility call without retaining or re-publishing its payload.
+        """
+
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_LIMBIC_SIGNAL_RETIRED",
+            "operation": str(operation),
+            "event_type": str(event_type or "UNKNOWN").strip().upper() or "UNKNOWN",
+            "accepted": False,
+            "state_signal_count": 0,
+        }
+
     def _canonical_body_sense_projection(
         self,
         *,
@@ -962,6 +987,18 @@ class LimbicAgent:
         # continuity.  Session-end hooks are observers and must not append a
         # second Life command for the same foreground occurrence.
         payload = self.resolve_inner_world_state(person_id=user_id)
+        if self._legacy_self_affect_writes_retired():
+            # In a canonical Host the historical hook receives VAD derived
+            # from the *user* turn.  Do not retain, signal or reinterpret it
+            # as Natsume's state: the accepted AffectiveTurnPlan and Life
+            # journal already own the causal record.
+            del valence, arousal, pending_topics, mood_baseline
+            return {
+                **payload,
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "projection": "READ_ONLY",
+                "session_end_observer": "CANONICAL_LIFE_SNAPSHOT",
+            }
         try:
             self.handle_signal(
                 event_type="SESSION_ENDED",
@@ -1075,6 +1112,16 @@ class LimbicAgent:
         target_agent: str | None = None,
     ) -> dict[str, Any]:
         normalized_event = str(event_type or "").strip().upper() or "UNKNOWN"
+        if self._legacy_self_affect_writes_retired():
+            # Do not even emit the event in canonical composition.  Several
+            # historical subscribers turn these unscoped compatibility
+            # signals into private metabolism/body/Bond mutations; emitting a
+            # no-op marker would still let a delayed subscriber recreate a
+            # second authority.
+            return self._retired_legacy_signal_result(
+                event_type=normalized_event,
+                operation="tribe_signal",
+            )
         normalized_payload = dict(payload or {})
         writer = str(source_agent or "limbic_agent").strip() or "limbic_agent"
 
@@ -1379,6 +1426,11 @@ class LimbicAgent:
             return {"status": "ERROR", "emotion_tag": str(emotion_tag or ""), "error": str(exc)}
 
     def _touch_state(self, *, key: str, value: Any) -> None:
+        if self._legacy_self_affect_writes_retired():
+            # ``TribeStateRegistry`` is a process-local diagnostic cache.
+            # In canonical composition it must not retain a second copy of
+            # self-affect, relationship posture or user-derived VAD.
+            return
         prev = self.state_registry.get_state("limbic") or {}
         prev_state = dict(prev.get("state") or {})
         merged = dict(prev_state)

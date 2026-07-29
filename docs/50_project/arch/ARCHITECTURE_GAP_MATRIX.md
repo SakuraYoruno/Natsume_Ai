@@ -168,6 +168,12 @@ Regulation/CompanionAct 的完整体验、Monitor/Review、真实 provider/Edge 
 `RetiredEmotionalSilenceEngine`，任何遗漏调用固定报 `LEGACY_SILENCE_ENGINE_RETIRED`。这防止“app-local”误被
 理解为可在 production 中保留第二份可写调节状态，仍不代表调节体验或服务栈通过。
 
+**Limbic signal/session 兼容回路退役修订：** canonical `LimbicAgent.handle_signal()`、`_touch_state()` 与
+post-process session-end hook 不再写 `TribeStateRegistry`、重发旧 EventBus 或把 caller 推导的用户 VAD/default
+Bond identity 送进旧模型。该回路只能返回 `RETIRED_CANONICAL_LIFE` 或
+`SKIPPED / LEGACY_PERSONA_SESSION_END_RETIRED`；accepted turn 的 Life journal/aftereffect 是唯一连续性来源。
+它清除一条影子投影，不等于真实模型、三模态设备或完整体验验收。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

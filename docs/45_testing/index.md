@@ -88,6 +88,11 @@
 - `test_ne01_host_lifecycle_composition.py` 与 `test_startup_chat_runtime_warmup.py` 额外验证 production Host
   只注入 fail-closed `RetiredEmotionalSilenceEngine`，chat startup 不会预热旧 engine；遗漏读取明确失败，不能偷偷
   建立 process-local posture。相邻最终集合为 `88 passed in 11.33s`，仍只是本地 composition evidence。
+- `test_limbic_agent.py` 与 `test_agent_runtime_shared_surface_loop.py` 进一步验证 canonical Life 模式下的
+  Limbic signal bus 与 `TribeStateRegistry` 写入均显式退役，Surface/AgentRuntime 的 legacy session-end hook
+  在推导用户 VAD 或 default Bond id 前返回 `SKIPPED / LEGACY_PERSONA_SESSION_END_RETIRED`。该集合只证明旧回路
+  不能重新成为 self-affect authority；连同 BodySense、silence、inner-world、startup 与 Host composition 的
+  最终单一集合为 `119 passed, 4 skipped in 10.95s`，不证明真实陪伴体验、provider、Voice/Avatar 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
