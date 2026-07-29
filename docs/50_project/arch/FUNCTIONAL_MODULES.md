@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.45
+版本：v2.46
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -331,6 +331,13 @@ emotion/Bond/loneliness EventBus，`resolve_dual_system()` 不再写 language re
 旧 silence/emotion/Bond/孤独/任务/平台/身体 callback。所有残留 handler 返回
 `LEGACY_CORTEX_EVENT_FANOUT_RETIRED`，不写 global cortex registry、不发布派生 Bond event，也不调用
 PainReward；relation episode、aftereffect 与 expression 必须回到 canonical Life 主链。
+
+`CircadianAgent` 现在是纯时间投影：canonical ports 下不注册旧 EventBus、不写 `circadian_agent` registry，也不把
+phase boundary 翻译为旧 organ 情绪副作用；`export_runtime_state()` 只返回带 `RUNTIME_TIME_OBSERVATION` 的
+`TIME_ONLY` 形状。`InteroceptionAgent` 不再合并无 scope 的 global vital/somatic cache，也不订阅、写入、发事件、
+调用旧 organ 或生成第二个叙事模型；它在 canonical 模式返回 `UNAVAILABLE` compatibility projection，并拒绝
+external stress/relief/body-budget tick。二者不能再成为七海 self-affect/Need 的 writer；将来需要真实身体输入时，
+必须通过 scoped Life command，而不是恢复旧 cache。该状态仍为 `PARTIAL`，不等同真实体验或 DL-07。
 
 `lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
 `LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，

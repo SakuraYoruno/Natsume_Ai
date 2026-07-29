@@ -45,7 +45,64 @@ class CircadianAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_circadian_writes_retired(self) -> bool:
+        """Whether canonical Life owns every affective consequence of time.
+
+        A clock is still a useful, deterministic runtime observation.  What
+        must disappear in the canonical Host is the old state-registry/event
+        fan-out that translated a phase boundary into Limbic, endocrine,
+        hedonic, or body-budget mutations without a scoped Life command.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _canonical_time_projection(
+        profile: dict[str, Any],
+        *,
+        source: str,
+    ) -> dict[str, Any]:
+        """Return the time-only projection allowed beside canonical Life."""
+
+        projected = dict(profile)
+        projected.update(
+            {
+                "status": "READ_ONLY",
+                "authority": "RUNTIME_TIME_OBSERVATION",
+                "self_affect_authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "LEGACY_CIRCADIAN_AFFECT_FANOUT_RETIRED",
+                "projection": "TIME_ONLY",
+                "legacy_side_effects_suppressed": True,
+                "source": str(source or "circadian_agent"),
+            }
+        )
+        return projected
+
+    @staticmethod
+    def _retired_legacy_circadian_result(
+        *,
+        operation: str,
+        source: str = "circadian_agent",
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_CIRCADIAN_AFFECT_FANOUT_RETIRED",
+            "operation": str(operation),
+            "source": str(source or "circadian_agent"),
+            "accepted": False,
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_circadian_writes_retired():
+            # Time is read directly for the frozen turn.  A process-global
+            # phase event has no relationship/task scope and therefore cannot
+            # become a second Life command or affect writer.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -84,6 +141,9 @@ class CircadianAgent:
 
     def refresh_state(self, *, source: str = "runtime", ts_ms: int | None = None) -> dict[str, Any]:
         profile = self.evaluate_profile(ts_ms=ts_ms)
+        if self._legacy_circadian_writes_retired():
+            return self._canonical_time_projection(profile, source=source)
+
         prev = self.state_registry.get_state("circadian_agent") or {}
         prev_state = dict(prev.get("state") or {})
         previous_phase = str(prev_state.get("phase") or self._last_phase or "unknown")
@@ -277,6 +337,11 @@ class CircadianAgent:
         Returns:
             时段感知描述字符串，或 None（未触发/失败）。
         """
+        if self._legacy_circadian_writes_retired():
+            # The frozen AffectiveTurnPlan owns wording and regulation.  A
+            # second model must not turn a clock observation into an
+            # untraceable emotional narration.
+            return None
         _significant = float(energy_level or 0.8) < 0.3 or float(sleep_pressure or 0.2) > 0.6
         if not _significant:
             return None
@@ -322,6 +387,28 @@ class CircadianAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_circadian_writes_retired():
+            state = self._canonical_time_projection(
+                self.evaluate_profile(),
+                source="export_runtime_state",
+            )
+            return {
+                "phase": str(state.get("phase") or "day"),
+                "local_hour": int(state.get("local_hour") or 12),
+                "phase_energy_baseline": float(state.get("phase_energy_baseline") or 0.8),
+                "proactive_multiplier": float(state.get("proactive_multiplier") or 1.0),
+                "recovery_bias": float(state.get("recovery_bias") or 0.3),
+                "sleep_pressure": float(state.get("sleep_pressure") or 0.2),
+                "response_latency_ms": int(state.get("response_latency_ms") or 400),
+                "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
+                "status": str(state["status"]),
+                "authority": str(state["authority"]),
+                "self_affect_authority": str(state["self_affect_authority"]),
+                "reason_code": str(state["reason_code"]),
+                "projection": str(state["projection"]),
+                "legacy_side_effects_suppressed": bool(state["legacy_side_effects_suppressed"]),
+            }
+
         snap = self.state_registry.get_state("circadian_agent") or {}
         state = dict(snap.get("state") or {})
         # Runtime exports are read-only projections. Phase-transition side effects
@@ -343,7 +430,12 @@ class CircadianAgent:
             "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
         }
 
-    async def _on_mode_transition(self, event: Any) -> None:
+    async def _on_mode_transition(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_circadian_writes_retired():
+            return self._retired_legacy_circadian_result(
+                operation="mode_transition",
+                source="mode_transition",
+            )
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = await asyncio.to_thread(self.refresh_state, source="mode_transition", ts_ms=ts_ms)
@@ -355,14 +447,24 @@ class CircadianAgent:
         }
         await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", prev, writer="circadian_agent")
 
-    async def _on_channel_message_received(self, event: Any) -> None:
+    async def _on_channel_message_received(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_circadian_writes_retired():
+            return self._retired_legacy_circadian_result(
+                operation="channel_message_received",
+                source="channel_message_received",
+            )
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = await asyncio.to_thread(self.state_registry.get_state, "circadian_agent") or {}
         state = dict(prev.get("state") or {})
         state["last_external_stimulus_ts_ms"] = ts_ms
         await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", state, writer="circadian_agent")
 
-    async def _on_voice_pipeline_started(self, event: Any) -> None:
+    async def _on_voice_pipeline_started(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_circadian_writes_retired():
+            return self._retired_legacy_circadian_result(
+                operation="voice_pipeline_started",
+                source="voice_pipeline_started",
+            )
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = await asyncio.to_thread(self.state_registry.get_state, "circadian_agent") or {}
         state = dict(prev.get("state") or {})
@@ -370,7 +472,12 @@ class CircadianAgent:
         state["voice_pipeline_started_ts_ms"] = ts_ms
         await asyncio.to_thread(self.state_registry.set_state, "circadian_agent", state, writer="circadian_agent")
 
-    async def _on_voice_pipeline_ended(self, event: Any) -> None:
+    async def _on_voice_pipeline_ended(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_circadian_writes_retired():
+            return self._retired_legacy_circadian_result(
+                operation="voice_pipeline_ended",
+                source="voice_pipeline_ended",
+            )
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = await asyncio.to_thread(self.state_registry.get_state, "circadian_agent") or {}
         state = dict(prev.get("state") or {})
@@ -396,6 +503,14 @@ class CircadianAgent:
         Returns:
             {"phase": str, "decay_result": dict, "baseline_applied": bool}
         """
+        if self._legacy_circadian_writes_retired():
+            return {
+                **self._retired_legacy_circadian_result(
+                    operation="tick_emotion_baseline",
+                    source=source,
+                ),
+                "baseline_applied": False,
+            }
         import logging as _logging
         _log = _logging.getLogger("Natsume.tribe.circadian_agent")
         try:

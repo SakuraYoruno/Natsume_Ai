@@ -3,8 +3,8 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.4
-日期：2026-07-16
+版本：v4.5
+日期：2026-07-28
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
 本文只定义产品必须提供什么、禁止什么以及如何验收，不记录代码完成度、文件数量、端口默认值或阶段状态。
@@ -225,6 +225,12 @@ Host、Obs、Gateway、Edge 和 Worker 只通过版本化 Command/Query/Event �
 原始 Edge 情绪/反应/ASR metadata 也属于无 scope 的外部证据：它们可被审计保存，或经最终 ASR 的受控
 Input bridge 重新进入用户观察，但不得直接写 Bond、七海 self-affect 或 Avatar/VTS。只有补全
 `workspace + relationship_subject` 并经 `AffectFusion → EventAppraisal` 的输入，才可能影响后续表达。
+
+昼夜时间可以作为确定性、只读的环境观察，但相位切换不得通过全局 EventBus 或旧 organ fan-out 直接制造
+七海的疲惫、愉悦或低唤醒。无 exact scope 的 body/vital cache 也不得被折叠为 `Need`、`Mood` 或身体预算；
+若 canonical Life 尚未收到可验证的输入，产品必须明确显示/处理为不可用，而不是用 `NEUTRAL`、默认能量或
+上一次会话的数值补齐。任何未来的身体输入都必须以同一 Life command/journal、可重放来源和隐私最小化摘要
+进入，不能重启旧 `InteroceptionAgent` 写 authority。
 
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结

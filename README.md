@@ -95,6 +95,13 @@ PainReward、Endocrine、Limbic、Interoception。PainReward 的全局 EventBus�
 EventBus 回调都显式退役，不写 `cortex_agent` global snapshot，也不触发旧 PainReward 或派生 Bond 事件。它保留
 纯上下文收集与路由读取；已接受回复的关系后效应、表达和外部交付仍只由 Life/Outbox/ExpressionPlan 主链拥有。
 
+`CircadianAgent` 现只保留由当前时间直接导出的只读时段观察；canonical Host 不再登记相位 EventBus、写
+`circadian_agent` 全局快照，或把昼夜切换扇出为 Limbic、Endocrine、PainReward、Interoception、ANS 或默认模式的
+情感副作用。`InteroceptionAgent` 则不再把无 scope 的全局 vital/body cache 拼成七海的身体预算：在尚未提供
+scope-bound Life 输入前，它明确返回 `LEGACY_INTEROCEPTION_BODY_BUDGET_RETIRED / UNAVAILABLE`，拒绝外部压力、
+恢复和 scheduler tick 写入。这保护“疲倦/紧张”仍是有因果来源的七海感受，而不是进程缓存；也说明 canonical
+body/need 输入仍需后续实现，DL-06 与 DL-07 都尚未完成。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

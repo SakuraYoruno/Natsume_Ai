@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.36
+版本：v2.37
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -166,6 +166,14 @@ self-affect 代谢：不订阅旧 global EventBus，不更新 hedonic cache/磁�
 关系/孤独/任务/平台/身体 EventBus，也不注册其对应 callback、写 global cortex snapshot 或驱动 PainReward。
 它仍可使用纯 context collection 与 intent route；accepted reply 的 episode、aftereffect、expression 和 delivery
 必须继续由 Life/Outbox/ExpressionPlan 的有 scope 主链处理。
+
+`CircadianAgent` 在 canonical Host 只保留从 wall-clock 得到的 `TIME_ONLY` runtime observation；它不注册旧
+phase/message/voice EventBus，也不写 global circadian snapshot，且不会把相位转换扇出到 Limbic、Endocrine、
+PainReward、Interoception、ANS 或 DefaultMode。`InteroceptionAgent` 的旧 global vital/body-budget state 则没有
+被误当作 canonical body input：它不订阅 global signal、不写 registry/派生 EventBus、不运行第二个身体叙事模型，
+所有 external stress、relief 与 scheduler tick 都显式退役为 `LEGACY_INTEROCEPTION_BODY_BUDGET_RETIRED`。没有
+scope-bound Life command 时其 projection 为 `UNAVAILABLE`，而不是伪造 `NEUTRAL` self-affect。真正的 body/need
+输入仍是后续工作；本收口不代表 DL-06、真实 Host 或 DL-07 服务栈通过。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

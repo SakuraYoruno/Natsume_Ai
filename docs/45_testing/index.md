@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.53
+版本：v2.54
 维护日期：2026-07-28
 状态：当前证据
 
@@ -137,6 +137,13 @@
   conversation lifecycle 或派生 Bond event，不写 cortex registry，也不调用 PainReward；其保留的是纯 context/route
   读取。`test_cortex_agent.py`、context collector 与 batch 47/49 覆盖 isolated compatibility。该集合只证明旧
   fan-out 已退役，不证明真实 Host、Gateway、Edge、模型或 DL-07。
+
+- `test_dl06_circadian_interoception_retirement.py` 验证 canonical `CircadianAgent` 只输出时间投影，既不订阅
+  global EventBus、写 phase snapshot，也不扇出旧 affect organ；canonical `InteroceptionAgent` 不接受 unscoped
+  body-budget/stress/relief/tick 写入，而是明确返回 `LEGACY_INTEROCEPTION_BODY_BUDGET_RETIRED / UNAVAILABLE`。
+  `test_circadian_agent.py`、`test_interoception_agent.py` 与 batch 35/37/41/48/49 保留 isolated legacy
+  compatibility 回归；加上 runtime snapshot/Obs 邻接后当前定向集合为 `84 passed in 3.66s`；它不证明 scoped body input、真实 Host、provider、
+  远端 Edge、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
