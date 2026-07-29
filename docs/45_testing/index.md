@@ -138,6 +138,10 @@
   即使兼容输入携带 `SOULMATE`、`relationship_distance=lover`、`closeness=0.99`、恋人 clue 或 lover task，也只能
   输出 `familiar`；rejected canonical 则保持 `guarded`。与普通 Chat projection、Surface packet/runtime 回归合计
   `82 passed in 21.18s`；未启动 Docker、真实 provider、远端 Edge 或物理 Voice/Avatar。
+- `test_dl06_retrieval_canonical_relationship_cutover.py` 覆盖 Cortex 检索预取：valid internal Life context 只能
+  生成无 score 的 `FRIEND / stepsibling / familiar` 摘要；workspace drift 生成 guarded rejected 摘要；两者均不调用
+  legacy state-arbiter Bond fetch，Motive 也只能收到该 bounded projection。Cortex workspace 传递、governed route、
+  Surface 关系 Gate 一并为 `34 passed in 5.64s`。
 
 ## NE-07 隔离外部服务栈
 

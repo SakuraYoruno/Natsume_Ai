@@ -123,6 +123,9 @@ legacy Bond 作为补偿；而是产生 `CANONICAL_RELATIONSHIP_REJECTED` 的安
 `surface_affect_control` 是该链的最后一个 production Gate：它依据 projection 的 `source_authority` 忽略旧
 `relationship_distance=lover`、closeness、恋人 clue 和 lover task，canonical 状态只能保持 `familiar`，rupture 或
 rejected hand-off 才可收紧为 `guarded`。其定向验证为 `82 passed in 21.18s`。
+同一 canonical relationship authority 现进入 Cortex retrieval prefetch：有效 hand-off 会跳过 legacy state
+arbiter，并向 retrieval/Motive 传递无 score 的 `FRIEND / stepsibling / familiar`；scope/schema drift 则传递
+guarded rejected projection，绝不回退到兼容 Bond。该链的定向验证为 `34 passed in 5.64s`。
 
 `DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE` 进一步把该边界前移到 production
 composition root：`build_production_host_application_ports()` 不再构造 mutable

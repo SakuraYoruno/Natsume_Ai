@@ -42,7 +42,9 @@
 `CANONICAL_RELATIONSHIP_REJECTED` 安全投影。Surface context packet 复用这条结果。当前只有
 `LOCAL_TARGETED_179_PASSED / EMOTIONAL_DIGITAL_LIFE_PARTIAL`，并由 `surface_affect_control` 在最终表达处忽略
 compatibility lover distance、closeness、clue 与 lover task 的二次升级；其定向集合为 `82 passed in 21.18s`。
-该模块不承担真实 Edge、Monitor、Review 或全栈验收。
+同一 module 的 Cortex retrieval adapter 在 canonical hand-off 存在时跳过 legacy state-arbiter Bond fetch，只向
+retrieval/Motive 输出无分数 `FRIEND / stepsibling / familiar|guarded` projection（`34 passed in 5.64s`）。该模块
+不承担真实 Edge、Monitor、Review 或全栈验收。
 
 Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
 `PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名

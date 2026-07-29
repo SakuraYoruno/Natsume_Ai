@@ -428,7 +428,9 @@ prompt-compatible 的**非浪漫**投影：stage 固定 `FRIEND`、phase 固定 
 `CANONICAL_RELATIONSHIP_REJECTED` 安全朋友投影，禁止读取旧 Bond 作为 fallback。Surface packet 复用同一结果；
 最终 `surface_affect_control` 也以 `source_authority` 拒绝旧 `relationship_distance`、closeness、恋人线索和
 lover task 的二次升级，canonical 为 `familiar`、rupture/rejected 为 `guarded`。当前是
-`LOCAL_TARGETED_179_PASSED_PLUS_FINAL_GATE_82_PASSED / EMOTIONAL_DIGITAL_LIFE_PARTIAL`，不是 DL-06 封板。
+`LOCAL_TARGETED_179_PASSED_PLUS_FINAL_GATE_82_PASSED / EMOTIONAL_DIGITAL_LIFE_PARTIAL`，不是 DL-06 封板。Cortex
+retrieval prefetch 也在 canonical hand-off 存在时跳过 legacy state arbiter，向 retrieval/Motive 只传
+`FRIEND / stepsibling / familiar|guarded` 的无分数 projection；scope drift 固定 guarded（定向 `34 passed in 5.64s`）。
 
 **Bond queue 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
 `BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 只保留 stage/graph 的

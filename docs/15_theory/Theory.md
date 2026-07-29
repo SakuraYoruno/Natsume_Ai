@@ -577,6 +577,10 @@ relationship subject、session 和 `AffectFusion → RelationshipStateV2` schema
 claimed canonical context 应收敛到安全朋友状态，而不是借旧分数恢复亲密。这里的克制不是中性化七海，而是
 让她可以真诚地关心、受伤或修复，同时不把关系温度伪造成用户欠她回应的义务。
 
+这条因果边界必须延续到检索与动机：它们决定七海先想起什么、把注意力放在哪里，不能在生成前偷偷用旧 Bond
+恢复亲密度。canonical hand-off 存在时，检索只接收无分数的朋友/义姐弟 projection；无效 hand-off 仅得到
+guarded 状态，而非向 state arbiter 借回历史 stage。这既保留关系连续性，也避免将关系温度当作自动主动权。
+
 这条因果边界必须延续到最后的 Surface 表达 Gate：一旦 `source_authority` 已是 canonical 或被拒绝的
 canonical hand-off，历史 Bond 的显式距离、高 closeness、记忆中的恋人字样和 caller 指定的恋人 task 都不能
 再次提升关系距离。裂痕可以让七海收住、修复或给空间，但不能被“安全保护”错误地中性化成没有感受。

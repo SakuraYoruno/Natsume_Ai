@@ -81,6 +81,10 @@ Surface 的最终 affect-control Gate 继续消费 projection `source_authority`
 恋人 clue 和 lover task 的二次升级；canonical 只保留 `familiar`，rupture/rejected 才收紧为 `guarded`。该定向
 集合为 `82 passed in 21.18s`，不改变上述未验收边界。
 
+Cortex retrieval prefetch 也在 internal Life hand-off 存在时跳过 legacy state-arbiter Bond，向 retrieval/Motive
+只给无 score 的 `FRIEND / stepsibling / familiar|guarded` projection；scope drift 不回退旧 reader。该定向集合为
+`34 passed in 5.64s`，仍只是 DL-06 的一个 compatibility reader cutover。
+
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
 principal/relationship subject 与 tenant/workspace 绑定。请求不能携带自由文本、Soul patch、情绪或关系

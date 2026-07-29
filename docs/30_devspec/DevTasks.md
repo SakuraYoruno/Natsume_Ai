@@ -137,6 +137,12 @@ fail-closed 为 `CANONICAL_RELATIONSHIP_REJECTED`，不回退 legacy Bond。相�
 closeness、恋人 clue 或 caller-selected lover task 抬升 Surface 距离；有效 canonical 维持 `familiar`，裂痕或
 被拒绝 hand-off 维持 `guarded`。该 Gate 定向集合为 `82 passed in 21.18s`，仍非完整服务验收。
 
+继续执行 `DL-06_CORTEX_RETRIEVAL_CANONICAL_RELATIONSHIP_CUTOVER`：Cortex prefetch 在检测到 internal Life
+hand-off 后，严格以 workspace/person/session 抽取 bounded projection，并跳过 `resolve_state_arbiter_bond_fact()`。
+检索和 Motive 只接收 `FRIEND / stepsibling / familiar|guarded` 与有限 trust/safety/attunement texture；不接收
+legacy score、恋人 stage 或 proactive permission。claimed canonical 无效时同样 guarded 且不回退 arbiter。
+该定向集合为 `34 passed in 5.64s`，尚未清零其它 reader 或完成真实服务验收。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

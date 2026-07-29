@@ -288,6 +288,11 @@ packet 取得同一结果，因此文字的关系距离仍为 `familiar`。本�
 clue 以及 lover task 都没有再次升温的机会；只有 rupture/rejected 会进一步收紧为 `guarded`。该小切片为
 `82 passed in 21.18s`，不替代真实语音、Avatar 或服务栈验收。
 
+**Cortex 检索预取修订：** internal AffectiveFusion hand-off 存在时，`fastpaths` 以同一 workspace/person/session
+生成无分数 `FRIEND / stepsibling / familiar|guarded` retrieval projection，并完全跳过 legacy state-arbiter
+Bond fetch。该 projection 是检索与 Motive 的唯一关系输入；scope/schema 失效也只给 guarded，不向旧 Bond 回退。
+定向验证为 `34 passed in 5.64s`，不能外推为其它 reader、真实模型或 DL-07 已完成。
+
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。
 任何遗漏 Life authority 的 Host request 都稳定拒绝为 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不再以

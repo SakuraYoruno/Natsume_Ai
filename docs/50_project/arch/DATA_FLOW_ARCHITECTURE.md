@@ -680,6 +680,20 @@ context 与 `RelationshipStateV2` 三层 schema 一致。成功时 legacy prompt
 旧显式 lover distance、closeness、恋人 clue 和 lover task，仅保留 `familiar` 或因 rupture/rejected 而收紧的
 `guarded`。该最终 Gate 定向回归为 `82 passed in 21.18s`。
 
+Cortex 的检索分支使用同一 authority：
+
+```text
+AffectFusion internal envelope
+  → scope/schema/self-id validation
+  → bounded retrieval relationship projection
+  → retrieval + Motive prefetch
+  → governed Chat input
+```
+
+只要 envelope 声称 canonical，预取就不会访问 legacy state-arbiter Bond。有效投影仅提供
+`FRIEND / stepsibling / familiar` 与有限 texture；drift 或不完整 hand-off 为 `guarded`，不携带 score、恋人 stage
+或 proactive permission。该路径的定向验证为 `34 passed in 5.64s`。
+
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor
