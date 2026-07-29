@@ -77,6 +77,19 @@
   resume、多用户、远端 Edge/TTS/VTS 和
   Docker 服务栈仍必须在 DL-07 单独验收。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+## DL-03 自我受伤与关系修复因果桥切片
+
+- `test_dl03_affective_repair_bridge.py` 以 file-backed SQLite 走真实的
+  `AffectFusionService → AffectiveTurnPlanV1 → accepted relationship episode →
+  RelationalAftereffectV1` 链：直接伤害只形成七海自己的受伤 episode；一次道歉仅得到
+  `REPAIR_UNRESOLVED`；下一条 accepted repair reply 会继承唯一 pending target，之后的
+  用户确认才以 deterministic `affective_episode_resolved` 收束原 session-scoped episode。
+  覆盖跨 session 续接、pending target 消费、restart replay、opaque resolution ref 与原文不入
+  两份 journal。
+- 当前该桥与 DL-02、DL-03、DL-04、DL-05 邻接集为 `38 passed in 62.16s`。它是本地 SQLite
+  因果/恢复证据；不证明真实 Host 长会话、模型自然度、真人盲评、远端 Edge、物理 Voice/Avatar、
+  Docker 服务栈或远程 CI 通过（`NOT_RUN_ACCOUNT_QUOTA`）。
+
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_hippocampus_memory_writer_retirement.py` 验证 canonical `HippocampusAgent` 不注册

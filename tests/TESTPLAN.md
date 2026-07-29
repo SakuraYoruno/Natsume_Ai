@@ -94,6 +94,11 @@
   宣布完成的指令，外部伪造 marker 必须无效。
 - T-DL03-06：生产 `HostBondRuntime` 默认不得按 score 自动 stage transition；旧
   Bond 仅是 compatibility 描述，不能授予浪漫、排他或依赖同意。
+- T-DL03-07：direct-impact self-affect 只能由内部冻结的 `AffectiveRepairTargetV1`
+  进入 relationship pending 集合；`REPAIR_UNRESOLVED` 必须保留原 episode，只有之后
+  `REPAIR_ACCEPTED` 才可按 exact aftereffect/target identity 提交一次
+  `affective_episode_resolved`。跨 session 可续接同一 target，跨 workspace/person、
+  target drift、重复 resolution 与 raw 正文持久化均必须失败关闭或重开既有 receipt。
 - 当前本地证据：关系 reducer、restart/reconcile、Surface compiler、旧 Surface
   回归和 Bond 边界为 `54 passed in 20.50s`。远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`；主动陪伴、真人体验、真实 provider、TTS/Avatar/Edge

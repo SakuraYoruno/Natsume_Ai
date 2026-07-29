@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from natsume_contracts.life import (
+    AffectiveRepairTargetV1,
     AffectiveTurnPlanV1,
     CompanionActV1,
     CompanionProfilePreferencesV1,
@@ -42,7 +43,18 @@ _APPRAISAL_CANDIDATE_SELECTION_KINDS = frozenset(
         "NATSUME_MAY_HAVE_HURT_USER",
         "DIRECTED_DISRESPECT_TOWARD_NATSUME",
         "REPAIR_SIGNAL",
+        "RELATIONSHIP_REPAIR_ACCEPTED",
         "USER_MIXED_AFFECT",
+        "DIRECTED_RELATIONAL_HURT",
+        "DIRECTED_RELATIONAL_THREAT",
+        "DIRECTED_RELATIONAL_COMPARISON",
+    }
+)
+_DIRECT_REPAIRABLE_APPRAISALS = frozenset(
+    {
+        "directed_relational_hurt",
+        "directed_relational_threat",
+        "directed_relational_comparison",
     }
 )
 
@@ -129,6 +141,11 @@ class AffectiveTurnGuidance:
             "companion_profile_digest": self.plan.companion_profile_digest,
             "companion_profile_revision": self.plan.companion_profile_revision,
             "companion_profile_stage": self.plan.companion_profile_stage,
+            "affect_repair_target_episode_id": (
+                self.plan.affect_repair_target.affect_episode_id
+                if self.plan.affect_repair_target is not None
+                else ""
+            ),
         }
 
 
@@ -228,6 +245,15 @@ def build_affective_turn_guidance(
         if regulation_is_current
         else "EXPRESS"
     )
+    repair_target = _repair_target_for_plan(
+        affective_life=life,
+        self_affect=self_affect,
+        regulation=regulation if regulation_is_current else {},
+        workspace_id=expected_workspace,
+        relationship_subject_id=expected_subject,
+        session_id=expected_session,
+        self_affect_revision=self_revision,
+    )
     relationship_life = _mapping(life.get("relationship_life"))
     relationship_state = _mapping(relationship_life.get("state"))
     if relationship_state and _text(
@@ -281,6 +307,9 @@ def build_affective_turn_guidance(
         "regulation_id": regulation_id,
         "appraisal_id": appraisal_id,
         "appraisal_kind": appraisal_kind,
+        "affect_repair_target": (
+            repair_target.as_dict() if repair_target is not None else None
+        ),
         "companion_act": act_kind,
         "generation_mode": generation_mode,
         # The previous expression is read only from the durable Host delivery
@@ -379,12 +408,68 @@ def build_affective_turn_guidance(
         companion_profile_digest=profile.profile_digest,
         companion_profile_revision=profile_revision,
         companion_profile_stage=profile_stage,
+        affect_repair_target=repair_target,
     )
     return AffectiveTurnGuidance(
         plan=plan,
         facts=_facts_for_plan(plan),
         must_not_do=_must_not_for_plan(plan),
         style_anchor=(*_style_for_plan(plan), *_profile_style_anchors(profile.preferences)),
+    )
+
+
+def _repair_target_for_plan(
+    *,
+    affective_life: Mapping[str, Any],
+    self_affect: Mapping[str, Any],
+    regulation: Mapping[str, Any],
+    workspace_id: str,
+    relationship_subject_id: str,
+    session_id: str,
+    self_affect_revision: int,
+) -> AffectiveRepairTargetV1 | None:
+    """Return an exact bridge only for a fresh direct relational impact.
+
+    An ordinary sad user message, a helpful response, or a later repair
+    signal must never manufacture a repair debt for Natsume.  The target is
+    therefore limited to the same atomic appraisal/regulation pair that
+    opened one of the three narrowly detected direct-impact episodes.
+    """
+
+    appraisal = _mapping(self_affect.get("last_appraisal"))
+    if _text(appraisal.get("event_kind")).lower() not in _DIRECT_REPAIRABLE_APPRAISALS:
+        return None
+    episode_id = _text(regulation.get("episode_id"))
+    if not episode_id:
+        return None
+    active = [
+        _mapping(item)
+        for item in list(self_affect.get("active_episodes") or [])
+        if isinstance(item, Mapping)
+    ]
+    episode = next(
+        (item for item in active if _text(item.get("episode_id")) == episode_id),
+        None,
+    )
+    if episode is None:
+        return None
+    components = {
+        _text(_mapping(component).get("emotion")).upper()
+        for component in list(episode.get("components") or [])
+        if isinstance(component, Mapping)
+    }
+    if not components.intersection({"HURT", "ANGER", "JEALOUSY"}):
+        return None
+    aggregate_id = _text(affective_life.get("aggregate_id"))
+    if not aggregate_id.startswith("affect::"):
+        return None
+    return AffectiveRepairTargetV1(
+        affect_aggregate_id=aggregate_id,
+        affect_episode_id=episode_id,
+        workspace_id=workspace_id,
+        relationship_subject_id=relationship_subject_id,
+        session_id=session_id,
+        self_affect_revision=self_affect_revision,
     )
 
 
@@ -442,7 +527,11 @@ def _select_companion_act(
     # of being lost until a later relationship aftereffect exists.
     if appraisal_kind == "USER_BOUNDARY_OR_SPACE":
         return "GIVE_SPACE"
-    if appraisal_kind in {"NATSUME_MAY_HAVE_HURT_USER", "REPAIR_SIGNAL"}:
+    if appraisal_kind in {
+        "NATSUME_MAY_HAVE_HURT_USER",
+        "REPAIR_SIGNAL",
+        "RELATIONSHIP_REPAIR_ACCEPTED",
+    }:
         return "REPAIR"
     if appraisal_kind == "DIRECTED_DISRESPECT_TOWARD_NATSUME":
         return "SET_BOUNDARY"

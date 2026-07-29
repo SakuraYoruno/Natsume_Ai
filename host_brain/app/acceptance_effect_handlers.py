@@ -581,6 +581,20 @@ class _AcceptedLifeForegroundHandler:
         )
         reply_channel = str(payload.get("reply_channel") or "").strip()
         reply_target = str(payload.get("reply_target") or "").strip()
+        raw_affective_turn_plan = payload.get("affective_turn_plan")
+        affective_turn_plan = (
+            dict(raw_affective_turn_plan)
+            if isinstance(raw_affective_turn_plan, Mapping)
+            else {}
+        )
+        raw_affect_repair_target = affective_turn_plan.get(
+            "affect_repair_target"
+        )
+        affect_repair_target = (
+            dict(raw_affect_repair_target)
+            if isinstance(raw_affect_repair_target, Mapping)
+            else {}
+        )
         return {
             "workspace_id": str(payload.get("workspace_id") or "workspace::default").strip(),
             "relationship_subject_id": str(value.get("person_id") or "").strip(),
@@ -599,6 +613,7 @@ class _AcceptedLifeForegroundHandler:
                 if reply_channel and reply_target
                 else None
             ),
+            "affect_repair_target": affect_repair_target or None,
         }
 
     def _provision_relationship_episode(

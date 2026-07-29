@@ -57,7 +57,8 @@ TTS、Avatar 和 Bond 只能提交观察、读取投影或消费冻结计划。
 | `SelfAffectStateV2` / `EmotionEpisodeV1` | 并存情绪、触发、对象、衰减、未解决与修复状态 |
 | `MoodStateV1` / `NeedStateV1` | 慢速心境、能量、连接、休息、自主、玩乐、修复需要 |
 | `RegulationDecisionV1` / `CompanionActV1` | 真实表达、克制、修复、边界、给空间、安静等动作 |
-| `RelationshipEpisodeV1` / `RelationshipStateV2` | 信任、安全、默契、裂痕、修复、亲密同意与主动权限 |
+| `AffectiveRepairTargetV1` | direct-impact self-affect 的无正文、scope-bound 修复目标；只可由后续真实确认消费 |
+| `RelationshipEpisodeV1` / `RelationshipStateV2` | 信任、安全、默契、裂痕、修复、亲密同意、主动权限与有界 pending repair target |
 | `ExpressionPlanV1` / `AffectiveTurnPlanV1` | 同轮文本、TTS、Avatar 的共同 revision、sync 和降级策略 |
 | `RelationalAftereffectV1` / `CompanionProfileVersionV1` | 回应是否有效、技术失败、低风险偏好 canary 与 exact rollback |
 
@@ -183,6 +184,12 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
   `BOUNDARY`、`MISUNDERSTOOD`、`REPAIR_ACCEPTED` 或 `REPAIR_UNRESOLVED` aftereffect。
   `SILENCE` 和 `DELIVERY_FAILED` 不降低信任、安全或主动权限；道歉本身不自动完成修复。
   浪漫、排他、依赖同意默认均为 `NOT_GRANTED`，本切片不因积分或互动次数升级它们。
+- direct relational appraisal 形成的 `HURT`、`ANGER` 或克制 `JEALOUSY` 可把 exact
+  `AffectiveRepairTargetV1` 冻结到 accepted reply 的关系 episode；关系 aggregate 只保留
+  有界 pending target。单次道歉只能形成 `REPAIR_UNRESOLVED`，不会清除 target；后续
+  `REPAIR_ACCEPTED` 才先写 canonical aftereffect，再以 deterministic、可重放的第二条
+  `affective_episode_resolved` command 收束原 session-scoped self-affect。两条聚合命令
+  是顺序恢复链，不得虚假声明为跨库原子事务。
 - 生产 Host 的 `HostBondRuntime` 默认关闭 automatic stage transition；旧 Bond
   score/stage 只保留兼容描述，不能把分数自动推进为亲密、恋人或依赖。Surface reply
   compiler 仅在 Input runtime 加入的内部 provenance hand-off 存在时，读取关系状态并

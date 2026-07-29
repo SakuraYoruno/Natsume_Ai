@@ -18,6 +18,7 @@ from typing import Any
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.service import LifeCommandService
 from natsume_contracts.life import (
+    AffectiveRepairTargetV1,
     CompanionProactiveTargetV1,
     CompanionResponseFeedbackRequestV1,
     LifeCommand,
@@ -89,6 +90,39 @@ def _aftereffect_from_payload(payload: Mapping[str, Any]) -> RelationalAftereffe
         repair_acknowledged=raw.get("repair_acknowledged"),
         observed_at_ms=raw.get("observed_at_ms"),
         evidence_refs=raw.get("evidence_refs") or (),
+        affect_repair_target=(
+            None
+            if raw.get("affect_repair_target") is None
+            else AffectiveRepairTargetV1.from_mapping(
+                _mapping(raw.get("affect_repair_target"))
+            )
+        ),
+        self_id=raw.get("self_id") or "natsume_ai",
+    )
+
+
+def _relationship_episode_from_payload(
+    raw: Mapping[str, Any],
+) -> RelationshipEpisodeV1:
+    if not raw:
+        raise ValueError("relationship episode is required")
+    return RelationshipEpisodeV1(
+        episode_id=raw.get("episode_id"),
+        workspace_id=raw.get("workspace_id"),
+        relationship_subject_id=raw.get("relationship_subject_id"),
+        session_id=raw.get("session_id"),
+        source_kind=raw.get("source_kind"),
+        response_receipt_ref=raw.get("response_receipt_ref"),
+        response_digest=raw.get("response_digest"),
+        opened_at_ms=raw.get("opened_at_ms"),
+        evidence_refs=raw.get("evidence_refs") or (),
+        affect_repair_target=(
+            None
+            if raw.get("affect_repair_target") is None
+            else AffectiveRepairTargetV1.from_mapping(
+                _mapping(raw.get("affect_repair_target"))
+            )
+        ),
         self_id=raw.get("self_id") or "natsume_ai",
     )
 
@@ -207,6 +241,8 @@ class RelationshipAftereffectResult:
     aftereffect: RelationalAftereffectV1 | None
     receipt: LifeCommandReceipt | None
     reason_code: str
+    affect_resolution_receipt: LifeCommandReceipt | None = None
+    affect_resolution_status: str = "NOT_REQUESTED"
 
     @property
     def recorded(self) -> bool:
@@ -444,6 +480,11 @@ class RelationshipLifecycleService:
             }
         )[:32]
         message = _text(getattr(request_body, "message", None), limit=8_000)
+        # A relationship aftereffect is committed before the cross-aggregate
+        # affect resolution.  Recover that deterministic second command before
+        # accepting another turn, so a crash cannot leave a confirmed repair
+        # permanently visible only on the relationship side.
+        self._reconcile_last_affect_repair(scope=scope)
         user_input_ref = _opaque_ref(
             "relationship-user-input",
             {
@@ -478,6 +519,13 @@ class RelationshipLifecycleService:
                     repair_acknowledged=prior.get("repair_acknowledged"),
                     observed_at_ms=prior.get("observed_at_ms"),
                     evidence_refs=prior.get("evidence_refs") or (),
+                    affect_repair_target=(
+                        None
+                        if prior.get("affect_repair_target") is None
+                        else AffectiveRepairTargetV1.from_mapping(
+                            _mapping(prior.get("affect_repair_target"))
+                        )
+                    ),
                 )
                 receipt = self._read_command_receipt(
                     self._command_id(
@@ -488,11 +536,16 @@ class RelationshipLifecycleService:
                         payload={"aftereffect": aftereffect.as_dict()},
                     )
                 )
+                resolution_receipt, resolution_status = (
+                    self._resolve_aftereffect_affect_repair(aftereffect=aftereffect)
+                )
                 return RelationshipAftereffectResult(
                     scope=scope,
                     aftereffect=aftereffect,
                     receipt=receipt,
                     reason_code="RELATIONAL_AFTEREFFECT_REPLAYED",
+                    affect_resolution_receipt=resolution_receipt,
+                    affect_resolution_status=resolution_status,
                 )
             return RelationshipAftereffectResult(
                 scope=scope,
@@ -538,6 +591,14 @@ class RelationshipLifecycleService:
             repair_acknowledged=repair_acknowledged,
             observed_at_ms=now_ms,
             evidence_refs=(user_input_ref,),
+            affect_repair_target=(
+                None
+                if outcome != "REPAIR_ACCEPTED"
+                or episode.get("affect_repair_target") is None
+                else AffectiveRepairTargetV1.from_mapping(
+                    _mapping(episode.get("affect_repair_target"))
+                )
+            ),
         )
         receipt = self._submit(
             scope=scope,
@@ -552,11 +613,16 @@ class RelationshipLifecycleService:
             request_id=stable_request_id,
             aftereffect=aftereffect,
         )
+        resolution_receipt, resolution_status = (
+            self._resolve_aftereffect_affect_repair(aftereffect=aftereffect)
+        )
         return RelationshipAftereffectResult(
             scope=scope,
             aftereffect=aftereffect,
             receipt=receipt,
             reason_code="RELATIONAL_AFTEREFFECT_RECORDED",
+            affect_resolution_receipt=resolution_receipt,
+            affect_resolution_status=resolution_status,
         )
 
     def provision_accepted_response(
@@ -569,6 +635,7 @@ class RelationshipLifecycleService:
         response_receipt: Mapping[str, Any],
         response_text: str,
         proactive_target: Mapping[str, Any] | None = None,
+        affect_repair_target: Mapping[str, Any] | AffectiveRepairTargetV1 | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
         """Open one provisional episode after a reply has canonical receipt."""
@@ -587,6 +654,7 @@ class RelationshipLifecycleService:
             response_receipt=response_receipt,
             response_text=response_text,
             proactive_target=proactive_target,
+            affect_repair_target=affect_repair_target,
             source_kind=source_kind,
         )
         payload = self._accepted_response_payload(
@@ -601,6 +669,13 @@ class RelationshipLifecycleService:
         )
         if legacy is not None:
             return legacy.as_replayed()
+        existing = self._accepted_response_receipt_by_ref(
+            scope=scope,
+            response_receipt_ref=episode.response_receipt_ref,
+            source_kind=episode.source_kind,
+        )
+        if existing is not None:
+            return existing.as_replayed()
         return self._submit(
             scope=scope,
             request_id=stable_request_id,
@@ -620,6 +695,7 @@ class RelationshipLifecycleService:
         response_receipt: Mapping[str, Any],
         response_text: str,
         proactive_target: Mapping[str, Any] | None = None,
+        affect_repair_target: Mapping[str, Any] | AffectiveRepairTargetV1 | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
         """Reopen exactly one already-provisioned episode without writing.
@@ -639,6 +715,7 @@ class RelationshipLifecycleService:
                 response_receipt=response_receipt,
                 response_text=response_text,
                 proactive_target=proactive_target,
+                affect_repair_target=affect_repair_target,
                 source_kind=source_kind,
             )
         )
@@ -663,9 +740,16 @@ class RelationshipLifecycleService:
                 episode=episode,
                 companion_target=companion_target,
             )
-            if legacy is None:
-                raise
-            return legacy.as_replayed()
+            if legacy is not None:
+                return legacy.as_replayed()
+            existing = self._accepted_response_receipt_by_ref(
+                scope=scope,
+                response_receipt_ref=episode.response_receipt_ref,
+                source_kind=episode.source_kind,
+            )
+            if existing is not None:
+                return existing.as_replayed()
+            raise
 
     def provision_delivered_proactive(
         self,
@@ -870,6 +954,259 @@ class RelationshipLifecycleService:
             if len(batch) < 500:
                 return None
 
+    def _accepted_response_receipt_by_ref(
+        self,
+        *,
+        scope: RelationshipScope,
+        response_receipt_ref: str,
+        source_kind: str,
+    ) -> LifeCommandReceipt | None:
+        """Find one prior accepted reply without recomputing a stale target.
+
+        A repair can legitimately settle the original affect episode before a
+        task-acceptance recovery runs.  In that state rebuilding the old plan
+        would no longer find an *active* target, but the response receipt is
+        still immutable evidence that the exact relationship command already
+        exists.  Scan only this aggregate and fail closed if the source fact is
+        ambiguous.
+        """
+
+        reader = self._require_snapshot_reader()
+        after_sequence = 0
+        matches: list[LifeCommandReceipt] = []
+        while True:
+            batch = reader.list_events(
+                scope.aggregate_id,
+                after_sequence=after_sequence,
+                limit=500,
+            )
+            if not batch:
+                break
+            for event in batch:
+                sequence = int(event.sequence)
+                if sequence <= after_sequence:
+                    raise RuntimeError("RELATIONSHIP_EVENT_CURSOR_REGRESSION")
+                after_sequence = sequence
+                if event.event_type != "relationship_response_accepted":
+                    continue
+                command_payload = _mapping(
+                    _mapping(event.payload).get("command_payload")
+                )
+                episode = _relationship_episode_from_payload(
+                    _mapping(command_payload.get("episode"))
+                )
+                if (
+                    episode.response_receipt_ref != response_receipt_ref
+                    or episode.source_kind != source_kind
+                ):
+                    continue
+                receipt = reader.get_receipt(event.command_id)
+                if receipt is None:
+                    raise RuntimeError(
+                        "RELATIONSHIP_RESPONSE_REPLAY_RECEIPT_MISSING"
+                    )
+                matches.append(receipt)
+            if len(batch) < 500:
+                break
+        if len(matches) > 1:
+            raise RuntimeError("RELATIONSHIP_RESPONSE_RECEIPT_NOT_UNIQUE")
+        return matches[0] if matches else None
+
+    def _reconcile_last_affect_repair(
+        self,
+        *,
+        scope: RelationshipScope,
+    ) -> tuple[LifeCommandReceipt | None, str]:
+        """Finish the second half of an already accepted repair, if any.
+
+        Relationship acceptance is intentionally durable before the linked
+        affect aggregate is touched.  The exact aftereffect id below is also
+        the idempotency seed for the second command, which lets a later user
+        turn recover a crash between the two aggregates without recreating a
+        relationship episode or replaying a visible reply.
+        """
+
+        snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
+        relation = _mapping(_mapping(snapshot.state).get("relationship_v2"))
+        prior = _mapping(relation.get("last_aftereffect"))
+        if not prior or prior.get("affect_repair_target") is None:
+            return None, "NOT_REQUESTED"
+        aftereffect = _aftereffect_from_payload({"aftereffect": prior})
+        return self._resolve_aftereffect_affect_repair(aftereffect=aftereffect)
+
+    def _resolve_aftereffect_affect_repair(
+        self,
+        *,
+        aftereffect: RelationalAftereffectV1,
+    ) -> tuple[LifeCommandReceipt | None, str]:
+        """Resolve one active self-affect episode after verified repair only."""
+
+        target = aftereffect.affect_repair_target
+        if target is None:
+            return None, "NOT_REQUESTED"
+        if (
+            aftereffect.outcome != "REPAIR_ACCEPTED"
+            or not aftereffect.repair_acknowledged
+        ):
+            raise RuntimeError("AFFECT_REPAIR_REQUIRES_ACKNOWLEDGED_REPAIR")
+        command_id = self._affect_repair_command_id(
+            aftereffect=aftereffect,
+            target=target,
+        )
+        reader = self._require_snapshot_reader()
+        existing = reader.get_receipt(command_id)
+        if existing is not None:
+            return existing.as_replayed(), "REPLAYED"
+        snapshot = reader.get_snapshot(target.affect_aggregate_id)
+        if not self._target_is_active_in_snapshot(target=target, snapshot=snapshot):
+            # Natural decay or a prior independently reconciled closure is not
+            # a licence to synthesize a second resolution receipt.
+            return None, "TARGET_ALREADY_INACTIVE"
+        resolution_ref = _opaque_ref(
+            "relationship-aftereffect",
+            {
+                "aftereffect_id": aftereffect.aftereffect_id,
+                "source_receipt_ref": aftereffect.source_receipt_ref,
+                "target": target.as_dict(),
+            },
+        )
+        service = self._require_command_service()
+
+        def build(current: Any) -> LifeCommand:
+            if not self._target_is_active_in_snapshot(target=target, snapshot=current):
+                raise ValueError("AFFECT_REPAIR_TARGET_NOT_ACTIVE")
+            return LifeCommand(
+                command_id=command_id,
+                person_id=target.affect_aggregate_id,
+                command_type="affective_episode_resolved",
+                payload={
+                    "episode_id": target.affect_episode_id,
+                    "resolution_ref": resolution_ref,
+                },
+                expected_version=int(current.version),
+                created_at_ms=max(0, int(aftereffect.observed_at_ms)),
+                correlation_id=aftereffect.aftereffect_id,
+                metadata={
+                    "source": "relationship_repair_bridge",
+                    "workspace_id": target.workspace_id,
+                    "relationship_subject_id": target.relationship_subject_id,
+                    "session_id": target.session_id,
+                    "aftereffect_id": aftereffect.aftereffect_id,
+                },
+            )
+
+        try:
+            return service.submit_next(target.affect_aggregate_id, build), "APPLIED"
+        except ValueError as exc:
+            if str(exc) != "AFFECT_REPAIR_TARGET_NOT_ACTIVE":
+                raise
+            existing = reader.get_receipt(command_id)
+            if existing is not None:
+                return existing.as_replayed(), "REPLAYED"
+            return None, "TARGET_ALREADY_INACTIVE"
+
+    def _active_affect_repair_target(
+        self,
+        *,
+        scope: RelationshipScope,
+        value: Mapping[str, Any] | AffectiveRepairTargetV1 | None,
+        allow_pending: bool,
+    ) -> AffectiveRepairTargetV1 | None:
+        inherited = value is None
+        if value is None:
+            if not allow_pending:
+                return None
+            target = self._single_pending_affect_repair_target(scope=scope)
+            if target is None:
+                return None
+        else:
+            target = (
+                value
+                if isinstance(value, AffectiveRepairTargetV1)
+                else AffectiveRepairTargetV1.from_mapping(_mapping(value))
+            )
+        if (
+            target.workspace_id != scope.workspace_id
+            or target.relationship_subject_id != scope.relationship_subject_id
+        ):
+            raise ValueError("AFFECT_REPAIR_TARGET_SCOPE_DRIFT")
+        if not inherited and target.session_id != scope.session_id:
+            raise ValueError("AFFECT_REPAIR_TARGET_SESSION_DRIFT")
+        aggregate_seed = {
+            "schema": "affective-life-scope.v1",
+            "workspace_id": target.workspace_id,
+            "relationship_subject_id": target.relationship_subject_id,
+            "session_id": target.session_id,
+        }
+        expected_aggregate_id = f"affect::{_digest(aggregate_seed)[:40]}"
+        if target.affect_aggregate_id != expected_aggregate_id:
+            raise ValueError("AFFECT_REPAIR_TARGET_AGGREGATE_DRIFT")
+        snapshot = self._require_snapshot_reader().get_snapshot(target.affect_aggregate_id)
+        if not self._target_is_active_in_snapshot(target=target, snapshot=snapshot):
+            return None
+        return target
+
+    def _single_pending_affect_repair_target(
+        self,
+        *,
+        scope: RelationshipScope,
+    ) -> AffectiveRepairTargetV1 | None:
+        snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
+        relation = _mapping(_mapping(snapshot.state).get("relationship_v2"))
+        raw_targets = relation.get("pending_affect_repair_targets") or []
+        if not isinstance(raw_targets, list):
+            raise ValueError("PENDING_AFFECT_REPAIR_TARGETS_INVALID")
+        targets = [
+            AffectiveRepairTargetV1.from_mapping(_mapping(item))
+            for item in raw_targets
+            if isinstance(item, Mapping)
+        ]
+        if len(targets) != len(raw_targets):
+            raise ValueError("PENDING_AFFECT_REPAIR_TARGETS_INVALID")
+        # Multiple unsettled self-affect episodes require a deliberate future
+        # arbitration; silently selecting one would make a later "we are
+        # okay" claim settle the wrong feeling.
+        return targets[0] if len(targets) == 1 else None
+
+    @staticmethod
+    def _target_is_active_in_snapshot(
+        *,
+        target: AffectiveRepairTargetV1,
+        snapshot: Any,
+    ) -> bool:
+        state = _mapping(getattr(snapshot, "state", None))
+        identity = _mapping(state.get("identity"))
+        if (
+            identity.get("self_id") != "natsume_ai"
+            or _text(identity.get("relationship_subject_id"))
+            != target.relationship_subject_id
+        ):
+            raise ValueError("AFFECT_REPAIR_TARGET_IDENTITY_DRIFT")
+        affective = _mapping(state.get("affective"))
+        if int(affective.get("revision") or 0) < target.self_affect_revision:
+            raise ValueError("AFFECT_REPAIR_TARGET_REVISION_REGRESSION")
+        return any(
+            _text(_mapping(item).get("episode_id")) == target.affect_episode_id
+            and _text(_mapping(item).get("relationship_subject_id"))
+            == target.relationship_subject_id
+            for item in list(affective.get("active_episodes") or [])
+            if isinstance(item, Mapping)
+        )
+
+    @staticmethod
+    def _affect_repair_command_id(
+        *,
+        aftereffect: RelationalAftereffectV1,
+        target: AffectiveRepairTargetV1,
+    ) -> str:
+        return "affect_repair_" + _digest(
+            {
+                "schema": "relationship-affect-repair.v1",
+                "aftereffect_id": aftereffect.aftereffect_id,
+                "target": target.as_dict(),
+            }
+        )[:40]
+
     def _require_command_service(self) -> LifeCommandService:
         service = self._command_service_provider()
         if not isinstance(service, LifeCommandService):
@@ -940,6 +1277,7 @@ class RelationshipLifecycleService:
         response_receipt: Mapping[str, Any],
         response_text: str,
         proactive_target: Mapping[str, Any] | None,
+        affect_repair_target: Mapping[str, Any] | AffectiveRepairTargetV1 | None,
         source_kind: str,
     ) -> tuple[
         RelationshipScope,
@@ -963,12 +1301,20 @@ class RelationshipLifecycleService:
         response_receipt_ref = f"life-event://{event_id}"
         response_digest = f"sha256:{_digest({'response_text': str(response_text or '')})}"
         normalized_source = _text(source_kind).upper() or "CHAT_RESPONSE"
+        repair_target = self._active_affect_repair_target(
+            scope=scope,
+            value=affect_repair_target,
+            allow_pending=normalized_source == "CHAT_RESPONSE",
+        )
         identity = {
             "schema": "relationship-episode.v1",
             "scope": scope.aggregate_id,
             "response_receipt_ref": response_receipt_ref,
             "request_id": stable_request_id,
             "source_kind": normalized_source,
+            "affect_repair_target": (
+                repair_target.as_dict() if repair_target is not None else None
+            ),
         }
         opened_at_ms = max(0, int(receipt.get("created_at_ms") or self._clock_ms()))
         episode = RelationshipEpisodeV1(
@@ -981,6 +1327,7 @@ class RelationshipLifecycleService:
             response_digest=response_digest,
             opened_at_ms=opened_at_ms,
             evidence_refs=(response_receipt_ref,),
+            affect_repair_target=repair_target,
         )
         companion_target = self._accepted_response_target(
             scope=scope,

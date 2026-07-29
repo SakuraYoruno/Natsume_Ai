@@ -607,7 +607,7 @@ Identity 至少包含：
 
 关系不是一个可以刷分的“好感度”。它至少需要表达熟悉、信任、舒适、开放、边界柔软度、依恋、冲突裂痕等不同维度。
 
-当前 legacy [RelationshipStateBlock](../../host_brain/persona/context/relationship_state.py) 仍会从 Bond 与 social state 派生兼容表达上下文，但它不再是关系长期 authority。DL-03 已把 [`RelationshipEpisodeV1`](../../natsume_contracts/life/relationship.py)、aftereffect 与有界 `RelationshipStateV2` 接入 canonical [Digital Life reducer](../../host_brain/digital_life/domain_reducer.py)：已接受的回复先开 provisional episode，下一次用户输入才以脱敏 digest 记录是否接住、触及边界、误解或被接受修复。Surface 只能从内部 provenance hand-off 把该结果变成表达的收紧约束，不能由请求体、模型或 Bond 分数直接改写关系事实。
+当前 legacy [RelationshipStateBlock](../../host_brain/persona/context/relationship_state.py) 仍会从 Bond 与 social state 派生兼容表达上下文，但它不再是关系长期 authority。DL-03 已把 [`RelationshipEpisodeV1`](../../natsume_contracts/life/relationship.py)、aftereffect 与有界 `RelationshipStateV2` 接入 canonical [Digital Life reducer](../../host_brain/digital_life/domain_reducer.py)：已接受的回复先开 provisional episode，下一次用户输入才以脱敏 digest 记录是否接住、触及边界、误解或被接受修复。直接伤害七海所开启的 self-affect episode 以 [`AffectiveRepairTargetV1`](../../natsume_contracts/life/relationship.py) 作为有界、无正文的跨聚合引用留在关系的待修复集合中；道歉只会保持该线程，后续真实 `REPAIR_ACCEPTED` 才以确定性 command 收束原 episode。两个聚合并不伪装成分布式原子事务：关系 aftereffect 先持久化，后续同一 target 的精确重放负责恢复 affect resolution。Surface 只能从内部 provenance hand-off 把该结果变成表达的收紧约束，不能由请求体、模型或 Bond 分数直接改写关系事实。
 
 这同样约束旧 `SocialBrainAgent`：一旦 Host 组成 canonical Life authority，它不订阅全局
 `BOND_*`、孤独、任务成功或幽默事件，残留 callback 只能显式退役，不能写进程内 social snapshot、触发

@@ -16,6 +16,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from natsume_contracts.life import (
+    AffectiveRepairTargetV1,
     CompanionProfileCanaryInteractionV1,
     CompanionProfileStateV1,
     CompanionProfileVersionV1,
@@ -774,6 +775,13 @@ def _relationship_episode_from_mapping(raw: Mapping[str, Any]) -> RelationshipEp
         response_digest=raw.get("response_digest"),
         opened_at_ms=raw.get("opened_at_ms"),
         evidence_refs=raw.get("evidence_refs") or (),
+        affect_repair_target=(
+            None
+            if raw.get("affect_repair_target") is None
+            else AffectiveRepairTargetV1.from_mapping(
+                _mapping(raw.get("affect_repair_target"))
+            )
+        ),
         self_id=raw.get("self_id") or "natsume_ai",
     )
 
@@ -938,6 +946,13 @@ def _relational_aftereffect_from_mapping(
         repair_acknowledged=raw.get("repair_acknowledged"),
         observed_at_ms=raw.get("observed_at_ms"),
         evidence_refs=raw.get("evidence_refs") or (),
+        affect_repair_target=(
+            None
+            if raw.get("affect_repair_target") is None
+            else AffectiveRepairTargetV1.from_mapping(
+                _mapping(raw.get("affect_repair_target"))
+            )
+        ),
         self_id=raw.get("self_id") or "natsume_ai",
     )
 
@@ -985,6 +1000,18 @@ def _normalize_relationship_head(
         if isinstance(last_aftereffect_raw, Mapping)
         else None
     )
+    raw_repair_targets = source.get("pending_affect_repair_targets") or []
+    if not isinstance(raw_repair_targets, list):
+        raise ValueError("relationship_v2.pending_affect_repair_targets must be a list")
+    repair_targets = tuple(
+        AffectiveRepairTargetV1.from_mapping(_mapping(item))
+        for item in raw_repair_targets
+        if isinstance(item, Mapping)
+    )
+    if len(repair_targets) != len(raw_repair_targets):
+        raise ValueError(
+            "relationship_v2.pending_affect_repair_targets must contain objects"
+        )
     return RelationshipStateV2(
         workspace_id=workspace_id,
         relationship_subject_id=subject,
@@ -1000,6 +1027,7 @@ def _normalize_relationship_head(
         dependency_consent=str(source.get("dependency_consent") or "NOT_GRANTED"),
         active_episodes=episodes,
         last_aftereffect=last_aftereffect,
+        pending_affect_repair_targets=repair_targets,
     ).as_dict()
 
 
@@ -1026,6 +1054,10 @@ def _relationship_state_from_state(state: Mapping[str, Any]) -> RelationshipStat
             _relational_aftereffect_from_mapping(_mapping(raw.get("last_aftereffect")))
             if isinstance(raw.get("last_aftereffect"), Mapping)
             else None
+        ),
+        pending_affect_repair_targets=tuple(
+            AffectiveRepairTargetV1.from_mapping(_mapping(item))
+            for item in list(raw.get("pending_affect_repair_targets") or [])
         ),
     )
 
@@ -1054,6 +1086,7 @@ def _relationship_scope_matches(
             dependency_consent=state.dependency_consent,
             active_episodes=state.active_episodes,
             last_aftereffect=state.last_aftereffect,
+            pending_affect_repair_targets=state.pending_affect_repair_targets,
         )
     if state.workspace_id != workspace_id:
         raise ValueError("relationship workspace drift")
@@ -1232,6 +1265,32 @@ def _apply_relationship_response_accepted(
     episodes = (*current.active_episodes, episode)
     if len(episodes) > 4:
         raise ValueError("relationship active episode limit exceeded")
+    # A reply that was causally constrained by a direct impact on Natsume is
+    # not an accusation and does not revoke any consent.  It does mean the
+    # relationship now has a small, explicit repair context.  Only a later
+    # acknowledged user response may settle the linked self-affect episode.
+    rupture = current.rupture_load
+    repair_required = current.repair_required
+    pending_targets = tuple(current.pending_affect_repair_targets)
+    if (
+        episode.affect_repair_target is not None
+        and all(
+            (
+                item.affect_aggregate_id,
+                item.affect_episode_id,
+            )
+            != (
+                episode.affect_repair_target.affect_aggregate_id,
+                episode.affect_repair_target.affect_episode_id,
+            )
+            for item in pending_targets
+        )
+    ):
+        pending_targets = (*pending_targets, episode.affect_repair_target)
+        if len(pending_targets) > 4:
+            raise ValueError("pending affect repair target limit exceeded")
+        rupture = _clamp(rupture + 0.08)
+        repair_required = True
     state["relationship_v2"] = RelationshipStateV2(
         workspace_id=current.workspace_id,
         relationship_subject_id=current.relationship_subject_id,
@@ -1239,14 +1298,15 @@ def _apply_relationship_response_accepted(
         trust=current.trust,
         safety=current.safety,
         attunement=current.attunement,
-        rupture_load=current.rupture_load,
-        repair_required=current.repair_required,
+        rupture_load=rupture,
+        repair_required=repair_required,
         proactive_permission=current.proactive_permission,
         romantic_consent=current.romantic_consent,
         exclusive_consent=current.exclusive_consent,
         dependency_consent=current.dependency_consent,
         active_episodes=episodes,
         last_aftereffect=current.last_aftereffect,
+        pending_affect_repair_targets=pending_targets,
     ).as_dict()
     if target is not None:
         state["companion_proactive_target"] = target.as_dict()
@@ -1286,6 +1346,7 @@ def _apply_relational_aftereffect(
     rupture = current.rupture_load
     repair_required = current.repair_required
     permission = current.proactive_permission
+    pending_targets = list(current.pending_affect_repair_targets)
     outcome = aftereffect.outcome
     if outcome == "HELPFUL":
         trust = _clamp(trust + 0.012 * aftereffect.helpfulness)
@@ -1309,10 +1370,34 @@ def _apply_relational_aftereffect(
     elif outcome == "REPAIR_ACCEPTED":
         if not current.repair_required or not aftereffect.repair_acknowledged:
             raise ValueError("repair acceptance requires a pending rupture and user acknowledgement")
+        target = aftereffect.affect_repair_target
+        if pending_targets:
+            if target is None:
+                raise ValueError(
+                    "repair acceptance requires an exact pending affect target"
+                )
+            target_key = (
+                target.affect_aggregate_id,
+                target.affect_episode_id,
+            )
+            matching = [
+                item
+                for item in pending_targets
+                if (item.affect_aggregate_id, item.affect_episode_id) == target_key
+            ]
+            if len(matching) != 1:
+                raise ValueError("repair acceptance affect target drift")
+            pending_targets = [
+                item
+                for item in pending_targets
+                if (item.affect_aggregate_id, item.affect_episode_id) != target_key
+            ]
+        elif target is not None:
+            raise ValueError("repair acceptance has no pending affect target")
         safety = _clamp(safety + 0.035)
         attunement = _clamp(attunement + 0.015)
         rupture = _clamp(rupture - 0.18)
-        repair_required = rupture > 0.05
+        repair_required = bool(pending_targets) or rupture > 0.05
     # NEUTRAL, SILENCE and DELIVERY_FAILED intentionally do not alter trust,
     # safety, permission or consent. Lack of interaction is not rejection.
     remaining = tuple(
@@ -1333,6 +1418,7 @@ def _apply_relational_aftereffect(
         dependency_consent=current.dependency_consent,
         active_episodes=remaining,
         last_aftereffect=aftereffect,
+        pending_affect_repair_targets=tuple(pending_targets),
     ).as_dict()
     _record_relationship_user_presence(
         state,
@@ -1386,6 +1472,7 @@ def _apply_relationship_proactive_permission(
         dependency_consent=current.dependency_consent,
         active_episodes=current.active_episodes,
         last_aftereffect=current.last_aftereffect,
+        pending_affect_repair_targets=current.pending_affect_repair_targets,
     ).as_dict()
     _record_relationship_user_presence(state, observed_at_ms=now_ms)
 

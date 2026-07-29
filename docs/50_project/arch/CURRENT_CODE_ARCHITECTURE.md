@@ -22,7 +22,11 @@
 > `RelationshipStateV2` 纳入相同 Life event/CAS/replay authority：已接受的
 > reply 才能开 provisional episode，下一次用户输入以 opaque digest 形成 aftereffect，
 > relation aggregate 以 workspace + subject 连续而不把 session 当长期身份。边界、
-> 未接住和修复状态会收紧 Surface 话术；沉默、投递失败和单次道歉不会自动修复。
+> 未接住和修复状态会收紧 Surface 话术；沉默、投递失败和单次道歉不会自动修复。direct
+> relational impact 形成的 `AffectiveRepairTargetV1` 会以无正文、workspace/subject-bound
+> pending target 留在 relationship head：后续 `REPAIR_ACCEPTED` 先提交 aftereffect，再用其
+> exact identity 触发 session-scoped affect aggregate 的 `affective_episode_resolved`。该跨聚合
+> 链可顺序恢复、不可重复，但不是伪装成原子分布式写入。
 > `HostBondRuntime` 的生产默认已关闭积分自动阶段升级。DL-06 Scheduler
 > policy 已要求 canonical relationship 的 `ALLOWED` 主动权限、无未结 episode/repair，
 > 且七海自身未选择给空间，才会从 bounded canonical self-affect 生成无回应压力的

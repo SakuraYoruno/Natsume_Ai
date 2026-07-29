@@ -538,6 +538,11 @@ def _submit_surface_foreground_completed(
             if reply_channel and reply_target
             else None
         ),
+        affect_repair_target=(
+            dict(affective_turn_plan["affect_repair_target"])
+            if isinstance(affective_turn_plan.get("affect_repair_target"), Mapping)
+            else None
+        ),
     )
     return {
         **dict(foreground_receipt),
