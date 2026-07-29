@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.59
+版本：v2.60
 维护日期：2026-07-28
 状态：当前证据
 
@@ -179,6 +179,12 @@
   export/hint 入口分别返回 explicit retirement/`UNAVAILABLE`。Vestibular/Peripheral、batch 37/38/41/42/46/48/49、
   direct-effect 与 Proprioception 邻接的当前定向集合为 `100 passed in 4.14s`；它不证明真实 ExpressionPlan delivery、
   Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
+
+- `test_dl06_immune_affect_fanout_retirement.py` 验证 canonical `ImmuneAgent` 仍真实给出输入/输出 `BLOCK`，
+  但不发布 legacy `IMMUNE_BLOCK`、不调用 Limbic/Interoception/Endocrine/PainReward，且不订阅或消费 Bond-stage
+  safety threshold；安全 counters 仍可被读取。Immune、batch 36/37/42/45/47 与 embodiment 邻接的当前定向集合为
+  `84 passed in 3.03s`；它不证明 scoped boundary Appraisal、真实 Host/Gateway、provider、远端 Edge、Monitor/Review
+  或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

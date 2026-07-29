@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.42
+版本：v2.43
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -206,6 +206,11 @@ assessment 和 export 均返回 `LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED / UN
 不再订阅 legacy emotion/immune/platform/gate/mute/edge EventBus，也不以 global peripheral snapshot 直写表情、语调、
 动作或身体状态；它只返回 `LEGACY_PERIPHERAL_EXPRESSION_WRITER_RETIRED / UNAVAILABLE`。真实三模态输出仍必须
 从同一 frozen ExpressionPlan 的 scoped delivery receipt 驱动；远端 Edge 未启动。
+
+`ImmuneAgent` 保留输入/输出安全 scan、block/report、bounded counter、airlock/governor 与 threat audit；但 canonical
+ports 下不再将风险结果发布为 legacy `IMMUNE_BLOCK` 给情感族，也不回灌 Limbic、Interoception、Endocrine 或
+PainReward，更不会订阅 Bond stage 来放宽安全阈值。安全结果因此不成为 self-affect 或关系 authority；其旧情感
+fan-out 返回 `LEGACY_IMMUNE_AFFECT_FANOUT_RETIRED`，真实边界表达仍由 scoped Appraisal/Regulation 处理。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

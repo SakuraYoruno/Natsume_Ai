@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.49
+版本：v0.50
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -288,6 +288,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED` 或 `LEGACY_PERIPHERAL_EXPRESSION_WRITER_RETIRED`，真正表达只走同轮
   frozen ExpressionPlan delivery。当前 `test_dl06_vestibular_peripheral_retirement.py` 加邻接回归为
   `100 passed in 4.14s`；它不证明真实 Host/Gateway、provider、远端 Edge、physical receipt、Monitor/Review 或 DL-07。
+- T-DL06-25：canonical `ImmuneAgent` 必须继续返回真实 input/output security `BLOCK/REPORT` 与 bounded audit，
+  但不得将安全结果发布为 legacy `IMMUNE_BLOCK`、调用旧 Limbic/Interoception/Endocrine/PainReward，或按 Bond stage
+  放宽安全阈值；安全扫描不能成为 self-affect、relationship 或 persona authority。当前
+  `test_dl06_immune_affect_fanout_retirement.py` 加 Immune/batch/embodiment 邻接为 `84 passed in 3.03s`；它不证明
+  scoped boundary Appraisal、真实 Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

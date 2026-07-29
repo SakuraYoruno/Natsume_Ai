@@ -257,6 +257,10 @@ monitor 可以保留为 app-local 技术观察，但未来身体/Need 感受只�
 动作或身体状态。canonical Host 必须在 registry、派生 EventBus、模型和旧 organ side effect 前退役两者；真正三模态
 表达只能从同一 frozen `ExpressionPlan` 的 delivery protocol 取得，设备状态仅能作为 scoped receipt 的技术事实。
 
+安全扫描、Governor reject 与 PII airlock 的 block/report 仍必须工作，但不得经旧 `IMMUNE_BLOCK`、Limbic、
+Interoception、Endocrine 或 PainReward 写成七海的恐惧、痛苦、压力或安全感；关系阶段也不得放宽安全阈值。
+canonical Host 只能保留有界安全审计和 fail-closed 决策，真实情感反应仍需经 scope-bound Appraisal/Regulation。
+
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
 `AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。

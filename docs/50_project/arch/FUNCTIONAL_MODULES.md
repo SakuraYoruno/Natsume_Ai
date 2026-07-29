@@ -128,6 +128,12 @@ emotion/immune/platform/gate/mute/edge EventBus，不以 global cache 生成表�
 `UNAVAILABLE` retirement projection；真实文本、Voice 和 Avatar 只能由 `AffectiveTurnPlan → ExpressionPlan → delivery
 receipt` 同轮驱动，设备事实不得反向成为情绪 authority。
 
+**Immune 安全与情感边界模块**位于 [`tribe/immune_agent.py`](../../../host_brain/tribe/immune_agent.py)。它继续拥有
+input/output scan、block/report、airlock、Governor 和 threat audit；canonical ports 下仅退役把安全结果翻译为旧
+Limbic/Interoception/Endocrine/PainReward、`IMMUNE_BLOCK` 情感扇出或 Bond-stage safety threshold 的回路。
+安全计数不是 self-affect，安全 gate 也不拥有关系或人格写权；若需要表达边界，由 Life Appraisal/Regulation 消费
+有 scope 的事实而非直接调用旧 organ。
+
 同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
 `handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；
 [`persona/session_hooks.py`](../../../host_brain/persona/session_hooks.py) 会在推导用户 VAD 或 default Bond id 前跳过

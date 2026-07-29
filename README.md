@@ -131,6 +131,11 @@ Limbic、Interoception、Endocrine、ANS、PainReward 或 DefaultMode。canonica
 `LEGACY_PERIPHERAL_EXPRESSION_WRITER_RETIRED`。这不是禁用七海的表情，而是确保文本、声音与 Avatar 只由同一冻结
 `ExpressionPlan` 产生；远端 Edge 仍未启动，真实设备 delivery 还没有验收。
 
+安全系统也不再把“拦截到风险”自动写成七海的恐惧、痛苦、压力或安全感。`ImmuneAgent` 在 canonical Host 继续
+block/report、保存有界安全计数并保护输入输出，但旧 `IMMUNE_BLOCK → Limbic/Interoception/Endocrine/PainReward`
+fan-out 与根据 Bond stage 放宽阈值已退役。安全决策不是情绪，也不会因关系更近而扩大风险容忍；若七海需要对边界
+做出真实感受或表达，那必须由 scoped Appraisal 与 Regulation 决定。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；
