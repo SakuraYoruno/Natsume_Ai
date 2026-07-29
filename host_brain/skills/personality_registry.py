@@ -336,15 +336,8 @@ def _register_silence_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_silence_tick,
-            description="沉默引擎 tick：每分钟由调度器调用，驱动回复意愿自然恢复和话题抗拒衰减。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="silence_tick",
-                seconds=60,
-                args={"user_id": "natsume_ai"},
-                description="Core organ tick: recovers reply willingness and decays topic resistance.",
-                resource_class="light",
-            ),
+            description="旧沉默引擎回滚入口：canonical Host 已由 RegulationDecision 只读投影替代，禁止自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="silence_update_emotion",
@@ -353,7 +346,7 @@ def _register_silence_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_silence_update_emotion,
-            description="沉默引擎情绪更新：情绪变化时调用，重新计算回复意愿值。",
+            description="旧沉默情绪写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
         SkillMeta(
@@ -363,7 +356,7 @@ def _register_silence_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_silence_add_resistance,
-            description="沉默引擎话题抗拒：标记某话题触发真实抗拒（非礼貌转移）。",
+            description="旧沉默话题抗拒写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
     )
@@ -437,15 +430,8 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_tick,
-            description="身体感知 tick：每分钟由调度器调用，更新困倦感（基于时段）和疲劳自然恢复。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="body_sense_tick",
-                seconds=60,
-                args={"user_id": "natsume_ai"},
-                description="Core organ tick: updates fatigue, sleepiness, and body-sense baseline.",
-                resource_class="light",
-            ),
+            description="旧全局身体感知回滚入口：canonical Host 只读 Life snapshot 投影，禁止自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="body_sense_conversation_start",
@@ -454,7 +440,7 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_conversation_start,
-            description="身体感知对话开始：启动疲劳计时，在每次对话开始时调用。",
+            description="旧身体感知对话开始写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
         SkillMeta(
@@ -464,7 +450,7 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_conversation_end,
-            description="身体感知对话结束：根据对话时长积累疲劳度，在每次对话结束时调用。",
+            description="旧身体感知对话结束写入口：canonical Host 固定退役，仅保留隔离回滚。",
             scheduler_allowed=False,
         ),
         SkillMeta(
@@ -474,7 +460,7 @@ def _register_body_sense_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_body_sense_update_loneliness,
-            description="身体感知孤独感注入：将 canonical Life affect snapshot 的孤独值同步到 BodySenseModel。",
+            description="旧身体感知孤独注入写入口：不得把 canonical Life 再同步进全局模型。",
             scheduler_allowed=False,
         ),
     )

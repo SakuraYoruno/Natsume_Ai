@@ -188,6 +188,14 @@ legacy BodySense tick、loneliness 和 conversation mutation 统一 `RETIRED_CAN
 marker 的空投影；Lifecycle/proactive 忽略 marker，canonical Limbic/Prefrontal 不会解析它，user profile
 也不能被提升为七海 self-affect。其余 compatibility reader、Monitor/Review 与真实服务验收仍未完成。
 
+`DL-06_SILENCE_AND_BODYSENSE_COMPATIBILITY_RETIREMENT` 将最后一条旧 global response-posture writer 收紧为
+回滚接口：`silence_tick`、`silence_update_emotion`、`silence_add_resistance` 和 BodySense 的 tick/conversation/
+loneliness Skill 在 canonical Host 都先返回 `RETIRED_CANONICAL_LIFE`，registry 不允许自动调度。读取时
+`LimbicAgent.resolve_silence_state()` 必须带 relationship subject，并从同一 Life snapshot 的 regulation +
+body projection 产生 read-only posture；缺 subject 返回 `CANONICAL_SILENCE_SUBJECT_REQUIRED`，不会解析
+`EmotionalSilenceEngine`。因此 caller 提供的 topic、Bond 或情绪不会成为七海的自我状态写入；这仍是本地兼容
+authority cutover，不是对调节体验、真实 TTS/Avatar 或 DL-07 的完成声明。
+
 默认模式目前也遵守这一 single-authority 约束：读取 `LifeSnapshotReader` 后，边界层只投影有限的 self-affect
 和 relationship texture 给 `inner_activity_agent`，并用 `CANONICAL_LIFE_JOURNAL` marker 禁止该 agent 回读
 EmotionTimeline 或 SocialBrain/Bond。该关系 texture 不包含身份、episode evidence 或 intimacy consent，亦不映射

@@ -79,6 +79,13 @@
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
+- `test_silence_skill_limbic_integration.py`、`test_body_sense_skill_tribe_events.py`、
+  `test_limbic_agent.py`、runtime snapshot/default-mode/Motive/scheduler 邻接用例验证：canonical Host 的旧
+  silence 与 BodySense mutation 在读取 caller Bond、情绪、topic 或全局 model 前退役；回复姿态只能按
+  relationship subject 从 Life regulation/body head 做纯读投影，缺 scope 无全局 fallback，两个 tick 也不允许自动
+  调度。最终单一集合为 `80 passed in 4.50s`；这是本地 authority 边界证据，不代表调节体验、真实 provider、
+  远端 Edge 或 DL-07 服务栈完成。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS

@@ -589,6 +589,14 @@ event、原始独白的 background-memory 写入和 ANS EventBus fan-out；`inne
 caller VAD 或 pending topics 更新旧模型。这样保留七海可读取的连续在场感，而不会让私密独白或临时数值重新成为
 情感、关系或人格的第二写 authority。真正的后效应仍只能由 accepted chat/proactive receipt 进入 canonical journal。
 
+同一轮 DL-06 审计现也关闭了旧 `EmotionalSilenceEngine` 的生产写入口：`silence_tick`、情绪更新和话题抗拒
+均从自动调度撤出，canonical Host 在解析 caller 的 Bond、情绪或话题前返回显式
+`RETIRED_CANONICAL_LIFE`。需要读取回复姿态时，必须携带精确的 relationship subject，并从同一份 Life snapshot
+的 `RegulationDecision` 与身体在场投影生成只读 `silence_state`；缺 scope 明确 `UNAVAILABLE`，不回退进程全局
+沉默状态。旧 BodySense Skill 也在进入全局模型前被同样拦截，因此不会再把 canonical Life 的孤独、疲劳或会话
+事件同步回第二个单例。`80 passed in 4.50s` 只证明本地 compatibility-authority 边界，既不代表新的 Regulation /
+CompanionAct 已补齐所有体验细节，也不代表真实模型、远端 Edge 或 DL-07 服务栈验收。
+
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开
 SocialBrain。原先未被生产代码导入的重复 `app/input_service_ack.py` 已删除。该收口只覆盖本地 helper

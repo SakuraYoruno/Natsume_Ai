@@ -276,6 +276,11 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   在 canonical Host 固定返回 `RETIRED / LEGACY_INNER_WORLD_SESSION_END_RETIRED`，不接受 caller VAD/topics
   更新旧 inner-world/body 模型。专用 canonical inner-world journal 尚未实现，不能把只读投影描述为
   autonomous thought 或长期记忆能力。
+- 旧 `EmotionalSilenceEngine` 与 global BodySense 的 mutable Skill 同样不是 canonical regulation 路径：
+  silence tick/情绪更新/话题抗拒和 BodySense tick/conversation/loneliness 均先作 canonical authority probe，
+  production 返回 `RETIRED_CANONICAL_LIFE` 并禁止自动调度；读取仅可带 exact relationship subject 从同一 Life
+  snapshot 的 last regulation/body projection 得到 bounded posture，缺 scope 不回退全局 singleton。该项仅完成
+  compatibility authority cutover，不构成真实陪伴调节体验、远端 Edge 或 DL-07 验收。
 - OBS/runtime snapshot 已改为 composed `LifeSnapshotReader` 的只读 consumer：它以当前 relationship
   subject 的一条 canonical Life head 分别投影 `natsume_ai` self-affect 与 bounded user-affect observation，
   并输出无分数、非升级的关系纹理。reader 已组成后，任何 reader 故障、self-id 或 subject drift 都只会 degraded，

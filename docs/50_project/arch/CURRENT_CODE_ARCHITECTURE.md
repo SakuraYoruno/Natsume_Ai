@@ -115,6 +115,12 @@
 > `RETIRED / LEGACY_INNER_WORLD_SESSION_END_RETIRED`，不能用 caller VAD/topics 写入旧状态机。该边界并未
 > 实现 canonical inner-world journal，也不应被称为主动思考或长期记忆完成。
 
+> **DL-06 沉默/身体兼容 authority 退役修订：** canonical Limbic 仅可按 exact relationship subject 从同一
+> Life snapshot 的 last regulation 与 body projection 返回 read-only `silence_state`；缺 scope 返回
+> `CANONICAL_SILENCE_SUBJECT_REQUIRED`，不再读取 `EmotionalSilenceEngine`。silence tick/情绪更新/话题抗拒和
+> BodySense tick/conversation/loneliness Skill 都在解析 caller 输入前返回 `RETIRED_CANONICAL_LIFE`，且两个 tick
+> 不可自动调度。它不代表调节体验、真实 provider/Edge 或 DL-07 已完成。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧

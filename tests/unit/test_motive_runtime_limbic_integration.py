@@ -13,10 +13,11 @@ def test_compute_runtime_motive_state_uses_limbic_wrappers_when_missing_inputs(
     monkeypatch.setattr(
         "host_brain.tribe.limbic_agent.get_limbic_agent",
         lambda: SimpleNamespace(
-            resolve_silence_state=lambda current_topic="": {
+            resolve_silence_state=lambda current_topic="", person_id=None: {
                 "response_willingness": 0.41,
                 "willingness_level": "RELUCTANT",
                 "topic": current_topic,
+                "relationship_subject_id": person_id,
             },
             resolve_body_sense_state=lambda person_id=None: {
                 "fatigue_level": "TIRED",
@@ -55,6 +56,7 @@ def test_compute_runtime_motive_state_uses_limbic_wrappers_when_missing_inputs(
 
     assert result["dominant_motive"] == "reach_out"
     assert captured["silence_state"]["topic"] == "project alpha"
+    assert captured["silence_state"]["relationship_subject_id"] == "user-1"
     assert captured["body_sense"]["fatigue_level"] == "TIRED"
     assert captured["offline_state"]["offline_hours"] == 1.5
 

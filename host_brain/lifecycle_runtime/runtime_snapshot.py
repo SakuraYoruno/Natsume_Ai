@@ -291,7 +291,10 @@ def build_digital_life_runtime_snapshot(
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         silence_state = _as_plain_dict(
-            get_limbic_agent().resolve_silence_state(current_topic=normalized_topic)
+            get_limbic_agent().resolve_silence_state(
+                current_topic=normalized_topic,
+                person_id=persona_user_id,
+            )
         )
         slot_status["silence_state"] = "live"
     except Exception as exc:

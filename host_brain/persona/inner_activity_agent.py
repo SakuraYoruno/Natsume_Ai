@@ -573,7 +573,10 @@ def _build_inner_activity_context(
     )
     canonical_self_affect = _coerce_mapping(inner_state_dict.get("self_affect"))
     canonical_relationship = _coerce_mapping(inner_state_dict.get("relationship_state"))
-    silence_state = _collect_silence_state(topic_phrase=topic_phrase)
+    silence_state = _collect_silence_state(
+        topic_phrase=topic_phrase,
+        persona_user_id=persona_user_id,
+    )
     body_sense = _collect_body_sense(persona_user_id=persona_user_id)
     bond_summary, bond_state = _collect_bond_context(
         persona_user_id=persona_user_id,
@@ -814,11 +817,20 @@ def _build_life_trace_state_from_context(context: Mapping[str, Any] | None) -> d
     }
 
 
-def _collect_silence_state(*, topic_phrase: str) -> dict[str, Any]:
+def _collect_silence_state(
+    *,
+    topic_phrase: str,
+    persona_user_id: str,
+) -> dict[str, Any]:
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        return dict(get_limbic_agent().resolve_silence_state(current_topic=str(topic_phrase or "")))
+        return dict(
+            get_limbic_agent().resolve_silence_state(
+                current_topic=str(topic_phrase or ""),
+                person_id=persona_user_id,
+            )
+        )
     except Exception as exc:
         _logger.debug("inner_activity silence_state degraded: %s", exc)
         return {}

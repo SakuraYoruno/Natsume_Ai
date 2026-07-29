@@ -89,6 +89,15 @@ inline tick、无范围 evolution event 与 raw monologue background-memory 均�
 固定退役，不能以 caller VAD/topics 写状态。此模块是 read-only continuity projection，不是 canonical
 inner-world journal 或可自动成长的人格 authority。
 
+**Regulation / Silence compatibility projection 模块**同样位于
+[`tribe/limbic_agent.py`](../../../host_brain/tribe/limbic_agent.py)、
+[`skills/impl/silence_skill.py`](../../../host_brain/skills/impl/silence_skill.py) 与
+[`skills/impl/body_sense_skill.py`](../../../host_brain/skills/impl/body_sense_skill.py)。生产 canonical Host 不再让
+`EmotionalSilenceEngine` 持有可写的回复意愿或话题抗拒：读取必须按 relationship subject 从同一 Life snapshot 的
+`RegulationDecision` 与 body projection 得到 bounded posture；无 subject 明确不可用，不回退 process-global
+state。三个 silence 写入口与四个 BodySense mutation Skill 都在解析 caller 输入前退役，registry 禁止其自动调度。
+isolated compatibility composition 仍可用于 rollback，但它不构成 self-affect、关系、调节或主动权限 authority。
+
 同一模块的 `run_growth_feedback_cycle()` 在 canonical authority 下已退役 legacy session feedback：
 `INTERACTION_RECORDED` 的 raw text/session 不再解析 Bond user 或调用 `PersonaGrowthTracker`，而是返回
 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。

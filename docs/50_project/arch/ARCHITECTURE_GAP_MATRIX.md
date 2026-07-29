@@ -156,6 +156,13 @@ Tribe/ANS EventBus、DefaultMode inline tick、无范围 evolution trigger 和 r
 `RETIRED / LEGACY_INNER_WORLD_SESSION_END_RETIRED`。这保留只读连续性，不等于实现了独立 canonical
 inner-world journal、主动思考、长期记忆或体验收益。
 
+**沉默/身体兼容 writer 退役修订：** canonical Limbic 读取 response posture 时必须带 exact relationship
+subject，并由同一 Life head 的 last regulation/body projection 形成只读 `silence_state`；缺 scope 直接
+`CANONICAL_SILENCE_SUBJECT_REQUIRED`，不得打开 `EmotionalSilenceEngine` 或其它全局 fallback。旧
+silence tick/情绪更新/话题抗拒及 BodySense tick/conversation/loneliness Skill 都在解析 caller Bond、emotion、topic
+前返回 `RETIRED_CANONICAL_LIFE`，registry 也禁止两个 tick 自动调度。该收口只消除这条第二写 authority，未完成
+Regulation/CompanionAct 的完整体验、Monitor/Review、真实 provider/Edge 或 DL-07。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

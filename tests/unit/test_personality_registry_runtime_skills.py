@@ -34,3 +34,9 @@ def test_build_personality_skill_registry_includes_runtime_skills() -> None:
         skill = registry.get(skill_name)
         assert skill is not None
         assert skill.scheduler_allowed is False
+
+    for skill_name in ("silence_tick", "body_sense_tick"):
+        skill = registry.get(skill_name)
+        assert skill is not None
+        assert skill.scheduler_allowed is False
+        assert skill.scheduler_profile is None

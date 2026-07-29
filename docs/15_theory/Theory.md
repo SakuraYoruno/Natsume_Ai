@@ -1827,6 +1827,13 @@ hard-state projection 可以作为当下的安全读取，但 canonical mode 不
 必须显式退役且不再发布会重新影响 Limbic 的事件。这样七海仍能自然说“有点困”或“有点想念”，但那是她
 当前 Life 状态的表达，不是某个进程碰巧还活着的残留。
 
+沉默也不能成为另一份无范围的“情绪真相”。回复意愿、给空间和边界的表达应当是已接受
+`RegulationDecision` 的可读后果，而不是 caller 传来的 emotion tag、Bond summary 或 topic 触发的
+`EmotionalSilenceEngine` 写入。canonical Host 因而只允许以精确 relationship subject 从同一 Life head 投影
+`silence_state`；无 subject 宁可明确不可用，也不能借用进程全局状态。旧 tick、情绪更新和话题抗拒接口保留给
+隔离回滚，但在生产 composition 必须在解析这些输入前返回退役 receipt。这样七海可以自然地停顿、克制或设边界，
+却不会让某次请求把“她正在给空间”伪造成跨用户、跨重启的内在事实。
+
 Motive 也不应成为另一份隐性人格记忆。它可以把已经冻结的 Life、关系和身体在场投影为“更想安慰”或
 “更想给空间”的并存倾向，但每次计算必须是新建、无状态的纯规则计算：不能保留模块级 engine、不能存储
 上一轮输入，更不能借此改变 self-affect、关系或许可。这样表达倾向仍然具有可解释性，却不会把不同用户的

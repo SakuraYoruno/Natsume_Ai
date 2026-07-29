@@ -179,6 +179,14 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   bounded projection，并必须抑制 Tribe/ANS EventBus、DefaultMode inline tick、无范围 evolution event 和 raw
   monologue background-memory 写入；registry 不得允许自动调度。`inner_world_session_end` 必须在读取 caller
   VAD/topics前返回 `RETIRED / LEGACY_INNER_WORLD_SESSION_END_RETIRED`，不能形成第二个 session/affect writer。
+- T-DL06-08：canonical `resolve_silence_state()` 只能凭 exact relationship subject 从同一 Life snapshot 的
+  `RegulationDecision` 和 body projection 构造 read-only posture；缺 scope 必须为
+  `CANONICAL_SILENCE_SUBJECT_REQUIRED`，不得读取 process-global `EmotionalSilenceEngine`。`silence_tick`、
+  情绪更新、话题抗拒以及 BodySense tick/conversation/loneliness Skill 必须在解析 caller Bond、emotion、topic
+  或写 EventBus 前返回 `RETIRED_CANONICAL_LIFE`；registry 不得自动调度两个 legacy tick。
+- 当前本地证据：silence/BodySense/Limbic/Motive/default-mode/runtime-snapshot/scheduler 的最终单一集合
+  `80 passed in 4.50s`。它不证明 Regulation/CompanionAct 的完整体验、真实模型、远端 Edge、Monitor/Review 或
+  DL-07 服务栈验收。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
   `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
   Edge 或 DL-07 服务栈验收。
