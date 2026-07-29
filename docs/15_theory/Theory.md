@@ -1772,7 +1772,7 @@ canonical provisional relationship episode 中的 response receipt；反馈本�
 情绪标签和 Soul patch 都不进入这个证据入口。
 
 经过独立 scope 认证的 `HELPFUL` 可以成为该回应的高置信 aftereffect，但它不创建
-profile，也不能由请求指定 activation profile。它至多推进一个已经由独立历史证据启动的 CANARY；第五条合格 canary 后效应才由 canonical lifecycle 自动 activation；
+profile，也不能由请求指定 activation profile。它至多推进一个已经由独立历史证据启动的 CANARY；第五条合格 canary 后效应才由 canonical lifecycle 自动 activation。当前本地生命周期验证直接使用这一 receipt-bound 入口，而不是把普通文本分类器替换成伪造的高置信评分；activation 和 exact rollback 都必须在下一轮同一冻结计划的文本、语音与 Avatar 投影中可见；
 普通聊天中的关键词分类和 persona proposal 继续是保守、低权重的理解信号。这样，
 七海能从“这次有没有接住我”学习低风险表达方式，却不会把一次点赞、一次误解或
 一段模型推断误当成对人格、亲密身份、关系许可或 self-affect 的授权。

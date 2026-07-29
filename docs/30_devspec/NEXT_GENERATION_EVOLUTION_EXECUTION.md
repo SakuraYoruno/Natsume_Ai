@@ -333,7 +333,7 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   一个仍为 active provisional episode 的 `life-event://` 或 `life-delivery://` response receipt；
   `host.companion-feedback` 另行要求 `companion:feedback:write`、exact user/subject 和 tenant/workspace
   绑定。只有 signed `HELPFUL` 生成 `0.95` 的 strong aftereffect，它只能调用既有 canary 的
-  `record_eligible_canary_aftereffect`；第五条合格 canary 后效应才会自动 activation，外部请求不能自己创建或指定 activation profile。自然语言 classifier、
+  `record_eligible_canary_aftereffect`；第五条合格 canary 后效应才会自动 activation，外部请求不能自己创建或指定 activation profile。当前本地生命周期集通过真实 receipt-bound `HELPFUL` 驱动该 observer，且在 activation/exact rollback 后验证下一轮冻结的 text/Voice/Avatar profile projection；不得用替换 classifier 的高置信 fixture 充当生产证据。自然语言 classifier、
   persona response-feedback proposal 和任意 raw rating 均不得进入这条 authority。
 - `POST /v1/digital-life/relationship/companion-profile/rollback` 是与 canary-start 分离的
   **exact active-version rollback** 入口。`CompanionProfileRollbackRequestV1` 只能声明当前

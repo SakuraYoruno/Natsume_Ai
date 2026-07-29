@@ -61,7 +61,7 @@ window；其他 compatibility reader、Monitor/Review、长期 canary 与真实�
 
 0148 已补上“受认证的直接偏好控制”这一窄入口：`POST /v1/digital-life/relationship/companion-profile` 只接受完整、严格的低风险偏好 JSON，要求 `companion:profile:write`、`user principal == relationship_subject_id` 与 `tenant == workspace_id`。它不会从聊天文字推断偏好，也不能立即激活 profile；Host 只会从 canonical 强 aftereffect 历史选取证据、创建五次互动的 CANARY，并把 Secure Ingress audit ref 一并固化。该接口不是 Monitor 的用户反馈/审核界面，仍不改变 Soul、关系许可或 self-affect；CANARY 证据收集、长期收益、旧 writer 清零和真实服务栈验收仍未完成。
 
-本次又接入 `POST /v1/digital-life/relationship/response-feedback`：用户只能对一条仍处于 provisional 状态、已有 canonical receipt 的回复提交 `HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY`。它要求独立的 `companion:feedback:write`、精确 user/subject 与 tenant/workspace 绑定；`HELPFUL` 才会成为 `0.95` 的 receipt-scoped 强 aftereffect，且只能推进一个已经存在的 profile CANARY；第五条合格后效应才会由 lifecycle 自动激活它，外部请求不能创建或指定激活 profile。自然语言关键词识别仍是保守的 `0.72`，只用于普通关系理解；它不能伪装为学习证据。
+本次又接入 `POST /v1/digital-life/relationship/response-feedback`：用户只能对一条仍处于 provisional 状态、已有 canonical receipt 的回复提交 `HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY`。它要求独立的 `companion:feedback:write`、精确 user/subject 与 tenant/workspace 绑定；`HELPFUL` 才会成为 `0.95` 的 receipt-scoped 强 aftereffect，且只能推进一个已经存在的 profile CANARY；第五条合格后效应才会由 lifecycle 自动激活它，外部请求不能创建或指定激活 profile。当前本地生命周期证据不再篡改文本分类器置信度：它通过真实 receipt-bound 显式反馈自动推进 CANARY，并验证 activation 与 exact rollback 会实际改变、再恢复下一轮的文本锚点、TTS 语速和 Avatar 动作强度。自然语言关键词识别仍是保守的 `0.72`，只用于普通关系理解；它不能伪装为学习证据，也不等同于真实用户长期收益或远端播放验收。
 
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、

@@ -197,6 +197,13 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
 - 当前本地证据：Limbic/session hook、BodySense、silence、inner-world、startup 与 Host composition 的最终单一
   集合为 `119 passed, 4 skipped in 10.95s`。其中四项 skip 是已退役的 legacy recent-turn direct route；该集合不证明
   真实 provider、Voice/Avatar、远端 Edge、Monitor/Review 或 DL-07 服务栈。
+- T-DL06-11：低风险 companion profile 的强证据必须来自一个仍处于 provisional 状态的 accepted response receipt
+  和 `record_explicit_response_feedback()`；测试不得替换普通文本 classifier 以制造高置信度。relationship lifecycle
+  必须通过实际 profile provider 自动观察 `0.95` 的 `HELPFUL` aftereffect，五条跨日历史只可启动 CANARY，第五条
+  合格 canary interaction 才能自动 activation。activation 与 exact rollback 都必须改变、再恢复下一轮同一
+  `AffectiveTurnPlanV1` 的文本锚点、TTS 语速和 Avatar 动作强度；普通 `0.72` 文本 aftereffect 必须失败关闭。
+  当前 `profile lifecycle + profile ingress + response-feedback ingress` 集合为 `12 passed in 56.39s`；不代表
+  真实用户长期收益、远端 Edge/Avatar 播放、Monitor UI 或 DL-07 服务栈验收。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
