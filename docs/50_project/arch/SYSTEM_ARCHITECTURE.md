@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.46
+版本：v2.47
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -13,6 +13,11 @@ DL-06 的 canonical Tribe composition 也不再把旧 `MotorCortexAgent/Cerebell
 在 canonical Life ports 下不注册 `MOTOR_*`/platform EventBus，不持久局部 plan/correction、不做自动 retry，也不把
 技术失败或顺畅执行 fan-out 为 Limbic、Endocrine、PainReward、Interoception 或 DefaultMode。它们只保留稳定的
 retired read projection；真正的 effect 执行、重试和未知副作用对账属于 immutable TaskGraph 与 Effect receipt。
+
+同一 production composition 下，`DefaultModeAgent` 也不再是内在活动或主动性 writer：它不订阅 inner-world/
+conversation EventBus，不运行 idle 模型、写 local self-model/monologue，也不把 continuity/loneliness 扇出为
+Glymphatic、ANS、Interoception 或 PainReward。其 tick、callback 和 export 仅给 retired projection；真正的关系
+连续性与陪伴冲动只能从 scoped Life/Appraisal/Regulation/aftereffect 取得。
 
 NE-01 的本地代码封口把七个入口、一般多节点恢复和 Workspace 生命周期放进
 同一证据边界：路线收据从一个 canonical SQLite 只读快照派生；恢复波次由
@@ -308,11 +313,11 @@ Tribe event、VTS driver、bulk TTS 与 Prefrontal drift/growth 已物理删除�
 `LEGACY_TRIBE_DIRECT_SPEAK_RETIRED`，不写 registry、不发布 EventBus、不调用 TTS/Edge，也不把技术失败转写为
 Limbic 事件。真实 Voice/Avatar 只从 accepted `ExpressionPlanV1` 的 delivery intent 继续。
 
-默认模式目前也遵守这一 single-authority 约束：读取 `LifeSnapshotReader` 后，边界层只投影有限的 self-affect
-和 relationship texture 给 `inner_activity_agent`，并用 `CANONICAL_LIFE_JOURNAL` marker 禁止该 agent 回读
-EmotionTimeline 或 SocialBrain/Bond。该关系 texture 不包含身份、episode evidence 或 intimacy consent，亦不映射
-为旧 Bond score/stage；background continuity 只能调节投影行为，不能调用 legacy Limbic metabolism 写入情绪。
-这是一个 reader 切片，不改变其他 compatibility reader、Monitor/Review、真实 provider/Edge 与 DL-07 的未完成状态。
+纯 `inner_activity_agent` 可读取 `LifeSnapshotReader` 的有限 self-affect/relationship texture，并用
+`CANONICAL_LIFE_JOURNAL` marker 禁止回读 EmotionTimeline 或 SocialBrain/Bond；该关系 texture 不包含身份、episode
+evidence 或 intimacy consent，亦不映射为旧 Bond score/stage。它不再授权 `DefaultModeAgent` 的 background
+continuity tick：该 writer 已返回 retired projection，不改变其他 compatibility reader、Monitor/Review、真实
+provider/Edge 与 DL-07 的未完成状态。
 
 0148 的 `CompanionProfileIngress` 现在把一条更窄的直接控制路径加入同一 composition：
 `POST /v1/digital-life/relationship/companion-profile` 经 `host.companion-profile` 验证

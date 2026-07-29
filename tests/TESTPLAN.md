@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.53
+版本：v0.54
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -313,6 +313,14 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   delivery reconciliation 只能属于 governed TaskGraph/Effect receipt。当前
   `test_dl06_motor_cerebellum_execution_retirement.py` 与 Motor/Cerebellum、batch 42/45、direct-effect、Immune
   邻接集合为 `42 passed in 2.49s`；不证明真实 Edge、物理设备、provider、Monitor/Review 或 DL-07。
+- T-DL06-28：canonical `DefaultModeAgent` 不得订阅 inner-world/conversation EventBus，不得运行 idle model、
+  持久 local inner monologue/self-model、生成 proactive candidate，或将 continuity/loneliness 回灌
+  Glymphatic/ANS/Interoception/PainReward。tick、callback 与 export 必须显式返回
+  `LEGACY_DEFAULT_MODE_INNER_ACTIVITY_RETIRED`，不以空/中性值伪造 self-affect；纯
+  `project_inner_world_state()` 读模型不取得 writer 权限。当前
+  `test_dl06_default_mode_inner_activity_retirement.py` 与 DefaultMode、inner-activity、batch 34/39/42/43/44/
+  46/47/48、Glymphatic/Motor 邻接集合为 `125 passed in 4.42s`；不证明真实 provider、远端 Edge、Monitor/Review
+  或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

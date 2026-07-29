@@ -41,10 +41,8 @@ class CerebellumAgent:
         active beside canonical Life.
         """
 
-        return (
-            self.application_ports is not None
-            and self.application_ports.uses_canonical_affective_life()
-        )
+        ports = getattr(self, "application_ports", None)
+        return ports is not None and ports.uses_canonical_affective_life()
 
     @staticmethod
     def _retired_correction_decision(

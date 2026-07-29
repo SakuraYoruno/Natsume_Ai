@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.63
+版本：v2.64
 维护日期：2026-07-28
 状态：当前证据
 
@@ -78,6 +78,13 @@
   Docker 服务栈仍必须在 DL-07 单独验收。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
+
+- `test_dl06_default_mode_inner_activity_retirement.py` 验证 canonical `DefaultModeAgent` 不订阅
+  inner-world/conversation EventBus，不运行 idle 模型、写 process-local inner monologue/self-model、产生主动候选，
+  或把 continuity/loneliness 扇出为 Glymphatic、ANS、Interoception/PainReward。tick、callback 与 export 只返回
+  `LEGACY_DEFAULT_MODE_INNER_ACTIVITY_RETIRED`；纯 canonical Life projection 仍不能变成背景 writer。该文件与
+  DefaultMode、inner-activity、batch 34/39/42/43/44/46/47/48、Glymphatic/Motor 邻接最终集合为
+  `125 passed in 4.42s`，不代表真实 provider、远端 Edge、Monitor/Review 或 DL-07 服务栈验收。
 
 - `test_dl06_motor_cerebellum_execution_retirement.py` 验证 canonical `MotorCortexAgent` 与
   `CerebellumAgent` 不注册旧 `MOTOR_*`/platform EventBus，不保存 process-local plan/correction，也不产生
@@ -299,10 +306,10 @@
 - `test_dl06_default_mode_canonical_inner_activity.py`、
   `test_inner_activity_agent_limbic_integration.py`、
   `test_inner_activity_agent_social_brain_integration.py` 与
-  `test_aw08_life_memory_legacy_retirement.py` 共同验证：默认模式从同一 canonical Life snapshot 获取有限
+  `test_aw08_life_memory_legacy_retirement.py` 共同验证：纯 inner-activity helper 从同一 canonical Life snapshot 获取有限
   self-affect/relationship projection 后，私密活动不再触碰 legacy EmotionTimeline/SocialBrain/Bond；projection
   不泄露 trigger/evidence、workspace/subject 或 intimacy consent，且 trust/attunement 不会被压成 Bond score。
-  `test_tribe_deepening_batch47.py` 同时确认高连续性 tick 不会再调用 legacy Limbic metabolism。连同
+  `test_tribe_deepening_batch47.py` 的历史断言不再代表 production DefaultMode writer；后者已整体退役。连同
   `test_default_mode_agent.py`、相邻 DL-06、Limbic/Motive 与 inner-activity 文件的最终单一集合为
   `92 passed in 44.20s`（4 条既有弃用警告）；这是本地 reader-cutover 证据，不证明其他 compatibility reader、
   Monitor/Review、真实 provider/Edge 或 DL-07 服务栈。

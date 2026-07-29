@@ -43,10 +43,8 @@ class MotorCortexAgent:
         this class available only for isolated legacy compatibility fixtures.
         """
 
-        return (
-            self.application_ports is not None
-            and self.application_ports.uses_canonical_affective_life()
-        )
+        ports = getattr(self, "application_ports", None)
+        return ports is not None and ports.uses_canonical_affective_life()
 
     def _retired_execution_result(
         self,

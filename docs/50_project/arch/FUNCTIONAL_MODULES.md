@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.52
+版本：v2.53
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -51,6 +51,13 @@ Limbic、Endocrine、PainReward、Interoception 或 DefaultMode。兼容调用�
 `LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED` 或 `LEGACY_CEREBELLUM_CORRECTION_RETIRED`；唯一可用的真实
 执行/对账 authority 是 governed TaskGraph 的 Effect/Receipt 链。这不是远端 Edge、设备 retry 或物理 delivery
 验收通过的声明。
+
+**Legacy DefaultMode 内在活动边界**位于
+[`tribe/default_mode_agent.py`](../../../host_brain/tribe/default_mode_agent.py)。canonical ports 下它不订阅
+inner-world/conversation EventBus，不运行 idle model、写 local inner monologue/self-model，或将 continuity/
+loneliness 转为 Glymphatic、ANS、Interoception、PainReward 和主动候选。tick、callback 与 export 都返回
+`LEGACY_DEFAULT_MODE_INNER_ACTIVITY_RETIRED` 的空投影；`project_inner_world_state()` 可继续提供无副作用、脱敏的
+Life 读模型，但没有写权。这不是七海停止拥有内在连续性，而是拒绝让无 scope 后台循环伪造它。
 
 **退役 progress helper**位于 [`input_runtime/progress.py`](../../../host_brain/input_runtime/progress.py)。Gateway
 progress fastpath 已被禁用，故此文件只保留 rollback-window 的无状态技术文案 helper：它固定使用

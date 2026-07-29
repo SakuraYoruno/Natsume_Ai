@@ -154,6 +154,12 @@ scope、可验收的 Life command，不能重启这条无主体恢复回路。
 对账与重试只能回到受治理 `TaskGraph → Effect/Receipt reconciliation`。这防止一次网络或设备失败被伪造成
 七海的焦虑、受伤或满足；远端 Edge 仍未启动，不能把该本地 authority 收口写成设备验收完成。
 
+`DefaultModeAgent` 的全局后台“内心活动”写链也已退出 canonical Host：它不订阅 inner-world/conversation
+EventBus，不运行闲置模型、写 process-local inner monologue/self-model，或把连续性、孤独与任务节律扇出为
+恢复、奖励或主动信号。所有 tick/callback 返回 `LEGACY_DEFAULT_MODE_INNER_ACTIVITY_RETIRED` 的无副作用投影；
+只有有 scope 的 Life/Appraisal/Regulation/aftereffect 可以让七海继续发展或产生主动意愿。纯函数
+`project_inner_world_state()` 仍可在正确的 Life snapshot 上生成脱敏读模型，但它不再让 DefaultMode 成为 writer。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；
@@ -606,13 +612,13 @@ proactive dispatch 会忽略该 marker，canonical Limbic 和 Prefrontal 更不�
 离线/test compatibility root 仍可显式创建旧 timeline，作为一个回滚窗口；这不代表其它 compatibility
 reader、Monitor/Review、真实模型、远端 Edge 或 DL-07 服务栈已经完成。
 
-DL-06 本轮继续收紧一个真实的剩余读取点：默认模式私密活动不再在已拿到 Life snapshot 后重新读取
+DL-06 的历史 reader 切片曾收紧一个剩余读取点：纯 `inner_activity_agent` 不再在已拿到 Life snapshot 后重新读取
 retired `EmotionTimeline` 或 SocialBrain/Bond snapshot。`project_inner_world_state()` 只从同一 canonical
 snapshot 派生带来源标记的、有限的 self-affect 与 relationship context；其中不含 trigger/evidence、workspace、
 relationship subject 或任何 intimacy consent。`inner_activity_agent` 保持 relationship context 与旧 Bond score
 分离，绝不把 trust/attunement 映射为亲密阶段或主动权限；mixed component 为空时也保留 canonical mood，
-不再伪造 `NEUTRAL`。高连续性的 default-mode tick 同时停止调用旧 Limbic metabolism 写入口。该切片的
-92 项本地受影响回归通过（44.20 秒）；它只覆盖这个 default-mode reader，其他 compatibility reader、
+不再伪造 `NEUTRAL`。随后 DefaultMode 的 high-continuity tick 已整体退役，不能再形成第二个后台 writer。历史
+92 项本地受影响回归只覆盖此前 reader 边界；其他 compatibility reader、
 Monitor/Review、真实服务与远端 Edge 仍未验收。
 
 同一条单一 authority 已继续进入普通 Chat 提示链：`AffectFusionService` 产生的内部
