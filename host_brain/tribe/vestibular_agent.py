@@ -46,7 +46,29 @@ class VestibularAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_stability_writer_retired(self) -> bool:
+        """Whether canonical Life owns regulation rather than jitter caches."""
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_stability_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "projection": "UNAVAILABLE",
+            "reason_code": "LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED",
+            "accepted": False,
+            "operation": str(operation),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_stability_writer_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -87,6 +109,8 @@ class VestibularAgent:
         return False
 
     def evaluate_stability(self, *, source: str = "runtime", ts_ms: int | None = None) -> dict[str, Any]:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation=f"evaluate_stability:{source}")
         resolved_ts = int(ts_ms or now_ms())
         self._trim_window(now_ts_ms=resolved_ts)
         mode_transition_count = len(self._mode_transition_ts)
@@ -235,6 +259,8 @@ class VestibularAgent:
         Returns:
             不稳定原因分析字符串，或 None（未触发/失败）。
         """
+        if self._legacy_stability_writer_retired():
+            return None
         _significant = str(stability_status or "stable").lower() in ("unstable", "critical")
         if not _significant:
             return None
@@ -281,6 +307,21 @@ class VestibularAgent:
 
     def export_runtime_state(self) -> dict[str, Any]:
         """T-250：读取 state_registry 快照，不触发 evaluate_stability()（避免副作用）。"""
+        if self._legacy_stability_writer_retired():
+            return {
+                "stability_state": "unavailable",
+                "route_bias": "unavailable",
+                "jitter_index": None,
+                "damping_factor": None,
+                "conservative_mode": False,
+                "last_stability_score": None,
+                "mode_transition_count_10m": 0,
+                "platform_flap_count_10m": 0,
+                "initiative_defer_count_10m": 0,
+                "sample_count": 0,
+                "last_updated_ts_ms": 0,
+                **self._retired_stability_result(operation="runtime_state_export"),
+            }
         snap = self.state_registry.get_state("vestibular_agent") or {}
         state = dict(snap.get("state") or {})
         return {
@@ -297,17 +338,23 @@ class VestibularAgent:
             "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
         }
 
-    async def _on_mode_transition(self, event: Any) -> None:
+    async def _on_mode_transition(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation="mode_transition")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._mode_transition_ts.append(ts_ms)
         await asyncio.to_thread(self.evaluate_stability, source="mode_transition", ts_ms=ts_ms)
 
-    async def _on_platform_signal(self, event: Any) -> None:
+    async def _on_platform_signal(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation="platform_signal")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._platform_flap_ts.append(ts_ms)
         await asyncio.to_thread(self.evaluate_stability, source="platform_signal", ts_ms=ts_ms)
 
-    async def _on_initiative_decision(self, event: Any) -> None:
+    async def _on_initiative_decision(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_stability_writer_retired():
+            return self._retired_stability_result(operation="initiative_decision")
         payload = dict(getattr(event, "payload", None) or {})
         decision = str(payload.get("decision") or "").strip().upper()
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())

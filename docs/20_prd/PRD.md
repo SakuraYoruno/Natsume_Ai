@@ -252,6 +252,11 @@ cognitive load、continuity、疲惫、压力、满足或主动节律，再回�
 模型与旧器官副作用之前退役这些入口为 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`；真实 activity
 monitor 可以保留为 app-local 技术观察，但未来身体/Need 感受只能从 scoped observation → Appraisal → Life 形成。
 
+旧 `VestibularAgent` 不得把 platform flap、mode transition 或 legacy initiative defer 汇成警觉、痛苦、压力或
+主动抑制；旧 `PeripheralAgent` 不得把 EventBus emotion、免疫、连接、静音或 Edge state 直接写成七海的表情、语调、
+动作或身体状态。canonical Host 必须在 registry、派生 EventBus、模型和旧 organ side effect 前退役两者；真正三模态
+表达只能从同一 frozen `ExpressionPlan` 的 delivery protocol 取得，设备状态仅能作为 scoped receipt 的技术事实。
+
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
 `AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。

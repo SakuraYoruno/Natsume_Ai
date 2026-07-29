@@ -33,8 +33,30 @@ class PeripheralAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_peripheral_writer_retired(self) -> bool:
+        """Whether ExpressionPlan delivery, not this cache, owns embodiment."""
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_peripheral_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "projection": "UNAVAILABLE",
+            "reason_code": "LEGACY_PERIPHERAL_EXPRESSION_WRITER_RETIRED",
+            "accepted": False,
+            "operation": str(operation),
+        }
+
     def get_peripheral_state(self) -> dict[str, Any]:
         """返回当前外周神经系统状态快照。"""
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="peripheral_state_read")
         try:
             snap = self.state_registry.get_state("peripheral_agent") or {}
             return dict(snap.get("state") or {})
@@ -53,6 +75,11 @@ class PeripheralAgent:
         - PERIPHERAL_STATE_UPDATED：接收 edge_client 外设状态快照
         - GATE_STATE_CHANGED / PLATFORM_MUTE_CHANGED：接收 edge 门控与静音状态变更
         """
+        if self._legacy_peripheral_writer_retired():
+            # Canonical text/voice/avatar delivery is compiled from the same
+            # ExpressionPlan.  Global emotion/device callbacks cannot become
+            # a second expression authority.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -70,12 +97,14 @@ class PeripheralAgent:
                 "PeripheralAgent 订阅注册失败（降级）: %s", exc
             )
 
-    async def _on_emotion_state_changed(self, event: Any) -> None:
+    async def _on_emotion_state_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 EMOTION_STATE_CHANGED 事件：更新外周表达状态。
 
         T-110：情绪变化时，根据 emotion_tag 生成外周表达建议
         （表情强度、语调建议、动作幅度），供 edge_client 驱动外设输出。
         """
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="emotion_state_changed")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
@@ -129,12 +158,14 @@ class PeripheralAgent:
         except Exception:
             pass
 
-    async def _on_immune_block(self, event: Any) -> None:
+    async def _on_immune_block(self, event: Any) -> dict[str, Any] | None:
         """处理 IMMUNE_BLOCK 事件：触发外周抑制信号。
 
         T-110：免疫拦截时，将外周输出置为抑制状态，
         降低表情/动作活跃度，避免在有害内容被拦截时仍表现出积极外周反应。
         """
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="immune_block")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             risk_level = str(payload.get("risk_level") or "low").strip().lower()
@@ -171,8 +202,10 @@ class PeripheralAgent:
         except Exception:
             pass
 
-    async def _on_platform_connected(self, event: Any) -> None:
+    async def _on_platform_connected(self, event: Any) -> dict[str, Any] | None:
         """处理 PLATFORM_CONNECTED 事件：记录平台连通状态。"""
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="platform_connected")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             platform = str(payload.get("platform") or "").strip().lower()
@@ -225,8 +258,10 @@ class PeripheralAgent:
         except Exception:
             pass
 
-    async def _on_platform_disconnected(self, event: Any) -> None:
+    async def _on_platform_disconnected(self, event: Any) -> dict[str, Any] | None:
         """处理 PLATFORM_DISCONNECTED 事件：记录平台断开状态。"""
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="platform_disconnected")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             platform = str(payload.get("platform") or "").strip().lower()
@@ -259,8 +294,10 @@ class PeripheralAgent:
         except Exception:
             pass
 
-    async def _on_peripheral_state_updated(self, event: Any) -> None:
+    async def _on_peripheral_state_updated(self, event: Any) -> dict[str, Any] | None:
         """处理 PERIPHERAL_STATE_UPDATED：接收 edge_client 外设状态快照。"""
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="peripheral_state_updated")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
@@ -328,8 +365,10 @@ class PeripheralAgent:
         except Exception:
             pass
 
-    async def _on_gate_state_changed(self, event: Any) -> None:
+    async def _on_gate_state_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 GATE_STATE_CHANGED：同步平台门控状态。"""
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="gate_state_changed")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             platform = str(payload.get("platform") or "all").strip().lower() or "all"
@@ -349,8 +388,10 @@ class PeripheralAgent:
         except Exception:
             pass
 
-    async def _on_platform_mute_changed(self, event: Any) -> None:
+    async def _on_platform_mute_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 PLATFORM_MUTE_CHANGED：同步平台静音状态。"""
+        if self._legacy_peripheral_writer_retired():
+            return self._retired_peripheral_result(operation="platform_mute_changed")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             platform = str(payload.get("platform") or "all").strip().lower() or "all"
@@ -381,6 +422,8 @@ class PeripheralAgent:
         Returns:
             情境感知描述字符串，或 None（未触发/失败）。
         """
+        if self._legacy_peripheral_writer_retired():
+            return None
         pass  # 无灰度开关，直接执行
 
         import logging as _logging  # noqa: PLC0415
@@ -432,6 +475,24 @@ class PeripheralAgent:
 
     def export_runtime_state(self) -> dict[str, Any]:
         """导出 Peripheral 运行时状态，供 CortexAgent 收口与监控使用。"""
+        if self._legacy_peripheral_writer_retired():
+            return {
+                "connected_platforms": [],
+                "gate_state": {},
+                "mute_state": {},
+                "suppressed": False,
+                "suppressed_risk_level": None,
+                "current_emotion_tag": None,
+                "current_intensity": None,
+                "voice_tone": None,
+                "motion_scale": None,
+                "last_platform_event": None,
+                "last_connected_ts_ms": 0,
+                "last_disconnected_ts_ms": 0,
+                "last_edge_peripheral_report_ts_ms": 0,
+                "edge_peripheral_error": None,
+                **self._retired_peripheral_result(operation="runtime_state_export"),
+            }
         try:
             state = self.get_peripheral_state()
             return {

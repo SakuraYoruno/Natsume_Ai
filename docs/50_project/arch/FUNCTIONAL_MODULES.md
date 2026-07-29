@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.50
+版本：v2.51
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -119,6 +119,14 @@ conversation/channel/voice/task EventBus，不将 session、打断、任务成�
 派生 `PROPRIOCEPTION_UPDATED`、调用旧 organ 或生成 load hint。所有 state/callback/export 入口都给
 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`。activity monitor 保留为 app-local 技术事实；它不能把
 服务负荷升级为七海的 fatigue、stress、reward、关系连续性或主动许可。
+
+**Vestibular / Peripheral 兼容具身边界模块**位于
+[`tribe/vestibular_agent.py`](../../../host_brain/tribe/vestibular_agent.py) 与
+[`tribe/peripheral_agent.py`](../../../host_brain/tribe/peripheral_agent.py)。canonical ports 下 Vestibular 不注册
+mode/platform/initiative EventBus，不把 jitter 变成 route bias、情绪或旧 organ side effect；Peripheral 不注册
+emotion/immune/platform/gate/mute/edge EventBus，不以 global cache 生成表情、语调或动作。两者仅输出明确
+`UNAVAILABLE` retirement projection；真实文本、Voice 和 Avatar 只能由 `AffectiveTurnPlan → ExpressionPlan → delivery
+receipt` 同轮驱动，设备事实不得反向成为情绪 authority。
 
 同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
 `handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；

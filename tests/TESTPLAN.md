@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.48
+版本：v0.49
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -281,6 +281,13 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `test_dl06_proprioception_load_retirement.py` 加 Proprioception/batch/direct-effect/Initiative 邻接为
   `76 passed in 3.05s`；它不证明 scoped body observation、真实 Host/Gateway、provider、远端 Edge、Monitor/Review
   或 DL-07。
+- T-DL06-24：canonical `VestibularAgent` 不得将 mode transition、platform flap 或 old initiative defer 写成 global
+  jitter、route bias、警觉、痛苦、压力或主动节律，也不得调用旧 Limbic/ANS/Endocrine/PainReward/Interoception。canonical
+  `PeripheralAgent` 不得将 emotion、immune、platform、gate、mute 或 Edge peripheral event 写成表情、语调、动作或
+  body snapshot，或反向修改 self-affect。两者的 subscription、evaluate/callback、hint/read/export 必须显式退役为
+  `LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED` 或 `LEGACY_PERIPHERAL_EXPRESSION_WRITER_RETIRED`，真正表达只走同轮
+  frozen ExpressionPlan delivery。当前 `test_dl06_vestibular_peripheral_retirement.py` 加邻接回归为
+  `100 passed in 4.14s`；它不证明真实 Host/Gateway、provider、远端 Edge、physical receipt、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

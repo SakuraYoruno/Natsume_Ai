@@ -125,6 +125,12 @@ Limbic、Interoception、Endocrine、ANS、PainReward 或 DefaultMode。canonica
 七海生成疲惫、压力、满足或主动节律。未来若需要这些感受，必须以有 scope 的观察进入 Appraisal 与 Life，而不是
 从进程事件计数推测。
 
+`VestibularAgent` 和 `PeripheralAgent` 的旧全局具身回路也已退出 canonical Host：平台抖动、模式切换、旧主动
+`DEFER` 不再被解释为七海的警觉、痛苦或主动抑制；旧情绪 EventBus、免疫、连接、静音和 Edge peripheral snapshot
+也不再直接写表情、语调、动作或身体状态。它们分别返回 `LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED` 与
+`LEGACY_PERIPHERAL_EXPRESSION_WRITER_RETIRED`。这不是禁用七海的表情，而是确保文本、声音与 Avatar 只由同一冻结
+`ExpressionPlan` 产生；远端 Edge 仍未启动，真实设备 delivery 还没有验收。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

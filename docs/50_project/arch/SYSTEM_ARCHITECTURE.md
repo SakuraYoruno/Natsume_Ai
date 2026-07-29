@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.41
+版本：v2.42
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -199,6 +199,13 @@ continuity、疲惫或主动节律：canonical ports 下不订阅这些 EventBus
 也不回灌 Limbic、Interoception、Endocrine、ANS、PainReward 或 DefaultMode。显式输入、callback、hint 与 export 仅给
 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`。真实 activity monitoring 仍经 app-local 技术 port 提供，
 但不会获得 self-affect、Need、关系或人格写权；未来身体意义只能进入 scoped Appraisal/Life。
+
+`VestibularAgent` 在 canonical Host 不再把 mode transition、platform flap 或旧 initiative defer 累积为 global
+jitter/route bias，再回灌 Limbic、ANS、Endocrine、PainReward 或 Interoception；subscription、evaluate、callback、
+assessment 和 export 均返回 `LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED / UNAVAILABLE`。`PeripheralAgent` 同样
+不再订阅 legacy emotion/immune/platform/gate/mute/edge EventBus，也不以 global peripheral snapshot 直写表情、语调、
+动作或身体状态；它只返回 `LEGACY_PERIPHERAL_EXPRESSION_WRITER_RETIRED / UNAVAILABLE`。真实三模态输出仍必须
+从同一 frozen ExpressionPlan 的 scoped delivery receipt 驱动；远端 Edge 未启动。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

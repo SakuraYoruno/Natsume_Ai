@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.58
+版本：v2.59
 维护日期：2026-07-28
 状态：当前证据
 
@@ -172,6 +172,13 @@
   `test_proprioception_agent.py`、batch 35/36/43/44/47、direct-effect 与 Initiative 邻接保留 isolated legacy
   compatibility 覆盖。当前定向集合为 `76 passed in 3.05s`；它不证明 scoped body/Need 体验、真实 Host/Gateway、
   provider、远端 Edge、Monitor/Review 或 DL-07。
+
+- `test_dl06_vestibular_peripheral_retirement.py` 验证 canonical `VestibularAgent` 不注册 mode/platform/initiative
+  EventBus，不写 jitter/route-bias 或回灌旧 organ；canonical `PeripheralAgent` 不注册 emotion/immune/platform/gate/
+  mute/edge EventBus，不写 global expression/body snapshot 或 direct expression side effect。两类 evaluate/callback/
+  export/hint 入口分别返回 explicit retirement/`UNAVAILABLE`。Vestibular/Peripheral、batch 37/38/41/42/46/48/49、
+  direct-effect 与 Proprioception 邻接的当前定向集合为 `100 passed in 4.14s`；它不证明真实 ExpressionPlan delivery、
+  Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
