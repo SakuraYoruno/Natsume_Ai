@@ -77,6 +77,14 @@
 > SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。此切片本地集合为 `67 passed in 10.65s`，不是
 > Monitor、真实 provider/Edge 或 DL-07 完成。
 
+> **DL-06 runtime snapshot 兼容计量修订：** Host composition 现在把 canonical
+> Life reader 标记为必需。它缺失时不再具备 legacy fallback 资格，而是返回 degraded canonical
+> snapshot；每个 Host lifespan 的 ports instance 公开一个只含固定 projection ID 和计数的
+> `compatibility_projection_usage`，分别记录实际 legacy assembler 读取与被抑制的回退。该
+> meter 不持久化、无用户内容且不是状态 authority；显式离线/测试 composition 的 rollback
+> window 仍可使用旧 assembler 并被计数。本地 `51 passed in 9.07s` 仅覆盖这条边界，不代表
+> 其它 compatibility reader、Monitor/Review、真实 provider/Edge 或 DL-07 已完成。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧

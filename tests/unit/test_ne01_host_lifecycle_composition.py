@@ -681,6 +681,7 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
     assert lifecycle.get_life_memory_store is provider
     assert lifecycle.get_model_attempt_service is host_services.model_attempt_service
     assert lifecycle.get_life_snapshot_reader is provider
+    assert lifecycle.require_canonical_life_snapshot is True
     assert lifecycle.emotion_timeline.rebuild_summary(window_ms=1) == {}
     assert lifecycle.emotion_timeline.build_daily_diary(window_ms=1) == {}
     assert (

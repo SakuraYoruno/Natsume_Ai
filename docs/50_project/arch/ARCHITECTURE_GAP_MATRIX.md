@@ -118,6 +118,14 @@ legacy Limbic metabolism。最终相邻本地集合为 `92 passed in 44.20s`；�
 为无分数、非自动升级的 texture。定向本地集合 `67 passed in 10.65s`，只证明 reader-cutover，不证明
 Monitor/Review、真实 Host/Obs、provider、远端 Edge 或 DL-07 服务栈。
 
+**Runtime snapshot compatibility meter 修订：** production ports 现在声明 canonical reader
+为必需；没有 reader 时只输出 degraded canonical projection，并记录一次 suppressed fallback，不能重新
+进入 legacy assembler。每个 app-local ports instance 的 `compatibility_projection_usage` 只暴露固定
+assembler ID 与 read/suppressed counters，既不包含用户 scope/content，也不成为 durable Life state。明确
+离线/测试 compatibility graph 才能读取旧 assembler，且每次读取会增加 counter。最新定向
+`51 passed in 9.07s` 只覆盖这条读边界；剩余 compatibility reader、Monitor/Review、长期 canary、真实
+provider/Edge 与服务栈验收仍是未完成项。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

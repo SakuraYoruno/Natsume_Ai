@@ -21,6 +21,13 @@
 推断“七海现在是什么感受”。生产读取应直接使用本轮已冻结的 canonical self-affect，或在无
 该上下文时承认不可用；把缺失伪装成 `NEUTRAL` 同样会制造一个假的情感事实。
 
+回滚窗口也必须是显式、可观测而非静默的旁路：生产 composition 应声明
+canonical reader 为必需；reader 缺失时只返回带原因的降级投影，不能重新拼装旧 Bond、
+timeline 或 organ state。若隔离迁移测试仍允许旧 projection，运行期只可记录固定
+projection ID 的计数；计数器不得携带人、workspace、session、原文或情绪内容，且它本身
+不是 Life、关系或人格 authority。零计数只能说明这一条已观测路径未使用旧 reader，不能
+替代对其他 consumer 的清点、真实服务验收或体验评估。
+
 同一原则也约束私密活动和默认模式：它们可以阅读同一 canonical snapshot 的有界投影，却不能先拿到
 七海的 self-affect 后又从旧时间线或 Bond 积分“补一份感觉”。投影只传递当前 mixed components、mood、need、
 调节模式、裂痕/修复和主动权限等必要纹理；episode 的 trigger/evidence、用户与 workspace identity、以及

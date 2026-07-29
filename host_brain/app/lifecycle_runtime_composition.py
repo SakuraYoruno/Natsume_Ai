@@ -53,6 +53,10 @@ def build_lifecycle_runtime_application_ports(
             host_services,
             "life_snapshot_reader",
         ),
+        # An actual Host composition must stay on the canonical Life reader
+        # even while isolated compatibility fixtures still exercise the
+        # temporary legacy assembler below this boundary.
+        require_canonical_life_snapshot=host_services is not None,
     )
 
 

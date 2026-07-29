@@ -70,6 +70,7 @@ def test_lifecycle_composition_preserves_injected_hard_state_owner() -> None:
     assert ports.get_hard_state is hard_state_provider
     assert ports.get_endocrine_state is endocrine_state_provider
     assert ports.get_hard_state() is hard_state
+    assert ports.require_canonical_life_snapshot is False
 
 
 def test_missing_hard_state_owner_is_compatible_to_compose_but_fails_closed() -> None:

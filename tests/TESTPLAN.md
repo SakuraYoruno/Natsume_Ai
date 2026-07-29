@@ -146,6 +146,21 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
 校验和 `git diff --check`。这些都是 Host 本地协议证据；远程 CI 固定为
 `NOT_RUN_ACCOUNT_QUOTA`，不能记为 PASS。
 
+## T-DL06-COMPATIBILITY-PROJECTION-BOUNDARY
+
+- T-DL06-01：production `LifecycleRuntimeApplicationPorts` 必须声明 canonical Life reader
+  为必需；缺少 provider、reader 失败或 identity drift 只能返回 degraded canonical snapshot，
+  禁止回读 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。
+- T-DL06-02：`compatibility_projection_usage` 只能包含固定 projection ID 和整数计数，
+  不得包含 person、workspace、session、topic、正文、原始媒体或 emotion 值；canonical 路径的
+  legacy read count 必须为 0。
+- T-DL06-03：只有明确的离线/测试 compatibility port graph 才可进入
+  `legacy_runtime_snapshot_assembler`，且每次进入必须增加 read count；production reader
+  缺失时必须增加 suppressed fallback count 而非复活旧读取。
+- 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
+  `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
+  Edge 或 DL-07 服务栈验收。
+
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 
 - T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；

@@ -749,6 +749,13 @@ timeline/decay 与 Bond、任务成功、幽默、孤独、风险拦截、内感
 Prefrontal 也不会读取它。user profile 仅保留为用户 observation，不能覆盖七海 self-affect；其它 compatibility
 reader 与真实服务验收仍待处理。
 
+Lifecycle OBS snapshot 的 rollback window 也已显式化：production composition 设置
+`require_canonical_life_snapshot`，所以 reader 缺失只能走 canonical degraded projection，不能倒回
+`legacy_runtime_snapshot_assembler`。同一 app-local ports instance 的
+`compatibility_projection_usage` 只输出固定 projection ID、legacy read count 与 suppressed fallback
+count；它既不接收 scope/content，也不参与 Life journal。离线/测试 graph 若特意走旧 assembler 会留下
+read count，正式 Host 应持续为零；这个单点计量不替代其他 compatibility reader 的清点或真实服务验收。
+
 默认模式私密活动的实际读流已改为：`LifeSnapshotReader → project_inner_world_state → bounded self_affect /
 relationship_state → inner_activity_agent`。来源 marker 存在时，inner activity 直接从 canonical mood 与 mixed
 component 得到当前 emotion，并把关系纹理作为独立 context；它不回读 legacy timeline，也不向 SocialBrain/Bond

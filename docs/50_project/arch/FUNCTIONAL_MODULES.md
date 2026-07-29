@@ -280,6 +280,13 @@ Host 也不再从旧 action log hydrate `EmotionTimeline`，而是以显式 reti
 retired timeline。该模块状态是 `DL06_RUNTIME_SNAPSHOT_CANONICAL_READER_LOCAL_TARGETED_67_PASSED`，并不代表
 Monitor、真人陪伴体验、真实模型/Edge 或 DL-07 验收。
 
+该 snapshot 的 production ports 现同时声明 canonical reader 必需：provider 缺失时仅能返回
+degraded canonical projection，不能重新进入旧 assembler。`compatibility_projection_usage` 由每个
+app-local ports instance 维护，固定记录 `legacy_runtime_snapshot_assembler` 的 legacy read 与
+suppressed fallback 数量；它不含任何 scope/content，不持久化，也不成为新的 Digital Life state。
+只有显式离线/测试 compatibility composition 可调用旧 assembler，且调用会被计数。此为该 reader
+的本地安全/审计切片，不能泛化为其它 compatibility reader 已归零。
+
 `DefaultModeAgent` / `inner_activity_agent` 是该审计已切换的一条真实生产读路径：默认模式拿到 canonical
 Life snapshot 后仅消费 `inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1` 的有界事实，不会
 再次解析 retired timeline 或 Bond snapshot。关系投影与旧 Bond summary 分离，不能由 trust/attunement 推断

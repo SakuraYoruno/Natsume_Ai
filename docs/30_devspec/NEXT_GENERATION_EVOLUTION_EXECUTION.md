@@ -343,6 +343,17 @@ Bond queue 已退役：production factory 不再构造 real queue/writer，Surfa
 canonical Limbic/Prefrontal 不会 resolve/cached 该投影，user profile 不得覆盖七海 self-affect。其它
 compatibility projection 的生产读取审计与 runtime 使用计量仍未清零，不能把这些局部切断写成 DL-06 完成。
 
+**Lifecycle runtime compatibility meter 修订：** production
+`LifecycleRuntimeApplicationPorts` 现在显式设置 `require_canonical_life_snapshot=true`。
+因此 composed reader 缺失、失败或 identity drift 时，OBS snapshot 只走 canonical degraded
+branch；它不能重新读取 SocialBrain/Bond、Limbic、Prefrontal 或 retired timeline。每个
+app-local ports instance 输出 privacy-safe `compatibility_projection_usage`：只含固定
+`legacy_runtime_snapshot_assembler` ID、实际 fallback read 次数与被拒绝回退次数，不含
+relationship subject、workspace、session、topic 或情绪数据。明确离线/test port graph 才能
+保留旧 assembler，并会计入 read count。该切片的 `51 passed in 9.07s` 只证明这一条 runtime
+snapshot 边界与计量；其它 compatibility projection、Monitor/Review、长期 canary、真实 provider/
+Edge 与 DL-07 仍未完成。
+
 **默认模式 reader 修订：** `DefaultModeAgent` 现在从一次 canonical Life snapshot 的
 `project_inner_world_state()` 投影读取私密活动所需的 self-affect 与关系纹理。投影标记为
 `CANONICAL_LIFE_JOURNAL`，仅包含有界 components/mood/needs/regulation 与 trust/safety/attunement/
