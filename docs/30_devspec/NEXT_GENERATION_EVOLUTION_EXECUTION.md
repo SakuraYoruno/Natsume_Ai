@@ -118,6 +118,10 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
   `LifeSnapshotReader` provider。每个观察先生成 workspace-scoped opaque aggregate，
   再写 `affective_observation_recorded`；Appraisal 只能随后通过
   `affective_event_appraised` 形成 self-affect。
+- Edge 的原始 `EMOTION_DETECTED`、`USER_REACTION` 与 ASR metadata 只可先进入 Edge evidence ledger；它们不再
+  直接更新 Bond 或以用户标签驱动 VTS。满足条件的最终 ASR 文本仍走既有 ASR→Input bridge，只有该受信入口补齐
+  workspace 与 relationship subject 后，才可成为 scoped user observation；孤立 Edge 事件必须无 self-affect、
+  关系或 Avatar authority。
 - 文本关键词现在只是最高 0.4 confidence 的 `TEXT` observer；self-report、声学和
   视觉使用 typed observation。文本/self-report TTL=30 秒、acoustic=5 秒、visual=3 秒；
   raw text/audio/image/model-chain 不进入命令、snapshot 或 projection。

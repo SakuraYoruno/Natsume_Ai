@@ -206,6 +206,11 @@ construction/warmup；为保持 rollback-window lifecycle contract，Host 只注
 post-process 在读取用户 VAD、topic 或 default Bond identity 前即返回
 `SKIPPED / LEGACY_PERSONA_SESSION_END_RETIRED`。因此用户观察不会通过异步收口再次伪装为七海自我情绪。
 
+同一条因果边界现也覆盖 Edge 入站：`/v1/edge/events` 继续持久记录事件并保留最终 ASR 的受控 Input bridge，但
+原始 `EMOTION_DETECTED`、`USER_REACTION` 与 ASR metadata 不再直接调用 legacy Bond queue 或 VTS emotion driver。
+Edge payload 没有精确 workspace/relationship subject 时只能是外部证据；它必须经 authenticated Input/Fusion 补全
+scope、写入用户观察并经 Appraisal 后，才可能影响七海的 self-affect 或一个冻结的 `ExpressionPlan`。
+
 默认模式目前也遵守这一 single-authority 约束：读取 `LifeSnapshotReader` 后，边界层只投影有限的 self-affect
 和 relationship texture 给 `inner_activity_agent`，并用 `CANONICAL_LIFE_JOURNAL` marker 禁止该 agent 回读
 EmotionTimeline 或 SocialBrain/Bond。该关系 texture 不包含身份、episode evidence 或 intimacy consent，亦不映射

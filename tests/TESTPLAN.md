@@ -204,6 +204,12 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `AffectiveTurnPlanV1` 的文本锚点、TTS 语速和 Avatar 动作强度；普通 `0.72` 文本 aftereffect 必须失败关闭。
   当前 `profile lifecycle + profile ingress + response-feedback ingress` 集合为 `12 passed in 56.39s`；不代表
   真实用户长期收益、远端 Edge/Avatar 播放、Monitor UI 或 DL-07 服务栈验收。
+- T-DL06-12：`/v1/edge/events` 中原始 `EMOTION_DETECTED`、`USER_REACTION` 和 ASR metadata 必须只是 Edge evidence；
+  它们不得直接调用 Cortex 的 Bond update，亦不得按用户 emotion tag 调用 VTS driver。符合白名单、置信度与最终文本
+  条件的 ASR 仍只能经既有 ASR→Input bridge，之后由带 workspace/relationship subject 的 Fusion/Appraisal 路线决定
+  是否形成 self-affect。当前 direct `test_edge_events_whitelist.py` 为 `11 passed in 0.43s`；连同 HTTP Edge、
+  AffectFusion 与 ExpressionPlan 邻接回归的最终受影响集合为 `36 passed in 43.29s`；不代表远端 Edge、物理播放或
+  DL-07 服务栈验收。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

@@ -95,6 +95,11 @@ API 与 endpoint registry 项，仅保留 score/stage 的历史只读展示。�
 volatile Bond queue 不再是生产关系 authority。其余 legacy reader、Review、受治理 Budget、真实 provider/Edge
 与服务栈验收仍未完成。
 
+**Edge 原始情绪直驱退役修订：** `/v1/edge/events` 保留原始事件的 evidence ledger 与最终 ASR 的受控 Input bridge，
+但不再将 `EMOTION_DETECTED`、`USER_REACTION` 或 ASR metadata 送往 Cortex Bond update，也不再按用户 emotion tag
+直驱 VTS。Edge payload 未经过 scope-bound Input/Fusion/Appraisal 时没有 self-affect、关系或 Avatar authority；这关闭
+了一个用户情绪→七海情绪/表情的旁路，仍不证明远端 Edge、TTS/VTS 物理回执或 DL-07。
+
 **Legacy emotion timeline 退役修订：** production `HostMemoryRuntimeOwner` 不再打开旧 action-log
 query repository 来 hydrate mutable `EmotionTimeline`；它返回 `RETIRED_CANONICAL_LIFE` 空投影，故不会把
 旧的 user/self 混合条目包装成 `NEUTRAL` 或现时 self-affect。Lifecycle snapshot/proactive dispatch 忽略该

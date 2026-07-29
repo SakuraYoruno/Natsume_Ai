@@ -63,6 +63,8 @@ window；其他 compatibility reader、Monitor/Review、长期 canary 与真实�
 
 本次又接入 `POST /v1/digital-life/relationship/response-feedback`：用户只能对一条仍处于 provisional 状态、已有 canonical receipt 的回复提交 `HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY`。它要求独立的 `companion:feedback:write`、精确 user/subject 与 tenant/workspace 绑定；`HELPFUL` 才会成为 `0.95` 的 receipt-scoped 强 aftereffect，且只能推进一个已经存在的 profile CANARY；第五条合格后效应才会由 lifecycle 自动激活它，外部请求不能创建或指定激活 profile。当前本地生命周期证据不再篡改文本分类器置信度：它通过真实 receipt-bound 显式反馈自动推进 CANARY，并验证 activation 与 exact rollback 会实际改变、再恢复下一轮的文本锚点、TTS 语速和 Avatar 动作强度。自然语言关键词识别仍是保守的 `0.72`，只用于普通关系理解；它不能伪装为学习证据，也不等同于真实用户长期收益或远端播放验收。
 
+`/v1/edge/events` 的原始 `EMOTION_DETECTED`、`USER_REACTION` 与 ASR 事件现只作为 Edge 证据记录；它们不再直接写 Bond，也不再按用户情绪直驱 VTS。带文本且满足条件的最终 ASR 仍可进入既有 ASR→Input 桥，之后才由带 scope 的 `AffectFusionService` 形成用户观察和 Appraisal；孤立的 Edge 情绪事件在没有 `workspace + relationship_subject` 的可信输入边界时没有 self-affect、关系或 Avatar 写权。远端 Edge 位于另一台电脑，本波没有启动。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

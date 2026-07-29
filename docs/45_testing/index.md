@@ -94,6 +94,11 @@
   不能重新成为 self-affect authority；连同 BodySense、silence、inner-world、startup 与 Host composition 的
   最终单一集合为 `119 passed, 4 skipped in 10.95s`，不证明真实陪伴体验、provider、Voice/Avatar 或 DL-07。
 
+- `test_edge_events_whitelist.py` 现验证原始 `EMOTION_DETECTED` 仍被真实 Edge ledger 接受和记录，但不会调用
+  legacy Cortex Bond update，也不会出现 `_drive_stream_vts_emotion` 直驱；最终 ASR 的受控 Input bridge 保持独立。
+  该 direct 集合为 `11 passed in 0.43s`；加上 HTTP Edge、AffectFusion 与 ExpressionPlan 邻接回归的最终受影响集合为
+  `36 passed in 43.29s`。两者均只是 Host-side authority cutover，不是远端 Edge、TTS/VTS 播放或 DL-07 证据。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS

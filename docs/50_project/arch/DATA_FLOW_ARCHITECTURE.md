@@ -538,6 +538,11 @@ delivery 解释权。
 `少管我` 或 `滚开`，Fusion 与 RelationshipLifecycle 同时优先 `BOUNDARY/GIVE_SPACE`，关系 aftereffect
 持久禁用 unsolicited Scheduler contact，不让受伤表达抢占用户边界。
 
+`/v1/edge/events` 位于这条流的最外层：它只把原始 Edge 事件写入 evidence ledger。历史上
+`EMOTION_DETECTED` 会直接触发 Bond 更新并按用户 emotion tag 直驱 VTS；该旁路已退役。最终 ASR 文本仍可在
+白名单、置信度和去重 Gate 后进入 ASR→Input bridge，而孤立的 Edge 情绪事件缺少 `workspace + relationship_subject`
+时必须停在 evidence 层，不能形成 self-affect、关系事件或 Avatar 命令。
+
 ~~~mermaid
 flowchart LR
     I["Secure Input / Chat / Gateway"] --> P["InputRuntimeApplicationPorts"]

@@ -222,6 +222,10 @@ Host、Obs、Gateway、Edge 和 Worker 只通过版本化 Command/Query/Event �
 
 生命状态由唯一 Event/Reducer/Projection 模型推进；Surface、Tribe、Scheduler 和后台循环不得各自推进平行生命时钟。人格成长遵循 proposal → Lab/shadow → Review → version activation → rollback。任何自动成长输入必须绑定 exact `workspace + relationship_subject`、已接受回应和 durable aftereffect；无 scope 的 Bond、session、EventBus 或原始 episodic 文本不得触发模型归纳、Persona proposal 或自动调度。兼容入口只能在模型调用前 `DEFERRED`，不得重新成为生产 authority。后台内在活动仅可读取 canonical Life projection；在没有专用、可回放且隐私受控的 inner-world journal 前，它不得写入原始独白、EventBus、关系或人格状态。回复意愿、给空间与边界也只能是 canonical `RegulationDecision` 的 scoped read-only 投影；caller 的情绪、Bond 或话题不得写入全局 silence/body state，缺 relationship subject 必须失败关闭而非复用上一会话。
 
+原始 Edge 情绪/反应/ASR metadata 也属于无 scope 的外部证据：它们可被审计保存，或经最终 ASR 的受控
+Input bridge 重新进入用户观察，但不得直接写 Bond、七海 self-affect 或 Avatar/VTS。只有补全
+`workspace + relationship_subject` 并经 `AffectFusion → EventAppraisal` 的输入，才可能影响后续表达。
+
 ### FR-ARCH-005：Memory 与 Knowledge OS
 
 Life Memory 服务人格连续性；Knowledge OS 服务项目、概念、流程和决策。KnowledgeItem 必须记录 provenance、version、validity、confidence、conflict 和 decision refs，并支持 promotion、deprecation 和回滚。
