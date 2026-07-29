@@ -49,6 +49,10 @@ def build_lifecycle_runtime_application_ports(
             host_services,
             "user_emotion_profile",
         ),
+        get_life_snapshot_reader=_optional_host_provider(
+            host_services,
+            "life_snapshot_reader",
+        ),
     )
 
 

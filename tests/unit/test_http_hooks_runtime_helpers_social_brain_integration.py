@@ -112,7 +112,7 @@ def test_run_proactive_dispatch_rejects_unvalidated_scheduler_authority(monkeypa
     assert captured == {}
 
 
-def test_run_proactive_dispatch_routes_lightnovel_recommender_as_natsume_scheduler(monkeypatch) -> None:
+def test_run_proactive_dispatch_rejects_lightnovel_without_governed_authority(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def _fake_dispatch(payload):  # noqa: ANN001
@@ -154,10 +154,10 @@ def test_run_proactive_dispatch_routes_lightnovel_recommender_as_natsume_schedul
 
     assert captured == {}
     assert result["status"] == "REJECTED"
-    assert result["reason_code"] == "SKILL_AUTHORITY_MISSING"
+    assert result["reason_code"] == "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED"
 
 
-def test_run_proactive_dispatch_executes_diary_writer_via_executor(monkeypatch) -> None:
+def test_run_proactive_dispatch_rejects_diary_writer_without_governed_authority(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     class _FakeSocialBrain:
@@ -204,10 +204,10 @@ def test_run_proactive_dispatch_executes_diary_writer_via_executor(monkeypatch) 
 
     assert captured == {}
     assert result["status"] == "REJECTED"
-    assert result["reason_code"] == "SKILL_AUTHORITY_MISSING"
+    assert result["reason_code"] == "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED"
 
 
-def test_run_proactive_dispatch_executes_dream_generator_with_sleep_context(monkeypatch) -> None:
+def test_run_proactive_dispatch_rejects_dream_generator_without_governed_authority(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def _fake_dispatch(payload):  # noqa: ANN001
@@ -241,7 +241,7 @@ def test_run_proactive_dispatch_executes_dream_generator_with_sleep_context(monk
 
     assert captured == {}
     assert result["status"] == "REJECTED"
-    assert result["reason_code"] == "SKILL_AUTHORITY_MISSING"
+    assert result["reason_code"] == "GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED"
 
 
 def test_scheduler_narrative_generator_uses_canonical_model_attempt() -> None:

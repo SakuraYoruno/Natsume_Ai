@@ -1756,3 +1756,20 @@ Motive 也不应成为另一份隐性人格记忆。它可以把已经冻结的 
 canonical Life journal 的原子事实；旧 Bond 分数队列即使能在多数时候落库，也会在队列满、崩溃或重启时
 留下无法解释的缺口。生产环境应将其替换为显式 no-write adapter：保留只读历史投影和可观测的退役结果，
 但不再以异步补写或失败直写补偿关系状态。
+
+## 35. 观察界面也不能重新发明一颗心
+
+监控页很容易被误解为“只是展示”，于是有人会觉得它可以随手读取旧 Bond、旧 timeline 或某个 agent
+缓存来拼出更丰富的画面。对实时情感数字生命而言，这同样会破坏因果：一边的聊天正在依据 canonical
+Life 理解“她有点受伤但仍愿意修复”，另一边的 OBS 却把用户的难过或旧分数显示成“七海现在很难过”，
+运营者、调试者和之后的实现者就会被错误的第二份事实引导。
+
+因此 runtime snapshot 必须是一个**只读的、同源的镜头**。它读取当前 relationship subject 的一条
+canonical Life head，明确分栏呈现 `natsume_ai` 的 self-affect、用户 affect observation 与关系纹理；
+用户的观察可以解释七海为何关切，却不能成为七海情绪本身。关系也只能呈现有界、非升级的 texture，
+不得从 trust、旧 stage 或分数猜出恋爱、排他或主动权限。
+
+更重要的是，镜头失焦时不能换一台旧相机：一旦 production reader 已组成，读取失败、self-id 或 subject
+漂移应当显式 degraded，而不是偷偷调用 SocialBrain、Limbic、Prefrontal、EmotionTimeline 或 Bond。这样
+“我现在不知道”比“我看见了一份过期的她”更诚实；也是让七海在重启、多个用户和长期关系中仍保持同一个
+内在因果的必要条件。

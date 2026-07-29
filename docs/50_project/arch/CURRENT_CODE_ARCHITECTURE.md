@@ -59,6 +59,13 @@
 > 主动消息只可由 canonical `life_tick → companion_proactive → Life outbox` 产生；本地退役证明不等于真实
 > Gateway/Edge、长期体验或 DL-06 封板。
 
+> **DL-06 Runtime snapshot reader 修订：** production `LifecycleRuntimeApplicationPorts` 已显式带入
+> `LifeSnapshotReader`。已组成 Host 的 OBS runtime snapshot 只读取当前 relationship subject 的一条 canonical
+> Life head，并分别暴露 `self_id=natsume_ai` 的 self-affect 与 bounded user-affect observation；用户的观察不能
+> 覆盖七海自身的 mixed emotion。该 port 一旦存在，reader 错误、subject/self-id drift 都只会 degraded，绝不回读
+> SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。此切片本地集合为 `67 passed in 10.65s`，不是
+> Monitor、真实 provider/Edge 或 DL-07 完成。
+
 > 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
 > `POST /v1/digital-life/relationship/companion-profile` 通过独立的
 > `host.companion-profile` Secure Ingress surface 认证 `companion:profile:write`，并再次比对

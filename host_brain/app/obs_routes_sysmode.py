@@ -69,6 +69,8 @@ class SysModeHistoryResponse(BaseModel):
 
 
 class DigitalLifeRuntimeSnapshotResponse(BaseModel):
+    self_id: str = "natsume_ai"
+    relationship_subject_id: str = ""
     persona_user_id: str
     current_topic: str = ""
     sys_mode: str

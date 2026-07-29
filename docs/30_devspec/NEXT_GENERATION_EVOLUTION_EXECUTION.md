@@ -195,6 +195,11 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   固定返回 `LEGACY_PROACTIVE_TALK_RETIRED`，不得读取 Bond、EmotionTimeline、Limbic、旧模板或创建
   delivery intent。canonical `life_tick → companion_proactive → Life outbox` 是唯一主动发送 authority。
   本地退役合同不证明真实 Gateway/Edge、用户送达、长期体验或 DL-06 完成。
+- OBS/runtime snapshot 已改为 composed `LifeSnapshotReader` 的只读 consumer：它以当前 relationship
+  subject 的一条 canonical Life head 分别投影 `natsume_ai` self-affect 与 bounded user-affect observation，
+  并输出无分数、非升级的关系纹理。reader 已组成后，任何 reader 故障、self-id 或 subject drift 都只会 degraded，
+  不得回读 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。`67 passed in 10.65s` 仅是本地
+  reader-cutover，不是 Monitor、真实 provider/Edge 或 DL-07 验收。
 - Scheduler 切流已将既有 `emotional_proactive` 的 impulse/risk 纯算法包入
   `canonical_life_companion` adapter：只向它提供 bounded `state.affective`、
   `relationship_v2` 和 scheduler-admitted timezone，绝不提供 Bond stage、旧 `affect`、

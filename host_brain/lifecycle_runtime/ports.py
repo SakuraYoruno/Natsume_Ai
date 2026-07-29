@@ -38,6 +38,11 @@ class LifecycleRuntimeApplicationPorts:
     get_model_attempt_service: ServiceProvider
     emotion_timeline: EmotionTimelinePort
     get_user_emotion_profile: ServiceProvider | None = None
+    # Production OBS must read the same canonical Life snapshot that powers
+    # chat and companion delivery.  ``None`` exists only for isolated legacy
+    # compatibility fixtures; a composed provider that fails must degrade
+    # closed instead of reviving Bond/EmotionTimeline readers.
+    get_life_snapshot_reader: ServiceProvider | None = None
 
 
 __all__ = [

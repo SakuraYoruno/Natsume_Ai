@@ -91,6 +91,12 @@ Scheduler-add inventory 移除，Host composition 在启动时以 CAS 禁用旧�
 Limbic 或模板，也不会写 delivery intent。唯一主动发送 authority 仍是 `life_tick` 派生的 canonical Life outbox；
 这只是本地退役证据，不能宣称 DL-06 或真实服务验收完成。
 
+OBS runtime snapshot 是本轮接上的另一条 production reader：typed lifecycle port 在已组成的 Host 中只读取
+relationship subject 对应的 canonical Life snapshot，分别输出 `natsume_ai` self-affect 与 bounded user-affect
+observation；用户观察不会镜像成七海自身情绪。该 reader 不再解析 SocialBrain/Bond、Limbic、Prefrontal 或 retired
+EmotionTimeline；reader 故障显式 degraded，不向旧 authority 回退。定向本地集合为 `67 passed in 10.65s`，仍不代表
+Monitor、真实模型、远端 Edge 或 DL-07 完成。
+
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
 principal/relationship subject 与 tenant/workspace 绑定。请求不能携带自由文本、Soul patch、情绪或关系

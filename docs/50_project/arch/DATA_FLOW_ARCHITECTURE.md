@@ -727,6 +727,25 @@ definition 输入移除，Host composition 还会对升级前遗留的 `proactiv
 `LEGACY_PROACTIVE_TALK_RETIRED`；不会读取旧 Bond/EmotionTimeline/Limbic，也不会产生 outbox 或 Gateway
 effect。这样 crash recovery 不会把旧模板路径重新变成第二条主动发送 authority。
 
+OBS 读取也遵循同一单一事实原则：
+
+```mermaid
+flowchart LR
+    L["canonical Life snapshot"] --> SA["Natsume self-affect"]
+    L --> UA["bounded user-affect observation"]
+    L --> RS["bounded relationship texture"]
+    SA --> O["OBS runtime snapshot"]
+    UA --> O
+    RS --> O
+    O -. "reader failure" .-> D["degraded; no legacy fallback"]
+```
+
+`LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 已在 production Host composition 中接入。snapshot
+reader 以当前 relationship subject 重开一条 canonical head，固定输出 `self_id=natsume_ai`、self-affect 与用户
+observation 的分离视图；后者只能解释用户状态，不能改写前者。reader 已组成后，任何读取失败或 identity drift
+都会停在 degraded，不会调用 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。该本地 reader-cutover
+集合为 `67 passed in 10.65s`，未包含 OBS 进程、真实 Host、Gateway、远端 Edge 或 DL-07 服务栈。
+
 主动许可的写入口不复用 generic Life HTTP command，也不解析“你可以常来找我”之类的
 自然语言。`POST /v1/digital-life/relationship/proactive-permission` 先以 exact raw JSON 建立
 `CompanionProactivePermissionRequestV1`，再由 server-owned `host.companion-contact` Secure

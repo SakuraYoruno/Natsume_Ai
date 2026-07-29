@@ -151,6 +151,14 @@ Limbic 或模板，也不能创建 outbox/delivery intent。唯一发送路径�
 `life_tick → companion_proactive → Life outbox`。此切片只完成本地旧 authority 退役，剩余 compatibility
 reader、Monitor/Review、真实 provider/Gateway/Edge 与 DL-07 仍未验收。
 
+当前追加 `DL-06_RUNTIME_SNAPSHOT_CANONICAL_READER_CUTOVER`：production
+`LifecycleRuntimeApplicationPorts` 现在显式接收 `LifeSnapshotReader`。OBS snapshot 对同一个
+relationship subject 读取一条 canonical Life head，再纯投影 `self_id=natsume_ai` 的 mixed self-affect、
+bounded user-affect observation、关系纹理、body-sense、motive 与 render posture；任何用户 `emotion_tag`
+都不能覆盖 self-affect。该 port 一旦已组成，reader 缺失、scope/self-id drift 或读取失败均为 degraded，绝不
+回退 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。当前 `67 passed in 10.65s` 只覆盖本地
+切流与邻接回归；Monitor/Review、真实 provider/Gateway/Edge、跨进程恢复与 DL-07 仍待验收。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

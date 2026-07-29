@@ -80,6 +80,13 @@ SocialBrain/Bond。关系纹理保留为独立 context，不能将 trust/attunem
 legacy Limbic metabolism。最终相邻本地集合为 `92 passed in 44.20s`；这只降低一个 compatibility reader，
 其余 reader、Monitor/Review、真实 provider/Edge 和服务栈验收仍未完成。
 
+**Runtime snapshot canonical reader 修订：** production `LifecycleRuntimeApplicationPorts` 现显式拥有
+`LifeSnapshotReader`，OBS runtime snapshot 只读取当前 relationship subject 的 canonical Life head，并分离
+`natsume_ai` self-affect 与 bounded user-affect observation。已组成 reader 后，读取失败、self-id 或 subject drift
+都只产生 degraded 投影，不能回退 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline；关系展示固定
+为无分数、非自动升级的 texture。定向本地集合 `67 passed in 10.65s`，只证明 reader-cutover，不证明
+Monitor/Review、真实 Host/Obs、provider、远端 Edge 或 DL-07 服务栈。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

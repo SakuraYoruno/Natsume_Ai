@@ -226,6 +226,13 @@ loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond
 Host 也不再从旧 action log hydrate `EmotionTimeline`，而是以显式 retired 空投影失败关闭读取，不能用它重建
 七海 self-affect。DL-06 后续项是其它 compatibility reader 使用审计与 runtime 计量。
 
+`lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
+`LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，
+把 `natsume_ai` self-affect、bounded user observation、关系 texture、body projection 与 posture 分开投影。
+已组成 reader 后发生错误或 identity drift 时明确 degraded，不能改走 SocialBrain/Bond、Limbic、Prefrontal 或
+retired timeline。该模块状态是 `DL06_RUNTIME_SNAPSHOT_CANONICAL_READER_LOCAL_TARGETED_67_PASSED`，并不代表
+Monitor、真人陪伴体验、真实模型/Edge 或 DL-07 验收。
+
 `DefaultModeAgent` / `inner_activity_agent` 是该审计已切换的一条真实生产读路径：默认模式拿到 canonical
 Life snapshot 后仅消费 `inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1` 的有界事实，不会
 再次解析 retired timeline 或 Bond snapshot。关系投影与旧 Bond summary 分离，不能由 trust/attunement 推断
