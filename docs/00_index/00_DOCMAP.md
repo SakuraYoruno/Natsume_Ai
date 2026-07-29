@@ -85,6 +85,12 @@ Cortex retrieval prefetch 也在 internal Life hand-off 存在时跳过 legacy s
 只给无 score 的 `FRIEND / stepsibling / familiar|guarded` projection；scope drift 不回退旧 reader。该定向集合为
 `34 passed in 5.64s`，仍只是 DL-06 的一个 compatibility reader cutover。
 
+历史 `proactive_talk` 不是 canonical proactive 的兼容入口：它已从 production Personality/Tool/executor/
+Scheduler-add inventory 移除，Host composition 在启动时以 CAS 禁用旧的 `proactive_talk_periodic` durable head。
+已接纳的旧 occurrence 只在重开精确 Scene 后返回 `LEGACY_PROACTIVE_TALK_RETIRED`，不读取旧 Bond、timeline、
+Limbic 或模板，也不会写 delivery intent。唯一主动发送 authority 仍是 `life_tick` 派生的 canonical Life outbox；
+这只是本地退役证据，不能宣称 DL-06 或真实服务验收完成。
+
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
 principal/relationship subject 与 tenant/workspace 绑定。请求不能携带自由文本、Soul patch、情绪或关系

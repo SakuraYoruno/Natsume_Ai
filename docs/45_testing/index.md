@@ -9,6 +9,12 @@
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
+- `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
+  `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
+  `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS
+  禁用旧 `proactive_talk_periodic` head；已接纳 occurrence 重开 exact Scene 后只能返回
+  `LEGACY_PROACTIVE_TALK_RETIRED`，不读 Bond/EmotionTimeline/Limbic/模板且不产生 delivery intent。
+  该定向集合为 `28 passed in 3.00s`；它是本地退役合同，不是真实 Gateway、Edge、用户送达或 DL-06 完成证据。
 - `test_dl06_companion_proactive.py` 验证 Scheduler 的主动决定只读取 canonical
   `relationship_v2`、`state.affective`、clock 与 admitted timezone：explicit
   `ALLOWED` 才能发送；`UNKNOWN/DENIED`、repair、未结 episode 与 `GIVE_SPACE`

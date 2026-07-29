@@ -1129,6 +1129,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         ]
         assert kwargs["runtime_context_application"] is runtime_context_application
         assert kwargs["worker_registry"] is scheduler_worker_registry
+        assert kwargs["retired_task_ids"] == ("proactive_talk_periodic",)
         assert kwargs["acceptance_effect_dispatcher"] is (
             acceptance_effect_dispatcher
         )

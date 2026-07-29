@@ -46,6 +46,16 @@ compatibility lover distance、closeness、clue 与 lover task 的二次升级�
 retrieval/Motive 输出无分数 `FRIEND / stepsibling / familiar|guarded` projection（`34 passed in 5.64s`）。该模块
 不承担真实 Edge、Monitor、Review 或全栈验收。
 
+**Legacy Proactive Retirement 模块**由
+[`lifecycle_runtime/proactive_dispatch.py`](../../../host_brain/lifecycle_runtime/proactive_dispatch.py)、
+[`composition/scheduler.py`](../../../host_brain/composition/scheduler.py) 与
+[`app/host_life_scheduler_wiring.py`](../../../host_brain/app/host_life_scheduler_wiring.py) 共同构成。它不再生成
+主动消息：`proactive_talk` 已从 production Personality Skill、Tool Catalog、executor 和 Scheduler-add task type
+移除；Host startup 以 CAS 禁用升级前保留的 `proactive_talk_periodic` definition。已接纳的旧 occurrence 仍校验
+其 exact Scene identity，但只能返回 `LEGACY_PROACTIVE_TALK_RETIRED`，不能读取 Bond、timeline、Limbic 或模板，
+更不能写 delivery intent。真正的主动消息仍只由 canonical Life `life_tick`、`companion_proactive` 和 durable
+outbox 负责；此模块状态为 `LOCAL_RETIREMENT_WIRED / EXPERIENCE_ACCEPTANCE_PENDING`。
+
 Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
 `PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名
 reconciliation、并行 terminal 和 Workspace Git 生命周期。模块的本地

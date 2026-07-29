@@ -38,6 +38,11 @@ class LifeSnapshotReaderPort(Protocol):
 
 SCHEDULER_HANDLER_RESULT_INVALID = "SCHEDULER_HANDLER_RESULT_INVALID"
 
+# This was the pre-DL-06 timer-driven proactive route.  New definitions are
+# already excluded by the registry scheduler policy; the composition root also
+# disables an old persisted head during startup so it cannot survive upgrade.
+RETIRED_LEGACY_SCHEDULER_TASK_IDS = ("proactive_talk_periodic",)
+
 
 class SchedulerHandlerResultError(RuntimeError):
     """A real Scheduler handler returned no trustworthy terminal meaning."""
@@ -779,6 +784,7 @@ def _assert_canonical_scheduler_result(value: Mapping[str, Any]) -> None:
 __all__ = [
     "LifeCommandServicePort",
     "LifeSnapshotReaderPort",
+    "RETIRED_LEGACY_SCHEDULER_TASK_IDS",
     "SCHEDULER_HANDLER_RESULT_INVALID",
     "SchedulerHandlerResultError",
     "build_agent_immune_scheduler_handler",

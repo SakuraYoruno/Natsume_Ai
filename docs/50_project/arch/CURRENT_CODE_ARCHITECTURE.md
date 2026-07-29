@@ -52,6 +52,13 @@
 > Bond queue/writer 已退役为 no-write adapter。production Host 也不会从旧 action log 预热 legacy emotion timeline：它返回显式 retired 空投影，且 Runtime snapshot 不会把 user profile 升格为 self-affect，canonical Limbic/Prefrontal 不会读取该投影；但 Surface 的其它兼容 state、Monitor 审核、canary 长期收益、真实模型和三模态物理服务仍未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
+> **DL-06 旧主动路径退役：** `proactive_talk` 已不再注册为 Personality Skill、Tool Catalog、executor 或
+> Scheduler-add task type。Host scheduler composition 对升级前存在的 `proactive_talk_periodic` durable definition
+> 使用 CAS disable；若 occurrence 已在升级前被接纳，dispatch 仍会验证 immutable Scene identity，但随后仅返回
+> `LEGACY_PROACTIVE_TALK_RETIRED`，不触碰 Bond、EmotionTimeline、Limbic、旧模板或 delivery intent。production
+> 主动消息只可由 canonical `life_tick → companion_proactive → Life outbox` 产生；本地退役证明不等于真实
+> Gateway/Edge、长期体验或 DL-06 封板。
+
 > 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
 > `POST /v1/digital-life/relationship/companion-profile` 通过独立的
 > `host.companion-profile` Secure Ingress surface 认证 `companion:profile:write`，并再次比对

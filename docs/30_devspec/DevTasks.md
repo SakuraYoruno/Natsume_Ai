@@ -143,6 +143,14 @@ hand-off 后，严格以 workspace/person/session 抽取 bounded projection，�
 legacy score、恋人 stage 或 proactive permission。claimed canonical 无效时同样 guarded 且不回退 arbiter。
 该定向集合为 `34 passed in 5.64s`，尚未清零其它 reader 或完成真实服务验收。
 
+当前追加 `DL-06_LEGACY_PROACTIVE_SCHEDULER_RETIREMENT_SLICE`：旧 `proactive_talk` 已从 Personality
+registry、Tool Catalog、executor 及 Scheduler-add type 移除。Host scheduler composition 对升级前遗留的
+`proactive_talk_periodic` definition 执行 CAS disable；若一个旧 occurrence 已完成 governed admission，仍先
+验证 immutable Scene identity，但只会得到 `LEGACY_PROACTIVE_TALK_RETIRED`，不能读取 Bond、EmotionTimeline、
+Limbic 或模板，也不能创建 outbox/delivery intent。唯一发送路径仍是 canonical
+`life_tick → companion_proactive → Life outbox`。此切片只完成本地旧 authority 退役，剩余 compatibility
+reader、Monitor/Review、真实 provider/Gateway/Edge 与 DL-07 仍未验收。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

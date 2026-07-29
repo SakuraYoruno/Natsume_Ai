@@ -721,6 +721,12 @@ payload/authorization digest 及 target/scope，才追加 `relationship_proactiv
 第三方平台送达或用户已阅读。未知/拒绝、裂痕、等待后效应或自我克制均为 hold，而不是用沉默
 惩罚用户。
 
+历史 `proactive_talk` 不再属于这张发送图：它已从 production Skill、Tool、executor 和新 Scheduler
+definition 输入移除，Host composition 还会对升级前遗留的 `proactive_talk_periodic` head 执行 CAS disable。
+若已有 occurrence 跨升级存活，它只能验证原有的 immutable Scene identity 后结束为
+`LEGACY_PROACTIVE_TALK_RETIRED`；不会读取旧 Bond/EmotionTimeline/Limbic，也不会产生 outbox 或 Gateway
+effect。这样 crash recovery 不会把旧模板路径重新变成第二条主动发送 authority。
+
 主动许可的写入口不复用 generic Life HTTP command，也不解析“你可以常来找我”之类的
 自然语言。`POST /v1/digital-life/relationship/proactive-permission` 先以 exact raw JSON 建立
 `CompanionProactivePermissionRequestV1`，再由 server-owned `host.companion-contact` Secure

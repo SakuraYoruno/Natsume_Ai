@@ -189,6 +189,12 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
 
 ### DL-06：主动陪伴与可逆成长
 
+- 历史 `proactive_talk` 生产 route 已退役：它不再进入 Personality Skill、Tool Catalog、executor 或
+  Scheduler-add inventory；Host scheduler composition 会 CAS 禁用升级前的
+  `proactive_talk_periodic` head。若旧 occurrence 已被接纳，仍须重开 exact Scene identity，随后
+  固定返回 `LEGACY_PROACTIVE_TALK_RETIRED`，不得读取 Bond、EmotionTimeline、Limbic、旧模板或创建
+  delivery intent。canonical `life_tick → companion_proactive → Life outbox` 是唯一主动发送 authority。
+  本地退役合同不证明真实 Gateway/Edge、用户送达、长期体验或 DL-06 完成。
 - Scheduler 切流已将既有 `emotional_proactive` 的 impulse/risk 纯算法包入
   `canonical_life_companion` adapter：只向它提供 bounded `state.affective`、
   `relationship_v2` 和 scheduler-admitted timezone，绝不提供 Bond stage、旧 `affect`、

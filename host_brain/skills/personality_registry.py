@@ -148,23 +148,6 @@ def _normalize_focus_mode(args: dict[str, Any], ctx: dict[str, Any] | None) -> d
     }
 
 
-def _normalize_proactive_talk(args: dict[str, Any], ctx: dict[str, Any] | None) -> dict[str, Any]:
-    try:
-        idle_threshold_ms = max(0, int((args or {}).get("idle_threshold_ms") or 4 * 60 * 60 * 1000))
-    except (TypeError, ValueError):
-        idle_threshold_ms = 4 * 60 * 60 * 1000
-    topic_hint = str((args or {}).get("topic_hint") or "").strip() or None
-
-    return {
-        "idle_threshold_ms": idle_threshold_ms,
-        "topic_hint": topic_hint,
-        "manifest_ref": "proactive_talk::send",
-        "request_id": str((ctx or {}).get("request_id") or "").strip() or None,
-        "session_id": str((ctx or {}).get("session_id") or "").strip() or None,
-        "_context": ctx or {},
-    }
-
-
 class PersonalitySkillProvider(DeclarativeSkillProvider):
     skill_specs = (
         DeclarativeSkillSpec(
@@ -256,25 +239,6 @@ class PersonalitySkillProvider(DeclarativeSkillProvider):
             tool="focus_mode",
             action=None,
             normalize_args=_normalize_focus_mode,
-        ),
-        DeclarativeSkillSpec(
-            skill_name="proactive_talk",
-            clearance="LOW",
-            risk_level=1,
-            scope="host",
-            reversible=False,
-            description="主动对话：空闲超过阈值时由调度器触发，LLM 生成问候语并推送到 UI 队列。",
-            tool="proactive_talk",
-            action="send",
-            normalize_args=_normalize_proactive_talk,
-            scheduler_profile=_interval_profile(
-                task_id="proactive_talk_periodic",
-                seconds=180,
-                mode_allowlist=("normal", "sleep"),
-                args={"idle_threshold_ms": 2_700_000},
-                description="主动对话：每 3 分钟检查一次，空闲 45 分钟后尝试发起问候。",
-                resource_class="social_light_llm",
-            ),
         ),
     )
 

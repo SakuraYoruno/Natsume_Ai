@@ -44,7 +44,6 @@ _PERSONALITY_TOOL_DEFS = (
     ("dream_generator", "WRITE", "LOW", ("memory",), "梦境生成"),
     ("desktop_note", "WRITE", "LOW", ("system", "file"), "桌面留言"),
     ("focus_mode", "WRITE", "LOW", ("system",), "专注模式切换"),
-    ("proactive_talk", "WRITE", "LOW", ("chat",), "主动对话"),
 )
 _SCHEDULER_TOOL_DEFS = (
     ("scheduler_add", "WRITE", "MEDIUM", ("system",), "添加定时任务"),

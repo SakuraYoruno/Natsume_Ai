@@ -1358,6 +1358,9 @@ def create_app(
                         "security_immune_periodic": "security_immune",
                         "agent_immune_auto_dispatch_tick": "agent_immune",
                     },
+                    retired_task_ids=(
+                        _scheduler_result_wiring.RETIRED_LEGACY_SCHEDULER_TASK_IDS
+                    ),
                     clock_enabled=scheduler_clock_enabled,
                     clock_identity=scheduler_clock_identity,
                     clock_poll_interval_seconds=(

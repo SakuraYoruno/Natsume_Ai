@@ -145,6 +145,7 @@ class ProcessSchedulerContainer:
     definition_repository: Any
     clock: Any | None
     seeded_task_ids: tuple[str, ...]
+    disabled_legacy_task_ids: tuple[str, ...]
     _clock_active: bool = False
 
     async def activate_clock(self) -> None:
@@ -166,6 +167,7 @@ class ProcessSchedulerContainer:
                 "clock_configured": self.clock is not None,
                 "clock_active": self._clock_active,
                 "seeded_task_ids": list(self.seeded_task_ids),
+                "disabled_legacy_task_ids": list(self.disabled_legacy_task_ids),
             }
         )
         return result
@@ -186,6 +188,7 @@ def build_process_scheduler_container(
     task_handlers: Mapping[str, SchedulerHandler] | None = None,
     seed_definitions: Iterable[Any] = (),
     seed_worker_keys: Mapping[str, str] | None = None,
+    retired_task_ids: Iterable[str] = (),
     resource_gate: Callable[[Any, str], Mapping[str, Any] | bool] | None = None,
     clock_enabled: bool = False,
     clock_identity: SchedulerClockIdentityConfig | None = None,
@@ -267,6 +270,11 @@ def build_process_scheduler_container(
             )
         seeded.append(task_id)
 
+    disabled_legacy_task_ids = _disable_retired_scheduler_tasks(
+        definitions=definitions,
+        task_ids=retired_task_ids,
+    )
+
     credential_provider = None
     if clock_enabled:
         if clock_identity is None:
@@ -306,7 +314,56 @@ def build_process_scheduler_container(
         definition_repository=definitions,
         clock=clock,
         seeded_task_ids=tuple(seeded),
+        disabled_legacy_task_ids=disabled_legacy_task_ids,
     )
+
+
+def _disable_retired_scheduler_tasks(
+    *,
+    definitions: Any,
+    task_ids: Iterable[str],
+) -> tuple[str, ...]:
+    """Disable explicitly retired persisted definitions during composition.
+
+    Scheduler seed reconciliation only creates missing definitions by design.
+    Without this narrow bootstrap reconciliation, a pre-cutover persisted task
+    could survive an upgrade and repeatedly enter a now-retired worker.  The
+    direct repository operation is limited to static, source-owned retirement
+    IDs and is CAS-checked; a concurrent successful disable is accepted, any
+    other race fails Host startup rather than reviving the legacy authority.
+    """
+
+    requested = tuple(
+        sorted({str(task_id or "").strip() for task_id in task_ids if str(task_id or "").strip()})
+    )
+    disabled: list[str] = []
+    for task_id in requested:
+        current = definitions.get(task_id)
+        if current is None:
+            continue
+        if bool(current.get("retired", False)) or not bool(current.get("enabled", False)):
+            disabled.append(task_id)
+            continue
+        try:
+            definitions.set_enabled(
+                task_id=task_id,
+                enabled=False,
+                expected_head_version=int(current["head_version"]),
+            )
+        except Exception as exc:
+            latest = definitions.get(task_id)
+            if latest is not None and (
+                bool(latest.get("retired", False))
+                or not bool(latest.get("enabled", False))
+            ):
+                disabled.append(task_id)
+                continue
+            raise SchedulerCompositionError(
+                SCHEDULER_COMPOSITION_INVALID,
+                f"retired scheduler task could not be disabled: {task_id}",
+            ) from exc
+        disabled.append(task_id)
+    return tuple(disabled)
 
 
 def scheduler_seed_payload(
