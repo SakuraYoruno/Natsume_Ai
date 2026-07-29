@@ -300,6 +300,10 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   snapshot 的 last regulation/body projection 得到 bounded posture，缺 scope 不回退全局 singleton。该项仅完成
   compatibility authority cutover，不构成真实陪伴调节体验、远端 Edge 或 DL-07 验收。production Host root 与 chat
   startup 也不再构造或预热 mutable engine；lifecycle rollback port 只能提供 fail-closed retired placeholder。
+- 历史 `emotion_update`、`bond_score_update`、`emotion_get` 与 `bond_score_get` Skill 已从 production provider catalog、
+  Tool executor、built-in execution policy 与 Scheduler 新任务类型物理移除；不能再用任意 payload 直写旧 emotion、Bond
+  queue 或 VTS。情感/关系读取只能重开 canonical Life projection。这是旧 tool authority 退役，不是新的情感能力或
+  Remote Edge 验收。
 - canonical Limbic 的 `handle_signal()` 与 `_touch_state()` 也不再拥有 production writer 权：任何旧
   conversation/session/body/Bond signal 都不得写 `TribeStateRegistry`、重发 EventBus 或以 caller VAD 改写
   self-affect。Surface/AgentRuntime session-end hook 必须在解析 VAD 或 default Bond identity 前跳过；唯一允许的

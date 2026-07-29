@@ -143,6 +143,11 @@
   不能重新成为 self-affect authority；连同 BodySense、silence、inner-world、startup 与 Host composition 的
   最终单一集合为 `119 passed, 4 skipped in 10.95s`，不证明真实陪伴体验、provider、Voice/Avatar 或 DL-07。
 
+- `test_dl06_legacy_emotion_skill_retirement.py` 验证历史 `emotion_*` 与 `bond_score_*` Skill descriptor 全部
+  fail-closed，生产 Tool executor 和 provider catalog 中均没有 `emotion` 入口，Scheduler 也不能再建立
+  `emotion_update` task。连同 policy/catalog/scheduler 与 executor-broker 邻接用例为 `57 passed in 36.55s`；这是本地旧 authority
+  退役证据，不是 canonical 情感读取、真实模型、远端 Edge 或 DL-07 验收。
+
 - `test_edge_events_whitelist.py` 现验证原始 `EMOTION_DETECTED` 仍被真实 Edge ledger 接受和记录，但不会调用
   legacy Cortex Bond update，也不会出现 `_drive_stream_vts_emotion` 直驱；最终 ASR 的受控 Input bridge 保持独立。
   该 direct 集合为 `11 passed in 0.43s`；加上 HTTP Edge、AffectFusion 与 ExpressionPlan 邻接回归的最终受影响集合为

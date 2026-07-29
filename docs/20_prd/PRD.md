@@ -283,6 +283,10 @@ Host protocol。不得因为没有调用模型而把文本裸发、跳过 accept
 携带唯一 deferred `life.foreground_completed` NODE effect（含 frozen plan、ExpressionPlan 与关系 provisional
 episode），只允许 accepted handler 在验收后写入 canonical journal。
 
+历史 `emotion_update`、`bond_score_update` 与同族 `emotion_get`/`bond_score_get` 不得作为生产 Skill
+继续存在：它们会允许任意工具 payload 绕过 `AffectFusion → Appraisal → Life` 或 relationship episode。
+情感与关系读取必须改为 exact scope 的 canonical Life projection，不能以兼容 read API 保留隐藏写回入口。
+
 任何旧 Tribe EventBus、Broca 或 MotorCortex convenience callback 均不得将文本直接提交给 TTS/Avatar；这类调用必须
 无副作用拒绝，且不得因设备失败写入 self-affect、关系或状态 registry。
 

@@ -226,6 +226,11 @@ perception-evidence rule terminal 已不再丢失 Life 因果：它只携带一�
 `life.foreground_completed` NODE effect（frozen plan、ExpressionPlan、foreground 与 provisional relationship），
 由 accepted handler 在验收后写 canonical journal，worker 没有 direct Life writer authority。
 
+旧 `emotion` Tool executor 与 `EmotionSkillProvider` 也已物理删除，随之删除
+`emotion_update`、`bond_score_update`、`emotion_get`、`bond_score_get` 四个 built-in policy descriptor 和
+Scheduler 新建任务类型。生产不存在能根据 caller payload 直接更新旧 emotion/Bond/VTS 的 Skill 入口；这不改变
+canonical Life 的唯一 read/write 边界，也不能被解释成真实设备或完整陪伴验收。
+
 ## 1. 结论
 
 NE-01 当前代码波次为
