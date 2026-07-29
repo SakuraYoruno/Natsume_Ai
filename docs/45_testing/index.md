@@ -90,6 +90,18 @@
   因果/恢复证据；不证明真实 Host 长会话、模型自然度、真人盲评、远端 Edge、物理 Voice/Avatar、
   Docker 服务栈或远程 CI 通过（`NOT_RUN_ACCOUNT_QUOTA`）。
 
+## DL-04 确定性表达不绕过情感协议切片
+
+- `test_dl04_native_affective_stream.py` 现同时覆盖 native provider stream、感知证据 gate 与模型失败后的
+  安全 sub-agent fallback。后二者无需模型，但仍必须先提交 `affective_turn_planned`，为每个稳定分句提交
+  `surface_sentence_delivery_intent` 与同一 Voice/Avatar Host protocol，随后才产生 SSE；foreground 只补
+  `RELEASE`，不得重复生成句子 intent。该测试还断言 fallback 的公开 trace 是
+  `deterministic_affective_delivery / NO_MODEL_RULE_FALLBACK`，不是伪造 provider usage。
+- 本次合并的 DL-02/DL-03/DL-04/Surface/DL-05 邻接定向集合为 `81 passed in 69.63s`；这仍只构成
+  本地 Host 协议与 SQLite 因果证据。真实 provider、guarded streaming、远端 Edge、物理 Voice/Avatar、
+  真人体验盲评和 DL-07 服务栈均未运行，远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`。
+
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_hippocampus_memory_writer_retirement.py` 验证 canonical `HippocampusAgent` 不注册

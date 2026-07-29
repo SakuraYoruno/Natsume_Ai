@@ -216,6 +216,13 @@ relationship subject/principal，并写入 `personal:<subject>` workspace；请�
 `LOCAL_PERSONAL_UNATTESTED`，不含 Secure Ingress claim/audit/tenant，不能外推为多用户认证；
 Gateway 和多用户关系始终由 `/v1/host/input` 的签名身份建立。
 
+直连 Host 的 perception-evidence gate 与安全 sub-agent fallback 也不能再从 Surface 直接发一个
+裸文本：它们先重建并持久化同一 `AffectiveTurnPlanV1`，每个本地稳定分句都先写
+`surface_sentence_delivery_intent`（含同一 ExpressionPlan 的 Voice/Avatar intent），随后才 SSE 可见，
+最后写 accepted foreground 与 provisional relationship episode。该路径明确是
+`deterministic_affective_delivery / NO_MODEL_RULE_FALLBACK`，不是 model stream、Edge 已播放或预算量测。
+受治理 worker 仍因 Task Acceptance 与 canonical usage 约束保持 buffered，未被本地直连修复越权打开。
+
 ## 1. 结论
 
 NE-01 当前代码波次为

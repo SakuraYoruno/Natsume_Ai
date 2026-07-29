@@ -46,7 +46,7 @@ def _public_result_trace(
     if result is None:
         summary = _safe_mapping(stream_summary)
         return {
-            "streaming": True,
+            "streaming": bool(summary.get("streaming", True)),
             "mode": str(summary.get("mode") or "native_sentence_stream"),
             "sentence_count": max(0, _coerce_int(summary.get("sentence_count"), default=0)),
             "plan_id": str(summary.get("plan_id") or "").strip(),
@@ -325,22 +325,20 @@ def _submit_surface_foreground_completed(
     expression_controls: list[dict[str, Any]] = []
     expression_receipts: list[dict[str, Any]] = []
     expression_traces: list[dict[str, Any]] = []
-    # Direct Host native streaming has already staged its expression protocol
-    # before text visibility.  A governed-node sentence stream stages only a
-    # Task-bound text visibility receipt before SSE; Voice/Avatar intents stay
-    # deferred until Task Verification and Acceptance.  Treat it like the
-    # buffered route here so the Task runtime remains the only effect writer.
+    # Direct native streaming and deterministic fallbacks may already stage
+    # paired Voice/Avatar protocol before text becomes visible. A governed
+    # TaskNode stream only stages text visibility before SSE; it is compiled
+    # here after Acceptance, using its exact persisted sentence boundaries.
     stream_metadata = _safe_mapping(stream_summary)
     stream_mode = str(stream_metadata.get("mode") or "").strip()
-    direct_native_sentence_stream = stream_mode == "native_sentence_stream"
+    sentence_delivery_already_staged = bool(
+        stream_metadata.get("sentence_delivery_staged")
+    ) or stream_mode == "native_sentence_stream"
     buffered_expression_segments: list[str] = []
-    if affective_turn_plan and narrative and not direct_native_sentence_stream:
-        # A governed native stream has already made each sentence visible via
-        # the Task-owned delivery ledger.  Do not destroy that immutable
-        # boundary by re-segmenting the completed narrative here: voice and
-        # avatar must receive one paired protocol per exact visible sentence.
-        # The summary is constructed inside the Surface runtime, then checked
-        # again below before it can influence the accepted Life command.
+    if affective_turn_plan and narrative and not sentence_delivery_already_staged:
+        # Preserve governed-node stable sentence boundaries instead of
+        # re-segmenting the completed narrative: Voice and Avatar must receive
+        # one paired protocol per exact visible sentence.
         buffered_expression_segments = _expression_segments_for_foreground(
             narrative=str(narrative or ""),
             stream_mode=stream_mode,
@@ -754,6 +752,7 @@ def _submit_surface_affective_turn_planned(
     life_snapshot_reader: Any,
     agent_input: Any,
     trace_stage_meta: Mapping[str, Any],
+    source: str = "surface_native_sentence_stream",
 ) -> dict[str, Any]:
     """Persist one immutable plan before the first visible stream sentence."""
 
@@ -794,7 +793,7 @@ def _submit_surface_affective_turn_planned(
         payload=payload,
         created_at_ms=max(0, _coerce_int(plan.get("created_at_ms"), default=0)),
         metadata={
-            "source": "surface_native_sentence_stream",
+            "source": str(source or "surface_native_sentence_stream"),
             "workspace_id": workspace_id,
             "session_id": session_id,
         },
@@ -809,6 +808,7 @@ def _submit_surface_sentence_delivery_intent(
     trace_stage_meta: Mapping[str, Any],
     sentence: str,
     sentence_index: int,
+    source: str = "surface_native_sentence_stream",
 ) -> dict[str, Any]:
     """Durably stage one already-gated sentence before its SSE emission."""
 
@@ -880,7 +880,7 @@ def _submit_surface_sentence_delivery_intent(
         payload=payload,
         created_at_ms=created_at_ms,
         metadata={
-            "source": "surface_native_sentence_stream",
+            "source": str(source or "surface_native_sentence_stream"),
             "workspace_id": workspace_id,
             "session_id": session_id,
             "sentence_digest": sentence_digest,

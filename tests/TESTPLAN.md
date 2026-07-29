@@ -120,6 +120,14 @@
 - T-DL04-05：native stream 的 plan、sentence、foreground 和 restart/replay 必须保持
   同一 synchronization id、self-affect revision 与 digest；受治理 Budget 请求在缺少
   provider-final canonical usage 时必须保持 usage-safe buffered，不得假称流式完成。
+- T-DL04-06：直连 Host 的 perception-evidence gate 与安全确定性 sub-agent fallback 也必须在
+  可见前冻结 canonical plan、逐句写 `surface_sentence_delivery_intent` 和同一 Voice/Avatar Host
+  protocol，并在最终 foreground 后创建 provisional relationship episode；它们的 public trace 必须为
+  `deterministic_affective_delivery / NO_MODEL_RULE_FALLBACK`，不能伪装成 provider stream。带
+  governed Budget 的 worker 仍不得借此在 Task Acceptance 前直接写 Life。
+- 当前合并的 DL-02/DL-03/DL-04/Surface/DL-05 邻接集合为 `81 passed in 69.63s`，并通过目标
+  模块 `py_compile`、机器状态 JSON 解析和 `git diff --check`。这不是真实 provider、guarded streaming、
+  远端 Edge 或 DL-07 服务栈验收；远程 CI 固定为 `NOT_RUN_ACCOUNT_QUOTA`。
 - 当前本地证据：provider stream、turn planner、两候本地选择、native stream、受影响
   Surface 回归与真实 SQLite restart 的完整集合 `73 passed in 8.82s`；文档 authority
   gate `7 passed in 3.56s`。远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`；真实 provider、连接

@@ -686,3 +686,147 @@ async def test_native_stream_blocks_manipulative_sentence_before_it_is_visible(
     assert commit["decision"] == "NO_REPLY"
     assert commit["reason_code"] == "SURFACE_STREAM_INTERRUPTED"
     assert [item["command_type"] for item in submitted] == ["affective_turn_planned"]
+
+
+@pytest.mark.asyncio
+async def test_affective_evidence_gate_stages_expression_before_rule_reply_visibility(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """A perception-boundary reply must not bypass Natsume's frozen plan."""
+
+    submitted: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _submit)
+    agent_input = _agent_input()
+    agent_input.user_message = "你觉得这几本书怎么样？"
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(
+            agent_input,
+            ports=surface_runtime_ports_factory(),
+        )
+    ]
+
+    command_types = [str(item["command_type"]) for item in submitted]
+    sentences = [event for event in events if event.get("phase") == "SENTENCE"]
+    deliveries = [event for event in events if event.get("phase") == "DELIVERY"]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert command_types[0] == "affective_turn_planned"
+    assert command_types[-1] == "foreground_completed"
+    assert command_types[1:-1]
+    assert set(command_types[1:-1]) == {"surface_sentence_delivery_intent"}
+    assert sentences
+    assert [event["delivery_state"] for event in deliveries[:-1]] == [
+        "HOST_PROTOCOL_STAGED"
+    ] * len(sentences)
+    assert deliveries[-1]["delivery_state"] == "HOST_RELEASE_STAGED"
+    assert commit["decision"] == "APPROVE"
+    assert commit["reason_code"] == "SURFACE_PERCEPTION_EVIDENCE_REQUIRED"
+    assert commit["audit_refs"]["path"] == "surface_reply:canonical_affective_deterministic"
+    assert commit["audit_refs"]["surface_main_chain"]["streaming"] is False
+    assert (
+        commit["audit_refs"]["surface_main_chain"]["provider_usage_status"]
+        == "NO_MODEL_RULE_FALLBACK"
+    )
+    assert len(command_types[1:-1]) == len(sentences)
+    synchronization_id = submitted[0]["payload"]["affective_turn_plan"]["expression_plan"][
+        "synchronization_id"
+    ]
+    assert {event["synchronization_id"] for event in sentences} == {synchronization_id}
+    assert submitted[1]["metadata"]["source"] == "surface_affective_deterministic_delivery"
+    assert submitted[-1]["payload"]["expression_delivery_intents"] == []
+    assert submitted[-1]["payload"]["expression_delivery_controls"]
+
+
+@pytest.mark.asyncio
+async def test_affective_model_failure_fallback_keeps_plan_and_expression_protocol(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """A safe sub-agent fallback remains an accepted affective response."""
+
+    submitted: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class FailingModel:
+        async def complete(self, _request):  # noqa: ANN001
+            raise RuntimeError("SURFACE_LLM_POOL_EXHAUSTED")
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _submit)
+    agent_input = _agent_input()
+    agent_input.user_message = "请告诉我授权任务有没有完成。"
+    agent_input.emotion_context["affective_life"]["conflict"] = True
+    agent_input.sub_agent_context = SimpleNamespace(
+        agent_id="pentest_agent",
+        task="只读检查授权结果",
+        result_text="检查完成：授权目标当前不可访问，没有执行任何写入动作。",
+        success=True,
+        latency_ms=12,
+        error="",
+        payload={"audit_refs": {"skill_exec": "skill_exec::request-stream::pentest_agent"}},
+    )
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(
+            agent_input,
+            ports=surface_runtime_ports_factory(
+                model_attempt_service=lambda: FailingModel(),
+            ),
+        )
+    ]
+
+    command_types = [str(item["command_type"]) for item in submitted]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    sentences = [event for event in events if event.get("phase") == "SENTENCE"]
+
+    assert command_types == [
+        "affective_turn_planned",
+        "surface_sentence_delivery_intent",
+        "foreground_completed",
+    ]
+    assert commit["decision"] == "APPROVE"
+    assert commit["reason_code"] == "SURFACE_MAIN_CHAIN_FALLBACK"
+    assert commit["reply_envelope"]["source"] == "surface_main_chain_affective_fallback"
+    assert commit["audit_refs"]["surface_main_chain"]["streaming"] is False
+    assert "授权目标当前不可访问" in commit["narrative"]
+    assert sentences
+    assert submitted[-1]["payload"]["surface_result"]["mode"] == "deterministic_affective_delivery"
+    assert submitted[-1]["payload"]["expression_delivery_intents"] == []
+    assert submitted[-1]["payload"]["expression_delivery_controls"]
