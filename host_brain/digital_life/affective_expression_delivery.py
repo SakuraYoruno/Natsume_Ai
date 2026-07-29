@@ -32,6 +32,25 @@ _EDGE_EMOTION_BY_EXPRESSION = {
 }
 
 
+def previous_durable_avatar_emotion_tag(
+    emotion_context: Mapping[str, Any] | None,
+) -> str | None:
+    """Read the prior Avatar expression only from the frozen Life plan.
+
+    Legacy ``_prev_emotion_tag`` can be derived from a user observation.  It
+    must never select an Avatar transition for Natsume, so compatibility data
+    outside the exact ``expression_plan.v1`` envelope is deliberately inert.
+    """
+
+    raw = _mapping(emotion_context).get("_affective_expression_internal")
+    if not isinstance(raw, Mapping):
+        return None
+    if str(raw.get("schema_version") or "").strip() != "expression_plan.v1":
+        return None
+    expression = str(raw.get("previous_avatar_expression") or "").strip().upper()
+    return _EDGE_EMOTION_BY_EXPRESSION.get(expression)
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
@@ -345,4 +364,5 @@ __all__ = [
     "build_expression_delivery_controls",
     "build_sentence_expression_delivery",
     "expression_delivery_trace",
+    "previous_durable_avatar_emotion_tag",
 ]

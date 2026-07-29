@@ -215,6 +215,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   persona growth 副作用前抛出 `LEGACY_DIRECT_POST_PROCESS_RETIRED`。实现不得保留 direct Bond update、VTS driver、
   voice submit 或 drift/growth invocation。当前 durable projection/handler/Surface/acceptance 受影响集合为
   `75 passed in 15.03s`；不代表真实 provider、远端 Edge/Avatar 或 DL-07 服务栈验收。
+- T-DL06-14：旧 `PROACTIVE_VOICE_TRIGGERED`、Broca 与 MotorCortex 不得把 preview text 直接转成 TTS/Avatar。
+  `dispatch_speak()` 必须无副作用返回 `LEGACY_TRIBE_DIRECT_SPEAK_RETIRED`，且不写 registry、不发布
+  `MOTOR_SPEAK_DISPATCHED`、不触发 Limbic 回灌；AgentRuntime 也不得暴露旧 Surface Bond、TTS 或 VTS callback。
+  当前含 Host/Life/Expression/Tribe/Embodiment 邻接的受影响集合为 `111 passed in 52.40s`；不代表真实远端 Edge、
+  物理设备或 DL-07 服务栈验收。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

@@ -734,7 +734,6 @@ class ANSAgent:
             bus.subscribe("VOICE_PIPELINE_ENDED", self._on_voice_pipeline_ended)       # T-119
             bus.subscribe("CHANNEL_MESSAGE_RECEIVED", self._on_channel_message_received)  # T-120
             bus.subscribe("GLYMPHATIC_CYCLE_COMPLETED", self._on_glymphatic_cycle)  # T-203
-            bus.subscribe("MOTOR_SPEAK_DISPATCHED", self._on_motor_speak_dispatched)  # D5
         except Exception as exc:
             logger.warning("ANSAgent 订阅注册失败（降级）: %s", exc)
 
@@ -768,46 +767,6 @@ class ANSAgent:
                 )
         except Exception as exc:
             logger.debug("ANSAgent._on_glymphatic_cycle 异常: %s", exc)
-
-    async def _on_motor_speak_dispatched(self, event: Any) -> None:
-        """D5: 处理 MOTOR_SPEAK_DISPATCHED 事件，发声后更新自主神经节律状态。
-
-        每次七海发出声音，自主神经系统应感知到"我刚刚说话了"，
-        更新最近发声时间戳，调整主动发声节律（避免连续发声过密）。
-        """
-        try:
-            payload = dict(getattr(event, "payload", None) or {})
-            ok = bool(payload.get("ok", True))
-            source = str(payload.get("source") or "unknown").strip()
-            emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
-            ts_ms = int(getattr(event, "ts_ms", 0) or payload.get("ts_ms") or 0)
-
-            if not ok:
-                return  # 发声失败不更新节律
-
-            # 更新最近发声时间戳（供 NatsumeScheduler 主动对话门控使用）
-            self.update_last_message_ts()
-
-            # 发声后短暂降低主动发声倾向（避免连续发声过密）
-            # 主动发声（proactive_voice）后降低更多，对话回复（chat_commit）后降低较少
-            _multiplier_reduction = 0.6 if source == "proactive_voice" else 0.85
-            self.emit_from_thread(
-                "INNER_WORLD_TICKED",
-                {
-                    "source": "ans_motor_speak",
-                    "speak_dispatched": True,
-                    "speak_source": source,
-                    "speak_emotion_tag": emotion_tag,
-                    "proactive_multiplier": _multiplier_reduction,
-                    "ts_ms": ts_ms,
-                },
-            )
-            logger.debug(
-                "ANSAgent._on_motor_speak_dispatched: source=%s emotion=%s multiplier=%.2f",
-                source, emotion_tag, _multiplier_reduction,
-            )
-        except Exception as exc:
-            logger.debug("ANSAgent._on_motor_speak_dispatched 异常: %s", exc)
 
     async def _on_bond_stage_changed(self, event: Any) -> None:
         """处理 BOND_STAGE_CHANGED 事件：记录当前关系阶段。

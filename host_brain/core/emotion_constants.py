@@ -59,7 +59,7 @@ EMOTION_TAG_ZH: dict[str, str] = {
 # 合并自 emotion_context._SEMANTIC_EMOTION_TAG_ALIASES,
 # vts_runtime_mapping.VTS_EMOTION_TAG_ALIASES,
 # surface_affect_control._normalize_emotion_tag,
-# surface_emotion_bond_flow._normalize_emotion_tag.
+# The canonical Digital Life planner keeps normalization at the contract edge.
 #
 # 中间非规范目标（ANNOYED, EXHAUSTED, JOY, GUILTY, ASHAMED）
 # 已全部解析为规范标签。

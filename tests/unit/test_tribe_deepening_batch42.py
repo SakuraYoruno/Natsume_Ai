@@ -313,7 +313,6 @@ def test_language_high_urgency_calls_endocrine_stress():
     mock_pain.record_pain = MagicMock()
     mock_limbic = MagicMock()
     mock_intero = MagicMock()
-    mock_motor = MagicMock()
 
     # 直接调用 resolve_dual_system，传入高紧迫度的 wernicke 结果
     wernicke = {
@@ -327,8 +326,7 @@ def test_language_high_urgency_calls_endocrine_stress():
     with patch("host_brain.tribe.language_system_agent.get_endocrine_agent", return_value=mock_endo), \
          patch("host_brain.tribe.language_system_agent.get_pain_reward_agent", return_value=mock_pain), \
          patch("host_brain.tribe.language_system_agent.get_limbic_agent", return_value=mock_limbic), \
-         patch("host_brain.tribe.language_system_agent.get_interoception_agent", return_value=mock_intero), \
-         patch("host_brain.tribe.language_system_agent.get_motor_cortex_agent", return_value=mock_motor):
+         patch("host_brain.tribe.language_system_agent.get_interoception_agent", return_value=mock_intero):
         agent.resolve_dual_system(
             user_text="马上帮我！紧急！！",
             bond_stage="friend",
@@ -363,14 +361,12 @@ def test_default_mode_high_continuity_calls_reduce_recovery_urgency(monkeypatch)
     mock_ans = MagicMock()
     mock_ans._recovery_mode = True
     mock_pr = MagicMock()
-    mock_limbic = MagicMock()
 
     with patch("host_brain.tribe.default_mode_agent.emit_tribe_event"), \
          patch("host_brain.tribe.default_mode_agent.get_interoception_agent", return_value=mock_intero), \
          patch("host_brain.tribe.default_mode_agent.get_glymphatic_agent", return_value=mock_glymphatic), \
          patch("host_brain.tribe.default_mode_agent.get_ans_agent", return_value=mock_ans), \
          patch("host_brain.tribe.default_mode_agent.get_pain_reward_agent", return_value=mock_pr), \
-         patch("host_brain.tribe.default_mode_agent.get_limbic_agent", return_value=mock_limbic), \
          patch("host_brain.persona.motive_runtime.build_offline_state_from_inner_state",
                return_value={"continuity_score": 0.75, "absence_band": "recent",
                              "offline_hours": 0.0, "loneliness_level": 0.0, "anticipation_level": 0.0}):

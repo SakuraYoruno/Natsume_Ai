@@ -105,6 +105,11 @@ volatile Bond queue 不再是生产关系 authority。其余 legacy reader、Rev
 失败关闭；旧直出实现已删除。该收口保证 `AffectiveTurnPlan / ExpressionPlan` 是同一 accepted turn 的唯一表达来源，
 但不替代真实 provider、远端 Edge、Monitor 或 DL-07 全服务栈验收。
 
+**Legacy Tribe direct-speak 退役修订：** 旧 `PROACTIVE_VOICE_TRIGGERED`、Broca 与 MotorCortex 发声桥没有
+Life revision、scope-bound delivery intent 或 channel receipt，现已删除；保留的 `dispatch_speak()` 无副作用返回
+`LEGACY_TRIBE_DIRECT_SPEAK_RETIRED`。它不调用 TTS/Edge、不写 registry、不发布 EventBus，也不会把技术失败回灌
+Limbic。该收口只证明本地 direct-effect authority 已关闭，仍不证明真实远端 Edge、物理语音/Avatar 回执或 DL-07。
+
 **Legacy emotion timeline 退役修订：** production `HostMemoryRuntimeOwner` 不再打开旧 action-log
 query repository 来 hydrate mutable `EmotionTimeline`；它返回 `RETIRED_CANONICAL_LIFE` 空投影，故不会把
 旧的 user/self 混合条目包装成 `NEUTRAL` 或现时 self-affect。Lifecycle snapshot/proactive dispatch 忽略该

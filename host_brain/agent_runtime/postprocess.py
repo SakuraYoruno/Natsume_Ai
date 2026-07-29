@@ -149,34 +149,6 @@ async def _async_post_process(
     except Exception:
         pass
 
-    if surface_main_chain_used:
-        try:
-            surface_bond_result = application_ports.apply_surface_emotion_bond_flow(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=user_message,
-                assistant_reply=narrative,
-                emotion_context=emotion_context,
-                bond_summary=bond_summary,
-                reply_plan=reply_plan,
-                retrieval_evidence_items=retrieval_evidence_items,
-                ts_ms=ts_ms,
-            )
-            normalized_trace_stage_meta = {
-                **normalized_trace_stage_meta,
-                "surface_emotion_bond_flow": surface_bond_result,
-            }
-        except Exception as exc:
-            _logger.debug("[%s] surface emotion-bond flow failed: %s", request_id, exc)
-            normalized_trace_stage_meta = {
-                **normalized_trace_stage_meta,
-                "surface_emotion_bond_flow": {
-                    "status": "DEGRADED",
-                    "reason_code": "SURFACE_EMOTION_BOND_FLOW_FAILED",
-                },
-            }
-
     try:
         await application_ports.persist_post_process_audit(
             request_id=request_id,

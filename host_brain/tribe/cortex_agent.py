@@ -258,8 +258,6 @@ class CortexAgent:
             bus.subscribe("CIRCADIAN_PHASE_UPDATED", self._on_circadian_phase_updated)
             bus.subscribe("PROPRIOCEPTION_UPDATED", self._on_proprioception_updated)
             bus.subscribe("INITIATIVE_DECISION_MADE", self._on_initiative_decision_made)
-            # G3: 订阅主动发声触发事件，将 expression.content 走 TTS 链路发出
-            bus.subscribe("PROACTIVE_VOICE_TRIGGERED", self._on_proactive_voice_triggered)
         except Exception as exc:
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.cortex_agent").warning(
@@ -647,86 +645,6 @@ class CortexAgent:
                 "CortexAgent._on_platform_disconnected 异常: %s", exc
             )
 
-    async def _on_proactive_voice_triggered(self, event: Any) -> None:
-        """G3/D3: 处理 PROACTIVE_VOICE_TRIGGERED 事件，通过 MotorCortexAgent.dispatch_speak() 发出语音。
-
-        D3 改造：原来用 plan_action+dispatch_action 间接分发，现在直接调用
-        dispatch_speak()，统一走 Phase C 发声入口，确保：
-        1. 发声结果写入 state_registry（last_speak_outcome）
-        2. 发布 MOTOR_SPEAK_DISPATCHED 事件到 TribeEventBus
-        3. 发声失败时联动 LimbicAgent 轻度挫败感
-        """
-        import logging as _logging
-        _log = _logging.getLogger("Natsume.tribe.cortex_agent")
-        try:
-            payload = dict(getattr(event, "payload", None) or {})
-            triggered = bool(payload.get("triggered", False))
-            if not triggered:
-                return
-
-            expression = dict(payload.get("expression") or {})
-            content = str(expression.get("content") or payload.get("content_preview") or "").strip()
-            if not content:
-                _log.debug("CortexAgent._on_proactive_voice_triggered: content 为空，跳过")
-                return
-
-            emotion_tag = str(
-                expression.get("emotion_tag")
-                or payload.get("emotion_tag")
-                or "NEUTRAL"
-            ).strip().upper() or "NEUTRAL"
-
-            scene_type = str(payload.get("scene_type") or "").strip()
-            session_id = str(payload.get("session_id") or "").strip() or "proactive_voice"
-
-            # 从 Broca 获取 emotion_intensity（如果可用）
-            emotion_intensity: float = 0.5
-            try:
-                from host_brain.tribe.speech import broca_to_tts_params  # noqa: PLC0415
-                _lang_agent = get_language_system_agent()
-                _last_broca = dict(
-                    (_lang_agent.state_registry.get_state("language_system_agent") or {})
-                    .get("state", {})
-                    .get("last_broca") or {}
-                )
-                if _last_broca:
-                    _tts_params = broca_to_tts_params(
-                        tone=str(_last_broca.get("tone") or "balanced"),
-                        warmth_weight=float(_last_broca.get("warmth_weight") or 0.5),
-                        emotion_tag=emotion_tag,
-                    )
-                    emotion_tag = _tts_params["emotion_tag"]
-                    emotion_intensity = float(_tts_params["emotion_intensity"])
-            except Exception:
-                pass
-
-            # D3: 直接调用 MotorCortexAgent.dispatch_speak()（Phase C 统一发声入口）
-            from host_brain.core.ids import new_request_id  # noqa: PLC0415
-            req_id = new_request_id()
-            motor = get_motor_cortex_agent()
-            speak_result = motor.dispatch_speak(
-                text=content,
-                emotion_tag=emotion_tag,
-                emotion_intensity=emotion_intensity,
-                utterance_id=f"utt_proactive_{req_id}",
-                request_id=req_id,
-                session_id=session_id,
-                source="proactive_voice",
-                require_gate=False,
-            )
-
-            _log.info(
-                "CortexAgent._on_proactive_voice_triggered: 主动发声已发出 "
-                "scene=%s emotion=%s content_len=%d ok=%s",
-                scene_type, emotion_tag, len(content), speak_result.get("ok"),
-            )
-        except Exception as exc:
-            import logging  # noqa: PLC0415
-            logging.getLogger("Natsume.tribe.cortex_agent").warning(
-                "CortexAgent._on_proactive_voice_triggered 异常: %s", exc
-            )
-
-
 def get_cortex_agent() -> CortexAgent:
     from host_brain.tribe.runtime_context import (  # noqa: PLC0415
         require_active_tribe_agent,
@@ -743,6 +661,4 @@ __all__ = ["CortexAgent", "get_cortex_agent"]
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.events import emit_tribe_event  # noqa: E402, F401
-from host_brain.tribe.language_system_agent import get_language_system_agent  # noqa: E402, F401
-from host_brain.tribe.motor_cortex_agent import get_motor_cortex_agent  # noqa: E402, F401
 from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: E402, F401

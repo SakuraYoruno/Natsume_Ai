@@ -105,6 +105,14 @@
   `LEGACY_DIRECT_POST_PROCESS_RETIRED`；源文件中也不再保留这些直出符号。最终受影响集合为
   `75 passed in 15.03s`，证明 durable Host projection 边界，不是外部模型、远端设备或 DL-07 验收。
 
+- `test_dl06_legacy_direct_effect_retirement.py` 与 AgentRuntime/Surface/Life projection、ExpressionPlan、
+  Tribe composition、Embodiment contract 和 acceptance 邻接用例验证：旧 `PROACTIVE_VOICE_TRIGGERED`、
+  Broca→MotorCortex、`MOTOR_SPEAK_DISPATCHED` 回写均已删除；保留的 `dispatch_speak()` 只返回
+  `LEGACY_TRIBE_DIRECT_SPEAK_RETIRED`，不会写 registry、发 EventBus、调用 TTS/Edge 或把失败回灌 Limbic。
+  同时旧 Surface Bond/TTS/VTS adapter 文件已删除，AgentRuntime ports 不再暴露 direct-effect callback。最终
+  受影响集合为 `111 passed in 52.40s`；这只是本地 authority 证据，不是远端 Edge、物理 Voice/Avatar、真实模型或
+  DL-07 服务栈验收。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS
@@ -186,8 +194,8 @@
   `37 passed in 1.55s`。这只证明模块级缓存已退役，不证明 volatile Bond queue、关系后效应、
   真实 Edge/provider 或 DL-07 服务栈完成。
 - `test_ne01_host_bond_runtime.py`、`test_ne01_host_lifecycle_composition.py`、
-  `test_ne01_agent_runtime_composition.py`、`test_cortex_agent.py`、`test_bond_async_queue.py`、
-  `test_surface_emotion_bond_flow.py` 与 `test_bond_routes_api.py` 现验证 production Host 不再
+  `test_ne01_agent_runtime_composition.py`、`test_cortex_agent.py`、`test_bond_async_queue.py` 与
+  `test_bond_routes_api.py` 现验证 production Host 不再
   构造真实 Bond writer/worker queue，canonical Cortex 不解析 queue，Surface hook 不回退写分数，
   legacy `/bond/event` 返回 `410`。该定向集合为 `84 passed in 12.82s`；这是本地退役边界证据，
   不证明其它 compatibility reader、真实模型、远端 Edge/provider 或 DL-07 服务栈完成。

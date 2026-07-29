@@ -40,13 +40,10 @@ def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRun
             kwargs.get("base_runtime") or {}
         ),
         resolve_state_arbiter_bond_fact=_async_stub,
-        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
         build_conversation_experience_read_pack=lambda **kwargs: {
             "source": "experience-read-pack",
             "arguments": dict(kwargs),
         },
-        drive_stream_vts_emotion=_async_stub,
-        resolve_tts_route=lambda **_kwargs: {},
         conversation_history=lambda: "conversation-history",
         life_memory_service=lambda: object(),
         audit_ledger=lambda: ledger,

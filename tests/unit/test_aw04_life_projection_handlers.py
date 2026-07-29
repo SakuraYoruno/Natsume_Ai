@@ -41,10 +41,7 @@ def _agent_runtime_ports() -> AgentRuntimeApplicationPorts:
             kwargs.get("base_runtime") or {}
         ),
         resolve_state_arbiter_bond_fact=_async_value,
-        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
         build_conversation_experience_read_pack=lambda **_kwargs: {},
-        drive_stream_vts_emotion=_async_value,
-        resolve_tts_route=lambda **_kwargs: {},
         conversation_history=lambda: object(),
         life_memory_service=lambda: object(),
         audit_ledger=lambda: object(),

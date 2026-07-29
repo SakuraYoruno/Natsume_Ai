@@ -28,7 +28,6 @@ def _ports(*, assistant_result: dict, memory_receipt: dict) -> SimpleNamespace:
 
     return SimpleNamespace(
         record_assistant_turn=lambda **_kwargs: dict(assistant_result),
-        apply_surface_emotion_bond_flow=lambda **_kwargs: {"status": "QUEUED"},
         persist_post_process_audit=persist_post_process_audit,
         life_memory_service=lambda: memory,
         memory=memory,
@@ -146,6 +145,7 @@ def test_durable_projection_has_no_legacy_conversation_experience_writer() -> No
     source = inspect.getsource(postprocess._async_post_process)
     assert "get_conversation_experience_store" not in source
     assert "update_assistant_reply" not in source
+    assert "apply_surface_emotion_bond_flow" not in source
     assert "post_process_bond_update" not in source
     assert "drive_stream_vts_emotion" not in source
     assert "submit_voice_command" not in source

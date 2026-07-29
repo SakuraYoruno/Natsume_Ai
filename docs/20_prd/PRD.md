@@ -230,6 +230,9 @@ Input bridge 重新进入用户观察，但不得直接写 Bond、七海 self-af
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
 `AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。
 
+任何旧 Tribe EventBus、Broca 或 MotorCortex convenience callback 均不得将文本直接提交给 TTS/Avatar；这类调用必须
+无副作用拒绝，且不得因设备失败写入 self-affect、关系或状态 registry。
+
 ### FR-ARCH-005：Memory 与 Knowledge OS
 
 Life Memory 服务人格连续性；Knowledge OS 服务项目、概念、流程和决策。KnowledgeItem 必须记录 provenance、version、validity、confidence、conflict 和 decision refs，并支持 promotion、deprecation 和回滚。

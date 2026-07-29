@@ -216,6 +216,11 @@ scope、写入用户观察并经 Appraisal 后，才可能影响七海的 self-a
 Tribe event、VTS driver、bulk TTS 与 Prefrontal drift/growth 已物理删除；accepted reply 的后续文本、声音和 Avatar
 只能继续使用同一冻结计划的 Life delivery protocol，不能在回复结束后重新以兼容 `emotion_context` 改写七海。
 
+旧 Tribe 的 `PROACTIVE_VOICE_TRIGGERED` 订阅、Broca→MotorCortex 桥和 `MOTOR_SPEAK_DISPATCHED` 回写也已删除。
+保留的 `MotorCortexAgent.dispatch_speak()` 仅是 effect-free retirement boundary：它返回
+`LEGACY_TRIBE_DIRECT_SPEAK_RETIRED`，不写 registry、不发布 EventBus、不调用 TTS/Edge，也不把技术失败转写为
+Limbic 事件。真实 Voice/Avatar 只从 accepted `ExpressionPlanV1` 的 delivery intent 继续。
+
 默认模式目前也遵守这一 single-authority 约束：读取 `LifeSnapshotReader` 后，边界层只投影有限的 self-affect
 和 relationship texture 给 `inner_activity_agent`，并用 `CANONICAL_LIFE_JOURNAL` marker 禁止该 agent 回读
 EmotionTimeline 或 SocialBrain/Bond。该关系 texture 不包含身份、episode evidence 或 intimacy consent，亦不映射

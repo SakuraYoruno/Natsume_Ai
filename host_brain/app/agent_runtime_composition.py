@@ -25,9 +25,7 @@ from host_brain.app.route_catalog_runtime import (
     resolve_surface_reply_llm_runtime,
 )
 from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact
-from host_brain.app.tts_route import resolve_tts_route
 from host_brain.app.user_preference_store import build_user_preference_pack
-from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion
 from host_brain.observability.runtime_audit import _persist_post_process_audit
 
 
@@ -102,8 +100,6 @@ def build_agent_runtime_application_ports(
     session_tactic_ledger_store = host_services.require_provider(
         "session_tactic_ledger_store"
     )
-    tts_context_router = host_services.require_provider("tts_context_router")
-    meta_learning_loop = host_services.require_provider("meta_learning_loop")
     bond_neo4j_client = host_services.require_provider("bond_neo4j_client")
 
     def resolve_life_authority() -> tuple[Any, Any]:
@@ -191,20 +187,6 @@ def build_agent_runtime_application_ports(
     def build_user_preference_pack_with_ledger(**kwargs: Any) -> dict[str, Any]:
         return build_user_preference_pack(ledger=ledger(), **kwargs)
 
-    def retire_surface_emotion_bond_flow(**_kwargs: Any) -> dict[str, Any]:
-        """Keep the old Surface hook observable without resurrecting Bond writes.
-
-        Foreground relationship outcomes are already committed through the
-        canonical Life relationship lifecycle before this post-process stage.
-        A second score queue would be volatile and could contradict recovery.
-        """
-
-        return {
-            "status": "RETIRED_CANONICAL_LIFE",
-            "authority": "CANONICAL_LIFE_JOURNAL",
-            "reason_code": "LEGACY_SURFACE_BOND_FLOW_RETIRED",
-        }
-
     def task_status_projection() -> Any:
         return build_durable_task_status_projection(ledger=ledger())
 
@@ -217,19 +199,6 @@ def build_agent_runtime_application_ports(
         """
 
         return build_conversation_experience_read_pack(ledger=ledger(), **kwargs)
-
-    async def drive_stream_vts_emotion_with_ledger(**kwargs: Any) -> Any:
-        return await _drive_stream_vts_emotion(
-            ledger=ledger(),
-            **kwargs,
-        )
-
-    def resolve_tts_route_with_host_services(**kwargs: Any) -> Any:
-        return resolve_tts_route(
-            tts_context_router=tts_context_router(),
-            meta_learning_loop=meta_learning_loop(),
-            **kwargs,
-        )
 
     return AgentRuntimeApplicationPorts(
         record_user_turn=record_user_turn_with_life_authority,
@@ -244,10 +213,7 @@ def build_agent_runtime_application_ports(
             resolve_surface_reply_llm_runtime_with_catalog
         ),
         resolve_state_arbiter_bond_fact=resolve_state_arbiter_bond_fact_with_engine,
-        apply_surface_emotion_bond_flow=retire_surface_emotion_bond_flow,
         build_conversation_experience_read_pack=conversation_experience_read_pack,
-        drive_stream_vts_emotion=drive_stream_vts_emotion_with_ledger,
-        resolve_tts_route=resolve_tts_route_with_host_services,
         conversation_history=conversation_history,
         life_memory_service=life_memory_service,
         audit_ledger=ledger,

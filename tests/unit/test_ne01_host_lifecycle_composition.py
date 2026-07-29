@@ -1585,8 +1585,5 @@ def test_host_lifecycle_cutover_reduces_truthful_locator_inventory() -> None:
     assert (
         ROOT / "host_brain" / "app" / "conversation_writer.py"
     ) not in all_import_modules
-    assert (
-        ROOT / "host_brain" / "app" / "vts_emotion_driver.py"
-    ) not in all_import_modules
     assert not (ROOT / "host_brain" / "app" / "intelligent_runtime.py").exists()
     assert (ROOT / "host_brain" / "app" / "asgi.py") not in named_import_modules

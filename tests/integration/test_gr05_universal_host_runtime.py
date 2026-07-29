@@ -186,10 +186,7 @@ def _production_acceptance_effect_ports(
             kwargs.get("base_runtime") or {}
         ),
         resolve_state_arbiter_bond_fact=_unused_async,
-        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
         build_conversation_experience_read_pack=lambda **_kwargs: {},
-        drive_stream_vts_emotion=_unused_async,
-        resolve_tts_route=lambda **_kwargs: None,
         conversation_history=lambda: None,
         life_memory_service=lambda: life_memory_service,
         audit_ledger=lambda: ledger,

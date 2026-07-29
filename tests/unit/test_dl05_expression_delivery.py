@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from host_brain.app.vts_emotion_driver import _previous_durable_avatar_tag
 from host_brain.digital_life.affective_expression_delivery import (
     build_expression_delivery_controls,
     build_sentence_expression_delivery,
     expression_delivery_trace,
+    previous_durable_avatar_emotion_tag,
 )
 from host_brain.digital_life.affective_turn_planner import build_affective_turn_guidance
 from host_brain.surface_runtime.reply_context import _surface_emotion_context
@@ -134,8 +134,8 @@ def test_surface_emotion_context_and_vts_transition_ignore_legacy_previous_tag()
     assert context["emotion_tag"] == "SAD"
     assert context["_prev_emotion_tag"] == "ANGRY"  # compatibility field remains inert
     assert context["_affective_expression_internal"]["previous_avatar_expression"] == "SHARED_JOY"
-    assert _previous_durable_avatar_tag(context) == "HAPPY"
-    assert _previous_durable_avatar_tag({"_prev_emotion_tag": "ANGRY"}) is None
+    assert previous_durable_avatar_emotion_tag(context) == "HAPPY"
+    assert previous_durable_avatar_emotion_tag({"_prev_emotion_tag": "ANGRY"}) is None
 
 
 def test_invalid_expression_protocol_fails_closed_before_any_channel_claim() -> None:

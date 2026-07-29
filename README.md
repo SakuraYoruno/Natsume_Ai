@@ -66,6 +66,10 @@ window；其他 compatibility reader、Monitor/Review、长期 canary 与真实�
 `/v1/edge/events` 的原始 `EMOTION_DETECTED`、`USER_REACTION` 与 ASR 事件现只作为 Edge 证据记录；它们不再直接写 Bond，也不再按用户情绪直驱 VTS。带文本且满足条件的最终 ASR 仍可进入既有 ASR→Input 桥，之后才由带 scope 的 `AffectFusionService` 形成用户观察和 Appraisal；孤立的 Edge 情绪事件在没有 `workspace + relationship_subject` 的可信输入边界时没有 self-affect、关系或 Avatar 写权。远端 Edge 位于另一台电脑，本波没有启动。
 
 历史异步 post-process 也已不再是第二条输出或成长主链：它只接受已提交的 `life_projection_mode`，在任何 conversation、memory、Bond、TTS、VTS 或 persona 写入前拒绝 direct 调用。文本、声音与 Avatar 只能由同一 `AffectiveTurnPlanV1 → ExpressionPlanV1 → delivery protocol` 落盘链继续；这避免聊天回复完成后再用旧模型结果重新猜测七海情绪或重复播放。
+旧 Tribe 的 `PROACTIVE_VOICE_TRIGGERED → Cortex/Broca → MotorCortex` 直发声桥也已物理断开，
+`MotorCortexAgent.dispatch_speak()` 只会无副作用返回 `LEGACY_TRIBE_DIRECT_SPEAK_RETIRED`；它既不会触发
+TTS/Edge，也不会写 registry、发布后续 EventBus 或把“没有播出”误写成七海受伤。Voice/Avatar 只能由 accepted
+Life delivery protocol 的 exact `ExpressionPlanV1` 取得动作。
 
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
