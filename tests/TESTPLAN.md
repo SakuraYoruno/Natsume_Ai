@@ -233,6 +233,12 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   Limbic/Endocrine/Interoception/PainReward 或第二次模型尝试前返回/退役；用户情绪只能经
   `AffectFusion → Appraisal → Life` 形成七海自身情感。当前 `test_dl06_mirror_neuron_retirement.py` 与既有
   MirrorNeuron 兼容回归仅证明该旧回路已封闭，不代表真实 Fusion 体验、模型、远端 Edge 或 DL-07。
+- T-DL06-17：canonical `LanguageSystemAgent` 只能返回无状态语言分析，固定旧关系风格为 `FRIEND`；不得订阅
+  emotion/Bond/loneliness EventBus，不得把用户情绪、紧迫度、旧 Bond stage 或孤独信号写入 registry、PainReward、
+  Endocrine、Limbic、Interoception 或第二个模型。canonical `PainRewardAgent` 不得订阅 global EventBus、累积
+  hedonic/disk state、调用 organ fan-out 或反思模型，record/decay/callback 必须返回 retirement/零值 projection。
+  当前 `test_dl06_language_pain_reward_retirement.py` 与相邻 legacy 回归只证明旧 writer 已封闭，不代表真实陪伴
+  体验、模型、远端 Edge、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

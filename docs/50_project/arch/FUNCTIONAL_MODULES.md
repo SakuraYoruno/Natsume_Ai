@@ -320,6 +320,13 @@ dependency 的非升级投影，不会创建/读取 `BondStageEngine`，也不�
 只能成为 `AffectFusionService` 的 observation，必须再经 Appraisal 才能影响七海自身情感；旧 mirror 纯函数仅可供
 隔离 rollback 测试，不能重新成为情感或表达 writer。
 
+`LanguageSystemAgent` 只保留无状态 Wernicke/Broca 兼容输出：canonical ports 不注册
+emotion/Bond/loneliness EventBus，`resolve_dual_system()` 不再写 language registry 或把用户 emotion/urgency
+回灌 PainReward、Endocrine、Limbic、Interoception；旧 deep parse 与 opening hint 也不会另起模型解释链。
+`PainRewardAgent` 同时退出 canonical self-affect：record、decay、全局订阅、state/disk persistence、organ fan-out
+与 hedonic reflection 都返回 retirement/零值 projection。二者只可作为 rollback-window 的纯兼容辅助，不能把
+用户信号或旧关系状态重新写成七海自身情绪。
+
 `lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
 `LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，
 把 `natsume_ai` self-affect、bounded user observation、关系 texture、body projection 与 posture 分开投影。

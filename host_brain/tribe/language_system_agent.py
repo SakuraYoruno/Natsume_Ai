@@ -81,6 +81,30 @@ class LanguageSystemAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_language_side_effects_retired(self) -> bool:
+        """Whether canonical Life owns affect and relationship side effects.
+
+        Wernicke/Broca's deterministic parsing can remain a compatibility
+        helper, but it must not turn a raw user emotion or a legacy Bond stage
+        into a second self-affect, body-stress, or relationship writer.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_language_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_LANGUAGE_AFFECT_FEEDBACK_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+        }
+
     def wernicke_understand(
         self,
         *,
@@ -213,6 +237,14 @@ class LanguageSystemAgent:
             "broca": broca,
             "style": style,
         }
+        if self._legacy_language_side_effects_retired():
+            # The pure result may still help old runtime snapshots answer
+            # grammar/intent questions, but a canonical Host must not retain
+            # it in a global cache or feed raw user pressure into old organs.
+            payload["legacy_side_effects"] = self._retired_legacy_language_result(
+                operation="resolve_dual_system"
+            )
+            return payload
         try:
             self.state_registry.set_state(
                 "language_system_agent",
@@ -303,6 +335,13 @@ class LanguageSystemAgent:
         stage = str(bond_stage or "friend").strip().lower() or "friend"
         etag = str(emotion_tag or "NEUTRAL").strip().upper()
 
+        if self._legacy_language_side_effects_retired():
+            # Old Bond stages and process-global loneliness cannot authorize
+            # intimacy or proximity in a canonical relationship projection.
+            stage = "friend"
+            loneliness_level = 0.0
+            high_loneliness_flag = False
+
         style = _BOND_STYLE_MAP.get(stage, "neutral")
         tone = _EMOTION_TONE_MAP.get(etag, "balanced")
 
@@ -345,7 +384,7 @@ class LanguageSystemAgent:
                 response_goal=response_goal,
             )
             result["dual_system"] = dual
-        else:
+        elif not self._legacy_language_side_effects_retired():
             try:
                 self.state_registry.set_state(
                     "language_system_agent",
@@ -380,6 +419,15 @@ class LanguageSystemAgent:
                 "source": "wernicke_llm"|"disabled"|"error",
             }
         """
+        if self._legacy_language_side_effects_retired():
+            return {
+                "topic_entity": "",
+                "emotional_subtext": "",
+                "implicit_need": "",
+                "source": "retired_canonical_life",
+                "reason_code": "LEGACY_LANGUAGE_AFFECT_FEEDBACK_RETIRED",
+            }
+
         _should_trigger = (
             str(intent_type or "").lower() == "complex"
             or float(semantic_pressure or 0.0) > 0.6
@@ -450,6 +498,8 @@ class LanguageSystemAgent:
         Returns:
             开场句字符串（15字以内），或 None（未触发/失败）。
         """
+        if self._legacy_language_side_effects_retired():
+            return None
         if float(emotional_pressure or 0.0) <= 0.7:
             return None
 
@@ -486,6 +536,10 @@ class LanguageSystemAgent:
             return None
 
     def register_subscriptions(self) -> None:
+        if self._legacy_language_side_effects_retired():
+            # AffectiveTurnPlan owns expression timing and scope.  These
+            # global callbacks carry neither and cannot be used as a bridge.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -496,7 +550,11 @@ class LanguageSystemAgent:
         except Exception:
             pass
 
-    async def _on_emotion_state_changed(self, event: Any) -> None:
+    async def _on_emotion_state_changed(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_language_side_effects_retired():
+            return self._retired_legacy_language_result(
+                operation="emotion_state_changed"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
@@ -508,7 +566,11 @@ class LanguageSystemAgent:
         except Exception:
             pass
 
-    async def _on_bond_stage_changed(self, event: Any) -> None:
+    async def _on_bond_stage_changed(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_language_side_effects_retired():
+            return self._retired_legacy_language_result(
+                operation="bond_stage_changed"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             bond_stage = str(payload.get("new_stage") or payload.get("bond_stage") or "friend").strip().lower()
@@ -520,7 +582,11 @@ class LanguageSystemAgent:
         except Exception:
             pass
 
-    async def _on_loneliness_signal(self, event: Any) -> None:
+    async def _on_loneliness_signal(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_language_side_effects_retired():
+            return self._retired_legacy_language_result(
+                operation="loneliness_signal"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = _clamp(float(payload.get("loneliness") or 0.0))

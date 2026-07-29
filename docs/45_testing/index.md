@@ -127,6 +127,12 @@
   `test_mirror_neuron_agent.py` 与 batch 34/37/42/46/47/48 继续覆盖 isolated legacy compatibility 行为。
   该集合只证明 production 旧 mirror writer 已退役，不证明实际用户情绪理解或三模态服务验收。
 
+- `test_dl06_language_pain_reward_retirement.py` 验证 canonical `LanguageSystemAgent` 只返回无状态分析、固定
+  `FRIEND`，不订阅 emotion/Bond/loneliness EventBus，不写 language registry 或调用旧 affect organs；同一测试还
+  验证 `PainRewardAgent` 不再订阅 EventBus、更新 hedonic/disk state、调用 organ fan-out 或发起 reflection model。
+  `test_language_system_agent.py`、batch 34/35/42/43/44/46 保留 isolated legacy compatibility 回归。该本地集合
+  不证明真实情绪体验、模型、远端 Edge、Monitor/Review 或 DL-07。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS

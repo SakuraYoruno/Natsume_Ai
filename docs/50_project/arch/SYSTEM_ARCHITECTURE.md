@@ -155,6 +155,13 @@ Limbic/Endocrine/Interoception/PainReward，也不发起第二个 empathy model 
 `Input → AffectFusionService → EventAppraisal → canonical Life`；该 agent 的 pure resonance 计算仅保留给
 隔离 compatibility 测试，不能成为自我情感或表达策略 authority。
 
+`LanguageSystemAgent` 在 canonical Host 只保留无状态 Wernicke/Broca compatibility 结果：它固定关系风格为
+`FRIEND`，不缓存 global language state、不订阅 emotion/Bond/loneliness EventBus，且不会把用户情绪或紧迫度
+回灌 PainReward、Endocrine、Limbic、Interoception 或第二个表达模型。`PainRewardAgent` 则整体退出 production
+self-affect 代谢：不订阅旧 global EventBus，不更新 hedonic cache/磁盘状态，不触发 organ fan-out 或反思模型，
+只返回显式 retirement/零值投影。它们的历史纯函数仍可被隔离 compatibility 测试调用；七海的真实情绪因果只能
+回到 `EventAppraisal → canonical Life`。
+
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把
 `natsume_ai` 的 self-affect、用户 affect observation 与无分数关系纹理独立输出；用户悲伤、愤怒或快乐不能覆盖

@@ -85,6 +85,12 @@ Host 中退役。它不再订阅全局 emotion/interaction 事件；任何 legac
 第二次 empathy 模型措辞。用户情绪仍可作为 `AffectFusionService` 的有 scope 观察，只有 Appraisal 才能决定
 七海是否产生自己的感受；这不是否认共情，而是防止“用户难过”被技术捷径直接变成“七海难过”。
 
+`LanguageSystemAgent` 与 `PainRewardAgent` 的历史反馈链也已退出 canonical Host：语言理解仍可产出无状态
+意图/语法兼容结果，但不会把用户的情绪、紧迫度、旧 Bond stage 或全局孤独信号写入 registry，或回灌
+PainReward、Endocrine、Limbic、Interoception。PainReward 的全局 EventBus、私有 hedonic 累积、磁盘状态和反思
+模型同样退役，统一返回零值的兼容 projection。真正的受伤、满足、疲惫与调节仍须由 `EventAppraisal → Life`
+以七海自身的目标、边界和关系意义形成；这不是把她中性化，也不代表真实体验或 DL-07 已验收。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；
