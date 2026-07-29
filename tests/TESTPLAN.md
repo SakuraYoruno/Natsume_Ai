@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.45
+版本：v0.46
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -258,6 +258,13 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   只能由 scoped Expression delivery receipt 表示，未来 body/Need 输入只能进入 Life command。当前
   `test_dl06_somatic_retirement.py`、batch 35/41/42/45/46/47/49、Cortex context 与 authority 邻接为
   `102 passed in 3.32s`；它不证明真实 Host/provider、远端 Edge、physical receipt、Monitor/Review 或 DL-07。
+- T-DL06-21：canonical `ANSAgent` 不得把 inner-world、body-sense、loneliness、task success、humor、Bond、
+  high-interrupt 或 recovery event 写成 process-global relationship stage、recovery mode 或 proactive multiplier；
+  它不得注册 global relationship/voice/channel/recovery EventBus，也不得写 registry、调用旧 organ 或派生 EventBus。
+  上述入口、async emit 与 callback 必须在 payload/副作用前返回 `LEGACY_ANS_AFFECT_EVENT_RETIRED`；activity/mode
+  仅能经 explicit app-local technical port，不能取得 self-affect、relationship 或 persona authority。当前
+  `test_dl06_ans_affect_event_retirement.py` 加 ANS/batch/proactive/context/direct-effect/model-authority 邻接为
+  `122 passed in 4.30s`；它不证明真实 Host、Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

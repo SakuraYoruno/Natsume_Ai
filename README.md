@@ -107,6 +107,12 @@ body/need 输入仍需后续实现，DL-06 与 DL-07 都尚未完成。
 第二个身体叙事模型，并输出显式 `UNAVAILABLE` 投影；真正的设备状态只能等待 scope-bound 的 Expression delivery
 receipt，而真正的身体/Need 输入也必须通过 Life command。远端 Edge 仍保持停止，这不是设备联调通过的声明。
 
+旧 `ANSAgent` 的全局情感/关系事件桥也已在 canonical Host 退出：`INNER_WORLD_TICKED`、body-sense、孤独、
+任务成功、幽默和 Bond 进退等事件不会再经 EventBus 或 `TribeStateRegistry` 拼写七海的恢复模式、关系阶段或主动频率；
+相应 callback 只返回 `LEGACY_ANS_AFFECT_EVENT_RETIRED`。这不删除真实的技术活动监测或模式切换：它们必须以 app-local
+注入服务运行，且不能获得 self-affect、关系或人格写权。未来的休息、主动克制和关系节律只能由有 scope 的
+Life command、Regulation 和 durable aftereffect 决定；这一退役仍不是远端 Voice/Avatar、真实 Host 或 DL-07 验收。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

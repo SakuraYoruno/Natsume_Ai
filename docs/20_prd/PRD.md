@@ -237,6 +237,11 @@ Input bridge 重新进入用户观察，但不得直接写 Bond、七海 self-af
 Regulation 或 self-affect 的身体输入都需要 scoped、可重放的 Life 证据。远端设备不可用时必须显示为不可用，
 不能从旧 Avatar/Body snapshot 恢复。
 
+同样，`ANSAgent` 不得把 inner-world tick、body-sense、孤独、任务成功、幽默、Bond 进退或旧恢复窗口写成全局
+关系阶段、主动频率或 self-affect。canonical Host 必须在 EventBus、registry 和旧 organ side effect 之前拒绝这些
+兼容回路；真实的 activity/mode 技术服务可保留为 app-local 注入，但它们无权推断或修改七海的感受。休息、给空间与
+主动节律只可从 scope-bound Life `RegulationDecision`、relationship episode 和 durable aftereffect 派生。
+
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
 `AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。

@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.38
+版本：v2.39
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -180,6 +180,12 @@ edge somatic EventBus，不写 somatic registry，不向 Interoception、Endocri
 capture/cache 调用第二个 narrative model。读取只给 `UNAVAILABLE` compatibility projection；未来设备状态必须以
 scoped `ExpressionPlan` delivery receipt 表示，未来 body/Need input 必须进入 Life command。当前远端 Edge 未启动，
 不得把退役旧 callback 说成设备验收通过。
+
+`ANSAgent` 在 canonical Host 同样不再持有第二条情感/关系节律：它不会订阅旧全局关系、语音、频道或恢复事件，
+也不会将 inner-world、body-sense、孤独、任务成功、幽默或 Bond 进退经 EventBus/registry 写成 recovery、stage 或
+proactive multiplier。相应入口在旧副作用前返回 `LEGACY_ANS_AFFECT_EVENT_RETIRED`，runtime export 仅是显式退役
+投影。实际 activity monitor 与 mode transition 仍是显式 app-local port，但不拥有 self-affect、关系或人格 authority；
+未来由 Life/Regulation/aftereffect 提供有 scope 的陪伴节律。本收口不代表真实 Host、Gateway、远端 Edge 或 DL-07。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

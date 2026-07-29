@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.55
+版本：v2.56
 维护日期：2026-07-28
 状态：当前证据
 
@@ -150,6 +150,13 @@
   callback 和 somatic narrative 都返回 explicit retirement/`UNAVAILABLE`。batch 35/41/42/45/46/47/49 与 Cortex
   context/authority 邻接保留 legacy compatibility 覆盖。当前定向集合为 `102 passed in 3.32s`；它不证明 scoped
   body input、真实 Host/provider、远端 Edge、physical receipt、Monitor/Review 或 DL-07。
+
+- `test_dl06_ans_affect_event_retirement.py` 验证 canonical `ANSAgent` 不注册 global relationship/voice/channel/recovery
+  EventBus，也不把 inner-world、body-sense、孤独、任务、幽默、Bond、高打断或 recovery 事件写入 registry、旧 organ 或
+  派生 EventBus；显式入口、async emit 与 callback 都返回 `LEGACY_ANS_AFFECT_EVENT_RETIRED`，export 只给退役投影。
+  `test_ans_agent.py`、batch 36/37/39/41/44/47/48、proactive/context、direct-effect 与 model-authority 邻接保留
+  isolated legacy compatibility 覆盖。当前定向集合为 `122 passed in 4.30s`；它不证明 canonical Regulation 体验、
+  真实 Host、Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

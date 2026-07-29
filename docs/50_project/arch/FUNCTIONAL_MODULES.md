@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.47
+版本：v2.48
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -98,6 +98,13 @@ inner-world journal 或可自动成长的人格 authority。
 state。三个 silence 写入口与四个 BodySense mutation Skill 都在解析 caller 输入前退役，registry 禁止其自动调度。
 production Host root 和 startup 也不构造/预热 mutable engine；lifecycle port 仅保留 fail-closed retired placeholder。
 isolated compatibility composition 仍可用于 rollback，但它不构成 self-affect、关系、调节或主动权限 authority。
+
+**ANS 兼容节律边界模块**位于 [`tribe/ans_agent.py`](../../../host_brain/tribe/ans_agent.py)。canonical
+`TribeApplicationPorts` 下它不注册全局关系、语音、频道或恢复订阅，也不把 inner-world、body-sense、孤独、任务成功、
+幽默、Bond 进退或高打断恢复写进 `TribeStateRegistry`、旧器官或派生 EventBus；这些入口统一返回
+`LEGACY_ANS_AFFECT_EVENT_RETIRED`。保留的 activity monitor 和 mode transition 只能通过 explicit app-local port
+提供技术状态，不可借此产生 self-affect、关系阶段、人格或主动许可。真实的休息/克制/主动节律仍属于 canonical
+Life `RegulationDecision`、relationship episode 与 aftereffect，尚未完成真实 Host/Edge/体验验收。
 
 同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
 `handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；

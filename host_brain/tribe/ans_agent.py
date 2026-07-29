@@ -10,6 +10,17 @@ from host_brain.tribe.base_agent import TribeAgentDescriptor
 
 logger = logging.getLogger("Natsume.tribe.ans_agent")
 _GLYMPHATIC_LOG_COOLDOWN_MS = 30_000
+_CANONICAL_RETIRED_AFFECT_EVENT_TYPES = frozenset(
+    {
+        "INNER_WORLD_TICKED",
+        "BODY_SENSE_UPDATED",
+        "LONELINESS_SIGNAL",
+        "TASK_SUCCESS",
+        "HUMOR_LANDED",
+        "BOND_PROGRESS",
+        "BOND_REGRESS",
+    }
+)
 
 
 def _default_state_registry() -> Any:
@@ -69,6 +80,37 @@ class ANSAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_affect_events_retired(self) -> bool:
+        """Whether canonical Life owns ANS affect and relationship effects.
+
+        ANS may retain app-local activity/mode adapters, but it must not
+        preserve a second relationship stage, recovery mood, or global event
+        pathway that manufactures self-affect outside a scoped Life command.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_affect_result(
+        *,
+        operation: str,
+        event_type: str | None = None,
+    ) -> dict[str, Any]:
+        result = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_ANS_AFFECT_EVENT_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+        }
+        if event_type is not None:
+            result["event_type"] = str(event_type)
+        return result
+
     # ── 事件循环注册 ──────────────────────────────────────────────────────────
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -78,11 +120,24 @@ class ANSAgent:
 
     # ── 线程安全事件发布 ──────────────────────────────────────────────────────
 
-    def emit_from_thread(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+    def emit_from_thread(
+        self,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """从 threading.Timer 线程安全地发布 Tribe 事件到 asyncio 事件循环。
 
         若事件循环未注册或已关闭，则静默降级（不抛出异常，避免影响 Scheduler 主流程）。
         """
+        normalized_event_type = str(event_type or "").strip().upper()
+        if (
+            self._legacy_affect_events_retired()
+            and normalized_event_type in _CANONICAL_RETIRED_AFFECT_EVENT_TYPES
+        ):
+            return self._retired_legacy_affect_result(
+                operation="emit_from_thread",
+                event_type=normalized_event_type,
+            )
         loop = self._loop
         if loop is None or loop.is_closed():
             logger.debug("ANSAgent.emit_from_thread: 事件循环未就绪，跳过事件 %s", event_type)
@@ -95,8 +150,17 @@ class ANSAgent:
         except Exception as exc:
             logger.warning("ANSAgent.emit_from_thread 失败: event_type=%s exc=%s", event_type, exc)
 
-    async def _async_emit(self, event_type: str, payload: dict[str, Any]) -> None:
+    async def _async_emit(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any] | None:
         """异步发布事件到 TribeEventBus（在主 asyncio 线程中执行）。"""
+        normalized_event_type = str(event_type or "").strip().upper()
+        if (
+            self._legacy_affect_events_retired()
+            and normalized_event_type in _CANONICAL_RETIRED_AFFECT_EVENT_TYPES
+        ):
+            return self._retired_legacy_affect_result(
+                operation="async_emit",
+                event_type=normalized_event_type,
+            )
         try:
 
             emit_tribe_event(
@@ -109,7 +173,11 @@ class ANSAgent:
 
     # ── Skill 调用入口（供 inner_world_skill / body_sense_skill 调用）──────────
 
-    def emit_inner_world_ticked(self, *, tick_result: dict[str, Any] | None = None) -> None:
+    def emit_inner_world_ticked(
+        self,
+        *,
+        tick_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """inner_world_skill 执行完成后调用，发布 INNER_WORLD_TICKED 事件。
 
         可从任意线程调用（Timer 线程或 asyncio 线程均可）。
@@ -120,6 +188,11 @@ class ANSAgent:
         T-148：在 tick 完成后，根据 tick_result 中的 proactive_voice_eligible 标志
         判断是否触发主动发声评估，打通 INNER_WORLD_TICKED → proactive_voice 联动链路。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="emit_inner_world_ticked",
+                event_type="INNER_WORLD_TICKED",
+            )
         payload = dict(tick_result or {})
         payload.setdefault("source", "inner_world_skill")
         # T-43：携带当前关系阶段，调度器可据此调整 tick 频率
@@ -147,11 +220,20 @@ class ANSAgent:
                 payload.get("source"),
             )
 
-    def emit_body_sense_updated(self, *, sense_result: dict[str, Any] | None = None) -> None:
+    def emit_body_sense_updated(
+        self,
+        *,
+        sense_result: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         """body_sense_skill 执行完成后调用，发布 BODY_SENSE_UPDATED 事件。
 
         可从任意线程调用（Timer 线程或 asyncio 线程均可）。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="emit_body_sense_updated",
+                event_type="BODY_SENSE_UPDATED",
+            )
         payload = dict(sense_result or {})
         payload.setdefault("source", "body_sense_skill")
         self.emit_from_thread("BODY_SENSE_UPDATED", payload)
@@ -163,7 +245,7 @@ class ANSAgent:
         user_id: str = "",
         source: str = "inner_world_skill",
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-53：发布 LONELINESS_SIGNAL 事件，供各族 Agent 感知孤独感。
 
         inner_world_skill 在检测到孤独感超过阈值时调用此方法，
@@ -175,6 +257,11 @@ class ANSAgent:
             source: 信号来源，默认 "inner_world_skill"。
             metadata: 附加元数据（可选）。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="emit_loneliness_signal",
+                event_type="LONELINESS_SIGNAL",
+            )
         clamped = max(0.0, min(1.0, float(loneliness)))
         payload: dict[str, Any] = {
             "loneliness": round(clamped, 4),
@@ -198,7 +285,7 @@ class ANSAgent:
         user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-63：发布 TASK_SUCCESS 事件，供 skill 完成任务时调用。
 
         触发 PainRewardAgent / LimbicAgent / SocialBrainAgent 等的联动响应：
@@ -213,6 +300,11 @@ class ANSAgent:
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="emit_task_success",
+                event_type="TASK_SUCCESS",
+            )
         clamped = max(0.0, min(1.0, float(intensity)))
         payload: dict[str, Any] = {
             "task_type": str(task_type or "general").strip() or "general",
@@ -237,7 +329,7 @@ class ANSAgent:
         user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-75：发布 HUMOR_LANDED 事件，供 skill 幽默成功时调用。
 
         触发 PainRewardAgent / LimbicAgent / EndocrineAgent 等的联动响应：
@@ -252,6 +344,11 @@ class ANSAgent:
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="emit_humor_landed",
+                event_type="HUMOR_LANDED",
+            )
         clamped = max(0.0, min(1.0, float(intensity)))
         payload: dict[str, Any] = {
             "humor_type": str(humor_type or "general").strip() or "general",
@@ -276,7 +373,7 @@ class ANSAgent:
         user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-84：发布 BOND_PROGRESS 事件，供 skill 触发关系进展时调用。
 
         触发 SocialBrainAgent / LimbicAgent / CortexAgent / PainRewardAgent 等的联动响应：
@@ -292,6 +389,11 @@ class ANSAgent:
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="emit_bond_progress",
+                event_type="BOND_PROGRESS",
+            )
         clamped = max(0.0, min(1.0, float(delta)))
         payload: dict[str, Any] = {
             "delta": round(clamped, 4),
@@ -316,7 +418,7 @@ class ANSAgent:
         user_id: str = "",
         session_id: str = "default",
         metadata: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-84：发布 BOND_REGRESS 事件，供 skill 触发关系退步时调用。
 
         触发 SocialBrainAgent / LimbicAgent / CortexAgent / PainRewardAgent 等的联动响应：
@@ -331,6 +433,11 @@ class ANSAgent:
             session_id: 会话 ID，默认 "default"。
             metadata: 附加元数据（可选）。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="emit_bond_regress",
+                event_type="BOND_REGRESS",
+            )
         clamped = max(0.0, min(1.0, float(delta)))
         payload: dict[str, Any] = {
             "delta": round(clamped, 4),
@@ -576,7 +683,7 @@ class ANSAgent:
         *,
         interrupt_count: int,
         source: str = "proprioception_agent",
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-247：高打断频率时调整 ANS 节律，降低主动发声倾向。
 
         由 ProprioceptionAgent 在 interrupt_count_5m >= 6 时调用，
@@ -587,6 +694,11 @@ class ANSAgent:
             interrupt_count: 5分钟内打断次数
             source: 调用来源标识
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="adjust_rhythm_for_high_interrupt",
+                event_type="INNER_WORLD_TICKED",
+            )
         import math  # noqa: PLC0415
         # 打断次数越多，恢复模式持续时间越长（但最多标记一次，由下次 glymphatic 事件重置）
         self._recovery_mode = True
@@ -618,7 +730,12 @@ class ANSAgent:
         except Exception:
             pass
 
-    def set_recovery_mode(self, enabled: bool, *, source: str = "external") -> None:
+    def set_recovery_mode(
+        self,
+        enabled: bool,
+        *,
+        source: str = "external",
+    ) -> dict[str, Any] | None:
         """T-330：公开方法，供外部族安全地设置 recovery_mode 标志。
 
         避免外部族（DefaultModeAgent/CircadianAgent 等）直接访问私有属性 _recovery_mode。
@@ -629,6 +746,11 @@ class ANSAgent:
             enabled: True=进入恢复模式，False=退出恢复模式
             source: 调用来源标识（用于日志追踪）
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="set_recovery_mode",
+                event_type="INNER_WORLD_TICKED",
+            )
         prev = self._recovery_mode
         self._recovery_mode = bool(enabled)
         if prev != self._recovery_mode:
@@ -683,6 +805,18 @@ class ANSAgent:
         Returns:
             dict: 包含 bond_stage/recovery_mode/proactive_multiplier 等关键字段。
         """
+        if self._legacy_affect_events_retired():
+            return {
+                "bond_stage": "retired",
+                "recovery_mode": False,
+                "recovery_mode_ts_ms": 0,
+                "proactive_multiplier": 0.0,
+                "loop_registered": getattr(self, "_loop", None) is not None,
+                "ts_ms": 0,
+                **self._retired_legacy_affect_result(
+                    operation="runtime_state_export",
+                ),
+            }
         from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
         # 根据 bond_stage 推算 proactive_multiplier
         _stage_multiplier = {
@@ -725,6 +859,11 @@ class ANSAgent:
         T-119：订阅 VOICE_PIPELINE_STARTED/ENDED，语音管线状态变化时更新内部状态。
         T-120：订阅 CHANNEL_MESSAGE_RECEIVED，消息到达时更新活跃度感知。
         """
+        if self._legacy_affect_events_retired():
+            # Host activity/mode services are injected directly.  Their
+            # global ANS callbacks cannot recreate a relationship or affect
+            # state machine beside canonical Life.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -737,13 +876,18 @@ class ANSAgent:
         except Exception as exc:
             logger.warning("ANSAgent 订阅注册失败（降级）: %s", exc)
 
-    async def _on_glymphatic_cycle(self, event: Any) -> None:
+    async def _on_glymphatic_cycle(self, event: Any) -> dict[str, Any] | None:
         """T-203：处理 GLYMPHATIC_CYCLE_COMPLETED 事件，感知恢复窗口并调整节律。
 
         恢复窗口期间：将 _recovery_mode 设为 True，后续 emit_inner_world_ticked 会自动
         降低 proactive_multiplier 至 0.35，减少主动发声频率。
         恢复窗口关闭时：将 _recovery_mode 设为 False，恢复正常节律。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="glymphatic_cycle",
+                event_type="GLYMPHATIC_CYCLE_COMPLETED",
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             executed = bool(payload.get("executed", False))
@@ -768,13 +912,18 @@ class ANSAgent:
         except Exception as exc:
             logger.debug("ANSAgent._on_glymphatic_cycle 异常: %s", exc)
 
-    async def _on_bond_stage_changed(self, event: Any) -> None:
+    async def _on_bond_stage_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_STAGE_CHANGED 事件：记录当前关系阶段。
 
         T-37：当 bond stage 发生跃迁时，更新 _bond_stage 字段。
         后续可在 emit_inner_world_ticked() 中将 bond_stage 带入 payload，
         供 NatsumeScheduler 根据关系亲密度动态调整 tick 间隔。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="bond_stage_changed",
+                event_type="BOND_STAGE_CHANGED",
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             to_stage = str(payload.get("to_stage") or "").strip().upper()
@@ -797,12 +946,17 @@ class ANSAgent:
         except Exception as exc:
             logger.warning("ANSAgent._on_bond_stage_changed 异常: %s", exc)
 
-    async def _on_voice_pipeline_started(self, event: Any) -> None:
+    async def _on_voice_pipeline_started(self, event: Any) -> dict[str, Any] | None:
         """T-119：处理 VOICE_PIPELINE_STARTED 事件：记录语音管线启动状态。
 
         edge_client VoiceAgent 在语音管线启动时通过 EdgeTribeBridge 上报，
         ANSAgent 感知后可用于调整后台节律（如暂停主动对话检查）。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="voice_pipeline_started",
+                event_type="VOICE_PIPELINE_STARTED",
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             request_id = str(payload.get("request_id") or "")
@@ -830,11 +984,16 @@ class ANSAgent:
         except Exception as exc:
             logger.warning("ANSAgent._on_voice_pipeline_started 异常: %s", exc)
 
-    async def _on_voice_pipeline_ended(self, event: Any) -> None:
+    async def _on_voice_pipeline_ended(self, event: Any) -> dict[str, Any] | None:
         """T-119：处理 VOICE_PIPELINE_ENDED 事件：记录语音管线结束状态。
 
         语音管线结束后清除活跃标记，恢复正常后台节律。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="voice_pipeline_ended",
+                event_type="VOICE_PIPELINE_ENDED",
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             request_id = str(payload.get("request_id") or "")
@@ -861,12 +1020,17 @@ class ANSAgent:
         except Exception as exc:
             logger.warning("ANSAgent._on_voice_pipeline_ended 异常: %s", exc)
 
-    async def _on_channel_message_received(self, event: Any) -> None:
+    async def _on_channel_message_received(self, event: Any) -> dict[str, Any] | None:
         """T-120：处理 CHANNEL_MESSAGE_RECEIVED 事件：更新活跃度感知。
 
         edge_client ChannelAgent 在消息路由成功时上报，ANSAgent 感知后
         更新最近消息时间戳，供 NatsumeScheduler 主动对话门控（idle_threshold）使用。
         """
+        if self._legacy_affect_events_retired():
+            return self._retired_legacy_affect_result(
+                operation="channel_message_received",
+                event_type="CHANNEL_MESSAGE_RECEIVED",
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             platform = str(payload.get("platform") or "")
