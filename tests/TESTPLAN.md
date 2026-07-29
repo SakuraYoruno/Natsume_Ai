@@ -154,8 +154,9 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   写入该 acceptance scope 内的 state dir，并等待独立 Obs projection 报告
   `security_immune + available + HEALTHY`；超时、不可读或 stale 一律使本次 receipt 失败并回收 stack。
 - 当前本地合同/脚本组合证据为 `68 passed in 42.55s`；`static_scan,doc_gate` 为
-  `passed`。这不是实栈 receipt：下一步必须在已提交 SHA 上重新启动隔离 Docker、Host、Obs 和
-  Monitor。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+  `passed`。隔离 Docker/Host/Obs/Monitor 的实栈 receipt、真实浏览器交互和一次受控 Host restart
+  已完成；行为性变更后仍须在新提交 SHA 上重封收据。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`，Gateway、远端
+  Edge、真实 provider、ASR/TTS/Avatar 仍为 `NOT_TESTED`，整体结论为 `ACCEPTANCE_PENDING_EXTERNAL`。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 

@@ -13,7 +13,7 @@
 - `test_dl07_full_stack_acceptance_runner.py` 验证 runner 只接收 loopback URL，必须读取真实 Host `/health`、`/ready`、Digital Life health、Obs health、Monitor HTML 与代理 metrics；Windows PID 探测是只读 `tasklist`，不会因验收检查终止进程。总收据还必须校验同一 commit、run、三条 listener 与三条 PID 的 `natsume.digital-life-monitor-ui-live.v1` Playwright 回执；单纯 HTML/metrics 不能把 Monitor 提升为 PASS。真实 Monitor Playwright 接受 Obs 对声明 partial read-model 的可解释 `DEGRADED`，但仍要求 health projection 为 `HEALTHY`、没有 missing/unavailable job；不允许把真实降级改写为 `OK`。
 - `test_dl07_monitor_ui_live_runner.py` 验证真实浏览器运行器仅向 Host/Obs 传递 operator session 的 SHA-256 绑定，回执只含摘要；非 loopback、非 HTTP 或 query-bearing endpoint 必须在启动前拒绝。全新 acceptance 根先通过 Host 的真实本地 security hunt 写入隔离 evidence store，再等待独立 Obs projection 为 `security_immune / HEALTHY`，不能用 fixture 让页面越过空视图。浏览器失败时运行器使用同一 explicit runtime root 定向停止本次 Host/Obs/Monitor，成功时才保留短时间运行中的 stack 以封存总收据。
 - `test_ne07_external_service_isolation.py` 与 `test_runtime_startup_script_composition.py` 验证 acceptance 的解析 Obs/Monitor port 会跨 detached child 和 teardown 保持一致，Compose explicit network name 也会传递至 cleanup；它们不能替代 Docker、Host、Obs、Monitor 的实栈运行。
-- 当前远程 CI 额度为 `NOT_RUN_ACCOUNT_QUOTA`。本波最终证据必须在同一已提交 SHA 的隔离 Docker/Host/Obs/Monitor 进程上重新生成；远端 Edge、Gateway、真实 provider、ASR、TTS 与 Avatar 未运行时，预期结论只能是 `ACCEPTANCE_PENDING_EXTERNAL`。
+- 当前远程 CI 额度为 `NOT_RUN_ACCOUNT_QUOTA`。隔离 Docker/Host/Obs/Monitor 的真实写入、重启、security projection、Nginx Playwright 与受控 Host restart 已完成并封存为忽略的、commit-bound 收据；后续任何行为性提交仍必须重新生成同一 SHA 的收据。远端 Edge、Gateway、真实 provider、ASR、TTS 与 Avatar 未运行时，当前结论只能是 `ACCEPTANCE_PENDING_EXTERNAL`。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
