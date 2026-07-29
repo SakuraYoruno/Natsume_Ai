@@ -57,8 +57,10 @@ OpenAI-compatible final-usage transport 验证该顺序，不代表已验证真�
 DL-06 还删除了历史 `emotion_update`、`bond_score_update`、`emotion_get`、`bond_score_get`、`emotion_query` 与 `bond_query` Skill：它们不再出现在生产 provider catalog、Tool executor、built-in registry、governed execution policy 或 Scheduler 新任务类型中，因此没有任意工具调用能够直接写旧情绪、Bond 队列或 VTS，也不能把 caller-shaped `emotion_snapshot`、`bond_score` 或关系阶段伪装成七海的感受。旧 `emotion_agent` 也已从 Supervisor allowlist、Graph handler、application composition、ReAct tool catalog 与 prompt catalog 物理退出；带有旧 delegate target 的兼容请求只会退回 canonical Life 支撑的自然聊天，绝不改派为另一套情绪分析器。用户问“你现在是什么心情”或“我们是什么关系”时，Thalamus 只会生成带 `canonical_self_affect` / `canonical_relationship_state` 绑定的自然 `chat` 语义种子；Surface 必须从冻结的 canonical Life plan 自然作答，不能展示数值、阶段或让请求参数覆盖人格和安全边界。这是 Host 路由与本地 TaskGraph fixture 的收口，不等于真实模型、情感体验、远端设备或服务栈已验收。
 
 历史 `needs_deep_emotion_analysis` 只曾触发已退役的 `emotion_agent`，目前会留下
-`LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED` 审计标记，而不是冒充已经进入新的 Fusion 深路径；真正的冲突、低置信和两候选
-处理仍是 DL-02 深路径未完成项。
+`LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED` 审计标记，而不是冒充由旧字段触发的新 Fusion 深路径。真正的 DL-02
+Fusion 仍会根据 canonical 观察、冲突、边界、修复和 distress 生成最多两个确定性候选；主候选被拒绝时只允许一次第二候选
+重试，接受后以 request-scoped command identity 固定，重启/重复请求只重开原 receipt。它仍不是 model-backed reappraisal
+或用户盲评证明。
 
 DL-06 的 lifecycle runtime snapshot 现把这一条兼容读取边界进一步收紧：实际 Host
 composition 强制要求 `LifeSnapshotReader`，即使 provider 缺失也只能形成 degraded canonical

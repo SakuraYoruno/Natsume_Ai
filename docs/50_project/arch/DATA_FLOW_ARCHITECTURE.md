@@ -598,8 +598,9 @@ production provider catalog、Tool executor、built-in registry/policy 和 Sched
 而非 `Skill DAG → legacy query`；唯一可用读取方向仍为 exact-scope 的 canonical Life projection。
 同一条流不再经过 `Supervisor → emotion_agent → compatibility emotion_context → recommended_emotion_tag`：
 旧 Agent 的 allowlist、handler、prompt 和 ReAct tool 均已删除；历史深度观察字段只留下
-`LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED` 审计标记，不能假称 canonical Fusion/Surface 深路径已经接线；legacy
-delegate target 只会降级为 canonical chat。
+`LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED` 审计标记，不能冒充触发 Fusion。真正的 canonical Fusion 深路径仍按观察/冲突/
+边界/修复/distress 生成最多两个候选，主候选被拒绝时只尝试第二候选一次，并以 stable appraisal command identity 在
+restart 时重开相同 receipt；legacy delegate target 只会降级为 canonical chat。
 
 DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由

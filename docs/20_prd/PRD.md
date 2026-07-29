@@ -290,8 +290,9 @@ canonical Life projection；用户对七海自身感受或关系意义的提问�
 第一人称措辞回答，不能以兼容 read API 保留隐藏写回入口。
 
 生产图不得登记 `emotion_agent` 或任何读取 compatibility `emotion_context` 后推荐七海 self-affect 的二次 Agent。
-深度、冲突或低置信用户观察的真正深路径必须接入 `AffectFusion → Appraisal → AffectiveTurnPlan`；历史
-`needs_deep_emotion_analysis` 尚未完成该接线时只能被显式抑制并留审计标记。显式旧 delegate target 必须以
+深度、冲突或低置信用户观察的真正深路径进入 `AffectFusion → Appraisal → AffectiveTurnPlan`；它至多比较两个
+确定性候选，主候选被拒绝时至多重试第二候选一次，接受结果以 request-scoped command identity 固定并可 exact replay。
+历史 `needs_deep_emotion_analysis` 不拥有这条接线权，只能被显式抑制并留审计标记。显式旧 delegate target 必须以
 canonical chat 降级或明确拒绝，不能改派到另一个 generic Agent。
 
 任何旧 Tribe EventBus、Broca 或 MotorCortex convenience callback 均不得将文本直接提交给 TTS/Avatar；这类调用必须

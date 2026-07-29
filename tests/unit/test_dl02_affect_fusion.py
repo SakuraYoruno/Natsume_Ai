@@ -394,6 +394,8 @@ def test_rich_candidate_evidence_cannot_overflow_the_bounded_episode_contract(
         service=command_service,
         scope=scope,
         request_id="request-bounded-evidence",
+        command_id="affect_bounded_evidence",
+        appraisal_id="appraisal_bounded_evidence",
         candidate=candidate,
         observations=observations,
         created_at_ms=NOW,
@@ -557,6 +559,90 @@ def test_conflicting_modalities_preserve_conflict_and_choose_uncertainty(tmp_pat
         "CARE",
         "CAUTION",
     }
+
+
+def test_second_appraisal_candidate_is_single_retry_and_exact_replay_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fusion, reader, command_service = _runtime(tmp_path)
+    request = _request(message="你真恶心，我真的很难受。")
+    original_submit = fusion._submit_appraisal
+    attempted_kinds: list[str] = []
+
+    def reject_only_primary(**kwargs):  # noqa: ANN003
+        attempted_kinds.append(str(kwargs["candidate"].kind))
+        if len(attempted_kinds) == 1:
+            raise ValueError("synthetic primary rejection")
+        return original_submit(**kwargs)
+
+    monkeypatch.setattr(fusion, "_submit_appraisal", reject_only_primary)
+    first = fusion.resolve_request(
+        request_body=request,
+        request_id="request-appraisal-second-candidate",
+    )
+    event_count = len(reader.list_events(first.scope.aggregate_id, limit=20))
+
+    assert first.path == "DEEP"
+    assert first.candidate_count == 2
+    assert first.retry_count == 1
+    assert attempted_kinds == ["directed_relational_hurt", "user_distress"]
+    assert first.appraisal_id is not None
+    assert "APPRAISAL_CANDIDATE_1_REJECTED" in first.reason_codes
+    assert "APPRAISAL_SECOND_CANDIDATE_RETRY" in first.reason_codes
+
+    restarted = AffectFusionService(
+        command_service_provider=lambda: command_service,
+        snapshot_reader_provider=lambda: reader,
+        clock_ms=lambda: NOW,
+    )
+
+    def must_not_select_again(**_kwargs):  # noqa: ANN003
+        raise AssertionError("accepted appraisal selection must be replayed")
+
+    monkeypatch.setattr(restarted, "_submit_appraisal", must_not_select_again)
+    replayed = restarted.resolve_request(
+        request_body=request,
+        request_id="request-appraisal-second-candidate",
+    )
+
+    assert replayed.path == "DEEP"
+    assert replayed.retry_count == 0
+    assert replayed.appraisal_id == first.appraisal_id
+    assert replayed.receipts[-1].command_id == first.receipts[-1].command_id
+    assert replayed.receipts[-1].replayed is True
+    assert "APPRAISAL_SELECTION_REPLAYED" in replayed.reason_codes
+    assert len(reader.list_events(first.scope.aggregate_id, limit=20)) == event_count
+
+
+def test_two_rejected_appraisal_candidates_fall_back_without_unbounded_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request = _request(message="你真恶心，我真的很难受。")
+    attempted_kinds: list[str] = []
+
+    def reject_every_candidate(**kwargs):  # noqa: ANN003
+        attempted_kinds.append(str(kwargs["candidate"].kind))
+        raise ValueError("synthetic candidate rejection")
+
+    monkeypatch.setattr(fusion, "_submit_appraisal", reject_every_candidate)
+    result = fusion.resolve_request(
+        request_body=request,
+        request_id="request-all-appraisal-candidates-rejected",
+    )
+    events = reader.list_events(result.scope.aggregate_id, limit=20)
+
+    assert result.path == "FAST_FALLBACK"
+    assert result.candidate_count == 2
+    assert result.retry_count == 1
+    assert result.appraisal_id is None
+    assert attempted_kinds == ["directed_relational_hurt", "user_distress"]
+    assert "APPRAISAL_CANDIDATE_1_REJECTED" in result.reason_codes
+    assert "APPRAISAL_CANDIDATE_2_REJECTED" in result.reason_codes
+    assert "APPRAISAL_CANDIDATES_REJECTED" in result.reason_codes
+    assert not any(event.event_type == "affective_event_appraised" for event in events)
 
 
 def test_sensor_ttls_are_bounded_and_raw_sensor_material_is_not_journaled(

@@ -55,7 +55,9 @@
   3 秒、声学 5 秒、文本/自述 30 秒，raw audio/image/text/model-chain 必须在
   入账前失败关闭或省略。
 - T-DL02-03：冲突 observation 必须保留 conflict ref；深路径最多两个 appraisal
-  候选、重试上限一次，最终 self-affect 只能由选定的 appraisal command 形成。
+  候选、重试上限一次，最终 self-affect 只能由选定的 appraisal command 形成。主候选失败而第二候选接受后，
+  request-scoped appraisal command identity 必须在 duplicate/restart 时重开第二候选 receipt，禁止重新尝试主候选或追加事件；
+  升级前 candidate-shaped command 也只能只读匹配相同 opaque observation refs 后重开。
 - T-DL02-04：`workspace_id`、relationship subject 与 `session_id` 必须参与
   scope；同一 person 在不同 workspace 不能共享 canonical affect aggregate。
 - T-DL02-05：生产 Input composition 注入 fusion service 后，不得推进

@@ -309,8 +309,9 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
 - 旧 `emotion_agent` 也从 Agent allowlist、Supervisor/Graph handler、Host application composition、ReAct tool
   catalog 与 prompt catalog 物理退役；它过去会读取 compatibility `emotion_context` 并产出“建议七海情绪”，因此不能
   作为深路径保留。`needs_deep_emotion_analysis` 曾只触发该旧 Agent，当前记录为
-  `LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED`；真正 Fusion 深路径尚待 DL-02 后续切片接线。旧 delegate target 降级为 canonical
-  chat，而不是 fallback 到 IntentAgent。
+  `LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED`；它不是 Fusion 深路径的 trigger。真正 Fusion 深路径按 canonical
+  observation/conflict/boundary/repair/distress 生成至多两个候选，并以一次第二候选重试和 request-scoped receipt 保证
+  restart exact replay。旧 delegate target 降级为 canonical chat，而不是 fallback 到 IntentAgent。
 - canonical Limbic 的 `handle_signal()` 与 `_touch_state()` 也不再拥有 production writer 权：任何旧
   conversation/session/body/Bond signal 都不得写 `TribeStateRegistry`、重发 EventBus 或以 caller VAD 改写
   self-affect。Surface/AgentRuntime session-end hook 必须在解析 VAD 或 default Bond identity 前跳过；唯一允许的
