@@ -668,7 +668,7 @@ AffectFusion internal envelope
   → scope/schema/self-id validation
   → CanonicalRelationshipProjection
   → Prompt Context + Interaction Facts
-  → Surface relationship_state / affect packet
+  → Surface relationship_state / canonical-aware affect-control gate
 ```
 
 validation 同时绑定 `workspace_id + relationship_subject_id + session_id`，并要求 envelope、relationship turn
@@ -676,6 +676,9 @@ context 与 `RelationshipStateV2` 三层 schema 一致。成功时 legacy prompt
 的非浪漫表达纹理；旧 Bond score/stage、consent 或高 trust 不能提升亲密、排他、依赖或主动权限。失败时生成
 `CANONICAL_RELATIONSHIP_REJECTED` 的安全朋友投影，而非读回 Bond fallback。该流与相邻普通 Chat/Surface 回归
 目前为 `179 passed in 63.85s`，不包含真实 provider、Edge、Monitor 或 DL-07 服务栈。
+最后一跳不会重新相信 compatibility payload：`surface_affect_control` 若看到 canonical/rejected authority，就忽略
+旧显式 lover distance、closeness、恋人 clue 和 lover task，仅保留 `familiar` 或因 rupture/rejected 而收紧的
+`guarded`。该最终 Gate 定向回归为 `82 passed in 21.18s`。
 
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal

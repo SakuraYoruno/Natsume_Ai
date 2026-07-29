@@ -283,6 +283,11 @@ subject、session 后，才读取 canonical `RelationshipStateV2`。该投影固
 packet 取得同一结果，因此文字的关系距离仍为 `familiar`。本地受影响集为 `179 passed in 63.85s`；它不证明
 其余 compatibility reader 已清零，也不证明真实 provider、远端 Edge 或 DL-07。
 
+**Surface 最终 Gate 修订：** `surface_affect_control` 现在也把 relationship `source_authority` 作为不可降级
+约束。canonical/rejected 投影到达最终文本控制前，旧 `relationship_distance=lover`、stage、closeness、memory
+clue 以及 lover task 都没有再次升温的机会；只有 rupture/rejected 会进一步收紧为 `guarded`。该小切片为
+`82 passed in 21.18s`，不替代真实语音、Avatar 或服务栈验收。
+
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。
 任何遗漏 Life authority 的 Host request 都稳定拒绝为 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不再以

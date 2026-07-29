@@ -97,7 +97,12 @@ def test_canonical_relationship_projection_cannot_become_romance_from_legacy_bon
     )
 
     relationship = resolve_relationship_state(
-        bond_summary={"stage": "SOULMATE", "score": 1.0},
+        bond_summary={
+            "stage": "SOULMATE",
+            "score": 1.0,
+            "relationship_distance": "lover",
+            "closeness": 0.99,
+        },
         social_brain_state={"bond_stage": "SOULMATE"},
         canonical_relationship=projection,
         canonical_context_claimed=canonical_relationship_context_claimed(context),
@@ -146,7 +151,12 @@ def test_mismatched_canonical_scope_fails_closed_without_legacy_bond_fallback() 
         expected_session_id="session-dl06",
     )
     relationship = resolve_relationship_state(
-        bond_summary={"stage": "SOULMATE", "score": 1.0},
+        bond_summary={
+            "stage": "SOULMATE",
+            "score": 1.0,
+            "relationship_distance": "lover",
+            "closeness": 0.99,
+        },
         canonical_relationship=projection,
         canonical_context_claimed=canonical_relationship_context_claimed(context),
     )
@@ -220,7 +230,12 @@ def test_surface_packet_keeps_canonical_relationship_at_familiar_distance() -> N
         workspace_id="workspace-dl06",
         session_id="session-dl06",
         emotion_context=context,
-        bond_summary={"stage": "SOULMATE", "score": 1.0},
+        bond_summary={
+            "stage": "SOULMATE",
+            "score": 1.0,
+            "relationship_distance": "lover",
+            "closeness": 0.99,
+        },
     )
 
     assert packet["relationship_state"]["source_authority"] == "CANONICAL_RELATIONSHIP_LIFE"

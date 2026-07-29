@@ -120,6 +120,9 @@ legacy Bond 作为补偿；而是产生 `CANONICAL_RELATIONSHIP_REJECTED` 的安
 `FRIEND / stepsibling` 的 prompt-compatible texture，并且显式禁止由旧 `SOULMATE`、分数、trust、attunement
 或 consent 推导恋人、排他、依赖和主动许可。此处的 rupture/repair 只收紧表达、不会伪造修复成功。当前本地
 验证为 `179 passed in 63.85s`；该边界尚未替代余下 compatibility readers 或真实服务验收。
+`surface_affect_control` 是该链的最后一个 production Gate：它依据 projection 的 `source_authority` 忽略旧
+`relationship_distance=lover`、closeness、恋人 clue 和 lover task，canonical 状态只能保持 `familiar`，rupture 或
+rejected hand-off 才可收紧为 `guarded`。其定向验证为 `82 passed in 21.18s`。
 
 `DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE` 进一步把该边界前移到 production
 composition root：`build_production_host_application_ports()` 不再构造 mutable

@@ -482,6 +482,10 @@ Monitor/Review、真实服务与远端 Edge 仍未验收。
 context 若损坏、越 workspace/user/session 或缺字段，会 fail-closed 为安全朋友投影，绝不回退到旧 Bond
 分数。该 prompt/context/surface 回归连同相邻流式与表达链为 `179 passed in 63.85s`；这是本地代码证据，
 不代表余下 compatibility reader、Monitor/Review、真实模型、远端 Edge 或 DL-07 已验收。
+最终 Surface 情感控制 Gate 也读取同一 `source_authority`：即使旧 payload 仍夹带 `relationship_distance=lover`、
+`SOULMATE`、高 closeness、恋人记忆线索或 caller 选中的 lover task，也只能保持 canonical `familiar`（裂痕或
+被拒绝 hand-off 为 `guarded`）。该 Gate 的定向单测为 `82 passed in 21.18s`；它仍只是本地表达边界，不代表
+关系体验、真实 TTS/Avatar 或 DL-07 完成。
 
 内部旁车到 Governance owner 的既有批次都只作提交绑定历史。当前 Authority owner 集合证明每个 Host root 的 canonical SQLite connection、Memory stores、ModelAttempt 与 CapabilityBroker runtime identity 均隔离，Prompt/Route catalog 也不再共享可变实例；关闭失败会保留未完成资源并阻断新 epoch。生产 locator facade/Container 已物理清零，测试桥不属于可发布产品对象图；Chroma 与 Neo4j 仍使用配置级共享 namespace，所以不能外推为 tenant isolation、资源崩溃恢复、事务化 Chat、波次集成或 production canary 已完成。当前 fresh 完整架构静态 Gate 1～14 已全部 `PASS`、`failed_gates=[]`：Task Runtime feature-canary 合同和 Host lifecycle ports 已迁入中立 `host_brain/contracts/`，Persistence 与 Composition 分别直接依赖 canonical contract；旧导入路径只保留同一对象重导出，因此 application/persistence 与 app/composition 两个 SCC 均已消除。Gate 3 继续由 Research shadow ledger 的 1271/512/108 行职责拆分保持通过，没有扩大白名单。该结论只表示静态分层收口，不代表 Universal Runtime 七路线、NE-01 或完整架构项目完成。
 

@@ -134,6 +134,10 @@
   `CANONICAL_RELATIONSHIP_REJECTED` fail-closed，绝不回退旧 Bond。最终普通 Chat、canonical fusion、
   AffectiveTurn、表达协议、Surface/adapter 与受影响历史回归集合为 `179 passed in 63.85s`，8 条既有
   Python deprecation warnings；未运行 Docker、真实 provider、远端 Edge、Monitor 或 DL-07。
+- `test_surface_affect_control.py` 补充 final presentation Gate：canonical relationship authority 到达 Surface 后，
+  即使兼容输入携带 `SOULMATE`、`relationship_distance=lover`、`closeness=0.99`、恋人 clue 或 lover task，也只能
+  输出 `familiar`；rejected canonical 则保持 `guarded`。与普通 Chat projection、Surface packet/runtime 回归合计
+  `82 passed in 21.18s`；未启动 Docker、真实 provider、远端 Edge 或物理 Voice/Avatar。
 
 ## NE-07 隔离外部服务栈
 

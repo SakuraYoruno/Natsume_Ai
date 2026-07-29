@@ -42,6 +42,8 @@ _PRESENCE_REPAIR_TASKS = frozenset({"repair_presence", "presence_repair"})
 _AFFECTION_TASKS = frozenset({"affection", "ambiguous_affection", "receive_affection_lightly"})
 _LOVER_TASKS = frozenset({"lover_affection", "lover_presence", "return_affection_concretely"})
 _PROCESS_WORDS = ("emotion_tag", "mood_state", "vad", "情绪值", "关系阶段", "bond", "affect")
+_CANONICAL_RELATIONSHIP_AUTHORITY = "CANONICAL_RELATIONSHIP_LIFE"
+_REJECTED_CANONICAL_RELATIONSHIP_AUTHORITY = "CANONICAL_RELATIONSHIP_REJECTED"
 
 
 @dataclass(frozen=True)
@@ -140,6 +142,7 @@ def build_surface_affect_control_packet(
             "emotion_tag": tag or "NEUTRAL",
             "task_mode": task,
             "relationship_distance": relationship_distance,
+            "relationship_authority": _relationship_authority(bond),
             "clue_count": len(clues),
         },
     )
@@ -342,6 +345,16 @@ def _emotional_tone(
 
 
 def _relationship_distance_from_bond(bond: Mapping[str, Any], clues: Sequence[str]) -> str:
+    authority = _relationship_authority(bond)
+    if authority == _REJECTED_CANONICAL_RELATIONSHIP_AUTHORITY:
+        return "guarded"
+    if authority == _CANONICAL_RELATIONSHIP_AUTHORITY:
+        # A canonical prompt projection deliberately contains no romantic
+        # entitlement. Do not let an old explicit distance, score, memory
+        # clue, or caller-selected task raise it again at the final Surface
+        # gate.
+        conflict_rift = _coerce_float(bond.get("conflict_rift"), default=0.0)
+        return "guarded" if conflict_rift >= 0.55 else "familiar"
     explicit_distance = _clean_text(bond.get("relationship_distance") or bond.get("distance")).lower()
     stage = _normalize_relationship_stage(bond.get("bond_stage") or bond.get("stage"))
     phase = _clean_text(bond.get("relationship_phase")).lower()
@@ -377,6 +390,11 @@ def _relationship_distance_for_task(
     bond: Mapping[str, Any],
     clues: Sequence[str],
 ) -> str:
+    if _relationship_authority(bond) in {
+        _CANONICAL_RELATIONSHIP_AUTHORITY,
+        _REJECTED_CANONICAL_RELATIONSHIP_AUTHORITY,
+    }:
+        return relationship_distance
     value = _clean_text(relationship_distance).lower()
     joined = "\n".join(clues)
     non_romantic = any(token in joined for token in ("不升级亲密", "别升级亲密", "非恋人", "not_romantic", "not_intimate"))
@@ -391,6 +409,10 @@ def _relationship_distance_for_task(
     if task in _AFFECTION_TASKS and value in {"familiar", "close", "close_but_not_romantic", ""}:
         return "ambiguous"
     return relationship_distance
+
+
+def _relationship_authority(bond: Mapping[str, Any]) -> str:
+    return _clean_text(bond.get("source_authority")).upper()
 
 
 def _normalize_relationship_stage(value: Any) -> str:

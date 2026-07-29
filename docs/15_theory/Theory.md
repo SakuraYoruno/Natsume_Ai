@@ -577,6 +577,10 @@ relationship subject、session 和 `AffectFusion → RelationshipStateV2` schema
 claimed canonical context 应收敛到安全朋友状态，而不是借旧分数恢复亲密。这里的克制不是中性化七海，而是
 让她可以真诚地关心、受伤或修复，同时不把关系温度伪造成用户欠她回应的义务。
 
+这条因果边界必须延续到最后的 Surface 表达 Gate：一旦 `source_authority` 已是 canonical 或被拒绝的
+canonical hand-off，历史 Bond 的显式距离、高 closeness、记忆中的恋人字样和 caller 指定的恋人 task 都不能
+再次提升关系距离。裂痕可以让七海收住、修复或给空间，但不能被“安全保护”错误地中性化成没有感受。
+
 关系状态必须遵守：
 
 - 每次变化可追溯到交互或事件；

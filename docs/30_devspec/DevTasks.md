@@ -132,6 +132,11 @@ workspace、relationship subject、session 和 `v1/v1/v2` schema 共同校验的
 fail-closed 为 `CANONICAL_RELATIONSHIP_REJECTED`，不回退 legacy Bond。相邻受影响集为 `179 passed in 63.85s`；
 这只是本地 prompt reader 切流，DL-06、真实 provider/Edge 和 DL-07 均未完成。
 
+同一切片继续收口 `DL-06_SURFACE_AFFECT_CONTROL_CANONICAL_AUTHORITY`：最终表达 Gate 识别
+`CANONICAL_RELATIONSHIP_LIFE` 与 `CANONICAL_RELATIONSHIP_REJECTED`，不让旧显式 `relationship_distance`、高
+closeness、恋人 clue 或 caller-selected lover task 抬升 Surface 距离；有效 canonical 维持 `familiar`，裂痕或
+被拒绝 hand-off 维持 `guarded`。该 Gate 定向集合为 `82 passed in 21.18s`，仍非完整服务验收。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

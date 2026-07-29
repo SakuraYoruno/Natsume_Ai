@@ -77,6 +77,9 @@ proactive 忽略该标记，canonical Limbic/Prefrontal 不会解析它；user p
 推导恋人、排他、依赖或主动权限；修复与裂痕只会收紧表达。claimed canonical hand-off 损坏或越界时走
 `CANONICAL_RELATIONSHIP_REJECTED` 的安全朋友投影，不回退旧 Bond。普通 Chat/Surface 相邻本地集合为
 `179 passed in 63.85s`，仍不代表其它 reader、Monitor/Review、真实 provider、远端 Edge 或 DL-07 完成。
+Surface 的最终 affect-control Gate 继续消费 projection `source_authority`，忽略旧 `lover` distance、closeness、
+恋人 clue 和 lover task 的二次升级；canonical 只保留 `familiar`，rupture/rejected 才收紧为 `guarded`。该定向
+集合为 `82 passed in 21.18s`，不改变上述未验收边界。
 
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
