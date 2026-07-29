@@ -34,8 +34,39 @@ class SomaticAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_somatic_writes_retired(self) -> bool:
+        """Whether canonical Life owns any embodied self-affect consequence.
+
+        The legacy agent combined raw edge/body events, loneliness and Avatar
+        status in one process-global snapshot, then drove several affect
+        organs.  That has neither an immutable Life command nor the required
+        relationship/task scope, so it cannot remain a production writer.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_somatic_result(
+        *,
+        operation: str,
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_SOMATIC_GLOBAL_BODY_WRITE_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+            "projection": "UNAVAILABLE",
+        }
+
     def get_somatic_state(self) -> dict[str, Any]:
         """返回当前躯体感知状态快照。"""
+        if self._legacy_somatic_writes_retired():
+            return {}
         try:
             snap = self.state_registry.get_state("somatic_agent") or {}
             return dict(snap.get("state") or {})
@@ -52,6 +83,11 @@ class SomaticAgent:
         - LONELINESS_SIGNAL：孤独感信号时记录躯体孤独感状态
         - SOMATIC_STATE_UPDATED：接收 edge_client SomaticAgent 上报的状态快照（T-165）
         """
+        if self._legacy_somatic_writes_retired():
+            # Raw edge/body messages cannot create a self-affect or Avatar
+            # authority through a global callback.  A future scoped protocol
+            # must enter canonical Life/Expression delivery explicitly.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -65,12 +101,16 @@ class SomaticAgent:
                 "SomaticAgent 订阅注册失败（降级）: %s", exc
             )
 
-    async def _on_body_sense_updated(self, event: Any) -> None:
+    async def _on_body_sense_updated(self, event: Any) -> dict[str, Any] | None:
         """处理 BODY_SENSE_UPDATED 事件：将躯体感知数据写入 somatic_agent 快照。
 
         T-109：记录最近一次躯体感知信号的各项指标，
         Phase 6 接入 edge_client 后将携带真实传感器数据。
         """
+        if self._legacy_somatic_writes_retired():
+            return self._retired_legacy_somatic_result(
+                operation="body_sense_updated",
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             ts_ms = int(getattr(event, "ts_ms", 0) or 0)
@@ -198,12 +238,18 @@ class SomaticAgent:
         except Exception:
             pass
 
-    async def _on_loneliness_signal(self, event: Any) -> None:
+    async def _on_loneliness_signal(self, event: Any) -> dict[str, Any] | None:
         """处理 LONELINESS_SIGNAL 事件：记录躯体孤独感状态。
 
         T-109：孤独感信号到达时，将孤独感强度写入 somatic_agent 快照，
         供躯体反馈系统（Phase 6）参考（如触觉反馈、体温调节等）。
         """
+        if self._legacy_somatic_writes_retired():
+            # Relationship loneliness is already represented by the scoped
+            # Life relationship state; never cache it as a global body need.
+            return self._retired_legacy_somatic_result(
+                operation="loneliness_signal",
+            )
         try:
             payload = dict(getattr(event, 'payload', None) or {})
             loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
@@ -236,13 +282,17 @@ class SomaticAgent:
 
     # ── T-165：接收 edge_client 上报的躯体状态快照 ────────────────────────────
 
-    async def _on_somatic_state_updated(self, event: Any) -> None:
+    async def _on_somatic_state_updated(self, event: Any) -> dict[str, Any] | None:
         """处理 SOMATIC_STATE_UPDATED 事件：接收 edge_client SomaticAgent 上报的状态快照。
 
         T-165：edge_client SomaticAgent.publish_somatic_state() 发布此事件，
         host_brain SomaticAgent 接收后将 VTS 连接状态、当前表情等写入快照，
         供 CortexAgent.collect_tribe_context() 读取。
         """
+        if self._legacy_somatic_writes_retired():
+            return self._retired_legacy_somatic_result(
+                operation="somatic_state_updated",
+            )
         try:
             payload = dict(getattr(event, 'payload', None) or {})
             ts_ms = int(getattr(event, 'ts_ms', 0) or 0)
@@ -282,6 +332,10 @@ class SomaticAgent:
         Returns:
             躯体感受描述字符串，或 None（未触发/失败）。
         """
+        if self._legacy_somatic_writes_retired():
+            # An external capture or old body cache cannot authorize a second
+            # model to narrate what Natsume feels.
+            return None
         _significant = (
             float(somatic_pressure or 0.0) > 0.4
             or (float(face_confidence or 0.0) > 0.5 and str(user_expression or "NEUTRAL").upper() != "NEUTRAL")
@@ -352,6 +406,26 @@ class SomaticAgent:
                 "last_edge_somatic_report_ts_ms": int,
             }
         """
+        if self._legacy_somatic_writes_retired():
+            return {
+                "vts_connected": False,
+                "current_expression": None,
+                "last_emotion_tag": None,
+                "last_intensity": None,
+                "motion_level": 0.0,
+                "fatigue_level": 0.0,
+                "last_loneliness_level": 0.0,
+                "somatic_comfort_needed": False,
+                "heart_rate": None,
+                "skin_conductance": None,
+                "body_temp": None,
+                "edge_somatic_error": None,
+                "last_body_sense_ts_ms": 0,
+                "last_edge_somatic_report_ts_ms": 0,
+                **self._retired_legacy_somatic_result(
+                    operation="runtime_state_export",
+                ),
+            }
         try:
             state = self.get_somatic_state()
             return {

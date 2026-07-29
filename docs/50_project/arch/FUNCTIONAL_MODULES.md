@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.46
+版本：v2.47
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -338,6 +338,11 @@ phase boundary 翻译为旧 organ 情绪副作用；`export_runtime_state()` 只
 调用旧 organ 或生成第二个叙事模型；它在 canonical 模式返回 `UNAVAILABLE` compatibility projection，并拒绝
 external stress/relief/body-budget tick。二者不能再成为七海 self-affect/Need 的 writer；将来需要真实身体输入时，
 必须通过 scoped Life command，而不是恢复旧 cache。该状态仍为 `PARTIAL`，不等同真实体验或 DL-07。
+
+`SomaticAgent` 也不再保存另一份 global body/Avatar/孤独状态：canonical ports 下其三类 EventBus callback、registry
+写入、旧 organ fan-out 和 somatic narrative 均先退役，`export_runtime_state()` 只给无内容的 `UNAVAILABLE`
+compatibility 形状。这个模块不再拥有 Need/self-affect authority；真实设备连接只能由 Expression delivery receipt
+表达，真实身体输入仍需 scoped Life command。远端 Edge 未启动，因此本地合同不代表 physical receipt。
 
 `lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
 `LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，

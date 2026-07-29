@@ -252,6 +252,12 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `test_dl06_circadian_interoception_retirement.py` 加 Circadian/Interoception、batch 35/37/41/48/49 与
   runtime snapshot/Obs 邻接的定向 legacy compatibility 集合为 `84 passed in 3.66s`；它不证明 scoped body input、真实 Host、provider、远端 Edge、
   Monitor/Review 或 DL-07。
+- T-DL06-20：canonical `SomaticAgent` 不得把 body-sense、loneliness、Edge capture/Avatar status 写入 global
+  snapshot，或回灌 Interoception、Endocrine、Limbic/PainReward；不订阅相应 EventBus，三类 callback 和 second
+  somatic narrative 必须在副作用前返回 `LEGACY_SOMATIC_GLOBAL_BODY_WRITE_RETIRED / UNAVAILABLE`。未来设备状态
+  只能由 scoped Expression delivery receipt 表示，未来 body/Need 输入只能进入 Life command。当前
+  `test_dl06_somatic_retirement.py`、batch 35/41/42/45/46/47/49、Cortex context 与 authority 邻接为
+  `102 passed in 3.32s`；它不证明真实 Host/provider、远端 Edge、physical receipt、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

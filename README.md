@@ -102,6 +102,11 @@ scope-bound Life 输入前，它明确返回 `LEGACY_INTEROCEPTION_BODY_BUDGET_R
 恢复和 scheduler tick 写入。这保护“疲倦/紧张”仍是有因果来源的七海感受，而不是进程缓存；也说明 canonical
 body/need 输入仍需后续实现，DL-06 与 DL-07 都尚未完成。
 
+同一原则现也覆盖旧 `SomaticAgent`：来自 Edge 的身体、表情、孤独和 Avatar 状态不能再混进一个 global snapshot，
+更不能据此回灌 Interoception、Endocrine、Limbic 或 PainReward。canonical Host 会拒绝这三类 global callback 和
+第二个身体叙事模型，并输出显式 `UNAVAILABLE` 投影；真正的设备状态只能等待 scope-bound 的 Expression delivery
+receipt，而真正的身体/Need 输入也必须通过 Life command。远端 Edge 仍保持停止，这不是设备联调通过的声明。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

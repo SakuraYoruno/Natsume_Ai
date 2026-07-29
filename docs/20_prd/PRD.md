@@ -3,7 +3,7 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.5
+版本：v4.6
 日期：2026-07-28
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
@@ -231,6 +231,11 @@ Input bridge 重新进入用户观察，但不得直接写 Bond、七海 self-af
 若 canonical Life 尚未收到可验证的输入，产品必须明确显示/处理为不可用，而不是用 `NEUTRAL`、默认能量或
 上一次会话的数值补齐。任何未来的身体输入都必须以同一 Life command/journal、可重放来源和隐私最小化摘要
 进入，不能重启旧 `InteroceptionAgent` 写 authority。
+
+同样，Edge 的表情、连接、身体传感或用户孤独相关事件不得被归并为 process-global `SomaticAgent` 状态后再解释为
+七海自身感受。设备回执只能证明特定 expression delivery 的技术结果，不能证明她的情绪；任何可影响 Need、
+Regulation 或 self-affect 的身体输入都需要 scoped、可重放的 Life 证据。远端设备不可用时必须显示为不可用，
+不能从旧 Avatar/Body snapshot 恢复。
 
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结

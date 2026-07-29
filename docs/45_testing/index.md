@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.54
+版本：v2.55
 维护日期：2026-07-28
 状态：当前证据
 
@@ -144,6 +144,12 @@
   `test_circadian_agent.py`、`test_interoception_agent.py` 与 batch 35/37/41/48/49 保留 isolated legacy
   compatibility 回归；加上 runtime snapshot/Obs 邻接后当前定向集合为 `84 passed in 3.66s`；它不证明 scoped body input、真实 Host、provider、
   远端 Edge、Monitor/Review 或 DL-07。
+
+- `test_dl06_somatic_retirement.py` 验证 canonical `SomaticAgent` 不订阅 body-sense/loneliness/edge-somatic
+  EventBus，不写 global body/Avatar snapshot，也不调用 Interoception、Endocrine、Limbic 或 PainReward；三类
+  callback 和 somatic narrative 都返回 explicit retirement/`UNAVAILABLE`。batch 35/41/42/45/46/47/49 与 Cortex
+  context/authority 邻接保留 legacy compatibility 覆盖。当前定向集合为 `102 passed in 3.32s`；它不证明 scoped
+  body input、真实 Host/provider、远端 Edge、physical receipt、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

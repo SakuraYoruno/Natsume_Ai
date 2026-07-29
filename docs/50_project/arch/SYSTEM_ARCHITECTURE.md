@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.37
+版本：v2.38
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -174,6 +174,12 @@ PainReward、Interoception、ANS 或 DefaultMode。`InteroceptionAgent` 的旧 g
 所有 external stress、relief 与 scheduler tick 都显式退役为 `LEGACY_INTEROCEPTION_BODY_BUDGET_RETIRED`。没有
 scope-bound Life command 时其 projection 为 `UNAVAILABLE`，而不是伪造 `NEUTRAL` self-affect。真正的 body/need
 输入仍是后续工作；本收口不代表 DL-06、真实 Host 或 DL-07 服务栈通过。
+
+`SomaticAgent` 的另一份 global body/Avatar state 也在 canonical Host 退出：它不订阅 body-sense、loneliness 或
+edge somatic EventBus，不写 somatic registry，不向 Interoception、Endocrine、Limbic/PainReward 回灌，也不以
+capture/cache 调用第二个 narrative model。读取只给 `UNAVAILABLE` compatibility projection；未来设备状态必须以
+scoped `ExpressionPlan` delivery receipt 表示，未来 body/Need input 必须进入 Life command。当前远端 Edge 未启动，
+不得把退役旧 callback 说成设备验收通过。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把
