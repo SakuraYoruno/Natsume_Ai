@@ -134,6 +134,13 @@ Limbic/Interoception/Endocrine/PainReward、`IMMUNE_BLOCK` 情感扇出或 Bond-
 安全计数不是 self-affect，安全 gate 也不拥有关系或人格写权；若需要表达边界，由 Life Appraisal/Regulation 消费
 有 scope 的事实而非直接调用旧 organ。
 
+**Scoped Affective Turn Clock** 位于
+[`digital_life/affect_fusion.py`](../../../host_brain/digital_life/affect_fusion.py) 与
+[`digital_life/domain_reducer.py`](../../../host_brain/digital_life/domain_reducer.py)。每个真实 ingress 先写
+`affective_time_advanced`，只用 relationship subject 完成首次 canonical binding；随后 observation、Appraisal 和
+ExpressionPlan 继续使用同一 scope。它是 replay-safe 的 Life command，不是 global ticker，也不拥有用户情绪、
+旧 body cache、设备状态或跨 session 写权。
+
 同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
 `handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；
 [`persona/session_hooks.py`](../../../host_brain/persona/session_hooks.py) 会在推导用户 VAD 或 default Bond id 前跳过

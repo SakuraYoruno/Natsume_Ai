@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.50
+版本：v0.51
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -293,6 +293,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   放宽安全阈值；安全扫描不能成为 self-affect、relationship 或 persona authority。当前
   `test_dl06_immune_affect_fanout_retirement.py` 加 Immune/batch/embodiment 邻接为 `84 passed in 3.03s`；它不证明
   scoped boundary Appraisal、真实 Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
+- T-DL01-07：每次真实 affect ingress 必须先提交有 scope 的 `affective_time_advanced`，以 request-derived id exact
+  replay；该命令只能推进该 aggregate 的 episode decay 与 Need，首次命令必须绑定 typed relationship subject，不能读取
+  global recovery/body cache 或持久 raw material。当前 `test_dl02_affect_fusion.py` 与
+  `test_dl01_affective_life_kernel.py` 集合为 `17 passed in 26.31s`；它不证明后台 idle、真实 Host/Gateway、provider、
+  远端 Edge、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

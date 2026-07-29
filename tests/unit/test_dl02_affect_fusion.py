@@ -575,6 +575,59 @@ def test_duplicate_request_reopens_exact_receipts_without_duplicate_events(tmp_p
     assert len(events) == len(first.receipts)
 
 
+def test_real_scoped_turn_time_advances_canonical_affect_without_global_recovery(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dl02-affect-turn-clock.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=database).apply_migrations(
+        request_id="dl02-affect-turn-clock",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    repository = LifeCommandRepository(database)
+    command_service = LifeCommandService(repository, clock=lambda: NOW)
+    reader = LifeSnapshotReader(repository)
+    clock = [NOW]
+    fusion = AffectFusionService(
+        command_service_provider=lambda: command_service,
+        snapshot_reader_provider=lambda: reader,
+        clock_ms=lambda: clock[0],
+    )
+
+    first = fusion.resolve_request(
+        request_body=_request(message="我真的很难受，什么都不想做。"),
+        request_id="turn-clock-first",
+    )
+    before = reader.get_snapshot(first.scope.aggregate_id).state["affective"]
+    clock[0] += 3_600_000
+    second = fusion.resolve_request(
+        request_body=_request(message="嗯。"),
+        request_id="turn-clock-second",
+    )
+    after = reader.get_snapshot(second.scope.aggregate_id).state["affective"]
+    events = reader.list_events(second.scope.aggregate_id, limit=20)
+    time_event = next(
+        event
+        for event in events
+        if event.event_type == "affective_time_advanced"
+        and event.created_at_ms == clock[0]
+    )
+
+    assert time_event.command_id == second.receipts[0].command_id
+    assert time_event.payload["command_payload"] == {
+        "workspace_id": "workspace-a",
+        "relationship_subject_id": "person-a",
+        "session_id": "session-a",
+    }
+    assert after["last_integrated_ms"] == clock[0]
+    assert after["needs"]["rest"] > before["needs"]["rest"]
+    assert max(
+        (item["intensity"] for item in after["components"]),
+        default=0.0,
+    ) < max(item["intensity"] for item in before["components"])
+    assert all("raw" not in str(event.payload).lower() for event in events)
+
+
 def test_input_runtime_composition_does_not_resolve_host_emotion_runtime_when_fused(
     tmp_path: Path,
 ) -> None:

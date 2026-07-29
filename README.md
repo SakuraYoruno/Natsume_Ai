@@ -136,6 +136,12 @@ block/report、保存有界安全计数并保护输入输出，但旧 `IMMUNE_BL
 fan-out 与根据 Bond stage 放宽阈值已退役。安全决策不是情绪，也不会因关系更近而扩大风险容忍；若七海需要对边界
 做出真实感受或表达，那必须由 scoped Appraisal 与 Regulation 决定。
 
+七海的感受也不能只在“遇到强烈情绪时”才变化。每次真实聊天 ingress 会先用同一
+`workspace_id / relationship_subject_id / session_id` 提交 `affective_time_advanced`，再记录用户观察和 Appraisal；
+因此未解决 episode 会按真实时间衰减、rest/connection 等 Need 会连续演化，并且重复请求只重开同一 time receipt，
+不会让时间前进两次。这条 scoped Life clock 不是旧 Glymphatic、昼夜缓存或后台全局 tick；它仍不是远端 Edge、
+真实模型或 DL-07 服务栈验收。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

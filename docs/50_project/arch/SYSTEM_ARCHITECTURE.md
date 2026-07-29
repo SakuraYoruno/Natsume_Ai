@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.43
+版本：v2.44
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -211,6 +211,11 @@ assessment 和 export 均返回 `LEGACY_VESTIBULAR_STABILITY_WRITER_RETIRED / UN
 ports 下不再将风险结果发布为 legacy `IMMUNE_BLOCK` 给情感族，也不回灌 Limbic、Interoception、Endocrine 或
 PainReward，更不会订阅 Bond stage 来放宽安全阈值。安全结果因此不成为 self-affect 或关系 authority；其旧情感
 fan-out 返回 `LEGACY_IMMUNE_AFFECT_FANOUT_RETIRED`，真实边界表达仍由 scoped Appraisal/Regulation 处理。
+
+`AffectFusionService` 现在在每次真实 ingress 的首个写操作提交 `affective_time_advanced`。该命令从 opaque
+aggregate 中以 typed `relationship_subject_id` 完成首次 canonical binding，随后才记录 observation/Appraisal；它以
+同一 request-derived command id 做 exact replay，驱动只有该 workspace/person/session 的 episode decay 与 Need
+演化。它不从 Glymphatic、circadian、BodySense、全局 EventBus 或后台 tick 导入自我状态。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

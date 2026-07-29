@@ -722,6 +722,11 @@ def _resolve_canonical_relationship_subject(
             )
             or ""
         ).strip()
+    elif event_type == "affective_time_advanced":
+        # A real ingress turn advances the scoped Life clock before it
+        # records fresh observations.  The opaque aggregate id can never be
+        # mistaken for the relationship subject during that first command.
+        candidate = str(payload.get("relationship_subject_id") or "").strip()
     elif event_type in {
         "relationship_response_accepted",
         "relationship_proactive_delivered",

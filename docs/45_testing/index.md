@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.60
+版本：v2.61
 维护日期：2026-07-28
 状态：当前证据
 
@@ -185,6 +185,11 @@
   safety threshold；安全 counters 仍可被读取。Immune、batch 36/37/42/45/47 与 embodiment 邻接的当前定向集合为
   `84 passed in 3.03s`；它不证明 scoped boundary Appraisal、真实 Host/Gateway、provider、远端 Edge、Monitor/Review
   或 DL-07。
+
+- `test_dl02_affect_fusion.py` 新增 scoped turn-clock 用例：真实第二次 ingress 会以其 exact request receipt 写
+  `affective_time_advanced`，推进同 scope 的 episode 衰减与 Need，而不读取或调用 global recovery writer；首次命令已
+  绑定 typed relationship subject，raw material 不进入该 event。当前 Fusion 与 DL-01 kernel 集合为
+  `17 passed in 26.31s`；它不证明后台长期 idle、真实 Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

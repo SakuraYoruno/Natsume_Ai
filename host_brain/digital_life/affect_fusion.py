@@ -398,6 +398,32 @@ class AffectFusionService:
                 "message": _text(getattr(request_body, "message", None), limit=8_000),
             }
         )[:32]
+        # Affective decay and needs must progress from an immutable, scoped
+        # Life command at a real interaction boundary.  Do not let a
+        # process-global recovery agent infer this from unrelated clocks or
+        # body caches: that would reintroduce a second self-affect authority.
+        # The request-scoped idempotency seed below makes an exact ingress
+        # replay reopen this receipt rather than advance time twice.
+        service = self._require_command_service()
+        receipts: list[LifeCommandReceipt] = [
+            self._submit(
+                service=service,
+                scope=scope,
+                request_id=stable_request_id,
+                ordinal=-1,
+                command_type="affective_time_advanced",
+                # The aggregate key is deliberately opaque.  Carry only the
+                # typed scope needed for the reducer's first canonical
+                # identity binding and later audit; no raw user material or
+                # user affect is present in a time command.
+                payload={
+                    "workspace_id": scope.workspace_id,
+                    "relationship_subject_id": scope.relationship_subject_id,
+                    "session_id": scope.session_id,
+                },
+                created_at_ms=now_ms,
+            )
+        ]
         relationship_state: Mapping[str, Any] | None = None
         relationship_aftereffect: Mapping[str, Any] | None = None
         companion_profile: Mapping[str, Any] | None = None
@@ -445,8 +471,6 @@ class AffectFusionService:
         active = tuple(
             item for item in observations if item.expires_at_ms >= now_ms
         )
-        service = self._require_command_service()
-        receipts: list[LifeCommandReceipt] = []
         for index, observation in enumerate(observations):
             receipts.append(
                 self._submit(
