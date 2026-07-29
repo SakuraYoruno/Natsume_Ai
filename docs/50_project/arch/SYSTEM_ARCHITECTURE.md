@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.39
+版本：v2.40
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -186,6 +186,13 @@ scoped `ExpressionPlan` delivery receipt 表示，未来 body/Need input 必须�
 proactive multiplier。相应入口在旧副作用前返回 `LEGACY_ANS_AFFECT_EVENT_RETIRED`，runtime export 仅是显式退役
 投影。实际 activity monitor 与 mode transition 仍是显式 app-local port，但不拥有 self-affect、关系或人格 authority；
 未来由 Life/Regulation/aftereffect 提供有 scope 的陪伴节律。本收口不代表真实 Host、Gateway、远端 Edge 或 DL-07。
+
+`InitiativeGovernorAgent` 也退出 canonical Host 的陪伴决策：它不再订阅 circadian/proprioception/Bond/recovery
+EventBus，不再将旧 vitals、Bond vector 或 process-local recovery 组合为主动意愿，也不会写 registry、发
+`INITIATIVE_DECISION_MADE`、驱动旧 reward/DefaultMode/vestibular side effect 或调用 topic 模型。所有 legacy
+read/decision/export 入口显式给出 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`。真正的主动联系继续由
+scope-bound Life permission、relationship episode、Regulation、aftereffect 和 frozen Scene 决定；本退役不证明
+该 canonical 体验的真实 Host/Gateway/Edge 或 DL-07 验收。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

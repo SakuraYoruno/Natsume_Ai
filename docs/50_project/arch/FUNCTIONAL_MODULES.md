@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.48
+版本：v2.49
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -105,6 +105,13 @@ isolated compatibility composition 仍可用于 rollback，但它不构成 self-
 `LEGACY_ANS_AFFECT_EVENT_RETIRED`。保留的 activity monitor 和 mode transition 只能通过 explicit app-local port
 提供技术状态，不可借此产生 self-affect、关系阶段、人格或主动许可。真实的休息/克制/主动节律仍属于 canonical
 Life `RegulationDecision`、relationship episode 与 aftereffect，尚未完成真实 Host/Edge/体验验收。
+
+**Initiative Governor 兼容退役模块**位于
+[`tribe/initiative_governor_agent.py`](../../../host_brain/tribe/initiative_governor_agent.py)。canonical ports 下它不再
+订阅 circadian/proprioception/Bond/recovery EventBus，也不把 global vital、旧 Bond、body budget、时钟或 local
+recovery state 合成为主动门控；evaluate/read/export 都显式返回 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`，topic
+模型调用和 registry/EventBus/old organ side effect 一并停止。Motor/Cortex 遇到该结果会保守暂缓；真正的主动陪伴仍
+由 canonical Life 的 permission、relationship episode、Regulation、aftereffect 和 frozen Scene 决定，不是该兼容模块。
 
 同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
 `handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；

@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.56
+版本：v2.57
 维护日期：2026-07-28
 状态：当前证据
 
@@ -157,6 +157,14 @@
   `test_ans_agent.py`、batch 36/37/39/41/44/47/48、proactive/context、direct-effect 与 model-authority 邻接保留
   isolated legacy compatibility 覆盖。当前定向集合为 `122 passed in 4.30s`；它不证明 canonical Regulation 体验、
   真实 Host、Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
+
+- `test_dl06_initiative_governor_retirement.py` 验证 canonical `InitiativeGovernorAgent` 不订阅
+  circadian/proprioception/Bond/recovery EventBus，不使用 global vital、旧 Bond、body budget、时钟或 local recovery
+  制造主动 decision；evaluate/read/export、两类 callback 和 topic 生成均在 registry、EventBus、模型或 old-organ
+  side effect 前退役为 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`。`test_initiative_governor_agent.py`、MotorCortex、
+  batch 35/38/43/44/47 与 direct-effect 邻接覆盖 isolated legacy compatibility。当前定向集合为 `78 passed in 3.07s`；
+  附加的 AW05 secondary-model 文件因既有未绑定 Tribe runtime context 在 agent 构造前失败，未计入通过证据。它不证明
+  canonical proactive 体验、真实 Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

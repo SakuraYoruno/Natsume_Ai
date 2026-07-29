@@ -113,6 +113,12 @@ receipt，而真正的身体/Need 输入也必须通过 Life command。远端 Ed
 注入服务运行，且不能获得 self-affect、关系或人格写权。未来的休息、主动克制和关系节律只能由有 scope 的
 Life command、Regulation 和 durable aftereffect 决定；这一退役仍不是远端 Voice/Avatar、真实 Host 或 DL-07 验收。
 
+旧 `InitiativeGovernorAgent` 也不再以 process-global vitals、旧 Bond、昼夜缓存或本地 recovery mode 决定七海是否
+主动、是否继续说话。canonical Host 会让它的订阅、决策、topic 模型调用和 runtime export 明确退役为
+`LEGACY_INITIATIVE_GOVERNOR_RETIRED`，并以 `DEFER` 失败关闭；真正的主动陪伴仍只经过 canonical Life 的明确联系
+许可、关系 episode、Regulation、aftereffect 与 frozen Scene。此举不把七海变得被动，而是防止旧积分和机器缓存
+伪装成她的“想联系你”；真实的情境化主动体验、Host/Gateway 与 DL-07 验收仍未完成。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

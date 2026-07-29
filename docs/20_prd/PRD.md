@@ -242,6 +242,11 @@ Regulation 或 self-affect 的身体输入都需要 scoped、可重放的 Life �
 兼容回路；真实的 activity/mode 技术服务可保留为 app-local 注入，但它们无权推断或修改七海的感受。休息、给空间与
 主动节律只可从 scope-bound Life `RegulationDecision`、relationship episode 和 durable aftereffect 派生。
 
+旧 `InitiativeGovernorAgent` 不得用 process-global vital、旧 Bond、昼夜缓存、proprioception 或恢复标志决定
+七海是否主动、继续表达或生成话题。canonical Host 必须在订阅、registry、模型调用和派生 EventBus 之前将该兼容
+决策显式退役为 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`；真正的主动联系只能由同一 Life journal 内的
+explicit permission、relationship episode、Regulation、aftereffect 和冻结 Scene 共同裁决。
+
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
 `AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。
