@@ -537,21 +537,10 @@ def _register_emergent_growth_skills(registry: SkillRegistry) -> None:
             model_budget_required=True,
             budget_policy=SkillBudgetPolicy.TASK_PRECHARGE_DECLARED_MODEL,
             description=(
-                "涌现式成长周期（Phase XIX）：每周日 03:00 由调度器调用，"
-                "分析近期对话模式 → LLM/关键词归纳特质变化建议 → 安全门控 → 应用特质微调。"
+                "历史涌现人格成长兼容入口：仅供隔离回滚验证。canonical Host 会在解析模型端口前"
+                "返回 DEFERRED，不读取原始 episodic 文本、不生成 Persona proposal，也不允许自动调度。"
             ),
-            scheduler_allowed=True,
-            scheduler_profile=_cron_profile(
-                task_id="emergent_growth_weekly",
-                hour=3,
-                minute=50,
-                args={"user_id": "natsume_ai", "lookback_days": 7},
-                mode_allowlist=("normal", "sleep"),
-                resource_class="background_llm",
-                description="涌现式成长：每周日 03:50 分析近期对话并沉淀人格微调。",
-                catch_up_window_minutes=1440,
-            )
-            | {"trigger_config": {"day_of_week": 6, "hour": 3, "minute": 50, "catch_up_window_minutes": 1440}},
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="emergent_growth_status",
@@ -560,7 +549,7 @@ def _register_emergent_growth_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_emergent_growth_status,
-            description="涌现式成长状态查询：返回成长日志摘要（总周期数/最近主题/最新成长叙事）。",
+            description="历史涌现人格成长状态查询：canonical Host 返回已退役状态，不暴露 legacy growth log。",
             scheduler_allowed=False,
         ),
     )

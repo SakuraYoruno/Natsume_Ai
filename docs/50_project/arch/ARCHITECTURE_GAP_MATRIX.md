@@ -142,6 +142,13 @@ EventBus 路由，direct stage/milestone-growth 分别固定退役为 `LEGACY_BO
 长期 canary、activation 或体验收益通过。人格 drift 仍可收紧 Governor，但 canonical 路线不再把它直写到旧
 Limbic、Endocrine、PainReward、Interoception，也不再发出 `HUMOR_LANDED`/`TASK_SUCCESS` 旧情绪侧写事件。
 
+**无范围涌现成长退役修订：** `emergent_growth_weekly` 不再允许 Scheduler 自动登记。canonical
+Prefrontal 会在 model-port 解析、LLM 调用、原始 episodic 分析和 Persona proposal 前固定返回
+`DEFERRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`，状态查询为
+`RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。这阻断的是一条 raw-text、无关系 scope 的 legacy
+旁路；它不构成 aftereffect 驱动的人格成长、长期 canary 或体验收益。保留的 legacy model-budget
+兼容路径只允许隔离回滚验证，不能重获 production authority。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

@@ -641,6 +641,13 @@ canonical hand-off，历史 Bond 的显式距离、高 closeness、记忆中的�
 - 浪漫、排他和依赖不是“高 Bond”的奖励，默认未授权，必须有明确双向信号与独立 Review；
 - `workspace + relationship_subject` 是长期关系 scope，`session` 只说明事件发生在哪一次会话，不能成为跨用户合并捷径。
 
+同样，原始 episodic 文本的定期模型归纳不能成为人格演化的捷径。没有精确
+`workspace + relationship_subject`、已接受回应和 durable aftereffect 的输入，无法说明一项偏好变化属于谁、
+是否被真正接住，也无法区分一次偶发措辞和长期关系事实。因此 canonical Host 必须在模型调用前退役
+`emergent_growth_weekly` 这类 legacy 入口；它可以为隔离回滚保留，却不能自动调度、读取原始文本或产出
+Persona proposal。可自动演化的仅是有界、低风险且可精确回滚的 companion profile；Soul 的核心价值与人格
+身份仍是稳定宪法，任何变更都需要独立的证据与 Review。
+
 ### 7.4 Affect：内部信号，不是表演标签
 
 情感的理论结构是：

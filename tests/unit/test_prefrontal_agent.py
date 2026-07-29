@@ -799,6 +799,54 @@ def test_prefrontal_run_emergent_growth_weekly_skips_without_llm() -> None:
     assert result["reason_code"] == "EMERGENT_GROWTH_LLM_REQUIRED"
 
 
+def test_prefrontal_canonical_life_retires_raw_emergent_growth_before_analyzer(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.persona.interaction_pattern_analyzer.InteractionPatternAnalyzer",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not construct legacy analyzer")
+        ),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    weekly = agent.run_emergent_growth_weekly(
+        user_id="user-eg",
+        lookback_days=7,
+        episodic_store=object(),
+        llm_fn=lambda _prompt: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not call legacy LLM")
+        ),
+    )
+    status = agent.resolve_emergent_growth_status(user_id="user-eg", recent_limit=5)
+
+    assert agent.uses_canonical_affective_life() is True
+    assert weekly == {
+        "status": "DEFERRED",
+        "reason_code": "CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED",
+        "user_id": "user-eg",
+        "lookback_days": 7,
+        "pattern_result": {},
+        "growth_result": {},
+        "proposal": {
+            "status": "NO_CANDIDATE",
+            "reason_code": "LEGACY_EMERGENT_GROWTH_RETIRED",
+        },
+    }
+    assert status == {
+        "status": "RETIRED",
+        "reason_code": "LEGACY_EMERGENT_GROWTH_RETIRED",
+        "user_id": "user-eg",
+        "recent_limit": 5,
+        "growth_summary": {},
+        "recent_growth_log": [],
+    }
+
+
 def test_prefrontal_resolve_persona_change_and_growth_payloads(monkeypatch) -> None:
     class _Engine:
         def get_change_log(self, user_id: str, limit: int = 5):

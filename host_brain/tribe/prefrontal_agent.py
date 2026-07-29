@@ -76,6 +76,17 @@ class PrefrontalAgent:
             and ports.uses_canonical_affective_life()
         )
 
+    def uses_canonical_affective_life(self) -> bool:
+        """Expose the composition boundary without exposing mutable ports.
+
+        Compatibility Skill adapters need this preflight so they can stop
+        before resolving a model port or handing raw episodic data to a legacy
+        analyzer.  It is deliberately a read-only capability flag: it does
+        not create a second affect/relationship authority.
+        """
+
+        return self._uses_canonical_affective_life()
+
     def resolve_self_reflection_context(
         self,
         *,
@@ -1245,35 +1256,56 @@ class PrefrontalAgent:
         episodic_store: Any,
         llm_fn: Any | None = None,
     ) -> dict[str, Any]:
+        resolved_user_id = _resolve_prefrontal_persona_id(user_id)
+        resolved_lookback_days = max(1, int(lookback_days or 7))
+
+        if self._uses_canonical_affective_life():
+            # This legacy weekly path consumes raw episodic text and carries
+            # neither an exact workspace/relationship subject nor durable
+            # accepted-response aftereffects.  Canonical companion growth may
+            # only use the scoped aftereffect pipeline; stop before importing
+            # the analyzer, constructing a model port, or staging a Persona
+            # proposal.
+            return {
+                "status": "DEFERRED",
+                "reason_code": "CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED",
+                "user_id": resolved_user_id,
+                "lookback_days": resolved_lookback_days,
+                "pattern_result": {},
+                "growth_result": {},
+                "proposal": {
+                    "status": "NO_CANDIDATE",
+                    "reason_code": "LEGACY_EMERGENT_GROWTH_RETIRED",
+                },
+            }
+
         from host_brain.persona.interaction_pattern_analyzer import InteractionPatternAnalyzer  # noqa: PLC0415
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
         if llm_fn is None:
-            resolved_user_id = _resolve_prefrontal_persona_id(user_id)
             return {
                 "status": "SKIPPED",
                 "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
                 "user_id": resolved_user_id,
-                "lookback_days": max(1, int(lookback_days or 7)),
+                "lookback_days": resolved_lookback_days,
                 "pattern_result": {},
                 "growth_result": {},
             }
 
-        resolved_user_id = _resolve_prefrontal_persona_id(user_id)
         persona_engine = PersonaEngine.get_instance()
         analyzer = InteractionPatternAnalyzer(llm_fn=llm_fn, strict_llm=True)
         pattern_result = analyzer.analyze(
             user_id=resolved_user_id,
             episodic_store=episodic_store,
             current_traits=persona_engine.get_traits(resolved_user_id),
-            lookback_days=max(1, int(lookback_days or 7)),
+            lookback_days=resolved_lookback_days,
         )
         if str(getattr(pattern_result, "analysis_method", "") or "").strip().lower() != "llm":
             return {
                 "status": "SKIPPED",
                 "reason_code": "EMERGENT_GROWTH_LLM_REQUIRED",
                 "user_id": resolved_user_id,
-                "lookback_days": max(1, int(lookback_days or 7)),
+                "lookback_days": resolved_lookback_days,
                 "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
                 "growth_result": {},
             }
@@ -1293,16 +1325,25 @@ class PrefrontalAgent:
                 else "SKIPPED"
             ),
             "user_id": resolved_user_id,
-            "lookback_days": max(1, int(lookback_days or 7)),
+            "lookback_days": resolved_lookback_days,
             "pattern_result": dict(pattern_result.as_dict() if hasattr(pattern_result, "as_dict") else {}),
             "growth_result": dict(growth_result.as_dict() if hasattr(growth_result, "as_dict") else {}),
             "proposal": proposal,
         }
 
     def resolve_emergent_growth_status(self, *, user_id: str, recent_limit: int = 5) -> dict[str, Any]:
-        engine = self._get_emergent_growth_engine()
         recent = max(1, int(recent_limit or 5))
         resolved_user_id = _resolve_prefrontal_persona_id(user_id)
+        if self._uses_canonical_affective_life():
+            return {
+                "status": "RETIRED",
+                "reason_code": "LEGACY_EMERGENT_GROWTH_RETIRED",
+                "user_id": resolved_user_id,
+                "recent_limit": recent,
+                "growth_summary": {},
+                "recent_growth_log": [],
+            }
+        engine = self._get_emergent_growth_engine()
         growth_log = [record.as_dict() for record in engine.get_growth_log(resolved_user_id)[-recent:]]
         return {
             "status": "OK",

@@ -170,6 +170,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。真实低风险学习另由 durable、
   relationship-scoped aftereffect 生命周期验证。若 drift 被检出，只能更新 Governor 的 restrict-only
   状态；不得直接调用旧 Limbic、Endocrine、PainReward、Interoception，或发布 `HUMOR_LANDED`/`TASK_SUCCESS`。
+- T-DL06-06：canonical Life authority 下的 `emergent_growth_weekly` 必须在 model-port 解析、LLM 调用、
+  episodic store 读取和 Persona proposal 前返回
+  `DEFERRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`，其 status 查询必须为
+  `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`；registry 不得允许自动调度。模型 budget 负测仅覆盖隔离
+  legacy compatibility route，不能计为在线成长或 provider 证据。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
   `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
   Edge 或 DL-07 服务栈验收。
@@ -179,6 +184,10 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   退订、direct milestone retirement、drift 对旧 organ/event side effect 的阻断，以及 legacy compatibility
   回归、runtime snapshot/OBS 与文档 Gate。它仍只证明本地 scope 收口，不能外推为
   canonical relationship-aware evolution、长期 canary、真实 provider、远端 Edge 或 DL-07。
+- 本切片新增 `emergent_growth_weekly` canonical preflight、registry/scheduler 退役、legacy governed-budget
+  负测与相邻 compatibility 回归集合 `164 passed in 16.29s`；文档/交付 Gate 另为 `33 passed in 8.87s`。
+  两组测试均为本地定向证据，不能作为 aftereffect 驱动 Persona 演化、真实模型调用、远端 Edge 或
+  全栈验收的替代。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 

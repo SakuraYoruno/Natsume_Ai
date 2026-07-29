@@ -264,6 +264,12 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   固定返回 `LEGACY_PROACTIVE_TALK_RETIRED`，不得读取 Bond、EmotionTimeline、Limbic、旧模板或创建
   delivery intent。canonical `life_tick → companion_proactive → Life outbox` 是唯一主动发送 authority。
   本地退役合同不证明真实 Gateway/Edge、用户送达、长期体验或 DL-06 完成。
+- 历史 `emergent_growth_weekly` 同样不再是 production 自动成长 route：registry 禁止自动调度，canonical
+  `PrefrontalAgent` 在模型端口解析、LLM 调用、episodic 文本分析与 Persona proposal 之前固定返回
+  `DEFERRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`，状态查询返回
+  `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。其 legacy typed-model 路径只保留给隔离回滚，不能消耗
+  canonical 成长证据或被计入在线人格演化。后续正向低风险学习只能从 scoped accepted aftereffect 进入
+  companion profile；核心人格改动仍需 Review。
 - OBS/runtime snapshot 已改为 composed `LifeSnapshotReader` 的只读 consumer：它以当前 relationship
   subject 的一条 canonical Life head 分别投影 `natsume_ai` self-affect 与 bounded user-affect observation，
   并输出无分数、非升级的关系纹理。reader 已组成后，任何 reader 故障、self-id 或 subject drift 都只会 degraded，

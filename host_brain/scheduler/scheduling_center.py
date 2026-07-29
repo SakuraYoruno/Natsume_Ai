@@ -24,6 +24,7 @@ RETIRED_AUTO_SCHEDULE_SKILLS = {
     "body_sense_tick",
     "emotion_decay_tick",
     "proactive_talk",
+    "emergent_growth_weekly",
 }
 
 SCHEDULER_SEED_TASK_ORDER = (
@@ -34,7 +35,6 @@ SCHEDULER_SEED_TASK_ORDER = (
     "dream_generator_sleep",
     "life_memory_sleep_replay_daily",
     "gaming_companion_tick",
-    "emergent_growth_weekly",
 )
 
 CORE_ORGAN_TICK_TASK_IDS = (

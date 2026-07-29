@@ -101,6 +101,13 @@
 > Limbic/Endocrine/PainReward/Interoception 或发出 `HUMOR_LANDED`/`TASK_SUCCESS` 旧情绪事件。
 > 这不等于 Persona/Identity activation 或长期 canary 已完成。
 
+> **DL-06 无范围涌现成长退役修订：** `emergent_growth_weekly` 已从自动调度中撤出。canonical
+> `PrefrontalAgent` 在解析 model port 前检查 Life authority，并对无 exact workspace/relationship
+> subject 与 accepted-aftereffect 的旧入口返回
+> `DEFERRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`；它不会读取 episodic 文本、调用 LLM 或 stage
+> Persona proposal。状态查询固定为 `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。legacy typed-model
+> handler 只保留在隔离 rollback composition，不能作为在线人格成长完成证据。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧
@@ -551,7 +558,7 @@ Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issue
 | Embodiment / Edge receipt | `PARTIAL_D8_DURABLE_EMBODIMENT_AUTHORITY` | Host 0104 让新 outbox 行绑定 canonical DB 派生的 `runtime_scope_id`，同 scope 只有一个持 durable runtime lease/fence 的进程可执行，第二实例失败关闭；enqueue、claim、过期、收口与对账均在同一写事务复验该 authority。精确 Edge session/owner/lease/fence 由 Host 持久保存；替代 runtime 必须在开放路由前 exact reconnect、轮换 Edge fence 并验证新 lease/`fence+1`。Edge 0002 冻结 command owner，receipt query v2 受 owner/current session/lease/fence 和 command/key 精确约束，legacy ownerless 返回 `NOT_FOUND`；`IN_DOUBT` 仅可只读 CAS 对账、绝不重放。loopback TCP/HMAC/SQLite 查询与重启 exact replay 已测；真实设备仍 `NOT_TESTED` |
 | Composition | `INCOMPLETE / PRODUCTION_LOCATOR_PHYSICALLY_RETIRED / TRIBE_AGENT_CATALOG_APP_LOCAL / RESOURCE_MANAGER_STATUS_DURABLE` | 每个 Host ASGI app 拥有独立 Lifecycle/HardState/Authority/Bond/Memory/Governance runtime owner；Lifecycle、Tribe shared runtime/Agent catalog、Input、Agent、Context、Startup、Multimodal 与 heartbeat 使用显式 provider；ResourceManager status 由 0123 journal 绑定 exact Host fence。生产 locator module/field/lock/ref=`0/0/0/0`，测试桥仅在 pytest 安装。外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它外部资源恢复、并发 multi-Host compatibility context、legacy Executive generic delegate、真实 workspace-bound executor 和 Host/Worker/Obs authority 仍未闭环；canary/wave integration 未运行，NE-01 不得封板 |
 | 当前结构 Gate | `PASS_GATES_1_TO_14 / PROGRAM_INCOMPLETE` | Research ledger 与 NE-05 repository 已按职责拆分；NE-06 又将 Semantic recall result 移入 neutral contracts，并把 Prefrontal 纯运行策略拆为 201 行 focused module，Agent owner 为 1,879 行。fresh Gate 1 issues/SCC=`[]`、Gate 3 PASS、`failed_gates=[]`，未扩大白名单。静态通过不替代 NE-07 运行验收，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA` |
-| Persona 演化 authority | `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07` | `PersonaEngine` 中央拒绝非迁移 apply/rollback；stage、milestone、interaction、emergent 与显式 response feedback 只生成 proposal。0142 只有在真实 Lab + Review 通过后才切换 versioned Persona/表达 policy，并可 exact rollback |
+| Persona 演化 authority | `PARTIAL / LEGACY_UNSCOPED_GROWTH_RETIRED` | `PersonaEngine` 中央拒绝非迁移 apply/rollback；Bond stage、milestone、session feedback 与 `emergent_growth_weekly` 在 canonical Host 下均不得产生候选，后者在 LLM/episodic 分析前退役。0142 只有在真实 Lab + Review 通过后才切换 versioned Persona/表达 policy，并可 exact rollback；aftereffect 驱动的正向核心人格成长尚未实现 |
 | 长期演化能力 | `CODE_COMPLETE_NE03_TO_NE06_LOCAL / PROGRAM_INCOMPLETE` | World/Scene/Intent/Guardian、Evolution Lab、Skill lifecycle 与 0142 Feedback/Knowledge/Identity authority 已进入生产对象图。Knowledge reader 默认仍 SHADOW；部署 canary、真实数据库/网络/模型/设备与完整恢复必须由 NE-07 验收 |
 
 ### 1.1 Tribe runtime scope 当前事实

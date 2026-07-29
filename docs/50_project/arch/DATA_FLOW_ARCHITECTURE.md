@@ -786,6 +786,21 @@ authority 下直接终止为 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED`，不会�
 Governor restrict-only 约束，不能再流向 Limbic、Endocrine、PainReward、Interoception 或
 `HUMOR_LANDED`/`TASK_SUCCESS` 旧状态事件。
 
+历史 weekly 模型成长流也在同一边界停止：
+
+```text
+emergent_growth_weekly compatibility invocation
+→ canonical Prefrontal authority preflight
+→ DEFERRED + CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED
+→ 不解析 model port / 不调用 LLM / 不读取 episodic store / 不 stage Persona proposal
+
+status query → RETIRED + LEGACY_EMERGENT_GROWTH_RETIRED
+```
+
+该 Skill 不再允许 Scheduler 自动登记。legacy typed-model 流只用于隔离 rollback，不能把 raw text 变成
+canonical 成长证据；正向低风险适应必须由 accepted、scope-bound aftereffect 驱动的 companion profile
+生命周期完成。
+
 普通 Chat 的关系读取流现为：
 
 ```text

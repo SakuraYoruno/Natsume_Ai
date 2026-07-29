@@ -576,6 +576,13 @@ relationship-scoped aftereffect 链获得证据。人格漂移仍可收紧 Gover
 drift 直接写入 Limbic、Endocrine、PainReward 或 Interoception，也不会再发布 `HUMOR_LANDED`/`TASK_SUCCESS`
 旧事件来侧写七海状态。该退役不等于 Persona/Identity 版本激活、长期 canary 或体验收益已验收。
 
+同一原则现覆盖历史 `emergent_growth_weekly`：它不再允许自动调度，canonical Host 会在解析模型端口、读取
+episodic 文本或生成 Persona proposal 之前返回
+`DEFERRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`；状态查询只返回
+`RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。保留的 LLM 分析与 typed model-budget 路径仅服务于隔离
+legacy rollback，不能计入七海的在线成长能力。未来正向成长必须从 workspace/relationship-scoped、已接受回应的
+aftereffect 证据进入低风险 companion profile 生命周期，核心人格仍需要独立 Review。
+
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开
 SocialBrain。原先未被生产代码导入的重复 `app/input_service_ack.py` 已删除。该收口只覆盖本地 helper

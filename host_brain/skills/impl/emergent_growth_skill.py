@@ -103,9 +103,54 @@ def execute_emergent_growth_weekly(
         lookback_days = max(1, int((args or {}).get("lookback_days") or 7))
     except (TypeError, ValueError):
         lookback_days = 7
-    llm_fn = _resolve_llm_fn(args, context)
     prefrontal_agent = (context or {}).get("prefrontal_agent")
     episodic_store = (context or {}).get("episodic_store")
+    if prefrontal_agent is not None:
+        canonical_scope_probe = getattr(
+            prefrontal_agent,
+            "uses_canonical_affective_life",
+            None,
+        )
+        if callable(canonical_scope_probe):
+            try:
+                uses_canonical_affective_life = bool(canonical_scope_probe())
+            except Exception:
+                # A compatibility adapter must never treat an unavailable
+                # production authority probe as permission to process raw
+                # episodic data through the legacy model path.
+                return {
+                    "status": "SKIPPED",
+                    "reason_code": "CANONICAL_AFFECTIVE_LIFE_SCOPE_UNAVAILABLE",
+                    "user_id": user_id,
+                    "lookback_days": lookback_days,
+                    "pattern_result": {},
+                    "growth_result": {},
+                }
+            if uses_canonical_affective_life:
+                # Delegate to the canonical Prefrontal boundary before resolving
+                # any model port.  No raw episodic store, model budget, or Persona
+                # proposal is consumed on this retired compatibility route.
+                return dict(
+                    prefrontal_agent.run_emergent_growth_weekly(
+                        user_id=user_id,
+                        lookback_days=lookback_days,
+                        episodic_store=episodic_store,
+                        llm_fn=None,
+                    )
+                    or {
+                        "status": "DEFERRED",
+                        "reason_code": "CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED",
+                        "user_id": user_id,
+                        "lookback_days": lookback_days,
+                        "pattern_result": {},
+                        "growth_result": {},
+                    }
+                )
+
+    # Preserve the legacy governed-contract rejection when the compatibility
+    # adapter itself is incomplete.  The canonical branch above is the only
+    # route permitted to bypass model-port resolution.
+    llm_fn = _resolve_llm_fn(args, context)
     if llm_fn is None or prefrontal_agent is None or episodic_store is None:
         return {
             "status": "SKIPPED",
