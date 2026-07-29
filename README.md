@@ -91,6 +91,10 @@ PainReward、Endocrine、Limbic、Interoception。PainReward 的全局 EventBus�
 模型同样退役，统一返回零值的兼容 projection。真正的受伤、满足、疲惫与调节仍须由 `EventAppraisal → Life`
 以七海自身的目标、边界和关系意义形成；这不是把她中性化，也不代表真实体验或 DL-07 已验收。
 
+`CortexAgent` 也不再作为 canonical Host 的全局情感 fan-out：对话开始/结束、旧关系、孤独、任务、平台和身体
+EventBus 回调都显式退役，不写 `cortex_agent` global snapshot，也不触发旧 PainReward 或派生 Bond 事件。它保留
+纯上下文收集与路由读取；已接受回复的关系后效应、表达和外部交付仍只由 Life/Outbox/ExpressionPlan 主链拥有。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

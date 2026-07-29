@@ -239,6 +239,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   hedonic/disk state、调用 organ fan-out 或反思模型，record/decay/callback 必须返回 retirement/零值 projection。
   当前 `test_dl06_language_pain_reward_retirement.py` 与相邻 legacy 回归只证明旧 writer 已封闭，不代表真实陪伴
   体验、模型、远端 Edge、Monitor/Review 或 DL-07。
+- T-DL06-18：canonical `CortexAgent` 不得发布 conversation start/end 或派生 Bond EventBus，也不得订阅旧
+  silence/emotion/Bond/孤独/任务/平台/身体 callback、写 global cortex registry 或调用 PainReward。纯 context
+  collection 和 intent route 可保留；accepted episode、aftereffect、expression 与 delivery 必须回到 canonical Life
+  主链。当前 `test_dl06_cortex_event_fanout_retirement.py` 与 Cortex/batch 邻接回归只证明旧 fan-out 已退役，
+  不代表真实 Host、Gateway、Edge、模型、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

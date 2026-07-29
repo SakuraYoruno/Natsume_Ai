@@ -327,6 +327,11 @@ emotion/Bond/loneliness EventBus，`resolve_dual_system()` 不再写 language re
 与 hedonic reflection 都返回 retirement/零值 projection。二者只可作为 rollback-window 的纯兼容辅助，不能把
 用户信号或旧关系状态重新写成七海自身情绪。
 
+`CortexAgent` 的 context/route 读取仍保留，但 canonical ports 不再允许它广播 conversation lifecycle 或注册
+旧 silence/emotion/Bond/孤独/任务/平台/身体 callback。所有残留 handler 返回
+`LEGACY_CORTEX_EVENT_FANOUT_RETIRED`，不写 global cortex registry、不发布派生 Bond event，也不调用
+PainReward；relation episode、aftereffect 与 expression 必须回到 canonical Life 主链。
+
 `lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
 `LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，
 把 `natsume_ai` self-affect、bounded user observation、关系 texture、body projection 与 posture 分开投影。

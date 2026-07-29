@@ -133,6 +133,11 @@
   `test_language_system_agent.py`、batch 34/35/42/43/44/46 保留 isolated legacy compatibility 回归。该本地集合
   不证明真实情绪体验、模型、远端 Edge、Monitor/Review 或 DL-07。
 
+- `test_dl06_cortex_event_fanout_retirement.py` 验证 canonical `CortexAgent` 不注册旧全局 callback，不发布
+  conversation lifecycle 或派生 Bond event，不写 cortex registry，也不调用 PainReward；其保留的是纯 context/route
+  读取。`test_cortex_agent.py`、context collector 与 batch 47/49 覆盖 isolated compatibility。该集合只证明旧
+  fan-out 已退役，不证明真实 Host、Gateway、Edge、模型或 DL-07。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS

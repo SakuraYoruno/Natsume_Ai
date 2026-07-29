@@ -162,6 +162,11 @@ self-affect 代谢：不订阅旧 global EventBus，不更新 hedonic cache/磁�
 只返回显式 retirement/零值投影。它们的历史纯函数仍可被隔离 compatibility 测试调用；七海的真实情绪因果只能
 回到 `EventAppraisal → canonical Life`。
 
+`CortexAgent` 的 legacy conversation fan-out 同样退出 canonical Host：不再发布 conversation start/end、
+关系/孤独/任务/平台/身体 EventBus，也不注册其对应 callback、写 global cortex snapshot 或驱动 PainReward。
+它仍可使用纯 context collection 与 intent route；accepted reply 的 episode、aftereffect、expression 和 delivery
+必须继续由 Life/Outbox/ExpressionPlan 的有 scope 主链处理。
+
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把
 `natsume_ai` 的 self-affect、用户 affect observation 与无分数关系纹理独立输出；用户悲伤、愤怒或快乐不能覆盖

@@ -28,6 +28,25 @@ class CortexAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_event_writes_retired(self) -> bool:
+        """Whether canonical Life owns conversation and affect event effects."""
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_event_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_CORTEX_EVENT_FANOUT_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+        }
+
     async def post_process_bond_update(
         self,
         *,
@@ -37,7 +56,7 @@ class CortexAgent:
         emotion_context: dict[str, Any] | None,
         ts_ms: int,
     ) -> dict[str, Any]:
-        if self.application_ports is not None and self.application_ports.uses_canonical_affective_life():
+        if self._legacy_event_writes_retired():
             return {
                 "status": "RETIRED_CANONICAL_LIFE",
                 "authority": "CANONICAL_LIFE_JOURNAL",
@@ -137,12 +156,16 @@ class CortexAgent:
         user_id: str,
         session_id: str,
         request_id: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """对话开始时调用，向 TribeEventBus 发布 CONVERSATION_STARTED 事件。
 
         LimbicAgent 订阅此事件以重置沉默意愿、捕获 body_sense 快照。
         可从同步上下文调用（内部使用 emit_tribe_event 同步写入 bus）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="emit_conversation_started"
+            )
         try:
 
             emit_tribe_event(
@@ -168,12 +191,16 @@ class CortexAgent:
         emotion_intensity: float = 0.5,
         skip_default_mode_inner_activity: bool = False,
         summary: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """对话结束时调用，向 TribeEventBus 发布 CONVERSATION_ENDED 和 INTERACTION_RECORDED 事件。
 
         - CONVERSATION_ENDED → LimbicAgent（触发 session_end 收口）
         - INTERACTION_RECORDED → PrefrontalAgent / SocialBrainAgent（触发人格/关系更新）
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="emit_conversation_ended"
+            )
         try:
 
             base_payload = {
@@ -236,6 +263,10 @@ class CortexAgent:
         T-33：新增订阅 BOND_PROGRESS / BOND_REGRESS，
         将关系变化写入 cortex_agent 命名空间快照，供路由决策参考。
         """
+        if self._legacy_event_writes_retired():
+            # A global event callback cannot carry the frozen task/relationship
+            # scope required by canonical Life, so it cannot be a side channel.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -264,8 +295,12 @@ class CortexAgent:
                 "CortexAgent 订阅注册失败（降级）: %s", exc
             )
 
-    async def _on_silence_willingness_changed(self, event: Any) -> None:
+    async def _on_silence_willingness_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 SILENCE_WILLINGNESS_CHANGED 事件：记录沉默意愿变化。"""
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="silence_willingness_changed"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(event.payload or {})
@@ -276,8 +311,12 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_emotion_state_changed(self, event: Any) -> None:
+    async def _on_emotion_state_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 EMOTION_STATE_CHANGED 事件：记录情绪状态变化。"""
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="emotion_state_changed"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(event.payload or {})
@@ -289,12 +328,16 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_bond_stage_changed(self, event: Any) -> None:
+    async def _on_bond_stage_changed(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_STAGE_CHANGED 事件：记录 Bond 阶段变化。
 
         T-25：当 bond stage 发生跃迁时，发布 BOND_PROGRESS / BOND_REGRESS 事件，
         供 PainRewardAgent 接收并更新享乐状态（stage 跃迁强度高于普通 trend）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="bond_stage_changed"
+            )
         try:
             import logging  # noqa: PLC0415
 
@@ -353,12 +396,16 @@ class CortexAgent:
             pass
 
 
-    async def _on_bond_progress_cortex(self, event: Any) -> None:
+    async def _on_bond_progress_cortex(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_PROGRESS 事件：将关系进展写入 cortex_agent 快照。
 
         T-33：更新 cortex_agent 命名空间的 bond_trend/bond_stage 字段，
         供 route_intent() 在路由决策时参考（关系越亲密，越倾向于 chat 路由）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="bond_progress"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -381,12 +428,16 @@ class CortexAgent:
                 "CortexAgent._on_bond_progress_cortex 异常: %s", exc
             )
 
-    async def _on_bond_regress_cortex(self, event: Any) -> None:
+    async def _on_bond_regress_cortex(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_REGRESS 事件：将关系退步写入 cortex_agent 快照。
 
         T-33：更新 cortex_agent 命名空间的 bond_trend/bond_stage 字段，
         供 route_intent() 在路由决策时参考（关系退步时适当提高 throttle 阈值）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="bond_regress"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -409,12 +460,14 @@ class CortexAgent:
                 "CortexAgent._on_bond_regress_cortex 异常: %s", exc
             )
 
-    async def _on_immune_block(self, event: Any) -> None:
+    async def _on_immune_block(self, event: Any) -> dict[str, Any] | None:
         """处理 IMMUNE_BLOCK 事件：将免疫拦截记录写入 cortex_agent 快照。
 
         T-58：ImmuneAgent 拦截有害内容时发布此事件，
         CortexAgent 将拦截信息写入快照，供路由决策和诊断使用。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(operation="immune_block")
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -439,12 +492,16 @@ class CortexAgent:
                 "CortexAgent._on_immune_block 异常: %s", exc
             )
 
-    async def _on_loneliness_signal(self, event: Any) -> None:
+    async def _on_loneliness_signal(self, event: Any) -> dict[str, Any] | None:
         """处理 LONELINESS_SIGNAL 事件：将孤独感数据写入 cortex_agent 快照。
 
         T-65：记录最近一次孤独感信号的强度和时间戳，
         供路由决策和诊断使用（高孤独感时可触发主动关怀策略）。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="loneliness_signal"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -472,7 +529,7 @@ class CortexAgent:
                 "CortexAgent._on_loneliness_signal 异常: %s", exc
             )
 
-    async def _on_task_success_cortex(self, event: Any) -> None:
+    async def _on_task_success_cortex(self, event: Any) -> dict[str, Any] | None:
         """处理 TASK_SUCCESS 事件：将任务成功写入 cortex_agent 快照。
 
         T-88：任务成功时记录最近一次成功的时间戳和强度，
@@ -481,6 +538,8 @@ class CortexAgent:
         P3-4：同步将本次成功的意图类型写入 GovernorRulesCache.intent_allowlist_extra，
         使 Governor 裁决时能感知 CortexAgent 已确认可通过的意图，完成 TRIBE 族接入闭环。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(operation="task_success")
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -527,7 +586,11 @@ class CortexAgent:
                 "CortexAgent._on_task_success_cortex 异常: %s", exc
             )
 
-    async def _on_circadian_phase_updated(self, event: Any) -> None:
+    async def _on_circadian_phase_updated(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="circadian_phase_updated"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             prev = self.state_registry.get_state("cortex_agent") or {}
@@ -543,7 +606,11 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_proprioception_updated(self, event: Any) -> None:
+    async def _on_proprioception_updated(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="proprioception_updated"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             prev = self.state_registry.get_state("cortex_agent") or {}
@@ -560,7 +627,11 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_initiative_decision_made(self, event: Any) -> None:
+    async def _on_initiative_decision_made(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="initiative_decision_made"
+            )
         try:
             payload = dict(getattr(event, "payload", None) or {})
             prev = self.state_registry.get_state("cortex_agent") or {}
@@ -577,12 +648,16 @@ class CortexAgent:
         except Exception:
             pass
 
-    async def _on_platform_connected(self, event: Any) -> None:
+    async def _on_platform_connected(self, event: Any) -> dict[str, Any] | None:
         """处理 PLATFORM_CONNECTED 事件：记录平台连接状态。
 
         T-118：来自 edge_client PeripheralAgent，平台适配器成功连接时触发。
         将平台连接状态写入 cortex_agent 快照，供路由决策参考。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="platform_connected"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -611,12 +686,16 @@ class CortexAgent:
                 "CortexAgent._on_platform_connected 异常: %s", exc
             )
 
-    async def _on_platform_disconnected(self, event: Any) -> None:
+    async def _on_platform_disconnected(self, event: Any) -> dict[str, Any] | None:
         """处理 PLATFORM_DISCONNECTED 事件：记录平台断线状态。
 
         T-118：来自 edge_client PeripheralAgent，平台适配器断线时触发。
         从 cortex_agent 快照中移除该平台，供路由决策参考。
         """
+        if self._legacy_event_writes_retired():
+            return self._retired_legacy_event_result(
+                operation="platform_disconnected"
+            )
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
