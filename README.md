@@ -52,6 +52,8 @@ OpenAI-compatible final-usage transport 验证该顺序，不代表已验证真�
 远端 Edge/TTS/VTS 或 Docker 全栈；整体仍是 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，
 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+治理 TaskGraph 中的“缺少感知证据”规则回复也已不再保留无生命因果的 legacy terminal：它先冻结同一份 `AffectiveTurnPlanV1`，把完整 foreground、关系 provisional episode 与 ExpressionPlan 装入唯一的 `life.foreground_completed` NODE effect，交给 Task Acceptance 后的 accepted handler 写入 canonical journal。Worker 本身不直接提交 Life，也不会把该 buffered 路径冒充为 native stream、已播放的 Voice/Avatar 或 provider usage；真正的受治理 provider streaming 仍受 final canonical usage 缺口阻断。
+
 DL-06 的 lifecycle runtime snapshot 现把这一条兼容读取边界进一步收紧：实际 Host
 composition 强制要求 `LifeSnapshotReader`，即使 provider 缺失也只能形成 degraded canonical
 projection，绝不复活旧 Bond、Limbic、Prefrontal 或 EmotionTimeline assembler。每个 app-local

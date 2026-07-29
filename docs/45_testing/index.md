@@ -93,13 +93,14 @@
 ## DL-04 确定性表达不绕过情感协议切片
 
 - `test_dl04_native_affective_stream.py` 现同时覆盖 native provider stream、感知证据 gate 与模型失败后的
-  安全 sub-agent fallback。后二者无需模型，但仍必须先提交 `affective_turn_planned`，为每个稳定分句提交
+  安全 sub-agent fallback。直连 Host 的后二者无需模型，但仍必须先提交 `affective_turn_planned`，为每个稳定分句提交
   `surface_sentence_delivery_intent` 与同一 Voice/Avatar Host protocol，随后才产生 SSE；foreground 只补
-  `RELEASE`，不得重复生成句子 intent。该测试还断言 fallback 的公开 trace 是
-  `deterministic_affective_delivery / NO_MODEL_RULE_FALLBACK`，不是伪造 provider usage。
-- 本次合并的 DL-02/DL-03/DL-04/Surface/DL-05 邻接定向集合为 `81 passed in 69.63s`；这仍只构成
-  本地 Host 协议与 SQLite 因果证据。真实 provider、guarded streaming、远端 Edge、物理 Voice/Avatar、
-  真人体验盲评和 DL-07 服务栈均未运行，远程 CI 为
+  `RELEASE`，不得重复生成句子 intent。带 governed Budget 的感知证据 gate 则断言没有 direct Life submit，且只返回一个
+  含 frozen plan、ExpressionPlan 与 relationship payload 的 `life.foreground_completed` NODE effect，留给 Task
+  Acceptance 执行。两条规则路径都记录 `NO_MODEL_RULE_FALLBACK`，不是伪造 provider usage。
+- 当前 guarded-rule + Surface 定向集合为 `61 passed in 4.68s`；此前 DL-02/DL-03/DL-04/Surface/DL-05 邻接集合为
+  `81 passed in 69.63s`。二者均只构成本地 Host 协议与 SQLite 因果证据。
+- 真实 provider、guarded streaming、远端 Edge、物理 Voice/Avatar、真人体验盲评和 DL-07 服务栈均未运行，远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片

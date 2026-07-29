@@ -279,7 +279,9 @@ Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭�
 直连 Host 的规则性证据提示和安全确定性降级回复同样属于用户可见表达：它们必须在可见前冻结并持久化
 `AffectiveTurnPlanV1`，按稳定分句写入 delivery intent，再由同一 `ExpressionPlanV1` 生成 Voice/Avatar
 Host protocol。不得因为没有调用模型而把文本裸发、跳过 accepted-response relationship episode 或重新把 self-affect 归零；
-带 governed Budget 的 worker 仍在 Task Acceptance 前保持缓冲，不能借此直接写 Life。
+带 governed Budget 的 worker 仍在 Task Acceptance 前保持缓冲，不能借此直接写 Life。其规则性证据回复必须
+携带唯一 deferred `life.foreground_completed` NODE effect（含 frozen plan、ExpressionPlan 与关系 provisional
+episode），只允许 accepted handler 在验收后写入 canonical journal。
 
 任何旧 Tribe EventBus、Broca 或 MotorCortex convenience callback 均不得将文本直接提交给 TTS/Avatar；这类调用必须
 无副作用拒绝，且不得因设备失败写入 self-affect、关系或状态 registry。

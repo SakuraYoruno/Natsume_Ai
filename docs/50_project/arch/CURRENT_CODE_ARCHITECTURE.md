@@ -221,7 +221,10 @@ Gateway 和多用户关系始终由 `/v1/host/input` 的签名身份建立。
 `surface_sentence_delivery_intent`（含同一 ExpressionPlan 的 Voice/Avatar intent），随后才 SSE 可见，
 最后写 accepted foreground 与 provisional relationship episode。该路径明确是
 `deterministic_affective_delivery / NO_MODEL_RULE_FALLBACK`，不是 model stream、Edge 已播放或预算量测。
-受治理 worker 仍因 Task Acceptance 与 canonical usage 约束保持 buffered，未被本地直连修复越权打开。
+受治理 worker 仍因 Task Acceptance 与 canonical usage 约束保持 buffered，未被本地直连修复越权打开；但它的
+perception-evidence rule terminal 已不再丢失 Life 因果：它只携带一个 deferred
+`life.foreground_completed` NODE effect（frozen plan、ExpressionPlan、foreground 与 provisional relationship），
+由 accepted handler 在验收后写 canonical journal，worker 没有 direct Life writer authority。
 
 ## 1. 结论
 

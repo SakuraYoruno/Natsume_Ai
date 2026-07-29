@@ -1382,6 +1382,246 @@ async def _canonical_affective_deterministic_delivery(
     )
 
 
+async def _canonical_affective_deferred_delivery(
+    agent_input: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+    trace: dict[str, Any],
+    plan: Mapping[str, Any],
+    text: str,
+    started_ms: int,
+    reply_source: str,
+    reason_code: str,
+    degraded: bool,
+    audit: Mapping[str, Any] | None = None,
+    raw_extra: Mapping[str, Any] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Return a canonical rule reply as a Task-Acceptance-owned effect.
+
+    The governed worker buffers this generator's nonterminal frames.  It must
+    therefore not call the direct plan/sentence writers used by the Host
+    stream: the one deferred ``life.foreground_completed`` effect carries the
+    frozen plan and becomes the sole writer after Task Acceptance.
+    """
+
+    request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    plan_id = str(plan.get("plan_id") or "").strip()
+    expression = _safe_mapping(plan.get("expression_plan"))
+    synchronization_id = str(expression.get("synchronization_id") or "").strip()
+    try:
+        sentences = _gated_deterministic_affective_sentences(
+            text,
+            agent_input=agent_input,
+            trace=trace,
+        )
+    except Exception as exc:
+        trace["affective_deterministic_delivery"] = {
+            "status": "REJECTED",
+            "reason_code": str(exc).split(":", 1)[0][:160],
+            "reply_source": reply_source,
+            "delivery_authority": "TASK_ACCEPTANCE",
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": str(exc).split(":", 1)[0][:160]
+                or "SURFACE_STREAM_EMPTY_SENTENCE",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    narrative = "".join(sentences).strip()
+    if not narrative:
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "SURFACE_STREAM_EMPTY_SENTENCE",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    stream_summary = {
+        "mode": "governed_deterministic_affective_buffered",
+        "streaming": False,
+        "sentence_delivery_staged": False,
+        "sentence_count": len(sentences),
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "self_affect_revision": plan.get("self_affect_revision"),
+        "first_token_ms": None,
+        "provider_usage_status": "NO_MODEL_RULE_FALLBACK",
+        "reply_source": reply_source,
+    }
+    trace["affective_deterministic_delivery"] = {
+        "status": "DEFERRED_TO_TASK_ACCEPTANCE",
+        "reply_source": reply_source,
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "sentence_count": len(sentences),
+    }
+    envelope = ReplyEnvelope(
+        kind="final_reply",
+        text=narrative,
+        response_form="text",
+        source=reply_source,
+        sendable=True,
+        persistable=True,
+        cacheable=False,
+        degraded=False,
+        reason_code=str(reason_code or "").strip() or None,
+        audit={"request_id": request_id, **dict(audit or {})},
+        raw_extra=dict(raw_extra or {}),
+    )
+    total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    timings_ms = _surface_timings_ms(
+        total_latency_ms=total_latency_ms,
+        llm_latency_ms=0,
+    )
+    try:
+        foreground_receipt = await asyncio.to_thread(
+            _submit_surface_foreground_completed,
+            life_command_service=ports.get_life_command_service(),
+            life_snapshot_reader=ports.get_life_snapshot_reader(),
+            relationship_lifecycle_service=ports.get_relationship_lifecycle_service(),
+            agent_input=agent_input,
+            result=None,
+            envelope=envelope,
+            narrative=narrative,
+            trace_stage_meta=trace,
+            timings_ms=timings_ms,
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=0,
+            stream_summary=stream_summary,
+            first_token_ms=None,
+            buffer_stream=True,
+        )
+    except Exception as exc:
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "LIFE_FOREGROUND_DEFER_FAILED",
+            "error_type": type(exc).__name__,
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "LIFE_FOREGROUND_DEFER_FAILED",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    if str(foreground_receipt.get("status") or "") != "DEFERRED_TO_TASK_ACCEPTANCE":
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "LIFE_FOREGROUND_DEFER_AUTHORITY_DRIFT",
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "LIFE_FOREGROUND_DEFER_AUTHORITY_DRIFT",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    trace["life_causality"] = {
+        "status": "DEFERRED_TO_TASK_ACCEPTANCE",
+        "reason_code": foreground_receipt.get("reason_code"),
+        "effect_count": len(list(foreground_receipt.get("effect_intents") or [])),
+    }
+    effect_intents = [
+        dict(item)
+        for item in list(foreground_receipt.get("effect_intents") or [])
+        if isinstance(item, Mapping)
+    ]
+    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    for sentence_index, sentence in enumerate(sentences):
+        yield _sse({"phase": "RENDER", "chunk": sentence})
+        yield _sse(
+            {
+                "phase": "SENTENCE",
+                "sentence": sentence,
+                "sentence_index": sentence_index,
+                "affective_turn_plan_id": plan_id,
+                "synchronization_id": synchronization_id,
+            }
+        )
+    yield _sse(
+        {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "reason_code": envelope.reason_code or None,
+            "narrative": narrative,
+            "request_id": request_id,
+            "reply_envelope": envelope.as_dict(),
+            "acceptance_effect_intents": effect_intents,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "surface_reply:governed_affective_deterministic_buffered",
+                "latency_ms": total_latency_ms,
+                "first_token_ms": None,
+                "llm_latency_ms": 0,
+                "model_id": model_audit["model_id"],
+                "provider_name": model_audit["provider_name"] or "rule",
+                "response_form": "text",
+                "timings_ms": timings_ms,
+                "reply_envelope": envelope.as_dict(),
+                "surface_main_chain": _public_result_trace(
+                    None,
+                    stream_summary=stream_summary,
+                ),
+                "trace_stage_meta": {
+                    **trace,
+                    "surface_main_chain_used": True,
+                    "reply_source": reply_source,
+                    "surface_renderer": {
+                        "status": "DEGRADED" if degraded else "OK",
+                        "invoked": True,
+                        "affected_output": True,
+                        "source": reply_source,
+                        "reason_code": envelope.reason_code or "",
+                    },
+                },
+            },
+        }
+    )
+
+
 async def run_surface_main_chain_for_surface_reply_input(
     agent_input: Any,
     *,
@@ -1549,12 +1789,11 @@ async def surface_main_chain_sse_generator(
     )
     evidence_gate_text = _surface_perception_evidence_gate_text(agent_input)
     if evidence_gate_text:
-        # A rule-based perception boundary is still Natsume speaking.  Direct
-        # Host delivery therefore freezes and persists the same canonical plan
-        # as ordinary affective chat.  Governed workers remain buffered until
-        # Task Acceptance; their legacy terminal is intentionally not made a
-        # direct Life writer here.
-        if canonical_affective_context and not _has_governed_model_budget(trace):
+        # A rule-based perception boundary is still Natsume speaking.  It
+        # therefore always receives the canonical plan.  Direct Host delivery
+        # stages it locally; a governed worker instead returns one deferred
+        # foreground effect, which becomes the sole writer after Acceptance.
+        if canonical_affective_context:
             try:
                 surface_input = build_surface_main_chain_input_from_surface_reply_input(
                     agent_input,
@@ -1597,6 +1836,44 @@ async def surface_main_chain_sse_generator(
                 "reason_code": "SURFACE_PERCEPTION_EVIDENCE_REQUIRED",
                 "has_multimodal_payload": False,
             }
+            if bool(getattr(agent_input, "defer_effects_to_task_runtime", False)):
+                async for event in _canonical_affective_deferred_delivery(
+                    agent_input,
+                    ports=ports,
+                    trace=trace,
+                    plan=plan,
+                    text=evidence_gate_text,
+                    started_ms=started_ms,
+                    reply_source="surface_evidence_gate",
+                    reason_code="SURFACE_PERCEPTION_EVIDENCE_REQUIRED",
+                    degraded=False,
+                    audit={"evidence_gate": True},
+                    raw_extra={"evidence_gate": True},
+                ):
+                    yield event
+                return
+            if _has_governed_model_budget(trace):
+                yield _sse(
+                    {
+                        "phase": "COMMIT",
+                        "done": True,
+                        "decision": "NO_REPLY",
+                        "reason_code": "GOVERNED_AFFECTIVE_DEFER_REQUIRED",
+                        "narrative": "",
+                        "request_id": request_id,
+                        "audit_refs": {
+                            "request_id": request_id,
+                            "path": "surface_reply:governed_affective_deterministic_buffered",
+                            "durability": "fail_closed_before_stream",
+                            "trace_stage_meta": {
+                                **trace,
+                                "surface_main_chain_used": True,
+                                "reply_source": "surface_evidence_gate_defer_reject",
+                            },
+                        },
+                    }
+                )
+                return
             async for event in _canonical_affective_deterministic_delivery(
                 agent_input,
                 ports=ports,

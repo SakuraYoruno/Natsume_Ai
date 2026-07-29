@@ -124,7 +124,9 @@
   可见前冻结 canonical plan、逐句写 `surface_sentence_delivery_intent` 和同一 Voice/Avatar Host
   protocol，并在最终 foreground 后创建 provisional relationship episode；它们的 public trace 必须为
   `deterministic_affective_delivery / NO_MODEL_RULE_FALLBACK`，不能伪装成 provider stream。带
-  governed Budget 的 worker 仍不得借此在 Task Acceptance 前直接写 Life。
+  governed Budget 的 perception-evidence gate 不得借此在 Task Acceptance 前直接写 Life，必须返回恰好一个
+  deferred `life.foreground_completed` NODE effect；effect 必须携带 frozen plan、ExpressionPlan 与关系 provisional
+  payload，且只允许 accepted handler 在验收后写入 canonical journal。
 - 当前合并的 DL-02/DL-03/DL-04/Surface/DL-05 邻接集合为 `81 passed in 69.63s`，并通过目标
   模块 `py_compile`、机器状态 JSON 解析和 `git diff --check`。这不是真实 provider、guarded streaming、
   远端 Edge 或 DL-07 服务栈验收；远程 CI 固定为 `NOT_RUN_ACCOUNT_QUOTA`。
