@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
@@ -105,7 +106,7 @@ def test_prefrontal_run_evolution_cycle_success(monkeypatch) -> None:
     assert len(logger.info_calls) == 1
 
 
-def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
+def test_prefrontal_canonical_life_skips_legacy_timeline_and_bond(
     monkeypatch,
 ) -> None:
     captured: dict[str, object] = {}
@@ -127,17 +128,11 @@ def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
                 errors=[],
             )
 
-    class _FakeSocial:
-        def resolve_bond_snapshot(self, *, person_id: str):
-            assert person_id == "user_x"
-            return {"bond_state_obj": None, "bond_summary": {}}
-
-        def resolve_scheduler_bond_summary(self, **_kwargs):
-            return {}
-
     monkeypatch.setattr(
         "host_brain.tribe.prefrontal_agent.get_social_brain_agent",
-        lambda: _FakeSocial(),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not read legacy Bond")
+        ),
     )
     agent = _build_prefrontal_agent(
         application_ports=TribeApplicationPorts(
@@ -155,6 +150,59 @@ def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
     assert result["status"] == "OK"
     assert captured["timeline_summary"] == {}
     assert captured["timeline_diary"] == {}
+    assert captured["bond_state"] is None
+    assert captured["bond_summary"] == {}
+    assert result["relationship_input_source"] == "CANONICAL_RELATIONSHIP_SCOPE_REQUIRED"
+
+
+def test_prefrontal_canonical_life_retires_bond_stage_growth_paths(
+    monkeypatch,
+) -> None:
+    subscriptions: list[str] = []
+
+    class _FakeBus:
+        def subscribe(self, event_type: str, _handler) -> None:  # noqa: ANN001
+            subscriptions.append(event_type)
+
+    monkeypatch.setattr(
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
+        lambda: _FakeBus(),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    agent.register_subscriptions()
+    direct_result = agent.apply_stage_promotion_growth(
+        user_id="user_x",
+        from_stage="FRIEND",
+        to_stage="SOULMATE",
+        ts_ms=1,
+    )
+    asyncio.run(
+        agent._on_bond_stage_changed_growth(  # noqa: SLF001
+            SimpleNamespace(
+                payload={
+                    "user_id": "user_x",
+                    "from_stage": "FRIEND",
+                    "to_stage": "SOULMATE",
+                },
+                ts_ms=1,
+            )
+        )
+    )
+
+    assert "BOND_STAGE_CHANGED" not in subscriptions
+    assert direct_result == {
+        "applied": False,
+        "reason": "LEGACY_BOND_STAGE_GROWTH_RETIRED",
+        "proposal": {
+            "status": "NO_CANDIDATE",
+            "reason_code": "LEGACY_BOND_STAGE_GROWTH_RETIRED",
+        },
+    }
 
 
 def test_prefrontal_run_evolution_cycle_degraded_on_error(monkeypatch) -> None:

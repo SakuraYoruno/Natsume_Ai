@@ -85,6 +85,15 @@
 > window 仍可使用旧 assembler 并被计数。本地 `51 passed in 9.07s` 仅覆盖这条边界，不代表
 > 其它 compatibility reader、Monitor/Review、真实 provider/Edge 或 DL-07 已完成。
 
+> **DL-06 Prefrontal 背景演化关系输入修订：** Host canonical `TribeApplicationPorts` 下的
+> `PrefrontalAgent.run_evolution_cycle()` 现在不会调用 `SocialBrain` 或读取 Bond snapshot。scheduler
+> intent 目前只有七海 persona identity，缺少 canonical relationship 必需的 workspace + subject scope，
+> 因而明确向 `EvolutionOrchestrator` 传递空 `bond_state/bond_summary`，并返回
+> `CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`。这阻断旧 score/stage 触发里程碑或人格 proposal；不是把
+> 无 scope 的关系换算成新 score，也不是完成 relationship-aware evolution。canonical agent 同时不订阅
+> `BOND_STAGE_CHANGED`，残留直连返回 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。仅显式 legacy compatibility
+> composition 可保留旧读取用于隔离回滚测试。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧

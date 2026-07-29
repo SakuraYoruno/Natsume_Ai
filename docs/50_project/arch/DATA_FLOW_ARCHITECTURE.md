@@ -763,6 +763,21 @@ component 得到当前 emotion，并把关系纹理作为独立 context；它不
 关系数值误当授权；高连续性 background tick 也不再调用 legacy Limbic metabolism。此数据流仅覆盖 default-mode
 reader，不替代其余 compatibility reader、真实 TTS/Avatar/Edge 或服务栈验收。
 
+后台人格演化的关系流则刻意停在 scope 边界：
+
+```text
+Scheduler evolution intent（persona identity）
+→ canonical Tribe authority 判断
+→ 缺 exact workspace + relationship subject
+→ empty relationship input + CANONICAL_RELATIONSHIP_SCOPE_REQUIRED
+→ EvolutionOrchestrator
+
+禁止：intent 或 BOND_STAGE_CHANGED → SocialBrain / legacy Bond score-stage → milestone / persona proposal
+```
+
+这不是忽略关系连续性，而是拒绝用无 scope 的旧积分伪造关系事实。只有将来携带并验证 exact canonical
+`RelationshipStateV2` 的调用才能加入该输入；在此之前，background evolution 不得推动亲密、主动或人格变化。
+
 普通 Chat 的关系读取流现为：
 
 ```text

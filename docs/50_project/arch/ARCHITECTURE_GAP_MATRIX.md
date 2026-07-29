@@ -126,6 +126,14 @@ assembler ID 与 read/suppressed counters，既不包含用户 scope/content，�
 `51 passed in 9.07s` 只覆盖这条读边界；剩余 compatibility reader、Monitor/Review、长期 canary、真实
 provider/Edge 与服务栈验收仍是未完成项。
 
+**Prefrontal background evolution 关系边界修订：** canonical `TribeApplicationPorts` 的
+`run_evolution_cycle()` 已停止读取 `SocialBrain/Bond`。当前 background intent 只有七海 persona
+identity，无法证明 relation 所属的 workspace + subject，因此显式传入空 `bond_state/bond_summary` 并标记
+`CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`；旧 Bond stage/score 不再能创建 milestone 或 persona proposal。
+canonical agent 不订阅 `BOND_STAGE_CHANGED`，残留 direct stage-growth 调用返回
+`LEGACY_BOND_STAGE_GROWTH_RETIRED`。这是 fail-closed 的 scope 收口，不是 canonical relationship-aware evolution，也不证明长期成长收益或
+其它 compatibility reader 已清零。仅 legacy compatibility composition 保留隔离回滚读取。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

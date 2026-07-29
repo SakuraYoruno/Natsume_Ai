@@ -157,9 +157,18 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
 - T-DL06-03：只有明确的离线/测试 compatibility port graph 才可进入
   `legacy_runtime_snapshot_assembler`，且每次进入必须增加 read count；production reader
   缺失时必须增加 suppressed fallback count 而非复活旧读取。
+- T-DL06-04：canonical Life authority 下的 `PrefrontalAgent.run_evolution_cycle()` 不得读取
+  legacy `EmotionTimeline`、`SocialBrain` 或 Bond；由于当前 background intent 不携带 exact
+  workspace + relationship subject，它必须传入空的 relation input 并标记
+  `CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`。同一 agent 不得订阅 `BOND_STAGE_CHANGED`，残留 direct
+  stage-growth 调用必须返回 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。显式 legacy compatibility composition 的读取保留为
+  隔离回滚测试，不能形成 production 人格成长 authority。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
   `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
   Edge 或 DL-07 服务栈验收。
+- 本轮增量证据：Prefrontal canonical evolution、Bond-stage retirement、相邻 runtime snapshot/
+  composition/OBS 与文档 Gate 集合 `125 passed in 22.48s`。它仍只证明本地 scope 收口，不能外推为
+  canonical relationship-aware evolution、长期 canary、真实 provider、远端 Edge 或 DL-07。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 

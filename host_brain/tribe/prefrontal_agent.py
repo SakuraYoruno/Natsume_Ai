@@ -67,6 +67,15 @@ class PrefrontalAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _uses_canonical_affective_life(self) -> bool:
+        """Whether this app-local agent must reject legacy affect/Bond paths."""
+
+        ports = self.application_ports
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
     def resolve_self_reflection_context(
         self,
         *,
@@ -655,10 +664,7 @@ class PrefrontalAgent:
             timeline_summary: dict[str, Any] = {}
             timeline_diary: dict[str, Any] = {}
             ports = self.application_ports
-            uses_canonical_affective_life = bool(
-                isinstance(ports, TribeApplicationPorts)
-                and ports.uses_canonical_affective_life()
-            )
+            uses_canonical_affective_life = self._uses_canonical_affective_life()
             if not uses_canonical_affective_life:
                 try:
                     if not isinstance(ports, TribeApplicationPorts):
@@ -673,23 +679,37 @@ class PrefrontalAgent:
                         exc=exc,
                     )
 
+            # A background evolution intent identifies Natsume's persona, not
+            # one exact relationship scope.  Canonical Life relationship
+            # heads are scoped by workspace + relationship subject, so this
+            # route must not substitute a global/legacy Bond score merely to
+            # make a proposal look more personal.  Until a future caller
+            # carries that exact scope, canonical runs deliberately withhold
+            # relationship input.  This prevents Bond stage/score from
+            # creating persona-growth candidates or relationship milestones.
             bond_state = None
             bond_summary: dict[str, Any] = {}
-            try:
-                social_snapshot = get_social_brain_agent().resolve_bond_snapshot(person_id=user_id)
-                bond_state = social_snapshot.get("bond_state_obj")
-                bond_summary = dict(social_snapshot.get("bond_summary") or {})
-                if not bond_summary:
-                    bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(
-                        session_id="default",
+            relationship_input_source = (
+                "CANONICAL_RELATIONSHIP_SCOPE_REQUIRED"
+                if uses_canonical_affective_life
+                else "LEGACY_BOND_COMPATIBILITY"
+            )
+            if not uses_canonical_affective_life:
+                try:
+                    social_snapshot = get_social_brain_agent().resolve_bond_snapshot(person_id=user_id)
+                    bond_state = social_snapshot.get("bond_state_obj")
+                    bond_summary = dict(social_snapshot.get("bond_summary") or {})
+                    if not bond_summary:
+                        bond_summary = get_social_brain_agent().resolve_scheduler_bond_summary(
+                            session_id="default",
+                            user_id=user_id,
+                        )
+                except Exception as exc:
+                    self._record_evolution_failure(
                         user_id=user_id,
+                        operation="READ_BOND_SNAPSHOT",
+                        exc=exc,
                     )
-            except Exception as exc:
-                self._record_evolution_failure(
-                    user_id=user_id,
-                    operation="READ_BOND_SNAPSHOT",
-                    exc=exc,
-                )
 
             result = orchestrator.run_evolution_cycle(
                 user_id=user_id,
@@ -729,6 +749,7 @@ class PrefrontalAgent:
                 "proposals": proposals,
                 "growth_awareness": result.growth_awareness,
                 "errors": result.errors,
+                "relationship_input_source": relationship_input_source,
             }
         except Exception as exc:
             failure_ref = self._record_evolution_failure(
@@ -1064,6 +1085,19 @@ class PrefrontalAgent:
         to_stage: str,
         ts_ms: int,
     ) -> dict[str, Any]:
+        if self._uses_canonical_affective_life():
+            # A legacy Bond stage is neither an exact canonical relationship
+            # scope nor admissible evidence for Persona evolution.  Keep the
+            # public compatibility method harmless in case an old event bus
+            # subscriber or adapter invokes it after the production cutover.
+            return {
+                "applied": False,
+                "reason": "LEGACY_BOND_STAGE_GROWTH_RETIRED",
+                "proposal": {
+                    "status": "NO_CANDIDATE",
+                    "reason_code": "LEGACY_BOND_STAGE_GROWTH_RETIRED",
+                },
+            }
         tracker = self._get_persona_growth_tracker()
         if tracker is None:
             return {"applied": False, "reason": "tracker_unavailable"}
@@ -1285,8 +1319,11 @@ class PrefrontalAgent:
             bus = get_tribe_event_bus()
             bus.subscribe("EVOLUTION_CYCLE_TRIGGERED", self._on_evolution_cycle_triggered)
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
-            # T-34：订阅关系阶段跃迁事件，触发人格成长
-            bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_growth)
+            # Legacy Bond stages are not canonical relationship evidence.
+            # Keep the subscription only in explicit compatibility graphs;
+            # production canonical Life must not even receive this trigger.
+            if not self._uses_canonical_affective_life():
+                bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_growth)
             # T-47：订阅孤独感信号，影响决策策略（降低主动性阈值）
             bus.subscribe("LONELINESS_SIGNAL", self._on_loneliness_signal)
             # T-71：订阅免疫拦截事件，触发安全审查成长周期
@@ -1692,6 +1729,12 @@ class PrefrontalAgent:
         将关系进展转化为人格成长动力（如开放度提升、信任感增强等）。
         降级跃迁不触发成长（但不会回滚已有成长）。
         """
+        if self._uses_canonical_affective_life():
+            _logger.info(
+                "PrefrontalAgent 忽略 retired Bond 阶段成长事件: canonical Life authority",
+            )
+            return
+
         user_id = "natsume_ai"
         try:
             payload = dict(getattr(event, "payload", None) or {})

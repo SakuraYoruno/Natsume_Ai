@@ -558,6 +558,15 @@ relationship subject 的**同一条** canonical Life head 投影 OBS 所需的 s
 （`67 passed in 10.65s`），另有 OBS route integration `3 passed, 27 deselected in 19.51s`；两者都只是本地
 进程内证据，Monitor/Review、真实 provider、远端 Edge 和 DL-07 仍未验收。
 
+后台人格演化也不再把旧 Bond 当成 canonical 关系的补丁。`PrefrontalAgent.run_evolution_cycle()`
+在 production canonical Life authority 下只识别七海的人格 identity；该 background intent 没有携带
+精确的 workspace + relationship subject，故会明确保留空的关系输入，而不是读取
+`SocialBrain/Bond` score/stage 来生成里程碑或人格成长候选。只有显式 legacy compatibility
+composition 仍保留旧读取，供隔离回滚测试使用；canonical agent 也不再订阅
+`BOND_STAGE_CHANGED`，其旧 stage-growth 直连入口固定拒绝候选。未来若要让背景演化消费关系事实，必须先传入并校验
+精确 scope 的 canonical `RelationshipStateV2`。本地合同测试证明此一读取边界，但不代表剩余
+compatibility reader、长期成长收益、真实 provider、远端 Edge 或 DL-07 已完成。
+
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开
 SocialBrain。原先未被生产代码导入的重复 `app/input_service_ack.py` 已删除。该收口只覆盖本地 helper

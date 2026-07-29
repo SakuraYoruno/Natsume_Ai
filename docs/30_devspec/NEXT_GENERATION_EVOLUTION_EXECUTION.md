@@ -354,6 +354,16 @@ relationship subject、workspace、session、topic 或情绪数据。明确离�
 snapshot 边界与计量；其它 compatibility projection、Monitor/Review、长期 canary、真实 provider/
 Edge 与 DL-07 仍未完成。
 
+**Prefrontal 背景演化关系输入修订：** `run_evolution_cycle()` 在 canonical Life authority
+下不再读取 `SocialBrain/Bond`。当前 scheduler intent 只有七海 persona identity，没有可验证的
+workspace + relationship subject，故传给 `EvolutionOrchestrator` 的 `bond_state/bond_summary` 固定为空，
+并输出 `CANONICAL_RELATIONSHIP_SCOPE_REQUIRED` provenance；旧 Bond stage/score 不能再触发 milestone
+或人格成长 proposal。canonical agent 不再订阅 `BOND_STAGE_CHANGED`，并将残留 direct stage-growth
+调用固定拒绝为 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。显式 legacy compatibility composition 仍可读取旧 Bond，仅服务隔离回滚测试。
+这不是 canonical relationship-aware evolution：后者必须由未来调用者携带 exact scoped
+`RelationshipStateV2`，并另行验收。该本地切片不证明其余 compatibility consumer、长期 canary、
+真实 provider/Edge 或 DL-07。
+
 **默认模式 reader 修订：** `DefaultModeAgent` 现在从一次 canonical Life snapshot 的
 `project_inner_world_state()` 投影读取私密活动所需的 self-affect 与关系纹理。投影标记为
 `CANONICAL_LIFE_JOURNAL`，仅包含有界 components/mood/needs/regulation 与 trust/safety/attunement/
