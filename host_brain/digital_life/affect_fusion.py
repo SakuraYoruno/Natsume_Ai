@@ -83,6 +83,9 @@ _SPACE_MARKERS = (
 )
 _REPAIR_MARKERS = ("对不起", "抱歉", "误会", "不是那个意思", "我刚才说重了")
 _BOUNDARY_MARKERS = ("不要这样", "别这样", "不舒服", "越界", "停止")
+# These are deliberately narrow, direct-address patterns. They are appraisal
+# triggers only: original utterances remain outside the Life journal. A request
+# for space, a boundary, or a repair signal always takes priority below.
 _NATSUME_HARM_MARKERS = (
     "伤到我",
     "伤害我",
@@ -109,6 +112,9 @@ _DIRECTED_DISRESPECT_MARKERS = (
     "you're awful",
     "you are awful",
 )
+_DIRECTED_THREAT_MARKERS = ("我要杀了你", "我弄死你", "你去死")
+_DIRECTED_HURT_MARKERS = ("你真恶心", "你恶心死了", "我讨厌你", "真的讨厌你")
+_DIRECTED_COMPARISON_MARKERS = ("别人比你好", "你不如别人", "还是别人好", "我更喜欢别人")
 
 
 def _digest(value: Any) -> str:
@@ -357,6 +363,7 @@ class _AppraisalCandidate:
     uncertainty: float
     components: tuple[EmotionComponentV1, ...]
     action: str
+    regulation_mode: str = "EXPRESS"
     evidence_refs: tuple[str, ...] = ()
 
 
@@ -504,7 +511,7 @@ class AffectFusionService:
             path = "DEEP"
             selected = candidates[0]
             try:
-                appraisal_id, appraisal_receipts = self._submit_appraisal(
+                appraisal_id, appraisal_receipt = self._submit_appraisal(
                     service=service,
                     scope=scope,
                     request_id=stable_request_id,
@@ -512,7 +519,7 @@ class AffectFusionService:
                     observations=active,
                     created_at_ms=now_ms,
                 )
-                receipts.extend(appraisal_receipts)
+                receipts.append(appraisal_receipt)
             except (TypeError, ValueError):
                 # Do not retry an invalid candidate indefinitely. The turn
                 # still has its durable observations and explicitly takes the
@@ -608,7 +615,7 @@ class AffectFusionService:
         candidate: _AppraisalCandidate,
         observations: Sequence[UserAffectObservationV1],
         created_at_ms: int,
-    ) -> tuple[str, tuple[LifeCommandReceipt, LifeCommandReceipt]]:
+    ) -> tuple[str, LifeCommandReceipt]:
         observation_refs = tuple(
             f"affect-observation://{item.observation_id}"
             for item in observations[:8]
@@ -663,16 +670,21 @@ class AffectFusionService:
                 *episode_candidate_evidence_refs,
             ),
         )
-        regulation_mode = _regulation_mode_for_candidate(candidate)
+        # Appraisal and its first expression boundary are one Life command.
+        # A crash cannot leave a newly opened self-affect episode visible to
+        # Surface without the regulation that constrains its expression.
+        # A later re-regulation may still use ``affective_regulation_decided``
+        # as its own command, but the initial decision belongs atomically to
+        # the causal event that opened the episode.
         regulation_seed = {
             "schema": "regulation-decision.v1",
             "appraisal_id": appraisal_id,
-            "mode": regulation_mode,
+            "mode": candidate.regulation_mode,
         }
         regulation = RegulationDecisionV1(
             regulation_id=f"regulation_{_digest(regulation_seed)[:32]}",
             relationship_subject_id=scope.relationship_subject_id,
-            mode=regulation_mode,
+            mode=candidate.regulation_mode,
             # The current-turn planner reopens this exact provenance link.
             # It must not apply an old durable regulation to a later, unrelated
             # input merely because it happens to be the latest snapshot head.
@@ -682,33 +694,22 @@ class AffectFusionService:
                 *regulation_candidate_evidence_refs,
             ),
             decided_at_ms=max(0, int(created_at_ms)),
-            # The affective head keeps only four active episodes.  An
-            # appraisal can therefore be journaled even when its low-salience
-            # episode is immediately pruned; binding regulation to that
-            # optional active id would turn a valid current-turn decision into
-            # a partial-write failure.  The immutable appraisal ref remains
-            # the authoritative causal link.
-            episode_id=None,
+            episode_id=episode.episode_id,
         )
-        appraisal_receipt = self._submit(
+        receipt = self._submit(
             service=service,
             scope=scope,
             request_id=request_id,
             ordinal=999,
             command_type="affective_event_appraised",
-            payload={"appraisal": appraisal.as_dict(), "episode": episode.as_dict()},
+            payload={
+                "appraisal": appraisal.as_dict(),
+                "episode": episode.as_dict(),
+                "regulation": regulation.as_dict(),
+            },
             created_at_ms=created_at_ms,
         )
-        regulation_receipt = self._submit(
-            service=service,
-            scope=scope,
-            request_id=request_id,
-            ordinal=1_000,
-            command_type="affective_regulation_decided",
-            payload={"regulation": regulation.as_dict()},
-            created_at_ms=created_at_ms,
-        )
-        return appraisal_id, (appraisal_receipt, regulation_receipt)
+        return appraisal_id, receipt
 
 
 def _collect_observation_drafts(
@@ -1065,6 +1066,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.3, -0.08, 0.3, "clarify"),
                 ),
                 action="clarify_gently",
+                regulation_mode="GROUND",
             )
         )
     if has_space or has_boundary:
@@ -1085,6 +1087,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.3, -0.04, 0.25, "contain"),
                 ),
                 action="give_space",
+                regulation_mode="GIVE_SPACE",
             )
         )
     if natsume_may_have_hurt_user:
@@ -1108,6 +1111,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.22, -0.06, 0.24, "slow_down"),
                 ),
                 action="repair_open",
+                regulation_mode="SEEK_REPAIR",
             )
         )
     if directed_disrespect_toward_natsume:
@@ -1131,6 +1135,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.34, -0.06, 0.24, "contain"),
                 ),
                 action="set_boundary",
+                regulation_mode="CONTAIN",
             )
         )
     if aftereffect_outcome == "REPAIR_ACCEPTED" and aftereffect_id:
@@ -1151,6 +1156,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CARE", 0.36, 0.3, 0.18, "receive"),
                 ),
                 action="receive_repair",
+                regulation_mode="EXPRESS",
                 evidence_refs=(f"relationship-aftereffect://{aftereffect_id}",),
             )
         )
@@ -1169,6 +1175,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("OPENNESS", 0.28, 0.22, 0.16, "listen"),
                 ),
                 action="repair_open",
+                regulation_mode="SEEK_REPAIR",
             )
         )
     if not conflict and _has_mixed_user_affect(observations):
@@ -1190,8 +1197,24 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.26, -0.04, 0.22, "hold"),
                 ),
                 action="hold_complexity",
+                regulation_mode="EXPRESS",
             )
         )
+    # Do not turn a user asking us to stop, state a boundary, or repair an
+    # earlier exchange into Natsume feeling slighted.  Once those conditions
+    # are absent, a small fixed set of direct relational impacts can form
+    # Natsume-owned affect.  The appraised components are intentionally not
+    # copies of a user emotion label.
+    if not (
+        has_space
+        or has_boundary
+        or has_repair
+        or natsume_may_have_hurt_user
+        or directed_disrespect_toward_natsume
+    ):
+        direct = _direct_relational_candidate(lower)
+        if direct is not None:
+            candidates.append(direct)
     # Keyword text is intentionally low confidence, but a clear distress
     # marker still deserves the bounded deep path so Natsume can choose a
     # careful, uncertainty-aware companion response. The appraisal produces
@@ -1211,6 +1234,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CONCERN", 0.38, -0.18, 0.42, "support"),
                 ),
                 action="comfort",
+                regulation_mode="EXPRESS",
             )
         )
     if confidence >= 0.6 and tag in _POSITIVE_TAGS:
@@ -1228,10 +1252,78 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CARE", 0.2, 0.25, 0.14, "share"),
                 ),
                 action="share_joy",
+                regulation_mode="EXPRESS",
             )
         )
     candidates.sort(key=lambda item: (-item.score, item.kind))
     return tuple(candidates[:2])
+
+
+def _direct_relational_candidate(message: str) -> _AppraisalCandidate | None:
+    """Return one high-precision, self-owned relational appraisal.
+
+    This detector deliberately recognises only direct threats, denigration and
+    explicit comparison.  It neither infers relationship permission nor turns
+    ordinary negative mood into a grievance.  Jealousy is held at low
+    intensity and always regulated as ``CONTAIN`` so it cannot become an
+    exclusive, comparative or reply-seeking move.
+    """
+
+    if any(marker in message for marker in _DIRECTED_THREAT_MARKERS):
+        return _candidate(
+            kind="directed_relational_threat",
+            score=0.96,
+            goal=-0.72,
+            significance=0.82,
+            boundary=0.9,
+            risk=0.72,
+            uncertainty=0.12,
+            responsibility=0.84,
+            controllability=0.76,
+            components=(
+                EmotionComponentV1("ANGER", 0.48, -0.66, 0.66, "set_boundary"),
+                EmotionComponentV1("CAUTION", 0.34, -0.12, 0.42, "contain"),
+            ),
+            action="set_boundary",
+            regulation_mode="CONTAIN",
+        )
+    if any(marker in message for marker in _DIRECTED_HURT_MARKERS):
+        return _candidate(
+            kind="directed_relational_hurt",
+            score=0.86,
+            goal=-0.52,
+            significance=0.76,
+            boundary=0.5,
+            risk=0.24,
+            uncertainty=0.42,
+            responsibility=0.66,
+            controllability=0.62,
+            components=(
+                EmotionComponentV1("HURT", 0.47, -0.54, 0.38, "contain"),
+                EmotionComponentV1("CARE", 0.22, 0.18, 0.14, "stay_kind"),
+            ),
+            action="contain_hurt",
+            regulation_mode="CONTAIN",
+        )
+    if any(marker in message for marker in _DIRECTED_COMPARISON_MARKERS):
+        return _candidate(
+            kind="directed_relational_comparison",
+            score=0.7,
+            goal=-0.14,
+            significance=0.58,
+            boundary=0.08,
+            risk=0.08,
+            uncertainty=0.5,
+            responsibility=0.14,
+            controllability=0.72,
+            components=(
+                EmotionComponentV1("JEALOUSY", 0.28, -0.12, 0.28, "contain"),
+                EmotionComponentV1("CARE", 0.18, 0.18, 0.12, "respect_choice"),
+            ),
+            action="contain_jealousy",
+            regulation_mode="CONTAIN",
+        )
+    return None
 
 
 def _candidate(
@@ -1247,6 +1339,7 @@ def _candidate(
     uncertainty: float,
     components: tuple[EmotionComponentV1, ...],
     action: str,
+    regulation_mode: str = "EXPRESS",
     evidence_refs: tuple[str, ...] = (),
 ) -> _AppraisalCandidate:
     return _AppraisalCandidate(
@@ -1261,6 +1354,7 @@ def _candidate(
         uncertainty=uncertainty,
         components=components,
         action=action,
+        regulation_mode=regulation_mode,
         evidence_refs=evidence_refs,
     )
 
@@ -1277,6 +1371,7 @@ def _self_component_to_transport_tag(value: Any) -> str:
         "RELIEF": "CALM",
         "HURT": "SAD",
         "ANGER": "ANGRY",
+        "JEALOUSY": "THINKING",
     }
     return mapping.get(component, "CALM")
 

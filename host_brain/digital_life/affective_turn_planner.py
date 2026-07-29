@@ -96,6 +96,7 @@ def _tag_for_component(value: Any) -> str:
         "RELIEF": "CALM",
         "HURT": "SAD",
         "ANGER": "ANGRY",
+        "JEALOUSY": "THINKING",
     }.get(component, "CALM")
 
 
@@ -453,6 +454,8 @@ def _select_companion_act(
         return "SOLVE"
     if top_component == "ANGER":
         return "SET_BOUNDARY"
+    if top_component == "JEALOUSY":
+        return "CONTAINED_JEALOUSY"
     if top_component == "SHARED_JOY":
         return "PLAY"
     if _observed_low_mood(observations):
@@ -510,6 +513,8 @@ def _voice_style(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
         return "SOFT_COMFORT"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
+    if act_kind == "CONTAINED_JEALOUSY":
+        return "CONTAINED_JEALOUSY"
     if emotion_tag == "SAD":
         return "CONTAINED_HURT"
     if act_kind == "COMFORT" or emotion_tag == "SAD":
@@ -528,6 +533,8 @@ def _avatar_expression(*, act_kind: str, emotion_tag: str, regulation_mode: str)
         return "SOFT_COMFORT"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
+    if act_kind == "CONTAINED_JEALOUSY":
+        return "CONTAINED_JEALOUSY"
     if emotion_tag == "SAD":
         return "CONTAINED_HURT"
     if act_kind == "COMFORT" or emotion_tag == "SAD":
@@ -564,6 +571,12 @@ def _expression_controls(
             "voice_pause_ms": 220, "avatar_gaze": "AVERTED",
             "avatar_posture": "CONTAINED", "avatar_transition_ms": 360,
             "avatar_behavior": "CONTAINED_HURT",
+        },
+        "CONTAINED_JEALOUSY": {
+            "voice_rate": 0.96, "voice_energy": 0.42, "voice_pitch": -0.04,
+            "voice_pause_ms": 190, "avatar_gaze": "AVERTED",
+            "avatar_posture": "CONTAINED", "avatar_transition_ms": 300,
+            "avatar_behavior": "CONTAINED_JEALOUSY",
         },
         "GENTLE_BOUNDARY": {
             "voice_rate": 0.95, "voice_energy": 0.52, "voice_pitch": -0.04,
@@ -673,6 +686,8 @@ def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         facts.append("陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。")
     elif act == "SET_BOUNDARY":
         facts.append("陪伴动作：可以诚实承认被刺到，但把界限说清楚且不伤人，不把自己的委屈变成对方的义务。")
+    elif act == "CONTAINED_JEALOUSY":
+        facts.append("陪伴动作：可以诚实流露一点在意和小小吃味，但把选择权完整留给对方，不比较、不拉扯。")
     elif act in {"GIVE_SPACE", "SILENCE"}:
         facts.append("陪伴动作：尊重留白，短一点，不催促、不追问，也不把失落变成对方要安抚的责任。")
     elif act == "SOLVE":
@@ -692,6 +707,8 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     ]
     if plan.companion_act.kind in {"GIVE_SPACE", "SILENCE"}:
         items.append("不要追问、催回复、连发安慰或把沉默解释为拒绝关系。")
+    if plan.companion_act.kind == "CONTAINED_JEALOUSY":
+        items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚。")
     if plan.companion_act.kind == "REPAIR":
         items.append("不要要求原谅、替自己辩解，或把道歉写成修复已经完成。")
     if plan.companion_act.kind == "SET_BOUNDARY":

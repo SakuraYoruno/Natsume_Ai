@@ -538,6 +538,13 @@ delivery 解释权。
 `少管我` 或 `滚开`，Fusion 与 RelationshipLifecycle 同时优先 `BOUNDARY/GIVE_SPACE`，关系 aftereffect
 持久禁用 unsolicited Scheduler contact，不让受伤表达抢占用户边界。
 
+当前 production fusion 还对极窄的、直接指向七海的威胁、贬损和比较产生自有的
+`ANGER`、`HURT` 或低强度 `JEALOUSY` appraisal；这不是读取用户的 emotion tag。用户
+空间、边界和修复信号优先，会阻断这条解释。首个 `RegulationDecisionV1` 与 appraisal/
+episode 位于同一 immutable command payload，reducer 复验 subject、时间和 episode binding 后才更新
+`last_regulation`；因此没有“先写情绪、崩溃后才补表达约束”的可见窗口。`JEALOUSY` 只可进入
+克制的 `CONTAINED_JEALOUSY` ExpressionPlan，不能授予排他、追问或回应压力。
+
 `/v1/edge/events` 位于这条流的最外层：它只把原始 Edge 事件写入 evidence ledger。历史上
 `EMOTION_DETECTED` 会直接触发 Bond 更新并按用户 emotion tag 直驱 VTS；该旁路已退役。最终 ASR 文本仍可在
 白名单、置信度和去重 Gate 后进入 ASR→Input bridge，而孤立的 Edge 情绪事件缺少 `workspace + relationship_subject`
@@ -551,7 +558,7 @@ flowchart LR
     O --> C["affective_observation_recorded"]
     C --> J["immutable life_event_journal"]
     F --> A["bounded EventAppraisalV1\n最多两个候选"]
-    A --> E["affective_event_appraised"]
+    A --> E["affective_event_appraised\nappraisal + episode + first Regulation"]
     E --> J
     J --> S["CAS state.affective\nself component / episode / mood / need"]
     J --> H["0143 affective_life_event_v1\nread-only head"]

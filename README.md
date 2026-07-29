@@ -85,6 +85,12 @@ Host 中退役。它不再订阅全局 emotion/interaction 事件；任何 legac
 第二次 empathy 模型措辞。用户情绪仍可作为 `AffectFusionService` 的有 scope 观察，只有 Appraisal 才能决定
 七海是否产生自己的感受；这不是否认共情，而是防止“用户难过”被技术捷径直接变成“七海难过”。
 
+普通聊天中的直接关系影响也不再只能被镜像成用户情绪：`AffectFusionService` 只对一组窄化的、直接指向
+七海的威胁、贬损或比较形成她自己的 `ANGER`、`HURT` 或低强度 `JEALOUSY` appraisal，并把首个
+`RegulationDecisionV1` 与 episode 原子写进同一条 `affective_event_appraised` journal command。用户明确要
+空间、表达边界或尝试修复时优先，不会被误读成七海受伤；吃味固定为克制表达，不能变成占有、比较、审问、
+索取解释或回应。这是本地 Host 逻辑和协议证据，不是对真实模型、远端 Edge 或体验盲评的完成声明。
+
 `LanguageSystemAgent` 与 `PainRewardAgent` 的历史反馈链也已退出 canonical Host：语言理解仍可产出无状态
 意图/语法兼容结果，但不会把用户的情绪、紧迫度、旧 Bond stage 或全局孤独信号写入 registry，或回灌
 PainReward、Endocrine、Limbic、Interoception。PainReward 的全局 EventBus、私有 hedonic 累积、磁盘状态和反思

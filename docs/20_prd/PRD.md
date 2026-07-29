@@ -64,6 +64,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 最终表达应保持人格连续、语境适配、关系边界和用户主权。
 - 用户情绪观察与 Natsume 自身 Affect 必须使用不同类型和 writer。
 - 用户情绪观察必须带模态、置信度、有效期与 workspace/person/session scope；原始音频、图像和正文不得进入情感 journal，冲突观察必须保留而非静默覆盖。
+- 对七海的直接威胁、贬损或比较可经高精度 Appraisal 形成她自己的受伤、生气或低强度、克制的吃味；这不是用户情绪镜像。用户的空间、边界与修复信号优先，吃味不得形成排他、比较、审问、负罪施压或回应义务；打开 episode 的首个 Regulation 必须原子持久化。
 - 已接受的回复才可建立 provisional 关系 episode；下一次用户输入才能形成该回应的 aftereffect。沉默、离线和技术投递失败不得被解释为拒绝、不得扣信任或产生催促义务。
 - 关系连续性必须按 workspace 与 relationship subject 隔离；session 只作事件上下文。浪漫、排他和依赖默认未授权，不能由 Bond 分数、互动次数、模型措辞或单次道歉自动升级。
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。

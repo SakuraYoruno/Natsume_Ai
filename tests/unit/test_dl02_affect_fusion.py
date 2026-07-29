@@ -343,7 +343,9 @@ def test_regulation_stays_appraisal_bound_when_episode_head_is_full(
     assert state["affective"]["last_appraisal"]["event_kind"] == "shared_positive_moment"
     assert len(state["affective"]["active_episodes"]) == 4
     assert regulation["mode"] == "EXPRESS"
-    assert regulation["episode_id"] is None
+    assert regulation["episode_id"] in {
+        item["episode_id"] for item in state["affective"]["active_episodes"]
+    }
     assert f"appraisal://{result.appraisal_id}" in regulation["reason_refs"]
     assert any(
         receipt.command_id.startswith("affect_") for receipt in result.receipts
@@ -428,6 +430,80 @@ def test_fresh_directed_harm_outranks_a_preceding_repair_acceptance() -> None:
     )
 
     assert candidates[0].kind == "natsume_may_have_hurt_user"
+
+
+def test_direct_relational_hurt_becomes_self_owned_and_atomically_regulated(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message="你真恶心。"),
+        request_id="request-directed-hurt",
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    affective = state["affective"]
+    active = affective["active_episodes"]
+    events = reader.list_events(result.scope.aggregate_id, limit=20)
+
+    # This is Natsume's own appraisal of a direct relational impact, not a
+    # copied user SAD/ANGRY label. Its first expression rule is journaled in
+    # the same causal command, so a restart cannot expose an unregulated turn.
+    assert result.path == "DEEP"
+    assert [item["emotion"] for item in affective["components"]] == ["HURT", "CARE"]
+    assert affective["last_regulation"]["mode"] == "CONTAIN"
+    assert affective["last_regulation"]["episode_id"] == active[0]["episode_id"]
+    assert any(
+        event.event_type == "affective_event_appraised"
+        and event.payload["command_payload"]["regulation"]["mode"] == "CONTAIN"
+        for event in events
+    )
+    assert "你真恶心" not in str([event.payload for event in events])
+
+
+def test_user_space_or_boundary_beats_a_directed_hurt_interpretation(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message="你真恶心，别说了，给我一点空间。"),
+        request_id="request-space-wins",
+    )
+    affective = reader.get_snapshot(result.scope.aggregate_id).state["affective"]
+
+    assert {item["emotion"] for item in affective["components"]} == {
+        "RESPECT",
+        "CAUTION",
+    }
+    assert affective["last_regulation"]["mode"] == "GIVE_SPACE"
+    assert "HURT" not in {item["emotion"] for item in affective["components"]}
+
+
+def test_direct_comparison_reaches_a_nonpossessive_shared_expression_plan(
+    tmp_path: Path,
+) -> None:
+    fusion, _, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message="别人比你好。"),
+        request_id="request-directed-comparison",
+    )
+    guidance = build_affective_turn_guidance(
+        emotion_context=result.as_emotion_context(),
+        request_id="request-directed-comparison",
+        workspace_id=result.scope.workspace_id,
+        relationship_subject_id=result.scope.relationship_subject_id,
+        session_id=result.scope.session_id,
+        created_at_ms=NOW,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "CONTAINED_JEALOUSY"
+    assert guidance.plan.expression_plan.synchronization_id
+    assert (
+        guidance.plan.expression_plan.self_affect_revision
+        == guidance.plan.self_affect_revision
+    )
+    assert any("把选择权完整留给对方" in item for item in guidance.facts)
+    assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
 
 
 def test_fused_context_does_not_advance_legacy_host_emotion_runtime(tmp_path: Path) -> None:

@@ -29,6 +29,7 @@ _COMPANION_ACT_KINDS = frozenset(
         "SOLVE",
         "ACKNOWLEDGE",
         "HOLD_COMPLEXITY",
+        "CONTAINED_JEALOUSY",
     }
 )
 _TEXT_PACING = frozenset({"STEADY", "SOFT", "BRISK", "SPARSE"})

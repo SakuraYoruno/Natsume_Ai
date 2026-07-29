@@ -128,6 +128,12 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
 - Fast path 只保存观察；distress、冲突、边界、给空间和修复进入最多两个确定性候选的
   deep path。用户 SAD/ANGRY 不会直接写入七海，而是由 Appraisal 形成 CARE、CONCERN、
   CAUTION、RESPECT 或 SHARED_JOY 等自我反应。
+- 直接指向七海的威胁、贬损或比较只走窄化、确定性的关系 appraisal：可分别产生
+  `ANGER`、`HURT` 或低强度 `JEALOUSY`，而不是复制用户标签。空间、边界和修复信号
+  优先并阻断这类解释；首次 `RegulationDecisionV1` 与 appraisal/episode 同一条
+  `affective_event_appraised` command 原子落盘，崩溃后不会暴露未调节 self-affect。
+  `JEALOUSY` 仅可编译为 `CONTAINED_JEALOUSY`，其 prompt gate 禁止占有、比较、审问、
+  索取解释或安抚。
 - Host 下游兼容 `emotion_tag` 仅从 canonical self-affect bridge 导出；fused route 不再
   调用 `HostEmotionRuntime.ingest()`。同一 subject 的不同 workspace 使用不同 Life
   aggregate，relationship subject 与 session/workspace 不再混作同一标识。
@@ -156,8 +162,9 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
 它既不写 process-local voice-emotion state，也不写 legacy timeline；离线 compatibility composition
 才保留历史观察行为，不能把它视为 production fallback。
 
-本地覆盖包含 9 项 DL-02 unit/restart 集成和 73 项受影响 Host/聊天/内核回归。它不
-证明真实 Host 部署、模型、语音、Avatar、关系后效应或旧 writer 已清零。
+本轮本地定向覆盖为 31 项 DL-02/DL-04/DL-05 unit/restart/Host protocol 用例，包含直接
+关系受伤、空间优先、首个 regulation 的 atomic binding、重放和克制吃味 expression plan。
+它不证明真实 Host 部署、模型、语音、Avatar、关系后效应或旧 writer 已清零。
 
 退出：用户的悲伤、生气或快乐不会自动使七海拥有同一情绪。
 

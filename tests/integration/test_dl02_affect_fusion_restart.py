@@ -56,6 +56,10 @@ def test_fusion_journal_restart_replays_same_workspace_scoped_self_affect(
         "self_id": "natsume_ai",
         "relationship_subject_id": "person-restart",
     }
+    assert replayed.state["affective"]["last_regulation"]["mode"] == "SEEK_REPAIR"
+    assert replayed.state["affective"]["last_regulation"]["episode_id"] == replayed.state[
+        "affective"
+    ]["active_episodes"][0]["episode_id"]
     assert restarted_reader.list_affective_event_heads(
         result.scope.aggregate_id,
         limit=20,

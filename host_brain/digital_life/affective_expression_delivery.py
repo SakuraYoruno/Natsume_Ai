@@ -23,6 +23,7 @@ from natsume_contracts.life import (
 _EDGE_EMOTION_BY_EXPRESSION = {
     "SOFT_COMFORT": "CALM",
     "CONTAINED_HURT": "SAD",
+    "CONTAINED_JEALOUSY": "THINKING",
     "GENTLE_BOUNDARY": "THINKING",
     "REPAIR_OPEN": "CALM",
     "GIVE_SPACE": "CALM",

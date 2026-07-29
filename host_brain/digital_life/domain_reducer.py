@@ -1449,6 +1449,12 @@ def _apply_affective_appraisal(
     _reject_raw_affective_material(payload)
     appraisal = _appraisal_from_mapping(_mapping(payload.get("appraisal")))
     episode = _episode_from_mapping(_mapping(payload.get("episode")))
+    regulation_payload = _mapping(payload.get("regulation"))
+    regulation = (
+        _regulation_from_mapping(regulation_payload)
+        if regulation_payload
+        else None
+    )
     _assert_affective_subject(
         appraisal.relationship_subject_id,
         state=state,
@@ -1465,6 +1471,16 @@ def _apply_affective_appraisal(
         raise ValueError("episode.opened_at_ms cannot be after command time")
     if not episode.unresolved:
         raise ValueError("a newly appraised episode must be unresolved")
+    if regulation is not None:
+        _assert_affective_subject(
+            regulation.relationship_subject_id,
+            state=state,
+            field_name="regulation.relationship_subject_id",
+        )
+        if regulation.decided_at_ms > now_ms:
+            raise ValueError("regulation.decided_at_ms cannot be after command time")
+        if regulation.episode_id != episode.episode_id:
+            raise ValueError("appraisal regulation must bind the opened episode")
 
     affective = _mapping(state.get("affective"))
     _decay_affective_episodes(affective, now_ms=now_ms)
@@ -1472,8 +1488,20 @@ def _apply_affective_appraisal(
     if any(str(row.get("episode_id") or "") == episode.episode_id for row in active_rows):
         raise ValueError("episode_id is already active")
     active_rows.append(_episode_state_from_contract(episode, now_ms=now_ms))
-    affective["active_episodes"] = _bounded_episode_rows(active_rows)
+    # The opening regulation is atomically bound to this episode.  When the
+    # bounded head is already full, retain the new causal episode and evict the
+    # weakest older one rather than persisting a regulation that points outside
+    # the visible self-affect head.
+    affective["active_episodes"] = _bounded_episode_rows(
+        active_rows,
+        pinned_episode_id=episode.episode_id if regulation is not None else None,
+    )
     affective["last_appraisal"] = appraisal.as_dict()
+    if regulation is not None:
+        # The initial regulation is carried atomically with the causal
+        # appraisal.  This avoids a crash-visible self-affect transition that
+        # has no durable expression boundary for Surface to consume.
+        affective["last_regulation"] = regulation.as_dict()
     affective["last_integrated_ms"] = now_ms
     affective["revision"] = _integer(affective.get("revision")) + 1
     _apply_appraisal_needs(affective, appraisal=appraisal, now_ms=now_ms)
@@ -1814,7 +1842,11 @@ def _episode_state_from_contract(
     }
 
 
-def _bounded_episode_rows(rows: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _bounded_episode_rows(
+    rows: list[Mapping[str, Any]],
+    *,
+    pinned_episode_id: str | None = None,
+) -> list[dict[str, Any]]:
     normalized = [dict(row) for row in rows]
     normalized.sort(
         key=lambda row: (
@@ -1823,7 +1855,30 @@ def _bounded_episode_rows(rows: list[Mapping[str, Any]]) -> list[dict[str, Any]]
             str(row.get("episode_id") or ""),
         )
     )
-    return normalized[:_AFFECTIVE_EPISODE_LIMIT]
+    bounded = normalized[:_AFFECTIVE_EPISODE_LIMIT]
+    if (
+        pinned_episode_id
+        and normalized
+        and not any(row.get("episode_id") == pinned_episode_id for row in bounded)
+    ):
+        pinned = next(
+            (
+                row
+                for row in normalized
+                if row.get("episode_id") == pinned_episode_id
+            ),
+            None,
+        )
+        if pinned is not None:
+            bounded = [*bounded[: max(0, _AFFECTIVE_EPISODE_LIMIT - 1)], pinned]
+            bounded.sort(
+                key=lambda row: (
+                    -_episode_peak_intensity(row),
+                    -_integer(row.get("opened_at_ms")),
+                    str(row.get("episode_id") or ""),
+                )
+            )
+    return bounded
 
 
 def _episode_peak_intensity(row: Mapping[str, Any]) -> float:
