@@ -135,6 +135,12 @@ legacy BodySense tick、loneliness 和 conversation mutation 统一 `RETIRED_CAN
 marker 的空投影；Lifecycle/proactive 忽略 marker，canonical Limbic/Prefrontal 不会解析它，user profile
 也不能被提升为七海 self-affect。其余 compatibility reader、Monitor/Review 与真实服务验收仍未完成。
 
+默认模式目前也遵守这一 single-authority 约束：读取 `LifeSnapshotReader` 后，边界层只投影有限的 self-affect
+和 relationship texture 给 `inner_activity_agent`，并用 `CANONICAL_LIFE_JOURNAL` marker 禁止该 agent 回读
+EmotionTimeline 或 SocialBrain/Bond。该关系 texture 不包含身份、episode evidence 或 intimacy consent，亦不映射
+为旧 Bond score/stage；background continuity 只能调节投影行为，不能调用 legacy Limbic metabolism 写入情绪。
+这是一个 reader 切片，不改变其他 compatibility reader、Monitor/Review、真实 provider/Edge 与 DL-07 的未完成状态。
+
 0148 的 `CompanionProfileIngress` 现在把一条更窄的直接控制路径加入同一 composition：
 `POST /v1/digital-life/relationship/companion-profile` 经 `host.companion-profile` 验证
 `companion:profile:write`、user/relationship subject 及 tenant/workspace 的精确绑定。它只解析

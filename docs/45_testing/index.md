@@ -59,6 +59,16 @@
   canonical Limbic/Prefrontal 不会 resolve/cache 该投影，Runtime snapshot 也不会把 user profile 的
   top emotion 或 volatility 升格为七海 self-affect。最终受影响集合为 `169 passed in 12.85s`；它不证明
   其它兼容读取、Monitor、真实 provider/Edge 或 DL-07 服务栈。
+- `test_dl06_default_mode_canonical_inner_activity.py`、
+  `test_inner_activity_agent_limbic_integration.py`、
+  `test_inner_activity_agent_social_brain_integration.py` 与
+  `test_aw08_life_memory_legacy_retirement.py` 共同验证：默认模式从同一 canonical Life snapshot 获取有限
+  self-affect/relationship projection 后，私密活动不再触碰 legacy EmotionTimeline/SocialBrain/Bond；projection
+  不泄露 trigger/evidence、workspace/subject 或 intimacy consent，且 trust/attunement 不会被压成 Bond score。
+  `test_tribe_deepening_batch47.py` 同时确认高连续性 tick 不会再调用 legacy Limbic metabolism。连同
+  `test_default_mode_agent.py`、相邻 DL-06、Limbic/Motive 与 inner-activity 文件的最终单一集合为
+  `92 passed in 44.20s`（4 条既有弃用警告）；这是本地 reader-cutover 证据，不证明其他 compatibility reader、
+  Monitor/Review、真实 provider/Edge 或 DL-07 服务栈。
 - 上述 Host/Limbic/Endocrine、fusion 与旧 organ 邻接文件的最终合并定向回归为
   `149 passed in 33.81s`。它是覆盖重叠后的单一集合，不能与前述批次相加，也不构成波次集成或真实服务栈验收。
 - `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted

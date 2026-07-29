@@ -247,7 +247,15 @@ def project_inner_life_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def project_inner_world_state(snapshot: Mapping[str, Any]) -> dict[str, Any]:
-    """Translate canonical Life state into the read-only legacy-shaped view."""
+    """Project one canonical Life snapshot for the private default-mode reader.
+
+    The historical fields below remain for callers that still need an
+    ``inner_world``-shaped read model.  DL-06 also carries a deliberately
+    bounded self-affect/relationship projection so a default-mode tick does
+    not silently fall back to the retired EmotionTimeline or Bond score
+    authorities.  It is a read-only private context, never a command payload
+    and never a substitute for the full canonical snapshot.
+    """
 
     envelope = _mapping(snapshot)
     state = _mapping(envelope.get("state")) if "state" in envelope else envelope
@@ -256,6 +264,12 @@ def project_inner_world_state(snapshot: Mapping[str, Any]) -> dict[str, Any]:
     needs = _mapping(state.get("needs"))
     clock = _mapping(state.get("clock"))
     relationship = _mapping(state.get("relationship"))
+    canonical_affective = _bounded_inner_self_affect(
+        _mapping(state.get("affective"))
+    )
+    canonical_relationship = _bounded_inner_relationship(
+        _mapping(state.get("relationship_v2"))
+    )
     idle_minutes = _non_negative_int(clock.get("idle_minutes"))
     anticipation_topics = list(
         inner.get("anticipation_topics")
@@ -284,6 +298,85 @@ def project_inner_world_state(snapshot: Mapping[str, Any]) -> dict[str, Any]:
         "canonical_life_version": _non_negative_int(
             envelope.get("version") or state.get("version")
         ),
+        # This marker deliberately remains present at version zero: an empty
+        # canonical Life head is still authoritative and must not cause a
+        # production reader to revive a legacy writer/read model.
+        "canonical_life_source": "CANONICAL_LIFE_JOURNAL",
+        "self_affect": canonical_affective,
+        "relationship_state": canonical_relationship,
+    }
+
+
+def _bounded_inner_self_affect(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Return only the private, bounded facts needed by inner activity.
+
+    Episode trigger/evidence references and relationship identity are kept in
+    the append-only Life journal.  They must not enter an LLM-facing default
+    mode context merely because it is constructed from a local snapshot.
+    """
+
+    mood = _mapping(source.get("mood"))
+    needs = _mapping(source.get("needs"))
+    components: list[dict[str, Any]] = []
+    for raw in list(source.get("components") or []):
+        row = _mapping(raw)
+        emotion = str(row.get("emotion") or "").strip().upper()
+        if not emotion:
+            continue
+        components.append(
+            {
+                "emotion": emotion,
+                "intensity": _bounded_float(row.get("intensity"), low=0.0, high=1.0),
+                "valence": _bounded_float(row.get("valence"), low=-1.0, high=1.0),
+                "arousal": _bounded_float(row.get("arousal"), low=0.0, high=1.0),
+                "action_tendency": str(row.get("action_tendency") or "observe").strip().lower()[:64],
+            }
+        )
+    components.sort(key=lambda item: (-float(item["intensity"]), str(item["emotion"])))
+    active_episodes = [
+        row for row in list(source.get("active_episodes") or []) if isinstance(row, Mapping)
+    ]
+    regulation = _mapping(source.get("last_regulation"))
+    return {
+        "schema_version": "inner_self_affect_projection.v1",
+        "revision": _non_negative_int(source.get("revision")),
+        "mood": {
+            "label": str(mood.get("label") or "calm").strip().lower()[:48] or "calm",
+            "valence": _bounded_float(mood.get("valence"), low=-1.0, high=1.0),
+            "arousal": _bounded_float(mood.get("arousal"), low=0.0, high=1.0),
+            "energy": _bounded_float(mood.get("energy"), low=0.0, high=1.0),
+        },
+        "components": components[:4],
+        "active_episode_count": min(4, len(active_episodes)),
+        "needs": {
+            name: _bounded_float(needs.get(name), low=0.0, high=1.0)
+            for name in ("connection", "rest", "autonomy", "play", "repair", "safety")
+        },
+        "regulation_mode": str(regulation.get("mode") or "NONE").strip().upper()[:48] or "NONE",
+    }
+
+
+def _bounded_inner_relationship(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Project relationship texture without leaking identity or consent state.
+
+    In particular, callers must not map trust/attunement to a historical Bond
+    score: scores could incorrectly imply intimacy or proactive permission.
+    """
+
+    active_episodes = [
+        row for row in list(source.get("active_episodes") or []) if isinstance(row, Mapping)
+    ]
+    return {
+        "schema_version": "inner_relationship_projection.v1",
+        "revision": _non_negative_int(source.get("revision")),
+        "trust": _bounded_float(source.get("trust"), low=0.0, high=1.0),
+        "safety": _bounded_float(source.get("safety"), low=0.0, high=1.0),
+        "attunement": _bounded_float(source.get("attunement"), low=0.0, high=1.0),
+        "rupture_load": _bounded_float(source.get("rupture_load"), low=0.0, high=1.0),
+        "repair_required": bool(source.get("repair_required")),
+        "proactive_permission": str(source.get("proactive_permission") or "UNKNOWN").strip().upper()[:64]
+        or "UNKNOWN",
+        "active_episode_count": min(4, len(active_episodes)),
     }
 
 
@@ -478,6 +571,10 @@ def _float(value: Any, default: float = 0.0) -> float:
         return float(value if value not in (None, "") else default)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _bounded_float(value: Any, *, low: float, high: float) -> float:
+    return round(max(float(low), min(float(high), _float(value))), 4)
 
 
 __all__ = [

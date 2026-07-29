@@ -43,6 +43,21 @@ def test_collect_bond_context_degrades_when_snapshot_fails(monkeypatch) -> None:
     assert state is None
 
 
+def test_collect_bond_context_skips_legacy_bond_for_canonical_relationship(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.tribe.social_brain_agent.get_social_brain_agent",
+        lambda: (_ for _ in ()).throw(AssertionError("legacy bond must not be read")),
+    )
+
+    summary, state = _collect_bond_context(
+        persona_user_id="user_42",
+        canonical_relationship={"trust": 0.8, "repair_required": True},
+    )
+
+    assert summary == {}
+    assert state is None
+
+
 def test_generate_inner_activity_note_ignores_heavy_background_disable(monkeypatch) -> None:
     monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "false")
     monkeypatch.delenv("HOST_CONTINUOUS_ORGAN_TICKS_ENABLED", raising=False)

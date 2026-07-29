@@ -115,6 +115,15 @@ Limbic/Prefrontal 不会读取或缓存它，user profile 也不能覆盖七海 
 本轮只完成 composition 级 fail-closed：Input/Tribe 缺 Life authority 的情感解析稳定拒绝，最终定向
 composition/输入路由集合 `148 passed in 39.51s`（直接 composition 子集 57 项）。它不等于旧类物理删除、Monitor/Review 使用量归零或真实服务验收。
 
+当前子波新增 `DL-06_DEFAULT_MODE_CANONICAL_INNER_ACTIVITY_READER_CUTOVER`：`DefaultModeAgent` 读取一次
+canonical Life snapshot 后，`project_inner_world_state()` 只交出有限 `self_affect`/`relationship_state`
+投影和 `CANONICAL_LIFE_JOURNAL` 来源标记；`inner_activity_agent` 据此构造私密活动上下文，不再解析 retired
+EmotionTimeline 或 SocialBrain/Bond snapshot。关系纹理保持与旧 Bond summary 分离，trust/attunement 不得映射成
+score/stage、亲密或主动许可；projection 也不带 identity、trigger/evidence 或 intimacy consent。默认模式高连续性
+不再调用 legacy Limbic metabolism 补写 self-affect。该读路径与相邻 DL-06/default-mode 集合为 `92 passed in
+44.20s`；它只完成一个 compatibility reader，Monitor/Review、其余 reader、跨进程真实恢复、真实 provider/Edge
+和 DL-07 服务栈仍待后续。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

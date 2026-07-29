@@ -65,6 +65,12 @@ proactive 忽略该标记，canonical Limbic/Prefrontal 不会解析它；user p
 七海 self-affect。Input/Tribe composition 现已彻底删除 `HostEmotionRuntime` fallback：缺 Life authority
 稳定拒绝，旧类只留直接隔离测试。剩余的是其它兼容读取审计与 runtime 使用计量，不是 DL-06 或真实服务验收完成。
 
+本轮已核对并切换默认模式私密活动这一条 production reader：它从一次 `project_inner_world_state()` 读取中获得
+有限的 `inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1`，再构造私密活动上下文；不再二次
+触碰 retired timeline 或 SocialBrain/Bond。投影不含用户/工作区身份、episode trigger/evidence 或浪漫、排他、
+依赖 consent；trust/attunement 也不转换为旧 Bond score。高连续性背景 tick 不再调用 legacy Limbic metabolism。
+92 项本地相邻回归通过（44.20 秒），但这只完成一个兼容 reader 切片，仍非 DL-06 或 DL-07 的完成证据。
+
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
 principal/relationship subject 与 tenant/workspace 绑定。请求不能携带自由文本、Soul patch、情绪或关系

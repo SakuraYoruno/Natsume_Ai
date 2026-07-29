@@ -410,6 +410,14 @@ mutation 统一退役，且 retired tick 不发布 Bus update。`MotiveEngine` �
 不包含 `NEUTRAL` 情感事实，Lifecycle/proactive 会忽略它，canonical Limbic 与 Prefrontal 不会解析/缓存它。
 这仍不等于全量 compatibility state 清零：其它 Surface/legacy reader 的使用审计、Monitor/Review 与真实验收仍待后续完成。
 
+默认模式的私密活动 reader 已成为上述审计中第一个实际切换点：`DefaultModeAgent` 的一次 Life snapshot
+通过 `project_inner_world_state()` 生成只读 `canonical_life_source=CANONICAL_LIFE_JOURNAL`、有界
+`inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1`。`inner_activity_agent` 看到该 marker
+后直接投影 mixed self-affect/mood，而非调用 Limbic timeline；也不再从 SocialBrain/Bond 读取 summary。关系投影
+不含 workspace、subject、trigger/evidence 或 intimacy consent，且不把 trust/attunement 变成 score/stage。
+高连续性 default-mode tick 已移除 legacy `drive_emotion_metabolism()` 调用。这只关闭这个 reader，其他
+compatibility read path 和真实服务验证仍为 `PARTIAL`。
+
 **Bond queue 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
 `BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 只保留 stage/graph 的
 read compatibility，并返回没有 worker、backlog 或直接 writer fallback 的 retired adapter；canonical

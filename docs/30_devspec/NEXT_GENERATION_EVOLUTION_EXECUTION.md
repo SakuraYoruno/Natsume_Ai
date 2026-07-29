@@ -263,6 +263,16 @@ Bond queue 已退役：production factory 不再构造 real queue/writer，Surfa
 canonical Limbic/Prefrontal 不会 resolve/cached 该投影，user profile 不得覆盖七海 self-affect。其它
 compatibility projection 的生产读取审计与 runtime 使用计量仍未清零，不能把这些局部切断写成 DL-06 完成。
 
+**默认模式 reader 修订：** `DefaultModeAgent` 现在从一次 canonical Life snapshot 的
+`project_inner_world_state()` 投影读取私密活动所需的 self-affect 与关系纹理。投影标记为
+`CANONICAL_LIFE_JOURNAL`，仅包含有界 components/mood/needs/regulation 与 trust/safety/attunement/
+rupture/repair/proactive permission；不包含 episode trigger/evidence、workspace/subject identity 或任何 intimacy
+consent。`inner_activity_agent` 在该标记存在时不会再读取 legacy EmotionTimeline 或 SocialBrain/Bond，并保持
+relationship context 与旧 Bond score/stage 分离；空 component 仍由 canonical mood 表达，不能退化伪造
+`NEUTRAL`。高连续性 default-mode tick 也不再调用 legacy Limbic metabolism。定向 reader/default-mode/DL-06
+集合为 `92 passed in 44.20s`，但仍只说明此 reader 的本地收口，不能取代剩余兼容读取审计、Monitor/Review、
+真实 provider/Edge 或 DL-07。
+
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。
 任何遗漏 Life authority 的 Host request 都稳定拒绝为 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不再以

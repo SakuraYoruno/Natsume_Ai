@@ -321,10 +321,10 @@ class TestT364ANSRecoveryExitEmotionMetabolism:
 
 # ── T-365 ──────────────────────────────────────────────────────────────────
 
-class TestT365DefaultModeHighContinuityEmotion:
-    """DefaultModeAgent 高连续性时联动 LimbicAgent.drive_emotion_metabolism()"""
+class TestDL06DefaultModeHighContinuity:
+    """高连续性只能影响投影，不得让默认模式补写旧自我情感。"""
 
-    def test_high_continuity_triggers_emotion(self, monkeypatch):
+    def test_high_continuity_does_not_mutate_legacy_emotion(self, monkeypatch):
         monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "true")
         from host_brain.tribe.default_mode_agent import DefaultModeAgent
         agent = DefaultModeAgent.__new__(DefaultModeAgent)
@@ -335,7 +335,7 @@ class TestT365DefaultModeHighContinuityEmotion:
         mock_pr = MagicMock()
         mock_intero = MagicMock()
         # build_offline_state_from_inner_state 决定 continuity_score，需要 mock 它
-        with patch("host_brain.tribe.default_mode_agent.get_limbic_agent", return_value=mock_limbic), \
+        with patch("host_brain.tribe.default_mode_agent.get_limbic_agent", return_value=mock_limbic, create=True), \
              patch("host_brain.tribe.default_mode_agent.get_pain_reward_agent", return_value=mock_pr), \
              patch("host_brain.tribe.default_mode_agent.get_interoception_agent", return_value=mock_intero), \
              patch("host_brain.tribe.default_mode_agent.get_glymphatic_agent", return_value=MagicMock()), \
@@ -346,10 +346,7 @@ class TestT365DefaultModeHighContinuityEmotion:
                                  "offline_hours": 0.0, "loneliness_level": 0.0, "anticipation_level": 0.0}):
             agent.tick_idle_cycle(source="test", person_id="user_1")
 
-        mock_limbic.drive_emotion_metabolism.assert_called_once()
-        call_kwargs = mock_limbic.drive_emotion_metabolism.call_args.kwargs
-        assert call_kwargs["valence"] > 0
-        assert "default_mode_continuity" in call_kwargs["event_kind"]
+        mock_limbic.drive_emotion_metabolism.assert_not_called()
 
 
 # ── T-366 ──────────────────────────────────────────────────────────────────

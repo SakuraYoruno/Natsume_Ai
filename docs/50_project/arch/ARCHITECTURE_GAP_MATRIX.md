@@ -72,6 +72,14 @@ observation，不能写入七海情绪。离线/test compatibility root 可显�
 的 production read authority，不证明其它 compatibility reader、Monitor/Review、真实 provider/Edge 或服务栈
 验收完成。
 
+**默认模式 canonical reader 修订：** `DefaultModeAgent` 已从同一 canonical Life snapshot 取得有界
+`inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1`，`inner_activity_agent` 看到
+`CANONICAL_LIFE_JOURNAL` 后直接使用其 mood/mixed components，而不回读 retired EmotionTimeline 或
+SocialBrain/Bond。关系纹理保留为独立 context，不能将 trust/attunement 变换为 Bond score、stage、亲密或主动
+许可；投影排除 workspace/subject、episode trigger/evidence 与 intimacy consent。高连续性 tick 也不再调用
+legacy Limbic metabolism。最终相邻本地集合为 `92 passed in 44.20s`；这只降低一个 compatibility reader，
+其余 reader、Monitor/Review、真实 provider/Edge 和服务栈验收仍未完成。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

@@ -465,6 +465,15 @@ proactive dispatch 会忽略该 marker，canonical Limbic 和 Prefrontal 更不�
 离线/test compatibility root 仍可显式创建旧 timeline，作为一个回滚窗口；这不代表其它 compatibility
 reader、Monitor/Review、真实模型、远端 Edge 或 DL-07 服务栈已经完成。
 
+DL-06 本轮继续收紧一个真实的剩余读取点：默认模式私密活动不再在已拿到 Life snapshot 后重新读取
+retired `EmotionTimeline` 或 SocialBrain/Bond snapshot。`project_inner_world_state()` 只从同一 canonical
+snapshot 派生带来源标记的、有限的 self-affect 与 relationship context；其中不含 trigger/evidence、workspace、
+relationship subject 或任何 intimacy consent。`inner_activity_agent` 保持 relationship context 与旧 Bond score
+分离，绝不把 trust/attunement 映射为亲密阶段或主动权限；mixed component 为空时也保留 canonical mood，
+不再伪造 `NEUTRAL`。高连续性的 default-mode tick 同时停止调用旧 Limbic metabolism 写入口。该切片的
+92 项本地受影响回归通过（44.20 秒）；它只覆盖这个 default-mode reader，其他 compatibility reader、
+Monitor/Review、真实服务与远端 Edge 仍未验收。
+
 内部旁车到 Governance owner 的既有批次都只作提交绑定历史。当前 Authority owner 集合证明每个 Host root 的 canonical SQLite connection、Memory stores、ModelAttempt 与 CapabilityBroker runtime identity 均隔离，Prompt/Route catalog 也不再共享可变实例；关闭失败会保留未完成资源并阻断新 epoch。生产 locator facade/Container 已物理清零，测试桥不属于可发布产品对象图；Chroma 与 Neo4j 仍使用配置级共享 namespace，所以不能外推为 tenant isolation、资源崩溃恢复、事务化 Chat、波次集成或 production canary 已完成。当前 fresh 完整架构静态 Gate 1～14 已全部 `PASS`、`failed_gates=[]`：Task Runtime feature-canary 合同和 Host lifecycle ports 已迁入中立 `host_brain/contracts/`，Persistence 与 Composition 分别直接依赖 canonical contract；旧导入路径只保留同一对象重导出，因此 application/persistence 与 app/composition 两个 SCC 均已消除。Gate 3 继续由 Research shadow ledger 的 1271/512/108 行职责拆分保持通过，没有扩大白名单。该结论只表示静态分层收口，不代表 Universal Runtime 七路线、NE-01 或完整架构项目完成。
 
 最新 `dev` 还保留 #114 的精确 Internal 单节点后置审核取消恢复：真实 Operator Secure Ingress 发起取消后，immutable intent 的 `BLOCKED` 只表示围栏，另一个绑定该 intent 的 trusted final decision 必须为 `CANCELLED`；重启 terminal worker 先关闭 deterministic nonacceptance claim，再 tombstone/清理 Workspace，且不得重跑 Agent。既有 pre-checkpoint 取消子集仍只接受两种受信终态：`RELEASE + NO_SIDE_EFFECT + 无 receipt`，或 `COMMIT + SIDE_EFFECT_CONFIRMED + durable receipt`，并要求 finalized cancellation。当前分支另行关闭“不存在取消意图”的精确 raw worker failure：仅当单节点 Graph 仍 `ACTIVE`、原 Lease 已到期、恰好一个 graph Budget、零 WorkerProjection/Acceptance Effect、签名 `RELEASE + NO_SIDE_EFFECT + 无 receipt` 全部成立时，单一 SQLite UoW 才把 Operation、Attempt、Node、Graph、Lease、Budget 连同各自 Outbox 收口为失败终态。真实 SQLite + Git 证明响应丢失只重开同一签名终态，Internal Secure Ingress claim 必须先于 worktree/stage 清理提交；claim 失败或证据篡改时现场原样保留。该能力只关闭精确单节点无副作用失败，不覆盖一般 unknown-effect、多节点 failure 或其它取消，不能据此把 Internal、NE-01 或完整架构标成完成。

@@ -654,6 +654,13 @@ timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_
 Prefrontal 也不会读取它。user profile 仅保留为用户 observation，不能覆盖七海 self-affect；其它 compatibility
 reader 与真实服务验收仍待处理。
 
+默认模式私密活动的实际读流已改为：`LifeSnapshotReader → project_inner_world_state → bounded self_affect /
+relationship_state → inner_activity_agent`。来源 marker 存在时，inner activity 直接从 canonical mood 与 mixed
+component 得到当前 emotion，并把关系纹理作为独立 context；它不回读 legacy timeline，也不向 SocialBrain/Bond
+要 score。该投影丢弃 episode trigger/evidence、workspace/subject identity 与 intimacy consent，避免生成链路把
+关系数值误当授权；高连续性 background tick 也不再调用 legacy Limbic metabolism。此数据流仅覆盖 default-mode
+reader，不替代其余 compatibility reader、真实 TTS/Avatar/Edge 或服务栈验收。
+
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor

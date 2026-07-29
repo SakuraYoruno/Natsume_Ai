@@ -201,6 +201,13 @@ loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond
 Host 也不再从旧 action log hydrate `EmotionTimeline`，而是以显式 retired 空投影失败关闭读取，不能用它重建
 七海 self-affect。DL-06 后续项是其它 compatibility reader 使用审计与 runtime 计量。
 
+`DefaultModeAgent` / `inner_activity_agent` 是该审计已切换的一条真实生产读路径：默认模式拿到 canonical
+Life snapshot 后仅消费 `inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1` 的有界事实，不会
+再次解析 retired timeline 或 Bond snapshot。关系投影与旧 Bond summary 分离，不能由 trust/attunement 推断
+stage、亲密或主动权限；它也不含 identity、evidence 或 intimacy consent。default-mode 高连续性不再触发
+legacy Limbic metabolism。状态为 `PARTIAL_DL06_DEFAULT_MODE_CANONICAL_READER_LOCAL`，不代表其他 reader 或
+真实服务已完成。
+
 Internal terminal recovery 模块除 #114 的精确后置审核取消外，当前还拥有一个独立的 signed raw-failure claim contract：它只从无取消意图、零投影/Effect、单节点和单 Budget 的原子失败终态生成 deterministic result，并要求先结算 Secure Ingress claim、再清理 Workspace/stage。该模块不拥有一般 failure/cancellation/multi-node/unknown-effect recovery authority。
 
 Operation reconciliation 模块现由五个互不越权的 owner 组成：0126 evidence store 负责写入时验签和 append-only 保存，`OperationReacquisitionService` 负责同 Attempt/higher-fence/Budget segment 的重获规则，`OperationCheckpointReconciliationService` 只确认 canonical WorkerProjection checkpoint，`OperationFailureReconciliationService` 处理精确无副作用节点失败，route-specific continuation 负责继续原图或消费已终结结果。单节点 failure Store 可终结整图；多节点只在第一 UoW 关闭 Operation/Attempt/Node/Lease，Graph/Budget 继续由 0090 parallel-settlement owner 终结。Operator/TaskGraph 只传 evidence ref/digest，Accepted handler 在执行时重开完整证据；v4 receipt 只绑定不可变 node failure，故 0090 从 PENDING 到 COMMITTED 不改变摘要。0127 禁止 WorkerProjection UPDATE/DELETE。任何模块都不能靠 ref、Preview 或 Review 单独取得执行权。
