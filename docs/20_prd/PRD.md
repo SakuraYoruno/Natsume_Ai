@@ -289,6 +289,11 @@ episode，或把 caller-shaped snapshot、积分和阶段伪装成七海的自�
 canonical Life projection；用户对七海自身感受或关系意义的提问只可进入 `chat`，并以冻结 plan 的自然、非数值化
 第一人称措辞回答，不能以兼容 read API 保留隐藏写回入口。
 
+生产图不得登记 `emotion_agent` 或任何读取 compatibility `emotion_context` 后推荐七海 self-affect 的二次 Agent。
+深度、冲突或低置信用户观察的真正深路径必须接入 `AffectFusion → Appraisal → AffectiveTurnPlan`；历史
+`needs_deep_emotion_analysis` 尚未完成该接线时只能被显式抑制并留审计标记。显式旧 delegate target 必须以
+canonical chat 降级或明确拒绝，不能改派到另一个 generic Agent。
+
 任何旧 Tribe EventBus、Broca 或 MotorCortex convenience callback 均不得将文本直接提交给 TTS/Avatar；这类调用必须
 无副作用拒绝，且不得因设备失败写入 self-affect、关系或状态 registry。
 

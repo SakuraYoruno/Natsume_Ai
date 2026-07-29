@@ -60,7 +60,6 @@ def test_static_registry_contains_metadata_without_callbacks() -> None:
         "retrieval_agent",
         "intent_agent",
         "judge_agent",
-        "emotion_agent",
     ],
 )
 def test_agent_discovery_returns_proposal_only_clones(agent_id: str) -> None:
@@ -73,6 +72,11 @@ def test_agent_discovery_returns_proposal_only_clones(agent_id: str) -> None:
 def test_pentest_agent_has_no_generic_react_tools() -> None:
     assert get_tools_for_agent("pentest_agent", allow_side_effects=False) == []
     assert get_tools_for_agent("pentest_agent", allow_side_effects=True) == []
+
+
+def test_retired_emotion_agent_has_no_tool_visibility() -> None:
+    assert get_tools_for_agent("emotion_agent", allow_side_effects=False) == []
+    assert get_tools_for_agent("emotion_agent", allow_side_effects=True) == []
 
 
 def test_side_effect_metadata_is_hidden_without_explicit_visibility() -> None:

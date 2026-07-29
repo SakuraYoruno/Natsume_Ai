@@ -77,7 +77,6 @@ _AGENT_HANDLER_MAP: dict[str, str] = {
     "intent_agent":    "intent_agent",
     "judge_agent":     "judge_agent",
     "retrieval_agent": "retrieval_agent",
-    "emotion_agent":   "emotion_agent",    # 方向 G Phase 2 新增
     "repair_agent":    "repair_agent",
     "pentest_agent":   "pentest_agent",
 }

@@ -241,6 +241,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   projection；“你现在心情如何 / 我们是什么关系”必须生成带 canonical context binding 的 `chat`，不得形成 Skill DAG
   节点、读取 caller snapshot/score/stage 或泄露数值状态；外部文本、图像或用户情绪分析则不得误认成七海自身反思。
   descriptor 缺失必须 fail-closed，不能以 legacy context 回退执行。
+- T-DL06-14b：`emotion_agent` 不得留在 Agent allowlist、Graph handler map、Host application composition、Supervisor
+  深度情感 override、ReAct tool catalog 或 prompt catalog；它不得读取 compatibility `emotion_context` 后生成推荐的
+  七海 self-affect。旧 `delegate:emotion_agent` 只能降级为 canonical chat；历史深度字段必须标记
+  `LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED`，直到真正 Fusion 深路径接线，且不得 fallback 到 IntentAgent 或创建任何
+  第二情感状态。
 - T-DL06-15：canonical `TribeApplicationPorts` 下的 `SocialBrainAgent` 不得注册旧全局
   `INTERACTION_RECORDED`、`BOND_*`、裂痕/修复、孤独、任务成功或幽默订阅；所有残留 direct callback 必须在读取
   payload 前返回 `LEGACY_SOCIAL_BRAIN_RELATIONSHIP_WRITE_RETIRED`，不得写 `TribeStateRegistry`、发布 Bond vector

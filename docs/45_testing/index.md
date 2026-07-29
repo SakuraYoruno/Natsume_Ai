@@ -152,6 +152,12 @@
   canonical chat 的 accepted TaskGraph fixture、caller-supplied Skill plan 的拒绝和完整 model-budget measurement
   形状。两者都是本地、model-free fixture 证据，不是 canonical 情感读取的真实 provider、远端 Edge 或 DL-07 验收。
 
+- `emotion_agent` 生产图退役后，`test_dl06_legacy_emotion_skill_retirement.py` 验证它不在 allowlist、Graph handler
+  map 或 Agent metadata 中，旧 delegate 只能成为 `surface_reply` 的 canonical chat，历史深度字段为
+  `LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED`，不冒充 Fusion 深路径；最终合并的 ReAct/tool/supervisor/prompt/graph/Host composition/dispatch 与
+  文档 Gate 受影响集合为 `165 passed in 29.37s`。这是本地代码证据，不证明真实
+  provider、TTS、VTS/VRM、远端 Edge 或 DL-07。
+
 - `test_edge_events_whitelist.py` 现验证原始 `EMOTION_DETECTED` 仍被真实 Edge ledger 接受和记录，但不会调用
   legacy Cortex Bond update，也不会出现 `_drive_stream_vts_emotion` 直驱；最终 ASR 的受控 Input bridge 保持独立。
   该 direct 集合为 `11 passed in 0.43s`；加上 HTTP Edge、AffectFusion 与 ExpressionPlan 邻接回归的最终受影响集合为

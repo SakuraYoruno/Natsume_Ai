@@ -306,6 +306,11 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   Thalamus 会把“你现在什么心情 / 我们是什么关系”编译为带 canonical context binding 的 chat，而不是 Skill DAG 节点；
   最终回答仍由冻结 AffectiveTurnPlan 决定且不能数值化泄露。这是旧 tool authority 与路由收口，不是新的情感能力或
   Remote Edge 验收。
+- 旧 `emotion_agent` 也从 Agent allowlist、Supervisor/Graph handler、Host application composition、ReAct tool
+  catalog 与 prompt catalog 物理退役；它过去会读取 compatibility `emotion_context` 并产出“建议七海情绪”，因此不能
+  作为深路径保留。`needs_deep_emotion_analysis` 曾只触发该旧 Agent，当前记录为
+  `LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED`；真正 Fusion 深路径尚待 DL-02 后续切片接线。旧 delegate target 降级为 canonical
+  chat，而不是 fallback 到 IntentAgent。
 - canonical Limbic 的 `handle_signal()` 与 `_touch_state()` 也不再拥有 production writer 权：任何旧
   conversation/session/body/Bond signal 都不得写 `TribeStateRegistry`、重发 EventBus 或以 caller VAD 改写
   self-affect。Surface/AgentRuntime session-end hook 必须在解析 VAD 或 default Bond identity 前跳过；唯一允许的

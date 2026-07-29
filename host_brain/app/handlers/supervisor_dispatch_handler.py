@@ -13,7 +13,6 @@ from host_brain.agent_runtime.agent_contract import (
 )
 from host_brain.agent_runtime.agent_registry import (
     AGENT_ID_CHAT,
-    AGENT_ID_EMOTION,
     AGENT_ID_INTENT,
     AGENT_ID_PENTEST,
     AGENT_ID_REPAIR,
@@ -125,7 +124,6 @@ _DELEGATE_TARGET_TO_AGENT: dict[str, str] = {
     "intent_agent":     AGENT_ID_INTENT,
     "vision_agent":     AGENT_ID_INTENT,   # vision_agent 暂复用 intent_agent
     "retrieval_agent":  AGENT_ID_RETRIEVAL,
-    "emotion_agent":    AGENT_ID_EMOTION,
     "repair_agent":     AGENT_ID_REPAIR,
     "pentest_agent":    AGENT_ID_PENTEST,
 }
@@ -160,6 +158,17 @@ def _resolve_agent_from_intent_draft(
     need_judge = _ROUTE_NEED_JUDGE.get(route, False)
 
     if route == "delegate":
+        if target_id == "emotion_agent":
+            # DL-06：旧 EmotionAgent 会从 compatibility emotion_context 推断并
+            # 推荐“七海当前情绪”。它已物理退出生产图；显式旧 target 退化为
+            # canonical Life 支撑的自然聊天，不能悄然改派到 IntentAgent。
+            route_source = str(intent_draft.get("route_source") or "rule").strip()
+            return (
+                AGENT_ID_CHAT,
+                RISK_MODE_SAFE,
+                False,
+                f"intent_draft:delegate:{route_source}:legacy_emotion_agent_retired",
+            )
         # delegate 时由 target_id 决定具体 agent
         agent_id = _DELEGATE_TARGET_TO_AGENT.get(target_id, AGENT_ID_INTENT)
     else:
@@ -205,21 +214,18 @@ def supervisor_dispatch_handler(
     rule_risk_mode = _SCENE_DEFAULT_RISK_MODE.get(scene_type, RISK_MODE_SAFE)
     rule_need_judge = _SCENE_NEED_JUDGE.get(scene_type, False)
 
-    # 情感深度分析覆盖（保留原有逻辑）
+    # 该字段只曾用于启动旧 EmotionAgent；它尚未接到新的 Fusion 深路径，不能
+    # 假装已经完成 reappraisal。先明确抑制旧信号，避免第二个 Agent 读取兼容
+    # snapshot 或推荐七海的 self-affect；真正深路径由 DL-02 后续切片另行接线。
     inferred_emotion = payload.get("inferred_emotion") or {}
     needs_deep = bool(payload.get("needs_deep_emotion_analysis")) if isinstance(inferred_emotion, dict) else False
-    if needs_deep and rule_agent == AGENT_ID_CHAT:
-        rule_agent = AGENT_ID_EMOTION
-        rule_need_judge = False
+    affect_analysis_mode = (
+        "LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED" if needs_deep else "NO_LEGACY_AFFECT_AGENT"
+    )
 
     # ── 决策优先级：intent_draft > scene_type 映射 ──────────────────────────
     if intent_result is not None:
         selected_agent, risk_mode, need_judge, decision_source = intent_result
-        # 情感深度分析覆盖（对 intent_draft 路径同样生效）
-        if needs_deep and selected_agent == AGENT_ID_CHAT:
-            selected_agent = AGENT_ID_EMOTION
-            need_judge = False
-            decision_source = f"{decision_source}:emotion_override"
     else:
         # 降级到 scene_type 映射
         selected_agent = rule_agent
@@ -271,6 +277,7 @@ def supervisor_dispatch_handler(
         "intent_route": str(intent_draft.get("route") or ""),
         "intent_target_id": str(intent_draft.get("target_id") or ""),
         "intent_route_source": str(intent_draft.get("route_source") or ""),
+        "affect_analysis_mode": affect_analysis_mode,
     }
     out["__next_node__"] = next_node
 

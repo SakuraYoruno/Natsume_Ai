@@ -71,7 +71,7 @@ def test_validate_proposal_forbidden_key_fails() -> None:
 
 def test_validate_proposal_agent_not_in_allowlist_fails() -> None:
     valid, code = validate_supervisor_proposal_for_graph(
-        {"selected_agent": "emotion_agent", "risk_mode": "safe"},
+        {"selected_agent": "retired_agent", "risk_mode": "safe"},
         ["intent_agent", "translate_agent"],
     )
     assert not valid

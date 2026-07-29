@@ -18,7 +18,6 @@ def build_process_application_ports(
     from host_brain.app.capability_forge import CapabilityForgeService
     from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
     from host_brain.app.graph_config_builder import (
-        EMOTION_AGENT_HANDLER_ID,
         INTENT_AGENT_ENTRY_HANDLER_ID,
         INTENT_AGENT_HANDLER_ID,
         JUDGE_AGENT_HANDLER_ID,
@@ -29,7 +28,6 @@ def build_process_application_ports(
         SURFACE_REPLY_HANDLER_ID,
         TRANSLATE_AGENT_HANDLER_ID,
     )
-    from host_brain.app.handlers.emotion_agent_handler import emotion_agent_handler
     from host_brain.app.handlers.intent_agent_entry_handler import intent_agent_entry_handler
     from host_brain.app.handlers.intent_agent_handler import intent_agent_handler
     from host_brain.app.handlers.judge_agent_handler import judge_agent_handler
@@ -80,7 +78,6 @@ def build_process_application_ports(
             (INTENT_AGENT_HANDLER_ID, intent_agent_handler),
             (JUDGE_AGENT_HANDLER_ID, judge_agent_handler),
             (RETRIEVAL_AGENT_HANDLER_ID, retrieval_agent_handler),
-            (EMOTION_AGENT_HANDLER_ID, emotion_agent_handler),
             (REPAIR_AGENT_HANDLER_ID, repair_agent_handler),
             (PENTEST_AGENT_HANDLER_ID, pentest_agent_handler),
         )

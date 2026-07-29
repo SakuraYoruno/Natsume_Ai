@@ -596,6 +596,10 @@ production provider catalog、Tool executor、built-in registry/policy 和 Sched
 `bond_score_get`/`emotion_query`/`bond_query` 也不再把 caller-shaped compatibility context 伪装成七海自身或关系读取。
 自然语言的“你现在心情如何 / 我们是什么关系”改为 `Thalamus → canonical-bound chat → frozen AffectiveTurnPlan`
 而非 `Skill DAG → legacy query`；唯一可用读取方向仍为 exact-scope 的 canonical Life projection。
+同一条流不再经过 `Supervisor → emotion_agent → compatibility emotion_context → recommended_emotion_tag`：
+旧 Agent 的 allowlist、handler、prompt 和 ReAct tool 均已删除；历史深度观察字段只留下
+`LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED` 审计标记，不能假称 canonical Fusion/Surface 深路径已经接线；legacy
+delegate target 只会降级为 canonical chat。
 
 DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由

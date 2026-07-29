@@ -3,6 +3,9 @@ from __future__ import annotations
 import pytest
 
 from host_brain.agents.planning_agent import PlanningAgent
+from host_brain.agent_runtime.agent_registry import AGENT_ALLOWLIST, get_agent_meta
+from host_brain.app.handlers.supervisor_dispatch_handler import supervisor_dispatch_handler
+from host_brain.integrations.graph_executor import _AGENT_HANDLER_MAP
 from host_brain.skills import provider_catalog
 from host_brain.skills.builtin_execution_policy import builtin_skill_policies
 from host_brain.skills.executor_registry import build_builtin_tool_executor_registry
@@ -115,3 +118,30 @@ def test_external_affect_or_relationship_analysis_is_not_misread_as_natsume_refl
             "canonical_relationship_state",
             "canonical_self_affect_and_relationship",
         }
+
+
+def test_legacy_emotion_agent_is_not_registered_or_dispatchable() -> None:
+    assert "emotion_agent" not in AGENT_ALLOWLIST
+    assert get_agent_meta("emotion_agent") is None
+    assert "emotion_agent" not in _AGENT_HANDLER_MAP
+
+    dispatched = supervisor_dispatch_handler(
+        {
+            "scene_type": "CHAT",
+            "intent_draft": {
+                "route": "delegate",
+                "target_id": "emotion_agent",
+                "route_source": "legacy-client",
+            },
+            "inferred_emotion": {"label": "SAD"},
+            "needs_deep_emotion_analysis": True,
+        },
+    )
+
+    assert dispatched["active_agent_id"] == "surface_reply"
+    assert dispatched["supervisor_dispatch"]["supervisor_decision_source"].endswith(
+        "legacy_emotion_agent_retired"
+    )
+    assert dispatched["supervisor_dispatch"]["affect_analysis_mode"] == (
+        "LEGACY_DEEP_AFFECT_SIGNAL_SUPPRESSED"
+    )

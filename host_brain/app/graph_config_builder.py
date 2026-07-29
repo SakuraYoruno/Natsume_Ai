@@ -55,8 +55,6 @@ from host_brain.app.graph_config_constants import (  # noqa: E402
     JUDGE_AGENT_HANDLER_ID,
     RETRIEVAL_AGENT_NODE_ID,
     RETRIEVAL_AGENT_HANDLER_ID,
-    EMOTION_AGENT_NODE_ID,
-    EMOTION_AGENT_HANDLER_ID,
     REPAIR_AGENT_NODE_ID,
     REPAIR_AGENT_HANDLER_ID,
     PENTEST_AGENT_NODE_ID,
@@ -622,7 +620,6 @@ def _build_graph_config_by_profile(
             INTENT_AGENT_HANDLER_ID,
             JUDGE_AGENT_HANDLER_ID,
             RETRIEVAL_AGENT_HANDLER_ID,
-            EMOTION_AGENT_HANDLER_ID,  # 方向 G Phase 2 新增
             REPAIR_AGENT_HANDLER_ID,
             PENTEST_AGENT_HANDLER_ID,
         ]

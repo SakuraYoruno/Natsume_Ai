@@ -14,7 +14,6 @@ def test_prompt_specs_expose_versioned_agent_prompt_catalog() -> None:
         "translate_agent_handler.runtime_texts",
         "retrieval_agent_handler.runtime_texts",
         "judge_agent_handler.prompt_templates",
-        "emotion_agent_handler.prompt_templates",
         "pentest_agent_handler.system_prompt_extra",
         "repair_agent_handler.runtime_texts",
         "supervisor_dispatch_handler.prompt_templates",

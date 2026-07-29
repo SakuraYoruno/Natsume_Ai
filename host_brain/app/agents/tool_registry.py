@@ -158,36 +158,6 @@ _TOOL_REGISTRY: dict[str, ToolSpec] = {
         has_side_effects=False,
         executor=None,
     ),
-    # 方向 G Phase 2：情感 Agent 专用工具
-    "emotion_history_search": ToolSpec(
-        tool_id="emotion_history_search",
-        display_name="情感记忆检索",
-        description="检索用户的历史情感记忆，了解用户过去的情感状态变化",
-        parameters={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "情感相关的检索查询词"},
-                "emotion_tag": {"type": "string", "description": "过滤指定情感标签（可选）"},
-            },
-            "required": ["query"],
-        },
-        has_side_effects=False,
-        executor=None,
-    ),
-    "emotion_timeline_query": ToolSpec(
-        tool_id="emotion_timeline_query",
-        display_name="情感时间线查询",
-        description="查询最近的情感变化轨迹，了解情感走势",
-        parameters={
-            "type": "object",
-            "properties": {
-                "window_minutes": {"type": "integer", "description": "时间窗口（分钟），默认 60"},
-            },
-            "required": [],
-        },
-        has_side_effects=False,
-        executor=None,
-    ),
 }
 
 # 各 agent 可用的工具集合（只读工具）
@@ -202,7 +172,6 @@ _AGENT_TOOLS: dict[str, list[str]] = {
         "analyze_code",
     ],
     "judge_agent":     ["evaluate_artifact", "compare_artifacts"],  # P14：JudgeAgent ReAct 化，使用工件评估工具
-    "emotion_agent":   ["emotion_history_search", "emotion_timeline_query", "search_knowledge"],  # 方向 G Phase 2
     # Pentest application dispatch is planning-only.  Effects are server-owned
     # by SecurePentestExecutionService and are never generic ReAct tools.
     "pentest_agent":   [],
