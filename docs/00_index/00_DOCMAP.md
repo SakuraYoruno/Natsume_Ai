@@ -97,6 +97,11 @@ observation；用户观察不会镜像成七海自身情绪。该 reader 不再�
 EmotionTimeline；reader 故障显式 degraded，不向旧 authority 回退。定向本地集合为 `67 passed in 10.65s`，仍不代表
 Monitor、真实模型、远端 Edge 或 DL-07 完成。
 
+Gateway progress fastpath 已退役；保留的 rollback-window helper 固定以 `FRIEND / CALM` 产生技术状态
+话术，不读取 SocialBrain、旧 Bond，也不把 ingress 的用户情绪写成七海自我情绪。未被任何生产模块导入的
+重复 `app/input_service_ack.py` 已物理删除。`14 passed in 1.92s` 只证明本地 helper 与退役入口边界，
+不构成真实 Gateway 或完整对话验收。
+
 0148 现在提供严格的 signed profile-control route：`POST /v1/digital-life/relationship/companion-profile`
 只接受完整 bounded preference object，Secure Ingress 必须验证 `companion:profile:write`、精确 user
 principal/relationship subject 与 tenant/workspace 绑定。请求不能携带自由文本、Soul patch、情绪或关系

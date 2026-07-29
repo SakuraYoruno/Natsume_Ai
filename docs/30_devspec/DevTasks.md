@@ -159,6 +159,11 @@ bounded user-affect observation、关系纹理、body-sense、motive 与 render 
 回退 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。当前 `67 passed in 10.65s` 只覆盖本地
 切流与邻接回归；Monitor/Review、真实 provider/Gateway/Edge、跨进程恢复与 DL-07 仍待验收。
 
+`DL06_RETIRED_PROGRESS_REPLY_AUTHORITY_CUTOVER`：进度 fastpath 已由主链退役，仍保留的
+`input_runtime.progress` helper 不再解析 payload 的 Bond stage 或 user emotion，也不导入 SocialBrain；它只能
+将技术状态渲染为 `FRIEND / CALM`。无生产 import 的旧 `app/input_service_ack.py` 已删除。`14 passed in
+1.92s` 为定向本地合同，不能当作 Gateway 送达、可见对话或 DL-06 完成。
+
 NE-02 已补齐 D20c 的生产 transport identity 边界：真实 provider adapter
 生成脱敏 endpoint digest、调用时延和外部 HTTPS 决策，canonical audit 与
 Research attestation 必须精确一致；本地、私网、CLI、未知 transport 及历史

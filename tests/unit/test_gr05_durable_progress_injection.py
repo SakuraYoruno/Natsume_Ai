@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from host_brain.app.input_service_ack import (
-    build_gateway_progress_reply_text as build_legacy_progress_reply,
-)
 from host_brain.input_runtime.progress import build_gateway_progress_reply_text
 
 
@@ -81,23 +78,3 @@ def test_input_runtime_progress_can_read_by_session_without_person_id() -> None:
     assert projection.calls == [
         {"session_id": "session-progress", "exclude_request_id": None}
     ]
-
-
-def test_legacy_ack_module_requires_injected_projection(monkeypatch) -> None:
-    projection = _Projection()
-    monkeypatch.setattr(
-        "host_brain.app.surface_reply_preprocessor.render_quick_gateway_progress_text",
-        _render,
-    )
-
-    text, reason, summary = build_legacy_progress_reply(
-        request_id="request-progress",
-        session_id="session-progress",
-        payload={"person_id": "person-progress"},
-        task_status_projection=projection,
-    )
-
-    assert text == "RUNNING:research_agent"
-    assert reason == "PROGRESS_SUMMARY_FOUND"
-    assert summary is not None
-    assert projection.calls[0]["session_id"] == "session-progress"

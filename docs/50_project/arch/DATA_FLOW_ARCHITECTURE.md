@@ -740,6 +740,10 @@ flowchart LR
     O -. "reader failure" .-> D["degraded; no legacy fallback"]
 ```
 
+已退役的 Gateway progress fastpath 不在这条情感数据流中。若 rollback-window helper 被显式调用，只有
+`DurableTaskStatusProjection → FRIEND/CALM technical wording`，没有 `payload → Bond/SocialBrain` 或
+`payload user emotion → Natsume self-affect` 的箭头；因此它不能绕过 `AffectiveTurnPlan` 伪造关系或情绪。
+
 `LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 已在 production Host composition 中接入。snapshot
 reader 以当前 relationship subject 重开一条 canonical head，固定输出 `self_id=natsume_ai`、self-affect 与用户
 observation 的分离视图；后者只能解释用户状态，不能改写前者。reader 已组成后，任何读取失败或 identity drift

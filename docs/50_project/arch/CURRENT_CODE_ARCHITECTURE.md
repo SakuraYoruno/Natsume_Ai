@@ -66,6 +66,11 @@
 > SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。此切片本地集合为 `67 passed in 10.65s`，不是
 > Monitor、真实 provider/Edge 或 DL-07 完成。
 
+> **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
+> `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
+> `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧
+> `app/input_service_ack.py` 已删除；`14 passed in 1.92s` 仅是本地 helper 证据。
+
 > 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
 > `POST /v1/digital-life/relationship/companion-profile` 通过独立的
 > `host.companion-profile` Secure Ingress surface 认证 `companion:profile:write`，并再次比对

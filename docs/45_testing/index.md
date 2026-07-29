@@ -21,6 +21,10 @@
   reader 不会被调用；canonical reader 故障只 degraded，不会隐式 fallback。最终相关集合为
   `67 passed in 10.65s`；OBS route integration 另有 `3 passed, 27 deselected in 19.51s`。二者均无 Docker、
   真实 Host/Obs 进程、Gateway、真实 provider 或远端 Edge。
+- `test_dl06_progress_reply_legacy_authority_retirement.py`、既有 durable progress、Input route worker/dispatch
+  与 runtime-boundary 合同验证：已退役 progress helper 对伪造 `SOULMATE`/用户 `SAD` 仍只传入
+  `FRIEND / CALM`，不再导入或读取 SocialBrain；旧重复 ACK 模块已删除。集合为
+  `14 passed, 79 deselected in 1.92s`，只是本地回滚窗口边界，不是 Gateway 或完整对话实测。
 - `test_dl06_companion_proactive.py` 验证 Scheduler 的主动决定只读取 canonical
   `relationship_v2`、`state.affective`、clock 与 admitted timezone：explicit
   `ALLOWED` 才能发送；`UNKNOWN/DENIED`、repair、未结 episode 与 `GIVE_SPACE`

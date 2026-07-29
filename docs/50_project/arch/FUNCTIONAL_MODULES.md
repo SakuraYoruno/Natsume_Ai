@@ -31,6 +31,12 @@
 > 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
 > physical receipt 以及旧 writer 清零仍未完成。
 
+**退役 progress helper**位于 [`input_runtime/progress.py`](../../../host_brain/input_runtime/progress.py)。Gateway
+progress fastpath 已被禁用，故此文件只保留 rollback-window 的无状态技术文案 helper：它固定使用
+`FRIEND / CALM`，不读取 ingress `bond_summary`、用户 emotion、SocialBrain 或旧 Bond。历史重复
+`app/input_service_ack.py` 已无生产 caller 并被删除，避免它成为第二条兼容读取路径。该边界只做本地合同验证，
+不能取代 canonical Life 主链。
+
 **Canonical Relationship Prompt Projection 模块**位于
 [`persona/context/relationship_state.py`](../../../host_brain/persona/context/relationship_state.py)、
 [`app/context/prompt_context_plane.py`](../../../host_brain/app/context/prompt_context_plane.py) 与

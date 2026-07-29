@@ -508,6 +508,11 @@ relationship subject 的**同一条** canonical Life head 投影 OBS 所需的 s
 （`67 passed in 10.65s`），另有 OBS route integration `3 passed, 27 deselected in 19.51s`；两者都只是本地
 进程内证据，Monitor/Review、真实 provider、远端 Edge 和 DL-07 仍未验收。
 
+已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
+`FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开
+SocialBrain。原先未被生产代码导入的重复 `app/input_service_ack.py` 已删除。该收口只覆盖本地 helper
+（`14 passed in 1.92s`），正常可见回复仍必须通过 canonical Life 与 Governed Surface 主链。
+
 内部旁车到 Governance owner 的既有批次都只作提交绑定历史。当前 Authority owner 集合证明每个 Host root 的 canonical SQLite connection、Memory stores、ModelAttempt 与 CapabilityBroker runtime identity 均隔离，Prompt/Route catalog 也不再共享可变实例；关闭失败会保留未完成资源并阻断新 epoch。生产 locator facade/Container 已物理清零，测试桥不属于可发布产品对象图；Chroma 与 Neo4j 仍使用配置级共享 namespace，所以不能外推为 tenant isolation、资源崩溃恢复、事务化 Chat、波次集成或 production canary 已完成。当前 fresh 完整架构静态 Gate 1～14 已全部 `PASS`、`failed_gates=[]`：Task Runtime feature-canary 合同和 Host lifecycle ports 已迁入中立 `host_brain/contracts/`，Persistence 与 Composition 分别直接依赖 canonical contract；旧导入路径只保留同一对象重导出，因此 application/persistence 与 app/composition 两个 SCC 均已消除。Gate 3 继续由 Research shadow ledger 的 1271/512/108 行职责拆分保持通过，没有扩大白名单。该结论只表示静态分层收口，不代表 Universal Runtime 七路线、NE-01 或完整架构项目完成。
 
 最新 `dev` 还保留 #114 的精确 Internal 单节点后置审核取消恢复：真实 Operator Secure Ingress 发起取消后，immutable intent 的 `BLOCKED` 只表示围栏，另一个绑定该 intent 的 trusted final decision 必须为 `CANCELLED`；重启 terminal worker 先关闭 deterministic nonacceptance claim，再 tombstone/清理 Workspace，且不得重跑 Agent。既有 pre-checkpoint 取消子集仍只接受两种受信终态：`RELEASE + NO_SIDE_EFFECT + 无 receipt`，或 `COMMIT + SIDE_EFFECT_CONFIRMED + durable receipt`，并要求 finalized cancellation。当前分支另行关闭“不存在取消意图”的精确 raw worker failure：仅当单节点 Graph 仍 `ACTIVE`、原 Lease 已到期、恰好一个 graph Budget、零 WorkerProjection/Acceptance Effect、签名 `RELEASE + NO_SIDE_EFFECT + 无 receipt` 全部成立时，单一 SQLite UoW 才把 Operation、Attempt、Node、Graph、Lease、Budget 连同各自 Outbox 收口为失败终态。真实 SQLite + Git 证明响应丢失只重开同一签名终态，Internal Secure Ingress claim 必须先于 worktree/stage 清理提交；claim 失败或证据篡改时现场原样保留。该能力只关闭精确单节点无副作用失败，不覆盖一般 unknown-effect、多节点 failure 或其它取消，不能据此把 Internal、NE-01 或完整架构标成完成。
