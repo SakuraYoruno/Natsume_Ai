@@ -153,17 +153,20 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 - `AffectiveTurnPlanV1`、`CompanionActV1` 与 `ExpressionPlanV1` 已在可信
   Affect Fusion hand-off 后、模型调用前冻结；模型只负责措辞，Surface completion
   不再把 `natsume_emotion_tag` 或纯文本 fallback 写回七海 self-affect。
-- 普通低歧义回合可经 `ModelAttemptService.stream()` 和真实 Vault provider stream
-  逐句输出。每个稳定分句先写 `surface_sentence_delivery_intent`，再发 SSE；计划、
+- 普通低歧义回合可优先经 `ModelAttemptService.stream_with_result()` 输出 typed delta，并以唯一
+  provider final response 把模型/transport 与可选 usage 交回终态 Attempt；只有在 token、completion token 与成本齐全时才可称为实际计量。只有在首个 delta 前明确
+  `MODEL_STREAM_RESULT_UNSUPPORTED` 才可回退兼容 `stream()` 并标记无终态 usage。每个稳定分句先写
+  `surface_sentence_delivery_intent`，再发 SSE；计划、
   句子 digest、sync id 与最终 foreground receipt 由 migration
   `0145_affective_turn_delivery.sql` 从 immutable Life event 派生只读 projection。
 - 高歧义、边界或修复回合冻结为恰好两候的 buffered selection；本地 scorer 必须选择
   一条后再经非操控 Gate 才可进入既有 buffered renderer。Gate 会在可见前拦截威胁、
   排他、负罪施压和内部计划泄漏。取消会记录 sent count，不发送未
   staging 的句子。
-- 本切片没有把受治理 Budget stream 伪装成已完成：当前 provider stream 尚不能返回
-  final canonical usage，带 node-bound guard 的请求仍走 usage-safe buffered path。
-  connection resume、TTS/Avatar、真实 Edge 和完整 Chat 路由实测仍未完成。
+- 本切片没有把受治理 Budget stream 伪装成已完成：模型层已具备 final canonical result 合同，
+  但默认 Vault provider 尚未绑定它，且 Task Runtime 还没有 node/attempt-bound 的逐句可见性、
+  cancel、restart replay 与 duplicate fence。带 node-bound guard 的请求仍走 usage-safe buffered
+  path。connection resume、TTS/Avatar、真实 Edge 和完整 Chat 路由实测仍未完成。
 
 退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
 Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。

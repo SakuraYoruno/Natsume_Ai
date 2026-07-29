@@ -22,6 +22,7 @@ from host_brain.model_runtime.provider_adapters import (
     ProviderAdapterError,
     ProviderAdapterRegistry,
     StreamCallable,
+    StreamResultCallable,
 )
 
 
@@ -57,6 +58,7 @@ class ProductionProviderBinding:
     provider: str
     complete: ProviderPayloadCallable
     stream: ProviderPayloadCallable | None = None
+    stream_with_result: ProviderPayloadCallable | None = None
     credential_available: bool = False
     adapter_id: str | None = None
     run_sync_in_thread: bool = False
@@ -114,6 +116,7 @@ def production_provider_payload(
     request: ProviderAttemptRequest,
     *,
     stream: bool,
+    require_final_usage: bool = False,
 ) -> dict[str, Any]:
     """Create a credential-free payload for one injected transport call."""
 
@@ -127,6 +130,12 @@ def production_provider_payload(
     if response_format is not None:
         payload["response_format"] = response_format
     payload.update(_generation_parameters(request))
+    if require_final_usage:
+        # This is an explicit transport capability request, not a token/cost
+        # estimate.  The binding must still return a terminal response with
+        # the provider-owned usage dimensions required by the Task budget.
+        payload["stream_options"] = {"include_usage": True}
+        payload["require_final_usage"] = True
     return payload
 
 
@@ -137,6 +146,10 @@ def _build_adapter(binding: ProductionProviderBinding) -> CallableProviderAdapte
         raise ProductionProviderConfigurationError(f"provider {provider} has no complete callable")
     if binding.stream is not None and not callable(binding.stream):
         raise ProductionProviderConfigurationError(f"provider {provider} has invalid stream callable")
+    if binding.stream_with_result is not None and not callable(binding.stream_with_result):
+        raise ProductionProviderConfigurationError(
+            f"provider {provider} has invalid stream_with_result callable"
+        )
     if not binding.credential_available:
         # Do not include callable repr, credential values, or binding state.
         raise ProductionProviderConfigurationError(f"provider credential unavailable: {provider}")
@@ -152,11 +165,26 @@ def _build_adapter(binding: ProductionProviderBinding) -> CallableProviderAdapte
 
         stream_fn = _stream
 
+    stream_result_fn: StreamResultCallable | None = None
+    if binding.stream_with_result is not None:
+        def _stream_with_result(request: ProviderAttemptRequest) -> Any:
+            assert binding.stream_with_result is not None
+            return binding.stream_with_result(
+                production_provider_payload(
+                    request,
+                    stream=True,
+                    require_final_usage=True,
+                )
+            )
+
+        stream_result_fn = _stream_with_result
+
     adapter_id = str(binding.adapter_id or "").strip() or default_adapter_id
     return CallableProviderAdapter(
         adapter_id,
         complete_fn=_complete,
         stream_fn=stream_fn,
+        stream_result_fn=stream_result_fn,
         run_sync_in_thread=binding.run_sync_in_thread,
     )
 

@@ -460,7 +460,7 @@ Effect fence 的证据规则为 fail closed：一般 handler/transport `FAILED` 
 
 ### 3.5 模型与能力执行层
 
-- `host_brain/model_runtime/`：prompt contract、provider route、ModelAttempt、重试与用量证据。
+- `host_brain/model_runtime/`：prompt contract、provider route、ModelAttempt、重试与用量证据。`stream_with_result()` 将流拆为 typed delta 与唯一 provider final response；只有 final response 的显式 usage/transport 可进入 Attempt audit，默认 Vault adapter 尚未绑定该能力。该模型协议不授予 Governed Chat 逐句外显权，后者仍需要 Task node/attempt/lease-bound delivery、cancel 与 restart duplicate fence。
 - `host_brain/capability_plane/`：Capability Broker、descriptor policy、execution journal。
 - `host_brain/skills/`：内置 Skill 定义、executor、确定性 SkillDraft/bundle 编译器和签名供应链资产。0141 真实重开 Lab、Review、Supply Chain 与 canary evidence 后才写 active projection；Host 运行时只解析批准的 version binding，不扫描目录、不直接 import 外部 Python。
 - `host_brain/tools/`、`host_brain/mcp/`、`host_brain/lsp/`：具体工具和协议 adapter。
@@ -640,7 +640,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Historical terminal reconciliation | 0099 immutable case/proof/supersession + `DurableTaskStore` CAS | 主 Host/独立 Obs physical query-only repository | 单次启动最多 10,000 Graph；唯一 graph-scope exact-only；历史替代链最终必须有可信 proof；system auto 默认 OFF、canary 未跑 |
 | Host mode HardState / Policy | app-local `HostHardStateOwner` + 0115 journal；`HostModePolicyOwner` + 0129 journal | ModeTransition history、runtime snapshot、Obs Life Body | 两个聚合各自 runtime-scoped event/head 同事务；expected revision CAS；exact Host lease/fence；完整 chain replay 后恢复。mode、auto-rules、last-interaction 与 event outcome 均有 canonical owner；canary未跑 |
 | Governor / Grant | canonical audit ledger 与 grant resolver | Operator/trace projection | token 必须绑定 scope 和 subject |
-| Model invocation | `ModelAttemptService` 及持久记录 | 用量和健康投影 | terminal attempt 去重；三维 token 为 Optional 并携带 measured coverage/lower-bound；provider 缺失时不得伪造精确成本；stream 当前无生产调用者且最终 usage 未接，启用前必须补 typed final usage |
+| Model invocation | `ModelAttemptService` 及持久记录 | 用量和健康投影 | terminal attempt 去重；三维 token 为 Optional 并携带 measured coverage/lower-bound；provider 缺失时不得伪造精确成本；`stream_with_result()` 已定义 typed final result，只有完整 token/completion/cost 才计量；默认 Vault provider、Governed Chat visibility 与真实生产调用仍未接 |
 | Capability execution | Capability Broker journal/receipt | maturity scorecard | maturity 投影本身不是执行 authority |
 | Life | Life command/event/reducer | Life projection、UI | 业务模块不能直接改 projection |
 | Acceptance Effect recovery | Effect row + app-local dispatcher + domain read authority | Guardian SLO | privacy gate fail-closed；disabled=`DISABLED`且零 event/profile；0118 sealed child + full-set reconcile；admitted-time/exact conversation/session delivery digest；Gateway同SQLite payload校验effect_id，`NOT_FOUND`仍`UNKNOWN` |

@@ -6,7 +6,20 @@ from typing import Any
 
 import pytest
 
-from host_brain.app.surface_main_chain_adapter import surface_main_chain_sse_generator
+from host_brain.app.surface_main_chain_adapter import (
+    _final_stream_usage_is_attested,
+    surface_main_chain_sse_generator,
+)
+from host_brain.model_runtime import (
+    AttemptStatus,
+    ModelAttemptRecord,
+    ModelAttemptResult,
+    ModelAttemptStreamEvent,
+    ModelStreamProtocolError,
+    ProviderResponse,
+    ProviderTarget,
+    RouteDecision,
+)
 
 
 SOUL = "你是七海。中文私聊，真诚、有分寸，不操控用户。"
@@ -77,6 +90,40 @@ def _agent_input() -> SimpleNamespace:
         multimodal_observations={},
         response_form="text",
     )
+
+
+def test_final_stream_usage_status_requires_all_provider_budget_dimensions() -> None:
+    complete = SimpleNamespace(
+        cached=False,
+        attempts=(
+            SimpleNamespace(
+                metadata={
+                    "provider_budget_measurements": {
+                        "token_count": 12,
+                        "completion_tokens": 7,
+                        "model_cost_micros": 31,
+                    }
+                }
+            ),
+        ),
+    )
+    missing_cost = SimpleNamespace(
+        cached=False,
+        attempts=(
+            SimpleNamespace(
+                metadata={
+                    "provider_budget_measurements": {
+                        "token_count": 12,
+                        "completion_tokens": 7,
+                    }
+                }
+            ),
+        ),
+    )
+
+    assert _final_stream_usage_is_attested(complete) is True
+    assert _final_stream_usage_is_attested(missing_cost) is False
+    assert _final_stream_usage_is_attested(SimpleNamespace(cached=True, attempts=())) is False
 
 
 @pytest.mark.asyncio
@@ -160,6 +207,175 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
     assert foreground["emotion_context"]["emotion_tag"] == "CALM"
     assert foreground["emotion_context"]["emotion_source"] == "affective_turn_plan"
     assert foreground["surface_result"]["plan_id"] == submitted[0]["payload"]["affective_turn_plan"]["plan_id"]
+
+
+@pytest.mark.asyncio
+async def test_native_stream_records_terminal_usage_attestation_when_available(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    submitted: list[dict[str, Any]] = []
+    requests: list[Any] = []
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class UsageAttestedStreamingModel:
+        async def stream_with_result(self, request):  # noqa: ANN001
+            requests.append(request)
+            yield ModelAttemptStreamEvent.delta("先缓一下。")
+            yield ModelAttemptStreamEvent.delta("我在这儿，慢慢说也行。")
+            target = ProviderTarget("surface-attested", "provider-a", "model-a")
+            response = ProviderResponse(
+                content="先缓一下。我在这儿，慢慢说也行。",
+                usage={
+                    "total_tokens": 12,
+                    "completion_tokens": 7,
+                    "model_cost_micros": 31,
+                },
+            )
+            result = ModelAttemptResult(
+                request_id=request.request_id,
+                success=True,
+                route_decision=RouteDecision(
+                    "route-surface-attested",
+                    (target,),
+                    "surface-test",
+                    max_attempts=1,
+                ),
+                attempts=(
+                    ModelAttemptRecord(
+                        attempt_id="attempt-surface-attested",
+                        request_id=request.request_id,
+                        route_decision_id="route-surface-attested",
+                        attempt_index=1,
+                        status=AttemptStatus.SUCCEEDED,
+                        retry_reason="initial",
+                        adapter_id="surface-attested",
+                        provider="provider-a",
+                        model_id="model-a",
+                        prompt_id="surface.main.text.v1",
+                        prompt_version="1",
+                        prompt_digest="a" * 64,
+                        started_at_ms=1,
+                        ended_at_ms=2,
+                        latency_ms=1,
+                        metadata={
+                            "provider_budget_measurements": {
+                                "token_count": 12,
+                                "completion_tokens": 7,
+                                "model_cost_micros": 31,
+                            }
+                        },
+                    ),
+                ),
+                response=response,
+                final_target=target,
+            )
+            yield ModelAttemptStreamEvent.final(result)
+
+        async def stream(self, _request):  # noqa: ANN001
+            raise AssertionError("attested stream must not fall back to legacy stream")
+            yield ""  # pragma: no cover - preserves async-generator shape
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _submit)
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=lambda: UsageAttestedStreamingModel(),
+    )
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(_agent_input(), ports=ports)
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+    model_trace = trace["surface_model_attempt"]
+
+    assert requests
+    assert commit["decision"] == "APPROVE"
+    assert commit["audit_refs"]["model_id"] == "model-a"
+    assert commit["audit_refs"]["provider_name"] == "provider-a"
+    assert commit["audit_refs"]["surface_main_chain"]["provider_usage_status"] == (
+        "STREAM_FINAL_USAGE_ATTESTED"
+    )
+    assert model_trace["provider_usage_status"] == "STREAM_FINAL_USAGE_ATTESTED"
+    assert model_trace["budget_measurement"]["token_count"] == 12
+    assert model_trace["budget_measurement"]["model_cost_micros"] == 31
+    assert trace["native_sentence_stream"]["model_stream_protocol"] == "FINAL_RESULT_WITH_USAGE"
+
+
+@pytest.mark.asyncio
+async def test_native_stream_falls_back_only_for_explicit_pre_delta_unsupported_protocol(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    submitted: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class ExplicitLegacyStreamingModel:
+        async def stream_with_result(self, _request):  # noqa: ANN001
+            raise ModelStreamProtocolError(
+                "provider has no final usage protocol",
+                code="MODEL_STREAM_RESULT_UNSUPPORTED",
+            )
+            yield ModelAttemptStreamEvent.delta("unreachable")  # pragma: no cover
+
+        async def stream(self, _request):  # noqa: ANN001
+            yield "先缓一下。"
+            yield "我在这儿。"
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _submit)
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=lambda: ExplicitLegacyStreamingModel(),
+    )
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(_agent_input(), ports=ports)
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    trace = commit["audit_refs"]["trace_stage_meta"]
+
+    assert commit["decision"] == "APPROVE"
+    assert commit["audit_refs"]["surface_main_chain"]["provider_usage_status"] == (
+        "STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE"
+    )
+    assert trace["native_sentence_stream"]["model_stream_protocol"] == "LEGACY_NO_FINAL_USAGE"
+    assert trace["native_sentence_stream"]["legacy_stream_fallback_reason"] == (
+        "MODEL_STREAM_RESULT_UNSUPPORTED"
+    )
 
 
 @pytest.mark.asyncio

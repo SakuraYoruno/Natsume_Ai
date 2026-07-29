@@ -12,6 +12,8 @@ from host_brain.model_runtime import (
     PromptRef,
     PromptRegistry,
     ProviderAttemptRequest,
+    ProviderResponse,
+    ProviderStreamEvent,
     RouteNotConfiguredError,
     build_production_provider_registry,
     build_vault_backed_provider_registry,
@@ -172,6 +174,64 @@ def test_injected_provider_callable_is_invoked_exactly_once() -> None:
     assert payloads[0]["messages"] == [{"role": "user", "content": "hello"}]
     assert "timeout_ms" not in payloads[0]
     assert "llm_api_key" not in payloads[0]
+
+
+@pytest.mark.asyncio
+async def test_explicit_production_stream_result_binding_requests_terminal_usage() -> None:
+    payloads: list[dict[str, object]] = []
+
+    async def _complete(_payload):  # noqa: ANN001
+        return {"content": "unused"}
+
+    async def _stream_with_result(payload):  # noqa: ANN001
+        payloads.append(dict(payload))
+        yield ProviderStreamEvent.delta("第一句。")
+        yield ProviderStreamEvent.final(
+            ProviderResponse(
+                content="第一句。",
+                finish_reason="stop",
+                usage={
+                    "total_tokens": 8,
+                    "completion_tokens": 3,
+                    "model_cost_micros": 12,
+                },
+            )
+        )
+
+    registry = build_production_provider_registry(
+        [
+            ProductionProviderBinding(
+                provider="gemini",
+                complete=_complete,
+                stream_with_result=_stream_with_result,
+                credential_available=True,
+            )
+        ]
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(), scene_type="CHAT", cognitive_tier="FAST"
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-stream-result",
+        attempt_id="attempt-stream-result",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT",
+        cognitive_tier="FAST",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    events = [
+        event
+        async for event in registry.get("production.gemini").stream_with_result(request)
+    ]
+
+    assert [event.kind.value for event in events] == ["DELTA", "FINAL"]
+    assert payloads[0]["stream"] is True
+    assert payloads[0]["stream_options"] == {"include_usage": True}
+    assert payloads[0]["require_final_usage"] is True
 
 
 def test_vault_backed_transport_emits_server_owned_external_identity() -> None:

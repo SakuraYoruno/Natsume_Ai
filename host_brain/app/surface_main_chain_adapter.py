@@ -88,6 +88,35 @@ def _surface_model_deadline_ms(governed_model_budget: Any | None) -> int:
     return min(int(governed_model_budget.deadline_ms), configured)
 
 
+def _final_stream_usage_is_attested(result: Any) -> bool:
+    """Return whether a final stream result carries all canonical budget facts.
+
+    A final provider response can be useful audit evidence even when the
+    provider omits token or cost fields.  It must not be relabeled as usage
+    attestation in that case.  Governed calls enforce these fields inside
+    ``ModelAttemptService``; this small read-side classifier only keeps the
+    direct native Surface trace honest.
+    """
+
+    if result is None or bool(getattr(result, "cached", False)):
+        return False
+    attempts = tuple(getattr(result, "attempts", ()) or ())
+    if not attempts:
+        return False
+    measurements = _safe_mapping(
+        _safe_mapping(getattr(attempts[-1], "metadata", None)).get(
+            "provider_budget_measurements"
+        )
+    )
+    required = ("token_count", "completion_tokens", "model_cost_micros")
+    return all(
+        isinstance(measurements.get(key), int)
+        and not isinstance(measurements.get(key), bool)
+        and int(measurements[key]) >= 0
+        for key in required
+    )
+
+
 def _record_surface_memory_guard_packet(
     *,
     agent_input: Any,
@@ -330,10 +359,18 @@ async def _native_affective_sentence_stream(
 
     from host_brain.model_runtime.contracts import (  # noqa: PLC0415
         ModelAttemptRequest,
+        ModelAttemptStreamEvent,
+        ModelAttemptStreamEventKind,
         PromptRef,
+    )
+    from host_brain.model_runtime.model_attempt_service import (  # noqa: PLC0415
+        ModelStreamProtocolError,
     )
     from host_brain.model_runtime.live_prompts import (  # noqa: PLC0415
         SURFACE_MAIN_TEXT_PROMPT_ID,
+    )
+    from host_brain.model_runtime.trace import (  # noqa: PLC0415
+        model_attempt_result_trace,
     )
 
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
@@ -385,21 +422,85 @@ async def _native_affective_sentence_stream(
     narrative_parts: list[str] = []
     sent_sentence_count = 0
     sentence_receipts: list[dict[str, Any]] = []
+    model_request = ModelAttemptRequest(
+        request_id=request_id or "surface-main-chain",
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+        prompt=PromptRef(SURFACE_MAIN_TEXT_PROMPT_ID, {"messages": messages}),
+        deadline_ms=_surface_model_deadline_ms(None),
+        foreground=True,
+        metadata={
+            "chain": "surface_main_native_sentence_stream",
+            "affective_turn_plan_id": plan_id,
+        },
+    )
+    final_model_attempt: Any | None = None
+    final_result_stream = False
+    legacy_stream_fallback_reason = ""
+
+    async def model_chunks() -> AsyncGenerator[str, None]:
+        """Prefer a terminally-attested stream without weakening legacy Host chat.
+
+        A direct native stream has its own per-sentence durable visibility
+        authority, so it can expose a delta before the provider's terminal
+        usage record arrives.  It may fall back to the old unmetered stream
+        only when the provider proves *before emitting anything* that it does
+        not implement the explicit final-result protocol.  Any malformed or
+        interrupted attested stream stays fail-closed: replaying it through a
+        second provider could duplicate words the user already saw.
+        """
+
+        nonlocal final_model_attempt, final_result_stream, legacy_stream_fallback_reason
+        model_service = ports.model_attempt_service()
+        stream_with_result = getattr(model_service, "stream_with_result", None)
+        if callable(stream_with_result):
+            emitted_attested_delta = False
+            final_seen = False
+            try:
+                async for event in stream_with_result(model_request):
+                    if not isinstance(event, ModelAttemptStreamEvent):
+                        raise ModelStreamProtocolError(
+                            "surface model stream emitted an untyped result event"
+                        )
+                    if event.kind is ModelAttemptStreamEventKind.DELTA:
+                        if final_seen:
+                            raise ModelStreamProtocolError(
+                                "surface model stream emitted a delta after its final result"
+                            )
+                        emitted_attested_delta = True
+                        yield event.text
+                        continue
+                    if event.kind is not ModelAttemptStreamEventKind.FINAL or final_seen:
+                        raise ModelStreamProtocolError(
+                            "surface model stream emitted an invalid final result sequence"
+                        )
+                    final_seen = True
+                    final_model_attempt = event.result
+                if not final_seen or final_model_attempt is None:
+                    raise ModelStreamProtocolError(
+                        "surface model stream ended without a final audited result"
+                    )
+                final_result_stream = True
+                return
+            except Exception as exc:
+                # ModelAttemptService classifies this path before starting a
+                # provider attempt.  No visible delta and this exact code are
+                # the only safe conditions for the legacy direct-Host stream.
+                if (
+                    emitted_attested_delta
+                    or str(getattr(exc, "code", "")).strip().upper()
+                    != "MODEL_STREAM_RESULT_UNSUPPORTED"
+                ):
+                    raise
+                legacy_stream_fallback_reason = "MODEL_STREAM_RESULT_UNSUPPORTED"
+
+        async for raw_chunk in model_service.stream(model_request):
+            chunk = str(raw_chunk or "")
+            if chunk:
+                yield chunk
+
     try:
-        async for raw_chunk in ports.model_attempt_service().stream(
-            ModelAttemptRequest(
-                request_id=request_id or "surface-main-chain",
-                scene_type="CHAT_SURFACE",
-                cognitive_tier="A",
-                prompt=PromptRef(SURFACE_MAIN_TEXT_PROMPT_ID, {"messages": messages}),
-                deadline_ms=_surface_model_deadline_ms(None),
-                foreground=True,
-                metadata={
-                    "chain": "surface_main_native_sentence_stream",
-                    "affective_turn_plan_id": plan_id,
-                },
-            )
-        ):
+        async for raw_chunk in model_chunks():
             if first_token_ms is None:
                 first_token_ms = max(
                     0,
@@ -566,6 +667,7 @@ async def _native_affective_sentence_stream(
 
     total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
     llm_latency_ms = max(0, int((time.perf_counter() - stream_started) * 1000))
+    final_usage_attested = _final_stream_usage_is_attested(final_model_attempt)
     stream_summary = {
         "mode": "native_sentence_stream",
         "sentence_count": sent_sentence_count,
@@ -573,22 +675,43 @@ async def _native_affective_sentence_stream(
         "synchronization_id": synchronization_id,
         "self_affect_revision": plan.get("self_affect_revision"),
         "first_token_ms": first_token_ms,
-        "provider_usage_status": "STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE",
+        "provider_usage_status": (
+            "STREAM_FINAL_USAGE_ATTESTED"
+            if final_usage_attested
+            else "STREAM_FINAL_RESULT_AUDITED_UNMEASURED"
+            if final_result_stream
+            else "STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE"
+        ),
     }
-    trace["surface_model_attempt"] = {
-        "streaming": True,
-        "prompt_id": SURFACE_MAIN_TEXT_PROMPT_ID,
-        "message_count": len(messages),
-        "generate_elapsed_ms": llm_latency_ms,
-        "first_token_ms": first_token_ms,
-        "provider_usage_status": stream_summary["provider_usage_status"],
-    }
+    if final_model_attempt is not None:
+        attempt_trace = model_attempt_result_trace(final_model_attempt)
+    else:
+        attempt_trace = {}
+    attempt_trace.update(
+        {
+            "streaming": True,
+            "prompt_id": SURFACE_MAIN_TEXT_PROMPT_ID,
+            "message_count": len(messages),
+            "generate_elapsed_ms": llm_latency_ms,
+            "first_token_ms": first_token_ms,
+            "provider_usage_status": stream_summary["provider_usage_status"],
+        }
+    )
+    trace["surface_model_attempt"] = attempt_trace
     trace["native_sentence_stream"] = {
         "status": "COMPLETED",
         "plan_id": plan_id,
         "synchronization_id": synchronization_id,
         "sent_sentence_count": sent_sentence_count,
         "sentence_receipts": sentence_receipts,
+        "model_stream_protocol": (
+            "FINAL_RESULT_WITH_USAGE"
+            if final_usage_attested
+            else "FINAL_RESULT_UNMEASURED"
+            if final_result_stream
+            else "LEGACY_NO_FINAL_USAGE"
+        ),
+        "legacy_stream_fallback_reason": legacy_stream_fallback_reason or None,
     }
     timings_ms = _surface_timings_ms(
         total_latency_ms=total_latency_ms,

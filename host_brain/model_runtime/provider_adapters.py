@@ -17,6 +17,7 @@ from host_brain.model_runtime.contracts import (
     ProviderAdapter,
     ProviderAttemptRequest,
     ProviderResponse,
+    ProviderStreamEvent,
 )
 
 
@@ -37,6 +38,10 @@ CompleteCallable = Callable[
     ProviderResponse | str | Mapping[str, Any] | Awaitable[ProviderResponse | str | Mapping[str, Any]],
 ]
 StreamCallable = Callable[
+    [ProviderAttemptRequest],
+    AsyncIterable[Any] | Iterable[Any] | Awaitable[AsyncIterable[Any] | Iterable[Any]],
+]
+StreamResultCallable = Callable[
     [ProviderAttemptRequest],
     AsyncIterable[Any] | Iterable[Any] | Awaitable[AsyncIterable[Any] | Iterable[Any]],
 ]
@@ -81,6 +86,38 @@ def _coerce_chunk(value: Any) -> str:
     return str(value or "")
 
 
+def _coerce_stream_result_event(value: Any) -> ProviderStreamEvent:
+    """Normalize an explicit usage-attested stream event, never raw chunks.
+
+    Plain strings remain valid only for the legacy ``stream`` method.  A
+    caller that wants a governed stream must provide a terminal response with
+    provider-owned usage instead of relying on an inferred token count.
+    """
+
+    if isinstance(value, ProviderStreamEvent):
+        return value
+    if not isinstance(value, Mapping):
+        raise ProviderAdapterError(
+            "stream result callable must emit ProviderStreamEvent or mapping"
+        )
+    payload = dict(value)
+    kind = payload.get("kind", payload.get("event_type"))
+    if str(kind or "").strip().upper() == "DELTA":
+        return ProviderStreamEvent.delta(
+            str(payload.get("text", payload.get("content", "")) or "")
+        )
+    if str(kind or "").strip().upper() == "FINAL":
+        response = payload.get("response")
+        if isinstance(response, ProviderResponse):
+            return ProviderStreamEvent.final(response)
+        if isinstance(response, Mapping):
+            return ProviderStreamEvent.final(_coerce_response(response))
+        raise ProviderAdapterError(
+            "stream result final mapping requires a ProviderResponse response"
+        )
+    raise ProviderAdapterError("stream result event kind must be DELTA or FINAL")
+
+
 class CallableProviderAdapter:
     """Adapter around injected single-call complete/stream functions."""
 
@@ -90,6 +127,7 @@ class CallableProviderAdapter:
         *,
         complete_fn: CompleteCallable,
         stream_fn: StreamCallable | None = None,
+        stream_result_fn: StreamResultCallable | None = None,
         run_sync_in_thread: bool = False,
     ) -> None:
         normalized_id = str(adapter_id or "").strip()
@@ -99,9 +137,12 @@ class CallableProviderAdapter:
             raise TypeError("complete_fn must be callable")
         if stream_fn is not None and not callable(stream_fn):
             raise TypeError("stream_fn must be callable")
+        if stream_result_fn is not None and not callable(stream_result_fn):
+            raise TypeError("stream_result_fn must be callable")
         self._adapter_id = normalized_id
         self._complete_fn = complete_fn
         self._stream_fn = stream_fn
+        self._stream_result_fn = stream_result_fn
         self._run_sync_in_thread = bool(run_sync_in_thread)
 
     @property
@@ -119,6 +160,15 @@ class CallableProviderAdapter:
 
     def stream(self, request: ProviderAttemptRequest):
         return self._stream(request)
+
+    @property
+    def supports_canonical_stream_result(self) -> bool:
+        """Whether this injected transport ends with canonical usage evidence."""
+
+        return self._stream_result_fn is not None
+
+    def stream_with_result(self, request: ProviderAttemptRequest):
+        return self._stream_with_result(request)
 
     async def _stream(self, request: ProviderAttemptRequest):
         if self._stream_fn is None:
@@ -148,6 +198,30 @@ class CallableProviderAdapter:
             return
         raise ProviderAdapterError(
             f"stream callable returned {type(source).__name__}, expected iterable or async iterable"
+        )
+
+    async def _stream_with_result(self, request: ProviderAttemptRequest):
+        if self._stream_result_fn is None:
+            raise ProviderAdapterError(
+                "provider stream has no final canonical usage response"
+            )
+        if self._run_sync_in_thread and not inspect.iscoroutinefunction(self._stream_result_fn):
+            source: Any = await asyncio.to_thread(self._stream_result_fn, request)
+        else:
+            source = self._stream_result_fn(request)
+            if inspect.isawaitable(source):
+                source = await source
+        if isinstance(source, AsyncIterable):
+            async for raw_event in source:
+                yield _coerce_stream_result_event(raw_event)
+            return
+        if isinstance(source, Iterable) and not isinstance(source, (str, bytes, bytearray)):
+            for raw_event in source:
+                yield _coerce_stream_result_event(raw_event)
+            return
+        raise ProviderAdapterError(
+            "stream result callable returned "
+            f"{type(source).__name__}, expected iterable or async iterable"
         )
 
 
@@ -198,6 +272,7 @@ __all__ = [
     "DuplicateProviderAdapterError",
     "ProviderAdapterError",
     "ProviderAdapterRegistry",
+    "StreamResultCallable",
     "StreamCallable",
     "UnknownProviderAdapterError",
 ]

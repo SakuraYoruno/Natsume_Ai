@@ -549,12 +549,16 @@ Bond queue/writer construction，只有 no-write retired adapter 与 score/stage
 DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由
 plain-text parser 将双方状态重置为 `NEUTRAL`。普通低歧义回合逐句 staging；高歧义、
-边界和修复回合保留两候 buffered selection。`0145_affective_turn_delivery.sql` 只投影
-plan/sync/sentence digest，不复制句子正文、原始观察或私密媒体。DL-05 在同一 immutable
-plan 下为每个稳定句生成 Voice `SPEAK` 和 Avatar `TRANSITION` 成对 Host protocol；结束和
-打断生成 `RELEASE`/`CANCEL`。`0146_affective_expression_delivery.sql` 只投影 channel/action、
-sync、self-affect revision、avatar predecessor 与 Host staging status，绝不复制文本、原始媒体
-或模型推理。该读模型的 “last accepted” 是**最后一次 Host 暂存**，不是远端设备实际状态。
+边界和修复回合保留两候 buffered selection。`ModelAttemptService.stream_with_result()` 可在
+每个 typed delta 后，以唯一 provider-owned final response 回传模型/transport 与可选 usage；只有完整
+token、completion token、cost 才称 usage 已证明；native stream
+只在首个 delta 前明确收到 `MODEL_STREAM_RESULT_UNSUPPORTED` 时回退兼容 stream，并在最终
+trace 标记无终态 usage。`0145_affective_turn_delivery.sql` 只投影 plan/sync/sentence digest，
+不复制句子正文、原始观察或私密媒体。DL-05 在同一 immutable plan 下为每个稳定句生成 Voice
+`SPEAK` 和 Avatar `TRANSITION` 成对 Host protocol；结束和打断生成 `RELEASE`/`CANCEL`。
+`0146_affective_expression_delivery.sql` 只投影 channel/action、sync、self-affect revision、avatar
+predecessor 与 Host staging status，绝不复制文本、原始媒体或模型推理。该读模型的 “last accepted”
+是**最后一次 Host 暂存**，不是远端设备实际状态。
 
 0147 将 `companion_profile` 作为同一 relation aggregate 的 bounded head，而不是 Surface、TTS
 或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only
@@ -616,7 +620,7 @@ target 字段均 fail closed；Voice/Avatar/文本随后只读新的 active prof
 flowchart LR
     H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]
     R["canonical companion profile\nCANARY or ACTIVE"] --> P
-    P -->|"low ambiguity"| M["ModelAttempt native text stream"]
+    P -->|"low ambiguity"| M["ModelAttempt typed delta + final result / conditional usage stream"]
     P -->|"repair / conflict / boundary"| C["two-candidate buffered selection"]
     M --> G["local consistency + non-manipulation Gate"]
     G --> I["surface_sentence_delivery_intent\ncanonical Life journal"]
@@ -628,12 +632,13 @@ flowchart LR
     R --> CP["0147 profile lifecycle projection\nopaque evidence and bounded head"]
 ```
 
-当前 stream adapter 尚不能携带 provider-final canonical usage；因此带 node-bound
-`ModelBudgetGuard` 的 Governed Chat 保持 usage-safe buffered path，不能为了首 token
-延迟静默去掉预算 authority。Governed Chat 已不再无条件抑制 TTS/VTS，但仍只把 protocol
-随 Task Acceptance effect 暂存，不能在 speculative worker 中提前触发物理输出。远端 Edge、
-真实 TTS/Avatar channel receipt、connection resume 与全服务栈验收仍不在这条本地 Host
-protocol 切片的完成范围。
+当前已有显式 provider-final result 与条件 usage 合同，但默认 Vault adapter 没有绑定它，且它本身不创建
+用户可见 authority。因此带 node-bound `ModelBudgetGuard` 的 Governed Chat 仍保持 usage-safe
+buffered path：Task Runtime 还必须先提供逐句 node/attempt/lease-bound delivery intent、cancel、
+restart replay 与 duplicate fence，不能为了首 token 延迟静默去掉预算或 acceptance authority。
+Governed Chat 已不再无条件抑制 TTS/VTS，但仍只把 protocol 随 Task Acceptance effect 暂存，不能在
+speculative worker 中提前触发物理输出。远端 Edge、真实 TTS/Avatar channel receipt、connection
+resume 与全服务栈验收仍不在这条本地 Host protocol 切片的完成范围。
 
 `DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE` 已令 production Host root 不再构造
 `HostEmotionRuntime`，且 ASGI 为 Input 与 Tribe 都注入 lazy Life command provider；二者在

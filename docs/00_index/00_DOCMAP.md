@@ -29,8 +29,9 @@ episode 与下一次用户输入的 aftereffect 写入 canonical Life journal：
 workspace/subject 连续，session 只保留事件上下文，边界和误解不因道歉、沉默或
 投递失败被自动消解。Surface 只消费可信内部 hand-off 来收紧话术，不能由外部
 请求伪造。DL-04 进一步在可信 hand-off 后冻结 `AffectiveTurnPlanV1`；普通低歧义
-文本可通过生产 `ModelAttemptService.stream()` 逐句输出，每个稳定句先写 canonical
-Life delivery intent，再对外可见，高歧义/修复回合保持恰好两候的 buffered selection。
+文本可优先通过生产 `ModelAttemptService.stream_with_result()` 的 typed delta + provider final result
+逐句输出；每个稳定句先写 canonical Life delivery intent，再对外可见。只有首个 delta 前明确不支持
+终态合同才可回退兼容 stream 并标记无 usage；高歧义/修复回合保持恰好两候的 buffered selection。
 模型候选和纯文本 fallback 均不能改写七海 self-affect。DL-05 让同一份
 `ExpressionPlanV1` 编译出 Voice `SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，
 在文本可见前持久化；流结束/打断分别有 `RELEASE`/`CANCEL` 控制和 0146 的隐私最小化
@@ -51,8 +52,8 @@ aftereffect 才能开始五次真实互动 canary；第五条合格 canary 后�
 该 profile 只收紧或调整称呼、长度、追问、安慰、主动时段、语速和动作强度；它不能修改 Soul、
 relationship consent 或 self-affect。CANARY/ACTIVE identity 会冻结进入后续文本/Voice/Avatar Host
 plan 与 delivery intent；生产的保守文本分类仅为 `0.72`，不会自动伪造强偏好证据。直接反馈入口、
-Monitor 审核、旧 writer 清零、受治理预算流的 provider-final canonical usage、连接恢复与真实服务验收
-仍未完成。当前生产 Host 已移除 `HostEmotionRuntime`，而 canonical Tribe authority 又令 Limbic 的
+Monitor 审核、旧 writer 清零、受治理 Chat 的 node/attempt-bound 逐句可见性、连接恢复与真实服务验收
+仍未完成；模型 final result / conditional usage 合同并不替代 Task Runtime 的 acceptance authority。当前生产 Host 已移除 `HostEmotionRuntime`，而 canonical Tribe authority 又令 Limbic 的
 legacy persistence、metabolism、timeline、decay 和 Bond callback 统一拒写并返回
 `RETIRED_CANONICAL_LIFE`；Endocrine 的 legacy delta、last-state、hint 与 fan-out 也已在 canonical
 mode 退役，且 Circadian/MirrorNeuron 不再直写其私有字段。生产 Surface 和 startup 现在不再解析或预热
