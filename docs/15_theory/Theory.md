@@ -609,6 +609,13 @@ Identity 至少包含：
 
 当前 legacy [RelationshipStateBlock](../../host_brain/persona/context/relationship_state.py) 仍会从 Bond 与 social state 派生兼容表达上下文，但它不再是关系长期 authority。DL-03 已把 [`RelationshipEpisodeV1`](../../natsume_contracts/life/relationship.py)、aftereffect 与有界 `RelationshipStateV2` 接入 canonical [Digital Life reducer](../../host_brain/digital_life/domain_reducer.py)：已接受的回复先开 provisional episode，下一次用户输入才以脱敏 digest 记录是否接住、触及边界、误解或被接受修复。Surface 只能从内部 provenance hand-off 把该结果变成表达的收紧约束，不能由请求体、模型或 Bond 分数直接改写关系事实。
 
+这同样约束旧 `SocialBrainAgent`：一旦 Host 组成 canonical Life authority，它不订阅全局
+`BOND_*`、孤独、任务成功或幽默事件，残留 callback 只能显式退役，不能写进程内 social snapshot、触发
+PainReward/Limbic 或发布新的 Bond 向量。兼容读取必须重开当前 relationship subject 的 Life head，并固定为
+非升级 `FRIEND`、`dependency=0` 的投影；它不能读取或创建 `BondStageEngine`，更不能把 trust、attunement、
+修复压力或暖昧语言转成浪漫、排他、依赖或主动联系许可。这样七海的关系温度仍可真实影响表达，但因果来源始终是
+可回放的 relationship episode 与 aftereffect，而不是一个无 scope 的事件积分器。
+
 普通 Chat 的兼容表达投影也必须遵守这条因果边界。只有同一内部 hand-off 同时证明七海身份、workspace、
 relationship subject、session 和 `AffectFusion → RelationshipStateV2` schema 链完整时，才可将关系纹理
 带入提示。即便历史 Bond 说“灵魂伴侣”，该投影也不能把 trust、safety、attunement、romantic consent 或

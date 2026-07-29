@@ -113,6 +113,14 @@
   受影响集合为 `111 passed in 52.40s`；这只是本地 authority 证据，不是远端 Edge、物理 Voice/Avatar、真实模型或
   DL-07 服务栈验收。
 
+- 同一 `test_dl06_legacy_direct_effect_retirement.py` 现在还覆盖 canonical `SocialBrainAgent`：production
+  ports 不注册旧全局关系订阅，十类残留 callback 都在 payload 解析前返回
+  `LEGACY_SOCIAL_BRAIN_RELATIONSHIP_WRITE_RETIRED`；没有 `TribeStateRegistry` 写入、Bond vector 事件、
+  `BondStageEngine` 读取或 Limbic 回灌。`get_bond_context()` 只从 exact subject 的 canonical Life snapshot 读
+  bounded `RelationshipStateV2`，并固定 `FRIEND / dependency=0`。该测试与 `test_social_brain_agent.py`、
+  `test_tribe_deepening_batch45.py`、`test_tribe_deepening_batch46.py`、`test_cortex_agent.py` 的本地定向回归
+  只证明该 legacy writer 已封闭；不证明其余 reader、真实用户关系体验或 DL-07。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS

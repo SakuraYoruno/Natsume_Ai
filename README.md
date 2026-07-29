@@ -71,6 +71,14 @@ window；其他 compatibility reader、Monitor/Review、长期 canary 与真实�
 TTS/Edge，也不会写 registry、发布后续 EventBus 或把“没有播出”误写成七海受伤。Voice/Avatar 只能由 accepted
 Life delivery protocol 的 exact `ExpressionPlanV1` 取得动作。
 
+同一 canonical Host 中的 `SocialBrainAgent` 现在也不再订阅旧全局 Bond/关系事件。任何残留的
+`BOND_PROGRESS`、裂痕、修复、孤独、任务成功或幽默回调都会返回
+`LEGACY_SOCIAL_BRAIN_RELATIONSHIP_WRITE_RETIRED`，不会写 `TribeStateRegistry`、发布 Bond 向量或联动旧
+Limbic。为保留一个回滚窗口，它只可从当前 relationship subject 的 canonical Life head 读取有界兼容投影：
+stage 固定为 `FRIEND`、dependency 固定为 `0`，不再打开 `BondStageEngine`，更不能从 trust/attunement 推导
+恋爱、排他、依赖或主动联系权限。这是旧 SocialBrain 写 authority 的一条本地收口，不代表所有 compatibility
+reader、真实关系体验、Monitor/Review 或 DL-07 已完成。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

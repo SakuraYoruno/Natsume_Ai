@@ -220,6 +220,13 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `MOTOR_SPEAK_DISPATCHED`、不触发 Limbic 回灌；AgentRuntime 也不得暴露旧 Surface Bond、TTS 或 VTS callback。
   当前含 Host/Life/Expression/Tribe/Embodiment 邻接的受影响集合为 `111 passed in 52.40s`；不代表真实远端 Edge、
   物理设备或 DL-07 服务栈验收。
+- T-DL06-15：canonical `TribeApplicationPorts` 下的 `SocialBrainAgent` 不得注册旧全局
+  `INTERACTION_RECORDED`、`BOND_*`、裂痕/修复、孤独、任务成功或幽默订阅；所有残留 direct callback 必须在读取
+  payload 前返回 `LEGACY_SOCIAL_BRAIN_RELATIONSHIP_WRITE_RETIRED`，不得写 `TribeStateRegistry`、发布 Bond vector
+  或联动旧 Limbic/PainReward。兼容读取只能通过 `LifeSnapshotReader` 重开 exact relationship subject 的
+  `RelationshipStateV2`，输出固定 `FRIEND` 与 `dependency=0`，禁止调用 `BondStageEngine`、推断亲密/排他/依赖
+  或主动权限。当前 `test_dl06_legacy_direct_effect_retirement.py`、`test_social_brain_agent.py` 与相邻 legacy
+  SocialBrain 回归为本地定向证据，不代表其它 compatibility reader、真实关系体验、远端 Edge 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

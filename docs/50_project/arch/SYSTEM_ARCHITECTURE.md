@@ -141,6 +141,13 @@ Host Input 形成 scope-bound observation；其它 telemetry 保持审计，不�
 self-affect revision、workspace、subject、session 和 Host receipt，漂移立即失败关闭。0146 所保留的是
 Host staging projection，远端 Edge 未启动，故仍无播放或 Avatar physical receipt。
 
+`SocialBrainAgent` 是本轮已收口的一条兼容 writer：canonical Tribe ports 下不注册旧全局关系订阅，残留的
+progress/regress、rupture/repair、孤独、任务成功和幽默 handler 全部返回显式 retirement result，不写
+`TribeStateRegistry`、不发 Bond vector、也不联动旧 affect organ。需要保留的读取只经 `LifeSnapshotReader`
+重开 exact subject 的 `RelationshipStateV2`，并以 `FRIEND`、零 dependency 的只读形状服务旧调用者；读不到
+canonical head 时 degraded，不回退 `BondStageEngine` 或 social cache。此处只关闭该 agent 的生产写 authority，
+不代表其它 compatibility reader 或真实服务栈已通过。
+
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把
 `natsume_ai` 的 self-affect、用户 affect observation 与无分数关系纹理独立输出；用户悲伤、愤怒或快乐不能覆盖

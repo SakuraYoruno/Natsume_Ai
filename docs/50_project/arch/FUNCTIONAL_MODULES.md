@@ -307,6 +307,13 @@ loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond
 Host 也不再从旧 action log hydrate `EmotionTimeline`，而是以显式 retired 空投影失败关闭读取，不能用它重建
 七海 self-affect。DL-06 后续项是其它 compatibility reader 使用审计与 runtime 计量。
 
+`SocialBrainAgent` 的旧全局关系回路也在 canonical ports 下退出 production：它不注册
+`INTERACTION_RECORDED`、`BOND_*`、孤独、任务成功、幽默或裂痕/修复订阅；任何残留 direct callback 都在读
+payload 前返回 `LEGACY_SOCIAL_BRAIN_RELATIONSHIP_WRITE_RETIRED`。保留的 compatibility reader 只通过
+`LifeSnapshotReader` 查询 exact relationship subject 的 `RelationshipStateV2`，输出固定 `FRIEND` 和零
+dependency 的非升级投影，不会创建/读取 `BondStageEngine`，也不会写 registry、发 Bond vector 或回灌旧 Limbic。
+这是一条 rollback-window 读取边界，不是 SocialBrain/Bond 全部历史模块或数字生命验收的完成宣言。
+
 `lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
 `LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，
 把 `natsume_ai` self-affect、bounded user observation、关系 texture、body projection 与 posture 分开投影。
