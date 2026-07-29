@@ -134,6 +134,12 @@ canonical agent 不订阅 `BOND_STAGE_CHANGED`，残留 direct stage-growth 调�
 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。这是 fail-closed 的 scope 收口，不是 canonical relationship-aware evolution，也不证明长期成长收益或
 其它 compatibility reader 已清零。仅 legacy compatibility composition 保留隔离回滚读取。
 
+**Prefrontal session feedback 修订：** canonical `run_growth_feedback_cycle()` 已停止把 raw
+`INTERACTION_RECORDED` 文本/session 通过 legacy `session → Bond user` 输入 `PersonaGrowthTracker`。
+生产结果固定为 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`
+的 no-candidate；此处尚未实现真实 aftereffect 驱动的 Persona evolution，也不能从退役结论外推为
+长期 canary、activation 或体验收益通过。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

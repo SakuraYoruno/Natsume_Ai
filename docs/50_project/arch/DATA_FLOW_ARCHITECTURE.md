@@ -778,6 +778,11 @@ Scheduler evolution intent（persona identity）
 这不是忽略关系连续性，而是拒绝用无 scope 的旧积分伪造关系事实。只有将来携带并验证 exact canonical
 `RelationshipStateV2` 的调用才能加入该输入；在此之前，background evolution 不得推动亲密、主动或人格变化。
 
+同一 Prefrontal compatibility hook 的反馈流为：`INTERACTION_RECORDED raw text + session` 在 canonical
+authority 下直接终止为 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED`，不会经过 legacy `session → Bond user`
+或 `PersonaGrowthTracker`。只有已接受回复产生的 durable、relationship-scoped aftereffect 能在未来作为
+低风险表达学习证据；该 future flow 目前尚未由此 compatibility hook 实现。
+
 普通 Chat 的关系读取流现为：
 
 ```text

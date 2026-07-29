@@ -567,6 +567,11 @@ composition 仍保留旧读取，供隔离回滚测试使用；canonical agent �
 精确 scope 的 canonical `RelationshipStateV2`。本地合同测试证明此一读取边界，但不代表剩余
 compatibility reader、长期成长收益、真实 provider、远端 Edge 或 DL-07 已完成。
 
+同样地，`INTERACTION_RECORDED` 的原始会话文本不能通过 legacy session→Bond identity 直接形成
+Persona proposal。canonical Prefrontal 对这条兼容 feedback hook 返回
+`LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED` 与 no-candidate；低风险表达偏好的真实学习仍必须从 durable、
+relationship-scoped aftereffect 链获得证据。该退役不等于 Persona/Identity 版本激活、长期 canary 或体验收益已验收。
+
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开
 SocialBrain。原先未被生产代码导入的重复 `app/input_service_ack.py` 已删除。该收口只覆盖本地 helper

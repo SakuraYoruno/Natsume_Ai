@@ -94,6 +94,12 @@
 > `BOND_STAGE_CHANGED`，残留直连返回 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。仅显式 legacy compatibility
 > composition 可保留旧读取用于隔离回滚测试。
 
+> **DL-06 Prefrontal session feedback 修订：** canonical `run_growth_feedback_cycle()` 也不再把
+> `INTERACTION_RECORDED` 的原始文本和 legacy `session → Bond user` identity 送进
+> `PersonaGrowthTracker`。它只返回 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED` 与
+> `CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate；已接受、scope-bound aftereffect 才是
+> 将来低风险表达学习的可用证据。这不等于 Persona/Identity activation 或长期 canary 已完成。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧

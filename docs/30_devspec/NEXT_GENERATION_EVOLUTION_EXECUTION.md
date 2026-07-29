@@ -364,6 +364,13 @@ workspace + relationship subject，故传给 `EvolutionOrchestrator` 的 `bond_s
 `RelationshipStateV2`，并另行验收。该本地切片不证明其余 compatibility consumer、长期 canary、
 真实 provider/Edge 或 DL-07。
 
+**Prefrontal session feedback 修订：** canonical Life authority 下的
+`run_growth_feedback_cycle()` 不再从 `INTERACTION_RECORDED` 原始文本调用 legacy
+`session → Bond user` 映射或 `PersonaGrowthTracker`。它固定返回
+`LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的
+no-candidate；真实低风险偏好学习必须引用 durable、relationship-scoped aftereffect，不能由单次夸奖、
+文本分类或 session id 自动生成 Persona proposal。legacy compatibility composition 仅供隔离回滚测试。
+
 **默认模式 reader 修订：** `DefaultModeAgent` 现在从一次 canonical Life snapshot 的
 `project_inner_world_state()` 投影读取私密活动所需的 self-affect 与关系纹理。投影标记为
 `CANONICAL_LIFE_JOURNAL`，仅包含有界 components/mood/needs/regulation 与 trust/safety/attunement/

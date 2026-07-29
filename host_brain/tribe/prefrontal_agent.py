@@ -926,6 +926,26 @@ class PrefrontalAgent:
         user_message: str,
         assistant_reply: str,
     ) -> dict[str, Any]:
+        if self._uses_canonical_affective_life():
+            # Raw interaction text plus a legacy session→Bond identity is not
+            # admissible feedback evidence for Persona evolution.  Canonical
+            # low-risk adaptation is derived from durable, relationship-scoped
+            # aftereffects; this compatibility hook must not invent a second
+            # learning authority while that input is absent.
+            return {
+                "status": "RETIRED",
+                "reason_code": "LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED",
+                "feedback_source": "CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED",
+                "user_id": "",
+                "feedback_count": 0,
+                "applied": False,
+                "proposal": {
+                    "status": "NO_CANDIDATE",
+                    "reason_code": "LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED",
+                },
+                "triggered_rules": [],
+            }
+
         from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
         from host_brain.persona.growth_feedback_collector import GrowthFeedbackCollector  # noqa: PLC0415
 

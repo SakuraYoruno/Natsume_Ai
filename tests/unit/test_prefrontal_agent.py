@@ -437,6 +437,42 @@ def test_prefrontal_run_growth_feedback_cycle(monkeypatch) -> None:
     ]
 
 
+def test_prefrontal_canonical_life_retires_legacy_session_feedback_growth(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.bond.user_identity.resolve_bond_user_id",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not resolve a legacy Bond user")
+        ),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    result = agent.run_growth_feedback_cycle(
+        session_id="s-001",
+        user_message="你真的帮到我了",
+        assistant_reply="我在呢",
+    )
+
+    assert result == {
+        "status": "RETIRED",
+        "reason_code": "LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED",
+        "feedback_source": "CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED",
+        "user_id": "",
+        "feedback_count": 0,
+        "applied": False,
+        "proposal": {
+            "status": "NO_CANDIDATE",
+            "reason_code": "LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED",
+        },
+        "triggered_rules": [],
+    }
+
+
 def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
     class _FakeTracker:
         def on_stage_promoted(self, **kwargs):  # noqa: ANN003

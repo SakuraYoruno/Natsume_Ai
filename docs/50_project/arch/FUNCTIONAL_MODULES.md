@@ -75,6 +75,11 @@ prompt fallback。当前关系、称呼、亲密度、主动权限与 self-affec
 同一模块还校验 72 条合成多轮陪伴场景的覆盖与测量合同；它固定为 `MEASUREMENT_PENDING`，fixture、脚本回放、
 mock transport、fake store 或端口占位均不能把体验验收提升为 PASS。真实盲测与服务栈验收仍属于后续 DL-07。
 
+同一模块的 `run_growth_feedback_cycle()` 在 canonical authority 下已退役 legacy session feedback：
+`INTERACTION_RECORDED` 的 raw text/session 不再解析 Bond user 或调用 `PersonaGrowthTracker`，而是返回
+`LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。
+这避免单次文本或 session 变成 Persona authority；低风险表达学习只能等待 durable、scope-bound aftereffect。
+
 **Legacy Proactive Retirement 模块**由
 [`lifecycle_runtime/proactive_dispatch.py`](../../../host_brain/lifecycle_runtime/proactive_dispatch.py)、
 [`composition/scheduler.py`](../../../host_brain/composition/scheduler.py) 与

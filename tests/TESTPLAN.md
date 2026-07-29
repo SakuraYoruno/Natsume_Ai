@@ -163,11 +163,16 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `CANONICAL_RELATIONSHIP_SCOPE_REQUIRED`。同一 agent 不得订阅 `BOND_STAGE_CHANGED`，残留 direct
   stage-growth 调用必须返回 `LEGACY_BOND_STAGE_GROWTH_RETIRED`。显式 legacy compatibility composition 的读取保留为
   隔离回滚测试，不能形成 production 人格成长 authority。
+- T-DL06-05：canonical Life authority 下的 `run_growth_feedback_cycle()` 不得解析 legacy
+  `session → Bond user` 或从 `INTERACTION_RECORDED` 原始文本生成 Persona proposal；必须返回
+  `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED` 与
+  `CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。真实低风险学习另由 durable、
+  relationship-scoped aftereffect 生命周期验证。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
   `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
   Edge 或 DL-07 服务栈验收。
-- 本轮增量证据：Prefrontal canonical evolution、Bond-stage retirement、相邻 runtime snapshot/
-  composition/OBS 与文档 Gate 集合 `125 passed in 22.48s`。它仍只证明本地 scope 收口，不能外推为
+- 本轮增量证据：Prefrontal canonical evolution、Bond-stage/session-feedback retirement、相邻 runtime snapshot/
+  composition/OBS 与文档 Gate 集合 `126 passed in 22.07s`。它仍只证明本地 scope 收口，不能外推为
   canonical relationship-aware evolution、长期 canary、真实 provider、远端 Edge 或 DL-07。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
