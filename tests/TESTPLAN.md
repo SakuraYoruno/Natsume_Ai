@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.52
+版本：v0.53
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -305,6 +305,14 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `test_dl06_glymphatic_recovery_retirement.py` 加历史 Glymphatic/circadian/interoception/ANS 邻接为
   `105 passed in 3.76s`；它不证明 scoped background rhythm、真实 Host/Gateway、provider、远端 Edge、Monitor/Review
   或 DL-07。
+- T-DL06-27：canonical `MotorCortexAgent` 与 `CerebellumAgent` 不得注册 `MOTOR_*` 或 platform EventBus，
+  不得保存 local plan/correction、自动 retry、发起纠偏/失败模式模型、写旧语义记忆，或把技术执行结果扇出为
+  Limbic/Endocrine/PainReward/Interoception/DefaultMode affect。前者必须显式返回
+  `LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED`，后者必须返回
+  `LEGACY_CEREBELLUM_CORRECTION_RETIRED / GOVERNED_TASKGRAPH_REQUIRED`；真正 retry、unknown effect 与
+  delivery reconciliation 只能属于 governed TaskGraph/Effect receipt。当前
+  `test_dl06_motor_cerebellum_execution_retirement.py` 与 Motor/Cerebellum、batch 42/45、direct-effect、Immune
+  邻接集合为 `42 passed in 2.49s`；不证明真实 Edge、物理设备、provider、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

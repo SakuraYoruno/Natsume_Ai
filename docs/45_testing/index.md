@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.62
+版本：v2.63
 维护日期：2026-07-28
 状态：当前证据
 
@@ -78,6 +78,14 @@
   Docker 服务栈仍必须在 DL-07 单独验收。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
+
+- `test_dl06_motor_cerebellum_execution_retirement.py` 验证 canonical `MotorCortexAgent` 与
+  `CerebellumAgent` 不注册旧 `MOTOR_*`/platform EventBus，不保存 process-local plan/correction，也不产生
+  自动 retry、模型叙事、旧记忆或 Limbic/Endocrine/PainReward/Interoception/DefaultMode fan-out。两条兼容入口
+  分别显式退役为 `LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED` 与
+  `LEGACY_CEREBELLUM_CORRECTION_RETIRED`；真正的技术重试与 effect reconciliation 仍待 governed TaskGraph
+  路线处理。该文件与 Motor/Cerebellum、batch 42/45、direct-effect 与 Immune 邻接最终集合为
+  `42 passed in 2.49s`，不代表远端 Edge、物理设备、真实 provider 或 DL-07 服务栈验收。
 
 - `test_silence_skill_limbic_integration.py`、`test_body_sense_skill_tribe_events.py`、
   `test_limbic_agent.py`、runtime snapshot/default-mode/Motive/scheduler 邻接用例验证：canonical Host 的旧

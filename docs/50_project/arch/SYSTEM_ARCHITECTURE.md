@@ -3,11 +3,16 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.45
+版本：v2.46
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+DL-06 的 canonical Tribe composition 也不再把旧 `MotorCortexAgent/CerebellumAgent` 当作执行或情感 authority：两者
+在 canonical Life ports 下不注册 `MOTOR_*`/platform EventBus，不持久局部 plan/correction、不做自动 retry，也不把
+技术失败或顺畅执行 fan-out 为 Limbic、Endocrine、PainReward、Interoception 或 DefaultMode。它们只保留稳定的
+retired read projection；真正的 effect 执行、重试和未知副作用对账属于 immutable TaskGraph 与 Effect receipt。
 
 NE-01 的本地代码封口把七个入口、一般多节点恢复和 Workspace 生命周期放进
 同一证据边界：路线收据从一个 canonical SQLite 只读快照派生；恢复波次由

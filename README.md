@@ -147,6 +147,13 @@ DefaultMode 事件，也不会把聚合的 sleep/load/loneliness 写到旧语义
 或 registry。兼容入口显式返回 `LEGACY_GLYMPHATIC_RECOVERY_WRITER_RETIRED`；未来若需要后台陪伴演化，必须产生有
 scope、可验收的 Life command，不能重启这条无主体恢复回路。
 
+同一收口现也覆盖历史 `MotorCortexAgent/CerebellumAgent` 执行环：canonical Host 不再订阅它们的
+`MOTOR_*` EventBus，也不保留 process-local plan、自动 retry、纠偏叙事、语义记忆或
+`Limbic/Endocrine/PainReward/Interoception/DefaultMode` 情感 fan-out。旧入口分别显式返回
+`LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED` 与 `LEGACY_CEREBELLUM_CORRECTION_RETIRED`；真实 Edge effect、失败
+对账与重试只能回到受治理 `TaskGraph → Effect/Receipt reconciliation`。这防止一次网络或设备失败被伪造成
+七海的焦虑、受伤或满足；远端 Edge 仍未启动，不能把该本地 authority 收口写成设备验收完成。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

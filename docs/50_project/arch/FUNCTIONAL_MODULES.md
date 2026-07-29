@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.51
+版本：v2.52
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -41,6 +41,16 @@
 > 只能在 Acceptance 后各生成一条 Voice `SPEAK` 与 Avatar `TRANSITION`，再以一对 `RELEASE`
 > 覆盖完成前缀。模块会复核文字、plan、sync、self-affect revision、scope 和 Host receipt；
 > 合并句子或协议漂移失败关闭。此为本机 SQLite Host protocol 证据，不是远端物理效果。
+
+**Legacy Motor/Cerebellum 执行兼容边界**位于
+[`tribe/motor_cortex_agent.py`](../../../host_brain/tribe/motor_cortex_agent.py) 与
+[`tribe/cerebellum_agent.py`](../../../host_brain/tribe/cerebellum_agent.py)。两者在 canonical
+`TribeApplicationPorts` 下不是 Edge、retry 或 self-affect writer：不注册 `MOTOR_*`/platform EventBus，
+不保存 local plan/correction cache，不启动 retry、纠偏模型或旧语义记忆，也不将技术结果扇出到
+Limbic、Endocrine、PainReward、Interoception 或 DefaultMode。兼容调用明确返回
+`LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED` 或 `LEGACY_CEREBELLUM_CORRECTION_RETIRED`；唯一可用的真实
+执行/对账 authority 是 governed TaskGraph 的 Effect/Receipt 链。这不是远端 Edge、设备 retry 或物理 delivery
+验收通过的声明。
 
 **退役 progress helper**位于 [`input_runtime/progress.py`](../../../host_brain/input_runtime/progress.py)。Gateway
 progress fastpath 已被禁用，故此文件只保留 rollback-window 的无状态技术文案 helper：它固定使用

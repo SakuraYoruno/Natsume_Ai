@@ -32,7 +32,42 @@ class MotorCortexAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_execution_authority_retired(self) -> bool:
+        """Whether the canonical Host has retired this EventBus executor.
+
+        ``MotorCortexAgent`` predates immutable TaskGraphs.  Its plan cache,
+        EventBus retry and organ fan-out could turn a transport failure into a
+        second execution authority *and* an unscoped self-affect mutation.
+        The production Host now owns action attempts, reconciliation and
+        embodiment delivery through governed TaskGraph/Life receipts.  Keep
+        this class available only for isolated legacy compatibility fixtures.
+        """
+
+        return (
+            self.application_ports is not None
+            and self.application_ports.uses_canonical_affective_life()
+        )
+
+    def _retired_execution_result(
+        self,
+        *,
+        plan_id: str = "",
+        ok: bool | None = None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "reason_code": "LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED",
+            "authority": "GOVERNED_TASKGRAPH_AND_LIFE_DELIVERY",
+            "plan_id": str(plan_id or "").strip(),
+        }
+        if ok is not None:
+            result["ok"] = bool(ok)
+        return result
+
     def register_subscriptions(self) -> None:
+        if self._legacy_execution_authority_retired():
+            # Edge feedback and retry are reconciled against the immutable
+            # TaskGraph/Effect ledger, never against a process-local plan.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -73,6 +108,11 @@ class MotorCortexAgent:
             {"ok": bool, "plan_id": str, "matched": bool}
         """
         resolved_plan_id = str(plan_id or "").strip()
+        if self._legacy_execution_authority_retired():
+            return self._retired_execution_result(
+                plan_id=resolved_plan_id,
+                ok=bool(ok),
+            )
         resolved_ts = now_ms()
 
         # 从 state_registry 读取当前 last_dispatch_outcome
@@ -185,6 +225,11 @@ class MotorCortexAgent:
         motive: float | None = None,
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_execution_authority_retired():
+            return {
+                "status": "RETIRED",
+                **self._retired_execution_result(),
+            }
         resolved_action = str(action or "").strip() or "unknown_action"
         resolved_ts = now_ms()
         resolved_payload = dict(payload or {})
@@ -262,6 +307,11 @@ class MotorCortexAgent:
         executor: Any | None = None,
     ) -> dict[str, Any]:
         plan_dict = dict(plan or {})
+        if self._legacy_execution_authority_retired():
+            return self._retired_execution_result(
+                plan_id=str(plan_dict.get("plan_id") or ""),
+                ok=False,
+            )
         if not plan_dict:
             return {"ok": False, "reason_code": "EMPTY_PLAN"}
         target_agent = str(plan_dict.get("target_agent") or "edge.channel").strip() or "edge.channel"
@@ -345,6 +395,17 @@ class MotorCortexAgent:
         }
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_execution_authority_retired():
+            return {
+                "last_plan_id": "",
+                "last_action": "",
+                "last_target_agent": "",
+                "last_dispatch_ok": False,
+                "last_dispatch_reason": "LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED",
+                "last_dispatch_latency_ms": 0,
+                "last_updated_ts_ms": 0,
+                "authority": "GOVERNED_TASKGRAPH_AND_LIFE_DELIVERY",
+            }
         snap = self.state_registry.get_state("motor_cortex_agent") or {}
         state = dict(snap.get("state") or {})
         last_plan = dict(state.get("last_plan") or {})
@@ -361,6 +422,8 @@ class MotorCortexAgent:
 
     async def _on_execution_feedback(self, event: Any) -> None:
         """T-199：处理 MOTOR_EXECUTION_FEEDBACK 事件（来自 Edge 侧或 Cerebellum）。"""
+        if self._legacy_execution_authority_retired():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         plan_id = str(payload.get("plan_id") or "").strip()
         ok = bool(payload.get("ok", True))
@@ -378,6 +441,8 @@ class MotorCortexAgent:
 
     async def _on_retry_requested(self, event: Any) -> None:
         """T-206：处理 MOTOR_RETRY_REQUESTED 事件，自动重新执行 dispatch_action。"""
+        if self._legacy_execution_authority_retired():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         plan_id = str(payload.get("plan_id") or "").strip()
         if not plan_id:
@@ -454,6 +519,14 @@ class MotorCortexAgent:
                 "source": str,          # "motor_llm"|"disabled"|"error"
             }
         """
+        if self._legacy_execution_authority_retired():
+            return {
+                "speed": 1.0,
+                "pause_hint": "中",
+                "filler_hint": "",
+                "source": "retired",
+                "reason_code": "LEGACY_MOTOR_CORTEX_EXECUTION_RETIRED",
+            }
         _significant = float(arousal or 0.3) > 0.6 or float(valence or 0.0) < -0.3
         if not _significant:
             return {"speed": 1.0, "pause_hint": "中", "filler_hint": "嗯", "source": "skipped"}
