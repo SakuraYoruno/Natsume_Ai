@@ -683,6 +683,23 @@ class GovernedFrozenNodeWorker:
         if staged_stream_receipt_refs:
             normalized["audit_refs"].update(
                 {
+                    # A provisional sentence has already crossed the local
+                    # client-visible boundary.  The terminal narrative is
+                    # still canonical Task output (Verification/Acceptance
+                    # need it), but delivery consumers must treat it as a
+                    # reconciliation payload rather than as a fresh utterance.
+                    # Stable receipt refs are the only legal deduplication
+                    # identity; text comparison is not safe across Unicode
+                    # normalization or renderer changes.
+                    "pre_acceptance_stream_protocol": (
+                        "Natsume.task_runtime.governed_chat_stream_receipt.v1"
+                    ),
+                    "pre_acceptance_stream_terminal_narrative": (
+                        "RECONCILIATION_ONLY"
+                    ),
+                    "pre_acceptance_stream_client_deduplication": (
+                        "REQUIRED_BY_RECEIPT_REF"
+                    ),
                     "pre_acceptance_streamed_sentence_count": len(
                         tuple(staged_stream_receipt_refs)
                     ),

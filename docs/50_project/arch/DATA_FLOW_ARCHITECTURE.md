@@ -553,7 +553,9 @@ DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native 
 worker 写入 0149 `task_runtime_governed_chat_stream_receipt`，绑定 exact
 `graph/revision/node/attempt/grant`、AffectiveTurnPlan、sync 与 self-affect revision。receipt 只保存
 assistant sentence 和摘要，不保存输入媒体、不改写 Life state，且在 Acceptance 前不产生 Voice/Avatar
-effect。终局 attestation 缺失或漂移时须以失败收口，不能估算、重试或偷偷走无审计 stream。
+effect。终局 attestation 缺失或漂移时须以失败收口，不能估算、重试或偷偷走无审计 stream。已有
+0149 receipt 时，terminal narrative 是 `RECONCILIATION_ONLY` 的 canonical 对账材料；文本、气泡和
+后续 consumer 必须按 receipt ref 去重，不能以同一文字形成第二次表达。
 
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由
 plain-text parser 将双方状态重置为 `NEUTRAL`。普通低歧义回合逐句 staging；高歧义、

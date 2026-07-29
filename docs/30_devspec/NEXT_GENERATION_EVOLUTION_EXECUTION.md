@@ -158,6 +158,10 @@ Life/Expression effect 必须等待 Task Acceptance。只有声明终局 attesta
 该流；它在终局缺精确 token、成本或传输身份时以失败收口，不能估算、重试或降级成无审计 stream。该协议已有本地
 SQLite exact-replay/restart 合同，外部 provider/设备证据仍为 `ACCEPTANCE_PENDING_EXTERNAL`。
 
+终态 `COMMIT` 的完整 narrative 仍是 canonical Task 对账材料，却不构成第二次用户可见 delivery：已有
+0149 staged receipt 时，worker 必须写入 `RECONCILIATION_ONLY` 和稳定 receipt-ref 去重要求；旧
+MateEngine 气泡、文本 consumer 与后续通道均不得用文字比较重发同一句。
+
 - `AffectiveTurnPlanV1`、`CompanionActV1` 与 `ExpressionPlanV1` 已在可信
   Affect Fusion hand-off 后、模型调用前冻结；模型只负责措辞，Surface completion
   不再把 `natsume_emotion_tag` 或纯文本 fallback 写回七海 self-affect。

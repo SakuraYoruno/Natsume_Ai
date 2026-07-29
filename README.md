@@ -14,7 +14,11 @@ attestation 的 provider 可以逐句生成，但每句在可见前必须先写 
 并绑定 `graph/revision/node/attempt/grant`、冻结的 affective plan 与 sync identity。该
 `PRE_ACCEPTANCE_STAGED` receipt 不写 Life、不驱动 TTS/Avatar/Edge；真正的表达效果仍待 Task
 Acceptance。provider 缺 final canonical usage/cost 时在第一句前失败关闭，不能估算或退回无审计
-stream。此处是本地 SQLite/合同证据，真实 provider、远端设备和全服务栈验收仍未完成。
+stream。未声明终局协议的 provider 会在首句前拒绝；已产生分句后若终局 usage、成本或传输身份
+缺失、超时或漂移，只能以失败终态收口，不能估算、重试或退回无审计 stream。终态 `COMMIT` 保留
+canonical narrative 供 Verification/Acceptance 对账；已有 0149 receipt 的分句明确标记为
+`RECONCILIATION_ONLY`，客户端和兼容 MateEngine 气泡只能按稳定 receipt ref 去重，不能再次表达。
+此处是本地 SQLite/合同证据，真实 provider、远端设备和全服务栈验收仍未完成。
 
 0148 已补上“受认证的直接偏好控制”这一窄入口：`POST /v1/digital-life/relationship/companion-profile` 只接受完整、严格的低风险偏好 JSON，要求 `companion:profile:write`、`user principal == relationship_subject_id` 与 `tenant == workspace_id`。它不会从聊天文字推断偏好，也不能立即激活 profile；Host 只会从 canonical 强 aftereffect 历史选取证据、创建五次互动的 CANARY，并把 Secure Ingress audit ref 一并固化。该接口不是 Monitor 的用户反馈/审核界面，仍不改变 Soul、关系许可或 self-affect；CANARY 证据收集、长期收益、旧 writer 清零和真实服务栈验收仍未完成。
 

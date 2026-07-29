@@ -106,7 +106,10 @@ DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 流以失败收口且不得重试。该不可变 receipt 绑定
 `graph/revision/node/attempt/grant`、冻结 plan、sync 和 self-affect revision，exact replay 可重开；
 它不写 Life、不发 TTS/Avatar effect，后两者继续等待 Task Acceptance。缺 usage/cost/identity 的
-provider 在首句前失败关闭，绝不估算或回落到无审计 streaming。
+provider 在首句前失败关闭；已开始后再缺失时只能以失败终态收口，绝不估算、重试或回落到无审计
+streaming。已有 staged receipt 的 terminal narrative 被标记为 `RECONCILIATION_ONLY`：它仍供
+Verification/Acceptance 对账，但客户端与旧 MateEngine 气泡必须按 immutable receipt ref 去重，不能
+第二次表达。
 低歧义路径使用 `ModelAttemptService.stream()`，生产 Vault adapter 会调用 provider
 native stream；稳定句先写 `affective_turn_planned` / `surface_sentence_delivery_intent`
 到 canonical Life journal，再通过 SSE 可见。`0145_affective_turn_delivery.sql` 只从

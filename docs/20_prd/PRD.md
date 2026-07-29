@@ -68,7 +68,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 流式文本的每个可见稳定分句必须先形成可恢复、`graph/revision/node/attempt/grant` 绑定的
   pre-acceptance receipt；它不是 Life mutation 或设备 delivery intent。带预算的 provider 必须声明终局
   精确 token、成本与传输身份 attestation；终局缺失时必须失败收口且不得重试或估算。用户打断后未可见分句不得
-  继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中选择，不能把内部计划或
+  继续发送，已可见分句不得重复。终态 narrative 仅能作为 `RECONCILIATION_ONLY` 对账材料，所有
+  consumer 必须按稳定 receipt ref 去重，不能用文本相似度再次表达。高歧义、边界和修复回合只能在受限候选中选择，不能把内部计划或
   操控性措辞暴露给用户。
 - Voice `SPEAK`、Avatar `TRANSITION` 与文本必须从同一 `ExpressionPlan`、同步编号和
   self-affect revision 编译；Host 暂存、取消与释放 receipt 必须与物理 Edge receipt 分开。

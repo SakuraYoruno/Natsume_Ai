@@ -628,6 +628,11 @@ Life mutation，也不是 TTS/Avatar effect；这些外显副作用仍只可在 
 支持终局精确 usage、成本和传输身份 attestation 的 provider 才可走这条路径；终局事实缺失或漂移时
 流以失败收口、不得重试或估算，不能用无审计流式回复补齐。
 
+没有声明终局协议的 adapter 会在首句前被拒绝；若已产生 delta 后才缺少终局 attestation，则只能
+以失败终态收口，不能重试。已经显示的分句由 immutable receipt 提供唯一去重身份：terminal
+`COMMIT` 保存完整 narrative 只供 Task Verification、Acceptance 与恢复对账，并标记为
+`RECONCILIATION_ONLY`；文本、兼容气泡和后续通道 consumer 都不得将它当作第二次表达。
+
 DL-04 把这条理论再向前推进一层：在模型措辞前冻结
 [`AffectiveTurnPlanV1`](../../natsume_contracts/life/affective_turn.py)。它将当轮
 self-affect revision、调节方式、陪伴动作和 `ExpressionPlan` 绑定成同一 identity；

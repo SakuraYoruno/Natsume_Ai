@@ -103,6 +103,13 @@ def _extract_mateengine_commit_text(event_payload: Any) -> str:
         return ""
     if str(event_payload.get("decision") or "").upper() == "REJECT":
         return ""
+    if _terminal_narrative_is_preacceptance_stream_reconciliation(event_payload):
+        # Governed Chat can expose locally staged sentences before Task
+        # Acceptance.  Its terminal narrative remains needed for canonical
+        # Task/Life reconciliation, but the old MateEngine bubble is an
+        # independent visible delivery path and must never repeat it.  The
+        # accepted ExpressionPlan protocol owns later Voice/Avatar delivery.
+        return ""
 
     direct_text = _extract_text_from_commit_payload(event_payload)
     if direct_text:
@@ -116,6 +123,34 @@ def _extract_mateengine_commit_text(event_payload: Any) -> str:
         return _extract_text_from_commit_payload(envelope)
 
     return ""
+
+
+def _terminal_narrative_is_preacceptance_stream_reconciliation(
+    event_payload: dict[str, Any],
+) -> bool:
+    """Return whether an immutable staged sentence prefix already exists.
+
+    This is deliberately stricter than checking a narrative string or a
+    sentence count alone.  Only the Frozen Task worker writes this protocol
+    marker after it has durably staged graph/revision/node/attempt-bound
+    receipts, so a legacy terminal remains compatible with the MateEngine
+    bubble path.
+    """
+
+    audit_refs = event_payload.get("audit_refs")
+    if not isinstance(audit_refs, dict):
+        return False
+    if (
+        str(audit_refs.get("pre_acceptance_stream_protocol") or "")
+        != "Natsume.task_runtime.governed_chat_stream_receipt.v1"
+        or str(audit_refs.get("pre_acceptance_stream_terminal_narrative") or "")
+        != "RECONCILIATION_ONLY"
+        or str(audit_refs.get("pre_acceptance_stream_client_deduplication") or "")
+        != "REQUIRED_BY_RECEIPT_REF"
+    ):
+        return False
+    count = audit_refs.get("pre_acceptance_streamed_sentence_count")
+    return isinstance(count, int) and not isinstance(count, bool) and count > 0
 
 
 def _extract_mateengine_commit_performance(event_payload: Any) -> Dict[str, Any]:

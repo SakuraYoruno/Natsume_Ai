@@ -18,8 +18,11 @@
 - `test_dl04_native_affective_stream.py`、`test_gr05_frozen_route_executors.py` 与
   `test_gr05_governed_frozen_workers.py` 验证受治理 Chat 只前送
   `PRE_ACCEPTANCE_STAGED` sentence；每句先由 worker 持久化 receipt，render/delivery 事件仍缓冲，
-  预验收阶段没有 Life、Voice 或 Avatar effect。
-- 当前本地定向集合：`112 passed in 6.81s`。后续运行的 Host Runtime 冒烟
+  预验收阶段没有 Life、Voice 或 Avatar effect。`test_chat_handler_streaming.py` 进一步验证带
+  `RECONCILIATION_ONLY` receipt 标记的终态 narrative 不会经兼容 MateEngine 气泡重复表达，而 legacy
+  terminal 仍保持兼容路径。
+- 当前本地定向集合：早期完整流式合同集合为 `112 passed in 6.81s`；本次 terminal 对账去重的
+  受影响回归集合为 `44 passed in 5.45s`。后续运行的 Host Runtime 冒烟
   `test_gr05_universal_host_runtime.py` 为 `1 passed in 35.07s`；`test_gr05_durable_task_status_projection.py` 有两个既有
   fixture 未提供当前 admission 必须的 canonical `output_contract`，在此次改动未触及的
   `validate_task_graph_admission_state()` 处拒绝。该失败记为基线测试债，不能被写作本切片通过，

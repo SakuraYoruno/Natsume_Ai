@@ -420,6 +420,36 @@ def test_chat_settings_are_typed_and_resolved_without_module_reload(monkeypatch)
     assert chat_handler_module._mateengine_state_cue_text("memory_recall") == "正在找记忆"
 
 
+def test_preacceptance_streamed_governed_terminal_does_not_repeat_mateengine_bubble() -> None:
+    streamed = {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "APPROVE",
+        "narrative": "这句已经以稳定分句显示过了。",
+        "audit_refs": {
+            "pre_acceptance_stream_protocol": (
+                "Natsume.task_runtime.governed_chat_stream_receipt.v1"
+            ),
+            "pre_acceptance_stream_terminal_narrative": "RECONCILIATION_ONLY",
+            "pre_acceptance_stream_client_deduplication": "REQUIRED_BY_RECEIPT_REF",
+            "pre_acceptance_streamed_sentence_count": 1,
+        },
+    }
+    legacy = {
+        "phase": "COMMIT",
+        "done": True,
+        "decision": "APPROVE",
+        "narrative": "这句仍应由兼容气泡显示。",
+        "audit_refs": {},
+    }
+
+    assert chat_handler_module._extract_mateengine_commit_text(streamed) == ""
+    assert (
+        chat_handler_module._extract_mateengine_commit_text(legacy)
+        == "这句仍应由兼容气泡显示。"
+    )
+
+
 @pytest.mark.asyncio
 async def test_evaluate_governor_with_timing_stays_on_ledger_owner_thread(monkeypatch) -> None:
     engine = _FakeIntentEngine()

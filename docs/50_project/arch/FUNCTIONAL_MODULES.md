@@ -41,6 +41,8 @@
 usage/cost/identity protocol 同时成立时，放行稳定句的 `PRE_ACCEPTANCE_STAGED` SSE。每句先入 0149
 append-only receipt，绑定 `graph/revision/node/attempt/grant`；未验收前没有 Life、TTS、Avatar 或 Edge
 effect。终局 attestation 缺失时流以失败收口、不得重试，不能以估算或 buffered 结果伪称实时流式。
+已 staged 的分句以 immutable receipt ref 为唯一去重身份；terminal narrative 只作
+`RECONCILIATION_ONLY` 对账，兼容 MateEngine 气泡不得将其再次表达。
 当前仅有本地 SQLite/replay 与合同测试；真实 provider、远端 Edge 与三模态体验验收仍待 DL-07/外部授权。
 
 **退役 progress helper**位于 [`input_runtime/progress.py`](../../../host_brain/input_runtime/progress.py)。Gateway

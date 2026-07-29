@@ -305,6 +305,15 @@ async def test_chat_worker_stages_a_narrow_sentence_receipt_before_forwarding_it
     assert terminal["audit_refs"]["pre_acceptance_stream_receipt_refs"] == [
         "governed-chat-stream://test/0"
     ]
+    assert terminal["audit_refs"]["pre_acceptance_stream_protocol"] == (
+        "Natsume.task_runtime.governed_chat_stream_receipt.v1"
+    )
+    assert terminal["audit_refs"]["pre_acceptance_stream_terminal_narrative"] == (
+        "RECONCILIATION_ONLY"
+    )
+    assert terminal["audit_refs"]["pre_acceptance_stream_client_deduplication"] == (
+        "REQUIRED_BY_RECEIPT_REF"
+    )
 
 
 @pytest.mark.asyncio
