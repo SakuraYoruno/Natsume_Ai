@@ -40,13 +40,39 @@ async def _fake_surface_reply_sse_generator(  # noqa: ANN001
     assert ports is not None
     sub_ctx = getattr(chat_input, "sub_agent_context", None)
     result_text = getattr(sub_ctx, "result_text", "") if sub_ctx is not None else ""
+    trace_stage_meta = dict(getattr(chat_input, "trace_stage_meta", {}) or {})
+    # Governed Chat uses a frozen model budget.  This fixture is deliberately
+    # model-free, but it must emulate the same server-owned final measurement
+    # shape that a real buffered provider completion emits; otherwise the
+    # route executor correctly refuses to turn a synthetic reply into an
+    # accepted task result.
+    if isinstance(trace_stage_meta.get("governed_model_budget"), dict):
+        trace_stage_meta["surface_model_attempt"] = {
+            "success": True,
+            "attempt_ids": [
+                f"model-attempt://http-skill-route/{chat_input.request_id}/1"
+            ],
+            "budget_measurement": {
+                "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+                "measurement_ref": (
+                    f"model-budget://http-skill-route/{chat_input.request_id}/1"
+                ),
+                "attempt_count": 1,
+                "retry_count": 0,
+                "token_count": 18,
+                "model_cost_micros": 27,
+            },
+        }
     payload = {
         "phase": "COMMIT",
         "done": True,
         "decision": "APPROVE",
         "request_id": chat_input.request_id,
         "narrative": f"skill-route-ok::{result_text}",
-        "audit_refs": {"path": "test:surface_reply_stub"},
+        "audit_refs": {
+            "path": "test:surface_reply_stub",
+            "trace_stage_meta": trace_stage_meta,
+        },
     }
     yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
@@ -401,13 +427,13 @@ def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch, tmp
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_routes_affective_reflection_to_governed_chat(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
             "/v1/chat",
             json={
-                "message": "first summarize the current session then read emotion snapshot",
+                "message": "first summarize the current session then read your emotion snapshot",
                 "session_id": "sess_http_plan_smoke_nl_001",
             },
         )
@@ -417,23 +443,19 @@ def test_http_chat_route_infers_supported_plan_from_natural_language(monkeypatch
         events = _parse_sse_events(response)
         commit_event = _governed_commit(events)
 
-        assert commit_event["execution_receipt"]["graph_revision"] == 1
+        assert commit_event["route_type"] == "chat"
         assert commit_event["decision"] == "APPROVE"
-        assert "session_summary" in str(commit_event.get("narrative") or "")
-        assert "emotion_query" in str(commit_event.get("narrative") or "")
 
-        request_id = str(commit_event["request_id"])
-        trace = ledger.trace_request(request_id)
-        assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
-            "emotion_query",
-            "session_summary",
+        model_attempt = commit_event["audit_refs"]["trace_stage_meta"][
+            "surface_model_attempt"
         ]
-        assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
+        assert model_attempt["success"] is True
+        assert model_attempt["budget_measurement"]["token_count"] == 18
     finally:
         _close_client(client, ledger)
 
 
-def test_http_chat_route_executes_skill_plan(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_rejects_caller_provided_skill_plan(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
@@ -457,10 +479,10 @@ def test_http_chat_route_executes_skill_plan(monkeypatch, tmp_path: Path) -> Non
                         {
                             "step_index": 2,
                             "route": "skill",
-                            "target_id": "emotion_query",
-                            "description": "read emotion snapshot",
-                            "task_description": "read current emotion snapshot",
-                            "route_reason": "test:http_plan:emotion_query",
+                            "target_id": "memory_recall",
+                            "description": "recall session context",
+                            "task_description": "recall what we already discussed",
+                            "route_reason": "test:http_plan:memory_recall",
                             "allow_parallel": True,
                             "skill_family": "social",
                             "risk_level": 1,
@@ -473,20 +495,11 @@ def test_http_chat_route_executes_skill_plan(monkeypatch, tmp_path: Path) -> Non
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        commit_event = _governed_commit(events)
+        commit_event = [event for event in events if event.get("phase") == "COMMIT"][-1]
 
-        assert commit_event["execution_receipt"]["graph_revision"] == 1
-        assert commit_event["decision"] == "APPROVE"
-        assert "session_summary" in str(commit_event.get("narrative") or "")
-        assert "emotion_query" in str(commit_event.get("narrative") or "")
-
-        request_id = str(commit_event["request_id"])
-        trace = ledger.trace_request(request_id)
-        assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
-            "emotion_query",
-            "session_summary",
-        ]
-        assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
+        assert commit_event["decision"] == "REJECT"
+        assert commit_event["reason_code"] == "GOVERNED_ROUTE_UNSUPPORTED"
+        assert not any(event.get("governed") is True for event in events)
     finally:
         _close_client(client, ledger)
 
@@ -568,7 +581,7 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         _close_client(client, ledger)
 
 
-def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_real_governor_rejects_caller_provided_plan_extensions(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         now_ms = int(time.time() * 1000)
@@ -607,10 +620,10 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch, tmp_
                         {
                             "step_index": 2,
                             "route": "skill",
-                            "target_id": "emotion_query",
-                            "description": "read emotion snapshot",
-                            "task_description": "read current emotion snapshot",
-                            "route_reason": "test:http_plan_real:emotion_query",
+                            "target_id": "memory_recall",
+                            "description": "recall session context",
+                            "task_description": "recall what we already discussed",
+                            "route_reason": "test:http_plan_real:memory_recall",
                             "allow_parallel": True,
                             "skill_family": "social",
                             "risk_level": 1,
@@ -623,34 +636,10 @@ def test_http_chat_route_real_governor_accepts_plan_extensions(monkeypatch, tmp_
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        commit_event = _governed_commit(events)
+        commit_event = [event for event in events if event.get("phase") == "COMMIT"][-1]
 
-        assert commit_event["execution_receipt"]["graph_revision"] == 1
-        assert commit_event["decision"] == "APPROVE"
-        assert "session_summary" in str(commit_event.get("narrative") or "")
-        assert "emotion_query" in str(commit_event.get("narrative") or "")
-
-        request_id = str(commit_event["request_id"])
-        trace = ledger.trace_request(request_id)
-        assert trace["status"] == "COMPLETE"
-        assert len(trace["intent_log"]) == 1
-        assert len(trace["governor_log"]) == 3
-        child_grants = [
-            row
-            for row in trace["governor_log"]
-            if row.get("reason_code") == "PLAN_NODE_DERIVED_APPROVE"
-        ]
-        assert len(child_grants) == 2
-        child_actions = {
-            row["tokens"]["approved_action_binding"]["action_kind"]
-            for row in child_grants
-        }
-        assert child_actions == {"session_summary", "emotion_query"}
-        assert len({row["tokens"]["approval_token_ref"] for row in child_grants}) == 2
-        assert sorted(row["skill_name"] for row in trace["skill_exec_log"]) == [
-            "emotion_query",
-            "session_summary",
-        ]
-        assert all(row["result_status"] == "SUCCESS" for row in trace["skill_exec_log"])
+        assert commit_event["decision"] == "REJECT"
+        assert commit_event["reason_code"] == "GOVERNED_ROUTE_UNSUPPORTED"
+        assert not any(event.get("governed") is True for event in events)
     finally:
         _close_client(client, ledger)

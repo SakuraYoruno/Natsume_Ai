@@ -89,7 +89,7 @@ def test_production_skill_inventory_is_exhaustively_classified() -> None:
         for skill_spec in provider_spec.instantiate().get_skill_specs()
     )
 
-    assert len(registry.all()) == 88
+    assert len(registry.all()) == 86
     assert len(policies) == 80
     assert set(policies) == {
         skill_spec.skill_name for skill_spec in declarative_specs
@@ -102,13 +102,13 @@ def test_production_skill_inventory_is_exhaustively_classified() -> None:
     assert Counter(
         meta.execution_policy for meta in registry.all()
     ) == {
-        SkillExecutionPolicy.INLINE_READ_ONLY: 26,
+        SkillExecutionPolicy.INLINE_READ_ONLY: 24,
         SkillExecutionPolicy.PRE_ACCEPTANCE_PROPOSAL_ONLY: 13,
         SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE: 3,
         SkillExecutionPolicy.BLOCKED_PENDING_ACCEPTANCE_EFFECT: 46,
     }
     assert Counter(meta.budget_policy for meta in registry.all()) == {
-        SkillBudgetPolicy.TASK_PRECHARGE: 64,
+        SkillBudgetPolicy.TASK_PRECHARGE: 62,
         SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL: 24,
     }
     assert {
@@ -119,7 +119,7 @@ def test_production_skill_inventory_is_exhaustively_classified() -> None:
             is SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE
         )
     } == {"agent_worker", "agent_self_heal", "agent_self_evolve"}
-    assert len(registry.build_skill_manifest()) == 42
+    assert len(registry.build_skill_manifest()) == 40
     assert all(
         row["governed_execution_enabled"] is True
         for row in registry.build_skill_manifest()

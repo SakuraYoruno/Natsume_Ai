@@ -592,9 +592,10 @@ Bond queue/writer construction，只有 no-write retired adapter 与 score/stage
 再由 queue crash、full 或 fallback 影响关系事实。
 
 历史通用 Skill 的 `emotion_update → old emotion/VTS` 与 `bond_score_update → Bond queue` 支线也已被物理删除：
-production provider catalog、Tool executor、built-in policy 和 Scheduler-add 均不能解析它们，`emotion_get`/
-`bond_score_get` 也不再把 caller-shaped compatibility context 伪装成关系读取。唯一可用读取方向仍为
-exact scope 的 canonical Life projection。
+production provider catalog、Tool executor、built-in registry/policy 和 Scheduler-add 均不能解析它们，`emotion_get`/
+`bond_score_get`/`emotion_query`/`bond_query` 也不再把 caller-shaped compatibility context 伪装成七海自身或关系读取。
+自然语言的“你现在心情如何 / 我们是什么关系”改为 `Thalamus → canonical-bound chat → frozen AffectiveTurnPlan`
+而非 `Skill DAG → legacy query`；唯一可用读取方向仍为 exact-scope 的 canonical Life projection。
 
 DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由

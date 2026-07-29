@@ -143,10 +143,14 @@
   不能重新成为 self-affect authority；连同 BodySense、silence、inner-world、startup 与 Host composition 的
   最终单一集合为 `119 passed, 4 skipped in 10.95s`，不证明真实陪伴体验、provider、Voice/Avatar 或 DL-07。
 
-- `test_dl06_legacy_emotion_skill_retirement.py` 验证历史 `emotion_*` 与 `bond_score_*` Skill descriptor 全部
-  fail-closed，生产 Tool executor 和 provider catalog 中均没有 `emotion` 入口，Scheduler 也不能再建立
-  `emotion_update` task。连同 policy/catalog/scheduler 与 executor-broker 邻接用例为 `57 passed in 36.55s`；这是本地旧 authority
-  退役证据，不是 canonical 情感读取、真实模型、远端 Edge 或 DL-07 验收。
+- `test_dl06_legacy_emotion_skill_retirement.py` 现同时验证历史 `emotion_*`、`bond_score_*`、`emotion_query` 与
+  `bond_query` 均不在 registry/catalog/executor/policy 中，Planner 不会把情感自省再委派给旧 route；Thalamus 的
+  情感、关系和混合提问必须成为带 canonical context binding 的 `chat`，且不带数值化 read API；外部文本、图片或
+  用户情绪分析不得误路由为七海自身反思。连同 policy/catalog/scheduler、Thalamus、frozen-route budget contract 与
+  executor-broker 邻接用例为 `197 passed in 38.99s`。`test_http_skill_route_smoke.py` 的三个受影响 HTTP 用例另有
+  `3 passed in 32.95s`：它验证
+  canonical chat 的 accepted TaskGraph fixture、caller-supplied Skill plan 的拒绝和完整 model-budget measurement
+  形状。两者都是本地、model-free fixture 证据，不是 canonical 情感读取的真实 provider、远端 Edge 或 DL-07 验收。
 
 - `test_edge_events_whitelist.py` 现验证原始 `EMOTION_DETECTED` 仍被真实 Edge ledger 接受和记录，但不会调用
   legacy Cortex Bond update，也不会出现 `_drive_stream_vts_emotion` 直驱；最终 ASR 的受控 Input bridge 保持独立。

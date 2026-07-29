@@ -140,24 +140,9 @@ _MULTI_PART_PATTERN_WORDS = frozenset({
 # 命中则直接路由，无需进入 LLM 判断
 # ---------------------------------------------------------------------------
 RULE_ROUTE_MAP: dict[str, tuple[str, str]] = {
-    # ── 情绪/心情 → emotion_agent ──────────────────────────────────────────
-    "情绪": ("delegate", "emotion_agent"),
-    "心情": ("delegate", "emotion_agent"),
-    "感受": ("delegate", "emotion_agent"),
-    "开心": ("delegate", "emotion_agent"),
-    "难过": ("delegate", "emotion_agent"),
-    "伤心": ("delegate", "emotion_agent"),
-    "焦虑": ("delegate", "emotion_agent"),
-    "压力": ("delegate", "emotion_agent"),
-    "烦躁": ("delegate", "emotion_agent"),
-    "孤独": ("delegate", "emotion_agent"),
-    "委屈": ("delegate", "emotion_agent"),
-    # ── 关系/亲密 → bond_query skill ──────────────────────────────────────
-    "关系阶段": ("skill", "bond_query"),
-    "亲密度": ("skill", "bond_query"),
-    "好感度": ("skill", "bond_query"),
-    "关系进展": ("skill", "bond_query"),
-    "我们的关系": ("skill", "bond_query"),
+    # 情感自省与关系提问不是规划任务。它们由 Thalamus 交给 Surface 的
+    # canonical Life self-reflection chat，不能借 Planner 再委派旧 emotion
+    # agent，也不能读取 caller 形状的 Bond 分数/阶段。
     # ── 记忆/回忆 → memory_recall skill ───────────────────────────────────
     "回忆一下": ("skill", "memory_recall"),
     "记得吗": ("skill", "memory_recall"),

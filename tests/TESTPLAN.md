@@ -235,9 +235,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `MOTOR_SPEAK_DISPATCHED`、不触发 Limbic 回灌；AgentRuntime 也不得暴露旧 Surface Bond、TTS 或 VTS callback。
   当前含 Host/Life/Expression/Tribe/Embodiment 邻接的受影响集合为 `111 passed in 52.40s`；不代表真实远端 Edge、
   物理设备或 DL-07 服务栈验收。
-- T-DL06-14a：`emotion_update`、`bond_score_update`、`emotion_get`、`bond_score_get` 不得留在 built-in
-  execution descriptor、production provider catalog 或 Tool executor；Scheduler-add 必须把 `emotion_update`
-  归为 `custom`，不能新建历史情绪 writer task。canonical 情感/关系读取只能通过 exact-scope Life projection；
+- T-DL06-14a：`emotion_update`、`bond_score_update`、`emotion_get`、`bond_score_get`、`emotion_query`、`bond_query`
+  不得留在 built-in registry/execution descriptor、production provider catalog 或 Tool executor；Scheduler-add 必须把
+  `emotion_update` 归为 `custom`，不能新建历史情绪 writer task。canonical 情感/关系读取只能通过 exact-scope Life
+  projection；“你现在心情如何 / 我们是什么关系”必须生成带 canonical context binding 的 `chat`，不得形成 Skill DAG
+  节点、读取 caller snapshot/score/stage 或泄露数值状态；外部文本、图像或用户情绪分析则不得误认成七海自身反思。
   descriptor 缺失必须 fail-closed，不能以 legacy context 回退执行。
 - T-DL06-15：canonical `TribeApplicationPorts` 下的 `SocialBrainAgent` 不得注册旧全局
   `INTERACTION_RECORDED`、`BOND_*`、裂痕/修复、孤独、任务成功或幽默订阅；所有残留 direct callback 必须在读取
