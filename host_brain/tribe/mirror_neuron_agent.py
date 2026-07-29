@@ -53,7 +53,51 @@ class MirrorNeuronAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_resonance_writes_retired(self) -> bool:
+        """Whether canonical Life owns all user-affect interpretation.
+
+        The historical mirror loop treated a user emotion signal as enough to
+        update a process-global resonance cache and fan it into several old
+        affect organs.  In a composed Host that would be a second appraisal
+        path.  Isolated compatibility tests retain the pure calculation, but
+        production must receive its observation through AffectFusion.
+        """
+
+        # A few isolated historical tests construct the dataclass through
+        # ``__new__``.  Missing ports are the legacy compatibility mode, not
+        # canonical authority.
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_resonance_result(
+        *,
+        operation: str,
+        user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        result = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_MIRROR_RESONANCE_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+        }
+        if str(user_id or "").strip():
+            result["relationship_subject_id"] = str(user_id).strip()
+        if str(session_id or "").strip():
+            result["session_id"] = str(session_id).strip()
+        return result
+
     def register_subscriptions(self) -> None:
+        if self._legacy_resonance_writes_retired():
+            # AffectFusion owns user observations and Appraisal owns whether
+            # they affect Natsume.  A global EventBus subscription cannot
+            # carry the required workspace/relationship scope.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -117,6 +161,13 @@ class MirrorNeuronAgent:
         source: str,
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
+
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="apply_resonance",
+                user_id=user_id,
+                session_id=session_id,
+            )
 
         resolved_ts = int(ts_ms or now_ms())
         social = get_social_brain_agent()
@@ -291,6 +342,11 @@ class MirrorNeuronAgent:
         Returns:
             共情回应建议字符串，或 None（未触发/失败）。
         """
+        if self._legacy_resonance_writes_retired():
+            # The frozen AffectiveTurnPlan is the only production source for
+            # empathy wording.  Do not ask a second model to reinterpret a
+            # raw user emotion and then cache its unscoped suggestion.
+            return None
         if float(resonance_intensity or 0.0) <= 0.6:
             return None
 
@@ -376,6 +432,19 @@ class MirrorNeuronAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_resonance_writes_retired():
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "LEGACY_MIRROR_RESONANCE_RETIRED",
+                "resonance_count": 0,
+                "last_emotion_tag": "",
+                "last_resonance_strength": 0.0,
+                "last_valence_shift": 0.0,
+                "last_arousal_shift": 0.0,
+                "last_co_regulation_hint": "",
+                "last_ts_ms": 0,
+            }
         snap = self.state_registry.get_state("mirror_neuron_agent") or {}
         state = dict(snap.get("state") or {})
         last = dict(state.get("last_resonance") or {})
@@ -389,7 +458,11 @@ class MirrorNeuronAgent:
             "last_ts_ms": int(state.get("last_ts_ms") or now_ms()),
         }
 
-    async def _on_emotion_inference_updated(self, event: Any) -> None:
+    async def _on_emotion_inference_updated(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="emotion_inference_updated"
+            )
         payload = dict(getattr(event, "payload", None) or {})
         await self._absorb_emotion_event(
             payload=payload,
@@ -398,7 +471,11 @@ class MirrorNeuronAgent:
             fallback_intensity=0.45,
         )
 
-    async def _on_interaction_recorded(self, event: Any) -> None:
+    async def _on_interaction_recorded(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="interaction_recorded"
+            )
         payload = dict(getattr(event, "payload", None) or {})
         await self._absorb_emotion_event(
             payload=payload,
@@ -407,7 +484,11 @@ class MirrorNeuronAgent:
             fallback_intensity=0.5,
         )
 
-    async def _on_emotion_state_changed(self, event: Any) -> None:
+    async def _on_emotion_state_changed(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="emotion_state_changed"
+            )
         payload = dict(getattr(event, "payload", None) or {})
         await self._absorb_emotion_event(
             payload=payload,
@@ -423,7 +504,11 @@ class MirrorNeuronAgent:
         event: Any,
         source: str,
         fallback_intensity: float,
-    ) -> None:
+    ) -> dict[str, Any] | None:
+        if self._legacy_resonance_writes_retired():
+            return self._retired_legacy_resonance_result(
+                operation="absorb_emotion_event"
+            )
         emotion_tag = str(payload.get("emotion_tag") or "").strip().upper()
         if not emotion_tag:
             return

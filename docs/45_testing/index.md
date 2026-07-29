@@ -121,6 +121,12 @@
   `test_tribe_deepening_batch45.py`、`test_tribe_deepening_batch46.py`、`test_cortex_agent.py` 的本地定向回归
   只证明该 legacy writer 已封闭；不证明其余 reader、真实用户关系体验或 DL-07。
 
+- `test_dl06_mirror_neuron_retirement.py` 验证 canonical `MirrorNeuronAgent` 不注册 emotion/interaction
+  EventBus，也不把用户情绪写为 global resonance、派生 EventBus 或旧器官调用。legacy direct resonance 和三类
+  callback 都返回 `LEGACY_MIRROR_RESONANCE_RETIRED`，empathy model hint 也不会发起第二个解释链；原有
+  `test_mirror_neuron_agent.py` 与 batch 34/37/42/46/47/48 继续覆盖 isolated legacy compatibility 行为。
+  该集合只证明 production 旧 mirror writer 已退役，不证明实际用户情绪理解或三模态服务验收。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS

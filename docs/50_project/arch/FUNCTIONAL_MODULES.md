@@ -314,6 +314,12 @@ payload 前返回 `LEGACY_SOCIAL_BRAIN_RELATIONSHIP_WRITE_RETIRED`。保留的 c
 dependency 的非升级投影，不会创建/读取 `BondStageEngine`，也不会写 registry、发 Bond vector 或回灌旧 Limbic。
 这是一条 rollback-window 读取边界，不是 SocialBrain/Bond 全部历史模块或数字生命验收的完成宣言。
 
+`MirrorNeuronAgent` 在 canonical Host 也只保留无状态 compatibility 形状：它不注册
+`EMOTION_INFERENCE_UPDATED`、`INTERACTION_RECORDED`、`EMOTION_STATE_CHANGED` 订阅，`apply_resonance()`、
+三类 callback 和模型化 empathy hint 都在任何旧 global cache、EventBus 或器官调用前退役。用户情绪的生产输入
+只能成为 `AffectFusionService` 的 observation，必须再经 Appraisal 才能影响七海自身情感；旧 mirror 纯函数仅可供
+隔离 rollback 测试，不能重新成为情感或表达 writer。
+
 `lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
 `LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，
 把 `natsume_ai` self-affect、bounded user observation、关系 texture、body projection 与 posture 分开投影。

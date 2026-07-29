@@ -227,6 +227,12 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `RelationshipStateV2`，输出固定 `FRIEND` 与 `dependency=0`，禁止调用 `BondStageEngine`、推断亲密/排他/依赖
   或主动权限。当前 `test_dl06_legacy_direct_effect_retirement.py`、`test_social_brain_agent.py` 与相邻 legacy
   SocialBrain 回归为本地定向证据，不代表其它 compatibility reader、真实关系体验、远端 Edge 或 DL-07。
+- T-DL06-16：canonical `TribeApplicationPorts` 下的 `MirrorNeuronAgent` 不得订阅
+  `EMOTION_INFERENCE_UPDATED`、`INTERACTION_RECORDED` 或 `EMOTION_STATE_CHANGED`。`apply_resonance()`、三类
+  callback 与 empathy hint 必须在读取 raw payload、写 global resonance state、发布 EventBus、调用
+  Limbic/Endocrine/Interoception/PainReward 或第二次模型尝试前返回/退役；用户情绪只能经
+  `AffectFusion → Appraisal → Life` 形成七海自身情感。当前 `test_dl06_mirror_neuron_retirement.py` 与既有
+  MirrorNeuron 兼容回归仅证明该旧回路已封闭，不代表真实 Fusion 体验、模型、远端 Edge 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

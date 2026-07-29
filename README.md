@@ -79,6 +79,12 @@ stage 固定为 `FRIEND`、dependency 固定为 `0`，不再打开 `BondStageEng
 恋爱、排他、依赖或主动联系权限。这是旧 SocialBrain 写 authority 的一条本地收口，不代表所有 compatibility
 reader、真实关系体验、Monitor/Review 或 DL-07 已完成。
 
+`MirrorNeuronAgent` 的旧“用户情绪 → 全局共鸣 → Limbic/Endocrine/Interoception”回路也已在 canonical
+Host 中退役。它不再订阅全局 emotion/interaction 事件；任何 legacy direct resonance 调用都会返回
+`LEGACY_MIRROR_RESONANCE_RETIRED`，既不会写 global resonance cache、发 EventBus、调用旧器官，也不会再发起
+第二次 empathy 模型措辞。用户情绪仍可作为 `AffectFusionService` 的有 scope 观察，只有 Appraisal 才能决定
+七海是否产生自己的感受；这不是否认共情，而是防止“用户难过”被技术捷径直接变成“七海难过”。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

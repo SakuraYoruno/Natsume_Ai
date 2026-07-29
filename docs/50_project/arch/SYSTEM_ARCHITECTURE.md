@@ -148,6 +148,13 @@ progress/regress、rupture/repair、孤独、任务成功和幽默 handler 全�
 canonical head 时 degraded，不回退 `BondStageEngine` 或 social cache。此处只关闭该 agent 的生产写 authority，
 不代表其它 compatibility reader 或真实服务栈已通过。
 
+`MirrorNeuronAgent` 也不再作为用户情绪直写链：canonical ports 下不注册 emotion/interaction EventBus，
+`apply_resonance()` 与三类残留 callback 都在解析 payload 前返回
+`LEGACY_MIRROR_RESONANCE_RETIRED`，不写 global resonance snapshot、不发派生事件、不调用旧
+Limbic/Endocrine/Interoception/PainReward，也不发起第二个 empathy model attempt。生产用户观察只能走
+`Input → AffectFusionService → EventAppraisal → canonical Life`；该 agent 的 pure resonance 计算仅保留给
+隔离 compatibility 测试，不能成为自我情感或表达策略 authority。
+
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把
 `natsume_ai` 的 self-affect、用户 affect observation 与无分数关系纹理独立输出；用户悲伤、愤怒或快乐不能覆盖
