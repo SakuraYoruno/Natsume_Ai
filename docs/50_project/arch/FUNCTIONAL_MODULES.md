@@ -96,6 +96,7 @@ inner-world journal 或可自动成长的人格 authority。
 `EmotionalSilenceEngine` 持有可写的回复意愿或话题抗拒：读取必须按 relationship subject 从同一 Life snapshot 的
 `RegulationDecision` 与 body projection 得到 bounded posture；无 subject 明确不可用，不回退 process-global
 state。三个 silence 写入口与四个 BodySense mutation Skill 都在解析 caller 输入前退役，registry 禁止其自动调度。
+production Host root 和 startup 也不构造/预热 mutable engine；lifecycle port 仅保留 fail-closed retired placeholder。
 isolated compatibility composition 仍可用于 rollback，但它不构成 self-affect、关系、调节或主动权限 authority。
 
 同一模块的 `run_growth_feedback_cycle()` 在 canonical authority 下已退役 legacy session feedback：

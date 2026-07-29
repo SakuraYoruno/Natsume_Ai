@@ -597,6 +597,11 @@ caller VAD 或 pending topics 更新旧模型。这样保留七海可读取的�
 事件同步回第二个单例。`80 passed in 4.50s` 只证明本地 compatibility-authority 边界，既不代表新的 Regulation /
 CompanionAct 已补齐所有体验细节，也不代表真实模型、远端 Edge 或 DL-07 服务栈验收。
 
+production Host root 现在也不再实例化该可变 engine，chat startup 不会为“预热”而触碰它；保留的 lifecycle port
+只提供 fail-closed `RetiredEmotionalSilenceEngine`。任何遗漏的 production caller 会得到
+`LEGACY_SILENCE_ENGINE_RETIRED`，而非恢复一份进程内回复意愿。Host composition、startup 和上述相邻边界集合
+`88 passed in 11.33s`；这同样只是本地退役证据，不替代真实陪伴验收。
+
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开
 SocialBrain。原先未被生产代码导入的重复 `app/input_service_ack.py` 已删除。该收口只覆盖本地 helper

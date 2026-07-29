@@ -319,8 +319,9 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
 def _register_silence_skills(registry: SkillRegistry) -> None:
     """注册情绪驱动的沉默能力 Skills（Phase XVIII）。
 
-    使用直接 handler 注册方式（非 DeclarativeSkillSpec），
-    因为这些 skill 直接调用 EmotionalSilenceEngine 状态机。
+    使用直接 handler 注册方式（非 DeclarativeSkillSpec）。这些是显式的
+    rollback-window compatibility adapter；canonical Host 会在进入旧
+    EmotionalSilenceEngine 前返回退役 receipt。
     """
     from host_brain.skills.impl.silence_skill import (  # noqa: PLC0415
         execute_silence_tick,
@@ -412,8 +413,9 @@ def _register_gaming_companion_skills(registry: SkillRegistry) -> None:
 def _register_body_sense_skills(registry: SkillRegistry) -> None:
     """注册身体感知 Skills（v1.12 低优先级债务修复）。
 
-    使用直接 handler 注册方式（非 DeclarativeSkillSpec），
-    因为这些 skill 直接调用 BodySenseModel 状态机。
+    使用直接 handler 注册方式（非 DeclarativeSkillSpec）。这些是显式的
+    rollback-window compatibility adapter；canonical Host 会在进入旧
+    BodySenseModel 前返回退役 receipt。
     """
     from host_brain.skills.impl.body_sense_skill import (  # noqa: PLC0415
         execute_body_sense_tick,

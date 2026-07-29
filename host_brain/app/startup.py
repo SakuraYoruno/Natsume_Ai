@@ -586,8 +586,9 @@ def warmup_chat_runtime_basics(
             from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
             PersonaEngine.get_instance()
-            ports.silence_engine()
-            warmed_parts.append("persona_runtime=ready")
+            # The canonical Host must not warm the retired mutable
+            # EmotionalSilenceEngine as part of chat cold-start reduction.
+            warmed_parts.append("persona_runtime=ready,legacy_silence=retired")
         else:
             warmed_parts.append("persona_runtime=lazy")
 

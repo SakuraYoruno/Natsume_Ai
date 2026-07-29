@@ -49,6 +49,7 @@ from host_brain.lifecycle_runtime.ports import LifecycleRuntimeApplicationPorts
 from host_brain.lifecycle_runtime.runtime_snapshot import (
     build_digital_life_runtime_snapshot,
 )
+from host_brain.persona.emotional_silence import RetiredEmotionalSilenceEngine
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -548,6 +549,12 @@ def test_production_host_port_root_owns_selected_state_per_app(
         first_instance = first_provider()
         assert first_provider() is first_instance
         assert second_provider() is not first_instance
+
+    retired_silence = first.lifecycle.silence_engine()
+    assert isinstance(retired_silence, RetiredEmotionalSilenceEngine)
+    assert retired_silence.status == "RETIRED_CANONICAL_LIFE"
+    with pytest.raises(RuntimeError, match="LEGACY_SILENCE_ENGINE_RETIRED"):
+        retired_silence.get_silence_state()
 
     assert (
         first.capability_forge_service()._telemetry

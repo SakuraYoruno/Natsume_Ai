@@ -85,6 +85,9 @@
   relationship subject 从 Life regulation/body head 做纯读投影，缺 scope 无全局 fallback，两个 tick 也不允许自动
   调度。最终单一集合为 `80 passed in 4.50s`；这是本地 authority 边界证据，不代表调节体验、真实 provider、
   远端 Edge 或 DL-07 服务栈完成。
+- `test_ne01_host_lifecycle_composition.py` 与 `test_startup_chat_runtime_warmup.py` 额外验证 production Host
+  只注入 fail-closed `RetiredEmotionalSilenceEngine`，chat startup 不会预热旧 engine；遗漏读取明确失败，不能偷偷
+  建立 process-local posture。相邻最终集合为 `88 passed in 11.33s`，仍只是本地 composition evidence。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

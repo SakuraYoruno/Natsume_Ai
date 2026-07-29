@@ -121,6 +121,11 @@
 > BodySense tick/conversation/loneliness Skill 都在解析 caller 输入前返回 `RETIRED_CANONICAL_LIFE`，且两个 tick
 > 不可自动调度。它不代表调节体验、真实 provider/Edge 或 DL-07 已完成。
 
+> **DL-06 production silence engine construction 退役修订：** Host root 不再创建 mutable
+> `EmotionalSilenceEngine`，chat startup 也不再预热它；为保持 rollback-window port，composition 仅提供
+> fail-closed `RetiredEmotionalSilenceEngine`。遗漏 access 固定为 `LEGACY_SILENCE_ENGINE_RETIRED`，不能重新产生
+> process-local response posture。这仍是本地 composition 边界，不是体验或全栈验收。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧

@@ -155,6 +155,26 @@ class SilenceState:
         return self.willingness_level != "NORMAL" or self.topic_resistance_active
 
 
+class RetiredEmotionalSilenceEngine:
+    """Fail-closed production placeholder for the retired mutable engine.
+
+    A canonical Host must not construct the historical in-memory
+    ``EmotionalSilenceEngine`` merely because a rollback-window port still
+    exists in the lifecycle contract.  This object deliberately exposes no
+    state or mutation methods: any missed production caller receives a
+    deterministic failure instead of silently recreating a second response
+    posture authority.  Explicit legacy/offline compositions can still
+    instantiate :class:`EmotionalSilenceEngine` directly.
+    """
+
+    status = "RETIRED_CANONICAL_LIFE"
+    authority = "CANONICAL_LIFE_JOURNAL"
+    reason_code = "LEGACY_SILENCE_ENGINE_RETIRED"
+
+    def __getattr__(self, name: str) -> Any:
+        raise RuntimeError(f"{self.reason_code}:{str(name or '').strip() or 'operation'}")
+
+
 # ---------------------------------------------------------------------------
 # 沉默指令模板
 # ---------------------------------------------------------------------------

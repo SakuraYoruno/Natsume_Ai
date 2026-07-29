@@ -55,13 +55,12 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
         "host_brain.persona.persona_engine.PersonaEngine.get_instance",
         lambda *args, **kwargs: object(),
     )
-    monkeypatch.setattr(
-        "host_brain.persona.body_sense.get_body_sense_model",
-        lambda: object(),
-    )
-
     status = warmup_chat_runtime_basics(
-        ports=_ports(),
+        ports=_ports(
+            silence_engine=lambda: (_ for _ in ()).throw(
+                AssertionError("canonical startup must not warm legacy silence engine")
+            )
+        ),
         eager_persona=True,
         thalamus_agent_provider=lambda: object(),
     )
@@ -73,6 +72,7 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     assert "state_write_arbiter=ready" in status
     assert "thalamus=ready" in status
     assert "persona_runtime=ready" in status
+    assert "legacy_silence=retired" in status
 
 
 def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch) -> None:

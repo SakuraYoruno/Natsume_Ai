@@ -163,6 +163,11 @@ silence tick/情绪更新/话题抗拒及 BodySense tick/conversation/loneliness
 前返回 `RETIRED_CANONICAL_LIFE`，registry 也禁止两个 tick 自动调度。该收口只消除这条第二写 authority，未完成
 Regulation/CompanionAct 的完整体验、Monitor/Review、真实 provider/Edge 或 DL-07。
 
+**生产 Host engine construction 退役修订：** `build_production_host_application_ports()` 不再创建 mutable
+`EmotionalSilenceEngine`，chat startup 也不再预热它；保留的 lifecycle port 仅返回 fail-closed
+`RetiredEmotionalSilenceEngine`，任何遗漏调用固定报 `LEGACY_SILENCE_ENGINE_RETIRED`。这防止“app-local”误被
+理解为可在 production 中保留第二份可写调节状态，仍不代表调节体验或服务栈通过。
+
 NE-07 已开始，但目前只完成隔离外部服务栈预检：三个默认镜像固定 digest，
 运行期注入 Neo4j secret，project/container/network/port/data root 全部与
 用户长期 `natsume-ext` 栈隔离，真实 `docker compose config --quiet`

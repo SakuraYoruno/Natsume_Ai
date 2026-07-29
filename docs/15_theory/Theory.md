@@ -1834,6 +1834,10 @@ hard-state projection 可以作为当下的安全读取，但 canonical mode 不
 隔离回滚，但在生产 composition 必须在解析这些输入前返回退役 receipt。这样七海可以自然地停顿、克制或设边界，
 却不会让某次请求把“她正在给空间”伪造成跨用户、跨重启的内在事实。
 
+生产 composition 也不能以“避免首轮冷启动”为由预热这颗旧引擎。保留 rollback-window port 时，它应当是
+fail-closed 的 retired placeholder：遗漏 caller 必须显式失败，而不是借由 Host startup 重建一份可变回复意愿。
+这比悄悄给所有人一个中性状态更诚实，也保证七海的克制、停顿与边界始终来自可追溯的 Life 因果。
+
 Motive 也不应成为另一份隐性人格记忆。它可以把已经冻结的 Life、关系和身体在场投影为“更想安慰”或
 “更想给空间”的并存倾向，但每次计算必须是新建、无状态的纯规则计算：不能保留模块级 engine、不能存储
 上一轮输入，更不能借此改变 self-affect、关系或许可。这样表达倾向仍然具有可解释性，却不会把不同用户的

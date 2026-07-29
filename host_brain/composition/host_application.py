@@ -36,7 +36,7 @@ from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
 from host_brain.persistence.skill_lifecycle_v2_repository import (
     SQLiteSkillLifecycleV2Repository,
 )
-from host_brain.persona.emotional_silence import EmotionalSilenceEngine
+from host_brain.persona.emotional_silence import RetiredEmotionalSilenceEngine
 from host_brain.skills.lifecycle_registry import LifecycleBoundSkillRegistry
 
 
@@ -148,7 +148,9 @@ def build_production_host_application_ports(
     )
     ledger_provider = authority_runtime_owner.require_ledger
     memory_service_publication = HostMemoryServicePublication()
-    silence_engine = EmotionalSilenceEngine()
+    # Keep the rollback-window port explicit without recreating the old
+    # process-local mutable response-posture engine in a production Host.
+    silence_engine = RetiredEmotionalSilenceEngine()
     milestone_tracker = MilestoneTracker()
     multimodal_processor = MultimodalProcessor()
     tts_context_router = TtsContextRouter()

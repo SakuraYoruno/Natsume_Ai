@@ -187,6 +187,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
 - 当前本地证据：silence/BodySense/Limbic/Motive/default-mode/runtime-snapshot/scheduler 的最终单一集合
   `80 passed in 4.50s`。它不证明 Regulation/CompanionAct 的完整体验、真实模型、远端 Edge、Monitor/Review 或
   DL-07 服务栈验收。
+- T-DL06-09：production Host root 与 chat startup 不得构造或预热 mutable `EmotionalSilenceEngine`；保留的
+  lifecycle port 只能返回 fail-closed `RetiredEmotionalSilenceEngine`，任何遗漏的 legacy access 必须为
+  `LEGACY_SILENCE_ENGINE_RETIRED`，而不是创建 process-local response posture。
+- 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
+  真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
   `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
   Edge 或 DL-07 服务栈验收。
