@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from natsume_contracts.life import (
     LifeDeliveryAuthorization,
     LifeSnapshot,
 )
+from host_brain.digital_life.companion_proactive import decide_companion_proactive
 from host_brain.runtime.scene_consumer_projection import (
     SceneConsumerProjectionError,
     project_scene_decision_v2,
@@ -175,9 +174,22 @@ def build_life_tick_payload(
         state_patch["proactive"] = {
             "last_attempt_ms": now_value,
             "last_status": "QUEUED",
-            "last_reason_code": "LIFE_TICK_OUTBOX",
-            "last_motive": "soft_reconnect",
+            "last_reason_code": str(
+                _mapping(_mapping(proactive.get("payload")).get("raw_extra"))
+                .get("decision_reason_code")
+                or "PROACTIVE_CANONICAL_IMPULSE_READY"
+            )[:120],
+            "last_motive": str(
+                _mapping(_mapping(proactive.get("payload")).get("raw_extra"))
+                .get("motive")
+                or "soft_reconnect"
+            )[:120],
         }
+        state_patch["companion_proactive"] = _mapping(
+            _mapping(_mapping(proactive.get("payload")).get("raw_extra")).get(
+                "companion_proactive"
+            )
+        )
     return payload
 
 
@@ -223,41 +235,34 @@ def _proactive_delivery(
     scene_identity: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     proactive = _mapping(state.get("proactive"))
-    target = _mapping(proactive.get("last_target"))
-    platform = str(target.get("platform") or "").strip()
-    conversation_id = str(target.get("conversation_id") or "").strip()
-    if not platform or not conversation_id or idle_ms < PROACTIVE_IDLE_THRESHOLD_MS:
+    if idle_ms < PROACTIVE_IDLE_THRESHOLD_MS:
         return None
     last_attempt = max(0, int(proactive.get("last_attempt_ms") or 0))
     if last_attempt and now_ms - last_attempt < PROACTIVE_COOLDOWN_MS:
         return None
-    pressure = _mapping(state.get("life_pressure"))
-    affect = _mapping(state.get("affect"))
-    if float(pressure.get("fatigue") or 0.0) >= 0.8:
+    decision = decide_companion_proactive(
+        state,
+        now_ms=now_ms,
+        timezone_name=timezone_name,
+    )
+    if not decision.send_allowed:
         return None
-    if float(affect.get("tension") or 0.0) >= 0.85:
-        return None
-    try:
-        zone = ZoneInfo(str(timezone_name or "UTC"))
-    except ZoneInfoNotFoundError:
-        zone = timezone.utc
-    hour = datetime.fromtimestamp(now_ms / 1_000.0, tz=timezone.utc).astimezone(zone).hour
-    if 5 <= hour < 10:
-        content = "早上好～我轻轻来看看你。"
-    elif 22 <= hour or hour < 5:
-        content = "夜深了，我来轻轻陪你一会儿。"
-    else:
-        content = "我刚好有点想起你，就来看看你在不在。"
     return {
         "destination": "proactive.gateway",
         "payload": {
-            "platform": platform,
-            "conversation_id": conversation_id,
-            "content": content,
+            "platform": decision.platform,
+            "conversation_id": decision.conversation_id,
+            "content": decision.content,
             "msg_type": "text",
+            # This durable context is for the Host-side delivery-success
+            # reconciler.  LifeDeliveryTransport removes it before any
+            # Gateway receives the outbound request.
+            "_companion_relationship_context": decision.as_delivery_context(),
             "raw_extra": {
-                "source_kind": "life_tick",
-                "motive": "soft_reconnect",
+                "source_kind": "canonical_life_companion_tick",
+                "motive": decision.motive,
+                "decision_reason_code": decision.reason_code,
+                "companion_proactive": decision.as_trace(),
                 "state_version": int(state.get("version") or 0),
                 "scene_id": str(scene_identity.get("scene_id") or ""),
                 "scene_revision": int(scene_identity.get("revision") or 0),

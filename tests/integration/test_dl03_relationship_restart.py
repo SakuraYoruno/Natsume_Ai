@@ -53,6 +53,8 @@ def _foreground_payload() -> dict[str, object]:
             "person_id": "person-restart",
             "user_message": "我今天有点累。",
             "assistant_reply": "那就先靠一会儿，我陪你慢慢缓下来。",
+            "reply_channel": "qq",
+            "reply_target": "conversation-restart",
             "completed_at_ms": NOW,
             "state_patch": {},
             "emotion_context": {},
@@ -241,3 +243,12 @@ async def test_accepted_foreground_provisions_and_reconciles_relationship_episod
 
     assert recovered["replayed"] is True
     assert recovered["relationship_episode"] == episode
+    target = restarted_reader.get_snapshot(
+        RelationshipScope.from_values(
+            workspace_id="workspace-restart",
+            relationship_subject_id="person-restart",
+            session_id="session-any",
+        ).aggregate_id
+    ).state["companion_proactive_target"]
+    assert target["platform"] == "qq"
+    assert target["conversation_id"] == "conversation-restart"

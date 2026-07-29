@@ -14,6 +14,10 @@ from .models import SecureIngressRequest
 
 class IngressSurface(str, Enum):
     HOST = "host"
+    COMPANION_CONTACT = "companion_contact"
+    COMPANION_PROFILE = "companion_profile"
+    COMPANION_PROFILE_ROLLBACK = "companion_profile_rollback"
+    COMPANION_FEEDBACK = "companion_feedback"
     TOOL = "tool"
     OBS = "obs"
     GATEWAY = "gateway"
@@ -44,6 +48,38 @@ SECURE_INGRESS_SURFACE_POLICIES: Mapping[
         action="host:input",
         required_scopes=("host:write",),
         default_path="/v1/host/input",
+    ),
+    IngressSurface.COMPANION_CONTACT: IngressSurfacePolicy(
+        surface=IngressSurface.COMPANION_CONTACT,
+        surface_id="host.companion-contact",
+        audience="host",
+        action="companion:contact:write",
+        required_scopes=("companion:contact:write",),
+        default_path="/v1/digital-life/relationship/proactive-permission",
+    ),
+    IngressSurface.COMPANION_PROFILE: IngressSurfacePolicy(
+        surface=IngressSurface.COMPANION_PROFILE,
+        surface_id="host.companion-profile",
+        audience="host",
+        action="companion:profile:write",
+        required_scopes=("companion:profile:write",),
+        default_path="/v1/digital-life/relationship/companion-profile",
+    ),
+    IngressSurface.COMPANION_PROFILE_ROLLBACK: IngressSurfacePolicy(
+        surface=IngressSurface.COMPANION_PROFILE_ROLLBACK,
+        surface_id="host.companion-profile-rollback",
+        audience="host",
+        action="companion:profile:rollback",
+        required_scopes=("companion:profile:rollback",),
+        default_path="/v1/digital-life/relationship/companion-profile/rollback",
+    ),
+    IngressSurface.COMPANION_FEEDBACK: IngressSurfacePolicy(
+        surface=IngressSurface.COMPANION_FEEDBACK,
+        surface_id="host.companion-feedback",
+        audience="host",
+        action="companion:feedback:write",
+        required_scopes=("companion:feedback:write",),
+        default_path="/v1/digital-life/relationship/response-feedback",
     ),
     IngressSurface.TOOL: IngressSurfacePolicy(
         surface=IngressSurface.TOOL,

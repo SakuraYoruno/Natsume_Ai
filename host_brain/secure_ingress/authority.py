@@ -60,6 +60,8 @@ class SecureIngressAuthority:
     reason_code: str
     request_id: str | None = None
     principal_id: str | None = None
+    principal_kind: str | None = None
+    tenant_id: str | None = None
     claim_ref: str | None = None
     audit_ref: str | None = None
     body_sha256: str | None = None
@@ -78,6 +80,8 @@ class SecureIngressAuthority:
             "reason_code": self.reason_code,
             "request_id": self.request_id,
             "principal_id": self.principal_id,
+            "principal_kind": self.principal_kind,
+            "tenant_id": self.tenant_id,
             "claim_ref": self.claim_ref,
             "audit_ref": self.audit_ref,
             "body_sha256": self.body_sha256,
@@ -181,6 +185,16 @@ class SecureIngressAuthorityEvaluator:
         decision: SecureIngressDecision,
         permit_execution: bool,
     ) -> SecureIngressAuthority:
+        principal_kind = (
+            request.identity.principal.kind.value
+            if request.identity is not None
+            else None
+        )
+        tenant_id = (
+            request.identity.principal.tenant_id
+            if request.identity is not None
+            else None
+        )
         duplicate = decision.reason_code is IngressReasonCode.IDEMPOTENCY_DUPLICATE
         if duplicate:
             canonical_request_id = str(
@@ -206,6 +220,8 @@ class SecureIngressAuthorityEvaluator:
                     duplicate=False,
                     reason_code=IngressReasonCode.INTERNAL_ERROR.value,
                     principal_id=request.principal_id,
+                    principal_kind=principal_kind,
+                    tenant_id=tenant_id,
                     audit_ref=decision.audit_ref,
                     body_sha256=request.body_sha256,
                 )
@@ -215,6 +231,8 @@ class SecureIngressAuthorityEvaluator:
                 reason_code=decision.reason_code.value,
                 request_id=canonical_request_id,
                 principal_id=request.principal_id,
+                principal_kind=principal_kind,
+                tenant_id=tenant_id,
                 claim_ref=canonical_claim_ref,
                 audit_ref=canonical_audit_ref,
                 body_sha256=canonical_body_sha256,
@@ -226,6 +244,8 @@ class SecureIngressAuthorityEvaluator:
             reason_code=decision.reason_code.value,
             request_id=request.request_id,
             principal_id=request.principal_id,
+            principal_kind=principal_kind,
+            tenant_id=tenant_id,
             claim_ref=decision.claim_ref,
             audit_ref=decision.audit_ref,
             body_sha256=request.body_sha256,

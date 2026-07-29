@@ -4,7 +4,7 @@ P3-2：从 http_hooks.py 拆分，负责应用启动/关闭生命周期：
 - 启动探针（模块预热、Edge RPC 健康检测）
 - 调度器注册（NatsumeScheduler、DistillationEngine 等）
 - Tribe 基础设施初始化（TribeEventBus、TribeStateRegistry）
-- 关闭清理（ActivityMonitor、BondUpdateQueue、TribeEventBus）
+- 关闭清理（ActivityMonitor、legacy Bond compatibility adapter、TribeEventBus）
 
 注意：lifespan 主体逻辑仍在 http_hooks.py 的 runtime_lifespan() 中，
 本模块作为中间件层的统一入口，提供辅助函数和调度器构建逻辑。

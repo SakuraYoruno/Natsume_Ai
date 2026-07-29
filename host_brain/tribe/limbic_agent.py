@@ -50,6 +50,29 @@ def _read_canonical_inner_world(person_id: str, *, reader: Any) -> dict[str, Any
     return project_inner_world_state(read_life_snapshot(person_id, reader=reader))
 
 
+def _read_canonical_body_sense(person_id: str, *, reader: Any) -> dict[str, Any]:
+    """Project body presence from one scoped Life snapshot without mutation."""
+
+    from host_brain.digital_life.application_boundary import read_life_snapshot  # noqa: PLC0415
+    from host_brain.persona.body_sense import (  # noqa: PLC0415
+        project_body_sense_from_life_snapshot,
+    )
+
+    snapshot = read_life_snapshot(person_id, reader=reader)
+    projection = project_body_sense_from_life_snapshot(snapshot).as_dict()
+    projection.update(
+        {
+            "status": "OK",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "projection": "READ_ONLY",
+            "relationship_subject_id": str(person_id),
+            "life_version": int(snapshot.get("version") or 0),
+            "life_state_digest": str(snapshot.get("state_digest") or ""),
+        }
+    )
+    return projection
+
+
 def _is_trusted_runtime_emotion_source(
     *,
     emotion_source: str,
@@ -80,6 +103,85 @@ class LimbicAgent:
     )
     state_registry: TribeStateRegistry = field(default_factory=get_global_registry)  # T-29：使用全局单例
     _emotion_persistence: Any | None = field(default=None, init=False, repr=False)
+
+    def _legacy_self_affect_writes_retired(self) -> bool:
+        """Return whether this Host has canonical Life self-affect authority.
+
+        The check is deliberately derived from the immutable app-local port
+        bundle.  A legacy/offline test may still exercise its isolated
+        compatibility model, but a production Host must never let an event
+        bus callback rebuild EmotionPersistence or append the old timeline.
+        """
+
+        ports = self.application_ports
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_affect_result(
+        *,
+        source: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_SELF_AFFECT_WRITE_RETIRED",
+            "operation": str(operation),
+            "source": str(source or "limbic_agent"),
+        }
+
+    @staticmethod
+    def _retired_body_sense_result(
+        *,
+        operation: str,
+        person_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Describe a retired mutable BodySense operation without hiding it.
+
+        The old global BodySense model remains available only to isolated
+        compatibility fixtures.  Returning an explicit receipt prevents a
+        scheduler or legacy skill from treating a no-op as a durable update.
+        """
+
+        result = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_BODY_SENSE_MUTATION_RETIRED",
+            "operation": str(operation),
+        }
+        if str(person_id or "").strip():
+            result["relationship_subject_id"] = str(person_id).strip()
+        return result
+
+    def _canonical_body_sense_projection(
+        self,
+        *,
+        person_id: str | None,
+    ) -> dict[str, Any]:
+        """Read one relationship-scoped, canonical body projection.
+
+        A missing subject must never fall back to the former process-global
+        model: that would make one user's embodied context visible to another
+        request.  The caller can deliberately degrade instead.
+        """
+
+        subject_id = str(person_id or "").strip()
+        if not subject_id:
+            return {
+                "status": "UNAVAILABLE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "CANONICAL_BODY_SENSE_SUBJECT_REQUIRED",
+                "body_sense": {},
+            }
+        if self.application_ports is None:
+            raise RuntimeError("TRIBE_APPLICATION_PORTS_NOT_CONFIGURED")
+        return _read_canonical_body_sense(
+            subject_id,
+            reader=self.application_ports.require("life_snapshot_reader")(),
+        )
 
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
@@ -137,6 +239,22 @@ class LimbicAgent:
         summary_window_ms: int | None = None,
         diary_window_ms: int | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            # Do not resolve or cache a historical mixed-affect projection in
+            # production.  Canonical request fusion owns the scoped
+            # self-affect hand-off; NEUTRAL is intentionally not emitted as a
+            # fake substitute fact.
+            del summary_window_ms, diary_window_ms
+            return {
+                **self._retired_legacy_affect_result(
+                    source="resolve_emotion_timeline_snapshot",
+                    operation="emotion_timeline_read",
+                ),
+                "reason_code": "LEGACY_EMOTION_TIMELINE_READ_RETIRED",
+                "summary": {},
+                "diary": {},
+                "dominant_emotion": "",
+            }
         timeline = self.application_ports.require("emotion_timeline")()
         if timeline is None:
             return {
@@ -184,6 +302,21 @@ class LimbicAgent:
         arousal: float,
         dominance: float,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            # No fallback read/merge/persist is permitted.  Canonical request
+            # fusion supplies self-affect to production prompts instead.
+            return {
+                **self._retired_legacy_affect_result(
+                    source="resolve_persistent_emotion_state",
+                    operation="emotion_persistence",
+                ),
+                "user_id": _resolve_limbic_persona_id(person_id),
+                "valence": float(valence),
+                "arousal": float(arousal),
+                "dominance": float(dominance),
+                "from_baseline": True,
+                "reunion_type": "CANONICAL_LIFE_REQUIRED",
+            }
         from host_brain.persona.emotion_persistence import EmotionPersistence  # noqa: PLC0415
 
         if self._emotion_persistence is None:
@@ -332,9 +465,13 @@ class LimbicAgent:
         return payload
 
     def apply_body_sense_penalty(self, *, penalty: float) -> None:
+        if self._legacy_self_affect_writes_retired():
+            return
         self.application_ports.require("silence_engine")().apply_body_sense_penalty(float(penalty))
 
-    def resolve_body_sense_state(self) -> dict[str, Any]:
+    def resolve_body_sense_state(self, *, person_id: str | None = None) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            return self._canonical_body_sense_projection(person_id=person_id)
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         state = get_body_sense_model().get_state()
@@ -350,6 +487,8 @@ class LimbicAgent:
         return payload
 
     def tick_body_sense(self, *, current_hour: int | None = None) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            return self._retired_body_sense_result(operation="body_sense_tick")
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -383,7 +522,21 @@ class LimbicAgent:
         result["body_sense"] = payload
         return result
 
-    def update_body_sense_loneliness(self, *, loneliness_value: float) -> dict[str, Any]:
+    def update_body_sense_loneliness(
+        self,
+        *,
+        loneliness_value: float,
+        person_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            result = self._retired_body_sense_result(
+                operation="body_sense_loneliness_update",
+                person_id=person_id,
+            )
+            if str(person_id or "").strip():
+                projection = self._canonical_body_sense_projection(person_id=person_id)
+                result["body_sense"] = projection
+            return result
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -425,6 +578,22 @@ class LimbicAgent:
         mood_state: str | None,
         offline_loneliness: float | int | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            projection = self._canonical_body_sense_projection(person_id=person_id)
+            result = self._retired_body_sense_result(
+                operation="conversation_body_sense_start",
+                person_id=person_id,
+            )
+            result.update(
+                {
+                    "body_sense": projection,
+                    "is_active": bool(projection.get("is_active")),
+                    "willingness_penalty": float(
+                        projection.get("willingness_penalty") or 0.0
+                    ),
+                }
+            )
+            return result
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -847,6 +1016,14 @@ class LimbicAgent:
         person_id: str | None = None,
         duration_minutes: float | int | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            projection = self._canonical_body_sense_projection(person_id=person_id)
+            result = self._retired_body_sense_result(
+                operation="conversation_body_sense_end",
+                person_id=person_id,
+            )
+            result["body_sense"] = projection
+            return result
         from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
         model = get_body_sense_model()
@@ -898,10 +1075,13 @@ class LimbicAgent:
         event_kind: str = "interaction",
         source: str = "limbic_agent",
     ) -> dict[str, Any]:
-        """T-137：驱动情绪代谢，将 EmotionVector 代谢逻辑族化到 LimbicAgent。
+        """Compatibility-only emotion metabolism for offline legacy callers.
 
-        封装 EmotionVector.decay() / blend() 调用，LimbicAgent 作为情绪代谢的
-        唯一驱动者，确保代谢逻辑不散落在 PrefrontalAgent 或其他模块中。
+        Production Host composition selects the canonical Digital Life journal
+        and this method then returns a retired marker without mutating the
+        former metabolism/persistence authority. The implementation remains
+        available only for isolated legacy/offline fixtures during the single
+        rollback window.
 
         Args:
             valence: 当前效价 [-1.0, 1.0]。
@@ -916,6 +1096,15 @@ class LimbicAgent:
             {"valence": float, "arousal": float, "dominance": float,
              "emotion_tag": str, "mood_state": str, "decayed": bool}
         """
+        if self._legacy_self_affect_writes_retired():
+            return {
+                **self._retired_legacy_affect_result(
+                    source=source,
+                    operation="emotion_metabolism",
+                ),
+                "decayed": False,
+                "event_kind": str(event_kind or "interaction"),
+            }
         try:
             from host_brain.core.metabolism import EmotionVector  # noqa: PLC0415
             from host_brain.core.ids import now_ms  # noqa: PLC0415
@@ -1004,10 +1193,11 @@ class LimbicAgent:
         source: str = "limbic_agent",
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
-        """T-138：将情绪事件写入 EmotionTimeline，将 emotion_timeline 写入操作族化到 LimbicAgent。
+        """Compatibility-only legacy EmotionTimeline append.
 
-        LimbicAgent 作为 emotion_timeline 的唯一写入者，确保时间线写入
-        不散落在 PrefrontalAgent 或其他模块中。
+        Canonical Host composition never appends this projection. It receives
+        an explicit retired result instead, so a delayed event-bus callback
+        cannot recreate a second self-affect journal.
 
         Args:
             emotion_tag: 情绪标签（如 "HAPPY"/"SAD"/"NEUTRAL" 等）。
@@ -1019,6 +1209,14 @@ class LimbicAgent:
         Returns:
             {"status": "OK", "emotion_tag": str, "ts_ms": int}
         """
+        if self._legacy_self_affect_writes_retired():
+            return {
+                **self._retired_legacy_affect_result(
+                    source=source,
+                    operation="emotion_timeline_append",
+                ),
+                "emotion_tag": str(emotion_tag or "NEUTRAL").upper(),
+            }
         try:
             from host_brain.core.ids import now_ms  # noqa: PLC0415
 
@@ -1152,6 +1350,12 @@ class LimbicAgent:
         T-139：body_sense 更新时，除更新沉默意愿外，还通过 drive_emotion_metabolism()
         将疲劳/孤独感转化为情绪代谢信号，打通 body_sense → LimbicAgent 联动链路。
         """
+        if self._legacy_self_affect_writes_retired():
+            # A legacy scheduler/skill may still emit this compatibility event
+            # during the rollback window.  It must not adjust silence or
+            # recreate an affect transition after canonical Life has taken
+            # ownership; the current turn reads the scoped Life projection.
+            return
         try:
             payload = dict(event.payload or {})
             penalty = float(payload.get("willingness_penalty") or 0.0)
@@ -1350,6 +1554,8 @@ class LimbicAgent:
         效价提升：intensity * 0.12（上限 0.10）
         沉默意愿降低：intensity * 0.08（上限 0.06）
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.limbic_agent")
@@ -1426,6 +1632,8 @@ class LimbicAgent:
         效价降低：intensity * 0.10（上限 0.08）
         沉默意愿提升：通过 apply_body_sense_penalty 施加惩罚
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.limbic_agent")
@@ -1770,6 +1978,14 @@ class LimbicAgent:
         Returns:
             {"valence": float, "arousal": float, "emotion_tag": str, "decayed": bool}
         """
+        if self._legacy_self_affect_writes_retired():
+            return {
+                **self._retired_legacy_affect_result(
+                    source=source,
+                    operation="emotion_decay",
+                ),
+                "decayed": False,
+            }
         import logging as _logging
         _log = _logging.getLogger("Natsume.tribe.limbic_agent")
         try:

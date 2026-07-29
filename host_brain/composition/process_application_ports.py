@@ -18,8 +18,6 @@ class ProcessApplicationPorts:
     graph_handler_bindings: Callable[[], Sequence[GraphHandlerBinding]]
     graph_runtime_factory: Factory
     bond_stage_engine_factory: Factory
-    bond_dynamics_writer_factory: Factory
-    bond_update_queue_factory: Factory
     shared_memory_index_factory: Factory
     multimodal_observer_factory: Factory
     conversation_turn_store_factory: Factory
@@ -36,7 +34,6 @@ class ProcessApplicationPorts:
     distillation_engine_factory: Factory
     semantic_recaller_factory: Factory
     episodic_store_adapter_factory: Factory
-    emotion_runtime_factory: Factory
     probe_edge_rpc_health: Callable[..., Any]
     build_edge_dependency_probe_statuses: Callable[..., Any]
     collect_dependency_probes: Callable[..., Any]

@@ -972,6 +972,8 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             life_projection_dispatcher
         )
         assert callable(kwargs["scheduler_command_service_provider"])
+        assert callable(kwargs["life_command_service_provider"])
+        assert callable(kwargs["relationship_lifecycle_service_provider"])
         assert kwargs == {
             "task_runtime_container": task_runtime_container,
             "ledger": ledger,
@@ -998,6 +1000,12 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             "life_projection_dispatcher": life_projection_dispatcher,
             "scheduler_command_service_provider": kwargs[
                 "scheduler_command_service_provider"
+            ],
+            "life_command_service_provider": kwargs[
+                "life_command_service_provider"
+            ],
+            "relationship_lifecycle_service_provider": kwargs[
+                "relationship_lifecycle_service_provider"
             ],
             "embodiment_runtime_provider": kwargs[
                 "embodiment_runtime_provider"
@@ -1121,6 +1129,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         ]
         assert kwargs["runtime_context_application"] is runtime_context_application
         assert kwargs["worker_registry"] is scheduler_worker_registry
+        assert kwargs["retired_task_ids"] == ("proactive_talk_periodic",)
         assert kwargs["acceptance_effect_dispatcher"] is (
             acceptance_effect_dispatcher
         )
@@ -1139,7 +1148,18 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
 
     action_preview_service = object()
     life_projection_dispatcher = object()
-    life_outbox_dispatcher = object()
+
+    class LifeOutboxDispatcher:
+        def reconcile_completed_relationship_deliveries(
+            self,
+            *,
+            limit: int,
+        ) -> tuple[object, ...]:
+            assert limit == 100
+            events.append("life-relationship-receipts-reconciled")
+            return ()
+
+    life_outbox_dispatcher = LifeOutboxDispatcher()
 
     def fake_start_runtime_context_services(**kwargs):
         assert kwargs["task_runtime"] is task_runtime_container
@@ -1224,7 +1244,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
     monkeypatch.setattr(
         asgi,
         "_compose_life_dispatchers",
-        lambda current, *, embodiment_runtime, action_preview_service, agent_runtime_ports: (
+        lambda current, *, embodiment_runtime, action_preview_service, agent_runtime_ports, relationship_lifecycle_service_provider: (
             life_projection_dispatcher,
             life_outbox_dispatcher,
         )
@@ -1233,6 +1253,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
             and embodiment_runtime is not None
             and action_preview_service is not None
             and agent_runtime_ports is not None
+            and callable(relationship_lifecycle_service_provider)
         )
         else pytest.fail("wrong Life dispatcher ledger"),
     )
@@ -1547,6 +1568,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
         "activity-monitor-started",
         "runtime-context-built",
         "guardian-startup-observed",
+        "life-relationship-receipts-reconciled",
         "canon-built",
         "canon-synced",
         "command-ingress-built",

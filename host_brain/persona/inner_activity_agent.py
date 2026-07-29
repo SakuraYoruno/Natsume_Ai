@@ -283,6 +283,7 @@ def generate_inner_activity_note(
         "silence_state",
         "body_sense",
         "bond_summary",
+        "relationship_context",
         "emotion_timeline",
         "motive_state",
         "reply_plan",
@@ -566,10 +567,21 @@ def _build_inner_activity_context(
         4,
     )
 
+    canonical_life = (
+        str(inner_state_dict.get("canonical_life_source") or "").strip().upper()
+        == "CANONICAL_LIFE_JOURNAL"
+    )
+    canonical_self_affect = _coerce_mapping(inner_state_dict.get("self_affect"))
+    canonical_relationship = _coerce_mapping(inner_state_dict.get("relationship_state"))
     silence_state = _collect_silence_state(topic_phrase=topic_phrase)
-    body_sense = _collect_body_sense()
-    bond_summary, bond_state = _collect_bond_context(persona_user_id=persona_user_id)
-    timeline_summary, timeline_diary, current_emotion = _collect_emotion_timeline()
+    body_sense = _collect_body_sense(persona_user_id=persona_user_id)
+    bond_summary, bond_state = _collect_bond_context(
+        persona_user_id=persona_user_id,
+        canonical_relationship=canonical_relationship if canonical_life else None,
+    )
+    timeline_summary, timeline_diary, current_emotion = _collect_emotion_timeline(
+        canonical_self_affect=canonical_self_affect if canonical_life else None,
+    )
 
     motive_state: dict[str, Any] = {}
     try:
@@ -673,9 +685,40 @@ def _build_inner_activity_context(
                 "shared_memory_count",
             ],
         ),
+        # Keep the bounded RelationshipStateV2 projection distinct from the
+        # old Bond summary.  Converting trust/attunement into a score would
+        # accidentally let a private default-mode note infer intimacy or
+        # proactive permission from the wrong authority.
+        "relationship_context": _project_mapping(
+            canonical_relationship if canonical_life else {},
+            [
+                "schema_version",
+                "revision",
+                "trust",
+                "safety",
+                "attunement",
+                "rupture_load",
+                "repair_required",
+                "proactive_permission",
+                "active_episode_count",
+            ],
+        ),
         "emotion_timeline": {
-            "summary": _project_mapping(timeline_summary, ["dominant_emotion", "trend", "total_events", "recent_events"]),
-            "diary": _project_mapping(timeline_diary, ["avg_valence", "avg_arousal", "dominant_emotion", "entries"]),
+            "summary": _project_mapping(
+                timeline_summary,
+                [
+                    "source",
+                    "revision",
+                    "dominant_emotion",
+                    "trend",
+                    "total_events",
+                    "recent_events",
+                ],
+            ),
+            "diary": _project_mapping(
+                timeline_diary,
+                ["source", "avg_valence", "avg_arousal", "dominant_emotion", "entries"],
+            ),
             "current_emotion": current_emotion,
         },
         "motive_state": _project_mapping(
@@ -781,17 +824,31 @@ def _collect_silence_state(*, topic_phrase: str) -> dict[str, Any]:
         return {}
 
 
-def _collect_body_sense() -> dict[str, Any]:
+def _collect_body_sense(*, persona_user_id: str) -> dict[str, Any]:
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        return dict(get_limbic_agent().resolve_body_sense_state())
+        return dict(
+            get_limbic_agent().resolve_body_sense_state(
+                person_id=persona_user_id
+            )
+        )
     except Exception as exc:
         _logger.debug("inner_activity body_sense degraded: %s", exc)
         return {}
 
 
-def _collect_bond_context(*, persona_user_id: str) -> tuple[dict[str, Any], Any | None]:
+def _collect_bond_context(
+    *,
+    persona_user_id: str,
+    canonical_relationship: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], Any | None]:
+    # The canonical relationship projection is intentionally not translated
+    # to a Bond score/stage.  It remains a separate, bounded prompt context.
+    # This guard also prevents default-mode production ticks from touching the
+    # retired SocialBrain/Bond read authority.
+    if canonical_relationship is not None:
+        return {}, None
     try:
         from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
         from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
@@ -810,7 +867,15 @@ def _collect_bond_context(*, persona_user_id: str) -> tuple[dict[str, Any], Any 
         return {}, None
 
 
-def _collect_emotion_timeline() -> tuple[dict[str, Any], dict[str, Any], str]:
+def _collect_emotion_timeline(
+    *,
+    canonical_self_affect: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    # A canonical Life snapshot is authoritative even if its mixed component
+    # head is empty.  Falling back to the retired timeline would erase that
+    # fact and commonly fabricate NEUTRAL during an otherwise live episode.
+    if canonical_self_affect is not None:
+        return _project_canonical_self_affect(canonical_self_affect)
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
@@ -822,6 +887,49 @@ def _collect_emotion_timeline() -> tuple[dict[str, Any], dict[str, Any], str]:
     except Exception as exc:
         _logger.debug("inner_activity emotion_timeline degraded: %s", exc)
         return {}, {}, "NEUTRAL"
+
+
+def _project_canonical_self_affect(
+    source: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """Make an LLM-safe timeline-shaped read view from SelfAffectStateV2."""
+
+    affect = _coerce_mapping(source)
+    mood = _coerce_mapping(affect.get("mood"))
+    components = [
+        _coerce_mapping(item)
+        for item in list(affect.get("components") or [])
+        if isinstance(item, Mapping)
+    ]
+    components.sort(
+        key=lambda item: (
+            -_coerce_float(item.get("intensity")),
+            str(item.get("emotion") or ""),
+        )
+    )
+    dominant = str(components[0].get("emotion") or "").strip().upper() if components else ""
+    if not dominant:
+        dominant = str(mood.get("label") or "CALM").strip().upper() or "CALM"
+    active_episode_count = min(
+        4,
+        len([item for item in list(affect.get("active_episodes") or []) if isinstance(item, Mapping)]),
+    )
+    summary = {
+        "source": "CANONICAL_LIFE_JOURNAL",
+        "revision": _coerce_non_negative_int(affect.get("revision")),
+        "dominant_emotion": dominant,
+        "trend": "canonical_snapshot",
+        "total_events": active_episode_count,
+        "recent_events": active_episode_count,
+    }
+    diary = {
+        "source": "CANONICAL_LIFE_JOURNAL",
+        "avg_valence": _coerce_float(mood.get("valence")),
+        "avg_arousal": _coerce_float(mood.get("arousal")),
+        "dominant_emotion": dominant,
+        "entries": active_episode_count,
+    }
+    return summary, diary, dominant
 
 
 def _collect_persona_changes(*, persona_user_id: str) -> list[Any]:
@@ -1105,6 +1213,20 @@ def _inner_note_similarity(left: str, right: str) -> float:
 
 def _coerce_mapping(raw: Any) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, Mapping) else {}
+
+
+def _coerce_float(raw: Any, default: float = 0.0) -> float:
+    try:
+        return float(raw if raw not in (None, "") else default)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def _coerce_non_negative_int(raw: Any) -> int:
+    try:
+        return max(0, int(raw or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _finalize_inner_note_text(raw_text: str) -> str:

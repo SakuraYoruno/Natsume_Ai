@@ -60,6 +60,7 @@ def _request_body() -> SimpleNamespace:
         message="请根据检索证据给出完整技术结论",
         thread_id=None,
         person_id="person-gr05-cortex",
+        workspace_id="workspace-gr05-cortex",
         reply_channel="gateway",
         reply_target="device-gr05",
         render_target_lang="zh",
@@ -93,6 +94,12 @@ async def test_canonical_routes_freeze_context_and_skip_all_legacy_paths(
     route: str,
 ) -> None:
     governed = _GovernedRuntime()
+    prefetch_args: dict[str, Any] = {}
+
+    async def _prefetch(**kwargs):  # noqa: ANN003
+        prefetch_args.update(kwargs)
+        return {"stage": "trusted"}, None, {"dominant_motive": "help"}
+
     events = [
         event
         async for event in _cortex_orchestrator_sse_generator_impl(
@@ -109,9 +116,7 @@ async def test_canonical_routes_freeze_context_and_skip_all_legacy_paths(
             metrics=object(),
             sse_fn=lambda value: dict(value),
             airlock_sanitize_input_fn=lambda value: (value, True),
-            prefetch_retrieval_persona_inputs_fn=lambda **_kwargs: _async_value(
-                ({"stage": "trusted"}, None, {"dominant_motive": "help"})
-            ),
+            prefetch_retrieval_persona_inputs_fn=_prefetch,
             resolve_person_id_fn=lambda *_args, **_kwargs: "person-gr05-cortex",
             governed_command_application=governed,
             command_authority={},
@@ -122,6 +127,7 @@ async def test_canonical_routes_freeze_context_and_skip_all_legacy_paths(
     assert len(governed.calls) == 1
     call = governed.calls[0]
     assert call["bond_summary"] == {"stage": "trusted"}
+    assert prefetch_args["workspace_id"] == "workspace-gr05-cortex"
     assert call["retrieval_summary"] == {"status": "OK"}
     assert call["retrieval_evidence_items"] == [
         {"evidence_ref": "memory://governed/context"}
@@ -195,7 +201,3 @@ def test_cortex_runtime_has_no_direct_chat_or_postprocess_compatibility_hooks() 
         / "app"
         / "surface_reply_postprocessor.py"
     ).exists()
-
-
-async def _async_value(value):  # noqa: ANN001
-    return value

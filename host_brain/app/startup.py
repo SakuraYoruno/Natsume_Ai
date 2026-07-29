@@ -424,12 +424,16 @@ def _run_async_sync(coro_factory: Callable[[], Awaitable[_AsyncT]]) -> _AsyncT:
 # ---------------------------------------------------------------------------
 
 def warmup_emotion_timeline(*, ports: StartupApplicationPorts) -> str:
-    """预热 EmotionTimeline：从 SQLite 加载最近 24h 情绪记录。
+    """Warm the legacy projection only when an offline root enables it.
 
-    返回状态字符串（"OK" / "DEGRADED: ..."）。
+    A production Host returns the explicit retirement marker.  Reporting it
+    as ``OK`` would falsely suggest that a second self-affect authority is
+    live.
     """
     try:
-        ports.emotion_timeline()
+        timeline = ports.emotion_timeline()
+        if str(getattr(timeline, "status", "")).strip() == "RETIRED_CANONICAL_LIFE":
+            return "RETIRED_CANONICAL_LIFE"
         return "OK"
     except Exception as exc:
         _logger.warning("EmotionTimeline 预热失败（降级）: %s", exc)
@@ -580,11 +584,9 @@ def warmup_chat_runtime_basics(
 
         if eager_persona:
             from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
-            from host_brain.persona.body_sense import get_body_sense_model  # noqa: PLC0415
 
             PersonaEngine.get_instance()
             ports.silence_engine()
-            get_body_sense_model()
             warmed_parts.append("persona_runtime=ready")
         else:
             warmed_parts.append("persona_runtime=lazy")

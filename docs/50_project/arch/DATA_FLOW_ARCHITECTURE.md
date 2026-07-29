@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.38
+版本：v3.39
 
 核对日期：2026-07-28
 
@@ -16,11 +16,12 @@
 > 情感链路当前为 PARTIAL。0143 已提供一个真实、可重放的 canonical
 > LifeCommand → life_event_journal → state.affective 内核：typed observation
 > 与 typed Appraisal 分离，只有 Appraisal command 可以创建 mixed
-> self-affect/episode，regulation 只记录表达约束。该内核尚未由 Host
-> Fusion/Appraisal ingress 调用，因此当前流还不是目标中的
-> Observation → Appraisal → SelfAffect → Regulation → ExpressionPlan 生产
-> 闭环；Host-local runtime、Limbic 与 Surface 的旧情感上下文只可作为待替换的
-> compatibility 输入，不能被解释为 canonical self-affect writer。
+> self-affect/episode，regulation 只记录表达约束。Host Input 的
+> `AffectFusionService` 已经把受信任的 Observation/Appraisal ingress 接入该内核；
+> 普通 Chat 仍只在其已启用 route 上具备这条链，delivery-success relationship
+> reconciliation、旧 organ writer 清零、真实 Voice/Avatar 物理回执与全栈恢复仍缺，
+> 因此不能把现有流写成完整生产闭环。Host-local runtime、Limbic 与 Surface 的旧情感
+> 上下文只可作为待替换的 compatibility 输入，不能被解释为 canonical self-affect writer。
 
 NE-01 代码封口后的证据流固定为：
 
@@ -541,8 +542,9 @@ rupture，`MISUNDERSTOOD` 与 `REPAIR_UNRESOLVED` 保留 repair required；`SILE
 Surface 不能直接读写关系账本：Input runtime 只把 canonical result 标成 trusted hand-off，
 reply compiler 才把它变成“尊重空间、不索取回应、不把修复说成完成、不使用排他或
 负罪施压”的 facts/must-not/style anchors。外部 `emotion_context` 没有 marker 时被忽略。
-生产 `HostBondRuntime` 默认关闭 score-driven automatic stage transition；旧 Bond queue
-和 projection 仍为 compatibility，直到 DL-06 才能声称 writer usage=0。
+生产 `HostBondRuntime` 默认关闭 score-driven automatic stage transition；production Host 已删除旧
+Bond queue/writer construction，只有 no-write retired adapter 与 score/stage read projection 保留，不能
+再由 queue crash、full 或 fallback 影响关系事实。
 
 DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由
@@ -554,9 +556,66 @@ plan 下为每个稳定句生成 Voice `SPEAK` 和 Avatar `TRANSITION` 成对 Ho
 sync、self-affect revision、avatar predecessor 与 Host staging status，绝不复制文本、原始媒体
 或模型推理。该读模型的 “last accepted” 是**最后一次 Host 暂存**，不是远端设备实际状态。
 
+0147 将 `companion_profile` 作为同一 relation aggregate 的 bounded head，而不是 Surface、TTS
+或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only
+`relational_aftereffect_recorded` 事件：五条独立 user-input ref、跨至少三 UTC 日、`HELPFUL`、
+boundary-safe 且 `helpfulness>=0.85` 的证据才能建立 candidate；candidate 再收集五次后续
+strong aftereffect 后会由同一 canonical lifecycle 自动 active。每个 learned profile 的 rollback ref 固定指向候选创建时的 active
+profile，不能挑一个方便的旧版本。普通文本 classifier 仅 `0.72`，因此不会写入或推进这条成长链。
+planner 从 trusted relationship hand-off 读取 CANARY 或 ACTIVE profile，把同一 profile id/digest/
+revision 冻结进 `AffectiveTurnPlanV1`、`ExpressionPlanV1`、Voice `SPEAK` 和 Avatar `TRANSITION`；
+它只能改变受限表达锚点、TTS rate、动作强度或把主动时段进一步收紧，不能改变 Soul、许可或 self-affect。
+
+0148 的 direct profile-control flow 不让请求指定 aftereffect 或直接写 profile：
+
+```mermaid
+flowchart LR
+    U["严格结构化偏好请求"] --> SI["host.companion-profile\nSecure Ingress"]
+    SI --> B["精确 user / subject\ntenant / workspace / scope 绑定"]
+    B --> H["canonical relation aftereffect 历史\nHost 自己选择合格证据"]
+    H --> C["companion_profile_canary_started\nLife command + audit ref"]
+    C --> P["0148 immutable profile head"]
+    P --> T["下一轮 AffectiveTurnPlan / ExpressionPlan"]
+```
+
+请求只可创建五互动 CANARY；它不能携带自然语言理由、Soul patch、emotion、relationship consent、原始媒体
+或任意 command，且不直接 activation。claim 完成中断后，Host 以相同 Secure Ingress audit ref 重开已提交的
+Life receipt，不产生第二个 candidate。
+
+明确回应反馈使用另一条 receipt-bound 的权限边界，不能把 chat keyword 或 persona proposal 伪装为强证据：
+
+```mermaid
+flowchart LR
+    U["签名 HELPFUL / NEUTRAL / MISUNDERSTOOD / BOUNDARY"] --> SI["host.companion-feedback\nSecure Ingress"]
+    SI --> R["active provisional response receipt\n精确 scope 验证"]
+    R --> A["relational_aftereffect_recorded\nopaque audit + response refs"]
+    A --> C["已有 CANARY 才可计一次\ncanary interaction"]
+    C --> P["第五次合格后由 canonical lifecycle 自动 activation"]
+```
+
+`HELPFUL` 是唯一映射为 `0.95` 的 strong aftereffect；其余反馈仍会正常影响关系修复/边界状态，
+但不能成为 profile 成长成功。没有 active receipt、跨 user/workspace、service principal、重复 JSON key
+或额外 rating 字段都会失败关闭。feedback 的 Secure Ingress audit ref 是 crash/retry 的重开键，而非原始
+对话正文。
+
+profile rollback 也不允许 caller 选择历史版本；它以当前 head 作为唯一可验证输入：
+
+```mermaid
+flowchart LR
+    U["signed current active profile identity"] --> SI["host.companion-profile-rollback\nSecure Ingress"]
+    SI --> B["user / subject / tenant / workspace\ncompanion:profile:rollback"]
+    B --> H["current active profile\nfrozen predecessor only"]
+    H --> R["companion_profile_rolled_back\nsource_control_ref + Life receipt"]
+    R --> D["duplicate / restart\nreopen exact receipt"]
+```
+
+`rollback_profile_id` 从不属于 wire body。current identity 已漂移、service principal、跨 scope 或额外
+target 字段均 fail closed；Voice/Avatar/文本随后只读新的 active profile projection。
+
 ```mermaid
 flowchart LR
     H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]
+    R["canonical companion profile\nCANARY or ACTIVE"] --> P
     P -->|"low ambiguity"| M["ModelAttempt native text stream"]
     P -->|"repair / conflict / boundary"| C["two-candidate buffered selection"]
     M --> G["local consistency + non-manipulation Gate"]
@@ -566,6 +625,7 @@ flowchart LR
     S --> F["foreground_completed\nRELEASE or accepted relationship aftereffect"]
     I --> R["0145 text delivery digest projection"]
     E --> X["0146 expression protocol projection\nnot an Edge-applied receipt"]
+    R --> CP["0147 profile lifecycle projection\nopaque evidence and bounded head"]
 ```
 
 当前 stream adapter 尚不能携带 provider-final canonical usage；因此带 node-bound
@@ -575,14 +635,152 @@ flowchart LR
 真实 TTS/Avatar channel receipt、connection resume 与全服务栈验收仍不在这条本地 Host
 protocol 切片的完成范围。
 
+`DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE` 已令 production Host root 不再构造
+`HostEmotionRuntime`，且 ASGI 为 Input 与 Tribe 都注入 lazy Life command provider；二者在
+authority 存在时均经 `AffectFusionService` 形成 scoped observation/appraisal。因而 global
+`user_emotion_profile` 在 production 留空，不能跨 workspace/person/session 汇总并反馈为七海的
+感受。旧 runtime 类不由任何 Input/Tribe composition 构造；缺 Life authority 的解析稳定拒绝。
+随后 canonical
+`TribeApplicationPorts` 也成为 Limbic compatibility writer 的 gate：旧 persistence/metabolism/
+timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
+回调追加为另一个 self-affect 事实。Endocrine 的 delta buffer/last-state/hint/fan-out 也由同一 gate
+拒绝；Circadian/MirrorNeuron 不再直写其私有字段。BodySense 生产读取现改为
+`relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
+没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
+`RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive 每次只对当前输入快照新建
+无状态投影，已不再保存模块级 engine；production volatile Bond queue 已无 worker/backlog。production
+`HostMemoryRuntimeOwner` 不再从旧 action log hydrate mutable `EmotionTimeline`，而是返回不含 emotion tag 的
+`RetiredEmotionTimelineProjection`；Lifecycle snapshot/proactive dispatch 忽略该 marker，canonical Limbic/
+Prefrontal 也不会读取它。user profile 仅保留为用户 observation，不能覆盖七海 self-affect；其它 compatibility
+reader 与真实服务验收仍待处理。
+
+默认模式私密活动的实际读流已改为：`LifeSnapshotReader → project_inner_world_state → bounded self_affect /
+relationship_state → inner_activity_agent`。来源 marker 存在时，inner activity 直接从 canonical mood 与 mixed
+component 得到当前 emotion，并把关系纹理作为独立 context；它不回读 legacy timeline，也不向 SocialBrain/Bond
+要 score。该投影丢弃 episode trigger/evidence、workspace/subject identity 与 intimacy consent，避免生成链路把
+关系数值误当授权；高连续性 background tick 也不再调用 legacy Limbic metabolism。此数据流仅覆盖 default-mode
+reader，不替代其余 compatibility reader、真实 TTS/Avatar/Edge 或服务栈验收。
+
+普通 Chat 的关系读取流现为：
+
+```text
+AffectFusion internal envelope
+  → scope/schema/self-id validation
+  → CanonicalRelationshipProjection
+  → Prompt Context + Interaction Facts
+  → Surface relationship_state / canonical-aware affect-control gate
+```
+
+validation 同时绑定 `workspace_id + relationship_subject_id + session_id`，并要求 envelope、relationship turn
+context 与 `RelationshipStateV2` 三层 schema 一致。成功时 legacy prompt vector 只保留 `FRIEND / stepsibling`
+的非浪漫表达纹理；旧 Bond score/stage、consent 或高 trust 不能提升亲密、排他、依赖或主动权限。失败时生成
+`CANONICAL_RELATIONSHIP_REJECTED` 的安全朋友投影，而非读回 Bond fallback。该流与相邻普通 Chat/Surface 回归
+目前为 `179 passed in 63.85s`，不包含真实 provider、Edge、Monitor 或 DL-07 服务栈。
+最后一跳不会重新相信 compatibility payload：`surface_affect_control` 若看到 canonical/rejected authority，就忽略
+旧显式 lover distance、closeness、恋人 clue 和 lover task，仅保留 `familiar` 或因 rupture/rejected 而收紧的
+`guarded`。该最终 Gate 定向回归为 `82 passed in 21.18s`。
+
+Cortex 的检索分支使用同一 authority：
+
+```text
+AffectFusion internal envelope
+  → scope/schema/self-id validation
+  → bounded retrieval relationship projection
+  → retrieval + Motive prefetch
+  → governed Chat input
+```
+
+只要 envelope 声称 canonical，预取就不会访问 legacy state-arbiter Bond。有效投影仅提供
+`FRIEND / stepsibling / familiar` 与有限 texture；drift 或不完整 hand-off 为 `guarded`，不携带 score、恋人 stage
+或 proactive permission。该路径的定向验证为 `34 passed in 5.64s`。
+
 `affective_time_advanced` 只按 command timestamp 和 episode half-life 衰减；
 `affective_episode_resolved` 只删除对应 active head 并留下 immutable journal
 evidence。snapshot 和 0143 projection 只保存 event/subject/ref digest 与 cursor
 字段。`normalize_chat_emotion_context(raw)` 对 replay/render 和 trusted fused
-context 都不写状态。旧 `HostEmotionRuntime.ingest → vector/timeline/profile` 流在
-未注入 fusion service 的 compatibility 调用中仍可使用；DL-06 之前不得把它的
-writer 使用量写为零。`ResponseFormDecider` 继续由 Input composition 独占并做
-原子额度检查，不是 affect authority。
+context 都不写状态。Input/Tribe composition 不会解析或调用旧
+`HostEmotionRuntime.ingest → vector/timeline/profile`；遗漏 Life authority 时稳定
+`CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不能退回 compatibility runtime。
+`ResponseFormDecider` 继续由 Input composition 独占并做原子额度检查，不是 affect authority。
+
+DL-06 的 Scheduler 主动消息已开始走同一条 canonical 边界。accepted foreground
+reply 先把 `CompanionProactiveTargetV1` 与 provisional relationship episode 原子写入同一
+Life command；这个 target 绑定 workspace、relationship subject、session、route 与来源
+receipt，但登记不等于主动许可。read-only registry 只重开 explicit `ALLOWED`、无
+repair/active episode 且 scope-valid 的 target，Scheduler 再从与 frozen Scene 匹配的集合稳定
+选择一个 aggregate。`companion_proactive` adapter 读取其 `relationship_v2`、`state.affective`、
+clock 和 admitted timezone，先验证无给空间 regulation、能量和休息需要，才调用既有的纯
+impulse/risk 算法；Bond score、legacy `state.affect`、旧 `last_target`、私密 inner note 和
+project title 不会进入该输入。decision trace 只记录 content digest；真正的消息仅存在于已经
+授权的 outbox payload。用于 delivery-success 对账的私有关系 context 只保留在该 canonical
+outbox 行，进入 Preview 和 Gateway 前会被剥离，不能成为外发 metadata。transport 成功先固定
+`LifeDeliveryReceipt`；app-local relationship reconciler 再重验 receipt/outbox 的 id、key、
+payload/authorization digest 及 target/scope，才追加 `relationship_proactive_delivered`。若进程
+在这两步之间中断，Host lifespan 或下一 outbox tick 只读扫描已完成 receipt 并 exact-replay
+该 relation command，永不重发 Gateway。这个 receipt 仅表示 Host/Gateway accepted，不能代表
+第三方平台送达或用户已阅读。未知/拒绝、裂痕、等待后效应或自我克制均为 hold，而不是用沉默
+惩罚用户。
+
+历史 `proactive_talk` 不再属于这张发送图：它已从 production Skill、Tool、executor 和新 Scheduler
+definition 输入移除，Host composition 还会对升级前遗留的 `proactive_talk_periodic` head 执行 CAS disable。
+若已有 occurrence 跨升级存活，它只能验证原有的 immutable Scene identity 后结束为
+`LEGACY_PROACTIVE_TALK_RETIRED`；不会读取旧 Bond/EmotionTimeline/Limbic，也不会产生 outbox 或 Gateway
+effect。这样 crash recovery 不会把旧模板路径重新变成第二条主动发送 authority。
+
+OBS 读取也遵循同一单一事实原则：
+
+```mermaid
+flowchart LR
+    L["canonical Life snapshot"] --> SA["Natsume self-affect"]
+    L --> UA["bounded user-affect observation"]
+    L --> RS["bounded relationship texture"]
+    SA --> O["OBS runtime snapshot"]
+    UA --> O
+    RS --> O
+    O -. "reader failure" .-> D["degraded; no legacy fallback"]
+```
+
+已退役的 Gateway progress fastpath 不在这条情感数据流中。若 rollback-window helper 被显式调用，只有
+`DurableTaskStatusProjection → FRIEND/CALM technical wording`，没有 `payload → Bond/SocialBrain` 或
+`payload user emotion → Natsume self-affect` 的箭头；因此它不能绕过 `AffectiveTurnPlan` 伪造关系或情绪。
+
+`LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 已在 production Host composition 中接入。snapshot
+reader 以当前 relationship subject 重开一条 canonical head，固定输出 `self_id=natsume_ai`、self-affect 与用户
+observation 的分离视图；后者只能解释用户状态，不能改写前者。reader 已组成后，任何读取失败或 identity drift
+都会停在 degraded，不会调用 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。该本地 reader-cutover
+集合为 `67 passed in 10.65s`，未包含 OBS 进程、真实 Host、Gateway、远端 Edge 或 DL-07 服务栈。
+
+主动许可的写入口不复用 generic Life HTTP command，也不解析“你可以常来找我”之类的
+自然语言。`POST /v1/digital-life/relationship/proactive-permission` 先以 exact raw JSON 建立
+`CompanionProactivePermissionRequestV1`，再由 server-owned `host.companion-contact` Secure
+Ingress policy 要求 `companion:contact:write`。只有签名 `user` principal 等于
+`relationship_subject_id`、tenant 等于 `workspace_id` 时，audit ref 才会成为 `USER_EXPLICIT`
+evidence 并调用 canonical `RelationshipLifecycleService.record_proactive_permission`。claim 完成结果
+绑定 `life-command://...`；duplicate 与进程重启只重开同一 command，不能成为第二个关系 writer。
+
+```mermaid
+flowchart LR
+    U["signed user contact control\nstrict ALLOWED / DENIED"] --> SI["Secure Ingress\nuser + tenant + scope exact bind"]
+    SI --> R
+    F["accepted foreground reply"] --> T["CompanionProactiveTargetV1 + provisional episode\n同一 Life command"]
+    T --> X["read-only durable target registry\nscope / permission / active episode filter"]
+    X --> L["one frozen-Scene-compatible Life snapshot"]
+    L --> R["relationship_v2: explicit permission"]
+    L --> A["state.affective: mood / need / regulation"]
+    L --> C["clock + admitted timezone"]
+    R --> G{"ALLOWED / no rupture / no episode?"}
+    A --> G
+    C --> G
+    G -->|no| H["hold: no outbox"]
+    G -->|yes| I["canonical companion impulse adapter"]
+    I --> O["authorized proactive.gateway outbox\nprivate reconciliation context"]
+    I --> D["bounded decision trace + content digest"]
+    O --> GY["Gateway transport accepted\nimmutable LifeDeliveryReceipt"]
+    GY --> Q["revalidate receipt + scope + target\nrelationship_proactive_delivered"]
+    Q --> E["PROACTIVE_MESSAGE episode\nwait for real next user input"]
+    GY -. "crash after receipt" .-> RS["Host startup / outbox tick\nreceipt-only reconciliation, no resend"]
+    RS --> Q
+```
 
 Internal 后置审核取消的数据流只覆盖一个精确终态：Operator Secure Ingress → immutable `BLOCKED` cancellation intent → trusted `CANCELLED` final decision → restart terminal worker → deterministic nonacceptance claim → tombstone/Workspace cleanup。intent 不能冒充 final decision，任何 lineage 漂移均 fail-closed；该流不处理一般取消、多节点或 unknown effect。
 

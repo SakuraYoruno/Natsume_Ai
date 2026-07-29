@@ -380,21 +380,10 @@ class DefaultModeAgent:
                     )
             except Exception:
                 pass
-            # T-365：高连续性时联动 LimbicAgent 触发温和正向情绪（自我完整感带来平静满足）
-            try:
-                _limbic = get_limbic_agent()
-                if hasattr(_limbic, "drive_emotion_metabolism"):
-                    _cont_valence = round(min(0.14, (continuity_score - 0.70) * 0.47), 4)
-                    _limbic.drive_emotion_metabolism(
-                        valence=_cont_valence,
-                        arousal=round(-_cont_valence * 0.30, 4),  # 高连续性时略微降低唤醒（平静感）
-                        dominance=0.05,
-                        blend_weight=0.09,
-                        event_kind=f"default_mode_continuity:{round(continuity_score, 3)}",
-                        source="default_mode_agent",
-                    )
-            except Exception:
-                pass
+            # DL-06: continuity is a read signal, not a license for this
+            # background loop to synthesize a new self-affect mutation.  A
+            # canonical Life command/appraisal is the only route that may
+            # create or regulate an EmotionEpisode.
 
         return result
 
@@ -522,7 +511,6 @@ __all__ = [
 ]
 
 # ── 跨模块引用（供测试 monkeypatch 使用）────────────────────────────────────
-from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: E402, F401
 from host_brain.tribe.pain_reward_agent import get_pain_reward_agent  # noqa: E402, F401
 from host_brain.tribe.ans_agent import get_ans_agent  # noqa: E402, F401
 from host_brain.tribe.interoception_agent import get_interoception_agent  # noqa: E402, F401

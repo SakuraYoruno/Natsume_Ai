@@ -216,11 +216,12 @@ def build_production_host_application_ports(
     bond_runtime_owner = HostBondRuntimeOwner(
         ledger_provider=ledger_provider,
         stage_engine_factory=process_application_ports.bond_stage_engine_factory,
-        dynamics_writer_factory=(
-            process_application_ports.bond_dynamics_writer_factory
-        ),
-        update_queue_factory=process_application_ports.bond_update_queue_factory,
+        dynamics_writer_factory=None,
+        update_queue_factory=None,
         client_factory=build_host_bond_client,
+        # Digital Life owns production relationship mutation.  This Host owner
+        # keeps only legacy read projections alive during the rollback window.
+        legacy_write_authority_enabled=False,
     )
     evolution_runtime_owner = HostEvolutionRuntimeOwner(
         persistence_db_path_provider=(
@@ -246,11 +247,10 @@ def build_production_host_application_ports(
         semantic_recaller_decorator=(
             evolution_runtime_owner.decorate_semantic_recaller
         ),
-    )
-    emotion_context_runtime = _app_local_lazy_provider(
-        lambda: process_application_ports.emotion_runtime_factory(
-            timeline_provider=memory_runtime_owner.require_emotion_timeline,
-        )
+        # The mutable timeline is retained only for explicitly legacy/offline
+        # roots.  Production Host must not hydrate historical, mixed affect
+        # rows as if they were Natsume's current emotional state.
+        legacy_emotion_timeline_enabled=False,
     )
     governance_runtime_owner = HostGovernanceRuntimeOwner(
         ledger_provider=ledger_provider,
@@ -302,15 +302,11 @@ def build_production_host_application_ports(
             emotion_timeline=(
                 memory_runtime_owner.require_emotion_timeline
             ),
-            emotion_context_runtime=emotion_context_runtime,
             bond_stage_engine=bond_runtime_owner.require_stage_engine,
             bond_neo4j_client=bond_runtime_owner.require_client,
             shared_memory_index=shared_memory_index,
             milestone_tracker=_app_local_provider(milestone_tracker),
             prompt_registry=authority_runtime_owner.require_prompt_registry,
-            user_emotion_profile=(
-                lambda: emotion_context_runtime().user_emotion_profile()
-            ),
             intent_engine=governance_runtime_owner.require_intent_engine,
             multimodal_observer=multimodal_observer,
             multimodal_processor=_app_local_provider(multimodal_processor),

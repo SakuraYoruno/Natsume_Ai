@@ -426,13 +426,6 @@ def _submit_surface_foreground_completed(
             "last_interaction_digest": (user_message or str(narrative or ""))[:160],
         },
     }
-    if reply_channel and reply_target:
-        state_patch["proactive"] = {
-            "last_target": {
-                "platform": reply_channel,
-                "conversation_id": reply_target,
-            }
-        }
     payload = {
         **projection_base,
         "state_patch": state_patch,
@@ -524,6 +517,14 @@ def _submit_surface_foreground_completed(
         request_id=request_id or str(foreground_receipt.get("command_id") or ""),
         response_receipt=foreground_receipt,
         response_text=str(narrative or ""),
+        proactive_target=(
+            {
+                "platform": reply_channel,
+                "conversation_id": reply_target,
+            }
+            if reply_channel and reply_target
+            else None
+        ),
     )
     return {
         **dict(foreground_receipt),

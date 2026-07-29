@@ -32,7 +32,6 @@ from host_brain.skills.impl.frontend_executor import execute_frontend_skill
 from host_brain.skills.impl.ide_executor import execute_ide_skill
 from host_brain.skills.impl.memory_executor import execute_memory_skill
 from host_brain.skills.impl.notification_executor import execute_notification_skill
-from host_brain.skills.impl.proactive_talk import execute_proactive_talk
 from host_brain.skills.impl.repo_executor import execute_repo_skill
 from host_brain.skills.impl.scheduler_executor import execute_scheduler_skill
 from host_brain.skills.impl.shell_executor import execute_shell_skill
@@ -187,7 +186,6 @@ def build_builtin_tool_executor_registry() -> ToolExecutorRegistry:
         ToolExecutorSpec("dream_generator", _with_context(execute_dream_generator)),
         ToolExecutorSpec("desktop_note", _with_context(execute_desktop_note)),
         ToolExecutorSpec("focus_mode", _focus_mode_with_mode_changer),
-        ToolExecutorSpec("proactive_talk", _with_context(execute_proactive_talk)),
         ToolExecutorSpec("desktop", _with_context(execute_desktop_skill)),
         ToolExecutorSpec("memory", _with_context(execute_memory_skill)),
         ToolExecutorSpec("emotion", _with_context(execute_emotion_skill)),

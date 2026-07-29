@@ -200,6 +200,16 @@ def create_app(
             host_lifecycle.get_mode_transition_service
         ),
         resource_manager_provider=host_lifecycle.get_resource_manager,
+        # The provider is intentionally lazy: Life authority is composed in
+        # lifespan startup, before a request may resolve Tribe affect context.
+        # Passing it here prevents the legacy HostEmotionRuntime fallback from
+        # entering any production Tribe chat path.
+        life_command_service_provider=(
+            lambda: life_command_authority_provider(ledger_provider())[0]
+        ),
+        relationship_lifecycle_service_provider=(
+            lambda: life_delivery_relationship_lifecycle_service_provider()
+        ),
     )
     tribe_runtime_agent_ports = build_production_tribe_runtime_agent_ports(
         tribe_runtime=tribe_runtime,
@@ -329,6 +339,79 @@ def create_app(
             snapshot_reader=snapshot_reader,
         )
 
+    def companion_permission_ingress_provider() -> Any | None:
+        """Bind user contact consent to this Host lifespan's ingress store.
+
+        The lifecycle provider is deliberately resolved only when the route is
+        called, after the app-local canonical Life authority has been
+        composed.  No module-global service locator participates.
+        """
+
+        current = command_ingress_container
+        if current is None:
+            return None
+        from host_brain.digital_life.companion_permission_ingress import (  # noqa: PLC0415
+            CompanionPermissionIngress,
+        )
+
+        return CompanionPermissionIngress(
+            evaluator=current.evaluator,
+            complete_claim=current.store.complete_claim,
+            relationship_lifecycle_service_provider=(
+                lambda: life_delivery_relationship_lifecycle_service_provider()
+            ),
+            clock_ms=now_ms,
+        )
+
+    def companion_profile_ingress_provider() -> Any | None:
+        """Bind a scoped low-risk preference trial to this Host lifespan."""
+
+        current = command_ingress_container
+        if current is None:
+            return None
+        from host_brain.digital_life.companion_profile_ingress import (  # noqa: PLC0415
+            CompanionProfileIngress,
+        )
+        from host_brain.digital_life.companion_profile_lifecycle import (  # noqa: PLC0415
+            CompanionProfileLifecycleService,
+        )
+
+        return CompanionProfileIngress(
+            evaluator=current.evaluator,
+            complete_claim=current.store.complete_claim,
+            companion_profile_lifecycle_service_provider=(
+                lambda: CompanionProfileLifecycleService(
+                    command_service_provider=(
+                        lambda: life_command_authority_provider(ledger_provider())[0]
+                    ),
+                    snapshot_reader_provider=(
+                        lambda: life_command_authority_provider(ledger_provider())[1]
+                    ),
+                    clock_ms=now_ms,
+                )
+            ),
+            clock_ms=now_ms,
+        )
+
+    def companion_feedback_ingress_provider() -> Any | None:
+        """Bind receipt-scoped user feedback to this Host lifespan."""
+
+        current = command_ingress_container
+        if current is None:
+            return None
+        from host_brain.digital_life.companion_feedback_ingress import (  # noqa: PLC0415
+            CompanionFeedbackIngress,
+        )
+
+        return CompanionFeedbackIngress(
+            evaluator=current.evaluator,
+            complete_claim=current.store.complete_claim,
+            relationship_lifecycle_service_provider=(
+                lambda: life_delivery_relationship_lifecycle_service_provider()
+            ),
+            clock_ms=now_ms,
+        )
+
     route_ports = HostRoutePorts(
         ledger_provider=ledger_provider,
         life_command_authority_provider=life_route_authority_provider,
@@ -347,6 +430,11 @@ def create_app(
         ),
         embodiment_runtime_provider=embodiment_runtime_provider,
         security_immune_agent_provider=application_ports.security_immune_agent,
+        companion_permission_ingress_provider=(
+            companion_permission_ingress_provider
+        ),
+        companion_profile_ingress_provider=companion_profile_ingress_provider,
+        companion_feedback_ingress_provider=companion_feedback_ingress_provider,
     )
     host_obs_route_ports = ObsRoutePorts(
         query_projection_store_provider=lambda: host_query_projection_store,
@@ -385,6 +473,39 @@ def create_app(
         if life_command_authority is None:
             life_command_authority = _compose_life_command_authority(ledger)
         return life_command_authority
+
+    def life_delivery_relationship_lifecycle_service_provider() -> Any:
+        """Create the app-local relation reconciler over canonical Life ports."""
+
+        from host_brain.digital_life.companion_profile_lifecycle import (  # noqa: PLC0415
+            CompanionProfileLifecycleService,
+        )
+        from host_brain.digital_life.relationship_lifecycle import (  # noqa: PLC0415
+            RelationshipLifecycleService,
+        )
+
+        companion_profile_lifecycle = CompanionProfileLifecycleService(
+            command_service_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[0]
+            ),
+            snapshot_reader_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[1]
+            ),
+            clock_ms=now_ms,
+        )
+
+        return RelationshipLifecycleService(
+            command_service_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[0]
+            ),
+            snapshot_reader_provider=(
+                lambda: life_command_authority_provider(ledger_provider())[1]
+            ),
+            companion_profile_lifecycle_service_provider=(
+                lambda: companion_profile_lifecycle
+            ),
+            clock_ms=now_ms,
+        )
 
     async def handle_chat_with_runtime(
         request_body: ChatRequest,
@@ -827,6 +948,17 @@ def create_app(
                     embodiment_runtime=embodiment_runtime,
                     action_preview_service=action_preview_service,
                     agent_runtime_ports=agent_runtime_ports,
+                    relationship_lifecycle_service_provider=(
+                        life_delivery_relationship_lifecycle_service_provider
+                    ),
+                )
+                # A completed Gateway receipt may have survived a process
+                # crash before its relationship episode was journaled.  This
+                # scan reads only canonical outbox/receipt facts and never
+                # replays transport, so run it before routes become available.
+                await asyncio.to_thread(
+                    life_dispatchers[1].reconcile_completed_relationship_deliveries,
+                    limit=100,
                 )
                 application.state.embodiment_runtime = embodiment_runtime
                 canon = build_process_canon_container(
@@ -1226,6 +1358,9 @@ def create_app(
                         "security_immune_periodic": "security_immune",
                         "agent_immune_auto_dispatch_tick": "agent_immune",
                     },
+                    retired_task_ids=(
+                        _scheduler_result_wiring.RETIRED_LEGACY_SCHEDULER_TASK_IDS
+                    ),
                     clock_enabled=scheduler_clock_enabled,
                     clock_identity=scheduler_clock_identity,
                     clock_poll_interval_seconds=(

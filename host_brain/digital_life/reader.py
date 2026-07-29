@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from natsume_contracts.life import (
     LifeCommandReceipt,
+    LifeDeliveryReceipt,
     LifeEvent,
+    LifeOutboxMessage,
     LifeProjectionIntent,
     LifeProjectionReceipt,
     LifeSnapshot,
@@ -60,6 +62,23 @@ class LifeSnapshotReader:
         """Read the DL-03 relationship projection without becoming a writer."""
 
         return self.repository.list_relationship_event_heads(
+            person_id,
+            after_created_at_ms=after_created_at_ms,
+            after_event_id=after_event_id,
+            limit=limit,
+        )
+
+    def list_companion_profile_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        """Read the DL-06 profile lifecycle projection without text or media."""
+
+        return self.repository.list_companion_profile_event_heads(
             person_id,
             after_created_at_ms=after_created_at_ms,
             after_event_id=after_event_id,
@@ -122,8 +141,39 @@ class LifeSnapshotReader:
             session_id=session_id,
         )
 
+    def list_companion_proactive_targets(
+        self,
+        *,
+        limit: int = 1_000,
+    ) -> list[dict[str, object]]:
+        """List currently eligible, scope-valid canonical companion targets.
+
+        The registry is reconstructed from durable Life projections rather
+        than an in-process queue.  This read has no authority to create,
+        alter or infer a target or relationship permission.
+        """
+
+        return self.repository.list_companion_proactive_targets(limit=limit)
+
     def get_receipt(self, command_id: str) -> LifeCommandReceipt | None:
         return self.repository.get_receipt(command_id)
+
+    def get_delivery_receipt(
+        self,
+        outbox_id: str,
+    ) -> LifeDeliveryReceipt | None:
+        return self.repository.get_delivery_receipt(outbox_id)
+
+    def list_completed_companion_proactive_messages(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[LifeOutboxMessage]:
+        """Read only receipt-backed companion messages missing a relation event."""
+
+        return self.repository.list_completed_companion_proactive_messages(
+            limit=limit
+        )
 
     def list_projection_intents(
         self,

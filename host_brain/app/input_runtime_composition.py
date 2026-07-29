@@ -10,7 +10,6 @@ from host_brain.app.chat_handler import _evaluate_governor_with_timing
 from host_brain.app.cortex_orchestrator import cortex_orchestrator_sse_generator
 from host_brain.app.durable_task_status import build_durable_task_status_projection
 from host_brain.app.emotion_context import (
-    HostEmotionRuntime,
     build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
@@ -29,6 +28,9 @@ from host_brain.app.surface_reply_preprocessor import (
 from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
 from host_brain.app.tribe_composition import TribeRuntimeAgentPorts
 from host_brain.digital_life.affect_fusion import AffectFusionService
+from host_brain.digital_life.companion_profile_lifecycle import (
+    CompanionProfileLifecycleService,
+)
 from host_brain.digital_life.relationship_lifecycle import RelationshipLifecycleService
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.outbound_delivery import trigger_reply_performance
@@ -60,11 +62,23 @@ def build_input_runtime_application_ports(
         host_services,
         "evolution_scope",
     )
-    get_emotion_context_runtime = _emotion_runtime_provider(host_services)
+    companion_profile_lifecycle_service = (
+        CompanionProfileLifecycleService(
+            command_service_provider=life_command_service_provider,
+            snapshot_reader_provider=get_life_snapshot_reader,
+        )
+        if callable(life_command_service_provider)
+        else None
+    )
     relationship_lifecycle_service = (
         RelationshipLifecycleService(
             command_service_provider=life_command_service_provider,
             snapshot_reader_provider=get_life_snapshot_reader,
+            companion_profile_lifecycle_service_provider=(
+                (lambda: companion_profile_lifecycle_service)
+                if companion_profile_lifecycle_service is not None
+                else None
+            ),
         )
         if callable(life_command_service_provider)
         else None
@@ -82,6 +96,10 @@ def build_input_runtime_application_ports(
         if callable(life_command_service_provider)
         else None
     )
+    # A Host request may only resolve affect through the canonical Life
+    # authority.  Do not construct HostEmotionRuntime as a composition
+    # fallback: even an app-local fallback would restore a second mutable
+    # self-affect writer when a caller accidentally omitted Life wiring.
     reply_form_decider = ResponseFormDecider()
     get_thalamus_agent = _tribe_agent_provider(
         tribe_runtime_agent_ports,
@@ -125,11 +143,12 @@ def build_input_runtime_application_ports(
             yield event
 
     def resolve_chat_emotion_context_with_runtime(**kwargs: Any) -> dict[str, Any]:
-        return resolve_chat_emotion_context(
-            runtime=get_emotion_context_runtime(),
-            affect_fusion_service=affect_fusion_service,
-            **kwargs,
-        )
+        if affect_fusion_service is not None:
+            return resolve_chat_emotion_context(
+                affect_fusion_service=affect_fusion_service,
+                **kwargs,
+            )
+        raise RuntimeError("CANONICAL_AFFECT_FUSION_NOT_INJECTED")
 
     return InputRuntimeApplicationPorts(
         get_intent_engine=get_intent_engine,
@@ -183,23 +202,6 @@ def _optional_host_provider(
         return None
     provider = getattr(host_services, field_name, None)
     return provider if callable(provider) else None
-
-
-def _emotion_runtime_provider(
-    host_services: HostLifecycleApplicationPorts | None,
-) -> Callable[[], HostEmotionRuntime]:
-    if host_services is not None:
-        provider = host_services.require_provider("emotion_context_runtime")
-
-        def require_host_runtime() -> HostEmotionRuntime:
-            runtime = provider()
-            if not isinstance(runtime, HostEmotionRuntime):
-                raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
-            return runtime
-
-        return require_host_runtime
-    local_runtime = HostEmotionRuntime()
-    return lambda: local_runtime
 
 
 def _missing_app_local_provider(*_args: Any, **_kwargs: Any) -> Any:

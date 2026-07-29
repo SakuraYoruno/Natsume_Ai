@@ -99,6 +99,7 @@ async def _cortex_orchestrator_sse_generator_impl(
         platform=getattr(request_body, "reply_channel", None),
         conversation_id=getattr(request_body, "reply_target", None),
     )
+    workspace_id = str(getattr(request_body, "workspace_id", "") or "").strip()
     canonical_route = str((intent_draft or {}).get("route") or "").strip().lower()
     canonical_governed_route = canonical_route in {"chat", "skill", "delegate", "plan"}
     canonical_read_route = canonical_route in {"task_progress", "recent_turn"}
@@ -328,6 +329,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                     request_id=request_id,
                     session_id=session_id,
                     person_id=person_id,
+                    workspace_id=workspace_id,
                     user_message=sanitized_message,
                     emotion_context=emotion_context,
                     mood_state=retrieval_mood_state,
@@ -340,6 +342,7 @@ async def _cortex_orchestrator_sse_generator_impl(
                 request_id=request_id,
                 session_id=session_id,
                 person_id=person_id,
+                workspace_id=workspace_id,
                 user_message=sanitized_message,
                 emotion_context=emotion_context,
                 mood_state=retrieval_mood_state,

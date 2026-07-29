@@ -28,6 +28,8 @@ from host_brain.composition.host_application import (
 from host_brain.app.application_port_wiring import (
     build_process_application_ports,
 )
+from host_brain.bond.bond_dynamics import RetiredBondDynamicsWriter
+from host_brain.bond.async_queue import RetiredBondUpdateQueue
 from host_brain.app.emotion_context import HostEmotionRuntime
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
@@ -315,21 +317,34 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     assert ports.token_service() is token_service
     bond_writer = ports.bond_dynamics_writer()
     assert ports.bond_dynamics_writer() is bond_writer
-    assert bond_writer.ledger is ledger
-    assert bond_writer._stage_engine is ports.lifecycle.bond_stage_engine()
-    assert bond_writer.neo4j_client is bond_client
+    assert isinstance(bond_writer, RetiredBondDynamicsWriter)
+    retired_result = bond_writer.apply_update(request_id="legacy-bond-write")
+    assert retired_result.success is False
+    assert retired_result.reason_code == "LEGACY_BOND_WRITE_RETIRED"
+    assert isinstance(ports.lifecycle.bond_update_queue(), RetiredBondUpdateQueue)
+    assert ports.lifecycle.bond_update_queue().enqueue({"request_id": "legacy-bond-queue"})[
+        "status"
+    ] == "RETIRED_CANONICAL_LIFE"
     assert ports.lifecycle.probe_edge_rpc_health is edge_probe
     assert (
         ports.lifecycle.build_edge_dependency_probe_statuses
         is edge_status_builder
     )
-    emotion_runtime = ports.lifecycle.emotion_context_runtime()
-    assert isinstance(emotion_runtime, HostEmotionRuntime)
-    assert ports.lifecycle.emotion_context_runtime() is emotion_runtime
-    assert (
-        ports.lifecycle.user_emotion_profile()
-        is emotion_runtime.user_emotion_profile()
+    # Production Host no longer constructs the mutable compatibility runtime.
+    # Canonical request paths receive affect through the Digital Life journal;
+    # a process-wide user profile would also violate scope isolation.
+    assert ports.lifecycle.emotion_context_runtime is None
+    assert ports.lifecycle.user_emotion_profile is None
+    timeline_projection = ports.lifecycle.emotion_timeline()
+    assert getattr(timeline_projection, "status", "") == "RETIRED_CANONICAL_LIFE"
+    assert timeline_projection.rebuild_summary()["reason_code"] == (
+        "LEGACY_EMOTION_TIMELINE_RETIRED"
     )
+    with pytest.raises(
+        HostLifecycleScopeError,
+        match="HOST_SERVICE_PROVIDER_NOT_INJECTED:emotion_context_runtime",
+    ):
+        ports.lifecycle.require_provider("emotion_context_runtime")
     with pytest.raises(RuntimeError, match="LIFE_MEMORY_SERVICE_NOT_COMPOSED"):
         ports.lifecycle.life_memory_service()
     memory_service = object()
@@ -665,6 +680,7 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
     assert lifecycle.get_ledger is provider
     assert lifecycle.get_life_memory_store is provider
     assert lifecycle.get_model_attempt_service is host_services.model_attempt_service
+    assert lifecycle.get_life_snapshot_reader is provider
     assert lifecycle.emotion_timeline.rebuild_summary(window_ms=1) == {}
     assert lifecycle.emotion_timeline.build_daily_diary(window_ms=1) == {}
     assert (

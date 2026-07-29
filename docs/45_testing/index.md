@@ -3,9 +3,161 @@
 
 # 测试与验收目录
 
-版本：v2.52
+版本：v2.53
 维护日期：2026-07-28
 状态：当前证据
+
+## DL-06 主动陪伴、可逆偏好与关系后效应切片
+
+- `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
+  `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
+  `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS
+  禁用旧 `proactive_talk_periodic` head；已接纳 occurrence 重开 exact Scene 后只能返回
+  `LEGACY_PROACTIVE_TALK_RETIRED`，不读 Bond/EmotionTimeline/Limbic/模板且不产生 delivery intent。
+  该定向集合为 `28 passed in 3.00s`；它是本地退役合同，不是真实 Gateway、Edge、用户送达或 DL-06 完成证据。
+- `test_dl06_runtime_snapshot_canonical_cutover.py` 连同 lifecycle composition、legacy timeline、SocialBrain
+  fallback、HardState 与 typed-port contract 邻接用例验证：composed runtime snapshot 从一条 canonical Life
+  snapshot 分离七海 self-affect 与用户 affect observation，旧 SocialBrain/Bond、Limbic、Prefrontal 与 timeline
+  reader 不会被调用；canonical reader 故障只 degraded，不会隐式 fallback。最终相关集合为
+  `67 passed in 10.65s`；OBS route integration 另有 `3 passed, 27 deselected in 19.51s`。二者均无 Docker、
+  真实 Host/Obs 进程、Gateway、真实 provider 或远端 Edge。
+- `test_dl06_progress_reply_legacy_authority_retirement.py`、既有 durable progress、Input route worker/dispatch
+  与 runtime-boundary 合同验证：已退役 progress helper 对伪造 `SOULMATE`/用户 `SAD` 仍只传入
+  `FRIEND / CALM`，不再导入或读取 SocialBrain；旧重复 ACK 模块已删除。集合为
+  `14 passed, 79 deselected in 1.92s`，只是本地回滚窗口边界，不是 Gateway 或完整对话实测。
+- `test_dl06_companion_proactive.py` 验证 Scheduler 的主动决定只读取 canonical
+  `relationship_v2`、`state.affective`、clock 与 admitted timezone：explicit
+  `ALLOWED` 才能发送；`UNKNOWN/DENIED`、repair、未结 episode 与 `GIVE_SPACE`
+  regulation 均只会 hold。测试故意提供极端 legacy `state.affect`，证明该字段
+  不再拥有主动消息发送权。
+- `test_aw04_life_tick_policy.py` 验证同一 frozen snapshot 的 deterministic outbox、
+  content-digest trace、scene/grant fail-closed 和 explicit permission。旧早/晚/默认
+  三句模板不再是当前 Scheduler 输出合同。
+- `test_dl02_affect_fusion.py` 验证 production fusion composition 不会解析
+  `HostEmotionRuntime` provider；Input/Tribe composition 在缺少 Life authority 时固定
+  `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不会构造任何 compatibility runtime。
+- `test_ne01_host_lifecycle_composition.py` 与 `test_dl02_affect_fusion.py` 现额外验证
+  production Host root 不再构造或发布 mutable `HostEmotionRuntime` / global user profile，
+  ASGI Tribe 具备 Life authority 时会和 Input 一样走 canonical fusion，且不会解析旧 runtime。
+  本切片的最终 composition/输入路由受影响集合为 `148 passed in 39.51s`（其中直接 composition
+  子集为 57 项）；
+  这不是 Limbic、Endocrine、BodySense、Motive、Bond queue 清零或真实服务栈证据。
+- `test_limbic_agent.py` 现验证 production canonical Life authority 会让 Limbic 的 legacy
+  persistence、metabolism、timeline append、decay 以及 Bond progress/regress callback 返回
+  `RETIRED_CANONICAL_LIFE`，且不会实例化 `EmotionPersistence` 或追加旧 timeline；未知 authority
+  值失败关闭，Tribe canonical fusion wiring 也被直接断言。相关 Limbic、fusion 与 Host composition
+  集合为 `77 passed in 31.20s`，与前项集合有重叠，不能相加；它不证明 BodySense、Endocrine、Motive、
+  Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_endocrine_agent.py` 现验证 canonical Life mode 不会消费 legacy cortisol/oxytocin buffer、
+  更新 `_last_state`、产生 hormonal hint 或触发旧 endocrine fan-out；stress、Bond、loneliness、task、
+  immune 与 generic delta 输入均显式退役。Circadian/MirrorNeuron 的邻接测试还验证它们改为调用受控
+  compatibility port，而非写 Endocrine 私有字段。该受影响集合为 `72 passed in 2.11s`；它不证明
+  BodySense、Motive、Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_limbic_agent.py` 现额外验证 canonical mode 下的 BodySense 只能从 exact
+  relationship subject 的 Life snapshot 纯投影，不会解析 global `BodySenseModel`、写 Tribe state、
+  调整 silence penalty 或把 legacy BODY_SENSE_UPDATED 再推进 self-affect；缺 subject 明确
+  `UNAVAILABLE`。`test_body_sense_skill_tribe_events.py` 验证 retired tick 不会发布伪 update。
+  本次最终单一受影响集合为 `187 passed in 28.59s`；它是本地代码证据，
+  不证明 Motive、Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_dl00_motive_willingness.py` 现额外验证 `get_motive_engine()` 每次返回不同的
+  无状态规则对象，同一冻结输入仍得到相同动机投影；配合 Motive/Limbic 定向集合为
+  `37 passed in 1.55s`。这只证明模块级缓存已退役，不证明 volatile Bond queue、关系后效应、
+  真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_ne01_host_bond_runtime.py`、`test_ne01_host_lifecycle_composition.py`、
+  `test_ne01_agent_runtime_composition.py`、`test_cortex_agent.py`、`test_bond_async_queue.py`、
+  `test_surface_emotion_bond_flow.py` 与 `test_bond_routes_api.py` 现验证 production Host 不再
+  构造真实 Bond writer/worker queue，canonical Cortex 不解析 queue，Surface hook 不回退写分数，
+  legacy `/bond/event` 返回 `410`。该定向集合为 `84 passed in 12.82s`；这是本地退役边界证据，
+  不证明其它 compatibility reader、真实模型、远端 Edge/provider 或 DL-07 服务栈完成。
+- `test_dl06_legacy_emotion_timeline_cutover.py`、`test_ne01_host_memory_runtime.py`、
+  `test_ne01_host_lifecycle_composition.py`、`test_limbic_agent.py` 与 `test_prefrontal_agent.py`
+  验证 production Host 不会打开旧 action log 预热 `EmotionTimeline`，而是返回显式 retired 空投影；
+  canonical Limbic/Prefrontal 不会 resolve/cache 该投影，Runtime snapshot 也不会把 user profile 的
+  top emotion 或 volatility 升格为七海 self-affect。最终受影响集合为 `169 passed in 12.85s`；它不证明
+  其它兼容读取、Monitor、真实 provider/Edge 或 DL-07 服务栈。
+- `test_dl06_default_mode_canonical_inner_activity.py`、
+  `test_inner_activity_agent_limbic_integration.py`、
+  `test_inner_activity_agent_social_brain_integration.py` 与
+  `test_aw08_life_memory_legacy_retirement.py` 共同验证：默认模式从同一 canonical Life snapshot 获取有限
+  self-affect/relationship projection 后，私密活动不再触碰 legacy EmotionTimeline/SocialBrain/Bond；projection
+  不泄露 trigger/evidence、workspace/subject 或 intimacy consent，且 trust/attunement 不会被压成 Bond score。
+  `test_tribe_deepening_batch47.py` 同时确认高连续性 tick 不会再调用 legacy Limbic metabolism。连同
+  `test_default_mode_agent.py`、相邻 DL-06、Limbic/Motive 与 inner-activity 文件的最终单一集合为
+  `92 passed in 44.20s`（4 条既有弃用警告）；这是本地 reader-cutover 证据，不证明其他 compatibility reader、
+  Monitor/Review、真实 provider/Edge 或 DL-07 服务栈。
+- 上述 Host/Limbic/Endocrine、fusion 与旧 organ 邻接文件的最终合并定向回归为
+  `149 passed in 33.81s`。它是覆盖重叠后的单一集合，不能与前述批次相加，也不构成波次集成或真实服务栈验收。
+- `test_dl06_companion_target_registry.py` 使用真实 SQLite Life journal 验证 accepted
+  reply 与 `CompanionProactiveTargetV1` 同一 relation command 写入；只有显式 `ALLOWED`
+  且 provisional episode 被后效应关闭后，read-only registry 才返回 scope-valid target。
+  同一文件还验证 Scheduler 只从与 frozen Scene 相符的 registry target 中稳定选择一个。
+- `test_dl06_proactive_delivery_reconciliation.py` 使用真实 SQLite Life journal 验证：只有
+  immutable `LifeDeliveryReceipt` 与原 outbox 的 id、key、payload/authorization digest 和
+  scope-bound target 全部一致时，才会打开一个 `PROACTIVE_MESSAGE` episode；下一次真实用户输入
+  才关闭该 episode 并写 aftereffect。它还注入 receipt 已落库但关系对账回调崩溃的窗口，验证
+  恢复扫描只重开 deterministic relationship command、不会第二次调用 transport；篡改私有 target
+  context 会失败关闭。
+- `test_dl06_companion_permission_ingress.py` 使用真实 SQLite migration、Secure Ingress
+  principal/credential store、Host route 和 canonical Life journal 验证：只有具有
+  `companion:contact:write` 的 `user` principal，且 principal/tenant 精确绑定
+  `relationship_subject_id/workspace_id` 时，strict JSON `ALLOWED/DENIED` 才能写入关系状态。
+  同一签名请求经过 HTTP duplicate 与进程重启后只重开同一 Life command；跨用户 scope、
+  service principal、重复 JSON key 与 `UNKNOWN` 均失败关闭，且不产生关系事件。
+- 本次新增定向集合为 delivery reconciliation/policy/registry/relationship/outbox `28 passed in
+  26.13s`，邻接 recovery、Surface/Acceptance、scheduler、fusion 回归 `91 passed in 49.91s`。
+  两组有重叠，不能相加；历史大合同文件在 60 秒窗口未完成，仍未记为通过。
+- 本次 permission ingress 切片额外运行 `test_dl06_companion_permission_ingress.py`、DL-06
+  relationship/proactive 回归及 Secure Ingress service 回归，合计 `47 passed in 27.69s`；这是本地
+  定向代码证据，不包含真实 Gateway、Monitor、provider、Edge 或 DL-07 服务栈。
+- 本次 `test_dl06_companion_profile_lifecycle.py` 在真实 SQLite migration `0147` 上覆盖：五条独立、
+  跨三天、强且守住边界的 canonical aftereffect 才能启动 candidate；第五次合格后续 canary interaction 会
+  自动 activate；冻结 profile 确实影响下一轮 text anchor、TTS rate 和 Avatar motion，rollback 精确恢复
+  baseline；journal replay/restart digest 一致且 projection 禁止直接改写。该文件 `3 passed in 11.76s`；
+  与 relationship/proactive 邻接集合合计 `11 passed in 17.99s`，两组不得相加。
+- 证据 fixture 明确替换了 relation classifier 才产生 `0.91` 的强后效应；生产保守文本 classifier 的
+  `0.72` 仍被拒绝，不能把该 fixture 当作自动偏好学习已经上线。receipt 只表示 Host/Gateway transport
+  accepted 或 Host expression staged，不证明第三方平台送达、用户阅读或真实 Gateway/Edge 运行；直接偏好
+  反馈与 Monitor 审核控件、旧 writer 清零、真实模型和 DL-07 服务栈仍未运行，不能由这些定向测试推导为
+  主动陪伴完成。
+- `test_dl06_companion_profile_ingress.py` 以真实 SQLite migration `0148`、Secure Ingress
+  principal/credential/claim store 与 Host route 覆盖 signed profile control：只有
+  `companion:profile:write`、exact `user`/relationship subject、tenant/workspace 绑定和已有五条
+  canonical strong aftereffect 时才能创建 CANARY；duplicate 与重启只重开同一 Life receipt，service
+  principal、跨 scope body、弱历史、重复 key 和 Soul patch 全部失败关闭。该文件 `4 passed in 13.87s`。
+  随后 profile lifecycle、permission、proactive、relationship 的受影响集合 `20 passed in 46.58s`，
+  Secure Ingress 邻接回归 `7 passed in 4.40s`；集合分开报告，未运行真实 Gateway、模型、Monitor、Edge
+  或 DL-07 服务栈。
+- `test_dl06_companion_feedback_ingress.py` 以真实 SQLite、Host route 和 Secure Ingress 验证：一条
+  signed `HELPFUL` 必须同时绑定 `companion:feedback:write`、exact user/subject、tenant/workspace 与
+  仍 active 的 response receipt，才可写入 `0.95` canonical aftereffect；它推进既有 profile CANARY，
+  第五条合格 canary interaction 会由 canonical lifecycle 自动 activation。HTTP duplicate、进程重启和
+  claim-result 恢复不会重复写 aftereffect、canary interaction 或 activation；service principal、跨 scope
+  body、失活 receipt 和额外 `rating` 字段全部失败关闭。当前 feedback/profile lifecycle 的直接集合为
+  `5 passed in 22.54s`；与 profile/permission/proactive/relationship/Secure Ingress 邻接集合为
+  `29 passed in 60.87s`。这仍不是真实用户盲评、Monitor UI、Gateway、provider、Edge 或 DL-07 证据。
+- `test_dl06_companion_profile_ingress.py` 现额外覆盖 signed exact rollback：真实 SQLite 的 active
+  CANARY→第五条后效应自动 activation 之后，只有 `companion:profile:rollback`、精确 user/subject 与
+  tenant/workspace 绑定的 current active identity 才能经过 Host route 恢复 predecessor。HTTP duplicate、
+  进程重建与同一 audit ref 只重开一个 `companion_profile_rolled_back` event；stale identity、service
+  principal、cross-scope body 与 caller-supplied target 字段都失败关闭。此为本地合同/路由证据，仍不代表
+  Monitor 操作界面、长期用户体验、旧 writer cutover、真实 Gateway/Edge/provider 或 DL-07。本次完整
+  受影响集合为 `35 passed in 79.78s`；其中没有 Docker、远端 Edge 或外部模型调用。
+- `test_dl06_canonical_relationship_prompt_projection.py` 新增普通 Chat 关系 projection 回归：一个内部
+  `RelationshipStateV2` 必须同时匹配 `natsume_ai`、workspace、relationship subject、session 与三层
+  schema；即使 legacy Bond 声称 `SOULMATE`，Prompt Context、Interaction Facts 与 Surface packet 仍只输出
+  `FRIEND / stepsibling / familiar`，不会从 trust、attunement、consent 或旧分数升级恋人、排他、依赖或主动许可。
+  repair/rupture 保持为显式修复状态；subject/workspace/session drift 或损坏 canonical hand-off 必须以
+  `CANONICAL_RELATIONSHIP_REJECTED` fail-closed，绝不回退旧 Bond。最终普通 Chat、canonical fusion、
+  AffectiveTurn、表达协议、Surface/adapter 与受影响历史回归集合为 `179 passed in 63.85s`，8 条既有
+  Python deprecation warnings；未运行 Docker、真实 provider、远端 Edge、Monitor 或 DL-07。
+- `test_surface_affect_control.py` 补充 final presentation Gate：canonical relationship authority 到达 Surface 后，
+  即使兼容输入携带 `SOULMATE`、`relationship_distance=lover`、`closeness=0.99`、恋人 clue 或 lover task，也只能
+  输出 `familiar`；rejected canonical 则保持 `guarded`。与普通 Chat projection、Surface packet/runtime 回归合计
+  `82 passed in 21.18s`；未启动 Docker、真实 provider、远端 Edge 或物理 Voice/Avatar。
+- `test_dl06_retrieval_canonical_relationship_cutover.py` 覆盖 Cortex 检索预取：valid internal Life context 只能
+  生成无 score 的 `FRIEND / stepsibling / familiar` 摘要；workspace drift 生成 guarded rejected 摘要；两者均不调用
+  legacy state-arbiter Bond fetch，Motive 也只能收到该 bounded projection。Cortex workspace 传递、governed route、
+  Surface 关系 Gate 一并为 `34 passed in 5.64s`。
 
 ## NE-07 隔离外部服务栈
 

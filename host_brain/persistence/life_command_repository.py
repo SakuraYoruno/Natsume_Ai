@@ -752,6 +752,131 @@ class LifeCommandRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def list_companion_profile_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Read the immutable DL-06 profile lifecycle projection."""
+
+        cursor_ms = max(0, int(after_created_at_ms))
+        cursor_event_id = str(after_event_id or "")
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT event_id, person_id, self_id, workspace_id,
+                       relationship_subject_id, profile_kind, profile_id,
+                       profile_digest, source_control_ref, active_profile_id, rollback_profile_id,
+                       profile_revision, canary_accepted_count, event_digest,
+                       payload_digest, created_at_ms
+                FROM companion_profile_life_event_v1
+                WHERE person_id = ?
+                  AND (
+                      created_at_ms > ?
+                      OR (created_at_ms = ? AND event_id > ?)
+                  )
+                ORDER BY created_at_ms ASC, event_id ASC
+                LIMIT ?
+                """,
+                (
+                    _required_text(person_id, "person_id"),
+                    cursor_ms,
+                    cursor_ms,
+                    cursor_event_id,
+                    max(1, min(int(limit), 1_000)),
+                ),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def list_companion_proactive_targets(
+        self,
+        *,
+        limit: int = 1_000,
+    ) -> list[dict[str, Any]]:
+        """Read the canonical target registry from durable Life projections.
+
+        Target registration is part of the immutable accepted-response event;
+        this is intentionally a read-only registry view instead of a second
+        mutable scheduler queue.  Invalid or stale compatibility projections
+        are skipped fail-closed and cannot become outbound candidates.
+        """
+
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT person_id, version, state_json, updated_at_ms
+                FROM digital_life_state
+                ORDER BY person_id ASC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 10_000)),),
+            ).fetchall()
+        targets: list[dict[str, Any]] = []
+        for row in rows:
+            state = _json_object(
+                row["state_json"],
+                "digital_life_state.state_json",
+            )
+            relationship_raw = state.get("relationship_v2")
+            target_raw = state.get("companion_proactive_target")
+            affective_raw = state.get("affective")
+            if not all(
+                isinstance(value, Mapping)
+                for value in (relationship_raw, target_raw, affective_raw)
+            ):
+                continue
+            relationship = dict(relationship_raw)
+            target = dict(target_raw)
+            affective = dict(affective_raw)
+            workspace_id = str(relationship.get("workspace_id") or "").strip()
+            subject_id = str(
+                relationship.get("relationship_subject_id") or ""
+            ).strip()
+            if (
+                not workspace_id
+                or not subject_id
+                or str(target.get("workspace_id") or "").strip() != workspace_id
+                or str(target.get("relationship_subject_id") or "").strip()
+                != subject_id
+                or str(relationship.get("proactive_permission") or "").upper()
+                != "ALLOWED"
+                or bool(relationship.get("repair_required"))
+                or bool(list(relationship.get("active_episodes") or []))
+            ):
+                continue
+            target_id = str(target.get("target_id") or "").strip()
+            platform = str(target.get("platform") or "").strip().lower()
+            conversation_id = str(target.get("conversation_id") or "").strip()
+            session_id = str(target.get("session_id") or "").strip()
+            if not target_id or not platform or not conversation_id or not session_id:
+                continue
+            targets.append(
+                {
+                    "aggregate_id": str(row["person_id"]),
+                    "state_version": int(row["version"]),
+                    "updated_at_ms": int(row["updated_at_ms"]),
+                    "target_id": target_id,
+                    "workspace_id": workspace_id,
+                    "relationship_subject_id": subject_id,
+                    "session_id": session_id,
+                    "platform": platform,
+                    "conversation_id": conversation_id,
+                    "registered_at_ms": max(
+                        0, int(target.get("registered_at_ms") or 0)
+                    ),
+                    "relationship_revision": max(
+                        0, int(relationship.get("revision") or 0)
+                    ),
+                    "self_affect_revision": max(
+                        0, int(affective.get("revision") or 0)
+                    ),
+                }
+            )
+        return targets
+
     def list_affective_turn_delivery_event_heads(
         self,
         person_id: str,
@@ -1503,6 +1628,47 @@ class LifeCommandRepository:
                 "SELECT * FROM life_delivery_receipt ORDER BY outbox_id ASC"
             ).fetchall()
             return [_delivery_receipt_from_row(row) for row in rows]
+
+    def list_completed_companion_proactive_messages(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[LifeOutboxMessage]:
+        """Read receipt-backed companion rows still missing their relation event.
+
+        This is a recovery-only projection of the canonical outbox.  It does
+        not claim, alter or resend messages.  A completed relation event is
+        excluded at query time so recurring ticks do not replay historical
+        messages; the relationship service still validates context and receipt
+        identity before writing a missing episode.
+        """
+
+        with self._operation(write=False) as conn:
+            rows = conn.execute(
+                """
+                SELECT outbox.*
+                FROM life_delivery_outbox AS outbox
+                INNER JOIN life_delivery_receipt AS receipt
+                    ON receipt.outbox_id = outbox.outbox_id
+                WHERE outbox.status = 'DELIVERED'
+                  AND outbox.destination = 'proactive.gateway'
+                  AND outbox.payload_json LIKE '%"_companion_relationship_context"%'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM life_event_journal AS relation_event
+                      WHERE relation_event.event_type =
+                            'relationship_proactive_delivered'
+                        AND json_extract(
+                            relation_event.event_payload_json,
+                            '$.command_payload.episode.response_receipt_ref'
+                        ) = ('life-delivery://' || outbox.outbox_id)
+                  )
+                ORDER BY receipt.completed_at_ms ASC, outbox.outbox_id ASC
+                LIMIT ?
+                """,
+                (max(1, min(int(limit), 10_000)),),
+            ).fetchall()
+        return [_outbox_from_row(row) for row in rows]
 
     def list_outbox(self, *, command_id: str | None = None) -> list[dict[str, Any]]:
         with self._operation(write=False) as conn:

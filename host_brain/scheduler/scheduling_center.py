@@ -435,7 +435,7 @@ def build_life_tick_task_config() -> SchedulerTaskConfig:
         trigger_config={"seconds": interval_seconds},
         intent_template={
             "skill_name": "life_tick",
-            "args": {"person_id": "default", "timezone": "Asia/Shanghai"},
+            "args": {"timezone": "Asia/Shanghai"},
             "proposer_node_id": "scheduler",
         },
         priority=TaskPriority.LOW,
@@ -443,8 +443,8 @@ def build_life_tick_task_config() -> SchedulerTaskConfig:
         enabled=True,
         max_consecutive_failures=3,
         description=(
-            "Single governed Digital Life tick; the handler emits one LifeCommand "
-            "and owns no Life side effects"
+            "Single governed Digital Life tick; the handler deterministically "
+            "selects one canonical registered target and emits one LifeCommand"
         ),
         resource_profile={
             "resource_class": "light_tick",

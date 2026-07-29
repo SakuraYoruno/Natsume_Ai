@@ -432,14 +432,18 @@ def _marker_weight(marker: str, text: str) -> float:
 def resolve_chat_emotion_context(
     *,
     request_body: Any,
-    runtime: "HostEmotionRuntime",
+    runtime: "HostEmotionRuntime | None" = None,
     affect_fusion_service: Any | None = None,
     request_id: str | None = None,
 ) -> dict[str, Any]:
-    """Resolve and ingest one real Host input through its exact runtime."""
+    """Resolve one Host input through canonical fusion or a legacy fallback.
 
-    if not isinstance(runtime, HostEmotionRuntime):
-        raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
+    A production caller with ``AffectFusionService`` must not even resolve the
+    compatibility ``HostEmotionRuntime``: doing so would keep a second,
+    mutable emotion timeline alive on the canonical chat path.  The runtime is
+    still required for explicitly legacy callers that have no Life authority.
+    """
+
     if affect_fusion_service is not None:
         resolver = getattr(affect_fusion_service, "resolve_request", None)
         if not callable(resolver):
@@ -452,6 +456,8 @@ def resolve_chat_emotion_context(
         if not callable(as_context):
             raise RuntimeError("AFFECT_FUSION_RESULT_INVALID")
         return normalize_chat_emotion_context(as_context())
+    if not isinstance(runtime, HostEmotionRuntime):
+        raise RuntimeError("HOST_EMOTION_RUNTIME_NOT_INJECTED")
     raw: dict[str, Any] = {}
     if isinstance(getattr(request_body, "emotion_context", None), Mapping):
         raw.update(dict(request_body.emotion_context))

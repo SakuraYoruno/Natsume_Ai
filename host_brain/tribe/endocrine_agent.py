@@ -25,6 +25,29 @@ class EndocrineAgent:
     _bond_oxytocin_delta: float = field(default=0.0, init=False, repr=False)
     _bond_lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
 
+    def _legacy_endocrine_writes_retired(self) -> bool:
+        """Whether the Host selected canonical Life over mutable hormone deltas."""
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_endocrine_result(
+        *,
+        operation: str,
+        source: str,
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_ENDOCRINE_MUTATION_RETIRED",
+            "operation": str(operation),
+            "source": str(source or "endocrine_agent"),
+        }
+
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
@@ -41,6 +64,19 @@ class EndocrineAgent:
             emotion_intensity=emotion_intensity,
         )
         payload = dict(state.as_dict())
+
+        if self._legacy_endocrine_writes_retired():
+            # The hard-state projection may still help a local safety/read
+            # path, but it cannot consume a process-local delta buffer, mutate
+            # _last_state or fan out into another affect writer. Canonical
+            # Life owns all causal self-affect transitions.
+            payload.update(
+                self._retired_legacy_endocrine_result(
+                    operation="endocrine_projection",
+                    source="resolve_endocrine_state",
+                )
+            )
+            return payload
 
         # ── T-17：接入 PainRewardAgent 压力信号 ──────────────────────────
         # 将痛觉/奖励系统的净压力变化量叠加到 cortisol_level，
@@ -140,11 +176,12 @@ class EndocrineAgent:
         *,
         source: str,
         intensity: float = 0.20,
-    ) -> None:
-        """T-238：外部族注入压力事件，叠加到 cortisol 缓冲区。
+    ) -> dict[str, Any]:
+        """Record a compatibility stress delta only outside canonical Life.
 
-        由 ProprioceptionAgent（高打断）、LanguageSystemAgent（高情绪压力）等外部族调用，
-        将压力信号写入 _bond_cortisol_delta 缓冲，下次 resolve_endocrine_state() 时消费。
+        Production callers may continue to submit the observation during the
+        rollback window, but it must not turn into a mutable endocrine/self-
+        affect buffer once canonical Life authority is present.
 
         Args:
             source: 压力来源标识（用于日志追踪）
@@ -152,13 +189,49 @@ class EndocrineAgent:
         """
         clamped = max(0.0, min(1.0, float(intensity)))
         cortisol_boost = round(min(0.10, clamped * 0.12), 4)
+        return self.record_legacy_hormonal_delta(
+            source=source,
+            cortisol_delta=cortisol_boost,
+            operation="stress_event",
+        )
+
+    def record_legacy_hormonal_delta(
+        self,
+        *,
+        source: str,
+        cortisol_delta: float = 0.0,
+        oxytocin_delta: float = 0.0,
+        operation: str = "hormonal_delta",
+    ) -> dict[str, Any]:
+        """Compatibility-only bounded endocrine buffer mutation.
+
+        Direct private delta writes are prohibited.  This one narrow method
+        preserves offline/test behavior while making production canonical mode
+        a clear no-write boundary.
+        """
+
+        if self._legacy_endocrine_writes_retired():
+            return self._retired_legacy_endocrine_result(
+                operation=operation,
+                source=source,
+            )
+        resolved_cortisol = max(-0.10, min(0.10, float(cortisol_delta)))
+        resolved_oxytocin = max(-0.12, min(0.12, float(oxytocin_delta)))
         with self._bond_lock:
-            self._bond_cortisol_delta += cortisol_boost
+            self._bond_cortisol_delta += resolved_cortisol
+            self._bond_oxytocin_delta += resolved_oxytocin
         import logging  # noqa: PLC0415
         logging.getLogger("Natsume.tribe.endocrine_agent").debug(
-            "EndocrineAgent.record_stress_event: source=%s intensity=%.3f cortisol+%.4f",
-            source, clamped, cortisol_boost,
+            "EndocrineAgent legacy delta: source=%s cortisol=%+.4f oxytocin=%+.4f",
+            source, resolved_cortisol, resolved_oxytocin,
         )
+        return {
+            "status": "COMPATIBILITY_BUFFERED",
+            "source": str(source or "endocrine_agent"),
+            "operation": str(operation),
+            "cortisol_delta": round(resolved_cortisol, 4),
+            "oxytocin_delta": round(resolved_oxytocin, 4),
+        }
 
     def resolve_vital_signs(self, *, endocrine_state: Mapping[str, Any] | None = None) -> dict[str, Any]:
         state = dict(endocrine_state or self._last_state or {})
@@ -190,6 +263,8 @@ class EndocrineAgent:
         Returns:
             身体感受描述字符串，或 None（未触发/失败）。
         """
+        if self._legacy_endocrine_writes_retired():
+            return None
         _significant = float(cortisol or 0.0) > 0.6 or float(oxytocin or 0.0) > 0.6
         if not _significant:
             return None
@@ -234,6 +309,15 @@ class EndocrineAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_endocrine_writes_retired():
+            return {
+                "state": {},
+                "vitals": self.resolve_vital_signs(endocrine_state={}),
+                **self._retired_legacy_endocrine_result(
+                    operation="runtime_state_export",
+                    source="export_runtime_state",
+                ),
+            }
         last_state = dict(self._last_state or {})
         return {
             "state": last_state,
@@ -286,6 +370,8 @@ class EndocrineAgent:
             stress_level: float  - 压力水平 0.0 ~ 1.0（来自 cortisol_level）
         若 payload 为空，则从 _last_state 中读取当前状态。
         """
+        if self._legacy_endocrine_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.endocrine_agent")
@@ -324,6 +410,8 @@ class EndocrineAgent:
         催产素增量：intensity * 0.15（上限 0.12）
         皮质醇减量：intensity * 0.05（上限 0.05）
         """
+        if self._legacy_endocrine_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -333,9 +421,12 @@ class EndocrineAgent:
             oxytocin_boost = round(min(0.12, intensity * 0.15), 4)
             # 皮质醇降低（负值）
             cortisol_relief = round(-min(0.05, intensity * 0.05), 4)
-            with self._bond_lock:
-                self._bond_oxytocin_delta += oxytocin_boost
-                self._bond_cortisol_delta += cortisol_relief
+            self.record_legacy_hormonal_delta(
+                source=f"bond_progress:{reason}",
+                cortisol_delta=cortisol_relief,
+                oxytocin_delta=oxytocin_boost,
+                operation="bond_progress",
+            )
             logging.getLogger("Natsume.tribe.endocrine_agent").debug(
                 "EndocrineAgent BOND_PROGRESS: oxytocin+%.3f cortisol%.3f reason=%s",
                 oxytocin_boost, cortisol_relief, reason,
@@ -349,6 +440,8 @@ class EndocrineAgent:
         皮质醇增量：intensity * 0.10（上限 0.08）
         催产素减量：intensity * 0.08（上限 0.06）
         """
+        if self._legacy_endocrine_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -358,9 +451,12 @@ class EndocrineAgent:
             cortisol_boost = round(min(0.08, intensity * 0.10), 4)
             # 催产素降低（负值）
             oxytocin_drop = round(-min(0.06, intensity * 0.08), 4)
-            with self._bond_lock:
-                self._bond_cortisol_delta += cortisol_boost
-                self._bond_oxytocin_delta += oxytocin_drop
+            self.record_legacy_hormonal_delta(
+                source=f"bond_regress:{reason}",
+                cortisol_delta=cortisol_boost,
+                oxytocin_delta=oxytocin_drop,
+                operation="bond_regress",
+            )
             logging.getLogger("Natsume.tribe.endocrine_agent").debug(
                 "EndocrineAgent BOND_REGRESS: cortisol+%.3f oxytocin%.3f reason=%s",
                 cortisol_boost, oxytocin_drop, reason,
@@ -376,6 +472,8 @@ class EndocrineAgent:
         在下次 resolve_endocrine_state() 时消费，模拟孤独感带来的轻微压力反应。
         cortisol 增量上限 0.06，避免单次事件过度影响内分泌状态。
         """
+        if self._legacy_endocrine_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -383,8 +481,11 @@ class EndocrineAgent:
             if loneliness <= 0.5:
                 return
             cortisol_boost = round(min(0.06, (loneliness - 0.5) * 0.12), 4)
-            with self._bond_lock:
-                self._bond_cortisol_delta += cortisol_boost
+            self.record_legacy_hormonal_delta(
+                source="loneliness_signal",
+                cortisol_delta=cortisol_boost,
+                operation="loneliness_signal",
+            )
             logging.getLogger("Natsume.tribe.endocrine_agent").debug(
                 "EndocrineAgent LONELINESS_SIGNAL: cortisol+%.3f loneliness=%.2f",
                 cortisol_boost, loneliness,
@@ -399,13 +500,18 @@ class EndocrineAgent:
         在下次 resolve_endocrine_state() 时消费，模拟成就感带来的压力缓解。
         cortisol 减量上限 0.05，避免单次事件过度影响内分泌状态。
         """
+        if self._legacy_endocrine_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
             intensity = max(0.0, min(1.0, float(payload.get("intensity") or 0.35)))
             cortisol_relief = round(-min(0.05, intensity * 0.07), 4)  # 负值表示减少
-            with self._bond_lock:
-                self._bond_cortisol_delta += cortisol_relief
+            self.record_legacy_hormonal_delta(
+                source="task_success",
+                cortisol_delta=cortisol_relief,
+                operation="task_success",
+            )
             logging.getLogger("Natsume.tribe.endocrine_agent").debug(
                 "EndocrineAgent TASK_SUCCESS: cortisol%.3f intensity=%.2f",
                 cortisol_relief, intensity,
@@ -420,6 +526,8 @@ class EndocrineAgent:
         cortisol 增量上限 0.04，避免单次拦截过度影响内分泌状态。
         仅在 risk_level 为 medium/high/critical 时触发。
         """
+        if self._legacy_endocrine_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -430,8 +538,11 @@ class EndocrineAgent:
             # medium → +0.02，high → +0.03，critical → +0.04
             risk_boost_map = {"medium": 0.02, "high": 0.03, "critical": 0.04}
             cortisol_boost = risk_boost_map.get(risk_level, 0.02)
-            with self._bond_lock:
-                self._bond_cortisol_delta += cortisol_boost
+            self.record_legacy_hormonal_delta(
+                source=f"immune_block:{risk_level}",
+                cortisol_delta=cortisol_boost,
+                operation="immune_block",
+            )
             logging.getLogger("Natsume.tribe.endocrine_agent").debug(
                 "EndocrineAgent IMMUNE_BLOCK: cortisol+%.3f risk_level=%s",
                 cortisol_boost, risk_level,

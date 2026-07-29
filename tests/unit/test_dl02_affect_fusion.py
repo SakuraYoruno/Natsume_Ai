@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from host_brain.app.emotion_context import (
     HostEmotionRuntime,
     normalize_chat_emotion_context,
@@ -11,6 +13,7 @@ from host_brain.app.emotion_context import (
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
 )
+from host_brain.app.tribe_composition import build_tribe_application_ports
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.digital_life.affect_fusion import AffectFusionService
 from host_brain.digital_life.reader import LifeSnapshotReader
@@ -237,18 +240,21 @@ def test_duplicate_request_reopens_exact_receipts_without_duplicate_events(tmp_p
     assert len(events) == len(first.receipts)
 
 
-def test_input_runtime_composition_wires_fusion_before_host_emotion_runtime(
+def test_input_runtime_composition_does_not_resolve_host_emotion_runtime_when_fused(
     tmp_path: Path,
 ) -> None:
     _, reader, command_service = _runtime(tmp_path)
-    host_runtime = HostEmotionRuntime(clock_ms=lambda: NOW, hour_provider=lambda: 12)
+
+    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
+        raise AssertionError("canonical fusion must not resolve HostEmotionRuntime")
+
     providers = {
         "intent_engine": lambda: object(),
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: reader,
         "multimodal_observer": lambda: object(),
         "multimodal_processor": lambda: object(),
-        "emotion_context_runtime": lambda: host_runtime,
+        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
     }
     host_services = SimpleNamespace(
         require_provider=lambda name: providers[name],
@@ -267,7 +273,105 @@ def test_input_runtime_composition_wires_fusion_before_host_emotion_runtime(
 
     assert result["emotion_inference_source"] == "affective_life_fusion"
     assert result["affective_life"]["workspace_id"] == "workspace-a"
-    assert host_runtime.user_emotion_profile().to_summary()["total_interactions"] == 0
+
+
+def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
+    tmp_path: Path,
+) -> None:
+    _, reader, command_service = _runtime(tmp_path)
+
+    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
+        raise AssertionError("Tribe canonical fusion must not resolve HostEmotionRuntime")
+
+    providers = {
+        "ledger": lambda: object(),
+        "life_snapshot_reader": lambda: reader,
+        "bond_update_queue": lambda: object(),
+        "silence_engine": lambda: object(),
+        "state_write_arbiter": lambda: object(),
+        "emotion_timeline": lambda: object(),
+        "bond_stage_engine": lambda: object(),
+        "shared_memory_index": lambda: object(),
+        "milestone_tracker": lambda: object(),
+        "model_attempt_service": lambda: object(),
+        "prompt_registry": lambda: object(),
+        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
+    }
+    host_services = SimpleNamespace(
+        require_provider=lambda name: providers[name],
+        evolution_activation_service=None,
+    )
+    ports = build_tribe_application_ports(
+        host_services=host_services,
+        life_command_service_provider=lambda: command_service,
+    )
+
+    result = ports.resolve_chat_emotion_context(
+        request_body=_request(message="我有点难受，先别急着劝我。"),
+        request_id="tribe-canonical-fusion",
+    )
+
+    assert result["emotion_inference_source"] == "affective_life_fusion"
+    assert result["affective_life"]["self_id"] == "natsume_ai"
+    assert ports.canonical_affect_fusion is not None
+    assert ports.uses_canonical_affective_life() is True
+
+
+def test_input_composition_fails_closed_when_life_authority_is_missing() -> None:
+    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
+        raise AssertionError("composition must not resolve HostEmotionRuntime")
+
+    providers = {
+        "intent_engine": lambda: object(),
+        "ledger": lambda: object(),
+        "life_snapshot_reader": lambda: object(),
+        "multimodal_observer": lambda: object(),
+        "multimodal_processor": lambda: object(),
+        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
+    }
+    host_services = SimpleNamespace(
+        require_provider=lambda name: providers[name],
+        evolution_activation_service=None,
+        evolution_scope=None,
+    )
+    ports = build_input_runtime_application_ports(host_services=host_services)
+
+    with pytest.raises(RuntimeError, match="CANONICAL_AFFECT_FUSION_NOT_INJECTED"):
+        ports.resolve_chat_emotion_context(
+            request_body=_request(message="我有一点难受。"),
+            request_id="input-missing-life-authority",
+        )
+
+
+def test_tribe_composition_fails_closed_when_life_authority_is_missing() -> None:
+    def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:
+        raise AssertionError("composition must not resolve HostEmotionRuntime")
+
+    providers = {
+        "ledger": lambda: object(),
+        "life_snapshot_reader": lambda: object(),
+        "bond_update_queue": lambda: object(),
+        "silence_engine": lambda: object(),
+        "state_write_arbiter": lambda: object(),
+        "emotion_timeline": lambda: object(),
+        "bond_stage_engine": lambda: object(),
+        "shared_memory_index": lambda: object(),
+        "milestone_tracker": lambda: object(),
+        "model_attempt_service": lambda: object(),
+        "prompt_registry": lambda: object(),
+        "emotion_context_runtime": legacy_runtime_must_not_be_resolved,
+    }
+    host_services = SimpleNamespace(
+        require_provider=lambda name: providers[name],
+        evolution_activation_service=None,
+    )
+    ports = build_tribe_application_ports(host_services=host_services)
+
+    with pytest.raises(RuntimeError, match="CANONICAL_AFFECT_FUSION_NOT_INJECTED"):
+        ports.resolve_chat_emotion_context(
+            request_body=_request(message="我有一点难受。"),
+            request_id="tribe-missing-life-authority",
+        )
 
 
 def test_external_affective_life_payload_cannot_spoof_canonical_self_affect() -> None:

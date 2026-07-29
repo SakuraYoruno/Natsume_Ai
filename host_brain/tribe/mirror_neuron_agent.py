@@ -194,18 +194,19 @@ class MirrorNeuronAgent:
             except Exception:
                 pass
 
-        # T-259：高共情(>=0.60)时联动 EndocrineAgent 分泌欲素（降低 cortisol，提升 energy_reserve）
+        # T-259：高共情时提交 compatibility endocrine relief。Production
+        # canonical Life owns self-affect, so Endocrine rejects this input
+        # instead of accepting a direct private-field mutation.
         if resonance_strength >= 0.60:
             try:
                 _endo = get_endocrine_agent()
-                if hasattr(_endo, "_bond_cortisol_delta") and hasattr(_endo, "_bond_lock"):
-                    # 高共情时降低 cortisol（欲素效应：社交联结降低压力激素）
+                if hasattr(_endo, "record_legacy_hormonal_delta"):
                     _oxytocin_effect = round((resonance_strength - 0.60) * 0.20, 4)
-                    with _endo._bond_lock:
-                        _endo._bond_cortisol_delta = max(
-                            -0.06,
-                            float(_endo._bond_cortisol_delta) - _oxytocin_effect,
-                        )
+                    _endo.record_legacy_hormonal_delta(
+                        source="mirror_high_resonance",
+                        cortisol_delta=-_oxytocin_effect,
+                        operation="mirror_resonance_relief",
+                    )
             except Exception:
                 pass
             # T-305：高共情时联动 InteroceptionAgent 降低 recovery_urgency（共情是正向信号，缓解身体压力）

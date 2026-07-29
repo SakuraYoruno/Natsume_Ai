@@ -3,14 +3,14 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.75
+版本：v5.77
 核对日期：2026-07-28
 合并基线：`origin/dev@fcb8997fa`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-05_HOST_EXPRESSION_PROTOCOL_LOCAL_SLICE`。
+> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -23,10 +23,80 @@
 > reply 才能开 provisional episode，下一次用户输入以 opaque digest 形成 aftereffect，
 > relation aggregate 以 workspace + subject 连续而不把 session 当长期身份。边界、
 > 未接住和修复状态会收紧 Surface 话术；沉默、投递失败和单次道歉不会自动修复。
-> `HostBondRuntime` 的生产默认已关闭积分自动阶段升级。`HostEmotionRuntime`、
-> Limbic、BodySense、Endocrine、Motive、legacy Bond queue 与 Surface 的其它兼容
-> state 仍未清零，真实模型和三模态物理服务也尚未闭环。因此状态仍为
+> `HostBondRuntime` 的生产默认已关闭积分自动阶段升级。DL-06 Scheduler
+> policy 已要求 canonical relationship 的 `ALLOWED` 主动权限、无未结 episode/repair，
+> 且七海自身未选择给空间，才会从 bounded canonical self-affect 生成无回应压力的
+> 主动 outbox；旧 Bond/legacy affect 和三条固定模板不再拥有该 route 的发送权。已接受
+> foreground reply 会将 `CompanionProactiveTargetV1` 与 provisional episode 原子写入同一
+> relationship command；只读 registry 仅返回 scope-valid、`ALLOWED`、无 repair/active
+> episode 的 target，Scheduler 再按 frozen Scene scope 确定性选择一个 aggregate。旧
+> `last_target` 不能授权发送。`proactive.gateway` 的完成 receipt 会同 canonical outbox 的
+> id/key/payload/authorization digest 与私有 scope-bound target context 一起重验；只有全部一致
+> 才生成 deterministic `relationship_proactive_delivered` command 并打开 `PROACTIVE_MESSAGE`
+> episode。receipt 后进程崩溃时，Host lifespan 与 outbox tick 只读扫描 completed receipt 并
+> exact-replay relation command，不会重复调用 Gateway transport；该回执只表示 Host/Gateway
+> accepted，不能推导第三方平台送达或用户阅读。
+> DL-06 已新增 `CompanionPermissionIngress` 与
+> `POST /v1/digital-life/relationship/proactive-permission`：它只从 signed Secure Ingress 接收
+> strict `CompanionProactivePermissionRequestV1`，要求 scope `companion:contact:write`、
+> `principal_kind=user`、`principal_id=relationship_subject_id` 与 `tenant_id=workspace_id`；
+> audit ref 才会作为 `USER_EXPLICIT` 的 canonical evidence，重复/重启只重开同一 Life command。
+> 它没有自然语言解析、模型或 Bond 旁路，也尚无 Monitor 端用户控件。0147 新增的
+> `CompanionProfileLifecycleService` 同样只通过 Life command 写入：它从 canonical relation
+> aftereffect chain 重开五条独立、跨至少三天、`HELPFUL`、boundary-safe 且 `>=0.85` 的证据，
+> 才能建立五互动 canary；第五条合格 canary 后效应会自动 activate，并只能 exact rollback 到候选创建时绑定的旧 profile。
+> profile 仅含低风险表达偏好和 opaque refs；其 ID/digest/revision 会进入下一次冻结的文本、
+> Voice 与 Avatar plan，不能修改 Soul、consent 或 self-affect。生产文本 classifier 的 `0.72`
+> 不满足门槛，不能被当成自动成长成功。
+> `HostEmotionRuntime`、Limbic、Endocrine 与 global BodySense 的生产写入已逐项切断，Motive 也已降为无模块级缓存的纯规则投影，production
+> Bond queue/writer 已退役为 no-write adapter。production Host 也不会从旧 action log 预热 legacy emotion timeline：它返回显式 retired 空投影，且 Runtime snapshot 不会把 user profile 升格为 self-affect，canonical Limbic/Prefrontal 不会读取该投影；但 Surface 的其它兼容 state、Monitor 审核、canary 长期收益、真实模型和三模态物理服务仍未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
+
+> **DL-06 旧主动路径退役：** `proactive_talk` 已不再注册为 Personality Skill、Tool Catalog、executor 或
+> Scheduler-add task type。Host scheduler composition 对升级前存在的 `proactive_talk_periodic` durable definition
+> 使用 CAS disable；若 occurrence 已在升级前被接纳，dispatch 仍会验证 immutable Scene identity，但随后仅返回
+> `LEGACY_PROACTIVE_TALK_RETIRED`，不触碰 Bond、EmotionTimeline、Limbic、旧模板或 delivery intent。production
+> 主动消息只可由 canonical `life_tick → companion_proactive → Life outbox` 产生；本地退役证明不等于真实
+> Gateway/Edge、长期体验或 DL-06 封板。
+
+> **DL-06 Runtime snapshot reader 修订：** production `LifecycleRuntimeApplicationPorts` 已显式带入
+> `LifeSnapshotReader`。已组成 Host 的 OBS runtime snapshot 只读取当前 relationship subject 的一条 canonical
+> Life head，并分别暴露 `self_id=natsume_ai` 的 self-affect 与 bounded user-affect observation；用户的观察不能
+> 覆盖七海自身的 mixed emotion。该 port 一旦存在，reader 错误、subject/self-id drift 都只会 degraded，绝不回读
+> SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。此切片本地集合为 `67 passed in 10.65s`，不是
+> Monitor、真实 provider/Edge 或 DL-07 完成。
+
+> **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
+> `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
+> `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧
+> `app/input_service_ack.py` 已删除；`14 passed in 1.92s` 仅是本地 helper 证据。
+
+> 0148 将 `CompanionProfileControlRequestV1` 接到 app-local Host：
+> `POST /v1/digital-life/relationship/companion-profile` 通过独立的
+> `host.companion-profile` Secure Ingress surface 认证 `companion:profile:write`，并再次比对
+> `user principal == relationship_subject_id`、`tenant == workspace_id`。它只接受完整 bounded
+> preference object，不能承载聊天正文、Soul patch、emotion、consent 或任意 Life command；lifecycle
+> 仅从 canonical 强 aftereffect history 选证据并启动 CANARY，Secure Ingress audit ref 与 profile
+> version 同时进入 Life journal。该路由不会直接 activation；Monitor/Review 与 legacy writer cutover
+> 仍未完成。
+
+> `CompanionFeedbackIngress` 已接入同一个 app-local Host composition：
+> `POST /v1/digital-life/relationship/response-feedback` 经独立 `host.companion-feedback` surface
+> 验证 `companion:feedback:write`、exact user/relationship subject 和 tenant/workspace。其 strict body
+> 只能引用一个仍为 active provisional episode 的 accepted receipt，并给出四种 bounded outcome；只有
+> explicit `HELPFUL` 生成 `0.95` 的 canonical aftereffect。该证据最多推进已有 companion-profile
+> CANARY；只有第五条合格 canary 后效应会由 lifecycle 自动 activation，外部请求不能创建或指定 activation profile，
+> 也不能写 Soul、consent、self-affect；旧关键词 classifier 与 persona
+> proposal 没有该权限。
+
+> `CompanionProfileRollbackRequestV1` 以另一条 server-owned Secure Ingress surface 接入：
+> `POST /v1/digital-life/relationship/companion-profile/rollback` 要求
+> `companion:profile:rollback`、exact user/relationship subject、tenant/workspace 和当前 active
+> profile identity。body 不能指定历史 target；lifecycle 只读取 current profile 的 frozen predecessor。
+> `companion_profile_rolled_back` command 保存 audit-derived `source_control_ref`，所以 duplicate 或
+> restart 会重开同一 receipt；stale active identity、service principal、cross-scope 与 target injection
+> 全部失败关闭。它不改变 Soul、consent 或 self-affect，且仍不等于 Monitor/Review 或 legacy writer
+> cutover 已完成。
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 `ExpressionPlanV1`，并在可信 internal AffectFusion hand-off 后由纯 planner 冻结。
@@ -336,7 +406,57 @@ Operator 平面的 `scheduler.task.enable/disable`、`sys_mode.auto_rules.update
 
 > 当前库存纠偏：生产 locator consumer/import、全部 import-form consumer、模块、字段、锁和可变引用均为 0。`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 各自构造 fresh ports 并显式传给 Host root，Host builder 无全局 fallback。`HostAuthorityRuntimeOwner` 继续 migration-first 持有 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图。ResourceManager status 已由 0123 Host-fenced Runtime Event journal 持久化，共享 JSON production reader/writer/fallback 为 0。Tribe shared state、Host registry、event bus 与 23-Agent catalog 也由每个 Host scope fresh 持有；bind 不发布进程级 active owner，lifespan/background execution 与 HTTP request 通过 execution-local `ContextVar` 借用 exact owner context。两个异步重叠 scope 已证明 legacy shared-state/cross-Agent getter 返回各自 Agent/registry；同 execution 跨 scope、active execution 解绑和 stale inherited context 均失败关闭。23 个 Agent backing singleton/setter 与 state/Host registry/event bus 的无上下文 fallback 已物理删除，缺 exact context 统一拒绝；完整 Host multi-app production canary 尚未执行。旧测试通过显式隔离 registry/context 兼容，fresh 生产进程不会加载 pytest bridge。外部 Chroma/Neo4j namespace、Token/MCP durable restart、其它外部资源恢复、事务化 Chat、完整 Worker/Obs Composition 与 NE-01 仍未完成。
 
-Host 情感上下文有两层边界。生产 ASGI 的 `InputRuntimeApplicationPorts` 通过惰性 `LifeCommandService` provider 构造 `AffectFusionService`；`resolve_chat_emotion_context(..., affect_fusion_service=...)` 会将输入归一为 `UserAffectObservationV1`，用 `workspace_id + relationship_subject_id + session_id` 形成不含原始身份的 aggregate key，并先持久化 observation，再有界生成至多两个 `EventAppraisalV1` 候选。只有 appraisal command 才能推进 canonical `state.affective`。视觉、声学、文本/自述各自有 3/5/30 秒 TTL；journal 只接受脱敏摘要和 digest ref，原始音频、图像、文本和模型链字段会失败关闭。`normalize_chat_emotion_context()` 对内部 fused context 只读；外部伪造 marker 不会取得 canonical authority。旧 `HostEmotionRuntime` 仍由 `emotion_runtime_factory` 在未注入 fusion service 的兼容调用中使用，管理 Host epoch 内 vector/timeline/profile；它不是 durable self-affect authority，也尚未在 DL-06 前清零。回复形态 `ResponseFormDecider` 继续由 Input composition 独占，并发语音额度检查与记账在同一锁内完成。
+Host 情感上下文有两层边界。生产 ASGI 的 `InputRuntimeApplicationPorts` 通过惰性 `LifeCommandService` provider 构造 `AffectFusionService`；`resolve_chat_emotion_context(..., affect_fusion_service=...)` 会直接将输入归一为 `UserAffectObservationV1`，用 `workspace_id + relationship_subject_id + session_id` 形成不含原始身份的 aggregate key，并先持久化 observation，再有界生成至多两个 `EventAppraisalV1` 候选。只有 appraisal command 才能推进 canonical `state.affective`。视觉、声学、文本/自述各自有 3/5/30 秒 TTL；journal 只接受脱敏摘要和 digest ref，原始音频、图像、文本和模型链字段会失败关闭。`normalize_chat_emotion_context()` 对内部 fused context 只读；外部伪造 marker 不会取得 canonical authority。Input 与 Tribe composition 都不会再构造或解析 `HostEmotionRuntime`；缺少 Life authority 时稳定拒绝 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`。旧类仅保留给直接隔离测试，不再是任何 Host composition 的 compatibility 路径。回复形态 `ResponseFormDecider` 继续由 Input composition 独占，并发语音额度检查与记账在同一锁内完成。
+
+最新 DL-06 切片使这个 fallback 不再进入 production Host object graph：
+`ProcessApplicationPorts` 和 `build_production_host_application_ports()` 已删除
+`emotion_runtime_factory` 与 runtime/profile publication。ASGI 同时把 lazy Life command provider
+传给 Tribe composition；Tribe 与 Input 在有 authority 时都 resolve `AffectFusionService`，不会
+解析或调用 `HostEmotionRuntime`；遗漏 authority 不再存在 local/offline runtime fallback，而是失败关闭。
+Lifecycle 的 global profile consumer 现为 optional read-only compatibility slot，production 留空。
+`TribeApplicationPorts` 还显式携带 affective-life authority：
+canonical mode 下 Limbic 的 legacy `EmotionPersistence`、metabolism、timeline append、decay 和
+Bond progress/regress callback 统一 short-circuit 为 `RETIRED_CANONICAL_LIFE`，不得再构造或写入
+第二份 self-affect；只有直接构造的隔离测试 port 才能覆盖历史行为，Host composition 不存在该 fallback。
+Endocrine 的 legacy
+cortisol/oxytocin delta buffer、`_last_state`、hormonal hint、callback 与 fan-out 在同一 canonical mode
+也全部退役，且 Circadian/MirrorNeuron 只能走受控 compatibility method，不能直写私有字段。production
+BodySense 同样不再被 Surface/startup warmup/read：`project_body_sense_from_life_snapshot()` 只读取当前
+relationship subject 的 canonical Life snapshot，Limbic canonical mode 的 tick/loneliness/conversation
+mutation 统一退役，且 retired tick 不发布 Bus update。`MotiveEngine` 同时移除模块级 `_engine`，factory
+每次返回新建的纯规则对象；它不能存储跨 turn 的情感、关系或学习上下文。production
+`HostMemoryRuntimeOwner` 现以 `RetiredEmotionTimelineProjection` 取代旧 action-log hydration；marker
+不包含 `NEUTRAL` 情感事实，Lifecycle/proactive 会忽略它，canonical Limbic 与 Prefrontal 不会解析/缓存它。
+这仍不等于全量 compatibility state 清零：其它 Surface/legacy reader 的使用审计、Monitor/Review 与真实验收仍待后续完成。
+
+默认模式的私密活动 reader 已成为上述审计中第一个实际切换点：`DefaultModeAgent` 的一次 Life snapshot
+通过 `project_inner_world_state()` 生成只读 `canonical_life_source=CANONICAL_LIFE_JOURNAL`、有界
+`inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1`。`inner_activity_agent` 看到该 marker
+后直接投影 mixed self-affect/mood，而非调用 Limbic timeline；也不再从 SocialBrain/Bond 读取 summary。关系投影
+不含 workspace、subject、trigger/evidence 或 intimacy consent，且不把 trust/attunement 变成 score/stage。
+高连续性 default-mode tick 已移除 legacy `drive_emotion_metabolism()` 调用。这只关闭这个 reader，其他
+compatibility read path 和真实服务验证仍为 `PARTIAL`。
+
+普通 Chat 的生产 prompt reader 现也有一条显式 canonical 分支：`prompt_context_plane` 与
+`interaction_facts_plane` 从内部 AffectiveFusion envelope 抽取 `RelationshipStateV2`，并严格重验
+`self_id=natsume_ai`、workspace、relationship subject、session 以及 `affective_turn_context.v1 /
+relationship_turn_context.v1 / relationship_state.v2`。通过后，旧 `RelationshipStateBlock` 只作为
+prompt-compatible 的**非浪漫**投影：stage 固定 `FRIEND`、phase 固定 `stepsibling`，trust/safety/attunement
+只能给出有界安全、开放、轻松或修复纹理；不再把 legacy Bond `SOULMATE`、score 或 consent 变成 lover、排他、
+依赖或主动许可。claimed canonical context 任一字段漂移时返回
+`CANONICAL_RELATIONSHIP_REJECTED` 安全朋友投影，禁止读取旧 Bond 作为 fallback。Surface packet 复用同一结果；
+最终 `surface_affect_control` 也以 `source_authority` 拒绝旧 `relationship_distance`、closeness、恋人线索和
+lover task 的二次升级，canonical 为 `familiar`、rupture/rejected 为 `guarded`。当前是
+`LOCAL_TARGETED_179_PASSED_PLUS_FINAL_GATE_82_PASSED / EMOTIONAL_DIGITAL_LIFE_PARTIAL`，不是 DL-06 封板。Cortex
+retrieval prefetch 也在 canonical hand-off 存在时跳过 legacy state arbiter，向 retrieval/Motive 只传
+`FRIEND / stepsibling / familiar|guarded` 的无分数 projection；scope drift 固定 guarded（定向 `34 passed in 5.64s`）。
+
+**Bond queue 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
+`BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 只保留 stage/graph 的
+read compatibility，并返回没有 worker、backlog 或直接 writer fallback 的 retired adapter；canonical
+Cortex 也会在解析 queue 前拒绝旧 Bond mutation。`/bond/event` 仍为历史写 API，但遇到该 adapter 固定
+返回 `410 LEGACY_BOND_WRITE_RETIRED`。旧 timeline 现在是显式 retired 空投影，而不是 canonical projection；
+它的退役不证明其它 compatibility reader 已清零。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

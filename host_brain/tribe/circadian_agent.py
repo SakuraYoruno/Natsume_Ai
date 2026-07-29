@@ -115,16 +115,18 @@ class CircadianAgent:
                     )
                 except Exception:
                     pass
-                # T-258：夜间相位时联动 EndocrineAgent 降低 cortisol（夜间应降低压力激素）
+                # T-258：夜间相位提交 compatibility endocrine relief。
+                # The Endocrine boundary itself rejects this in canonical Life
+                # mode, so a circadian callback cannot mutate a second affect
+                # authority through private fields.
                 try:
                     _endo = get_endocrine_agent()
-                    if hasattr(_endo, "_bond_cortisol_delta"):
-                        # 注入负 delta（降低 cortisol），通过 _bond_cortisol_delta 缓冲消费
-                        with _endo._bond_lock:
-                            _endo._bond_cortisol_delta = max(
-                                -0.08,
-                                float(_endo._bond_cortisol_delta) - 0.06,
-                            )
+                    if hasattr(_endo, "record_legacy_hormonal_delta"):
+                        _endo.record_legacy_hormonal_delta(
+                            source="circadian_night_phase",
+                            cortisol_delta=-0.06,
+                            operation="circadian_night_relief",
+                        )
                 except Exception:
                     pass
 

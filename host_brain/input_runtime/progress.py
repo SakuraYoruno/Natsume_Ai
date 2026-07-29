@@ -1,6 +1,9 @@
-"""input_service_ack.py — 输入路由 ACK/进度推送服务层。
+"""Retired Gateway progress helpers with a safe companion fallback.
 
-从 input_routes.py 提取的即时 ACK、进度推送、Bond/情绪上下文解析相关函数。
+The current Gateway progress fastpath is retired in favour of the governed
+ReplyEnvelope route.  These helpers remain only for an explicit rollback
+window, and must never reopen legacy Bond/SocialBrain or mirror untrusted user
+emotion into Natsume's technical status wording.
 """
 
 from __future__ import annotations
@@ -19,27 +22,22 @@ _logger = logging.getLogger("Natsume.input_routes")
 # ---------------------------------------------------------------------------
 
 def resolve_bond_stage_for_ack(*, payload: dict[str, Any]) -> str:
-    """从 payload 解析 Bond 阶段，用于 ACK 文本渲染。"""
-    stage = str((dict(payload.get("bond_summary") or {})).get("stage") or "").strip().upper()
-    if stage:
-        return stage
-    person_id = str(payload.get("person_id") or "").strip()
-    if not person_id:
-        return "FRIEND"
-    try:
-        from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-        return get_social_brain_agent().resolve_bond_stage(person_id=person_id, default="FRIEND")
-    except Exception:
-        return "FRIEND"
+    """Return a fixed, non-escalating relationship texture for retired output.
+
+    A progress reply is not an accepted affective turn and its gateway payload
+    is ingress data, not a canonical relationship hand-off.  It therefore
+    cannot select a Bond stage, re-open SocialBrain, or imply intimacy.
+    """
+
+    del payload
+    return "FRIEND"
 
 
 def resolve_emotion_tag_for_ack(*, payload: dict[str, Any]) -> str:
-    """从 payload 解析情绪标签，用于 ACK 文本渲染。"""
-    for key in ("emotion_tag", "emotion", "mood"):
-        value = str(payload.get(key) or "").strip().upper()
-        if value:
-            return value
-    return "NEUTRAL"
+    """Return a calm technical tone without treating user affect as self-affect."""
+
+    del payload
+    return "CALM"
 
 
 def format_elapsed_compact(elapsed_ms: int) -> str:

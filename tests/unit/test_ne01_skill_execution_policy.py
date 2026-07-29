@@ -89,8 +89,8 @@ def test_production_skill_inventory_is_exhaustively_classified() -> None:
         for skill_spec in provider_spec.instantiate().get_skill_specs()
     )
 
-    assert len(registry.all()) == 93
-    assert len(policies) == 85
+    assert len(registry.all()) == 92
+    assert len(policies) == 84
     assert set(policies) == {
         skill_spec.skill_name for skill_spec in declarative_specs
     }
@@ -105,10 +105,10 @@ def test_production_skill_inventory_is_exhaustively_classified() -> None:
         SkillExecutionPolicy.INLINE_READ_ONLY: 28,
         SkillExecutionPolicy.PRE_ACCEPTANCE_PROPOSAL_ONLY: 13,
         SkillExecutionPolicy.POST_ACCEPTANCE_WORKSPACE: 3,
-        SkillExecutionPolicy.BLOCKED_PENDING_ACCEPTANCE_EFFECT: 49,
+        SkillExecutionPolicy.BLOCKED_PENDING_ACCEPTANCE_EFFECT: 48,
     }
     assert Counter(meta.budget_policy for meta in registry.all()) == {
-        SkillBudgetPolicy.TASK_PRECHARGE: 69,
+        SkillBudgetPolicy.TASK_PRECHARGE: 68,
         SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL: 24,
     }
     assert {
@@ -171,11 +171,13 @@ def test_unclassified_direct_skill_is_catalog_only_and_fails_closed() -> None:
 def test_legacy_personality_registry_has_zero_governed_manifest() -> None:
     registry = build_personality_skill_registry()
 
-    assert len(registry.all()) == 19
+    assert len(registry.all()) == 18
+    assert registry.get("proactive_talk") is None
+    assert "proactive_talk" not in builtin_skill_policy_inventory()
     assert registry.build_skill_manifest() == []
     assert Counter(meta.execution_policy for meta in registry.all()) == {
         SkillExecutionPolicy.UNCLASSIFIED: 14,
-        SkillExecutionPolicy.BLOCKED_PENDING_ACCEPTANCE_EFFECT: 5,
+        SkillExecutionPolicy.BLOCKED_PENDING_ACCEPTANCE_EFFECT: 4,
     }
 
 

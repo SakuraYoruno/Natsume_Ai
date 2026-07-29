@@ -84,6 +84,14 @@ def _as_plain_dict(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _is_retired_legacy_emotion_timeline(value: Mapping[str, Any] | None) -> bool:
+    """Whether a timeline response explicitly declines legacy affect authority."""
+
+    return str(dict(value or {}).get("status") or "").strip() == (
+        "RETIRED_CANONICAL_LIFE"
+    )
+
+
 def _parse_bool_env(name: str, *, default: bool) -> bool:
     raw = str(_os.environ.get(name) or "").strip().lower()
     if raw in {"1", "true", "yes", "on"}:

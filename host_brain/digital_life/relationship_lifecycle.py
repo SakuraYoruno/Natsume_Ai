@@ -18,8 +18,12 @@ from typing import Any
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.service import LifeCommandService
 from natsume_contracts.life import (
+    CompanionProactiveTargetV1,
+    CompanionResponseFeedbackRequestV1,
     LifeCommand,
     LifeCommandReceipt,
+    LifeDeliveryReceipt,
+    LifeOutboxMessage,
     RelationshipEpisodeV1,
     RelationalAftereffectV1,
 )
@@ -63,6 +67,28 @@ def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _aftereffect_from_payload(payload: Mapping[str, Any]) -> RelationalAftereffectV1:
+    raw = _mapping(payload.get("aftereffect"))
+    if not raw:
+        raise ValueError("relational aftereffect is required")
+    return RelationalAftereffectV1(
+        aftereffect_id=raw.get("aftereffect_id"),
+        episode_id=raw.get("episode_id"),
+        workspace_id=raw.get("workspace_id"),
+        relationship_subject_id=raw.get("relationship_subject_id"),
+        session_id=raw.get("session_id"),
+        source_receipt_ref=raw.get("source_receipt_ref"),
+        user_input_ref=raw.get("user_input_ref"),
+        outcome=raw.get("outcome"),
+        helpfulness=raw.get("helpfulness"),
+        boundary_respected=raw.get("boundary_respected"),
+        repair_acknowledged=raw.get("repair_acknowledged"),
+        observed_at_ms=raw.get("observed_at_ms"),
+        evidence_refs=raw.get("evidence_refs") or (),
+        self_id=raw.get("self_id") or "natsume_ai",
+    )
+
+
 def _digest(value: Any) -> str:
     encoded = json.dumps(
         value,
@@ -76,6 +102,45 @@ def _digest(value: Any) -> str:
 
 def _opaque_ref(prefix: str, value: Any) -> str:
     return f"{prefix}://sha256/{_digest(value)}"
+
+
+def _companion_target_id(
+    *,
+    scope: "RelationshipScope",
+    platform: str,
+    conversation_id: str,
+) -> str:
+    identity = {
+        "schema": "companion-proactive-target.v1",
+        "aggregate_id": scope.aggregate_id,
+        "workspace_id": scope.workspace_id,
+        "relationship_subject_id": scope.relationship_subject_id,
+        "platform": str(platform or "").strip().lower(),
+        "conversation_id": str(conversation_id or "").strip(),
+    }
+    return f"companion_target_{_digest(identity)[:32]}"
+
+
+def _validate_delivery_receipt(
+    *,
+    message: LifeOutboxMessage,
+    receipt: LifeDeliveryReceipt,
+) -> None:
+    if (
+        receipt.outbox_id != message.outbox_id
+        or receipt.delivery_key != message.delivery_key
+        or receipt.payload_digest != message.payload_digest
+        or receipt.authorization_digest != message.authorization_digest
+    ):
+        raise ValueError("companion proactive delivery receipt drift")
+
+
+def _delivery_result_is_success(result: Mapping[str, Any]) -> bool:
+    payload = _mapping(result)
+    if payload.get("success") is False or payload.get("ok") is False:
+        return False
+    status = _text(payload.get("status"), limit=80).upper()
+    return status not in {"FAILED", "ERROR", "REJECTED", "DEGRADED", "IN_DOUBT"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,11 +217,206 @@ class RelationshipLifecycleService:
         *,
         command_service_provider: Callable[[], LifeCommandService],
         snapshot_reader_provider: Callable[[], LifeSnapshotReader],
+        companion_profile_lifecycle_service_provider: Callable[[], Any] | None = None,
         clock_ms: Callable[[], int] | None = None,
     ) -> None:
         self._command_service_provider = command_service_provider
         self._snapshot_reader_provider = snapshot_reader_provider
+        self._companion_profile_lifecycle_service_provider = (
+            companion_profile_lifecycle_service_provider
+        )
         self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+
+    def record_proactive_permission(
+        self,
+        *,
+        workspace_id: Any,
+        relationship_subject_id: Any,
+        session_id: Any,
+        request_id: Any,
+        proactive_permission: Any,
+        source_ref: Any,
+    ) -> LifeCommandReceipt:
+        """Persist a user-explicit proactive-contact decision.
+
+        The caller must supply an opaque evidence reference from a structured
+        consent interaction.  This service intentionally has no natural
+        language parser: warmth, Bond and inferred affection cannot become
+        contact permission.
+        """
+
+        scope = RelationshipScope.from_values(
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+            session_id=session_id,
+        )
+        permission = _text(proactive_permission, limit=64).upper()
+        if permission not in {"ALLOWED", "DENIED"}:
+            raise ValueError("proactive permission must be ALLOWED or DENIED")
+        evidence_ref = _text(source_ref, limit=512)
+        if not evidence_ref or "://" not in evidence_ref:
+            raise ValueError("proactive permission requires an opaque source_ref")
+        stable_request_id = _text(request_id) or _digest(
+            {
+                "schema": "relationship-proactive-permission.v1",
+                "scope": scope.aggregate_id,
+                "permission": permission,
+                "source_ref": evidence_ref,
+            }
+        )[:32]
+        created_at_ms = max(0, int(self._clock_ms()))
+        return self._submit(
+            scope=scope,
+            request_id=stable_request_id,
+            command_type="relationship_proactive_permission_changed",
+            ordinal=0,
+            payload={
+                "workspace_id": scope.workspace_id,
+                "relationship_subject_id": scope.relationship_subject_id,
+                "proactive_permission": permission,
+                "source_kind": "USER_EXPLICIT",
+                "source_ref": evidence_ref,
+            },
+            created_at_ms=created_at_ms,
+        )
+
+    def record_explicit_response_feedback(
+        self,
+        *,
+        workspace_id: Any,
+        relationship_subject_id: Any,
+        session_id: Any,
+        request_id: Any,
+        response_receipt_ref: Any,
+        feedback: Any,
+        source_ref: Any,
+    ) -> RelationshipAftereffectResult:
+        """Record an authenticated, bounded evaluation of one open response.
+
+        This is intentionally different from keyword detection in a normal
+        chat turn.  A signed user explicitly evaluates the exact accepted
+        response receipt; the canonical aggregate then verifies that the
+        corresponding relationship episode is still active.  The only strong
+        positive mapping is an explicit ``HELPFUL`` selection, and it can
+        still only advance an already-running profile canary through the
+        existing lifecycle gate.
+        """
+
+        control = CompanionResponseFeedbackRequestV1(
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+            session_id=session_id,
+            response_receipt_ref=response_receipt_ref,
+            feedback=feedback,
+        )
+        scope = RelationshipScope.from_values(
+            workspace_id=control.workspace_id,
+            relationship_subject_id=control.relationship_subject_id,
+            session_id=control.session_id,
+        )
+        evidence_ref = _text(source_ref, limit=512)
+        if not evidence_ref or "://" not in evidence_ref:
+            raise ValueError("explicit response feedback requires an opaque source_ref")
+        stable_request_id = _text(request_id) or _digest(
+            {
+                "schema": "relationship-explicit-feedback.v1",
+                "scope": scope.aggregate_id,
+                "response_receipt_ref": control.response_receipt_ref,
+                "feedback": control.feedback,
+                "source_ref": evidence_ref,
+            }
+        )[:32]
+        replayed = self._aftereffect_by_evidence_ref(
+            scope=scope,
+            evidence_ref=evidence_ref,
+        )
+        if replayed is not None:
+            aftereffect, receipt = replayed
+            self._observe_profile_canary_aftereffect(
+                scope=scope,
+                request_id=stable_request_id,
+                aftereffect=aftereffect,
+            )
+            return RelationshipAftereffectResult(
+                scope=scope,
+                aftereffect=aftereffect,
+                receipt=receipt.as_replayed(),
+                reason_code="RELATIONAL_EXPLICIT_FEEDBACK_REPLAYED",
+            )
+
+        reader = self._require_snapshot_reader()
+        snapshot = reader.get_snapshot(scope.aggregate_id)
+        relation = _mapping(_mapping(snapshot.state).get("relationship_v2"))
+        episodes = tuple(
+            _mapping(item)
+            for item in relation.get("active_episodes") or ()
+            if isinstance(item, Mapping)
+        )
+        episode = next(
+            (
+                item
+                for item in episodes
+                if _text(item.get("response_receipt_ref"), limit=512)
+                == control.response_receipt_ref
+            ),
+            None,
+        )
+        if episode is None:
+            raise ValueError("RELATIONSHIP_RESPONSE_RECEIPT_NOT_ACTIVE")
+        outcome, helpfulness, boundary_respected, repair_acknowledged = (
+            self._explicit_feedback_outcome(control.feedback)
+        )
+        now_ms = max(0, int(self._clock_ms()))
+        user_input_ref = _opaque_ref(
+            "relationship-user-feedback",
+            {
+                "scope": scope.aggregate_id,
+                "request_id": stable_request_id,
+                "source_ref": evidence_ref,
+                "response_receipt_ref": control.response_receipt_ref,
+                "feedback": control.feedback,
+            },
+        )
+        identity = {
+            "schema": "relational-explicit-feedback-aftereffect.v1",
+            "episode_id": _text(episode.get("episode_id")),
+            "source_ref": evidence_ref,
+            "response_receipt_ref": control.response_receipt_ref,
+        }
+        aftereffect = RelationalAftereffectV1(
+            aftereffect_id=f"aftereffect_{_digest(identity)[:32]}",
+            episode_id=_text(episode.get("episode_id")),
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            source_receipt_ref=control.response_receipt_ref,
+            user_input_ref=user_input_ref,
+            outcome=outcome,
+            helpfulness=helpfulness,
+            boundary_respected=boundary_respected,
+            repair_acknowledged=repair_acknowledged,
+            observed_at_ms=now_ms,
+            evidence_refs=(evidence_ref, control.response_receipt_ref),
+        )
+        receipt = self._submit(
+            scope=scope,
+            request_id=stable_request_id,
+            command_type="relational_aftereffect_recorded",
+            ordinal=0,
+            payload={"aftereffect": aftereffect.as_dict()},
+            created_at_ms=now_ms,
+        )
+        self._observe_profile_canary_aftereffect(
+            scope=scope,
+            request_id=stable_request_id,
+            aftereffect=aftereffect,
+        )
+        return RelationshipAftereffectResult(
+            scope=scope,
+            aftereffect=aftereffect,
+            receipt=receipt,
+            reason_code="RELATIONAL_EXPLICIT_FEEDBACK_RECORDED",
+        )
 
     def record_followup(
         self,
@@ -283,6 +543,11 @@ class RelationshipLifecycleService:
             payload={"aftereffect": aftereffect.as_dict()},
             created_at_ms=now_ms,
         )
+        self._observe_profile_canary_aftereffect(
+            scope=scope,
+            request_id=stable_request_id,
+            aftereffect=aftereffect,
+        )
         return RelationshipAftereffectResult(
             scope=scope,
             aftereffect=aftereffect,
@@ -299,25 +564,45 @@ class RelationshipLifecycleService:
         request_id: Any,
         response_receipt: Mapping[str, Any],
         response_text: str,
+        proactive_target: Mapping[str, Any] | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
         """Open one provisional episode after a reply has canonical receipt."""
 
-        scope, stable_request_id, episode, opened_at_ms = self._accepted_response_episode(
+        (
+            scope,
+            stable_request_id,
+            episode,
+            companion_target,
+            opened_at_ms,
+        ) = self._accepted_response_episode(
             workspace_id=workspace_id,
             relationship_subject_id=relationship_subject_id,
             session_id=session_id,
             request_id=request_id,
             response_receipt=response_receipt,
             response_text=response_text,
+            proactive_target=proactive_target,
             source_kind=source_kind,
         )
+        payload = self._accepted_response_payload(
+            episode=episode,
+            companion_target=companion_target,
+        )
+        legacy = self._legacy_accepted_response_receipt(
+            scope=scope,
+            request_id=stable_request_id,
+            episode=episode,
+            companion_target=companion_target,
+        )
+        if legacy is not None:
+            return legacy.as_replayed()
         return self._submit(
             scope=scope,
             request_id=stable_request_id,
             command_type="relationship_response_accepted",
             ordinal=0,
-            payload={"episode": episode.as_dict()},
+            payload=payload,
             created_at_ms=opened_at_ms,
         )
 
@@ -330,6 +615,7 @@ class RelationshipLifecycleService:
         request_id: Any,
         response_receipt: Mapping[str, Any],
         response_text: str,
+        proactive_target: Mapping[str, Any] | None = None,
         source_kind: str = "CHAT_RESPONSE",
     ) -> LifeCommandReceipt:
         """Reopen exactly one already-provisioned episode without writing.
@@ -340,7 +626,7 @@ class RelationshipLifecycleService:
         rather than assume a best-effort side effect succeeded.
         """
 
-        scope, stable_request_id, episode, _opened_at_ms = (
+        scope, stable_request_id, episode, companion_target, _opened_at_ms = (
             self._accepted_response_episode(
                 workspace_id=workspace_id,
                 relationship_subject_id=relationship_subject_id,
@@ -348,18 +634,144 @@ class RelationshipLifecycleService:
                 request_id=request_id,
                 response_receipt=response_receipt,
                 response_text=response_text,
+                proactive_target=proactive_target,
                 source_kind=source_kind,
             )
         )
-        return self._read_command_receipt(
-            self._command_id(
+        payload = self._accepted_response_payload(
+            episode=episode,
+            companion_target=companion_target,
+        )
+        try:
+            return self._read_command_receipt(
+                self._command_id(
+                    scope=scope,
+                    request_id=stable_request_id,
+                    command_type="relationship_response_accepted",
+                    ordinal=0,
+                    payload=payload,
+                )
+            )
+        except LookupError:
+            legacy = self._legacy_accepted_response_receipt(
                 scope=scope,
                 request_id=stable_request_id,
-                command_type="relationship_response_accepted",
-                ordinal=0,
-                payload={"episode": episode.as_dict()},
+                episode=episode,
+                companion_target=companion_target,
             )
+            if legacy is None:
+                raise
+            return legacy.as_replayed()
+
+    def provision_delivered_proactive(
+        self,
+        *,
+        message: LifeOutboxMessage,
+        delivery_receipt: LifeDeliveryReceipt,
+    ) -> LifeCommandReceipt | None:
+        """Open a proactive episode only after its durable delivery receipt.
+
+        Creating a Life outbox intent does not mean a message reached the
+        Gateway.  The immutable ``LifeDeliveryReceipt`` is therefore the
+        source fact for a ``PROACTIVE_MESSAGE`` episode.  Reopening this
+        method is exact-idempotent and never resends the external message.
+        """
+
+        if not isinstance(message, LifeOutboxMessage):
+            raise TypeError("message must be a LifeOutboxMessage")
+        if not isinstance(delivery_receipt, LifeDeliveryReceipt):
+            raise TypeError("delivery_receipt must be a LifeDeliveryReceipt")
+        context = _mapping(
+            _mapping(message.payload).get("_companion_relationship_context")
         )
+        if not context:
+            # Historical or non-companion deliveries have no relationship
+            # semantics.  They remain readable but cannot invent an episode.
+            return None
+        if str(message.destination or "").strip().lower() != "proactive.gateway":
+            raise ValueError("companion relationship context requires proactive.gateway")
+        _validate_delivery_receipt(message=message, receipt=delivery_receipt)
+        if not _delivery_result_is_success(delivery_receipt.result):
+            raise ValueError("companion proactive delivery receipt is not successful")
+        scope, target_id = self._companion_delivery_scope(
+            message=message,
+            context=context,
+        )
+        delivery_ref = f"life-delivery://{delivery_receipt.outbox_id}"
+        result_ref = _opaque_ref(
+            "life-delivery-result",
+            {
+                "outbox_id": delivery_receipt.outbox_id,
+                "delivery_key": delivery_receipt.delivery_key,
+                "payload_digest": delivery_receipt.payload_digest,
+                "authorization_digest": delivery_receipt.authorization_digest,
+                "result": dict(delivery_receipt.result),
+            },
+        )
+        identity = {
+            "schema": "relationship-proactive-delivery.v1",
+            "scope": scope.aggregate_id,
+            "target_id": target_id,
+            "delivery_ref": delivery_ref,
+            "delivery_key": delivery_receipt.delivery_key,
+            "payload_digest": delivery_receipt.payload_digest,
+        }
+        episode = RelationshipEpisodeV1(
+            episode_id=f"relationship_episode_{_digest(identity)[:32]}",
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            source_kind="PROACTIVE_MESSAGE",
+            response_receipt_ref=delivery_ref,
+            response_digest=(
+                f"sha256:{_digest({'delivery': identity, 'result_ref': result_ref})}"
+            ),
+            opened_at_ms=delivery_receipt.completed_at_ms,
+            evidence_refs=(delivery_ref, result_ref),
+        )
+        payload = {"episode": episode.as_dict()}
+        request_id = f"proactive_delivery_{_digest(identity)[:32]}"
+        return self._submit(
+            scope=scope,
+            request_id=request_id,
+            command_type="relationship_proactive_delivered",
+            ordinal=0,
+            payload=payload,
+            created_at_ms=delivery_receipt.completed_at_ms,
+        )
+
+    def reconcile_completed_proactive_deliveries(
+        self,
+        *,
+        limit: int = 100,
+    ) -> int:
+        """Recover completed companion deliveries missing a relation event.
+
+        The delivery receipt and original durable outbox row are the only
+        inputs.  A crash after ``complete_delivery`` but before the relation
+        command is committed is therefore recoverable on Host startup or the
+        next Life I/O tick without a second Gateway submission.  The reader
+        excludes delivery receipts that already have their immutable relation
+        event, so a normal recurrent tick has no historical replay work.
+        """
+
+        reader = self._require_snapshot_reader()
+        messages = reader.list_completed_companion_proactive_messages(
+            limit=max(1, int(limit))
+        )
+        reconciled = 0
+        for message in messages:
+            receipt = reader.get_delivery_receipt(message.outbox_id)
+            if receipt is None:
+                raise RuntimeError(
+                    "COMPANION_PROACTIVE_DELIVERY_RECEIPT_MISSING"
+                )
+            self.provision_delivered_proactive(
+                message=message,
+                delivery_receipt=receipt,
+            )
+            reconciled += 1
+        return reconciled
 
     def _classify_followup(
         self,
@@ -383,6 +795,76 @@ class RelationshipLifecycleService:
         if any(marker in normalized for marker in _HELPFUL_MARKERS):
             return "HELPFUL", 0.72, True, False
         return "NEUTRAL", 0.0, True, False
+
+    @staticmethod
+    def _explicit_feedback_outcome(
+        feedback: str,
+    ) -> tuple[str, float, bool, bool]:
+        """Map one bounded user selection without invoking text inference."""
+
+        normalized = _text(feedback, limit=64).upper()
+        if normalized == "HELPFUL":
+            # A signed explicit selection is stronger than the conservative
+            # textual classifier, but it remains scoped to exactly one
+            # accepted response and one user-controlled request.
+            return "HELPFUL", 0.95, True, False
+        if normalized == "NEUTRAL":
+            return "NEUTRAL", 0.0, True, False
+        if normalized == "MISUNDERSTOOD":
+            return "MISUNDERSTOOD", 0.0, False, False
+        if normalized == "BOUNDARY":
+            return "BOUNDARY", 0.0, False, False
+        raise ValueError("explicit response feedback is invalid")
+
+    def _aftereffect_by_evidence_ref(
+        self,
+        *,
+        scope: RelationshipScope,
+        evidence_ref: str,
+    ) -> tuple[RelationalAftereffectV1, LifeCommandReceipt] | None:
+        """Reopen an explicit feedback command after claim-result failure.
+
+        The Secure Ingress claim can survive a process crash between the
+        canonical Life command and claim completion.  The immutable audit ref
+        is the replay key, so later relationship activity cannot hide the
+        original result behind ``last_aftereffect``.
+        """
+
+        reader = self._require_snapshot_reader()
+        after_sequence = 0
+        while True:
+            batch = reader.list_events(
+                scope.aggregate_id,
+                after_sequence=after_sequence,
+                limit=500,
+            )
+            if not batch:
+                return None
+            for event in batch:
+                sequence = int(event.sequence)
+                if sequence <= after_sequence:
+                    raise RuntimeError("RELATIONSHIP_EVENT_CURSOR_REGRESSION")
+                after_sequence = sequence
+                if event.event_type != "relational_aftereffect_recorded":
+                    continue
+                payload = _mapping(event.payload)
+                aftereffect = _aftereffect_from_payload(
+                    _mapping(payload.get("command_payload"))
+                )
+                if evidence_ref not in aftereffect.evidence_refs:
+                    continue
+                if (
+                    aftereffect.workspace_id != scope.workspace_id
+                    or aftereffect.relationship_subject_id
+                    != scope.relationship_subject_id
+                ):
+                    raise RuntimeError("RELATIONSHIP_AFTEREFFECT_SCOPE_DRIFT")
+                receipt = reader.get_receipt(event.command_id)
+                if receipt is None:
+                    raise RuntimeError("RELATIONSHIP_AFTEREFFECT_REPLAY_RECEIPT_MISSING")
+                return aftereffect, receipt
+            if len(batch) < 500:
+                return None
 
     def _require_command_service(self) -> LifeCommandService:
         service = self._command_service_provider()
@@ -408,6 +890,42 @@ class RelationshipLifecycleService:
             raise RuntimeError("RELATIONSHIP_LIFE_RECEIPT_INVALID")
         return receipt
 
+    def _observe_profile_canary_aftereffect(
+        self,
+        *,
+        scope: RelationshipScope,
+        request_id: str,
+        aftereffect: RelationalAftereffectV1,
+    ) -> None:
+        """Let a composed profile canary observe only strong safe evidence.
+
+        Normal low-confidence text classification intentionally does not count
+        as a preference-learning success.  The no-op path retains ordinary
+        conversation availability; an injected profile lifecycle receives only
+        the strong typed signal and owns its own durable idempotency.
+        """
+
+        provider = self._companion_profile_lifecycle_service_provider
+        if provider is None:
+            return
+        if (
+            aftereffect.outcome != "HELPFUL"
+            or not aftereffect.boundary_respected
+            or aftereffect.helpfulness < 0.85
+        ):
+            return
+        service = provider()
+        method = getattr(service, "record_eligible_canary_aftereffect", None)
+        if not callable(method):
+            raise RuntimeError("COMPANION_PROFILE_LIFECYCLE_SERVICE_NOT_INJECTED")
+        method(
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            request_id=f"{request_id}::companion-profile",
+            aftereffect_id=aftereffect.aftereffect_id,
+        )
+
     def _accepted_response_episode(
         self,
         *,
@@ -417,8 +935,15 @@ class RelationshipLifecycleService:
         request_id: Any,
         response_receipt: Mapping[str, Any],
         response_text: str,
+        proactive_target: Mapping[str, Any] | None,
         source_kind: str,
-    ) -> tuple[RelationshipScope, str, RelationshipEpisodeV1, int]:
+    ) -> tuple[
+        RelationshipScope,
+        str,
+        RelationshipEpisodeV1,
+        CompanionProactiveTargetV1 | None,
+        int,
+    ]:
         scope = RelationshipScope.from_values(
             workspace_id=workspace_id,
             relationship_subject_id=relationship_subject_id,
@@ -453,7 +978,132 @@ class RelationshipLifecycleService:
             opened_at_ms=opened_at_ms,
             evidence_refs=(response_receipt_ref,),
         )
-        return scope, stable_request_id, episode, opened_at_ms
+        companion_target = self._accepted_response_target(
+            scope=scope,
+            response_receipt_ref=response_receipt_ref,
+            opened_at_ms=opened_at_ms,
+            target=proactive_target,
+        )
+        return scope, stable_request_id, episode, companion_target, opened_at_ms
+
+    @staticmethod
+    def _accepted_response_payload(
+        *,
+        episode: RelationshipEpisodeV1,
+        companion_target: CompanionProactiveTargetV1 | None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"episode": episode.as_dict()}
+        if companion_target is not None:
+            payload["companion_proactive_target"] = companion_target.as_dict()
+        return payload
+
+    def _legacy_accepted_response_receipt(
+        self,
+        *,
+        scope: RelationshipScope,
+        request_id: str,
+        episode: RelationshipEpisodeV1,
+        companion_target: CompanionProactiveTargetV1 | None,
+    ) -> LifeCommandReceipt | None:
+        """Reopen a pre-registry episode without adding a second episode.
+
+        Older accepted-reply commands did not carry a target.  A route retry
+        after this cutover may now have target metadata available, but must
+        not create a second command with the same episode identity merely to
+        backfill it.  The next accepted response can register a new target.
+        """
+
+        if companion_target is None:
+            return None
+        legacy_payload = self._accepted_response_payload(
+            episode=episode,
+            companion_target=None,
+        )
+        legacy_command_id = self._command_id(
+            scope=scope,
+            request_id=request_id,
+            command_type="relationship_response_accepted",
+            ordinal=0,
+            payload=legacy_payload,
+        )
+        try:
+            return self._read_command_receipt(legacy_command_id)
+        except LookupError:
+            return None
+
+    @staticmethod
+    def _accepted_response_target(
+        *,
+        scope: RelationshipScope,
+        response_receipt_ref: str,
+        opened_at_ms: int,
+        target: Mapping[str, Any] | None,
+    ) -> CompanionProactiveTargetV1 | None:
+        raw = _mapping(target)
+        if not raw:
+            return None
+        platform = _text(raw.get("platform"), limit=80).lower()
+        conversation_id = _text(raw.get("conversation_id"), limit=512)
+        if not platform and not conversation_id:
+            return None
+        if not platform or not conversation_id:
+            raise ValueError("companion proactive target requires platform and conversation_id")
+        target_id = _companion_target_id(
+            scope=scope,
+            platform=platform,
+            conversation_id=conversation_id,
+        )
+        return CompanionProactiveTargetV1(
+            target_id=target_id,
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            platform=platform,
+            conversation_id=conversation_id,
+            source_receipt_ref=response_receipt_ref,
+            registered_at_ms=opened_at_ms,
+        )
+
+    @staticmethod
+    def _companion_delivery_scope(
+        *,
+        message: LifeOutboxMessage,
+        context: Mapping[str, Any],
+    ) -> tuple[RelationshipScope, str]:
+        required = {
+            "schema_version",
+            "target_id",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+        }
+        if frozenset(context) != required:
+            raise ValueError("companion delivery context field set drift")
+        if str(context.get("schema_version") or "") != (
+            "companion_proactive_delivery_context.v1"
+        ):
+            raise ValueError("companion delivery context schema drift")
+        scope = RelationshipScope.from_values(
+            workspace_id=context.get("workspace_id"),
+            relationship_subject_id=context.get("relationship_subject_id"),
+            session_id=context.get("session_id"),
+        )
+        if message.person_id != scope.aggregate_id:
+            raise ValueError("companion delivery aggregate scope drift")
+        payload = _mapping(message.payload)
+        platform = _text(payload.get("platform"), limit=80).lower()
+        conversation_id = _text(payload.get("conversation_id"), limit=512)
+        if not platform or not conversation_id:
+            raise ValueError("companion delivery target route is required")
+        target_id = _text(context.get("target_id"), limit=240)
+        expected_target_id = _companion_target_id(
+            scope=scope,
+            platform=platform,
+            conversation_id=conversation_id,
+        )
+        if target_id != expected_target_id:
+            raise ValueError("companion delivery target identity drift")
+        return scope, target_id
 
     @staticmethod
     def _command_id(

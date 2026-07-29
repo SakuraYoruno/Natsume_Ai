@@ -18,9 +18,10 @@ def test_compute_runtime_motive_state_uses_limbic_wrappers_when_missing_inputs(
                 "willingness_level": "RELUCTANT",
                 "topic": current_topic,
             },
-            resolve_body_sense_state=lambda: {
+            resolve_body_sense_state=lambda person_id=None: {
                 "fatigue_level": "TIRED",
                 "drowsiness_level": "SLEEPY",
+                "relationship_subject_id": person_id,
             },
             resolve_inner_world_state=lambda person_id=None: {
                 "last_interaction_ts_ms": 0,

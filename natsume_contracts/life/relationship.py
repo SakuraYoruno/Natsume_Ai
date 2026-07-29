@@ -31,6 +31,15 @@ _AFTEREFFECT_OUTCOMES = frozenset(
 )
 _PROACTIVE_PERMISSIONS = frozenset({"UNKNOWN", "ALLOWED", "DENIED"})
 _CONSENT_STATES = frozenset({"NOT_GRANTED", "REVIEW_REQUIRED", "GRANTED"})
+_COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA = (
+    "companion_proactive_permission_request.v1"
+)
+_COMPANION_RESPONSE_FEEDBACK_REQUEST_SCHEMA = (
+    "companion_response_feedback_request.v1"
+)
+_EXPLICIT_RESPONSE_FEEDBACK = frozenset(
+    {"HELPFUL", "NEUTRAL", "MISUNDERSTOOD", "BOUNDARY"}
+)
 
 
 def _required(value: Any, name: str, *, limit: int = 240) -> str:
@@ -73,6 +82,187 @@ def _refs(value: Any, name: str) -> tuple[str, ...]:
     if len(set(result)) != len(result):
         raise ValueError(f"{name} must not contain duplicates")
     return result
+
+
+@dataclass(frozen=True)
+class CompanionProactivePermissionRequestV1:
+    """One structured, user-authenticated proactive-contact decision.
+
+    This narrow wire contract deliberately excludes free-form explanation,
+    message bodies, inferred feeling and routing target. The Host derives its
+    evidence from the signed Secure Ingress claim and the canonical
+    relationship aggregate owns the resulting state transition.
+    """
+
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    proactive_permission: str
+    schema_version: str = _COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema_version != _COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA:
+            raise ValueError("companion proactive permission request schema is invalid")
+        permission = _required(
+            self.proactive_permission,
+            "proactive_permission",
+            limit=64,
+        ).upper()
+        if permission not in {"ALLOWED", "DENIED"}:
+            raise ValueError("proactive_permission must be ALLOWED or DENIED")
+        object.__setattr__(self, "workspace_id", _required(self.workspace_id, "workspace_id"))
+        object.__setattr__(
+            self,
+            "relationship_subject_id",
+            _required(self.relationship_subject_id, "relationship_subject_id"),
+        )
+        object.__setattr__(self, "session_id", _required(self.session_id, "session_id"))
+        object.__setattr__(self, "proactive_permission", permission)
+        object.__setattr__(
+            self,
+            "schema_version",
+            _COMPANION_PROACTIVE_PERMISSION_REQUEST_SCHEMA,
+        )
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CompanionProactivePermissionRequestV1":
+        if not isinstance(value, Mapping):
+            raise ValueError("companion proactive permission request must be an object")
+        expected = {
+            "schema_version",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+            "proactive_permission",
+        }
+        if set(value) != expected:
+            raise ValueError("companion proactive permission request field set is invalid")
+        for field_name in expected:
+            if not isinstance(value.get(field_name), str):
+                raise ValueError(
+                    f"companion proactive permission request {field_name} must be a string"
+                )
+            if value[field_name] != value[field_name].strip():
+                raise ValueError(
+                    f"companion proactive permission request {field_name} cannot have outer whitespace"
+                )
+        if value["proactive_permission"] not in {"ALLOWED", "DENIED"}:
+            raise ValueError("companion proactive permission request permission must be exact")
+        return cls(
+            schema_version=value["schema_version"],
+            workspace_id=value["workspace_id"],
+            relationship_subject_id=value["relationship_subject_id"],
+            session_id=value["session_id"],
+            proactive_permission=value["proactive_permission"],
+        )
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "schema_version": self.schema_version,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "proactive_permission": self.proactive_permission,
+        }
+
+
+@dataclass(frozen=True)
+class CompanionResponseFeedbackRequestV1:
+    """A user-authenticated, body-free evaluation of one accepted response.
+
+    The request intentionally points to an existing canonical response receipt
+    instead of copying assistant text or asking the caller to report an
+    arbitrary score.  The relationship aggregate verifies that the referenced
+    receipt still owns an active provisional episode before it can become an
+    aftereffect.
+    """
+
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    response_receipt_ref: str
+    feedback: str
+    schema_version: str = _COMPANION_RESPONSE_FEEDBACK_REQUEST_SCHEMA
+
+    def __post_init__(self) -> None:
+        if self.schema_version != _COMPANION_RESPONSE_FEEDBACK_REQUEST_SCHEMA:
+            raise ValueError("companion response feedback request schema is invalid")
+        workspace = _required(self.workspace_id, "workspace_id")
+        subject = _required(
+            self.relationship_subject_id,
+            "relationship_subject_id",
+        )
+        session = _required(self.session_id, "session_id")
+        receipt_ref = _required(
+            self.response_receipt_ref,
+            "response_receipt_ref",
+            limit=512,
+        )
+        if not receipt_ref.startswith(("life-event://", "life-delivery://")):
+            raise ValueError(
+                "response_receipt_ref must reference one accepted Life response"
+            )
+        feedback = _required(self.feedback, "feedback", limit=64).upper()
+        if feedback not in _EXPLICIT_RESPONSE_FEEDBACK:
+            raise ValueError(
+                "feedback must be one of "
+                f"{sorted(_EXPLICIT_RESPONSE_FEEDBACK)}"
+            )
+        object.__setattr__(self, "workspace_id", workspace)
+        object.__setattr__(self, "relationship_subject_id", subject)
+        object.__setattr__(self, "session_id", session)
+        object.__setattr__(self, "response_receipt_ref", receipt_ref)
+        object.__setattr__(self, "feedback", feedback)
+        object.__setattr__(
+            self,
+            "schema_version",
+            _COMPANION_RESPONSE_FEEDBACK_REQUEST_SCHEMA,
+        )
+
+    @classmethod
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+    ) -> "CompanionResponseFeedbackRequestV1":
+        if not isinstance(value, Mapping):
+            raise ValueError("companion response feedback request must be an object")
+        expected = {
+            "schema_version",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+            "response_receipt_ref",
+            "feedback",
+        }
+        if set(value) != expected:
+            raise ValueError("companion response feedback request field set is invalid")
+        for field_name in expected:
+            raw = value.get(field_name)
+            if not isinstance(raw, str) or raw != raw.strip():
+                raise ValueError(
+                    "companion response feedback request "
+                    f"{field_name} must be an exact string"
+                )
+        if value["feedback"] not in _EXPLICIT_RESPONSE_FEEDBACK:
+            raise ValueError("companion response feedback must be exact")
+        return cls(
+            schema_version=value["schema_version"],
+            workspace_id=value["workspace_id"],
+            relationship_subject_id=value["relationship_subject_id"],
+            session_id=value["session_id"],
+            response_receipt_ref=value["response_receipt_ref"],
+            feedback=value["feedback"],
+        )
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "schema_version": self.schema_version,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "response_receipt_ref": self.response_receipt_ref,
+            "feedback": self.feedback,
+        }
 
 
 @dataclass(frozen=True)
@@ -120,6 +310,71 @@ class RelationshipEpisodeV1:
             "response_digest": self.response_digest,
             "opened_at_ms": self.opened_at_ms,
             "evidence_refs": list(self.evidence_refs),
+        }
+
+
+@dataclass(frozen=True)
+class CompanionProactiveTargetV1:
+    """One scope-bound destination registered by an accepted foreground reply.
+
+    This is a routing capability for a relationship aggregate, not evidence of
+    intimacy or permission to contact.  The relationship's explicit
+    ``proactive_permission`` remains the separate authority that can allow a
+    scheduler to use it.  No user or assistant body is retained here.
+    """
+
+    target_id: str
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    platform: str
+    conversation_id: str
+    source_receipt_ref: str
+    registered_at_ms: int
+    self_id: str = _SELF_ID
+
+    def __post_init__(self) -> None:
+        if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
+            raise ValueError("self_id must be natsume_ai")
+        platform = _required(self.platform, "platform", limit=80).lower()
+        object.__setattr__(self, "target_id", _required(self.target_id, "target_id"))
+        object.__setattr__(self, "workspace_id", _required(self.workspace_id, "workspace_id"))
+        object.__setattr__(
+            self,
+            "relationship_subject_id",
+            _required(self.relationship_subject_id, "relationship_subject_id"),
+        )
+        object.__setattr__(self, "session_id", _required(self.session_id, "session_id"))
+        object.__setattr__(self, "platform", platform)
+        object.__setattr__(
+            self,
+            "conversation_id",
+            _required(self.conversation_id, "conversation_id", limit=512),
+        )
+        object.__setattr__(
+            self,
+            "source_receipt_ref",
+            _required(self.source_receipt_ref, "source_receipt_ref", limit=512),
+        )
+        object.__setattr__(
+            self,
+            "registered_at_ms",
+            _non_negative_int(self.registered_at_ms, "registered_at_ms"),
+        )
+        object.__setattr__(self, "self_id", _SELF_ID)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "companion_proactive_target.v1",
+            "target_id": self.target_id,
+            "self_id": self.self_id,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "platform": self.platform,
+            "conversation_id": self.conversation_id,
+            "source_receipt_ref": self.source_receipt_ref,
+            "registered_at_ms": self.registered_at_ms,
         }
 
 
@@ -275,6 +530,9 @@ class RelationshipStateV2:
 
 
 __all__ = [
+    "CompanionProactivePermissionRequestV1",
+    "CompanionProactiveTargetV1",
+    "CompanionResponseFeedbackRequestV1",
     "RelationshipEpisodeV1",
     "RelationshipStateV2",
     "RelationalAftereffectV1",

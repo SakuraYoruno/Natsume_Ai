@@ -29,6 +29,66 @@ class EmotionTimelineEntry:
     source: str  # "user_input" / "visual" / "proactive" / "bond_event"
 
 
+class RetiredEmotionTimelineProjection:
+    """Fail-closed read projection for the retired Host emotion timeline.
+
+    The historical ``EmotionTimeline`` mixed user-observation-derived signals
+    with Natsume's own affect.  Production Host composition must therefore
+    never hydrate it from the legacy ledger or use it to infer self-affect.
+    This deliberately carries an explicit retirement marker rather than a
+    neutral emotion: a neutral value would itself look like a valid emotional
+    fact to older consumers.
+
+    The mutable ``EmotionTimeline`` remains available only to explicitly
+    legacy/offline compositions during the rollback window.
+    """
+
+    status = "RETIRED_CANONICAL_LIFE"
+    authority = "CANONICAL_LIFE_JOURNAL"
+    reason_code = "LEGACY_EMOTION_TIMELINE_RETIRED"
+
+    def rebuild_summary(self, *, window_ms: int = 300_000) -> dict[str, Any]:
+        del window_ms
+        return self._projection()
+
+    def build_daily_diary(
+        self,
+        *,
+        window_ms: int = 86_400_000,
+    ) -> dict[str, Any]:
+        del window_ms
+        return self._projection()
+
+    def build_cross_day_comparison(
+        self,
+        *,
+        today_window_ms: int = 86_400_000,
+        yesterday_window_ms: int = 86_400_000,
+    ) -> dict[str, Any]:
+        del today_window_ms, yesterday_window_ms
+        return self._projection()
+
+    def query(self, **_kwargs: Any) -> list[EmotionTimelineEntry]:
+        return []
+
+    @property
+    def entries(self) -> list[EmotionTimelineEntry]:
+        return []
+
+    @property
+    def entry_count(self) -> int:
+        return 0
+
+    @classmethod
+    def _projection(cls) -> dict[str, Any]:
+        return {
+            "status": cls.status,
+            "authority": cls.authority,
+            "reason_code": cls.reason_code,
+            "entries": [],
+        }
+
+
 class EmotionTimeline:
     """情感时间线——记录情感状态变化历史（M29-E OPT-9）。
 

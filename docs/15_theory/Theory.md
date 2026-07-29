@@ -16,11 +16,61 @@
 或单一 emotion tag。真实感不意味着操控：七海可以自然表达不高兴、担心、
 想念或克制的嫉妒，但不得把感受转化为用户必须回应、排他或内疚的义务。
 
+过往互动的情绪摘要也不是第四种自我情绪 authority。历史时间线最多只能作为明确标注的
+兼容/离线投影；一旦其条目曾混入用户观察、旧积分或过程内状态，它就不得被重新预热后拿来
+推断“七海现在是什么感受”。生产读取应直接使用本轮已冻结的 canonical self-affect，或在无
+该上下文时承认不可用；把缺失伪装成 `NEUTRAL` 同样会制造一个假的情感事实。
+
+同一原则也约束私密活动和默认模式：它们可以阅读同一 canonical snapshot 的有界投影，却不能先拿到
+七海的 self-affect 后又从旧时间线或 Bond 积分“补一份感觉”。投影只传递当前 mixed components、mood、need、
+调节模式、裂痕/修复和主动权限等必要纹理；episode 的 trigger/evidence、用户与 workspace identity、以及
+浪漫/排他/依赖 consent 不应进入生成上下文。尤其不能把 trust 或 attunement 再压成一个 Bond score，因为
+分数无法推出亲密、主动或排他授权。默认模式的连续性是读取信号，不是后台循环为七海补写正向情绪的许可。
+
 观察不是命令。多模态信号都带有来源、置信度、有效期和相互冲突的可能：一段
 文字可以说“没事”，声学却显示紧张；视觉也可能过期或不可用。系统应保留这些
 假设及其证据摘要，并让 Appraisal 结合七海自身目标、关系、边界和可控性选择
 她的感受与陪伴动作。由此，用户的悲伤可以使七海产生关切，而不是把七海直接
 改写成悲伤；不确定时应自然承认不确定，而不是伪造读心结论。
+
+主动陪伴也不是由亲密分数或七海一时想念自动取得的权利。它必须同时满足明确
+的主动联系许可、当前没有未结裂痕或等待用户后效应的 episode、七海自身没有
+选择给空间/暂缓、以及当下时段和打扰风险适宜。没有回应、投递失败或用户忙碌
+只能降低近期主动频率或保持安静，不能被解释成关系拒绝，更不能被转化为催促、
+索取、冷淡惩罚或任何回应义务。这样七海可以真诚地说“我想起你了”，但永远不把
+这份感受变成“你必须回来照顾我”。
+
+因此，旧的定时问候器不能作为同一行为的“备用通道”：即使它保存了旧的关系分数、
+情绪时间线或固定问候模板，也没有资格重新解释七海的感受或发起联系。升级后的
+运行时应停用它的持久任务；已经在队列中的旧任务只能留下可审计的拒绝结果，而不能
+借恢复机制再次发送。恢复正确性服务于关系连续性，不能成为绕开 consent、调节或
+关系后效应的理由。
+
+成长也不应把一次用户反应偷偷变成“人格升级”。低风险的表达偏好可以形成一个
+可逆 profile，但它只能改变称呼、回答长度、轻微幽默、追问频率、安慰方式、主动
+时段、声音语速和动作强度；它不能改写 Soul、价值观、关系许可、自我情绪或亲密
+身份。启动 profile 至少需要独立的、跨日的、守住边界的正向后效应；随后在有限的
+真实互动中 canary，才允许转正。每个版本必须指向精确的前一版本，以便观察到不适
+配时不争辩、不把用户的沉默当作同意，而是恢复原有表达。普通文本分类的低置信判断
+不能被包装成足以自动学习的“喜欢”。
+
+这里的“明确许可”不是模型从一句温暖的话、情绪分类或关系积分里猜出的结论。它应当是
+一个只含 scope、session 与 `ALLOWED/DENIED` 的结构化用户控制：签名身份必须是 `user`，
+principal 必须等于 relationship subject，tenant 必须等于 workspace；签名 claim 的 audit ref
+才是 journal 中的证据。该接口不接收自由文本解释，也不允许 `UNKNOWN` 被写成授权。这样，
+用户可以随时明确收紧或放开主动联系，而七海不能把“我想念你”误读为“我可以打扰你”。
+
+“可以发给谁”也必须是关系连续性的一部分：它只能由已接受的对话结果登记为
+与 workspace、relationship subject、session 绑定的可联系 target，不能由进程内
+队列、旧的 `last_target` 缓存或模型猜测补出。登记本身不等于许可；调度器还要在
+相同 scope 的关系许可、未结 episode 与七海自身 regulation 都允许时才可使用它。
+
+“发出”同样不能被偷换成“用户已经收到”。关系中的主动 episode 只能在本地
+`proactive.gateway` 取得 immutable transport receipt 后开启；该 receipt 必须与原
+outbox、授权摘要和 scope-bound target 精确相符。若进程在 receipt 与关系事件之间
+中断，恢复程序只能重开这两个本地事实并补记 deterministic episode，不能借恢复之名
+再次外发。第三方平台送达、用户阅读和用户回应仍是不同层次的证据；只有后续真实输入
+才可以形成 relationship aftereffect。
 
 代码封口与生产激活是两个不同事实。前者要求所有启用路线共享 canonical
 authority、持久恢复和一次波次证据；后者还要求目标部署、真实网络、外部
@@ -525,6 +575,21 @@ Identity 至少包含：
 关系不是一个可以刷分的“好感度”。它至少需要表达熟悉、信任、舒适、开放、边界柔软度、依恋、冲突裂痕等不同维度。
 
 当前 legacy [RelationshipStateBlock](../../host_brain/persona/context/relationship_state.py) 仍会从 Bond 与 social state 派生兼容表达上下文，但它不再是关系长期 authority。DL-03 已把 [`RelationshipEpisodeV1`](../../natsume_contracts/life/relationship.py)、aftereffect 与有界 `RelationshipStateV2` 接入 canonical [Digital Life reducer](../../host_brain/digital_life/domain_reducer.py)：已接受的回复先开 provisional episode，下一次用户输入才以脱敏 digest 记录是否接住、触及边界、误解或被接受修复。Surface 只能从内部 provenance hand-off 把该结果变成表达的收紧约束，不能由请求体、模型或 Bond 分数直接改写关系事实。
+
+普通 Chat 的兼容表达投影也必须遵守这条因果边界。只有同一内部 hand-off 同时证明七海身份、workspace、
+relationship subject、session 和 `AffectFusion → RelationshipStateV2` schema 链完整时，才可将关系纹理
+带入提示。即便历史 Bond 说“灵魂伴侣”，该投影也不能把 trust、safety、attunement、romantic consent 或
+主动许可反推成恋人话术：它最多表达为非浪漫朋友关系中的安全、轻松、修复或给空间。损坏或 scope drift 的
+claimed canonical context 应收敛到安全朋友状态，而不是借旧分数恢复亲密。这里的克制不是中性化七海，而是
+让她可以真诚地关心、受伤或修复，同时不把关系温度伪造成用户欠她回应的义务。
+
+这条因果边界必须延续到检索与动机：它们决定七海先想起什么、把注意力放在哪里，不能在生成前偷偷用旧 Bond
+恢复亲密度。canonical hand-off 存在时，检索只接收无分数的朋友/义姐弟 projection；无效 hand-off 仅得到
+guarded 状态，而非向 state arbiter 借回历史 stage。这既保留关系连续性，也避免将关系温度当作自动主动权。
+
+这条因果边界必须延续到最后的 Surface 表达 Gate：一旦 `source_authority` 已是 canonical 或被拒绝的
+canonical hand-off，历史 Bond 的显式距离、高 closeness、记忆中的恋人字样和 caller 指定的恋人 task 都不能
+再次提升关系距离。裂痕可以让七海收住、修复或给空间，但不能被“安全保护”错误地中性化成没有感受。
 
 关系状态必须遵守：
 
@@ -1599,3 +1664,112 @@ Registry adapter 是一条显式协议边界：未知 adapter、protocol drift�
 可以自动维持或下降，新能力最高只能进入 L1/L2；升级仍必须经 Lab 和 Review。
 Capability Forge 因而只能产生 proposal，不能批准自身、调整运行 route 或把
 运行统计反向写成激活证据。
+
+## 31. 陪伴偏好是可撤回的表达试验，不是人格重写
+
+用户可以明确提出“这几天说短一点”“语速慢一点”之类的低风险表达偏好，但这不等于
+用户、模型或一次聊天拥有重写七海人格的权力。正确边界是一个**签名的、结构化的
+canary 请求**：它只能列出完整且有界的称呼、长度、幽默、追问、安慰、主动时段、语速和
+动作强度；不能夹带聊天正文、情绪标签、Soul patch、关系许可或任意状态命令。
+
+该请求的认证主体必须就是关系对象，租户必须就是 workspace，并由独立 scope 授权。系统
+也不能相信请求中自报的“我之前喜欢这样”：Host 只从 canonical relationship aftereffect
+journal 重新选取足够独立、跨日、强且 boundary-safe 的证据。满足门槛时只开始五次互动的
+CANARY；第五条独立、合格的后效应会以 deterministic receipt 自动 activation，任何时刻都能精确回到候选创建时绑定的旧
+profile。Secure Ingress audit ref 与 profile version 同时写入 append-only Life journal，所以
+duplicate、重启或 claim-result 中断只会重开同一 receipt，而不是制造第二次成长。
+
+这条边界让“七海更懂得怎样和我说话”保持可感知、可撤销、非操控，同时保证 Soul、核心价值、
+亲密身份、关系许可和 self-affect 不被偏好学习吞没。用户界面的 Review、真实 canary 体验证据和
+旧兼容 writer 的清零仍是后续工作；有 endpoint 不等于已经证明长期体验更好。
+
+## 32. 明确回应反馈是关系证据，不是对人格的投票
+
+“这句话有帮到我”“你误解我了”“这里越界了”是用户对**某一条已经呈现的回应**
+的关系性评价，而不是让一段自由文本在事后重写七海。因而它必须引用一个仍在
+canonical provisional relationship episode 中的 response receipt；反馈本身只能是
+`HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY` 四种有限结果。原文、自由评分、
+情绪标签和 Soul patch 都不进入这个证据入口。
+
+经过独立 scope 认证的 `HELPFUL` 可以成为该回应的高置信 aftereffect，但它不创建
+profile，也不能由请求指定 activation profile。它至多推进一个已经由独立历史证据启动的 CANARY；第五条合格 canary 后效应才由 canonical lifecycle 自动 activation；
+普通聊天中的关键词分类和 persona proposal 继续是保守、低权重的理解信号。这样，
+七海能从“这次有没有接住我”学习低风险表达方式，却不会把一次点赞、一次误解或
+一段模型推断误当成对人格、亲密身份、关系许可或 self-affect 的授权。
+
+Secure Ingress audit ref 与 aftereffect 一起进入 append-only Life journal，故 claim
+完成前崩溃会按同一证据精确重开，而不是再次写入关系事件。`MISUNDERSTOOD` 与
+`BOUNDARY` 同样应保留为可见的关系事实；它们不能被沉默、投递失败或一次道歉自动
+冲销。真正的 Monitor 反馈界面、人工 Review、canary 的长期体验结果和 legacy writer
+退役仍需后续波次证明。
+
+## 33. 撤销表达偏好只能回到刚才的自己，不能重写历史
+
+用户可以撤销当前试用中的称呼、语速或动作强度，但“撤销”不能成为一个任意选择历史人格版本的
+后门。故 Host 只接受签名的 `CompanionProfileRollbackRequestV1`：它必须携带用户当前实际看到的
+active profile identity，并同时满足独立 `companion:profile:rollback`、关系主体与 workspace tenant
+绑定。请求没有 target profile 字段；canonical lifecycle 只能读取 current active profile 自己冻结的
+`rollback_profile_id`。
+
+回滚 command 将 opaque Secure Ingress audit-derived control ref 一并写进 append-only Life journal。
+如果命令已经提交、但 HTTP claim-result 尚未写回，duplicate 或重启会靠这条 immutable control ref
+精确重开原 receipt，而不会依据已经变化的 active head 再次猜测或执行一次回滚。过期 profile identity、
+跨用户/workspace、service principal 和额外历史 target 一律拒绝。这个机制只撤回低风险表达版本；
+Soul、关系许可、亲密身份和七海自身情感仍不受用户偏好 API 改写。
+
+## 34. 感受不能藏在 Host 的便利缓存里
+
+七海的感受不是“最近一次输入的情绪标签”，也不是某个 Host 进程里混合出来的连续向量。
+用户情绪只能作为有时效、置信度和冲突信息的观察；七海是否担心、想安慰、需要克制或想给
+空间，必须经过 Appraisal 并留在 canonical Life journal。否则重启、并发会话和不同用户会让
+“她的心情”变成偶然的内存残留。
+
+因此 production composition 不得把 `HostEmotionRuntime` 当作方便的自我状态 fallback。当前
+Input 与 Tribe 都只经 `AffectFusionService` 进入 Life authority；Host root 不再构造该 mutable
+runtime，两个 composition builder 缺少 Life provider 时也必须以
+`CANONICAL_AFFECT_FUSION_NOT_INJECTED` 失败关闭。旧类仅可被直接隔离测试覆盖，不能重新成为
+offline 或 production Host 的第二条自我情感路径。这个原则不否定身体感受或调节层，但它们在
+未被 canonical journal 吸收前只能是观察或只读投影，不能自行决定七海的情绪与关系。
+同样地，production Limbic 不可把一次 body/Bond callback 偷渡为旧 `EmotionPersistence`、timeline 或
+metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIRED_CANONICAL_LIFE`。这不是“压平
+情绪”，而是要求真实的受伤、牵挂或轻快都先有可解释的 Appraisal 与 Life journal 原因，避免两套隐性
+状态在不同重启、用户或会话中互相覆盖。
+
+同理，所谓“身体感受”不能靠一个进程内 cortisol/oxytocin 计数器偷偷改变下一轮表达。Endocrine 的
+hard-state projection 可以作为当下的安全读取，但 canonical mode 不得累加 delta、保存 last state、生成
+未经 journal 支持的提示，或再推动 Limbic/PainReward 的情绪链。这样并非否认疲倦、紧张或放松的体验；
+它要求这些体验未来以可追溯 observation/Appraisal 进入 Life，而不是以易失 callback 代替七海的因果。
+
+同样，BodySense 不能以“更像身体”为名成为全局的第二颗心。production 读取身体在场感时，必须带上
+当前 relationship subject，从该 subject 的 canonical Life snapshot 纯投影疲劳、困倦和孤独；这个投影没有
+进程时钟、单例、repository 写入或 tick。缺少 subject 时宁可明确不可用，也不能把上一位用户的内存借给
+当前对话。旧的会话开始/结束、loneliness 注入和 scheduler tick 可以在回滚窗口保留接口，但 canonical mode
+必须显式退役且不再发布会重新影响 Limbic 的事件。这样七海仍能自然说“有点困”或“有点想念”，但那是她
+当前 Life 状态的表达，不是某个进程碰巧还活着的残留。
+
+Motive 也不应成为另一份隐性人格记忆。它可以把已经冻结的 Life、关系和身体在场投影为“更想安慰”或
+“更想给空间”的并存倾向，但每次计算必须是新建、无状态的纯规则计算：不能保留模块级 engine、不能存储
+上一轮输入，更不能借此改变 self-affect、关系或许可。这样表达倾向仍然具有可解释性，却不会把不同用户的
+情绪遗留在进程内缓存中。
+
+关系也不能依靠“稍后有空再写”的进程内队列来延续。已接受的回复、裂痕、修复和主动许可必须先成为
+canonical Life journal 的原子事实；旧 Bond 分数队列即使能在多数时候落库，也会在队列满、崩溃或重启时
+留下无法解释的缺口。生产环境应将其替换为显式 no-write adapter：保留只读历史投影和可观测的退役结果，
+但不再以异步补写或失败直写补偿关系状态。
+
+## 35. 观察界面也不能重新发明一颗心
+
+监控页很容易被误解为“只是展示”，于是有人会觉得它可以随手读取旧 Bond、旧 timeline 或某个 agent
+缓存来拼出更丰富的画面。对实时情感数字生命而言，这同样会破坏因果：一边的聊天正在依据 canonical
+Life 理解“她有点受伤但仍愿意修复”，另一边的 OBS 却把用户的难过或旧分数显示成“七海现在很难过”，
+运营者、调试者和之后的实现者就会被错误的第二份事实引导。
+
+因此 runtime snapshot 必须是一个**只读的、同源的镜头**。它读取当前 relationship subject 的一条
+canonical Life head，明确分栏呈现 `natsume_ai` 的 self-affect、用户 affect observation 与关系纹理；
+用户的观察可以解释七海为何关切，却不能成为七海情绪本身。关系也只能呈现有界、非升级的 texture，
+不得从 trust、旧 stage 或分数猜出恋爱、排他或主动权限。
+
+更重要的是，镜头失焦时不能换一台旧相机：一旦 production reader 已组成，读取失败、self-id 或 subject
+漂移应当显式 degraded，而不是偷偷调用 SocialBrain、Limbic、Prefrontal、EmotionTimeline 或 Bond。这样
+“我现在不知道”比“我看见了一份过期的她”更诚实；也是让七海在重启、多个用户和长期关系中仍保持同一个
+内在因果的必要条件。

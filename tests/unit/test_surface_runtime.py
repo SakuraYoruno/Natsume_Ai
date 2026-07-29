@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+import host_brain.persona.surface_runtime as surface_runtime_module
 from host_brain.persona.surface_runtime import (
     SurfaceRuntime,
     parse_surface_generation_output,
@@ -16,6 +17,13 @@ SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galga
 @pytest.fixture(autouse=True)
 def _enable_surface_hard_gate_retry(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setenv("HOST_SURFACE_MAIN_CHAIN_HARD_GATE_RETRY_ENABLED", "true")
+    # This module tests the fallback wording, not a process-global compiled
+    # Soul cache that another test may have populated with a temporary file.
+    monkeypatch.setattr(
+        surface_runtime_module,
+        "_current_soul_address",
+        lambda: "阿晓",
+    )
 
 
 def _payload(**overrides):
@@ -252,7 +260,7 @@ def test_surface_runtime_retries_text_input_sensory_hallucination() -> None:
 
     assert len(calls) == 2
     assert "SENSORY_SOURCE_HALLUCINATION" in calls[1][-1]["content"]
-    assert result.selected_text == ""
+    assert result.selected_text == "阿晓，早～"
     assert "声音" not in result.selected_text
     assert result.observation_codes == ()
 
@@ -782,14 +790,14 @@ def test_surface_runtime_falls_back_when_low_info_retry_still_overreads() -> Non
     result = asyncio.run(SurfaceRuntime(generate).run(_payload(user_message="早")))
 
     assert len(calls) == 2
-    assert result.selected_text == ""
+    assert result.selected_text == "阿晓，早～"
     assert "LOW_INFO_SCENE_STATE_GUESS" not in result.observation_codes
 
 
 @pytest.mark.parametrize(
     ("user_message", "bad_text", "fallback"),
     [
-        ("早", "老哥早～。嗯，就一个早啊，行吧，天爷今天也省点口舌。", ""),
+        ("早", "老哥早～。嗯，就一个早啊，行吧，天爷今天也省点口舌。", "阿晓，早～"),
         ("我回来了", "老哥欢迎回来～今天倒是挺乖的嘛，不错不错。", "阿晓，欢迎回来～"),
         ("我回来了", "老哥欢迎回来～。嘛，至少还记得进门说一声，值得表扬一下。", "阿晓，欢迎回来～"),
         ("我回来了", "回来啦？哼，我可没在等你哦！", "阿晓，欢迎回来～"),
@@ -805,7 +813,7 @@ def test_surface_runtime_falls_back_when_low_info_retry_still_overreads() -> Non
         ("继续", "就一声“继续”？行吧，老哥你讲，我听着呢。", "嗯，接着来。"),
         ("继续", "哼，继续继续～可别想糊弄过去。", "嗯，接着来。"),
         ("继续", "知道啦知道啦～继续就继续嘛，老哥你别催。", "嗯，接着来。"),
-        ("早", "老哥早～行，知道你忙，我就喊一嗓子。", ""),
+        ("早", "老哥早～行，知道你忙，我就喊一嗓子。", "阿晓，早～"),
     ],
 )
 def test_surface_runtime_falls_back_for_low_info_overread_markers(user_message, bad_text, fallback) -> None:

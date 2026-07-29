@@ -45,6 +45,14 @@ class LifeCommandRepositoryPort(Protocol):
         after_event_id: str = "",
         limit: int = 100,
     ) -> list[dict[str, Any]]: ...
+    def list_companion_profile_event_heads(
+        self,
+        person_id: str,
+        *,
+        after_created_at_ms: int = 0,
+        after_event_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]: ...
     def list_affective_turn_delivery_event_heads(
         self,
         person_id: str,
@@ -70,6 +78,11 @@ class LifeCommandRepositoryPort(Protocol):
         relationship_subject_id: str,
         session_id: str,
     ) -> dict[str, Any] | None: ...
+    def list_companion_proactive_targets(
+        self,
+        *,
+        limit: int = 1_000,
+    ) -> list[dict[str, Any]]: ...
     def list_unadopted_projection_person_ids(self, *, limit: int = 1_000) -> list[str]: ...
     def try_claim_command(self, command: LifeCommand, **kwargs: Any) -> LifeCommandClaim | LifeCommandReceipt: ...
     def release_command_claim(self, claim: LifeCommandClaim) -> None: ...
@@ -92,6 +105,11 @@ class LifeCommandRepositoryPort(Protocol):
     def fail_delivery(self, message: LifeOutboxMessage, **kwargs: Any) -> None: ...
     def retry_delivery(self, message: LifeOutboxMessage, **kwargs: Any) -> None: ...
     def get_delivery_receipt(self, delivery_key: str) -> LifeDeliveryReceipt | None: ...
+    def list_completed_companion_proactive_messages(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[LifeOutboxMessage]: ...
 
 
 __all__ = ["LifeCommandRepositoryPort"]

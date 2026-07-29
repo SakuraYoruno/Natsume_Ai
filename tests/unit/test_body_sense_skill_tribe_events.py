@@ -37,8 +37,10 @@ class _FakeLimbicAgent:
             },
         }
 
-    def update_body_sense_loneliness(self, *, loneliness_value: float):
-        self.loneliness_calls.append({"loneliness_value": loneliness_value})
+    def update_body_sense_loneliness(self, *, loneliness_value: float, person_id=None):
+        self.loneliness_calls.append(
+            {"loneliness_value": loneliness_value, "person_id": person_id}
+        )
         return {
             "status": "OK",
             "body_sense": {
@@ -124,3 +126,32 @@ def test_body_sense_update_loneliness_rejects_invalid_value() -> None:
 
     assert result["status"] == "REJECTED"
     assert result["reason_code"] == "BODY_SENSE_LONELINESS_INVALID"
+
+
+def test_body_sense_tick_does_not_publish_retired_canonical_operation(monkeypatch) -> None:
+    class _RetiredLimbicAgent:
+        def tick_body_sense(self, *, current_hour=None):
+            assert current_hour == 2
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "reason_code": "LEGACY_BODY_SENSE_MUTATION_RETIRED",
+            }
+
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _RetiredLimbicAgent(),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.resolve_background_tick_guard_state",
+        lambda **_kwargs: {"active": False, "cooldown_remaining_ms": 0},
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.ans_agent.get_ans_agent",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("retired body sense must not publish an update")
+        ),
+    )
+
+    result = execute_body_sense_tick(args={"current_hour": 2})
+
+    assert result["status"] == "RETIRED_CANONICAL_LIFE"

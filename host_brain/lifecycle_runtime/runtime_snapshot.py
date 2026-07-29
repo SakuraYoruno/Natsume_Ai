@@ -1,7 +1,13 @@
 """Digital-life runtime snapshot assembly."""
 
 from ._shared import *  # noqa: F403
+from .canonical_life_snapshot import (
+    build_canonical_life_runtime_snapshot,
+    canonical_life_reader_is_composed,
+    resolve_runtime_relationship_subject_id,
+)
 from .ports import LifecycleRuntimeApplicationPorts
+
 
 def build_digital_life_runtime_snapshot(
     *,
@@ -10,22 +16,30 @@ def build_digital_life_runtime_snapshot(
 ) -> dict[str, Any]:
     now_ms = int(_time.time() * 1000)
     normalized_topic = str(current_topic or "").strip()
+    persona_user_id, subject_status, subject_detail = (
+        resolve_runtime_relationship_subject_id()
+    )
+    if canonical_life_reader_is_composed(ports):
+        return build_canonical_life_runtime_snapshot(
+            ports=ports,
+            current_topic=normalized_topic,
+            now_ms=now_ms,
+            relationship_subject_id=persona_user_id,
+            subject_status=subject_status,
+            subject_detail=subject_detail,
+        )
     slot_status: dict[str, str] = {}
     degraded_reasons: list[str] = []
 
-    persona_user_id = "default"
-    try:
-        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
-
-        persona_user_id = str(get_canonical_bond_user_id() or "").strip() or "default"
+    if subject_status == "live":
         slot_status["persona_user_id"] = "live"
-    except Exception as exc:
+    else:
         _record_snapshot_status(
             slot_status,
             degraded_reasons,
             slot="persona_user_id",
-            status="fallback",
-            detail=str(exc)[:120],
+            status=subject_status,
+            detail=subject_detail,
         )
 
     hard_state: dict[str, Any] = {}
@@ -96,20 +110,23 @@ def build_digital_life_runtime_snapshot(
     timeline_summary: dict[str, Any] = {}
     timeline_diary: dict[str, Any] = {}
     try:
-        profile = ports.get_user_emotion_profile()
-        profile_summary = _as_plain_dict(profile.to_summary() if hasattr(profile, "to_summary") else profile)
-        if profile_summary:
-            emotion_context["user_emotion_profile"] = profile_summary
-            top_emotions = list(profile_summary.get("top_emotions") or [])
-            if top_emotions and isinstance(top_emotions[0], dict):
-                emotion_context["emotion_tag"] = str(top_emotions[0].get("tag") or emotion_context["emotion_tag"]).upper()
-            try:
-                emotion_context["emotion_intensity"] = float(profile_summary.get("volatility") or 0.0)
-            except (TypeError, ValueError):
-                pass
+        profile_provider = ports.get_user_emotion_profile
+        if callable(profile_provider):
+            profile = profile_provider()
+            profile_summary = _as_plain_dict(
+                profile.to_summary() if hasattr(profile, "to_summary") else profile
+            )
+            if profile_summary:
+                # A user-affect profile is an observation about the user, not
+                # a self-affect source for Natsume.  Keep it separately so
+                # OBS consumers cannot accidentally present it as her mood.
+                emotion_context["user_emotion_profile"] = profile_summary
 
         timeline_summary = dict(ports.emotion_timeline.rebuild_summary(window_ms=6 * 3600 * 1000) or {})
-        if timeline_summary:
+        timeline_retired = _is_retired_legacy_emotion_timeline(
+            timeline_summary
+        )
+        if timeline_summary and not timeline_retired:
             emotion_context["emotion_timeline_summary"] = timeline_summary
             dominant_emotion = str(timeline_summary.get("dominant_emotion") or "").strip().upper()
             if dominant_emotion:
@@ -125,13 +142,22 @@ def build_digital_life_runtime_snapshot(
                 pass
 
         timeline_diary = dict(ports.emotion_timeline.build_daily_diary(window_ms=24 * 3600 * 1000) or {})
-        if timeline_diary:
+        timeline_retired = timeline_retired or _is_retired_legacy_emotion_timeline(
+            timeline_diary
+        )
+        if timeline_diary and not timeline_retired:
             emotion_context["emotion_diary"] = {
                 "dominant_emotion": timeline_diary.get("dominant_emotion"),
                 "diary_text": str(timeline_diary.get("diary_text") or "")[:160],
             }
 
-        slot_status["emotion_context"] = "live"
+        if timeline_retired:
+            # Retirement is an intentional production boundary, not a
+            # runtime-health failure.  The status remains observable without
+            # turning a healthy Host into a false degraded state.
+            slot_status["emotion_context"] = "retired"
+        else:
+            slot_status["emotion_context"] = "live"
     except Exception as exc:
         _record_snapshot_status(
             slot_status,
@@ -266,7 +292,11 @@ def build_digital_life_runtime_snapshot(
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
-        body_sense = _as_plain_dict(get_limbic_agent().resolve_body_sense_state())
+        body_sense = _as_plain_dict(
+            get_limbic_agent().resolve_body_sense_state(
+                person_id=persona_user_id
+            )
+        )
         slot_status["body_sense"] = "live"
     except Exception as exc:
         _record_snapshot_status(

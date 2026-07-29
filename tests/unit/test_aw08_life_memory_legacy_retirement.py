@@ -114,3 +114,73 @@ def test_inner_world_view_is_a_pure_projection_of_canonical_life_snapshot() -> N
     assert result["anticipation"] == 0.65
     assert result["anticipation_topics"] == ["topic-a"]
     assert result["canonical_life_version"] == 7
+
+
+def test_inner_world_projection_keeps_canonical_affect_bounded_and_scope_safe() -> None:
+    result = project_inner_world_state(
+        {
+            "person_id": "person-1",
+            "version": 9,
+            "state": {
+                "affective": {
+                    "revision": 6,
+                    "mood": {"label": "tender_hurt", "valence": -0.2, "arousal": 0.44, "energy": 0.57},
+                    "components": [
+                        {"emotion": "HURT", "intensity": 0.76, "valence": -0.6, "arousal": 0.5, "action_tendency": "repair"},
+                        {"emotion": "CARE", "intensity": 0.48, "valence": 0.4, "arousal": 0.22, "action_tendency": "comfort"},
+                    ],
+                    "active_episodes": [
+                        {
+                            "trigger_ref": "private-trigger",
+                            "evidence_refs": ["private-evidence"],
+                        }
+                    ],
+                    "needs": {"connection": 0.7, "repair": 0.65},
+                    "last_regulation": {"mode": "CONTAIN"},
+                },
+                "relationship_v2": {
+                    "workspace_id": "workspace-private",
+                    "relationship_subject_id": "person-1",
+                    "revision": 4,
+                    "trust": 0.61,
+                    "safety": 0.72,
+                    "attunement": 0.55,
+                    "rupture_load": 0.4,
+                    "repair_required": True,
+                    "proactive_permission": "ALLOW",
+                    "romantic_consent": "GRANTED",
+                    "exclusive_consent": "GRANTED",
+                    "dependency_consent": "GRANTED",
+                    "active_episodes": [{"episode_id": "relationship-private"}],
+                },
+            },
+        }
+    )
+
+    assert result["canonical_life_source"] == "CANONICAL_LIFE_JOURNAL"
+    assert result["self_affect"]["components"][0]["emotion"] == "HURT"
+    assert result["self_affect"]["active_episode_count"] == 1
+    assert result["self_affect"]["regulation_mode"] == "CONTAIN"
+    assert result["relationship_state"] == {
+        "schema_version": "inner_relationship_projection.v1",
+        "revision": 4,
+        "trust": 0.61,
+        "safety": 0.72,
+        "attunement": 0.55,
+        "rupture_load": 0.4,
+        "repair_required": True,
+        "proactive_permission": "ALLOW",
+        "active_episode_count": 1,
+    }
+    rendered = repr({
+        "self_affect": result["self_affect"],
+        "relationship_state": result["relationship_state"],
+    })
+    for private_value in (
+        "private-trigger",
+        "private-evidence",
+        "workspace-private",
+        "GRANTED",
+        "relationship-private",
+    ):
+        assert private_value not in rendered

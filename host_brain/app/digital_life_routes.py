@@ -5,7 +5,7 @@ from collections.abc import Callable, Mapping
 import time
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from host_brain.app.host_life_route_authority import (
     HostLifeRouteAuthority,
@@ -20,6 +20,42 @@ from host_brain.digital_life.application_boundary import (
     read_life_events,
     read_life_snapshot,
     submit_life_command,
+)
+from host_brain.digital_life.companion_permission_ingress import (
+    COMPANION_PERMISSION_BODY_INVALID,
+    COMPANION_PERMISSION_COMMAND_NOT_APPLIED,
+    COMPANION_PERMISSION_EVIDENCE_UNAVAILABLE,
+    COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+    COMPANION_PERMISSION_PRINCIPAL_KIND_DENIED,
+    COMPANION_PERMISSION_RESULT_CONFLICT,
+    COMPANION_PERMISSION_RESULT_RECORD_UNAVAILABLE,
+    COMPANION_PERMISSION_SCOPE_BINDING_DENIED,
+    CompanionPermissionIngress,
+    CompanionPermissionIngressError,
+)
+from host_brain.digital_life.companion_profile_ingress import (
+    COMPANION_PROFILE_BODY_INVALID,
+    COMPANION_PROFILE_COMMAND_NOT_APPLIED,
+    COMPANION_PROFILE_EVIDENCE_UNAVAILABLE,
+    COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+    COMPANION_PROFILE_PRINCIPAL_KIND_DENIED,
+    COMPANION_PROFILE_RESULT_CONFLICT,
+    COMPANION_PROFILE_RESULT_RECORD_UNAVAILABLE,
+    COMPANION_PROFILE_SCOPE_BINDING_DENIED,
+    CompanionProfileIngress,
+    CompanionProfileIngressError,
+)
+from host_brain.digital_life.companion_feedback_ingress import (
+    COMPANION_FEEDBACK_BODY_INVALID,
+    COMPANION_FEEDBACK_COMMAND_NOT_APPLIED,
+    COMPANION_FEEDBACK_EVIDENCE_UNAVAILABLE,
+    COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+    COMPANION_FEEDBACK_PRINCIPAL_KIND_DENIED,
+    COMPANION_FEEDBACK_RESULT_CONFLICT,
+    COMPANION_FEEDBACK_RESULT_RECORD_UNAVAILABLE,
+    COMPANION_FEEDBACK_SCOPE_BINDING_DENIED,
+    CompanionFeedbackIngress,
+    CompanionFeedbackIngressError,
 )
 from natsume_contracts.life import LifeDeliveryAuthorization
 from host_brain.orchestration.governor_grant import (
@@ -44,6 +80,87 @@ _UNTRUSTED_INTENT_FIELDS = frozenset(
         "created_at_ms",
     }
 )
+
+
+def _companion_permission_http_status(reason_code: str) -> int:
+    """Map redacted user-control failures without exposing auth material."""
+
+    reason = str(reason_code or "").strip().upper()
+    if reason in {
+        COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        COMPANION_PERMISSION_EVIDENCE_UNAVAILABLE,
+        COMPANION_PERMISSION_RESULT_RECORD_UNAVAILABLE,
+        COMPANION_PERMISSION_COMMAND_NOT_APPLIED,
+    } or "UNAVAILABLE" in reason or "ENFORCE_REQUIRED" in reason:
+        return 503
+    if reason == COMPANION_PERMISSION_BODY_INVALID:
+        return 422
+    if reason in {
+        COMPANION_PERMISSION_PRINCIPAL_KIND_DENIED,
+        COMPANION_PERMISSION_SCOPE_BINDING_DENIED,
+    } or "SCOPE" in reason or "PRINCIPAL" in reason:
+        return 403
+    if reason == COMPANION_PERMISSION_RESULT_CONFLICT or any(
+        marker in reason for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT")
+    ):
+        return 409
+    return 401
+
+
+def _companion_profile_http_status(reason_code: str) -> int:
+    """Map profile-control failures without exposing auth or user data."""
+
+    reason = str(reason_code or "").strip().upper()
+    if reason in {
+        COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        COMPANION_PROFILE_EVIDENCE_UNAVAILABLE,
+        COMPANION_PROFILE_RESULT_RECORD_UNAVAILABLE,
+        COMPANION_PROFILE_COMMAND_NOT_APPLIED,
+    } or "UNAVAILABLE" in reason or "ENFORCE_REQUIRED" in reason:
+        return 503
+    if reason == COMPANION_PROFILE_BODY_INVALID:
+        return 422
+    if reason in {
+        COMPANION_PROFILE_PRINCIPAL_KIND_DENIED,
+        COMPANION_PROFILE_SCOPE_BINDING_DENIED,
+    } or "SCOPE" in reason or "PRINCIPAL" in reason:
+        return 403
+    if reason == COMPANION_PROFILE_RESULT_CONFLICT or any(
+        marker in reason for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT")
+    ):
+        return 409
+    if any(
+        marker in reason
+        for marker in ("THRESHOLD", "CANARY", "RELATIONSHIP", "ROLLBACK", "DRIFT")
+    ):
+        return 409
+    return 401
+
+
+def _companion_feedback_http_status(reason_code: str) -> int:
+    """Map receipt-scoped feedback failures without disclosing private data."""
+
+    reason = str(reason_code or "").strip().upper()
+    if reason in {
+        COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        COMPANION_FEEDBACK_EVIDENCE_UNAVAILABLE,
+        COMPANION_FEEDBACK_RESULT_RECORD_UNAVAILABLE,
+        COMPANION_FEEDBACK_COMMAND_NOT_APPLIED,
+    } or "UNAVAILABLE" in reason or "ENFORCE_REQUIRED" in reason:
+        return 503
+    if reason == COMPANION_FEEDBACK_BODY_INVALID:
+        return 422
+    if reason in {
+        COMPANION_FEEDBACK_PRINCIPAL_KIND_DENIED,
+        COMPANION_FEEDBACK_SCOPE_BINDING_DENIED,
+    } or "SCOPE" in reason or "PRINCIPAL" in reason:
+        return 403
+    if reason == COMPANION_FEEDBACK_RESULT_CONFLICT or any(
+        marker in reason
+        for marker in ("IDEMPOTENCY", "REPLAY", "CONFLICT", "RELATIONSHIP")
+    ):
+        return 409
+    return 401
 
 
 def _life_projection_enabled() -> bool:
@@ -580,6 +697,190 @@ async def digital_life_proactive_attempt(
     )
 
 
+async def digital_life_proactive_permission(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Record only a signed, explicitly structured contact decision.
+
+    This intentionally does not accept natural-language consent, inferred
+    warmth, Bond, emotion tags or an arbitrary Life command payload.
+    """
+
+    provider = _route_ports.companion_permission_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionPermissionIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PERMISSION_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionPermissionIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_permission_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
+async def digital_life_companion_profile(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Start only a signed, bounded companion-expression canary.
+
+    The body is strict JSON with the complete low-risk preference surface. It
+    cannot carry natural-language rationale, Soul patches, emotion state,
+    consent, raw media or arbitrary Life commands.
+    """
+
+    provider = _route_ports.companion_profile_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionProfileIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionProfileIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_profile_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
+async def digital_life_companion_profile_rollback(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Restore only the exact predecessor of a signed user's active profile.
+
+    The body names the profile currently visible to the relationship; it never
+    names a rollback target.  The canonical lifecycle rejects a stale active
+    profile and reopens the same durable rollback receipt after claim loss.
+    """
+
+    provider = _route_ports.companion_profile_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionProfileIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_PROFILE_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit_rollback,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionProfileIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_profile_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
+async def digital_life_companion_feedback(
+    request: Request,
+    *,
+    _route_ports: HostRoutePorts,
+) -> dict[str, Any]:
+    """Record one signed, bounded evaluation of an accepted response.
+
+    The body refers to a canonical response receipt and a fixed feedback kind;
+    it cannot contain raw dialogue, ratings, Soul changes or arbitrary Life
+    state.  The relationship aggregate still verifies the receipt owns an
+    active provisional episode before writing an aftereffect.
+    """
+
+    provider = _route_ports.companion_feedback_ingress_provider
+    if not callable(provider):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        )
+    try:
+        ingress = provider()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        ) from exc
+    if not isinstance(ingress, CompanionFeedbackIngress):
+        raise HTTPException(
+            status_code=503,
+            detail=COMPANION_FEEDBACK_INGRESS_UNAVAILABLE,
+        )
+    raw_body = await request.body()
+    try:
+        result = await asyncio.to_thread(
+            ingress.submit,
+            request=request,
+            raw_body=raw_body,
+            received_at_ms=int(time.time() * 1000),
+        )
+    except CompanionFeedbackIngressError as exc:
+        raise HTTPException(
+            status_code=_companion_feedback_http_status(exc.reason_code),
+            detail=exc.reason_code,
+        ) from exc
+    return result.as_dict()
+
+
 async def digital_life_proactive_recent(
     person_id: str = Query("default"),
     limit: int = Query(20, ge=1, le=100),
@@ -740,6 +1041,26 @@ def create_digital_life_router(route_ports: HostRoutePorts) -> APIRouter:
     add(
         "/v1/digital-life/proactive/attempt",
         digital_life_proactive_attempt,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/proactive-permission",
+        digital_life_proactive_permission,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/companion-profile",
+        digital_life_companion_profile,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/companion-profile/rollback",
+        digital_life_companion_profile_rollback,
+        methods=["POST"],
+    )
+    add(
+        "/v1/digital-life/relationship/response-feedback",
+        digital_life_companion_feedback,
         methods=["POST"],
     )
     add(

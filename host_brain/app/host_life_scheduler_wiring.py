@@ -29,8 +29,19 @@ class LifeSnapshotReaderPort(Protocol):
 
     def get_receipt(self, command_id: str) -> Any | None: ...
 
+    def list_companion_proactive_targets(
+        self,
+        *,
+        limit: int = 1_000,
+    ) -> list[dict[str, Any]]: ...
+
 
 SCHEDULER_HANDLER_RESULT_INVALID = "SCHEDULER_HANDLER_RESULT_INVALID"
+
+# This was the pre-DL-06 timer-driven proactive route.  New definitions are
+# already excluded by the registry scheduler policy; the composition root also
+# disables an old persisted head during startup so it cannot survive upgrade.
+RETIRED_LEGACY_SCHEDULER_TASK_IDS = ("proactive_talk_periodic",)
 
 
 class SchedulerHandlerResultError(RuntimeError):
@@ -62,6 +73,7 @@ def compose_life_dispatchers(
     embodiment_runtime: Any,
     action_preview_service: Any | None = None,
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
+    relationship_lifecycle_service_provider: Callable[[], Any] | None = None,
 ) -> tuple[Any, Any]:
     """Bind projection and delivery workers to the canonical Life repository."""
 
@@ -94,6 +106,9 @@ def compose_life_dispatchers(
                 embodiment_runtime=embodiment_runtime,
                 action_preview_service=action_preview_service,
             ),
+            relationship_lifecycle_service_provider=(
+                relationship_lifecycle_service_provider
+            ),
         ),
     )
 
@@ -120,7 +135,6 @@ def submit_life_tick_command(
     intent = dict(definition.intent_template)
     args = dict(intent.get("args") or {})
     args.update(dict(occurrence.payload or {}))
-    person_id = str(args.get("person_id") or "default").strip() or "default"
     runtime_execution = dict(execution_context or {})
     frozen_input_pack = runtime_execution.get("frozen_input_pack")
     if not isinstance(frozen_input_pack, Mapping):
@@ -136,6 +150,12 @@ def submit_life_tick_command(
         result = scheduler_handler_result(replayed_receipt)
         result["replayed"] = True
         return result
+    person_id, target_selection = _select_life_tick_person_id(
+        args=args,
+        occurrence_id=str(occurrence.occurrence_id),
+        frozen_runtime_context=frozen_runtime_context,
+        life_snapshot_reader=life_snapshot_reader,
+    )
     from host_brain.digital_life.policy import build_life_tick_payload  # noqa: PLC0415
 
     occurrence_context = {
@@ -193,11 +213,63 @@ def submit_life_tick_command(
                 "scheduled_at_ms": int(occurrence.scheduled_at_ms),
                 "governor_grant_request_id": grant_request_id or None,
                 "governor_grant_ref": governor_grant or None,
+                "companion_target_selection": target_selection,
             },
         )
 
     receipt = life_command_service.submit_next(person_id, _command_factory)
     return scheduler_handler_result(receipt)
+
+
+def _select_life_tick_person_id(
+    *,
+    args: Mapping[str, Any],
+    occurrence_id: str,
+    frozen_runtime_context: Mapping[str, Any],
+    life_snapshot_reader: LifeSnapshotReaderPort,
+) -> tuple[str, str]:
+    """Select one scope-compatible canonical target per scheduler occurrence.
+
+    The Scheduler still produces exactly one LifeCommand, so a single clock
+    remains the authority.  A stable occurrence digest distributes ticks over
+    currently registered targets without an in-process queue; receipt replay
+    occurs before this lookup and therefore never changes a committed target.
+    """
+
+    explicit = str(args.get("person_id") or "").strip()
+    if explicit and explicit.lower() != "default":
+        return explicit, "EXPLICIT_PERSON_ID"
+    list_targets = getattr(life_snapshot_reader, "list_companion_proactive_targets", None)
+    if not callable(list_targets):
+        return "default", "REGISTRY_READER_UNAVAILABLE"
+    scene = dict(frozen_runtime_context.get("scene_decision_v2") or {})
+    scene_workspace = str(scene.get("workspace_id") or "").strip()
+    scene_subject = str(scene.get("subject_id") or "").strip()
+    try:
+        candidates = list_targets(limit=1_000)
+    except Exception:
+        return "default", "REGISTRY_READ_DEGRADED"
+    compatible = [
+        dict(row)
+        for row in candidates
+        if isinstance(row, Mapping)
+        and str(row.get("aggregate_id") or "").strip()
+        and (
+            not scene_workspace
+            or str(row.get("workspace_id") or "").strip() == scene_workspace
+        )
+        and (
+            not scene_subject
+            or str(row.get("relationship_subject_id") or "").strip()
+            == scene_subject
+        )
+    ]
+    if not compatible:
+        return "default", "NO_SCENE_COMPATIBLE_REGISTERED_TARGET"
+    compatible.sort(key=lambda row: str(row.get("aggregate_id") or ""))
+    digest = hashlib.sha256(str(occurrence_id).encode("utf-8")).digest()
+    selected = compatible[int.from_bytes(digest[:8], "big") % len(compatible)]
+    return str(selected["aggregate_id"]), "CANONICAL_REGISTERED_TARGET"
 
 
 def scheduler_seed_configs(
@@ -712,6 +784,7 @@ def _assert_canonical_scheduler_result(value: Mapping[str, Any]) -> None:
 __all__ = [
     "LifeCommandServicePort",
     "LifeSnapshotReaderPort",
+    "RETIRED_LEGACY_SCHEDULER_TASK_IDS",
     "SCHEDULER_HANDLER_RESULT_INVALID",
     "SchedulerHandlerResultError",
     "build_agent_immune_scheduler_handler",

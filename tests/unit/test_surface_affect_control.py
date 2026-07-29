@@ -359,6 +359,49 @@ def test_affection_task_uses_ambiguous_distance_without_non_romantic_clue() -> N
     assert "不要因为关系线索升级为恋人、家人或主人关系" in packet.must_not_do
 
 
+def test_canonical_relationship_authority_blocks_legacy_romantic_surface_upgrade() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state={"emotion_tag": "LOVE", "emotion_intensity": 0.7},
+        bond_summary={
+            "source_authority": "CANONICAL_RELATIONSHIP_LIFE",
+            "bond_stage": "FRIEND",
+            "relationship_phase": "stepsibling",
+            # Compatibility input must not regain authority at this final
+            # presentation gate.
+            "stage": "SOULMATE",
+            "relationship_distance": "lover",
+            "closeness": 0.99,
+        },
+        relationship_clues=["稳定恋人", "灵魂伴侣"],
+        task_mode="lover_affection",
+    )
+
+    assert packet.relationship_distance == "familiar"
+    assert packet.emotional_tone == "warm_gentle"
+    assert packet.trace == {
+        "emotion_tag": "LOVING",
+        "task_mode": "lover_affection",
+        "relationship_distance": "familiar",
+        "relationship_authority": "CANONICAL_RELATIONSHIP_LIFE",
+        "clue_count": 2,
+    }
+
+
+def test_rejected_canonical_relationship_stays_guarded_at_surface_gate() -> None:
+    packet = build_surface_affect_control_packet(
+        emotion_state={"emotion_tag": "LOVE", "emotion_intensity": 0.7},
+        bond_summary={
+            "source_authority": "CANONICAL_RELATIONSHIP_REJECTED",
+            "stage": "SOULMATE",
+            "relationship_distance": "lover",
+        },
+        task_mode="lover_presence",
+    )
+
+    assert packet.relationship_distance == "guarded"
+    assert packet.emotional_tone == "warm_gentle"
+
+
 def test_lover_task_can_surface_stable_lover_distance_from_intimate_bond() -> None:
     packet = build_surface_affect_control_packet(
         emotion_state={"emotion_tag": "LOVE", "emotion_intensity": 0.7},

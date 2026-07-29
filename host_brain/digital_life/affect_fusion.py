@@ -240,6 +240,7 @@ class AffectFusionResult:
     reason_codes: tuple[str, ...]
     relationship_state: Mapping[str, Any] | None = None
     relationship_aftereffect: Mapping[str, Any] | None = None
+    companion_profile: Mapping[str, Any] | None = None
 
     def as_emotion_context(self) -> dict[str, Any]:
         components = list(_safe_mapping(self.self_affect).get("components") or [])
@@ -275,6 +276,10 @@ class AffectFusionResult:
                     "relationship_subject_id": self.scope.relationship_subject_id,
                     "state": dict(self.relationship_state or {}),
                     "aftereffect": dict(self.relationship_aftereffect or {}),
+                    # The profile is a canonical relationship-scoped
+                    # expression preference head. It is never supplied by an
+                    # external ChatRequest and cannot change self-affect.
+                    "companion_profile": dict(self.companion_profile or {}),
                 },
             },
             # These bridge keys are intentionally derived from Natsume's
@@ -357,6 +362,7 @@ class AffectFusionService:
         )[:32]
         relationship_state: Mapping[str, Any] | None = None
         relationship_aftereffect: Mapping[str, Any] | None = None
+        companion_profile: Mapping[str, Any] | None = None
         relationship_reason_code = ""
         relationship_service = self._relationship_lifecycle_service()
         if relationship_service is not None:
@@ -383,6 +389,11 @@ class AffectFusionService:
                 )
                 relationship_state = _safe_mapping(
                     _safe_mapping(relationship_snapshot.state).get("relationship_v2")
+                )
+                companion_profile = _safe_mapping(
+                    _safe_mapping(relationship_snapshot.state).get(
+                        "companion_profile"
+                    )
                 )
         drafts, source_reasons = _collect_observation_drafts(
             request_body=request_body,
@@ -462,6 +473,7 @@ class AffectFusionService:
             reason_codes=tuple(dict.fromkeys(reason_codes))[:8],
             relationship_state=relationship_state,
             relationship_aftereffect=relationship_aftereffect,
+            companion_profile=companion_profile,
         )
 
     def _require_command_service(self) -> LifeCommandService:

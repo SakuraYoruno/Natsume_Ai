@@ -40,7 +40,6 @@ def build_process_application_ports(
     from host_brain.app.handlers.surface_reply_handler import surface_reply_handler
     from host_brain.app.handlers.translate_agent_handler import translate_agent_handler
     from host_brain.app.llm.routing_matrix import RoutingMatrix
-    from host_brain.app.emotion_context import HostEmotionRuntime
     from host_brain.app.memory.distillation_engine import DistillationEngine
     from host_brain.app.memory.episodic_store import EpisodicStore
     from host_brain.app.memory.memory_guard import MemoryGuard
@@ -52,8 +51,6 @@ def build_process_application_ports(
         resolve_model_provider_credential,
     )
     from host_brain.app.multimodal_observer import MultimodalObserver
-    from host_brain.bond.async_queue import BondUpdateQueue
-    from host_brain.bond.bond_dynamics import BondDynamicsWriter
     from host_brain.bond.bond_stage_engine import BondStageEngine
     from host_brain.bond.shared_memory_index import SharedMemoryIndex
     from host_brain.app.recall.semantic_recall import SemanticRecaller
@@ -105,8 +102,6 @@ def build_process_application_ports(
         graph_handler_bindings=graph_handler_bindings,
         graph_runtime_factory=GraphRuntimeContract,
         bond_stage_engine_factory=BondStageEngine,
-        bond_dynamics_writer_factory=BondDynamicsWriter,
-        bond_update_queue_factory=BondUpdateQueue,
         shared_memory_index_factory=SharedMemoryIndex,
         multimodal_observer_factory=MultimodalObserver,
         conversation_turn_store_factory=conversation_turn_store_factory,
@@ -123,7 +118,6 @@ def build_process_application_ports(
         distillation_engine_factory=DistillationEngine,
         semantic_recaller_factory=SemanticRecaller,
         episodic_store_adapter_factory=EpisodicStore,
-        emotion_runtime_factory=HostEmotionRuntime,
         probe_edge_rpc_health=probe_edge_rpc_health,
         build_edge_dependency_probe_statuses=build_edge_dependency_probe_statuses,
         collect_dependency_probes=collect_dependency_probes,

@@ -107,8 +107,10 @@ def build_emotional_proactive_episode(
     inner_state: Mapping[str, Any] | None = None,
     inner_weather: Mapping[str, Any] | None = None,
     bond_summary: Mapping[str, Any] | None = None,
+    relationship_permission_override: float | None = None,
     scene_awareness: Mapping[str, Any] | None = None,
     now_ms: int | None = None,
+    local_hour: int | None = None,
     last_foreground_ts_ms: int = 0,
     last_proactive_outbox_ts_ms: int = 0,
     active_projects: Any = None,
@@ -138,7 +140,16 @@ def build_emotional_proactive_episode(
     latest_inner_note = _latest_inner_note(inner)
     topics = _coerce_str_list(inner.get("anticipation_topics"))[:3]
 
-    relationship_permission = _relationship_permission(bond)
+    # Legacy callers may still provide a Bond projection, but canonical
+    # companion routes provide an explicit relationship-derived intensity.
+    # This override never grants permission by itself; admission remains the
+    # responsibility of the canonical relationship lifecycle.
+    relationship_permission = (
+        _clamp(_coerce_float(relationship_permission_override, 0.0))
+        if relationship_permission_override is not None
+        else _relationship_permission(bond)
+    )
+    hour = _normalize_hour(local_hour, default=_hour_from_ms(ts_ms))
     effective_loneliness = loneliness
     effective_anticipation = anticipation
     first_presence_pull = 0.0
@@ -152,8 +163,8 @@ def build_emotional_proactive_episode(
     project_nudge_pull, nudge_project = _project_nudge_pull(active_projects, ts_ms)
     attachment_pull = _clamp(relationship_permission * 0.70 + effective_loneliness * 0.30)
     tenderness = _clamp(relationship_permission * 0.38 + effective_loneliness * 0.34 + max(0.0, drifted_valence) * 0.18)
-    worry_drive = _worry_drive(hour=_hour_from_ms(ts_ms), offline_hours=offline_hours, arousal=drifted_arousal)
-    playful_pull = _playful_pull(hour=_hour_from_ms(ts_ms), anticipation=effective_anticipation, topics=topics)
+    worry_drive = _worry_drive(hour=hour, offline_hours=offline_hours, arousal=drifted_arousal)
+    playful_pull = _playful_pull(hour=hour, anticipation=effective_anticipation, topics=topics)
 
     emotional_drive = _clamp(
         0.26 * effective_loneliness
@@ -175,6 +186,7 @@ def build_emotional_proactive_episode(
         last_foreground_ts_ms=last_foreground_ts_ms,
         last_proactive_outbox_ts_ms=last_proactive_outbox_ts_ms,
         relationship_permission=relationship_permission,
+        local_hour=hour,
     )
     motive = _pick_motive(
         no_prior_contact=no_prior_contact,
@@ -187,7 +199,7 @@ def build_emotional_proactive_episode(
         worry_drive=worry_drive,
         playful_pull=playful_pull,
         topics=topics,
-        hour=_hour_from_ms(ts_ms),
+        hour=hour,
         project_nudge_pull=project_nudge_pull,
         has_self_change=bool(self_change_note),
     )
@@ -482,6 +494,7 @@ def _disturbance_risk(
     last_foreground_ts_ms: int,
     last_proactive_outbox_ts_ms: int,
     relationship_permission: float,
+    local_hour: int | None = None,
 ) -> float:
     risk = 0.12
     outbound_age_min = _age_minutes(now_ms, last_proactive_outbox_ts_ms)
@@ -499,7 +512,7 @@ def _disturbance_risk(
         elif foreground_age_min < 45:
             risk += 0.14
 
-    hour = _hour_from_ms(now_ms)
+    hour = _normalize_hour(local_hour, default=_hour_from_ms(now_ms))
     if 0 <= hour < 6:
         risk += 0.18
     elif 6 <= hour < 8:
@@ -696,6 +709,17 @@ def _age_minutes(now_ms: int, ts_ms: int) -> float | None:
 
 def _hour_from_ms(ts_ms: int) -> int:
     return _dt.datetime.fromtimestamp(int(ts_ms) / 1000.0).hour
+
+
+def _normalize_hour(value: int | None, *, default: int) -> int:
+    """Return a bounded scheduler-local hour without consulting wall clock."""
+
+    if value is None:
+        return int(default) % 24
+    try:
+        return int(value) % 24
+    except (TypeError, ValueError):
+        return int(default) % 24
 
 
 def _episode_id(*, ts_ms: int, motive: str, action: str) -> str:

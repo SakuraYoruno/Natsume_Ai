@@ -122,12 +122,69 @@ def _build_retrieval_bond_summary(summary_raw: Mapping[str, Any] | None) -> dict
     return bond_summary
 
 
+def _build_canonical_retrieval_relationship_summary(
+    *,
+    emotion_context: Mapping[str, Any] | None,
+    workspace_id: str,
+    person_id: str,
+    session_id: str,
+) -> dict[str, Any] | None:
+    """Return a bounded retrieval projection for a claimed Life hand-off.
+
+    Retrieval and motive prefetch are user-visible influences: they must not
+    resurrect a legacy Bond score just because a compatibility reader happens
+    to run before the final Surface gate.  A non-claimed context keeps the
+    rollback-only compatibility route; a claimed but invalid context is
+    explicitly guarded and must never fall back to the state arbiter.
+    """
+
+    from host_brain.persona.context.relationship_state import (  # noqa: PLC0415
+        canonical_relationship_context_claimed,
+        extract_canonical_relationship_projection,
+    )
+
+    if not canonical_relationship_context_claimed(emotion_context):
+        return None
+    projection = extract_canonical_relationship_projection(
+        emotion_context,
+        expected_workspace_id=str(workspace_id or "").strip(),
+        expected_relationship_subject_id=str(person_id or "").strip(),
+        expected_session_id=str(session_id or "").strip(),
+    )
+    if projection is None:
+        return {
+            "source_authority": "CANONICAL_RELATIONSHIP_REJECTED",
+            "stage": "FRIEND",
+            "bond_stage": "FRIEND",
+            "relationship_phase": "stepsibling",
+            "relationship_distance": "guarded",
+        }
+
+    return {
+        "source_authority": "CANONICAL_RELATIONSHIP_LIFE",
+        "stage": "FRIEND",
+        "bond_stage": "FRIEND",
+        "relationship_phase": "stepsibling",
+        "relationship_distance": (
+            "guarded"
+            if projection.repair_required or projection.rupture_load >= 0.55
+            else "familiar"
+        ),
+        # These values are descriptive texture only. They are not a score and
+        # cannot activate intimate/romantic or proactive behavior.
+        "trust": projection.trust,
+        "safety": projection.safety,
+        "attunement": projection.attunement,
+    }
+
+
 async def _prefetch_retrieval_persona_inputs(
     *,
     application_ports: AgentRuntimeApplicationPorts,
     request_id: str,
     session_id: str,
     person_id: str,
+    workspace_id: str = "",
     user_message: str,
     emotion_context: Mapping[str, Any],
     mood_state: str | None,
@@ -137,14 +194,23 @@ async def _prefetch_retrieval_persona_inputs(
     bond_evidence: dict[str, Any] | None = None
     motive_state: dict[str, Any] = {}
 
-    try:
-        bond_summary_raw, bond_evidence = await application_ports.resolve_state_arbiter_bond_fact(
-            session_id=session_id,
-            request_id=request_id,
-        )
-        bond_summary = _build_retrieval_bond_summary(bond_summary_raw)
-    except Exception as exc:
-        _logger.debug("[%s] retrieval persona bond prefetch failed: %s", request_id, exc)
+    canonical_relationship = _build_canonical_retrieval_relationship_summary(
+        emotion_context=emotion_context,
+        workspace_id=workspace_id,
+        person_id=person_id,
+        session_id=session_id,
+    )
+    if canonical_relationship is not None:
+        bond_summary = canonical_relationship
+    else:
+        try:
+            bond_summary_raw, bond_evidence = await application_ports.resolve_state_arbiter_bond_fact(
+                session_id=session_id,
+                request_id=request_id,
+            )
+            bond_summary = _build_retrieval_bond_summary(bond_summary_raw)
+        except Exception as exc:
+            _logger.debug("[%s] retrieval persona bond prefetch failed: %s", request_id, exc)
 
     try:
         from host_brain.persona.motive_runtime import (  # noqa: PLC0415

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Mapping
 
 
@@ -82,6 +83,25 @@ _STAGE_BASE: dict[str, dict[str, float]] = {
 }
 
 
+_COMPATIBILITY_BOND_AUTHORITY = "COMPATIBILITY_BOND"
+_CANONICAL_RELATIONSHIP_AUTHORITY = "CANONICAL_RELATIONSHIP_LIFE"
+_CANONICAL_RELATIONSHIP_REJECTED_AUTHORITY = "CANONICAL_RELATIONSHIP_REJECTED"
+
+
+def _safe_text(value: Any, *, limit: int = 240) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def _strict_unit(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed) or parsed < 0.0 or parsed > 1.0:
+        return None
+    return parsed
+
+
 def _stage_label(stage: str) -> str:
     return _STAGE_LABELS.get(_normalize_bond_stage(stage), _STAGE_LABELS["FRIEND"])
 
@@ -147,6 +167,157 @@ def derive_relationship_substage(
 
 
 @dataclass(frozen=True)
+class CanonicalRelationshipProjection:
+    """Validated, prompt-safe subset of canonical RelationshipStateV2.
+
+    The projection deliberately excludes all intimacy-consent fields.  Those
+    fields constrain actions elsewhere; they must never be converted into a
+    relationship stage, a Bond score, or a more intimate prompt voice.
+    """
+
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    revision: int
+    trust: float
+    safety: float
+    attunement: float
+    rupture_load: float
+    repair_required: bool
+    proactive_permission: str
+
+
+def canonical_relationship_context_claimed(
+    emotion_context: Mapping[str, Any] | None,
+) -> bool:
+    """Whether a hand-off claims to be the internal Affective Life context."""
+
+    context = _safe_mapping(emotion_context)
+    return bool(context.get("_affective_life_internal")) and isinstance(
+        context.get("affective_life"),
+        Mapping,
+    )
+
+
+def _strict_non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
+def extract_canonical_relationship_projection(
+    emotion_context: Mapping[str, Any] | None,
+    *,
+    expected_relationship_subject_id: str = "",
+    expected_workspace_id: str = "",
+    expected_session_id: str = "",
+) -> CanonicalRelationshipProjection | None:
+    """Return a canonical relationship projection only after scope validation.
+
+    A ``RelationshipStateV2`` is accepted only when the complete internal
+    AffectFusion envelope agrees with the current request scope.  This keeps
+    user-provided or stale payloads from reviving the old Bond score as a
+    fallback route to romance, exclusivity, or proactive permission.
+    """
+
+    if not canonical_relationship_context_claimed(emotion_context):
+        return None
+    context = _safe_mapping(emotion_context)
+    life = _safe_mapping(context.get("affective_life"))
+    if (
+        _safe_text(life.get("schema_version"), limit=96)
+        != "affective_turn_context.v1"
+        or _safe_text(life.get("self_id"), limit=64) != "natsume_ai"
+    ):
+        return None
+
+    workspace_id = _safe_text(life.get("workspace_id"), limit=240)
+    relationship_subject_id = _safe_text(
+        life.get("relationship_subject_id"),
+        limit=240,
+    )
+    session_id = _safe_text(life.get("session_id"), limit=240)
+    if not workspace_id or not relationship_subject_id or not session_id:
+        return None
+    expected_subject = _safe_text(expected_relationship_subject_id, limit=240)
+    expected_workspace = _safe_text(expected_workspace_id, limit=240)
+    expected_session = _safe_text(expected_session_id, limit=240)
+    if not expected_subject or not expected_workspace or not expected_session:
+        return None
+    if (
+        relationship_subject_id != expected_subject
+        or workspace_id != expected_workspace
+        or session_id != expected_session
+    ):
+        return None
+
+    relationship_life = _safe_mapping(life.get("relationship_life"))
+    if (
+        _safe_text(relationship_life.get("schema_version"), limit=96)
+        != "relationship_turn_context.v1"
+        or _safe_text(relationship_life.get("workspace_id"), limit=240)
+        != workspace_id
+        or _safe_text(
+            relationship_life.get("relationship_subject_id"),
+            limit=240,
+        )
+        != relationship_subject_id
+    ):
+        return None
+
+    state = _safe_mapping(relationship_life.get("state"))
+    if (
+        _safe_text(state.get("schema_version"), limit=96)
+        != "relationship_state.v2"
+        or _safe_text(state.get("self_id"), limit=64) != "natsume_ai"
+        or _safe_text(state.get("workspace_id"), limit=240) != workspace_id
+        or _safe_text(state.get("relationship_subject_id"), limit=240)
+        != relationship_subject_id
+    ):
+        return None
+
+    revision = _strict_non_negative_int(state.get("revision"))
+    trust = _strict_unit(state.get("trust"))
+    safety = _strict_unit(state.get("safety"))
+    attunement = _strict_unit(state.get("attunement"))
+    rupture_load = _strict_unit(state.get("rupture_load"))
+    proactive_permission = _safe_text(
+        state.get("proactive_permission"),
+        limit=64,
+    ).upper()
+    repair_required = state.get("repair_required")
+    if (
+        revision is None
+        or trust is None
+        or safety is None
+        or attunement is None
+        or rupture_load is None
+        or proactive_permission not in {"UNKNOWN", "ALLOWED", "DENIED"}
+        or not isinstance(repair_required, bool)
+    ):
+        return None
+
+    return CanonicalRelationshipProjection(
+        workspace_id=workspace_id,
+        relationship_subject_id=relationship_subject_id,
+        session_id=session_id,
+        revision=revision,
+        trust=trust,
+        safety=safety,
+        attunement=attunement,
+        rupture_load=rupture_load,
+        repair_required=repair_required,
+        proactive_permission=proactive_permission,
+    )
+
+
+@dataclass(frozen=True)
 class RelationshipStateBlock:
     familiarity: float = 0.08
     trust: float = 0.06
@@ -164,6 +335,7 @@ class RelationshipStateBlock:
     stage_label: str = ""
     relationship_phase: str = ""
     relationship_substage: str = ""
+    source_authority: str = _COMPATIBILITY_BOND_AUTHORITY
 
     def __post_init__(self) -> None:
         stage = _normalize_bond_stage(self.bond_stage)
@@ -206,6 +378,14 @@ class RelationshipStateBlock:
                     conflict_rift=self.conflict_rift,
                 ),
             )
+        authority = _safe_text(self.source_authority, limit=96).upper()
+        if authority not in {
+            _COMPATIBILITY_BOND_AUTHORITY,
+            _CANONICAL_RELATIONSHIP_AUTHORITY,
+            _CANONICAL_RELATIONSHIP_REJECTED_AUTHORITY,
+        }:
+            authority = _COMPATIBILITY_BOND_AUTHORITY
+        object.__setattr__(self, "source_authority", authority)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -225,14 +405,95 @@ class RelationshipStateBlock:
             "stage_label": self.stage_label,
             "relationship_phase": self.relationship_phase,
             "relationship_substage": self.relationship_substage,
+            "source_authority": self.source_authority,
         }
+
+
+def _resolve_canonical_relationship_state(
+    projection: CanonicalRelationshipProjection,
+) -> RelationshipStateBlock:
+    """Map canonical texture into the legacy prompt vector without intimacy.
+
+    The prompt-facing block is retained for compatibility with the existing
+    reply planner.  It must not turn trust, attunement, consent, or proactive
+    permission into a Bond score or a romantic stage.
+    """
+
+    base = _STAGE_BASE["FRIEND"]
+    trust = max(base["trust"], projection.trust)
+    comfort = min(
+        0.72,
+        max(base["comfort"], 0.18 + projection.safety * 0.54 + projection.attunement * 0.12),
+    )
+    openness = min(
+        0.62,
+        max(base["openness"], 0.12 + min(trust, projection.safety) * 0.45),
+    )
+    protectiveness = min(
+        0.47,
+        max(base["protectiveness"], 0.16 + projection.safety * 0.22 + projection.attunement * 0.12),
+    )
+    boundary_softness = min(
+        0.48,
+        max(base["boundary_softness"], 0.16 + projection.safety * 0.30),
+    )
+    affection_signal = min(
+        0.34,
+        max(base["affection_signal"], 0.10 + projection.attunement * 0.18),
+    )
+    playfulness = min(
+        0.52,
+        max(base["playfulness"], 0.18 + projection.safety * 0.20 + projection.attunement * 0.20),
+    )
+    conflict_rift = max(
+        projection.rupture_load,
+        0.65 if projection.repair_required else 0.0,
+    )
+    return RelationshipStateBlock(
+        familiarity=base["familiarity"],
+        trust=trust,
+        comfort=comfort,
+        openness=openness,
+        dependency_tolerance=base["dependency_tolerance"],
+        protectiveness=protectiveness,
+        boundary_softness=boundary_softness,
+        affection_signal=affection_signal,
+        playfulness=playfulness,
+        # ``RelationshipStateV2`` has explicit consent fields outside this
+        # prompt projection. Never manufacture romantic tension from them.
+        romantic_tension=base["romantic_tension"],
+        attachment_depth=base["attachment_depth"],
+        conflict_rift=conflict_rift,
+        bond_stage="FRIEND",
+        stage_label=_stage_label("FRIEND"),
+        relationship_phase="stepsibling",
+        source_authority=_CANONICAL_RELATIONSHIP_AUTHORITY,
+    )
+
+
+def _resolve_rejected_canonical_relationship_state() -> RelationshipStateBlock:
+    """Fail closed when a claimed canonical hand-off cannot be verified."""
+
+    return RelationshipStateBlock(
+        bond_stage="FRIEND",
+        stage_label=_stage_label("FRIEND"),
+        relationship_phase="stepsibling",
+        source_authority=_CANONICAL_RELATIONSHIP_REJECTED_AUTHORITY,
+    )
 
 
 def resolve_relationship_state(
     *,
     bond_summary: Mapping[str, Any] | None,
     social_brain_state: Mapping[str, Any] | None = None,
+    canonical_relationship: CanonicalRelationshipProjection | None = None,
+    canonical_context_claimed: bool = False,
 ) -> RelationshipStateBlock:
+    if isinstance(canonical_relationship, CanonicalRelationshipProjection):
+        return _resolve_canonical_relationship_state(canonical_relationship)
+    if canonical_context_claimed:
+        return _resolve_rejected_canonical_relationship_state()
+
     bond = _safe_mapping(bond_summary)
     social = _safe_mapping(social_brain_state)
     stage = _normalize_bond_stage(
@@ -322,6 +583,7 @@ def resolve_relationship_state(
         stage_label=_stage_label(stage),
         relationship_phase=_relationship_phase(stage),
         relationship_substage=relationship_substage,
+        source_authority=_COMPATIBILITY_BOND_AUTHORITY,
     )
 
 
@@ -368,8 +630,11 @@ def build_relationship_summary(*, relationship: RelationshipStateBlock, render_t
 
 
 __all__ = [
+    "CanonicalRelationshipProjection",
     "RelationshipStateBlock",
     "build_relationship_summary",
+    "canonical_relationship_context_claimed",
     "derive_relationship_substage",
+    "extract_canonical_relationship_projection",
     "resolve_relationship_state",
 ]

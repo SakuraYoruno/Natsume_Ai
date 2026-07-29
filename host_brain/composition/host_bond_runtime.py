@@ -1,4 +1,4 @@
-"""App-local ownership for Bond stage, writers, queue and backing client."""
+"""App-local ownership for legacy Bond read projections and backing client."""
 
 from __future__ import annotations
 
@@ -52,17 +52,22 @@ class HostBondRuntimeCloseError(RuntimeError):
 
 
 class HostBondRuntimeOwner:
-    """Own one Bond runtime epoch for one Host application root."""
+    """Own one legacy Bond projection epoch for one Host application root.
+
+    Production disables its score writer and in-process queue; the owner then
+    serves read compatibility only and returns explicit no-write adapters.
+    """
 
     def __init__(
         self,
         *,
         ledger_provider: ServiceProvider,
         stage_engine_factory: Factory,
-        dynamics_writer_factory: Factory,
-        update_queue_factory: Factory,
+        dynamics_writer_factory: Factory | None,
+        update_queue_factory: Factory | None,
         client_factory: ServiceProvider,
         settings_provider: SettingsProvider = lambda: load_host_bond_runtime_settings(),
+        legacy_write_authority_enabled: bool = True,
     ) -> None:
         self._ledger_provider = ledger_provider
         self._stage_engine_factory = stage_engine_factory
@@ -70,6 +75,7 @@ class HostBondRuntimeOwner:
         self._update_queue_factory = update_queue_factory
         self._client_factory = client_factory
         self._settings_provider = settings_provider
+        self._legacy_write_authority_enabled = bool(legacy_write_authority_enabled)
         self._lock = RLock()
         self._active = False
         self._closing = False
@@ -121,19 +127,32 @@ class HostBondRuntimeOwner:
         with self._lock:
             self._require_active()
             if self._writer is None:
-                self._writer = self._build_writer()
+                if not self._legacy_write_authority_enabled:
+                    from host_brain.bond.bond_dynamics import RetiredBondDynamicsWriter  # noqa: PLC0415
+
+                    self._writer = RetiredBondDynamicsWriter()
+                else:
+                    self._writer = self._build_writer()
             return self._writer
 
     def require_update_queue(self) -> Any:
         with self._lock:
             self._require_active()
             if self._queue is None:
-                settings = self._require_settings()
-                self._queue = self._update_queue_factory(
-                    writer_factory=self.require_writer,
-                    max_queue_size=int(settings.max_queue_size),
-                    worker_enabled=bool(settings.worker_enabled),
-                )
+                if not self._legacy_write_authority_enabled:
+                    from host_brain.bond.async_queue import RetiredBondUpdateQueue  # noqa: PLC0415
+
+                    self._queue = RetiredBondUpdateQueue()
+                else:
+                    settings = self._require_settings()
+                    factory = self._update_queue_factory
+                    if factory is None:
+                        raise RuntimeError("HOST_BOND_UPDATE_QUEUE_FACTORY_NOT_CONFIGURED")
+                    self._queue = factory(
+                        writer_factory=self.require_writer,
+                        max_queue_size=int(settings.max_queue_size),
+                        worker_enabled=bool(settings.worker_enabled),
+                    )
             return self._queue
 
     def close(self, *, timeout_s: float = 3.0) -> None:
@@ -189,7 +208,10 @@ class HostBondRuntimeOwner:
             return bool(self._active and not self._closing)
 
     def _build_writer(self) -> Any:
-        return self._dynamics_writer_factory(
+        factory = self._dynamics_writer_factory
+        if factory is None:
+            raise RuntimeError("HOST_BOND_DYNAMICS_WRITER_FACTORY_NOT_CONFIGURED")
+        return factory(
             ledger=self._ledger_provider(),
             neo4j_client=self.require_client(),
             stage_engine=self.require_stage_engine(),

@@ -10,7 +10,7 @@ from host_brain.persona.surface_main_chain import (
     compile_surface_main_chain_input,
 )
 from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMonologueDigest
-from host_brain.persona.body_sense import get_body_sense_model
+from host_brain.persona.body_sense import project_body_sense_from_life_snapshot
 from host_brain.persona.context.soul_runtime import get_compiled_soul
 from host_brain.tribe.default_mode_agent import get_default_mode_agent
 import re
@@ -49,6 +49,7 @@ from host_brain.surface_runtime.reply_context import (
     _surface_task_control_from_reply_plan,
 )
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+from host_brain.digital_life.application_boundary import read_life_snapshot
 from host_brain.digital_life.affective_turn_planner import (
     AffectiveTurnPlanError,
     build_affective_turn_guidance,
@@ -369,14 +370,31 @@ def build_surface_main_chain_input_from_surface_reply_input(
 
         # Build InnerMonologueDigest for inner-weather generation.
         _digest = _build_digest_from_inner_monologue(inner_monologue)
-        body_sense = get_body_sense_model().get_state()
+        relationship_subject_id = str(
+            getattr(agent_input, "person_id", "") or ""
+        ).strip()
+        if relationship_subject_id:
+            life_snapshot = read_life_snapshot(
+                relationship_subject_id,
+                reader=ports.get_life_snapshot_reader(),
+            )
+            body_sense = project_body_sense_from_life_snapshot(life_snapshot)
+            if isinstance(trace_stage_meta, dict):
+                trace_stage_meta["body_sense_projection"] = {
+                    "authority": "CANONICAL_LIFE_JOURNAL",
+                    "relationship_subject_id": relationship_subject_id,
+                    "life_version": int(life_snapshot.get("version") or 0),
+                    "life_state_digest": str(life_snapshot.get("state_digest") or ""),
+                }
+        else:
+            body_sense = None
         _inner_weather = build_inner_weather_hint(
             _digest,
-            fatigue=body_sense.fatigue,
-            drowsiness=body_sense.drowsiness,
-            loneliness=body_sense.loneliness,
+            fatigue=float(getattr(body_sense, "fatigue", 0.0)),
+            drowsiness=float(getattr(body_sense, "drowsiness", 0.0)),
+            loneliness=float(getattr(body_sense, "loneliness", 0.0)),
         )
-        _body_state_hint = body_sense.body_sense_hint
+        _body_state_hint = str(getattr(body_sense, "body_sense_hint", "") or "")
 
         # Map drive signals.
         _care_signal = float(inner_monologue.get("care_drive") or 0.0)

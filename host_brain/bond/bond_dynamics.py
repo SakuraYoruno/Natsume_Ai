@@ -22,6 +22,7 @@ S_BOND_UPDATE = "S_BOND_UPDATE"
 
 STATUS_OK = "OK"
 STATUS_REJECTED = "REJECTED"
+RETIRED_CANONICAL_LIFE = "RETIRED_CANONICAL_LIFE"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,40 @@ class BondUpdateResult:
     stage: str
     detail: str
     event: dict[str, Any]
+
+
+class RetiredBondDynamicsWriter:
+    """Fail-closed compatibility adapter for the retired Bond write path.
+
+    The score/stage graph remains readable during the rollback window, but a
+    production Host whose relationship authority is the Digital Life journal
+    must never create a second relationship truth through ``BondDynamics``.
+    This adapter deliberately returns a normal, inspectable result instead of
+    throwing, so legacy callers cannot silently fall back to another writer.
+    """
+
+    authority = "CANONICAL_LIFE_JOURNAL"
+
+    def apply_update(self, **kwargs: Any) -> BondUpdateResult:
+        request_id = str(kwargs.get("request_id") or "")
+        event_id = str(kwargs.get("event_id") or "")
+        return BondUpdateResult(
+            success=False,
+            status=STATUS_REJECTED,
+            reason_code="LEGACY_BOND_WRITE_RETIRED",
+            stage="UNAVAILABLE",
+            detail=(
+                "legacy BondDynamicsWriter is retired when canonical "
+                "Digital Life relationship authority is active"
+            ),
+            event={
+                "request_id": request_id,
+                "event_id": event_id,
+                "authority": self.authority,
+                "status": RETIRED_CANONICAL_LIFE,
+                "reason_code": "LEGACY_BOND_WRITE_RETIRED",
+            },
+        )
 
 
 class BondDynamicsWriter:

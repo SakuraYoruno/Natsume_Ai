@@ -3,14 +3,14 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.44
+版本：v2.45
 核对日期：2026-07-28
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> `NE-08 / DL-05_HOST_EXPRESSION_PROTOCOL_LOCAL_SLICE` 已把实时情感陪伴设为当前产品主线。
+> `NE-08 / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING` 已把实时情感陪伴设为当前产品主线。
 > Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
 > head：`EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
 > Regulation`；ASGI Input composition 又将 `AffectFusionService` 接入输入入口。
@@ -19,9 +19,10 @@
 > 0143 append-only projection 持久化；raw 音视频和正文不会进入 journal。
 > DL-03 再将 accepted reply 的 provisional relationship episode 与下一次用户输入的
 > aftereffect 写入相同 journal；Surface 只从内部 provenance hand-off 获取关系边界，
-> 不接受请求伪造。HostEmotionRuntime、Limbic、BodySense、Endocrine、Motive、Bond
-> 与 Surface 仍有兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
-> episode 与旧 writer 清零仍待后续 DL 波。
+> 不接受请求伪造。HostEmotionRuntime、Limbic、Endocrine 与 global BodySense 的 production mutation 已逐项切断；
+> BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪；production Bond writer/queue 已退役为只读 projection 与明确 no-write adapter，Surface
+> 仍有其它兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
+> episode 与旧 writer 清零仍待后续 DL 波。Input/Tribe composition 也已删除旧 runtime fallback：缺 Life authority 时拒绝，不能构造 `HostEmotionRuntime`。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`
 > 接到 Surface 主链：普通低歧义文本在可见前逐句落 journal，模型输出不能回写
 > self-affect；高歧义回合只能两候 buffered selection。DL-05 使 `ExpressionPlanV1`
@@ -29,6 +30,37 @@
 > 并将 `CANCEL`/`RELEASE` 与隐私最小化 0146 projection 接到 canonical Life journal。
 > 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
 > physical receipt 以及旧 writer 清零仍未完成。
+
+**退役 progress helper**位于 [`input_runtime/progress.py`](../../../host_brain/input_runtime/progress.py)。Gateway
+progress fastpath 已被禁用，故此文件只保留 rollback-window 的无状态技术文案 helper：它固定使用
+`FRIEND / CALM`，不读取 ingress `bond_summary`、用户 emotion、SocialBrain 或旧 Bond。历史重复
+`app/input_service_ack.py` 已无生产 caller 并被删除，避免它成为第二条兼容读取路径。该边界只做本地合同验证，
+不能取代 canonical Life 主链。
+
+**Canonical Relationship Prompt Projection 模块**位于
+[`persona/context/relationship_state.py`](../../../host_brain/persona/context/relationship_state.py)、
+[`app/context/prompt_context_plane.py`](../../../host_brain/app/context/prompt_context_plane.py) 与
+[`app/context/interaction_facts_plane.py`](../../../host_brain/app/context/interaction_facts_plane.py) 之间。它只接受
+经内部 AffectiveFusion provenance、`natsume_ai`、workspace、relationship subject、session 和三层 schema 验证的
+`RelationshipStateV2`；成功后把 canonical trust/safety/attunement/rupture 投影为有界、非浪漫的
+`FRIEND / stepsibling` prompt texture，repair 只收紧为修复状态。该模块不读取或写入 Bond，不把 consent、旧 score
+或 `SOULMATE` stage 解释为恋人、排他、依赖或主动授权；claimed canonical hand-off 无法验证时返回
+`CANONICAL_RELATIONSHIP_REJECTED` 安全投影。Surface context packet 复用这条结果。当前只有
+`LOCAL_TARGETED_179_PASSED / EMOTIONAL_DIGITAL_LIFE_PARTIAL`，并由 `surface_affect_control` 在最终表达处忽略
+compatibility lover distance、closeness、clue 与 lover task 的二次升级；其定向集合为 `82 passed in 21.18s`。
+同一 module 的 Cortex retrieval adapter 在 canonical hand-off 存在时跳过 legacy state-arbiter Bond fetch，只向
+retrieval/Motive 输出无分数 `FRIEND / stepsibling / familiar|guarded` projection（`34 passed in 5.64s`）。该模块
+不承担真实 Edge、Monitor、Review 或全栈验收。
+
+**Legacy Proactive Retirement 模块**由
+[`lifecycle_runtime/proactive_dispatch.py`](../../../host_brain/lifecycle_runtime/proactive_dispatch.py)、
+[`composition/scheduler.py`](../../../host_brain/composition/scheduler.py) 与
+[`app/host_life_scheduler_wiring.py`](../../../host_brain/app/host_life_scheduler_wiring.py) 共同构成。它不再生成
+主动消息：`proactive_talk` 已从 production Personality Skill、Tool Catalog、executor 和 Scheduler-add task type
+移除；Host startup 以 CAS 禁用升级前保留的 `proactive_talk_periodic` definition。已接纳的旧 occurrence 仍校验
+其 exact Scene identity，但只能返回 `LEGACY_PROACTIVE_TALK_RETIRED`，不能读取 Bond、timeline、Limbic 或模板，
+更不能写 delivery intent。真正的主动消息仍只由 canonical Life `life_tick`、`companion_proactive` 和 durable
+outbox 负责；此模块状态为 `LOCAL_RETIREMENT_WIRED / EXPERIENCE_ACCEPTANCE_PENDING`。
 
 Universal Runtime 模块已完成 NE-01 本地代码波次：七路线同库收据全部
 `PASS`，24 个恢复用例一次性覆盖通用图形、跨进程 checkpoint、签名
@@ -185,7 +217,34 @@ Worker Evidence 模块只负责对 durable WorkerProjection 做独立验证与�
 
 Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskStore 负责有序 Effect staging，Digital Life command repository 负责 command/event/intent 原子入账，`LifeProjectionDispatcher + life_projection_barrier` 负责 exact intent 执行与回执集合校验。`surface.post_process` 继续调用真实 app-local AgentRuntime ports，只有 assistant turn 和 LifeMemory admission 均持久成功才可完成 projection。Gateway transport仍由后序 delivery Effect 拥有，任何本地投影 UNKNOWN 都会阻断它；这样没有新增第二个 Conversation writer，也没有让 Life command receipt越权成为投影成功证明。
 
-情感上下文模块现在分为 canonical fusion 与 legacy compatibility 两个清晰边界。生产 ASGI 在 `InputRuntimeApplicationPorts` 提供 `LifeCommandService` 后，会构造 app-local `AffectFusionService`：它把 `ChatRequest` 的文本、自述和允许的结构化声学/视觉摘要转换为 `UserAffectObservationV1`，以 workspace-scoped opaque aggregate key 持久化，再最多产生两个 `EventAppraisalV1` 候选；只有后者可推进 `state.affective`。`normalize_chat_emotion_context()` 对 fused internal context 与 replay/render 均只读，外部无法以伪造 `affective_life` 字段越过该边界。`HostEmotionRuntime` 仍管理旧连续向量、前一标签、Timeline、用户画像和日记节流，但仅是未提供 fusion service 时的 app-local compatibility fallback，不是 canonical self-affect。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。上述模块均不拥有 Persona/Feedback 的永久写 authority。
+情感上下文模块现在由 canonical fusion 单独拥有 Host composition 入口。生产 ASGI 在 `InputRuntimeApplicationPorts` 提供 `LifeCommandService` 后，会构造 app-local `AffectFusionService`：它把 `ChatRequest` 的文本、自述和允许的结构化声学/视觉摘要转换为 `UserAffectObservationV1`，以 workspace-scoped opaque aggregate key 持久化，再最多产生两个 `EventAppraisalV1` 候选；只有后者可推进 `state.affective`。Input/Tribe composition 缺少该 authority 时固定 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，既不解析 provider，也不构造 `HostEmotionRuntime`。`normalize_chat_emotion_context()` 对 fused internal context 与 replay/render 均只读，外部无法以伪造 `affective_life` 字段越过该边界。旧 runtime 类仅保留给直接隔离测试，不是任何 Host fallback。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。上述模块均不拥有 Persona/Feedback 的永久写 authority。
+
+当前 production Host root 不再实例化该 compatibility runtime；`user_emotion_profile` 也不再
+作为 process-wide port 发布。`build_tribe_application_ports()` 接收 ASGI 的 lazy Life command
+provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime；遗漏
+authority 的 composition 失败关闭，不能恢复 offline/test fallback。canonical
+Tribe ports 还会令 Limbic 的 legacy persistence、metabolism、timeline append、decay 与 Bond callback
+全部 no-op 并返回 `RETIRED_CANONICAL_LIFE`，避免 event callback 重建第二份 self-affect。这不是完整
+organ 退役：Endocrine 的 legacy delta/last-state/hint/fan-out 现同样 no-op；Circadian/MirrorNeuron
+只能调用它的受控 compatibility port，不再触碰私有字段。BodySense 的 legacy global model 也不再被
+production Surface/startup 读取，canonical Limbic 必须从 scoped Life snapshot 做纯投影，且 legacy tick/
+loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond queue/writer 已退役；production
+Host 也不再从旧 action log hydrate `EmotionTimeline`，而是以显式 retired 空投影失败关闭读取，不能用它重建
+七海 self-affect。DL-06 后续项是其它 compatibility reader 使用审计与 runtime 计量。
+
+`lifecycle_runtime.runtime_snapshot` 现已完成这份审计中的 OBS 生产 reader 切换：它经 frozen
+`LifecycleRuntimeApplicationPorts.get_life_snapshot_reader` 读取 relationship subject 的 canonical Life head，
+把 `natsume_ai` self-affect、bounded user observation、关系 texture、body projection 与 posture 分开投影。
+已组成 reader 后发生错误或 identity drift 时明确 degraded，不能改走 SocialBrain/Bond、Limbic、Prefrontal 或
+retired timeline。该模块状态是 `DL06_RUNTIME_SNAPSHOT_CANONICAL_READER_LOCAL_TARGETED_67_PASSED`，并不代表
+Monitor、真人陪伴体验、真实模型/Edge 或 DL-07 验收。
+
+`DefaultModeAgent` / `inner_activity_agent` 是该审计已切换的一条真实生产读路径：默认模式拿到 canonical
+Life snapshot 后仅消费 `inner_self_affect_projection.v1` 与 `inner_relationship_projection.v1` 的有界事实，不会
+再次解析 retired timeline 或 Bond snapshot。关系投影与旧 Bond summary 分离，不能由 trust/attunement 推断
+stage、亲密或主动权限；它也不含 identity、evidence 或 intimacy consent。default-mode 高连续性不再触发
+legacy Limbic metabolism。状态为 `PARTIAL_DL06_DEFAULT_MODE_CANONICAL_READER_LOCAL`，不代表其他 reader 或
+真实服务已完成。
 
 Internal terminal recovery 模块除 #114 的精确后置审核取消外，当前还拥有一个独立的 signed raw-failure claim contract：它只从无取消意图、零投影/Effect、单节点和单 Budget 的原子失败终态生成 deterministic result，并要求先结算 Secure Ingress claim、再清理 Workspace/stage。该模块不拥有一般 failure/cancellation/multi-node/unknown-effect recovery authority。
 
@@ -356,14 +415,18 @@ Budget contention persistence 由 `TaskBudgetUsageStoreMixin` 唯一拥有：首
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|
 | Digital Life Core | LifeCommand、event、OCC/version、deterministic reducer、projection/outbox | [`digital_life/service.py`](../../../host_brain/digital_life/service.py)、[`digital_life/reducer.py`](../../../host_brain/digital_life/reducer.py)、[`persistence/life_command_repository.py`](../../../host_brain/persistence/life_command_repository.py) | Life contracts、repository port、projection/delivery port | Surface、Scheduler 或 Tribe 各自维护平行 Life 真相 | `WIRED`；是 Life 状态的 canonical 基础 |
-| Relationship Lifecycle | 已接受回复的 provisional episode、下一输入 aftereffect、trust/safety/attunement/rupture/repair/proactive permission 的有界状态 | [`digital_life/relationship_lifecycle.py`](../../../host_brain/digital_life/relationship_lifecycle.py)、[`digital_life/domain_reducer.py`](../../../host_brain/digital_life/domain_reducer.py)、[`contracts/life/relationship.py`](../../../natsume_contracts/life/relationship.py)、0144 | app-local Life command/reader、accepted reply receipt、opaque digest | 自行读取原文、把 Bond 积分当亲密同意、自动完成修复、给模型授予关系写权 | `DL03_CODE_COMPLETE_LOCAL`；workspace + subject 为长期 aggregate，session 只作事件上下文，重复/重启只重开同一 episode。主动生产调度、真人反馈与旧 writer 清零待 DL-06 |
+| Relationship Lifecycle / Companion Policy | 已接受回复的 provisional episode、scope-bound contact target、下一输入 aftereffect、trust/safety/attunement/rupture/repair/proactive permission、delivery receipt 后的 proactive episode、签名的显式许可入口，以及发送前 non-coercive proactive decision | [`digital_life/relationship_lifecycle.py`](../../../host_brain/digital_life/relationship_lifecycle.py)、[`digital_life/companion_permission_ingress.py`](../../../host_brain/digital_life/companion_permission_ingress.py)、[`digital_life/outbox.py`](../../../host_brain/digital_life/outbox.py)、[`digital_life/companion_proactive.py`](../../../host_brain/digital_life/companion_proactive.py)、[`digital_life/policy.py`](../../../host_brain/digital_life/policy.py)、[`digital_life/domain_reducer.py`](../../../host_brain/digital_life/domain_reducer.py)、[`contracts/life/relationship.py`](../../../natsume_contracts/life/relationship.py)、0144 | app-local Life command/reader、accepted reply receipt、delivery receipt、opaque digest、scheduler-admitted timezone、Secure Ingress user claim | 自行读取原文、把 Bond 积分当亲密同意、自动完成修复、给模型授予关系写权、未知权限下外发、把 crash recovery 变成外部重发、以自然语言或跨 scope 请求伪造许可 | `DL06_EXPLICIT_PERMISSION_INGRESS_SLICE`；accepted reply 原子登记 `CompanionProactiveTargetV1`，scheduler 只在 frozen Scene scope 内确定性选择该 read-only registry target。`proactive.gateway` receipt 经过 outbox/scope/target/digest 重验后才打开 `PROACTIVE_MESSAGE` episode；restart/tick 仅 receipt-only exact replay，不可重传。`POST /v1/digital-life/relationship/proactive-permission` 只接受 `ALLOWED/DENIED` strict JSON，要求 `companion:contact:write`、`user principal == relationship subject` 与 `tenant == workspace`，并将 audit ref/claim completion 绑定同一 Life receipt。旧 Bond/legacy affect/fixed template/`last_target` 无发送权；Monitor 控件、偏好 canary 与旧 writer 清零仍待后续 DL-06 |
+| Companion Profile Lifecycle | 可逆的低风险表达偏好版本、五互动 canary、激活与精确回滚；只读地把 profile identity 投入 text/Voice/Avatar/proactive planner | [`digital_life/companion_profile_lifecycle.py`](../../../host_brain/digital_life/companion_profile_lifecycle.py)、[`digital_life/domain_reducer.py`](../../../host_brain/digital_life/domain_reducer.py)、[`digital_life/affective_turn_planner.py`](../../../host_brain/digital_life/affective_turn_planner.py)、[`digital_life/affective_expression_delivery.py`](../../../host_brain/digital_life/affective_expression_delivery.py)、[`contracts/life/companion_profile.py`](../../../natsume_contracts/life/companion_profile.py)、0147 | canonical relation aftereffect event、Life command/reader、app-local composition、opaque refs | 修改 Soul、价值观、self-affect、relationship consent、亲密身份，或从 raw text/media/弱推断直接学习 | `DL06_CANONICAL_PROFILE_CANARY_LOCAL_HOST_WIRED`；五条独立、跨至少三天、`HELPFUL`、boundary-safe 且 `>=0.85` 的 canonical aftereffect 才能建 candidate，第五条合格 canary 后效应会自动 activate，rollback 只允许当前 profile 指定的旧版本。CANARY/ACTIVE profile 会真实影响下一轮 bounded style、TTS rate、Avatar motion 和可进一步收紧的 proactive window；生产 `0.72` 文本 classifier 不能自动累计。已存在 receipt-scoped 签名回应反馈，它在第五条合格 canary 后效应时会自动 activation；仍缺 Monitor/Review、canary 长期收益、旧 writer 清零和真实服务栈证据 |
+| Signed Companion Profile Control | 用户显式试用低风险表达偏好的严格 Host 入口；只能创建可回放的 CANARY | [`digital_life/companion_profile_ingress.py`](../../../host_brain/digital_life/companion_profile_ingress.py)、[`app/digital_life_routes.py`](../../../host_brain/app/digital_life_routes.py)、[`secure_ingress/surfaces.py`](../../../host_brain/secure_ingress/surfaces.py)、0148 | `host.companion-profile` Secure Ingress、canonical profile lifecycle、Life receipt | 自由文本推断、body 自报 evidence、Soul/consent/self-affect patch、直接 activation、跨 user/workspace body | `HOST_WIRED_LOCAL_TARGETED_PASS`；只接受 `companion:profile:write`、exact `user principal == relationship subject`、`tenant == workspace` 的完整 bounded JSON。Host 从 canonical strong aftereffect history 选择证据，audit ref 与 profile 一同持久化；duplicate/restart 只重开同一 receipt。不是 Monitor/Review 控件，不证明 canary 已完成或旧 writer 已退役 |
+| Signed Companion Response Feedback | 对单条已接受回复的有界用户评价；将明确体验反馈写成 relationship aftereffect，并在第五条合格后效应时自动完成既有 profile canary 的 activation | [`digital_life/companion_feedback_ingress.py`](../../../host_brain/digital_life/companion_feedback_ingress.py)、[`digital_life/relationship_lifecycle.py`](../../../host_brain/digital_life/relationship_lifecycle.py)、[`app/digital_life_routes.py`](../../../host_brain/app/digital_life_routes.py)、[`contracts/life/relationship.py`](../../../natsume_contracts/life/relationship.py) | `host.companion-feedback` Secure Ingress、active provisional episode、canonical Life receipt、profile lifecycle | 关键词/模型推断、raw rating、persona proposal、无 active receipt、直接创建或指定 activation profile、跨 user/workspace body | `HOST_WIRED_LOCAL_TARGETED_PASS`；`HELPFUL/NEUTRAL/MISUNDERSTOOD/BOUNDARY` 是唯一 wire values，只有明确 `HELPFUL` 得到 `0.95` strong aftereffect。audit ref 让 duplicate/restart 只重开同一 receipt；其余值可更新关系状态但不会成为 profile 学习成功；第五条合格 canary 后效应才由 canonical lifecycle 自动 activation。不是 Monitor UI 或真实 canary/服务栈验收 |
+| Signed Companion Profile Rollback | 用户撤销当前 active 的低风险表达 profile；只恢复该版本冻结的 predecessor | [`digital_life/companion_profile_ingress.py`](../../../host_brain/digital_life/companion_profile_ingress.py)、[`digital_life/companion_profile_lifecycle.py`](../../../host_brain/digital_life/companion_profile_lifecycle.py)、[`app/digital_life_routes.py`](../../../host_brain/app/digital_life_routes.py)、[`contracts/life/companion_profile.py`](../../../natsume_contracts/life/companion_profile.py) | `host.companion-profile-rollback` Secure Ingress、canonical active projection、Life receipt | caller-selected history、Soul/consent/self-affect patch、stale active head、service principal、跨 user/workspace body | `HOST_WIRED_LOCAL_TARGETED_PASS`；只接受 `companion:profile:rollback`、exact user/subject、tenant/workspace 与 current active identity。wire body 没有 target；audit-derived `source_control_ref` 进入 immutable rollback event，duplicate/restart 只重开同一 receipt。不是 Monitor/Review、legacy writer cutover 或真实服务栈验收 |
 | World/Environment Projection | 当前环境与世界事实只读投影、workspace-scoped Context 解析 | 0111、0137、[`persistence/world_observation_journal.py`](../../../host_brain/persistence/world_observation_journal.py)、[`persistence/long_term_goal_repository.py`](../../../host_brain/persistence/long_term_goal_repository.py)、[`runtime/world_observation_application.py`](../../../host_brain/runtime/world_observation_application.py)、[`runtime/world_resolver.py`](../../../host_brain/runtime/world_resolver.py) | typed ObservationPort、canonical source verifier、Host lease、server-owned signals/active goal owner | caller 分配 revision、request body 伪造 Scene/World、截断分页、读取时续期 | `PARTIAL_NE03_PRODUCTION_OBSERVATION_AND_GOAL_WIRED`；Host lifespan 中的 application 写入并重开 World，TTL 显式过期、goal 撤销以 `SOURCE_REVOKED` 过期、competing refs 与 captured-head replay 已实现；上游 Bond 原始证据、预测世界模型与部署 canary仍缺 |
 | Persona Surface | 人格表达、reply plan、情感/关系质感、memory grounding、文本质量门禁 | [`persona/surface_main_chain.py`](../../../host_brain/persona/surface_main_chain.py)、[`persona/surface_runtime.py`](../../../host_brain/persona/surface_runtime.py)、[`persona/reply_plan.py`](../../../host_brain/persona/reply_plan.py) | 只读 Persona/Life/Memory context、Model Runtime | 任务调度、能力授权、人格永久直写 | `WIRED / LARGE`；表达链能力丰富，边界与文件仍过密 |
 | Scene Policy | 统一生成表达、主动性和 Task admission 约束的只读场景决策 | 0112、[`runtime/scene_resolver.py`](../../../host_brain/runtime/scene_resolver.py)、[`runtime/context_application.py`](../../../host_brain/runtime/context_application.py)、[`runtime/scene_consumer_projection.py`](../../../host_brain/runtime/scene_consumer_projection.py) | WorldSnapshot、typed context、app-local Guardian、Host lease | caller 指定最终 Scene/Guardian 状态、三消费者各自重算、写入 World/Life/Persona | `PARTIAL_NE03_THREE_CONSUMERS_WIRED_LOCAL_ACCEPTANCE_PASSED`；Surface、Proactive、Task admission 冻结同一 revision/digest，旧 builder 无这三处生产调用；八类场景 commit-bound 验收已通过 |
 | Intent Arbiter | 将 Scene、Task、关系、长期目标、风险和 Grant 约束合并且只收紧 | [`runtime/production_intent_authority.py`](../../../host_brain/runtime/production_intent_authority.py)、[`runtime/intent_admission.py`](../../../host_brain/runtime/intent_admission.py)、[`runtime/intent_arbiter.py`](../../../host_brain/runtime/intent_arbiter.py)、[`persistence/long_term_goal_repository.py`](../../../host_brain/persistence/long_term_goal_repository.py) | canonical HostCommand/WorkOrder/TaskGraph/Scene/Grant + durable ReviewStore + 0137 goal owner | 裸信 caller digest、遗漏节点、过期/撤销 Grant、扩大权限或执行动作 | `PARTIAL_NE03_PRODUCTION_ADMISSION_AND_GOAL_OWNER_WIRED_LOCAL_WAVE_PASS`；准备/完成 receipt set 与 Review continuation 已接 Task Runtime，active goal refs/typed constraints 从 World 冻结并在 admission 重开；冻结后 identity 漂移失败关闭。部署 canary仍缺 |
 | Action Preview Authority | 在高风险执行点重开已有 authority 并冻结 exact action/context/scene；自身不授予执行权 | [`runtime/action_preview_authority.py`](../../../host_brain/runtime/action_preview_authority.py)、[`runtime/action_preview_resolver.py`](../../../host_brain/runtime/action_preview_resolver.py)、[`governor/action_preview.py`](../../../host_brain/governor/action_preview.py) | HostCommand/TaskGraph/Attempt/Lease/Grant/Guardian、Runtime Event、typed EffectDescriptor | caller 自报 node grant/risk/capability、扩展 scope/args、用 Preview 替代 Grant | `PARTIAL_NE03_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED`；Skill/Delegate/Scheduler/Acceptance/Life 已接线，终端正向还覆盖 sys-mode、terminal、Edge、Operation/Effect reconciliation、`task.operator_control` 与 `operator.state_control`；旧任务/effect、剩余 `23/37` 个 Operator 直写、reply-performance/Gateway voice/Avatar 直通隔离，后三者和 Operator 其余功能迁移仍属 NE-01 |
 | Runtime Guardian / Service Catalog | app-local health/degradation/recovery/SLO，以及 Host 五阶段启动 authority | 0112、0113、[`runtime/runtime_guardian.py`](../../../host_brain/runtime/runtime_guardian.py)、[`app/health_routes.py`](../../../host_brain/app/health_routes.py)、[`service_catalog/host_startup.py`](../../../host_brain/service_catalog/host_startup.py)、[`service_catalog/rollout_authority.py`](../../../host_brain/service_catalog/rollout_authority.py)、[`channels/embodiment.py`](../../../host_brain/channels/embodiment.py)、[`app/http_hooks.py`](../../../host_brain/app/http_hooks.py) | Host runtime lease、Runtime Event、append-only rollout operation/receipt/head、typed health ledger/probe ports | module-global singleton、裸 owner/fence、伪造 reducer/terminal、路由自行解析 process locator、跳阶段或收养未知 listener | `PARTIAL_NE03_APP_LOCAL_HEALTH_PROBE_STATE_WIRED`；startup probe 只通过 app-local Guardian sink 发布，缺失 sink 时显式 `UNBOUND` 而不回退 global reducer；ASGI 自有 Guardian task、cache 与 transport 是正式 Host 的唯一 health-loop owner，scope close 只清理本 scope；生产 `/health`、`/ready` 和内部免疫实时报告显式消费 composition 提供的端口，缺失即 503；fresh DB 逐级到 ENFORCE，crash replacement 只在旧 30 秒 embodiment Lease 到期后以更高 fence 接管，live heartbeat 不可抢占；启动器会先定向停止同 runtime root 的 sidecar 并观察 launcher 退出。该边界仍待真实重跑；legacy provider、Windows graceful stop 和部署多实例 canary 待收口 |
-| Bond（兼容） | 用户身份解析、历史阶段、里程碑、叙事和关系投影 | [`bond/bond_stage_engine.py`](../../../host_brain/bond/bond_stage_engine.py)、[`bond/milestone_tracker.py`](../../../host_brain/bond/milestone_tracker.py)、[`bond/bond_projection.py`](../../../host_brain/bond/bond_projection.py) | 事件、只读 Life/Memory、repository | 关系长期真相、亲密/浪漫授权、绕过人格版本激活直改 trait | `COMPATIBILITY / AUTO_STAGE_DISABLED_IN_HOST`；生产默认不再按积分自动晋级，stage 仅作描述；queue 与旧 projection 待 DL-06 退役 |
+| Bond（兼容） | 用户身份解析、历史阶段、里程碑、叙事和关系投影 | [`bond/bond_stage_engine.py`](../../../host_brain/bond/bond_stage_engine.py)、[`bond/milestone_tracker.py`](../../../host_brain/bond/milestone_tracker.py)、[`bond/bond_projection.py`](../../../host_brain/bond/bond_projection.py) | 事件、只读 Life/Memory、repository | 关系长期真相、亲密/浪漫授权、绕过人格版本激活直改 trait | `COMPATIBILITY / AUTO_STAGE_DISABLED_IN_HOST`；生产默认不再按积分自动晋级，stage 仅作描述；queue/writer 已退役，剩余 compatibility reader 需经 DL-06 使用审计 |
 | Persona Growth | trait drift/growth 候选、interaction/emergent 候选和显式反馈 | [`persona/persona_growth.py`](../../../host_brain/persona/persona_growth.py)、[`persona/evolution_orchestrator.py`](../../../host_brain/persona/evolution_orchestrator.py)、[`evolution/version_activation_feedback.py`](../../../host_brain/evolution/version_activation_feedback.py) | 只读 Persona、0142 proposal/version authority、trusted Lab 与 Review | 非迁移 trait 写入、legacy rollback、伪造已应用历史或消费一次性状态 | `CODE_COMPLETE_LOCAL / ACCEPTANCE_PENDING_NE07`；所有运行入口 proposal-only，Review 后切换版本，exact rollback 恢复前一版本 |
 | Lifecycle Runtime | Scheduler handler、Life jobs、背景投影和 proactive dispatch | [`lifecycle_runtime/composition.py`](../../../host_brain/lifecycle_runtime/composition.py)、[`lifecycle_runtime/life_jobs.py`](../../../host_brain/lifecycle_runtime/life_jobs.py)、[`lifecycle_runtime/proactive_dispatch.py`](../../../host_brain/lifecycle_runtime/proactive_dispatch.py) | Scheduler、Life Command、Governor、delivery ports | 新的时钟 authority、人格直写 | `PARTIAL`；定时执行闭环受 Scheduler runtime 故障限制 |
 | Evolution / Identity | 实验隔离策略、ExperimentSpec/Run/Report/Proposal、Feedback/Knowledge/Identity version activation 与 exact rollback | NE-04 既有 trusted Lab；[`evolution/version_activation.py`](../../../host_brain/evolution/version_activation.py)、[`persistence/evolution_activation_v2_repository.py`](../../../host_brain/persistence/evolution_activation_v2_repository.py)、[`release/identity_activation.py`](../../../host_brain/release/identity_activation.py) | 0138～0142、ReviewStore、version/snapshot authority | raw trace 落库、直接生产激活、伪造 URI evidence、legacy V1 mutation、Operator 直写 | Evolution Lab 保持 proposal-only；NE-06 0142 已本地完成 real authority resolution、active owner switch 与 rollback，0110 只读。真实 release deployment 和全栈验收待 NE-07 |

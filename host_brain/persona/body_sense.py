@@ -297,55 +297,10 @@ class BodySenseModel:
         Returns:
             BodySenseState 快照，供 prompt_builder 注入。
         """
-        fatigue_level = _classify_fatigue(self._fatigue)
-        drowsiness_level = _classify_drowsiness(self._drowsiness)
-        loneliness_level = _classify_loneliness(self._loneliness)
-        templates = _load_style_hint_templates()
-        drowsiness_templates = _mapping_section(templates, "drowsiness")
-        fatigue_templates = _mapping_section(templates, "fatigue")
-        loneliness_templates = _mapping_section(templates, "loneliness")
-
-        # 计算对回复意愿的惩罚（仅疲劳影响意愿，困倦影响风格）
-        willingness_penalty = 0.0
-        if fatigue_level != "FRESH":
-            # 疲劳越高，意愿惩罚越大（线性映射到 [0, 0.35]）
-            willingness_penalty = min(
-                _FATIGUE_WILLINGNESS_PENALTY_MAX,
-                max(0.0, self._fatigue - 0.3) / 0.7 * _FATIGUE_WILLINGNESS_PENALTY_MAX,
-            )
-        willingness_penalty = round(willingness_penalty, 4)
-
-        # 构建综合 body_sense_hint（优先级：困倦 > 疲劳 > 孤独）
-        hints: list[str] = []
-        drowsy_hint = str(drowsiness_templates.get(drowsiness_level, ""))
-        fatigue_hint = str(fatigue_templates.get(fatigue_level, ""))
-        lonely_hint = str(loneliness_templates.get(loneliness_level, ""))
-
-        if drowsy_hint:
-            hints.append(drowsy_hint)
-        if fatigue_hint:
-            hints.append(fatigue_hint)
-        if lonely_hint:
-            hints.append(lonely_hint)
-
-        body_sense_hint = " ".join(hints).strip()
-
-        is_active = (
-            fatigue_level != "FRESH"
-            or drowsiness_level != "ALERT"
-            or loneliness_level != "FINE"
-        )
-
-        return BodySenseState(
-            fatigue=round(self._fatigue, 4),
-            fatigue_level=fatigue_level,
-            drowsiness=round(self._drowsiness, 4),
-            drowsiness_level=drowsiness_level,
-            loneliness=round(self._loneliness, 4),
-            loneliness_level=loneliness_level,
-            body_sense_hint=body_sense_hint,
-            willingness_penalty=willingness_penalty,
-            is_active=is_active,
+        return _body_sense_state_from_levels(
+            fatigue=self._fatigue,
+            drowsiness=self._drowsiness,
+            loneliness=self._loneliness,
         )
 
     def get_willingness_penalty(self) -> float:
@@ -420,6 +375,123 @@ def _classify_loneliness(loneliness: float) -> str:
         return "LONGING"
     else:
         return "ACHING"
+
+
+def project_body_sense_from_life_snapshot(
+    snapshot: Mapping[str, Any] | None,
+) -> BodySenseState:
+    """Build a read-only body-sense view from the canonical Life snapshot.
+
+    The historical :class:`BodySenseModel` is a process-global mutable
+    compatibility model.  A production Host with canonical Digital Life
+    authority must not use that singleton to carry fatigue, loneliness, or
+    conversation timing across requests.  This projection deliberately takes
+    only a supplied snapshot and has no clock, singleton, repository, or
+    mutation dependency, so it is safe for replay and prompt assembly.
+
+    ``affective.needs.rest`` and the canonical fatigue/energy projections are
+    independent evidence of reduced capacity; they are combined
+    conservatively.  Drowsiness is a pure projection of the already-journaled
+    Life day phase rather than a second local tick loop.  Connection need is
+    not silently equated with loneliness: only the canonical affective
+    loneliness projection contributes to that dimension.
+    """
+
+    envelope = _as_mapping(snapshot)
+    state = _as_mapping(envelope.get("state")) or envelope
+    affective = _as_mapping(state.get("affective"))
+    mood = _as_mapping(affective.get("mood"))
+    needs = _as_mapping(affective.get("needs"))
+    affect = _as_mapping(state.get("affect"))
+    pressure = _as_mapping(state.get("life_pressure"))
+    clock = _as_mapping(state.get("clock"))
+    world_time = _as_mapping(_as_mapping(state.get("world")).get("time"))
+
+    energy = _unit(mood.get("energy"), default=0.62)
+    energy_fatigue = _unit((0.55 - energy) / 0.55)
+    fatigue = max(
+        _unit(pressure.get("fatigue")),
+        _unit(affect.get("fatigue")),
+        _unit(needs.get("rest")),
+        energy_fatigue,
+    )
+    loneliness = _unit(affect.get("loneliness"))
+    day_phase = str(
+        clock.get("day_phase") or world_time.get("day_phase") or "day"
+    ).strip().lower()
+    drowsiness = {
+        "night": 0.68,
+        "evening": 0.35,
+        "morning": 0.10,
+        "day": 0.0,
+    }.get(day_phase, 0.0)
+    return _body_sense_state_from_levels(
+        fatigue=fatigue,
+        drowsiness=drowsiness,
+        loneliness=loneliness,
+    )
+
+
+def _body_sense_state_from_levels(
+    *,
+    fatigue: float,
+    drowsiness: float,
+    loneliness: float,
+) -> BodySenseState:
+    """Create one normalized snapshot without reading or mutating runtime state."""
+
+    normalized_fatigue = _unit(fatigue)
+    normalized_drowsiness = _unit(drowsiness)
+    normalized_loneliness = _unit(loneliness)
+    fatigue_level = _classify_fatigue(normalized_fatigue)
+    drowsiness_level = _classify_drowsiness(normalized_drowsiness)
+    loneliness_level = _classify_loneliness(normalized_loneliness)
+    templates = _load_style_hint_templates()
+    drowsiness_templates = _mapping_section(templates, "drowsiness")
+    fatigue_templates = _mapping_section(templates, "fatigue")
+    loneliness_templates = _mapping_section(templates, "loneliness")
+
+    willingness_penalty = 0.0
+    if fatigue_level != "FRESH":
+        willingness_penalty = min(
+            _FATIGUE_WILLINGNESS_PENALTY_MAX,
+            max(0.0, normalized_fatigue - 0.3)
+            / 0.7
+            * _FATIGUE_WILLINGNESS_PENALTY_MAX,
+        )
+    hints = [
+        str(drowsiness_templates.get(drowsiness_level, "")),
+        str(fatigue_templates.get(fatigue_level, "")),
+        str(loneliness_templates.get(loneliness_level, "")),
+    ]
+    body_sense_hint = " ".join(item for item in hints if item).strip()
+    return BodySenseState(
+        fatigue=round(normalized_fatigue, 4),
+        fatigue_level=fatigue_level,
+        drowsiness=round(normalized_drowsiness, 4),
+        drowsiness_level=drowsiness_level,
+        loneliness=round(normalized_loneliness, 4),
+        loneliness_level=loneliness_level,
+        body_sense_hint=body_sense_hint,
+        willingness_penalty=round(willingness_penalty, 4),
+        is_active=(
+            fatigue_level != "FRESH"
+            or drowsiness_level != "ALERT"
+            or loneliness_level != "FINE"
+        ),
+    )
+
+
+def _as_mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _unit(value: Any, *, default: float = 0.0) -> float:
+    try:
+        numeric = float(value if value not in (None, "") else default)
+    except (TypeError, ValueError):
+        numeric = float(default)
+    return max(0.0, min(1.0, numeric))
 
 
 def _now_ms() -> int:

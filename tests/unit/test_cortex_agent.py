@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 
 from host_brain.tribe.cortex_agent import CortexAgent
-from host_brain.tribe.application_ports import TribeApplicationPorts
+from host_brain.tribe.application_ports import (
+    CANONICAL_AFFECT_LIFE_JOURNAL,
+    TribeApplicationPorts,
+)
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
@@ -96,3 +99,30 @@ def test_cortex_post_process_bond_update_fallback_writer(monkeypatch) -> None:
     assert captured["ledger"] == "ledger_sentinel"
     assert captured["stage_engine"] == "stage_engine_sentinel"
     assert captured["written_payload"]["session_id"] == "sess_2"
+
+
+def test_cortex_canonical_life_authority_never_resolves_legacy_bond_queue() -> None:
+    def _unexpected_queue():
+        raise AssertionError("canonical life must not resolve legacy Bond queue")
+
+    result = _run(
+        CortexAgent(
+            application_ports=TribeApplicationPorts(
+                bond_update_queue=_unexpected_queue,
+                affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            ),
+            state_registry=TribeStateRegistry(),
+        ).post_process_bond_update(
+            request_id="req-canonical-bond",
+            session_id="session-canonical-bond",
+            user_message="我有点累，先安静一会。",
+            emotion_context={"emotion_tag": "TIRED", "emotion_intensity": 0.7},
+            ts_ms=789,
+        )
+    )
+
+    assert result == {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_BOND_WRITE_RETIRED",
+    }

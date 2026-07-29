@@ -372,6 +372,7 @@ def build_cortex_prompt(
     retrieval_summary: dict[str, Any] | None = None,
     retrieval_evidence_items: list[dict[str, Any]] | None = None,
     person_id: str = "",
+    workspace_id: str = "",
     session_id: str = "",
     request_id: str = "",
     thread_id: str | None = None,
@@ -394,6 +395,7 @@ def build_cortex_prompt(
     runtime_input = build_chat_runtime_input(
         request_id=request_id,
         person_id=person_id,
+        workspace_id=workspace_id,
         session_id=session_id,
         thread_id=thread_id,
         user_message=user_message,
@@ -413,6 +415,7 @@ def build_cortex_prompt(
             "bond_summary": dict(bond_summary or {}),
             "request_id": request_id,
             "person_id": person_id,
+            "workspace_id": workspace_id,
             "session_id": session_id,
             "thread_id": thread_id,
         },
