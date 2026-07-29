@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.64
+版本：v2.65
 维护日期：2026-07-28
 状态：当前证据
 
@@ -78,6 +78,14 @@
   Docker 服务栈仍必须在 DL-07 单独验收。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
+
+- `test_dl06_hippocampus_memory_writer_retirement.py` 验证 canonical `HippocampusAgent` 不注册
+  interaction/loneliness/task EventBus，不写 legacy episodic/semantic/autobiographical layer 或 registry，也不向
+  DefaultMode/PainReward/Interoception/Limbic fan-out；三类写入显式退役为
+  `LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED`。同一文件确认 retrieval-row formatting 仍是无状态的纯转换。
+  该文件与 Hippocampus、Prefrontal/Glymphatic、batch、DefaultMode/Motor 邻接集合为 `147 passed in 10.04s`；
+  Surface、runtime snapshot、Host lifecycle、Tribe registry/handoff 邻接为 `70 passed in 17.09s`。两组不相加，
+  不代表真实情感记忆、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈验收。
 
 - `test_dl06_default_mode_inner_activity_retirement.py` 验证 canonical `DefaultModeAgent` 不订阅
   inner-world/conversation EventBus，不运行 idle 模型、写 process-local inner monologue/self-model、产生主动候选，

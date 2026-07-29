@@ -1,7 +1,7 @@
 受众：CODEX
 标题：TESTPLAN（测试契约索引）
 
-版本：v0.54
+版本：v0.55
 日期：2026-07-28
 
 说明：本文件维护稳定测试编号与断言口径。新增编号只代表契约已定义；只有对应测试代码和执行证据存在时才可标记为已覆盖。
@@ -321,6 +321,13 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `test_dl06_default_mode_inner_activity_retirement.py` 与 DefaultMode、inner-activity、batch 34/39/42/43/44/
   46/47/48、Glymphatic/Motor 邻接集合为 `125 passed in 4.42s`；不证明真实 provider、远端 Edge、Monitor/Review
   或 DL-07。
+- T-DL06-29：canonical `HippocampusAgent` 不得订阅 interaction/loneliness/task EventBus，不得将 raw
+  person/session 内容写入 legacy episodic/semantic/autobiographical layer、registry 或旧 Memory state，也不得把
+  记忆结果扇出为 DefaultMode/PainReward/Interoception/Limbic affect。三类 write、layer snapshot 与 export 必须
+  显式返回 `LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED`；`build_prompt_retrieval_rows()` 只能是上游已裁决摘要的
+  纯格式化器。当前 Hippocampus/Prefrontal/Glymphatic/batch/DefaultMode/Motor 集合为 `147 passed in 10.04s`，
+  Surface/runtime snapshot/Host lifecycle/Tribe 邻接为 `70 passed in 17.09s`；两组不相加，不证明真实情感记忆、
+  provider、远端 Edge、Monitor/Review 或 DL-07。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

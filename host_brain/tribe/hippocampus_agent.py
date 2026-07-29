@@ -58,6 +58,28 @@ class HippocampusAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_memory_authority_retired(self) -> bool:
+        """Whether canonical Life has retired this compatibility memory writer.
+
+        Canonical relationship/affect continuity is recorded through the Life
+        journal and accepted outcomes.  The old Hippocampus path accepts raw
+        person/session payloads, maintains a process-local layer cache and
+        fans successful writes into legacy affect organs, so it cannot become
+        a second memory or self-affect authority in production.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return ports is not None and ports.uses_canonical_affective_life()
+
+    @staticmethod
+    def _retired_memory_write(*, layer: str) -> dict[str, Any]:
+        return {
+            "layer": str(layer or "memory").strip() or "memory",
+            "status": "RETIRED",
+            "reason_code": "LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED",
+            "authority": "CANONICAL_LIFE_JOURNAL_AND_ACCEPTED_MEMORY_PROJECTION",
+        }
+
     async def recall(
         self,
         *,
@@ -301,6 +323,8 @@ class HippocampusAgent:
         T-36：订阅 INTERACTION_RECORDED，每轮对话结束后将对话元数据写入
         hippocampus_agent 命名空间快照，供诊断端点查询。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -322,6 +346,8 @@ class HippocampusAgent:
         T-36：记录最近一次对话的 session_id/user_id/emotion_tag，
         供诊断端点查询和调试使用。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             session_id = str(payload.get("session_id") or "default").strip() or "default"
@@ -347,6 +373,8 @@ class HippocampusAgent:
         T-61：记录最近一次孤独感信号的强度和时间戳，
         供 recall() 注入 session_state 和诊断端点查询使用。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.0)))
@@ -370,6 +398,8 @@ class HippocampusAgent:
         T-85：记录最近一次任务成功的 task_type / intensity / ts_ms，
         供 recall() 注入 session_state 和诊断端点查询使用。
         """
+        if self._legacy_memory_authority_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             task_type = str(payload.get("task_type") or "unknown").strip().lower() or "unknown"
@@ -407,6 +437,8 @@ class HippocampusAgent:
         Returns:
             规范化 Bond 用户 ID 字符串。
         """
+        if self._legacy_memory_authority_retired():
+            return str(fallback or "default").strip() or "default"
         try:
             from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
 
@@ -471,6 +503,8 @@ class HippocampusAgent:
         metadata: Mapping[str, Any] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return self._retired_memory_write(layer="episodic")
         payload = {
             "episodic_last": {
                 "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
@@ -519,6 +553,8 @@ class HippocampusAgent:
         source_refs: list[str] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return self._retired_memory_write(layer="semantic")
         payload = {
             "semantic_last": {
                 "person_id": _clean_person_id(person_id, fallback=self.resolve_bond_user_id()),
@@ -611,6 +647,8 @@ class HippocampusAgent:
         gate_result: Mapping[str, Any] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return self._retired_memory_write(layer="autobiographical")
         gate = dict(gate_result or {})
         allow = str(gate.get("decision") or "").strip().upper() == "ALLOW"
         if not allow:
@@ -702,6 +740,15 @@ class HippocampusAgent:
         return {"layer": "autobiographical", "arbiter": arbiter_result, "payload": payload["autobiographical_last"]}
 
     def resolve_memory_layer_snapshot(self) -> dict[str, Any]:
+        if self._legacy_memory_authority_retired():
+            return {
+                "episodic": {},
+                "semantic": {},
+                "autobiographical": {},
+                "last_write_type": "",
+                "reason_code": "LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED",
+                "authority": "CANONICAL_LIFE_JOURNAL_AND_ACCEPTED_MEMORY_PROJECTION",
+            }
         snap = self.state_registry.get_state("hippocampus_agent") or {}
         state = dict(snap.get("state") or {})
         layers = dict(state.get("memory_layers") or {})
@@ -721,6 +768,19 @@ class HippocampusAgent:
         Returns:
             dict: 包含 last_write_type/episodic_count/semantic_count 等关键字段。
         """
+        if self._legacy_memory_authority_retired():
+            return {
+                "last_write_type": "",
+                "has_episodic": False,
+                "has_semantic": False,
+                "has_autobiographical": False,
+                "last_episodic_session_id": "",
+                "last_semantic_person_id": "",
+                "last_autobiographical_person_id": "",
+                "write_count": 0,
+                "reason_code": "LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED",
+                "authority": "CANONICAL_LIFE_JOURNAL_AND_ACCEPTED_MEMORY_PROJECTION",
+            }
         snap = self.state_registry.get_state("hippocampus_agent") or {}
         state = dict(snap.get("state") or {})
         layers = dict(state.get("memory_layers") or {})

@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.47
+版本：v2.48
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -18,6 +18,11 @@ retired read projection；真正的 effect 执行、重试和未知副作用对�
 conversation EventBus，不运行 idle 模型、写 local self-model/monologue，也不把 continuity/loneliness 扇出为
 Glymphatic、ANS、Interoception 或 PainReward。其 tick、callback 和 export 仅给 retired projection；真正的关系
 连续性与陪伴冲动只能从 scoped Life/Appraisal/Regulation/aftereffect 取得。
+
+`HippocampusAgent` 在 canonical Life ports 下同样只保留无副作用的检索行格式化：它不订阅 interaction/
+loneliness/task EventBus，不写 legacy episodic/semantic/autobiographical layer、process-local snapshot 或旧器官
+fan-out。memory/relationship outcome 的写入与读取分别由 accepted projection/Life journal 的正式 owner 负责，
+兼容 agent 只返回 retired projection。
 
 NE-01 的本地代码封口把七个入口、一般多节点恢复和 Workspace 生命周期放进
 同一证据边界：路线收据从一个 canonical SQLite 只读快照派生；恢复波次由

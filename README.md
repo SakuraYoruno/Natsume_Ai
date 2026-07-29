@@ -160,6 +160,12 @@ EventBus，不运行闲置模型、写 process-local inner monologue/self-model�
 只有有 scope 的 Life/Appraisal/Regulation/aftereffect 可以让七海继续发展或产生主动意愿。纯函数
 `project_inner_world_state()` 仍可在正确的 Life snapshot 上生成脱敏读模型，但它不再让 DefaultMode 成为 writer。
 
+旧 `HippocampusAgent` 的全局记忆回路也不再拥有 production 写权：它不订阅 interaction/loneliness/task EventBus，
+不能通过 raw person/session 内容写 legacy episodic、semantic 或 autobiographical layer，更不能把“记住了”回灌为
+奖励、压力或情绪。兼容入口返回 `LEGACY_HIPPOCAMPUS_MEMORY_WRITER_RETIRED`；保留的 retrieval-row formatter
+只处理已经由正式检索层裁决的摘要，不读写状态。真正的情感记忆和关系连续性仍只能由 accepted outcome、Life
+journal 与 aftereffect 形成。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；
