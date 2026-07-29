@@ -16,7 +16,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urlsplit
 
-from host_brain.model_runtime.contracts import ProviderAttemptRequest, ProviderResponse
+from host_brain.model_runtime.contracts import (
+    ProviderAttemptRequest,
+    ProviderResponse,
+    ProviderStreamEvent,
+    ProviderStreamEventKind,
+)
 from host_brain.model_runtime.provider_adapters import (
     CallableProviderAdapter,
     ProviderAdapterError,
@@ -199,6 +204,12 @@ class VaultBackedSingleAttemptAdapter:
     def adapter_id(self) -> str:
         return self._adapter_id
 
+    @property
+    def supports_final_stream_usage(self) -> bool:
+        """Only transports with a documented final usage SSE frame qualify."""
+
+        return self._provider in {"openai", "openai_compatible", "deepseek"}
+
     async def complete(self, request: ProviderAttemptRequest) -> ProviderResponse:
         credential = str(self._credential_resolver(self._provider) or "").strip()
         if not credential and self._provider != "codex":
@@ -267,6 +278,9 @@ class VaultBackedSingleAttemptAdapter:
     def stream(self, request: ProviderAttemptRequest):
         return self._stream(request)
 
+    def stream_events(self, request: ProviderAttemptRequest):
+        return self._stream_events(request)
+
     async def _stream(self, request: ProviderAttemptRequest):
         """Use the real provider stream for unguarded live Surface calls.
 
@@ -301,6 +315,83 @@ class VaultBackedSingleAttemptAdapter:
             text = str(chunk or "")
             if text:
                 yield text
+
+    async def _stream_events(self, request: ProviderAttemptRequest):
+        """Expose provider-final stream usage for guarded model attempts.
+
+        Only the OpenAI-compatible transport helper currently has a protocol
+        for a final usage frame.  Unsupported providers deliberately raise;
+        the model authority converts that to a rejected, unmetered attempt
+        instead of estimating tokens or cost from text.
+        """
+
+        credential = str(self._credential_resolver(self._provider) or "").strip()
+        if not credential and self._provider != "codex":
+            raise ProductionProviderConfigurationError(
+                f"provider credential unavailable: {self._provider}"
+            )
+        if request.model_budget_guard is not None and self._provider == "codex" and not credential:
+            raise ProductionProviderConfigurationError(
+                "guarded Codex CLI calls do not expose a hard output cap"
+            )
+        from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
+            astream_llm_stream_events,
+        )
+
+        provider_name = "openai" if self._provider == "openai_compatible" else self._provider
+        base_url_override = self._base_url_resolver(self._provider)
+        transport_identity_digest, transport_external = _transport_identity(
+            provider=provider_name,
+            base_url=base_url_override,
+        )
+        started_ns = time.monotonic_ns()
+        async for raw_event in astream_llm_stream_events(
+            provider_name=provider_name,
+            model_id=request.target.model_id,
+            api_key=credential,
+            timeout_ms=request.timeout_ms,
+            messages=request.prompt.as_message_dicts(),
+            gen_params=_transport_generation_parameters(request),
+            base_url_override=base_url_override,
+        ):
+            event = dict(raw_event) if isinstance(raw_event, Mapping) else {}
+            kind = str(event.get("kind") or "").strip().lower()
+            if kind == "delta":
+                text = str(event.get("text") or "")
+                if text:
+                    yield ProviderStreamEvent(
+                        kind=ProviderStreamEventKind.DELTA,
+                        text=text,
+                    )
+                continue
+            if kind != "final":
+                raise ProductionProviderConfigurationError(
+                    "provider stream emitted an unsupported final-usage frame"
+                )
+            elapsed_ms = max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
+            usage = event.get("usage")
+            metadata = event.get("metadata")
+            transport_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+            transport_metadata.update(
+                {
+                    "provider_latency_ms": int(elapsed_ms),
+                    "transport_identity_digest": transport_identity_digest,
+                    "transport_external": transport_external,
+                }
+            )
+            yield ProviderStreamEvent(
+                kind=ProviderStreamEventKind.FINAL,
+                response=ProviderResponse(
+                    content=str(event.get("content") or ""),
+                    finish_reason=(
+                        str(event.get("finish_reason"))
+                        if event.get("finish_reason") is not None
+                        else None
+                    ),
+                    usage=dict(usage) if isinstance(usage, Mapping) else {},
+                    metadata=transport_metadata,
+                ),
+            )
 
 
 def _transport_identity(*, provider: str, base_url: str | None) -> tuple[str, bool]:

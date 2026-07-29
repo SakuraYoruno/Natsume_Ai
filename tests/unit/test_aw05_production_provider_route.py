@@ -12,6 +12,7 @@ from host_brain.model_runtime import (
     PromptRef,
     PromptRegistry,
     ProviderAttemptRequest,
+    ProviderStreamEventKind,
     RouteNotConfiguredError,
     build_production_provider_registry,
     build_vault_backed_provider_registry,
@@ -258,6 +259,62 @@ async def test_vault_backed_adapter_uses_native_provider_stream(monkeypatch) -> 
     assert chunks == ["第一句。", "第二句。"]
     assert received[0]["model_id"] == "gpt-stream"
     assert received[0]["base_url_override"] == "https://api.openai.com/v1"
+
+
+@pytest.mark.asyncio
+async def test_vault_backed_adapter_preserves_final_stream_usage_without_cost_estimation(
+    monkeypatch,
+) -> None:
+    async def _native_stream_events(**_kwargs):  # noqa: ANN003
+        yield {"kind": "delta", "text": "第一句。"}
+        yield {
+            "kind": "final",
+            "usage": {"total_tokens": 9, "completion_tokens": 4},
+        }
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.astream_llm_stream_events",
+        _native_stream_events,
+    )
+    registry = build_vault_backed_provider_registry(
+        ("openai",),
+        credential_resolver=lambda _provider: "stream-key",
+        base_url_resolver=lambda _provider: "https://api.openai.com/v1",
+        transport=lambda **_kwargs: {"content": "buffered fallback must not run"},
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(provider_name="openai", model_id="gpt-stream"),
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-stream-events",
+        attempt_id="attempt-stream-events",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    events = [
+        event
+        async for event in registry.get("production.openai").stream_events(request)
+    ]
+
+    assert [event.kind for event in events] == [
+        ProviderStreamEventKind.DELTA,
+        ProviderStreamEventKind.FINAL,
+    ]
+    assert events[-1].response is not None
+    assert events[-1].response.usage == {
+        "total_tokens": 9,
+        "completion_tokens": 4,
+    }
+    assert "model_cost_micros" not in events[-1].response.usage
+    assert events[-1].response.metadata["transport_external"] is True
 
 
 @pytest.mark.parametrize(

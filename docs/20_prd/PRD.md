@@ -65,9 +65,11 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
 - 每轮外显前必须冻结同一份 self-affect、CompanionAct 与 ExpressionPlan；模型、请求
   hint、纯文本解析或任一单通道失败均不得回写或中性化七海自身情感。
-- 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
-  分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
-  选择，不能把内部计划或操控性措辞暴露给用户。
+- 流式文本的每个可见稳定分句必须先形成可恢复、`graph/revision/node/attempt/grant` 绑定的
+  pre-acceptance receipt；它不是 Life mutation 或设备 delivery intent。带预算的 provider 必须声明终局
+  精确 token、成本与传输身份 attestation；终局缺失时必须失败收口且不得重试或估算。用户打断后未可见分句不得
+  继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中选择，不能把内部计划或
+  操控性措辞暴露给用户。
 - Voice `SPEAK`、Avatar `TRANSITION` 与文本必须从同一 `ExpressionPlan`、同步编号和
   self-affect revision 编译；Host 暂存、取消与释放 receipt 必须与物理 Edge receipt 分开。
   某个通道不可用只能独立降级，不能将七海 self-affect 中性化或把 `HOST_PROTOCOL_STAGED`

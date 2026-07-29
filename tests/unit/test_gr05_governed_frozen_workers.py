@@ -49,6 +49,22 @@ class _Executor:
         yield dict(self.terminal)
 
 
+class _StreamReceiptStore:
+    def __init__(self) -> None:
+        self.rows: list[dict[str, Any]] = []
+
+    def stage(self, *, receipt):  # noqa: ANN001
+        stored = dict(receipt)
+        stored.update(
+            {
+                "receipt_id": "governed-chat-stream://test/0",
+                "payload_digest": "sha256:" + "b" * 64,
+            }
+        )
+        self.rows.append(stored)
+        return stored
+
+
 def _active_budget() -> dict[str, Any]:
     """The only budget projection a production frozen worker may consume."""
 
@@ -76,6 +92,7 @@ def _contracts(route: str = "chat", target: str = "surface_reply"):
         objective="frozen objective",
         input_pack={
             "user_message": "hello",
+            "workspace_id": "workspace-workers",
             # A caller-owned input pack must never expand the authoritative
             # runtime reservation frozen below.
             "budget": {"remaining": {"token_count": 999_999_999}},
@@ -222,6 +239,72 @@ async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_comm
     copied_budget = dict(executor.inputs[0].budget)
     copied_budget["remaining"]["token_count"] = 999
     assert executor.inputs[0].budget["remaining"]["token_count"] == 120
+
+
+@pytest.mark.asyncio
+async def test_chat_worker_stages_a_narrow_sentence_receipt_before_forwarding_it() -> None:
+    command, order, context = _contracts()
+    stager = _StreamReceiptStore()
+
+    class _StreamingExecutor:
+        async def execute_stream(self, _frozen):  # noqa: ANN001
+            yield {
+                "phase": "SENTENCE",
+                "route_type": "chat",
+                "target_id": "surface_reply",
+                "request_id": "request-workers",
+                "sentence": "先缓一下。",
+                "sentence_index": 0,
+                "affective_turn_plan_id": "affective-turn://workers",
+                "synchronization_id": "sync-workers",
+                "self_affect_revision": 4,
+                "streaming_state": "PRE_ACCEPTANCE_PENDING_STAGE",
+            }
+            yield {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "先缓一下。",
+                "route_type": "chat",
+                "target_id": "surface_reply",
+                "audit_refs": {},
+                "acceptance_effect_intents": [
+                    {
+                        "effect_type": "life.foreground_completed",
+                        "commit_scope": "NODE",
+                        "payload": {"command_type": "foreground_completed"},
+                    }
+                ],
+            }
+
+    worker = GovernedFrozenNodeWorker(
+        route_kind="chat",
+        executor=_StreamingExecutor(),
+        node_grants=_GrantVerifier(),
+        projections=_ProjectionStore(),
+        stream_receipts=stager,
+    )
+
+    events = [
+        event
+        async for event in worker.execute_stream(
+            command=command,
+            work_order=order,
+            execution_context=context,
+        )
+    ]
+
+    assert [event["phase"] for event in events] == ["SENTENCE", "COMMIT"]
+    sentence, terminal = events
+    assert sentence["streaming_state"] == "PRE_ACCEPTANCE_STAGED"
+    assert sentence["stream_receipt_ref"] == "governed-chat-stream://test/0"
+    assert len(stager.rows) == 1
+    assert stager.rows[0]["workspace_id"] == "workspace-workers"
+    assert stager.rows[0]["node_grant_ref"] == "governor-grant://child/node"
+    assert terminal["audit_refs"]["pre_acceptance_streamed_sentence_count"] == 1
+    assert terminal["audit_refs"]["pre_acceptance_stream_receipt_refs"] == [
+        "governed-chat-stream://test/0"
+    ]
 
 
 @pytest.mark.asyncio

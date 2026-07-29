@@ -7,6 +7,27 @@
 维护日期：2026-07-28
 状态：当前证据
 
+## DL-04 受治理情感流式文本切片
+
+- `test_dl04_governed_model_stream.py` 验证带 node-bound `ModelBudgetGuard` 的 provider
+  delta/final stream：只有终局精确 token、成本和 transport identity measurement 可结束成功；缺
+  `model_cost_micros` 时结果稳定拒绝，不能估算后继续输出。
+- `test_dl04_governed_chat_stream_receipt_store.py` 直接应用 0149 migration，验证
+  `graph/revision/node/attempt/sentence` 作用域的 append-only receipt 在 SQLite restart 后 exact replay，
+  内容漂移、UPDATE 与 DELETE 均失败关闭。
+- `test_dl04_native_affective_stream.py`、`test_gr05_frozen_route_executors.py` 与
+  `test_gr05_governed_frozen_workers.py` 验证受治理 Chat 只前送
+  `PRE_ACCEPTANCE_STAGED` sentence；每句先由 worker 持久化 receipt，render/delivery 事件仍缓冲，
+  预验收阶段没有 Life、Voice 或 Avatar effect。
+- 当前本地定向集合：`112 passed in 6.81s`。后续运行的 Host Runtime 冒烟
+  `test_gr05_universal_host_runtime.py` 为 `1 passed in 35.07s`；`test_gr05_durable_task_status_projection.py` 有两个既有
+  fixture 未提供当前 admission 必须的 canonical `output_contract`，在此次改动未触及的
+  `validate_task_graph_admission_state()` 处拒绝。该失败记为基线测试债，不能被写作本切片通过，
+  也不通过放宽 TaskGraph 合同掩盖。
+- 未执行 GitHub Actions，固定记录为 `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。没有真实 provider final
+  usage/cost attestation、远端 Edge、TTS/Avatar、Docker 或全服务栈证据；该切片为本地协议与持久化合同，
+  整体仍 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`。
+
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、

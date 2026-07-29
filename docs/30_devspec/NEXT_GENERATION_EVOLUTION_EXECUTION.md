@@ -150,20 +150,27 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 
 ### DL-04：流式文本陪伴（本地切片已接线，未封板）
 
+当前修订：受治理低歧义 Chat 使用 typed delta/final model stream。每句在可见前由 frozen
+worker 写入 0149 `task_runtime_governed_chat_stream_receipt`，并冻结
+`graph/revision/node/attempt/grant`、plan/sync/self-affect revision 与内容 digest。这个
+`PRE_ACCEPTANCE_STAGED` receipt 不写 Life、不触发 TTS/Avatar、也不代表交付成功；真正的
+Life/Expression effect 必须等待 Task Acceptance。只有声明终局 attestation 协议的 provider 能开始
+该流；它在终局缺精确 token、成本或传输身份时以失败收口，不能估算、重试或降级成无审计 stream。该协议已有本地
+SQLite exact-replay/restart 合同，外部 provider/设备证据仍为 `ACCEPTANCE_PENDING_EXTERNAL`。
+
 - `AffectiveTurnPlanV1`、`CompanionActV1` 与 `ExpressionPlanV1` 已在可信
   Affect Fusion hand-off 后、模型调用前冻结；模型只负责措辞，Surface completion
   不再把 `natsume_emotion_tag` 或纯文本 fallback 写回七海 self-affect。
-- 普通低歧义回合可经 `ModelAttemptService.stream()` 和真实 Vault provider stream
-  逐句输出。每个稳定分句先写 `surface_sentence_delivery_intent`，再发 SSE；计划、
-  句子 digest、sync id 与最终 foreground receipt 由 migration
-  `0145_affective_turn_delivery.sql` 从 immutable Life event 派生只读 projection。
+- 普通低歧义回合通过 `ModelAttemptService.stream_events()` 的 typed delta/final 协议逐句
+  输出。受治理分句先写 0149 node-bound stream receipt，再发 `PRE_ACCEPTANCE_STAGED` SSE；
+  0145 Life projection 与 0146 Expression effect 均只在最终 Task Acceptance 后处理。
 - 高歧义、边界或修复回合冻结为恰好两候的 buffered selection；本地 scorer 必须选择
   一条后再经非操控 Gate 才可进入既有 buffered renderer。Gate 会在可见前拦截威胁、
   排他、负罪施压和内部计划泄漏。取消会记录 sent count，不发送未
   staging 的句子。
-- 本切片没有把受治理 Budget stream 伪装成已完成：当前 provider stream 尚不能返回
-  final canonical usage，带 node-bound guard 的请求仍走 usage-safe buffered path。
-  connection resume、TTS/Avatar、真实 Edge 和完整 Chat 路由实测仍未完成。
+- 本切片没有把外部 provider attestation 伪装成已完成：只有声明能返回终局精确 usage/cost/identity
+  的 provider 才可开始流式；终局缺失则以失败收口且不得重试。connection resume、真实 TTS/Avatar、真实 Edge
+  和完整 Chat 路由实测仍未完成。
 
 退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
 Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。

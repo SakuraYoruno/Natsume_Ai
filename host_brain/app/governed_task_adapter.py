@@ -1333,6 +1333,11 @@ def build_governed_host_runtime(
             ),
             node_grants=node_grant_verifier,
             projections=projection_store,
+            stream_receipts=getattr(
+                task_runtime_container,
+                "governed_chat_stream_receipt_store",
+                None,
+            ),
         )
         delegate_worker = GovernedFrozenNodeWorker(
             route_kind="delegate",

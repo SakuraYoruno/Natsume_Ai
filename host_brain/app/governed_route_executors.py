@@ -141,7 +141,13 @@ class FrozenDelegateRouteExecutor:
 
 
 class FrozenChatRouteExecutor:
-    """Buffer an injected chat stream into one authority-free terminal result."""
+    """Forward only validated provisional sentences plus one terminal result.
+
+    The executor remains authority-free: it does not persist, deliver, or
+    accept a sentence.  It merely reduces the Surface SSE stream to a narrow
+    ``SENTENCE`` protocol that the frozen Task worker can stage durably before
+    it becomes visible.  All other intermediate frames stay buffered.
+    """
 
     def __init__(self, *, ports: Any, stream_chat_with_context: ChatStreamPort) -> None:
         if ports is None:
@@ -169,6 +175,7 @@ class FrozenChatRouteExecutor:
         render_fragments: list[str] = []
         sentence_fragments: list[str] = []
         pending_sse = ""
+        expected_sentence_index = 0
 
         async for raw in stream:
             if isinstance(raw, Mapping):
@@ -209,6 +216,16 @@ class FrozenChatRouteExecutor:
                 if is_terminal:
                     terminal_count += 1
                     terminal = event
+                    continue
+                provisional = _governed_chat_stream_sentence(
+                    event,
+                    frozen=frozen,
+                    expected_sentence_index=expected_sentence_index,
+                )
+                if provisional is not None:
+                    expected_sentence_index += 1
+                    sentence_fragments.append(str(provisional["sentence"]))
+                    yield provisional
                     continue
                 _buffer_narrative(event, render_fragments, sentence_fragments)
 
@@ -888,6 +905,96 @@ def _buffer_narrative(
         render_fragments.append(chunk)
     if sentence and phase == "SENTENCE":
         sentence_fragments.append(sentence.strip())
+
+
+def _governed_chat_stream_sentence(
+    event: Mapping[str, Any],
+    *,
+    frozen: FrozenNodeInput,
+    expected_sentence_index: int,
+) -> dict[str, Any] | None:
+    """Return the minimal sentence envelope eligible for Task staging.
+
+    Raw ``RENDER`` chunks may be incomplete, and ``DELIVERY`` frames can carry
+    an unaccepted Voice/Avatar protocol.  Neither is allowed to escape the
+    frozen chat worker.  A complete sentence instead remains provisional until
+    the worker has persisted a node/grant-bound receipt.
+    """
+
+    phase = str(event.get("phase") or "").strip().upper()
+    if phase != "SENTENCE":
+        return None
+    # Legacy/buffered Surface routes may also emit a sentence-shaped SSE
+    # frame, but they have no frozen Affect/Expression identity and therefore
+    # remain terminal-buffered.  Only the explicit DL-04 provisional protocol
+    # is eligible for durable pre-acceptance staging.
+    if (
+        str(event.get("streaming_state") or "").strip().upper()
+        != "PRE_ACCEPTANCE_PENDING_STAGE"
+    ):
+        return None
+    text = str(event.get("sentence") or "").strip()
+    if not text or len(text) > 2_000:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat stream sentence is invalid",
+        )
+    raw_index = event.get("sentence_index")
+    if isinstance(raw_index, bool):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat sentence index is invalid",
+        )
+    try:
+        sentence_index = int(raw_index)
+    except (TypeError, ValueError) as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat sentence index is invalid",
+        ) from exc
+    if sentence_index != expected_sentence_index:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat sentences must use contiguous indexes",
+        )
+    plan_id = str(event.get("affective_turn_plan_id") or "").strip()
+    synchronization_id = str(event.get("synchronization_id") or "").strip()
+    if not plan_id or not synchronization_id:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat sentence lacks frozen affective expression identity",
+        )
+    raw_revision = event.get("self_affect_revision")
+    if isinstance(raw_revision, bool):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat self-affect revision is invalid",
+        )
+    try:
+        self_affect_revision = int(raw_revision)
+    except (TypeError, ValueError) as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat self-affect revision is invalid",
+        ) from exc
+    if self_affect_revision < 0:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "governed chat self-affect revision is invalid",
+        )
+    return {
+        "phase": "SENTENCE",
+        "done": False,
+        "route_type": frozen.route,
+        "target_id": frozen.target_id,
+        "request_id": frozen.request_id,
+        "sentence": text,
+        "sentence_index": sentence_index,
+        "affective_turn_plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "self_affect_revision": self_affect_revision,
+        "streaming_state": "PRE_ACCEPTANCE_PENDING_STAGE",
+    }
 
 
 def _split_complete_sse_frames(value: str) -> tuple[tuple[str, ...], str]:

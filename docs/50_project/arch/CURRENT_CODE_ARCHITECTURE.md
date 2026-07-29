@@ -100,6 +100,13 @@
 
 DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 `ExpressionPlanV1`，并在可信 internal AffectFusion hand-off 后由纯 planner 冻结。
+最新受治理流式切片将 provider 的 delta/final 事件交给 `ModelAttemptService.stream_events()`；
+只有声明支持 final usage/cost/identity protocol 的 adapter 才能开始，frozen Chat worker 会在句子
+可见前将它写入 0149 `task_runtime_governed_chat_stream_receipt`。终局 attestation 缺失、超时或漂移时
+流以失败收口且不得重试。该不可变 receipt 绑定
+`graph/revision/node/attempt/grant`、冻结 plan、sync 和 self-affect revision，exact replay 可重开；
+它不写 Life、不发 TTS/Avatar effect，后两者继续等待 Task Acceptance。缺 usage/cost/identity 的
+provider 在首句前失败关闭，绝不估算或回落到无审计 streaming。
 低歧义路径使用 `ModelAttemptService.stream()`，生产 Vault adapter 会调用 provider
 native stream；稳定句先写 `affective_turn_planned` / `surface_sentence_delivery_intent`
 到 canonical Life journal，再通过 SSE 可见。`0145_affective_turn_delivery.sql` 只从
@@ -111,8 +118,8 @@ self-affect 写权；外部 emotion hint 也不会成为七海的情绪。DL-05 
 派生隐私最小化 Host protocol head，下一轮只在 exact person/workspace/subject/session scope
 读取上次已暂存 Avatar expression；VTS compatibility transition 不再读取 legacy
 `_prev_emotion_tag`。`HOST_PROTOCOL_STAGED` 只表示 Host 持久化了协议，不表示远端已播放或
-已改变 Avatar。高歧义回合保持两候 buffered selection；带 governed budget 的 stream 因缺最终
-provider usage 仍禁止启用，远端 Edge、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
+已改变 Avatar。高歧义回合保持两候 buffered selection；外部 provider 是否具备完整最终
+attestation 仍未在真实凭据下验收，远端 Edge、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
 ## 1. 结论
 
@@ -390,7 +397,7 @@ reconciler 与 repository 重开唯一 Acceptance/artifact/Operation/projection
 路径、源分支不变与第二次重启零重放。多个写 owner、其它
 failure/cancellation/unknown-effect 组合及强隔离仍未完成。
 
-当前连续 migration head 为 `0146_affective_expression_delivery.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill/version activation authority；0143～0145 保存七海的 affect、关系与文本 delivery projection；0146 保存 Voice/Avatar Host protocol projection，均不改变 Task execution authority。
+当前连续 migration head 为 `0149_governed_chat_stream_receipts.sql`。0132～0135 继续持有 Task Budget、Verification、Acceptance 与 Review denial authority；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill/version activation authority；0143～0145 保存七海的 affect、关系与文本 delivery projection；0146 保存 Voice/Avatar Host protocol projection；0147～0148 保存可逆 companion profile 生命周期；0149 保存受治理 Chat 的 pre-acceptance sentence receipt，均不改变 Task execution authority。
 
 无 cancellation intent 的 signed `RELEASE + NO_SIDE_EFFECT` 已从单节点整图终态扩展为通用节点终态。`TaskOperationFailureReconciliationStoreMixin` 的第一事务只释放 Operation、失败目标 Attempt/Node、过期原 Lease并写四条 Outbox；只有单节点兼容路径在同一事务关闭 Graph/Budget。多节点 Graph/Budget 保持 ACTIVE，重启后的 `DurableDagSchedulingRuntime` 先重建 failed outcome，再让现有 0090 writer 原子提交 Graph/Budget 失败终态。Acceptance v4 receipt 不摘要会变化的 Graph settlement 字段，因此 `PENDING→COMMITTED` 后仍精确重放；0090 decision 或 Graph/Budget Outbox 漂移会失败关闭。双根、并发额度1的真实 SQLite 测试证明 READY sibling 未执行；并发额度2的双失败测试证明非 selected 失败节点仍由同一 decision outcome 精确覆盖并可重开。该链不自动判定副作用，也不覆盖其它 failure/cancellation。
 

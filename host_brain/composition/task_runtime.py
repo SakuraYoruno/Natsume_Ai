@@ -43,6 +43,9 @@ from host_brain.persistence.internal_agent_checkpoint_uow import (
 from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
+from host_brain.persistence.governed_chat_stream_receipt_repository import (
+    GovernedChatStreamReceiptStore,
+)
 from host_brain.persistence.scheduler_repository import (
     SchedulerDefinitionRepository,
     SchedulerExecutionResultRepository,
@@ -146,6 +149,7 @@ CommandRepositoryBuilder = Callable[..., HostCommandRepository]
 ReviewStoreBuilder = Callable[..., ReviewStore]
 ReviewContinuationStoreBuilder = Callable[..., ReviewContinuationStore]
 WorkerProjectionStoreBuilder = Callable[..., WorkerProjectionStore]
+GovernedChatStreamReceiptStoreBuilder = Callable[..., GovernedChatStreamReceiptStore]
 InternalAgentCheckpointUowBuilder = Callable[
     ...,
     DurableInternalAgentCheckpointUnitOfWork,
@@ -171,6 +175,7 @@ _INFRASTRUCTURE_ORDER = (
     "review_store",
     "review_continuation_store",
     "worker_projection_store",
+    "governed_chat_stream_receipt_store",
     "internal_agent_checkpoint_uow",
     "command_repository",
     "agent_result_repository",
@@ -198,6 +203,7 @@ class ProcessTaskRuntimeContainer:
     review_store: ReviewStore
     review_continuation_store: ReviewContinuationStore
     worker_projection_store: WorkerProjectionStore
+    governed_chat_stream_receipt_store: GovernedChatStreamReceiptStore | None
     internal_agent_checkpoint_uow: DurableInternalAgentCheckpointUnitOfWork
     command_repository: HostCommandRepository
     agent_result_repository: AgentExecutionResultRepository
@@ -743,6 +749,9 @@ def build_process_task_runtime_container(
         ReviewContinuationStore
     ),
     worker_projection_store_builder: WorkerProjectionStoreBuilder = WorkerProjectionStore,
+    governed_chat_stream_receipt_store_builder: GovernedChatStreamReceiptStoreBuilder = (
+        GovernedChatStreamReceiptStore
+    ),
     internal_agent_checkpoint_uow_builder: InternalAgentCheckpointUowBuilder = (
         DurableInternalAgentCheckpointUnitOfWork
     ),
@@ -863,6 +872,21 @@ def build_process_task_runtime_container(
         constructed.append(("review_continuation_store", review_continuation_store))
         worker_projection_store = worker_projection_store_builder(canonical)
         constructed.append(("worker_projection_store", worker_projection_store))
+        # Composition-only tests can use a fake migration runner that does
+        # not materialize SQLite at all.  Production's canonical runner has
+        # already created the database by this point; there the new receipt
+        # store is mandatory and verifies migration 0149 before Host wiring.
+        governed_chat_stream_receipt_store = None
+        if Path(canonical).exists():
+            governed_chat_stream_receipt_store = (
+                governed_chat_stream_receipt_store_builder(canonical)
+            )
+            constructed.append(
+                (
+                    "governed_chat_stream_receipt_store",
+                    governed_chat_stream_receipt_store,
+                )
+            )
         internal_agent_checkpoint_uow = internal_agent_checkpoint_uow_builder(
             task_store=task_store,
             worker_projection_store=worker_projection_store,
@@ -1004,6 +1028,7 @@ def build_process_task_runtime_container(
         review_store=review_store,
         review_continuation_store=review_continuation_store,
         worker_projection_store=worker_projection_store,
+        governed_chat_stream_receipt_store=governed_chat_stream_receipt_store,
         internal_agent_checkpoint_uow=internal_agent_checkpoint_uow,
         command_repository=command_repository,
         agent_result_repository=agent_result_repository,

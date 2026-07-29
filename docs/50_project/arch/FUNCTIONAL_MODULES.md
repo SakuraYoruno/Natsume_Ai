@@ -31,6 +31,18 @@
 > 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
 > physical receipt 以及旧 writer 清零仍未完成。
 
+**受治理情感分句模块**由
+[`surface_main_chain_adapter.py`](../../../host_brain/app/surface_main_chain_adapter.py)、
+[`governed_route_executors.py`](../../../host_brain/app/governed_route_executors.py)、
+[`governed_workers.py`](../../../host_brain/task_runtime/governed_workers.py)、
+[`model_attempt_service.py`](../../../host_brain/model_runtime/model_attempt_service.py) 与
+[`governed_chat_stream_receipt_repository.py`](../../../host_brain/persistence/governed_chat_stream_receipt_repository.py)
+共同构成。它只在 frozen `AffectiveTurnPlanV1`、node-bound `ModelBudgetGuard` 和 provider 声明的 final
+usage/cost/identity protocol 同时成立时，放行稳定句的 `PRE_ACCEPTANCE_STAGED` SSE。每句先入 0149
+append-only receipt，绑定 `graph/revision/node/attempt/grant`；未验收前没有 Life、TTS、Avatar 或 Edge
+effect。终局 attestation 缺失时流以失败收口、不得重试，不能以估算或 buffered 结果伪称实时流式。
+当前仅有本地 SQLite/replay 与合同测试；真实 provider、远端 Edge 与三模态体验验收仍待 DL-07/外部授权。
+
 **退役 progress helper**位于 [`input_runtime/progress.py`](../../../host_brain/input_runtime/progress.py)。Gateway
 progress fastpath 已被禁用，故此文件只保留 rollback-window 的无状态技术文案 helper：它固定使用
 `FRIEND / CALM`，不读取 ingress `bond_summary`、用户 emotion、SocialBrain 或旧 Bond。历史重复

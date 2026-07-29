@@ -164,6 +164,12 @@ class WorkerProjectionWriterPort(Protocol):
     def stage(self, *, projection_id: str, projection: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
 
+class GovernedChatStreamReceiptStagerPort(Protocol):
+    """Persist one provisional Chat sentence before it leaves Task Runtime."""
+
+    def stage(self, *, receipt: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+
 class GovernedFrozenNodeWorker:
     """Execute one frozen node and durably stage its only terminal projection."""
 
@@ -174,6 +180,7 @@ class GovernedFrozenNodeWorker:
         executor: FrozenRouteExecutorPort,
         node_grants: NodeGrantVerifierPort,
         projections: WorkerProjectionWriterPort,
+        stream_receipts: GovernedChatStreamReceiptStagerPort | None = None,
         action_preview_service: Any | None = None,
         allowed_acceptance_effect_types: frozenset[str] | None = None,
         preview_purpose: str | None = None,
@@ -191,6 +198,13 @@ class GovernedFrozenNodeWorker:
         self._executor = executor
         self._node_grants = node_grants
         self._projections = projections
+        if stream_receipts is not None and not callable(
+            getattr(stream_receipts, "stage", None)
+        ):
+            raise ValueError("stream_receipts.stage must be callable")
+        if stream_receipts is not None and kind != "chat":
+            raise ValueError("stream receipts are supported only for chat workers")
+        self._stream_receipts = stream_receipts
         self._action_preview_service = action_preview_service
         purpose = str(preview_purpose or "").strip().lower()
         if purpose and purpose not in {"delegate.dispatch", "scheduler.execute"}:
@@ -252,6 +266,7 @@ class GovernedFrozenNodeWorker:
         terminal: dict[str, Any] | None = None
         terminal_count = 0
         buffered_event_count = 0
+        staged_stream_receipt_refs: list[str] = []
         execute_with_recovery = getattr(
             self._executor,
             "execute_stream_with_recovery",
@@ -279,10 +294,20 @@ class GovernedFrozenNodeWorker:
                 terminal_count += 1
                 terminal = event
                 continue
-            # A worker is still speculative until Verification and Acceptance
-            # commit.  Streaming its deltas here would expose user-visible or
-            # externally actionable output before the governed decision.  The
-            # accepted terminal projection is the only public worker output.
+            provisional = self._stage_chat_stream_sentence(
+                event=event,
+                frozen=frozen,
+                verified_grant=_projection(verified),
+            )
+            if provisional is not None:
+                staged_stream_receipt_refs.append(
+                    str(provisional["stream_receipt_ref"])
+                )
+                yield provisional
+                continue
+            # All other intermediate frames remain speculative.  Raw token
+            # chunks, Voice/Avatar descriptors and arbitrary executor data
+            # must never become user-visible just because a Chat route exists.
             buffered_event_count += 1
         if terminal_count != 1 or terminal is None:
             raise GovernedNodeWorkerError(
@@ -295,7 +320,160 @@ class GovernedFrozenNodeWorker:
             preview=preview,
             terminal=terminal,
             buffered_event_count=buffered_event_count,
+            staged_stream_receipt_refs=tuple(staged_stream_receipt_refs),
         )
+
+    def _stage_chat_stream_sentence(
+        self,
+        *,
+        event: Mapping[str, Any],
+        frozen: FrozenNodeInput,
+        verified_grant: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        """Stage one narrow Chat sentence before yielding it to the host.
+
+        This is deliberately not a Life command or an external delivery.  The
+        Life plan, Voice and Avatar intents still wait for terminal Task
+        Acceptance.  The receipt is solely the durable replay/reconciliation
+        boundary for text the user may already have seen.
+        """
+
+        if self._route_kind != "chat":
+            return None
+        if str(event.get("phase") or "").strip().upper() != "SENTENCE":
+            return None
+        if self._stream_receipts is None:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "governed chat streaming requires the app-local receipt stager",
+            )
+        supplied = {
+            "route_type": str(event.get("route_type") or "").strip().lower(),
+            "target_id": str(event.get("target_id") or "").strip(),
+            "request_id": str(event.get("request_id") or "").strip(),
+        }
+        expected = {
+            "route_type": frozen.route,
+            "target_id": frozen.target_id,
+            "request_id": frozen.request_id,
+        }
+        if supplied != expected:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "stream sentence differs from frozen chat node identity",
+            )
+        sentence = str(event.get("sentence") or "").strip()
+        if not sentence or len(sentence) > 2_000:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "stream sentence is invalid",
+            )
+        for field_name in ("sentence_index", "self_affect_revision"):
+            if isinstance(event.get(field_name), bool):
+                raise GovernedNodeWorkerError(
+                    GOVERNED_NODE_COMMIT_INVALID,
+                    f"stream {field_name} is invalid",
+                )
+        try:
+            sentence_index = int(event.get("sentence_index"))
+            self_affect_revision = int(event.get("self_affect_revision"))
+        except (TypeError, ValueError) as exc:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "stream sentence identity is invalid",
+            ) from exc
+        if sentence_index < 0 or self_affect_revision < 0:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "stream sentence identity is invalid",
+            )
+        plan_id = str(event.get("affective_turn_plan_id") or "").strip()
+        synchronization_id = str(event.get("synchronization_id") or "").strip()
+        if not plan_id or not synchronization_id:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "stream sentence lacks affective expression identity",
+            )
+        input_pack = frozen.input_pack
+        request_body = input_pack.get("request_body")
+        request_body = request_body if isinstance(request_body, Mapping) else {}
+        workspace_id = str(
+            request_body.get("workspace_id")
+            or input_pack.get("workspace_id")
+            or frozen.business_scope
+            or ""
+        ).strip()
+        if not workspace_id:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_INPUT_INVALID,
+                "governed chat stream requires a workspace_id",
+            )
+        grant_digest = "sha256:" + _sha256_json(dict(verified_grant))
+        staged_raw = self._stream_receipts.stage(
+            receipt={
+                "schema_version": "Natsume.task_runtime.governed_chat_stream_receipt.v1",
+                "graph_id": frozen.graph_id,
+                "graph_revision": frozen.graph_revision,
+                "node_id": frozen.node_id,
+                "attempt_id": frozen.attempt_id,
+                "sentence_index": sentence_index,
+                "request_id": frozen.request_id,
+                "principal_id": frozen.principal_id,
+                "workspace_id": workspace_id,
+                "session_id": frozen.session_id,
+                "affective_turn_plan_id": plan_id,
+                "synchronization_id": synchronization_id,
+                "self_affect_revision": self_affect_revision,
+                "sentence": sentence,
+                "node_grant_ref": frozen.node_grant_ref,
+                "node_grant_digest": grant_digest,
+            }
+        )
+        staged = dict(staged_raw) if isinstance(staged_raw, Mapping) else {}
+        try:
+            staged_revision = int(staged.get("graph_revision"))
+            staged_sentence_index = int(staged.get("sentence_index"))
+        except (TypeError, ValueError) as exc:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "chat stream stager returned an invalid durable identity",
+            ) from exc
+        if (
+            str(staged.get("graph_id") or "") != frozen.graph_id
+            or staged_revision != frozen.graph_revision
+            or str(staged.get("node_id") or "") != frozen.node_id
+            or str(staged.get("attempt_id") or "") != frozen.attempt_id
+            or staged_sentence_index != sentence_index
+            or str(staged.get("sentence") or "") != sentence
+            or str(staged.get("node_grant_ref") or "") != frozen.node_grant_ref
+            or str(staged.get("node_grant_digest") or "") != grant_digest
+        ):
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "chat stream stager did not return the exact durable receipt",
+            )
+        receipt_ref = str(staged.get("receipt_id") or "").strip()
+        receipt_digest = str(staged.get("payload_digest") or "").strip()
+        if not receipt_ref or not receipt_digest:
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_PROJECTION_FAILED,
+                "chat stream stager omitted its durable receipt identity",
+            )
+        return {
+            "phase": "SENTENCE",
+            "done": False,
+            "route_type": frozen.route,
+            "target_id": frozen.target_id,
+            "request_id": frozen.request_id,
+            "sentence": sentence,
+            "sentence_index": sentence_index,
+            "affective_turn_plan_id": plan_id,
+            "synchronization_id": synchronization_id,
+            "self_affect_revision": self_affect_revision,
+            "streaming_state": "PRE_ACCEPTANCE_STAGED",
+            "stream_receipt_ref": receipt_ref,
+            "stream_receipt_digest": receipt_digest,
+        }
 
     def recover_sealed_checkpoint(
         self,
@@ -426,6 +604,7 @@ class GovernedFrozenNodeWorker:
         preview: Mapping[str, Any] | None,
         terminal: Mapping[str, Any],
         buffered_event_count: int,
+        staged_stream_receipt_refs: Sequence[str] = (),
     ) -> dict[str, Any]:
         projection, worker_commit = self._build_terminal_projection(
             frozen=frozen,
@@ -433,6 +612,7 @@ class GovernedFrozenNodeWorker:
             preview=preview,
             terminal=terminal,
             buffered_event_count=buffered_event_count,
+            staged_stream_receipt_refs=staged_stream_receipt_refs,
         )
         projection_id = str(projection["projection_id"])
         payload_digest = str(projection["payload_digest"])
@@ -459,6 +639,7 @@ class GovernedFrozenNodeWorker:
         preview: Mapping[str, Any] | None,
         terminal: Mapping[str, Any],
         buffered_event_count: int,
+        staged_stream_receipt_refs: Sequence[str] = (),
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         _assert_terminal(terminal, frozen=frozen)
         normalized = {
@@ -499,6 +680,18 @@ class GovernedFrozenNodeWorker:
         normalized["audit_refs"]["buffered_pre_acceptance_events"] = int(
             buffered_event_count
         )
+        if staged_stream_receipt_refs:
+            normalized["audit_refs"].update(
+                {
+                    "pre_acceptance_streamed_sentence_count": len(
+                        tuple(staged_stream_receipt_refs)
+                    ),
+                    "pre_acceptance_stream_receipt_refs": [
+                        str(value)
+                        for value in tuple(staged_stream_receipt_refs)[:16]
+                    ],
+                }
+            )
         normalized["audit_refs"].update(
             {
                 "node_grant_ref": frozen.node_grant_ref,

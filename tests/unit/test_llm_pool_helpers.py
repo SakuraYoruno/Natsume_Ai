@@ -505,6 +505,18 @@ def test_openai_compat_payload_raises_deepseek_json_token_floor() -> None:
     assert payload["max_tokens"] == 384
 
 
+def test_openai_compat_guarded_stream_requests_provider_final_usage_frame() -> None:
+    payload = helpers._build_openai_compat_payload(
+        model_id="gpt-stream",
+        messages=[{"role": "user", "content": "你好"}],
+        stream=True,
+        include_stream_usage=True,
+    )
+
+    assert payload["stream"] is True
+    assert payload["stream_options"] == {"include_usage": True}
+
+
 def test_openai_compat_payload_keeps_internal_hard_cap_below_deepseek_floor() -> None:
     payload = helpers._build_openai_compat_payload(
         model_id="deepseek-v4-flash",

@@ -7,6 +7,17 @@ from typing import Any
 import pytest
 
 from host_brain.app.surface_main_chain_adapter import surface_main_chain_sse_generator
+from host_brain.model_runtime.contracts import (
+    AttemptStatus,
+    ModelAttemptRecord,
+    ModelAttemptResult,
+    ModelAttemptStreamEvent,
+    ModelAttemptStreamEventKind,
+    ModelBudgetGuard,
+    ProviderResponse,
+    ProviderTarget,
+    RouteDecision,
+)
 
 
 SOUL = "你是七海。中文私聊，真诚、有分寸，不操控用户。"
@@ -206,3 +217,118 @@ async def test_native_stream_blocks_manipulative_sentence_before_it_is_visible(
     assert commit["decision"] == "NO_REPLY"
     assert commit["reason_code"] == "SURFACE_STREAM_INTERRUPTED"
     assert [item["command_type"] for item in submitted] == ["affective_turn_planned"]
+
+
+@pytest.mark.asyncio
+async def test_governed_native_stream_defers_life_and_expression_until_task_acceptance(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    submitted: list[dict[str, Any]] = []
+    guard = ModelBudgetGuard(
+        budget_id="budget://surface-stream",
+        graph_id="graph-surface-stream",
+        graph_revision=1,
+        node_id="node-surface-stream",
+        attempt_id="attempt-surface-stream",
+        deadline_ms=5_000,
+        max_provider_attempts=1,
+        max_token_count=100,
+        max_output_tokens=50,
+        max_model_cost_micros=500,
+    )
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class StreamingModel:
+        async def stream_events(self, request):  # noqa: ANN001
+            assert request.model_budget_guard == guard
+            target = ProviderTarget("fake", "provider", "model")
+            route = RouteDecision("route-stream", (target,), "unit-test", max_attempts=1)
+            record = ModelAttemptRecord(
+                attempt_id="model-attempt-stream",
+                request_id=request.request_id,
+                route_decision_id=route.decision_id,
+                attempt_index=1,
+                status=AttemptStatus.SUCCEEDED,
+                retry_reason="initial",
+                adapter_id=target.adapter_id,
+                provider=target.provider,
+                model_id=target.model_id,
+                prompt_id="surface.main.text.v1",
+                prompt_version="v1",
+                prompt_digest="a" * 64,
+                started_at_ms=1,
+                ended_at_ms=2,
+                metadata={
+                    "provider_budget_measurements": {
+                        "token_count": 12,
+                        "completion_tokens": 5,
+                        "model_cost_micros": 17,
+                    }
+                },
+            )
+            result = ModelAttemptResult(
+                request_id=request.request_id,
+                success=True,
+                route_decision=route,
+                attempts=(record,),
+                response=ProviderResponse(
+                    content="先缓一下。",
+                    usage={
+                        "total_tokens": 12,
+                        "completion_tokens": 5,
+                        "model_cost_micros": 17,
+                    },
+                ),
+                final_target=target,
+            )
+            yield ModelAttemptStreamEvent(
+                kind=ModelAttemptStreamEventKind.DELTA,
+                text="先缓一下。",
+            )
+            yield ModelAttemptStreamEvent(
+                kind=ModelAttemptStreamEventKind.TERMINAL,
+                result=result,
+            )
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        raise AssertionError("governed stream must not write Life before acceptance")
+
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _submit)
+    agent_input = _agent_input()
+    agent_input.defer_effects_to_task_runtime = True
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=lambda: StreamingModel(),
+    )
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(
+            agent_input,
+            ports=ports,
+            trace_stage_meta={"governed_model_budget": guard.as_dict()},
+        )
+    ]
+
+    sentences = [event for event in events if event.get("phase") == "SENTENCE"]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    assert submitted == []
+    assert [event["streaming_state"] for event in sentences] == [
+        "PRE_ACCEPTANCE_PENDING_STAGE"
+    ]
+    assert not [event for event in events if event.get("phase") == "DELIVERY"]
+    assert commit["decision"] == "APPROVE"
+    assert commit["acceptance_effect_intents"][0]["effect_type"] == (
+        "life.foreground_completed"
+    )
+    trace = commit["audit_refs"]["trace_stage_meta"]
+    assert trace["surface_model_attempt"]["success"] is True
+    assert trace["surface_model_attempt"]["budget_measurement"]["model_cost_micros"] == 17
+    assert commit["audit_refs"]["surface_main_chain"]["mode"] == (
+        "governed_sentence_stream"
+    )

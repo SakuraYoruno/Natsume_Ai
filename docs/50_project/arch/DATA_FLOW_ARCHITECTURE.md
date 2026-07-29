@@ -547,6 +547,14 @@ Bond queue/writer construction，只有 no-write retired adapter 与 score/stage
 再由 queue crash、full 或 fallback 影响关系事实。
 
 DL-04/05 的本地表达链只在上述 trusted hand-off 存在时启用 native sentence stream：
+
+受治理的低歧义 Chat 现在走 typed provider delta/final stream，而不是将完整回复缓冲到末尾。
+它只接受声明终局精确 usage/cost/transport identity attestation 的 provider；每个稳定句在可见前由 frozen
+worker 写入 0149 `task_runtime_governed_chat_stream_receipt`，绑定 exact
+`graph/revision/node/attempt/grant`、AffectiveTurnPlan、sync 与 self-affect revision。receipt 只保存
+assistant sentence 和摘要，不保存输入媒体、不改写 Life state，且在 Acceptance 前不产生 Voice/Avatar
+effect。终局 attestation 缺失或漂移时须以失败收口，不能估算、重试或偷偷走无审计 stream。
+
 它不再让 Surface model 的 `natsume_emotion_tag` 覆盖 canonical self-affect，也不会由
 plain-text parser 将双方状态重置为 `NEUTRAL`。普通低歧义回合逐句 staging；高歧义、
 边界和修复回合保留两候 buffered selection。`0145_affective_turn_delivery.sql` 只投影
@@ -616,24 +624,25 @@ target 字段均 fail closed；Voice/Avatar/文本随后只读新的 active prof
 flowchart LR
     H["trusted AffectFusion hand-off"] --> P["AffectiveTurnPlanV1\nself-affect + CompanionAct + ExpressionPlan"]
     R["canonical companion profile\nCANARY or ACTIVE"] --> P
-    P -->|"low ambiguity"| M["ModelAttempt native text stream"]
+    P -->|"low ambiguity"| M["ModelAttempt typed stream\nfinal usage/cost attestation"]
     P -->|"repair / conflict / boundary"| C["two-candidate buffered selection"]
     M --> G["local consistency + non-manipulation Gate"]
-    G --> I["surface_sentence_delivery_intent\ncanonical Life journal"]
+    G --> Q["0149 governed sentence receipt\ngraph/node/attempt/grant bound"]
+    Q --> S["SSE visible sentence\nPRE_ACCEPTANCE_STAGED"]
+    Q --> I["Task Acceptance only\nLife/Expression effects"]
     I --> E["Voice SPEAK + Avatar TRANSITION\nHOST_PROTOCOL_STAGED"]
-    E --> S["SSE visible sentence"]
-    S --> F["foreground_completed\nRELEASE or accepted relationship aftereffect"]
+    E --> F["foreground_completed\nRELEASE or accepted relationship aftereffect"]
     I --> R["0145 text delivery digest projection"]
     E --> X["0146 expression protocol projection\nnot an Edge-applied receipt"]
     R --> CP["0147 profile lifecycle projection\nopaque evidence and bounded head"]
 ```
 
-当前 stream adapter 尚不能携带 provider-final canonical usage；因此带 node-bound
-`ModelBudgetGuard` 的 Governed Chat 保持 usage-safe buffered path，不能为了首 token
-延迟静默去掉预算 authority。Governed Chat 已不再无条件抑制 TTS/VTS，但仍只把 protocol
-随 Task Acceptance effect 暂存，不能在 speculative worker 中提前触发物理输出。远端 Edge、
-真实 TTS/Avatar channel receipt、connection resume 与全服务栈验收仍不在这条本地 Host
-protocol 切片的完成范围。
+带 node-bound `ModelBudgetGuard` 的 Governed Chat 已可使用 provider-final typed stream；
+但只有声明终局完整 usage、成本与 transport identity attestation 的 adapter 才能开始。终局缺失、
+超时或 drift 一律失败收口且不重试，不能为首 token 延迟静默去掉预算 authority。Governed Chat
+已不再无条件抑制 TTS/VTS，但 Voice/Avatar protocol 仍随 Task Acceptance effect 才可暂存，
+不能在 speculative worker 中提前触发物理输出。远端 Edge、真实 TTS/Avatar channel receipt、
+connection resume 与全服务栈验收仍不在这条本地 Host protocol 切片的完成范围。
 
 `DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE` 已令 production Host root 不再构造
 `HostEmotionRuntime`，且 ASGI 为 Input 与 Tribe 都注入 lazy Life command provider；二者在

@@ -39,6 +39,16 @@ class ApplicationModelAttemptServicePort:
     def complete_sync(self, request: object):  # noqa: ANN201
         return self.service_provider().complete_sync(request)
 
+    def stream(self, request: object):  # noqa: ANN201
+        """Forward the app-local text stream without owning model authority."""
+
+        return self.service_provider().stream(request)
+
+    def stream_events(self, request: object):  # noqa: ANN201
+        """Forward the guarded stream lifecycle including its final receipt."""
+
+        return self.service_provider().stream_events(request)
+
     @property
     def prompt_registry(self):  # noqa: ANN201
         return self.service_provider().prompt_registry

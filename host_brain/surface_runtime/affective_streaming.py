@@ -69,15 +69,13 @@ def should_use_native_sentence_stream(
 ) -> bool:
     """Choose the low-latency route only when its authority is complete.
 
-    A governed budget currently requires provider-final canonical usage.  The
-    existing stream adapter exposes chunks but not that terminal measurement,
-    so it remains on the buffered, usage-safe path until the ModelAttempt
-    streaming protocol is upgraded.  This is intentionally explicit rather
-    than silently dropping the budget guard.
+    A governed request now uses the same route only when the model adapter can
+    return a final canonical usage receipt.  The downstream model authority
+    rejects an unsupported provider before Task Acceptance; this selector must
+    not silently discard the frozen budget merely to retain an old buffer.
     """
 
-    if has_governed_model_budget:
-        return False
+    del has_governed_model_budget
     plan = affective_turn_plan_from_trace(trace_stage_meta)
     return bool(plan) and str(plan.get("generation_mode") or "").upper() == _STREAMABLE_MODE
 

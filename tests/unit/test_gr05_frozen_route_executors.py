@@ -400,6 +400,55 @@ async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative
 
 
 @pytest.mark.asyncio
+async def test_chat_executor_forwards_only_explicit_preacceptance_sentence_protocol() -> None:
+    async def stream(**kwargs):  # noqa: ANN003
+        yield {"phase": "RENDER", "chunk": "先缓一下。"}
+        yield {
+            "phase": "SENTENCE",
+            "sentence": "先缓一下。",
+            "sentence_index": 0,
+            "affective_turn_plan_id": "affective-turn://route-executor",
+            "synchronization_id": "sync-route-executor",
+            "self_affect_revision": 3,
+            "streaming_state": "PRE_ACCEPTANCE_PENDING_STAGE",
+        }
+        yield {
+            "phase": "DELIVERY",
+            "delivery_state": "HOST_PROTOCOL_STAGED",
+        }
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "先缓一下。",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {
+                "trace_stage_meta": _approved_trace(kwargs["trace_stage_meta"]),
+            },
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                budget=_active_budget(),
+            )
+        )
+    ]
+
+    assert [event["phase"] for event in events] == ["SENTENCE", "COMMIT"]
+    sentence = events[0]
+    assert sentence["streaming_state"] == "PRE_ACCEPTANCE_PENDING_STAGE"
+    assert sentence["route_type"] == "chat"
+    assert sentence["target_id"] == "surface_reply"
+    assert "delivery_state" not in sentence
+
+
+@pytest.mark.asyncio
 async def test_plan_chat_consumes_only_digest_bound_dependency_artifacts() -> None:
     captured: dict[str, Any] = {}
     artifact_ref = (

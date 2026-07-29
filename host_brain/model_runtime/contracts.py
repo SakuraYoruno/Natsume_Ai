@@ -473,6 +473,49 @@ class ProviderResponse:
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
 
 
+class ProviderStreamEventKind(str, Enum):
+    """The only provider stream events accepted by the model authority.
+
+    A provider may expose many SSE frame shapes, but the adapter has to reduce
+    them to either a text delta or one terminal response carrying the
+    provider-owned usage record.  In particular, a ``FINAL`` event is not an
+    optional convenience signal for governed work: it is what lets the Task
+    budget settle the already-started stream without guessing a price.
+    """
+
+    DELTA = "delta"
+    FINAL = "final"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderStreamEvent:
+    """Secret-free normalized event from one provider streaming attempt."""
+
+    kind: ProviderStreamEventKind | str
+    text: str = ""
+    response: ProviderResponse | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            kind = (
+                self.kind
+                if isinstance(self.kind, ProviderStreamEventKind)
+                else ProviderStreamEventKind(str(self.kind or "").strip().lower())
+            )
+        except ValueError as exc:
+            raise ValueError("provider stream event kind is invalid") from exc
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "text", str(self.text or ""))
+        if kind is ProviderStreamEventKind.DELTA:
+            if self.response is not None:
+                raise ValueError("provider stream delta must not carry a response")
+            return
+        if not isinstance(self.response, ProviderResponse):
+            raise ValueError("provider stream final requires a ProviderResponse")
+        if self.text:
+            raise ValueError("provider stream final must keep content in its response")
+
+
 class AttemptStatus(str, Enum):
     STARTED = "started"
     SUCCEEDED = "succeeded"
@@ -607,6 +650,47 @@ class ModelAttemptResult:
         return self.response.content if self.response is not None else ""
 
 
+class ModelAttemptStreamEventKind(str, Enum):
+    """Public model-authority stream lifecycle, including its terminal proof."""
+
+    DELTA = "delta"
+    TERMINAL = "terminal"
+
+
+@dataclass(frozen=True, slots=True)
+class ModelAttemptStreamEvent:
+    """One audited stream delta or its final ``ModelAttemptResult``.
+
+    Consumers must not treat text deltas as a successful model outcome.  A
+    governed caller must observe the single ``TERMINAL`` event and use its
+    result trace before allowing Task Acceptance.
+    """
+
+    kind: ModelAttemptStreamEventKind | str
+    text: str = ""
+    result: ModelAttemptResult | None = None
+
+    def __post_init__(self) -> None:
+        try:
+            kind = (
+                self.kind
+                if isinstance(self.kind, ModelAttemptStreamEventKind)
+                else ModelAttemptStreamEventKind(str(self.kind or "").strip().lower())
+            )
+        except ValueError as exc:
+            raise ValueError("model attempt stream event kind is invalid") from exc
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "text", str(self.text or ""))
+        if kind is ModelAttemptStreamEventKind.DELTA:
+            if self.result is not None:
+                raise ValueError("model stream delta must not carry a terminal result")
+            return
+        if not isinstance(self.result, ModelAttemptResult):
+            raise ValueError("model stream terminal requires ModelAttemptResult")
+        if self.text:
+            raise ValueError("model stream terminal must not carry delta text")
+
+
 @runtime_checkable
 class ProviderAdapter(Protocol):
     """One transport call per method; adapters must not retry internally."""
@@ -617,6 +701,11 @@ class ProviderAdapter(Protocol):
     async def complete(self, request: ProviderAttemptRequest) -> ProviderResponse: ...
 
     def stream(self, request: ProviderAttemptRequest) -> AsyncIterator[str]: ...
+
+    def stream_events(
+        self,
+        request: ProviderAttemptRequest,
+    ) -> AsyncIterator[ProviderStreamEvent]: ...
 
 
 @runtime_checkable
@@ -653,6 +742,8 @@ __all__ = [
     "CacheScope",
     "JsonMapping",
     "MODEL_BUDGET_GUARD_SCHEMA_VERSION",
+    "ModelAttemptStreamEvent",
+    "ModelAttemptStreamEventKind",
     "ModelAttemptRecord",
     "ModelAttemptRequest",
     "ModelAttemptResult",
@@ -664,6 +755,8 @@ __all__ = [
     "ProviderAdapter",
     "ProviderAttemptRequest",
     "ProviderResponse",
+    "ProviderStreamEvent",
+    "ProviderStreamEventKind",
     "ProviderTarget",
     "RenderedPrompt",
     "RetryDirective",

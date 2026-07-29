@@ -622,12 +622,19 @@ Observation/Event
 
 当前 [AffectStateBlock](../../host_brain/persona/context/affect_state.py) 将 emotion、body、offline 与 silence 信号归一为可消费状态，[AffectPolicyDecision](../../host_brain/persona/affect_policy.py) 将它转为表达上限和趋避约束。这比把 `HAPPY/SAD` 直接拼进 prompt 更接近真实的状态—策略分离。
 
+受治理的 DL-04 分句有额外的可见性边界：每句在可见前必须先落入 append-only 0149
+stream receipt，并绑定 `graph/revision/node/attempt/grant`、冻结的计划和 sync identity。它不是
+Life mutation，也不是 TTS/Avatar effect；这些外显副作用仍只可在 Task Acceptance 后产生。只有声明
+支持终局精确 usage、成本和传输身份 attestation 的 provider 才可走这条路径；终局事实缺失或漂移时
+流以失败收口、不得重试或估算，不能用无审计流式回复补齐。
+
 DL-04 把这条理论再向前推进一层：在模型措辞前冻结
 [`AffectiveTurnPlanV1`](../../natsume_contracts/life/affective_turn.py)。它将当轮
 self-affect revision、调节方式、陪伴动作和 `ExpressionPlan` 绑定成同一 identity；
 模型不能用 `natsume_emotion_tag`、候选 JSON 或纯文本 fallback 倒灌状态。低歧义文本
-可以逐句送达，但每个稳定句必须先成为可重放的 delivery intent；因此“实时”不等于先
-说出去、以后再补写。高歧义、修复和边界场景宁可保留两候选择，也不以低延迟跳过分寸。
+可以逐句送达：direct route 先写 Life delivery intent，governed route 先写 node/grant-bound
+stream receipt；因此“实时”不等于先说出去、以后再补写。高歧义、修复和边界场景宁可保留两候选择，
+也不以低延迟跳过分寸。
 DL-05 已把这条约束落实到 Host protocol：每个稳定句在文本可见前编译出配对的 Voice
 `SPEAK` 和 Avatar `TRANSITION`，并在结束或打断时追加 `RELEASE`/`CANCEL`。它们共享
 同一个 sync/self-affect revision，且下一轮只从 exact-scope 的 durable avatar head 读取前一

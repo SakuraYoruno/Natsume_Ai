@@ -20,10 +20,14 @@ from host_brain.model_runtime.contracts import (
     ModelAttemptRecord,
     ModelAttemptRequest,
     ModelAttemptResult,
+    ModelAttemptStreamEvent,
+    ModelAttemptStreamEventKind,
     OutputContract,
     OutputKind,
     ProviderAttemptRequest,
     ProviderResponse,
+    ProviderStreamEvent,
+    ProviderStreamEventKind,
     ProviderTarget,
     RenderedPrompt,
     RetryDirective,
@@ -208,6 +212,31 @@ def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict
     if isinstance(external, bool):
         result["transport_external"] = external
     return result
+
+
+def _assert_stream_transport_attestation(response: ProviderResponse) -> None:
+    """Require the terminal transport facts that a live guarded stream needs.
+
+    Token/cost numbers alone are not enough for a user-visible provisional
+    sentence: after a restart the audit trail must also identify which
+    transport returned those numbers and how long it took.  This is scoped to
+    the new streaming protocol; existing complete-call compatibility remains
+    unchanged.
+    """
+
+    measurements = _provider_transport_measurements(response.metadata)
+    required = {
+        "provider_latency_ms",
+        "transport_identity_digest",
+        "transport_external",
+    }
+    missing = sorted(required - set(measurements))
+    if missing:
+        raise ModelBudgetGuardViolation(
+            "provider stream omitted required transport attestation: "
+            + ", ".join(missing),
+            code="MODEL_PROVIDER_TRANSPORT_UNPROVEN",
+        )
 
 
 class ModelAttemptService:
@@ -492,12 +521,24 @@ class ModelAttemptService:
         """
 
         if request.model_budget_guard is not None:
-            # Streaming adapters expose text chunks but not a final canonical
-            # usage record, so they cannot satisfy a durable budget guard.
-            raise ModelBudgetGuardViolation(
-                "guarded model calls require complete usage accounting",
-                code="MODEL_BUDGET_STREAM_UNSUPPORTED",
-            )
+            terminal: ModelAttemptResult | None = None
+            async for event in self.stream_events(request):
+                if event.kind is ModelAttemptStreamEventKind.DELTA:
+                    if event.text:
+                        yield event.text
+                    continue
+                terminal = event.result
+            if terminal is None:
+                raise ModelBudgetGuardViolation(
+                    "guarded model stream ended without a terminal usage receipt",
+                    code="MODEL_PROVIDER_USAGE_UNPROVEN",
+                )
+            if not terminal.success:
+                raise ModelBudgetGuardViolation(
+                    terminal.error_message or "guarded model stream cannot prove usage",
+                    code=terminal.error_code or "MODEL_PROVIDER_USAGE_UNPROVEN",
+                )
+            return
         prepared = await self._prepare(request)
         cached = self._get_cached(prepared.cache_key)
         if cached is not None:
@@ -642,6 +683,272 @@ class ModelAttemptService:
         if last_error is None:
             raise ModelAttemptServiceError("model stream exhausted without a successful attempt")
         raise ModelAttemptServiceError(_safe_error_message(last_error)) from last_error
+
+    async def stream_events(
+        self,
+        request: ModelAttemptRequest,
+    ) -> AsyncIterator[ModelAttemptStreamEvent]:
+        """Stream one governed provider attempt with a final usage attestation.
+
+        This narrow protocol is intentionally available only to a request that
+        carries a node-bound ``ModelBudgetGuard``.  Normal Surface streaming
+        keeps its backwards-compatible text-only path.  A governed stream can
+        make text visible before final Task Acceptance, but every provider
+        delta is accompanied by one audited terminal result; missing usage,
+        an interrupted stream, or an output-cap breach all end in a failed
+        terminal result rather than an estimated charge or a hidden fallback.
+        """
+
+        guard = request.model_budget_guard
+        if guard is None:
+            raise ModelAttemptServiceError(
+                "stream_events requires a node-bound ModelBudgetGuard"
+            )
+        prepared = await self._prepare(request)
+        # _prepare() disables cache for a guarded request.  Streaming remains
+        # one route attempt: after any visible delta, a fallback would combine
+        # two providers into one user-visible answer and break budget lineage.
+        budget = min(prepared.route.max_attempts, guard.max_provider_attempts)
+        attempts: list[ModelAttemptRecord] = []
+        target_index = 0
+        retry_reason = "initial"
+        prompt = prepared.prompt
+        buffered = (
+            prompt.output_contract.kind is not OutputKind.TEXT
+            or request.retry_evaluator is not None
+        )
+
+        while len(attempts) < budget and target_index < len(prepared.route.targets):
+            remaining_ms = self._remaining_ms(prepared.deadline_at)
+            if remaining_ms <= 0:
+                yield ModelAttemptStreamEvent(
+                    kind=ModelAttemptStreamEventKind.TERMINAL,
+                    result=ModelAttemptResult(
+                        request_id=request.request_id,
+                        success=False,
+                        route_decision=prepared.route,
+                        attempts=tuple(attempts),
+                        error_code="MODEL_DEADLINE_EXCEEDED",
+                        error_message="model request deadline exhausted",
+                    ),
+                )
+                return
+
+            target = prepared.route.targets[target_index]
+            attempt_request, started, started_monotonic = self._begin_attempt(
+                request=request,
+                route=prepared.route,
+                prompt=prompt,
+                target=target,
+                attempt_index=len(attempts) + 1,
+                retry_reason=retry_reason,
+                remaining_ms=remaining_ms,
+            )
+            await self._audit(started)
+            response: ProviderResponse | None = None
+            chunks: list[str] = []
+            emitted = False
+            final_seen = False
+            try:
+                adapter = self.provider_adapters.get(target.adapter_id)
+                stream_events = getattr(adapter, "stream_events", None)
+                if not callable(stream_events):
+                    raise ModelBudgetGuardViolation(
+                        "provider adapter cannot expose a final stream usage receipt",
+                        code="MODEL_BUDGET_STREAM_USAGE_UNSUPPORTED",
+                    )
+                if getattr(adapter, "supports_final_stream_usage", True) is not True:
+                    raise ModelBudgetGuardViolation(
+                        "provider adapter has no attested final stream usage protocol",
+                        code="MODEL_BUDGET_STREAM_USAGE_UNSUPPORTED",
+                    )
+                async with asyncio.timeout(
+                    max(0.001, attempt_request.timeout_ms / 1000.0)
+                ):
+                    async for raw_event in stream_events(attempt_request):
+                        if not isinstance(raw_event, ProviderStreamEvent):
+                            raise ModelBudgetGuardViolation(
+                                "provider adapter emitted an untyped stream event",
+                                code="MODEL_PROVIDER_USAGE_UNPROVEN",
+                            )
+                        if raw_event.kind is ProviderStreamEventKind.DELTA:
+                            if final_seen:
+                                raise ModelBudgetGuardViolation(
+                                    "provider emitted a delta after its final usage receipt",
+                                    code="MODEL_PROVIDER_USAGE_UNPROVEN",
+                                )
+                            text = str(raw_event.text or "")
+                            if not text:
+                                continue
+                            chunks.append(text)
+                            if not buffered:
+                                emitted = True
+                                yield ModelAttemptStreamEvent(
+                                    kind=ModelAttemptStreamEventKind.DELTA,
+                                    text=text,
+                                )
+                            continue
+                        if final_seen:
+                            raise ModelBudgetGuardViolation(
+                                "provider emitted more than one final stream usage receipt",
+                                code="MODEL_PROVIDER_USAGE_UNPROVEN",
+                            )
+                        final_seen = True
+                        response = raw_event.response
+
+                if not final_seen or response is None:
+                    raise ModelBudgetGuardViolation(
+                        "provider stream ended without a final canonical usage receipt",
+                        code="MODEL_PROVIDER_USAGE_UNPROVEN",
+                    )
+                # A final SSE frame may only contain usage.  The transcript is
+                # the accumulated delta text in that case; if the provider
+                # also supplies a complete final message, prefer it as the
+                # provider-owned canonical representation.
+                response = ProviderResponse(
+                    content=response.content or "".join(chunks),
+                    finish_reason=response.finish_reason,
+                    usage=response.usage,
+                    metadata={**dict(response.metadata), "streamed": True},
+                )
+                self._assert_model_budget_guard_response(
+                    response,
+                    guard,
+                    prior_attempts=attempts,
+                )
+                _assert_stream_transport_attestation(response)
+                validate_output_contract(response.content, prompt.output_contract)
+                directive = await self._evaluate_retry(request, response, attempt_request)
+                if directive is not None and directive.retry:
+                    if emitted:
+                        raise ModelBudgetGuardViolation(
+                            "semantic retry requested after a governed stream became visible",
+                            code="MODEL_STREAM_RETRY_AFTER_VISIBILITY",
+                        )
+                    terminal = self._terminal_record(
+                        started,
+                        started_monotonic=started_monotonic,
+                        status=AttemptStatus.REJECTED,
+                        response=response,
+                        error_code="SEMANTIC_RETRY_REQUESTED",
+                        error_message=directive.reason,
+                        metadata={"retry_directive": dict(directive.metadata)},
+                    )
+                    await self._audit(terminal)
+                    attempts.append(terminal)
+                    # A strict no-visible-output retry is still safe.  It is
+                    # bounded by the frozen guard and retains every previous
+                    # provider measurement for cap enforcement.
+                    prompt = (
+                        self.prompt_registry.validate_rendered(directive.rendered_prompt)
+                        if directive.rendered_prompt is not None
+                        else prompt
+                    )
+                    retry_reason = directive.reason
+                    if not directive.reuse_target:
+                        target_index += 1
+                    continue
+
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=AttemptStatus.SUCCEEDED,
+                    response=response,
+                )
+                await self._audit(terminal)
+                attempts.append(terminal)
+                if buffered:
+                    for text in chunks:
+                        if text:
+                            yield ModelAttemptStreamEvent(
+                                kind=ModelAttemptStreamEventKind.DELTA,
+                                text=text,
+                            )
+                yield ModelAttemptStreamEvent(
+                    kind=ModelAttemptStreamEventKind.TERMINAL,
+                    result=ModelAttemptResult(
+                        request_id=request.request_id,
+                        success=True,
+                        route_decision=prepared.route,
+                        attempts=tuple(attempts),
+                        response=response,
+                        final_target=target,
+                    ),
+                )
+                return
+            except asyncio.CancelledError as exc:
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=AttemptStatus.CANCELLED,
+                    response=response,
+                    error_code="MODEL_ATTEMPT_CANCELLED",
+                    error_message=_safe_error_message(exc),
+                )
+                await asyncio.shield(self._audit(terminal))
+                raise
+            except AttemptAuditError:
+                raise
+            except BaseException as exc:
+                if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+                    terminal = self._terminal_record(
+                        started,
+                        started_monotonic=started_monotonic,
+                        status=AttemptStatus.CANCELLED,
+                        response=response,
+                        error_code="MODEL_STREAM_CANCELLED",
+                        error_message=_safe_error_message(exc),
+                    )
+                    await asyncio.shield(self._audit(terminal))
+                    raise
+                if isinstance(exc, ModelBudgetGuardViolation):
+                    code = exc.code
+                    message = str(exc)
+                elif isinstance(exc, TimeoutError):
+                    code = "MODEL_PROVIDER_USAGE_UNPROVEN"
+                    message = "guarded provider stream timed out without canonical usage"
+                else:
+                    code = "MODEL_PROVIDER_USAGE_UNPROVEN"
+                    message = "guarded provider stream failed without canonical usage"
+                terminal = self._terminal_record(
+                    started,
+                    started_monotonic=started_monotonic,
+                    status=AttemptStatus.REJECTED,
+                    response=response,
+                    error_code=code,
+                    error_message=message,
+                )
+                await self._audit(terminal)
+                attempts.append(terminal)
+                # Never fall back after a possibly visible sentence.  Before
+                # visibility a retry could be safe, but a missing final usage
+                # means the first transport charge cannot be settled, so the
+                # durable task must reject rather than hide it behind another
+                # provider response.
+                yield ModelAttemptStreamEvent(
+                    kind=ModelAttemptStreamEventKind.TERMINAL,
+                    result=ModelAttemptResult(
+                        request_id=request.request_id,
+                        success=False,
+                        route_decision=prepared.route,
+                        attempts=tuple(attempts),
+                        error_code=code,
+                        error_message=message,
+                    ),
+                )
+                return
+
+        yield ModelAttemptStreamEvent(
+            kind=ModelAttemptStreamEventKind.TERMINAL,
+            result=ModelAttemptResult(
+                request_id=request.request_id,
+                success=False,
+                route_decision=prepared.route,
+                attempts=tuple(attempts),
+                error_code="MODEL_ROUTE_EXHAUSTED",
+                error_message="guarded model stream exhausted without a successful attempt",
+            ),
+        )
 
     async def _prepare(self, request: ModelAttemptRequest) -> _PreparedCall:
         started_at = self._monotonic()
