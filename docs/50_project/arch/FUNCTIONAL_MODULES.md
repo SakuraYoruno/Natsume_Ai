@@ -10,7 +10,7 @@
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> `NE-08 / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING` 已把实时情感陪伴设为当前产品主线。
+> `NE-08 / DL-07_REAL_COMPANION_ACCEPTANCE` 已把实时情感陪伴设为当前产品主线。
 > Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
 > head：`EventAppraisal → mixed component / EmotionEpisode → Mood / Need →
 > Regulation`；ASGI Input composition 又将 `AffectFusionService` 接入输入入口。
@@ -435,6 +435,7 @@ Budget contention persistence 由 `TaskBudgetUsageStoreMixin` 唯一拥有：首
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|
+| Full-Stack Companion Acceptance | 将隔离 Docker 持久服务、实际运行的 Host/Obs/Monitor 与外部设备状态压缩成隐私受限、commit-bound 的验收收据 | [`full_stack_acceptance.py`](../../../natsume_contracts/life/full_stack_acceptance.py)、[`run_dl07_full_stack_acceptance.py`](../../../scripts/runtime/run_dl07_full_stack_acceptance.py)、[`run_ne07_external_services_acceptance.py`](../../../scripts/runtime/run_ne07_external_services_acceptance.py)、Host/Docker start-stop scripts | 隔离 Compose receipt、loopback HTTP、运行时 PID/container/image identity | 用户正文、模型输出、raw audio/image、secret、端口占位、mock/synthetic PASS、远端 Edge 启动 authority | `DL07_RECEIPT_CONTRACT_IMPLEMENTED / REAL_RUN_PENDING`；local Docker/Neo4j/Chroma/Redis/Host/Obs/Monitor 全部真实通过才可能继续判定，Gateway/Edge/provider/ASR/TTS/Avatar 缺失时为 `ACCEPTANCE_PENDING_EXTERNAL`。启动/清理使用同一 resolved port/network scope，不触碰用户默认容器或远端 Edge |
 | Host Channels | Edge transport、TTS/VTS/MateEngine mapping、embodiment outbox 和 Life delivery transport | [`channels/edge_transport.py`](../../../host_brain/channels/edge_transport.py)、[`channels/embodiment.py`](../../../host_brain/channels/embodiment.py)、[`channels/embodiment_outbox.py`](../../../host_brain/channels/embodiment_outbox.py)、[`channels/mateengine.py`](../../../host_brain/channels/mateengine.py) | 跨进程 contracts、Acceptance effect/outbox、terminal Action Preview | 未验证直接物理副作用、无 Preview 的高风险网络/设备调用 | `PARTIAL_FIRST_GOVERNED_EXPRESSION_SLICE / DEVICE_DEPENDENT`；raw HTTP transport 与低层 command port 不再公开；Operator 表情命令经 `edge.embodiment_enqueue`、terminal Preview 与 durable outbox 进入 `set_expression`，exact replay/receipt reconciliation 已接。旧 voice/performance/avatar 直通和更多 command type 仍失败关闭，真实设备留 NE-07 |
 | Gateway Transport | 平台 webhook 验签、归一化、durable intake/delivery、receipt 和重试 | [`edge_client/gateway/server.py`](../../../edge_client/gateway/server.py)、[`edge_client/gateway/delivery_runtime.py`](../../../edge_client/gateway/delivery_runtime.py)、[`persistence/gateway_transport_repository.py`](../../../host_brain/persistence/gateway_transport_repository.py) | `natsume_contracts.edge`、Host HMAC 输入端、平台 adapter | Host 业务实现、对话状态真相 | `WIRED`；Gateway store factory 通过合同注入，但当前组装较大 |
 | Edge Runtime | 本地 sensor/actuator composition、语音 pipeline、Avatar 状态和健康 | [`edge_client/runtime/bootstrap.py`](../../../edge_client/runtime/bootstrap.py)、[`edge_client/runtime/voice_pipeline.py`](../../../edge_client/runtime/voice_pipeline.py)、[`edge_client/actuators/`](../../../edge_client/actuators)、[`edge_client/senses/`](../../../edge_client/senses) | Edge contracts、本地 provider/OS adapter | Host app/audit 实现、全局任务 authority | `WIRED / ENVIRONMENT_DEPENDENT`；边界扫描禁止 Edge 导入 Host 实现 |

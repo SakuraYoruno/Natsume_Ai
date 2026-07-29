@@ -7,6 +7,13 @@
 维护日期：2026-07-28
 状态：当前证据
 
+## DL-07 真实服务栈收据合同（实现完成，实栈重跑待提交绑定）
+
+- `test_dl07_full_stack_acceptance_receipt.py` 验证 `FullStackAcceptanceReceiptV1` 的固定组件顺序、完整 SHA、容器/image digest、隐私字段、派生结论和 fail-closed 行为：fixture、mock、scripted 或 absence evidence 不能把任何本地组件提升为 `PASS`。
+- `test_dl07_full_stack_acceptance_runner.py` 验证 runner 只接收 loopback URL，必须读取真实 Host `/health`、`/ready`、Digital Life health、Obs health、Monitor HTML 与代理 metrics；Windows PID 探测是只读 `tasklist`，不会因验收检查终止进程。
+- `test_ne07_external_service_isolation.py` 与 `test_runtime_startup_script_composition.py` 验证 acceptance 的解析 Obs/Monitor port 会跨 detached child 和 teardown 保持一致，Compose explicit network name 也会传递至 cleanup；它们不能替代 Docker、Host、Obs、Monitor 的实栈运行。
+- 当前远程 CI 额度为 `NOT_RUN_ACCOUNT_QUOTA`。本波最终证据必须在同一已提交 SHA 的隔离 Docker/Host/Obs/Monitor 进程上重新生成；远端 Edge、Gateway、真实 provider、ASR、TTS 与 Avatar 未运行时，预期结论只能是 `ACCEPTANCE_PENDING_EXTERNAL`。
+
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、

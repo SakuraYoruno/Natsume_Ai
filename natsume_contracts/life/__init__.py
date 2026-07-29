@@ -39,6 +39,17 @@ from .companion_profile import (
     baseline_companion_profile,
     utc_day_from_ms,
 )
+from .full_stack_acceptance import (
+    FULL_STACK_ACCEPTANCE_FAIL,
+    FULL_STACK_ACCEPTANCE_PASS,
+    FULL_STACK_ACCEPTANCE_PENDING_EXTERNAL,
+    FULL_STACK_ACCEPTANCE_SCHEMA_VERSION,
+    REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA,
+    DockerServiceEvidenceV1,
+    FullStackAcceptanceReceiptV1,
+    FullStackComponentV1,
+    derive_full_stack_outcome,
+)
 
 __all__ = [
     *_v1_all,
@@ -69,4 +80,13 @@ __all__ = [
     "CompanionProfileVersionV1",
     "baseline_companion_profile",
     "utc_day_from_ms",
+    "FULL_STACK_ACCEPTANCE_FAIL",
+    "FULL_STACK_ACCEPTANCE_PASS",
+    "FULL_STACK_ACCEPTANCE_PENDING_EXTERNAL",
+    "FULL_STACK_ACCEPTANCE_SCHEMA_VERSION",
+    "REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA",
+    "DockerServiceEvidenceV1",
+    "FullStackAcceptanceReceiptV1",
+    "FullStackComponentV1",
+    "derive_full_stack_outcome",
 ]

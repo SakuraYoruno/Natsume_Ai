@@ -1949,6 +1949,21 @@ Gate 6 最终定向集合为 `19 passed`；原始证据批次重叠禁止相加�
 
 当前监督流是 `ProjectionJobDaemon wave → secret-free health_snapshot → ObsApplicationContainer → GET /health`。普通 job/lease acquire/renew 失败只投影 job 名、错误类型和 opaque incident，线程继续下一 wave；成功 wave 清零连续失败并标记恢复；进程控制异常使 daemon 进入 `FAILED`，显式 close 前拒绝重启。首批合同/单测 `6 passed in 13.13s`；首次受影响回归 `67 passed, 1 failed in 169.29s`，补齐旧 Host fixture lifespan 后单 case `1 passed in 22.08s`，最终受影响集合 `68 passed in 211.30s`，批次重叠不得相加。该流仍是 app-local 内存监督，不是 durable SLO event：Guardian acknowledgement、跨进程历史、production canary 和 wave integration 均未完成；NE-01 继续 `PARTIAL / IN_PROGRESS`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+DL-07 的真实验收数据流不把端口可连或 test fixture 当作服务证据：
+
+```mermaid
+flowchart LR
+    C["隔离 Compose project\nNeo4j / Chroma / Redis"] --> D["真实写入、重启、读取、清理\nDocker receipt"]
+    D --> H["隔离 Host\n/health /ready /life health"]
+    H --> O["隔离 Obs\n/health"]
+    O --> M["真实 Nginx Monitor\nHTML + /obs/metrics"]
+    M --> R["FullStackAcceptanceReceiptV1\ncommit + identity + digest"]
+    E["远端 Edge / provider / 设备"] -. "未启动或未证明" .-> P["NOT_TESTED /\nACCEPTANCE_PENDING_EXTERNAL"]
+    P --> R
+```
+
+Docker receipt 与 Host/Obs/Monitor 读取均只输出脱敏 digest；禁止把用户文本、模型输出、音视频或认证写入收据。Host sidecar 由同一 runtime snapshot 传递解析后的 Obs/Monitor port，Docker teardown 使用启动时的 explicit network name。这样孤立验收不会悄悄复用用户默认容器或遗留 network；远端 Edge 未经用户允许不会启动。
+
 Service Catalog 分层切片随后把启动数据流固定为 `Host/ASGI → service_catalog/startup_coordinator.py → ServiceCatalogRolloutAuthority Protocol → SQLiteServiceCatalogRolloutRepository`；DTO、校验和 port 从 `contracts/service_catalog.py` 进入，旧 composition/类型路径仅作同对象重导出，`rollout_authority.py` 只观察 Guardian。该流清除了 application→composition 两条与 Catalog persistence→application 一条依赖，Gate 1 SCC 缩为 application/persistence；该切片完成时仍有 11 条 persistence→application 反向依赖（PlanningSearch 7、Evolution/Lab/Skill/World 4）。验证为 contract/unit `61 passed`、真实 socket integration `7 passed`、边界复跑 `7 passed`，集合可能重叠不得相加。
 
 PlanningSearch 持久化合同分层切片把仓储依赖流改为 `SQLite repositories → contracts/planning_search`，不再形成 `persistence → planning_search application`。core、benchmark、calibration、code、research 八组合同与模型由纯合同包持有，旧 application 模块只做同对象兼容重导出，因此调用者的 `__all__`、类型 identity、`isinstance` 与序列化形状不变。code benchmark、calibration、research shadow 三条 SQLite 流合计清除 7 条反向依赖；边界 `5 passed`，D13/D18/D19/D20 `60 passed, 1 skipped`（Windows 无 symlink 权限）。Gate 1 仍因 Evolution/Lab/Skill/World 4 条反向依赖维持 `FAIL`，application/persistence SCC 未消失；application→composition=0、Edge violation=0、reverse import=0，Gate 6/10 保持 `PASS`。该数据流调整无 migration，也没有增加候选生成、执行或收益 authority；wave integration=`NOT_RUN_PER_WAVE_POLICY`、`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

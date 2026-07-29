@@ -7,6 +7,7 @@ param(
   [string]$LocalServicesBackend = "docker",
   [string]$DockerComposeFile = "",
   [string]$DockerProjectName = "natsume-ext",
+  [string]$DockerNetworkName = "",
   [switch]$DockerRemoveVolumes,
 
   [string]$HostEnvFile = "",
@@ -198,6 +199,7 @@ if ($StopLocalServices.IsPresent) {
     $dockerArgs = @{
       ComposeFile = $DockerComposeFile
       ProjectName = $DockerProjectName
+      NetworkName = $DockerNetworkName
       RemoveVolumes = [bool]$DockerRemoveVolumes.IsPresent
     }
     $localServicesResult = Invoke-JsonScript -ScriptPath $dockerServicesStopScript -ArgsMap $dockerArgs

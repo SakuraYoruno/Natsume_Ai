@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "scripts/runtime/docker-compose.external.yml"
 START_DOCKER = ROOT / "scripts/runtime/start_docker_services.ps1"
 START_HOST = ROOT / "scripts/runtime/start_host_side.ps1"
+STOP_DOCKER = ROOT / "scripts/runtime/stop_docker_services.ps1"
 RUNTIME_SCRIPTS = (
     ROOT / "scripts/runtime/start_host_side.ps1",
     ROOT / "scripts/runtime/start_obs_side.ps1",
@@ -115,6 +116,30 @@ def test_host_stack_scripts_accept_an_isolated_runtime_root() -> None:
     assert "Get-ListeningPid -ProbePort $obsBindPort" in restart_source
     stop_host = sources["stop_host_side.ps1"]
     assert "if (-not $runtimeRootWasExplicit)" in stop_host
+
+
+def test_isolated_host_sidecars_and_docker_teardown_keep_the_same_scope() -> None:
+    host = START_HOST.read_text(encoding="utf-8")
+    stop_host = (ROOT / "scripts/runtime/stop_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    stop_docker = STOP_DOCKER.read_text(encoding="utf-8")
+
+    obs_start = host.index("$obsArgs = @{")
+    obs_start_end = host.index("if ($ForceRestart.IsPresent)", obs_start)
+    obs_args = host[obs_start:obs_start_end]
+    assert "BindHost = $obsBindHost" in obs_args
+    assert "Port = $obsBindPort" in obs_args
+
+    assert "[int]$ObsPort = 0" in stop_host
+    assert "[int]$MonitorProxyPort = 0" in stop_host
+    assert "Read-EnvFile -Path $runtimeEnvFile" in stop_host
+    assert "-Port $ObsPort" in stop_host
+    assert "-Port $MonitorProxyPort" in stop_host
+
+    assert "[string]$NetworkName = \"\"" in stop_docker
+    assert "$env:NATSUME_DOCKER_NETWORK_NAME = $NetworkName" in stop_docker
+    assert "network_name = if ($NetworkName)" in stop_docker
 
 
 def test_runtime_snapshot_excludes_secrets_but_keeps_safe_refs(

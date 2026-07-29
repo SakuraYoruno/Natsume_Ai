@@ -65,7 +65,8 @@ def test_host_orchestrator_requires_post_sidecar_stability_before_success() -> N
     assert '-RequiredConsecutiveChecks 5' in source[stability_gate:success_result]
     assert '"HOST_STACK_STARTUP_STABILITY_FAILED: host=$hostStable; "' in source
     assert "Stop-ProcessTree -ProcessId $hostPid" in source[stability_gate:success_result]
-    assert '& $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot' in source
+    assert '& $stopObsScript `' in source
+    assert "-Port $obsBindPort" in source[stability_gate:success_result]
     assert (
         '-RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")'
         in source[stability_gate:success_result]

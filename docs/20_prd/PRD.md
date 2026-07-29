@@ -265,3 +265,5 @@ Obs 和 UI 不直接查询业务私有表或进程缓存，不泄漏 raw thought
 7. migration/restore、security/privacy、performance/chaos、rollback、Docker、Host、Obs、UI、Gateway、Edge 与可用设备完成统一验收。
 
 当前是否满足这些条件，只能由 `ARCHITECTURE_GAP_MATRIX.md` 和最终机器 receipt 判断；历史 PASS、测试数量或代码行数不能替代本验收。
+
+对于实时情感陪伴的服务栈验收，真实进程本身也是产品证据的一部分：Docker 的 Neo4j、Chroma、Redis 必须在隔离数据根完成写入、重启和读取；Host、Obs 与 Nginx Monitor 必须提供真实 HTTP/read-model 数据。收据只能保存脱敏身份、状态和 digest。端口占位、fixture、scripted replay、静态构建产物或一台未启动的远端 Edge 均不能代替这条证据；缺真实 provider、远端设备或平台凭据时，结论必须是 `ACCEPTANCE_PENDING_EXTERNAL`，不得降格为 `PASS`。

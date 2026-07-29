@@ -1591,6 +1591,12 @@ if ($obsEnabled) {
       $obsArgs = @{
         EnvFile = $EnvFile
         RuntimeRoot = $RuntimeRoot
+        # The child launcher is deliberately detached from this PowerShell
+        # process, so it must receive the resolved acceptance ports explicitly.
+        # Reading only .env here would silently put an isolated Host and its
+        # OBS sidecar on different port scopes.
+        BindHost = $obsBindHost
+        Port = $obsBindPort
         WaitSeconds = $WaitSeconds
       }
       if ($ForceRestart.IsPresent) {
@@ -1842,14 +1848,18 @@ if (-not $hostStable -or -not $obsStable -or -not $monitorStable) {
     try {
       $null = & $stopMonitorScript `
         -EnvFile $EnvFile `
-        -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")
+        -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy") `
+        -Port $MonitorProxyPort
     } catch {
     }
   }
   $stopObsScript = Join-Path $PSScriptRoot "stop_obs_side.ps1"
   if ($obsEnabled -and (Test-Path -LiteralPath $stopObsScript)) {
     try {
-      $null = & $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot
+      $null = & $stopObsScript `
+        -EnvFile $EnvFile `
+        -RuntimeRoot $RuntimeRoot `
+        -Port $obsBindPort
     } catch {
     }
   }

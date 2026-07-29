@@ -120,6 +120,24 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
 校验和 `git diff --check`。这些都是 Host 本地协议证据；远程 CI 固定为
 `NOT_RUN_ACCOUNT_QUOTA`，不能记为 PASS。
 
+## T-DL07-REAL-COMPANION-STACK-ACCEPTANCE
+
+- T-DL07-01：`FullStackAcceptanceReceiptV1` 必须以完整 Git SHA、run id、隔离 Docker
+  receipt、container/image identity、Host/Obs/Monitor PID 与脱敏 HTTP digest 固化同一次运行；
+  user text、model output、raw audio/image、secret、authorization、payload 等字段必须拒绝。
+- T-DL07-02：本地 `docker/neo4j/chroma/redis/host/obs/monitor` 是强制组件；任一失败即
+  `FAIL`。Gateway、远端 Edge、model provider、ASR、TTS 与 Avatar 必须逐项记录，任一未证明时
+  只能得到 `ACCEPTANCE_PENDING_EXTERNAL`，不能借端口、fixture、mock 或 scripted replay 提升。
+- T-DL07-03：runner 只允许 loopback endpoint，实际读取 Host `/health`、`/ready`、Digital
+  Life runtime health、Obs `/health`、Nginx Monitor HTML 与 `/obs/metrics`；检查 PID 只能只读，
+  不能意外停止进程。
+- T-DL07-04：acceptance 自定义端口必须从同一 Host runtime snapshot 传给 detached Obs、
+  Monitor teardown；Docker cleanup 必须使用启动时 explicit network name。用户默认 Docker
+  stack、数据根和远端 Edge 均不在允许范围内。
+- 当前本地合同/脚本组合证据为 `30 passed in 5.43s`；`static_scan,doc_gate` 为
+  `passed`。这不是实栈 receipt：下一步必须在已提交 SHA 上重新启动隔离 Docker、Host、Obs 和
+  Monitor。远程 CI=`NOT_RUN_ACCOUNT_QUOTA`。
+
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 
 - T-NE07-EXT-01：Neo4j、Chroma、Redis 默认镜像必须绑定不可变 digest；

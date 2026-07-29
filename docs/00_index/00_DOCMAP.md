@@ -197,7 +197,7 @@ flowchart TD
 
 ## 4. 历史基础设施状态摘要（范围受限）
 
-> NE-07 已进入隔离真实服务栈预检。默认端口上的用户长期
+> DL-07 已进入隔离真实服务栈验收实现与重跑阶段。默认端口上的用户长期
 > `natsume-ext` Neo4j、Chroma、Redis 不停止、不写入且不计入验收；
 > acceptance project `natsume-ne07-555ead6d` 已完成独立
 > container/network/port/data-root 与固定镜像 digest 配置，真实
@@ -213,7 +213,10 @@ flowchart TD
 > 同 runtime root 的 Obs/Nginx 并监视 launcher 退出，定向集合
 > `33 passed in 34.32s`。真实接管、Obs 恢复与认证 Monitor 仍须重跑；
 > Edge、Gateway 尚未启动，因此当前只能是
-> `NE-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。8 项 npm audit 告警继续开放。
+> `DL-07_IN_PROGRESS / PROGRAM_INCOMPLETE`。本轮新增的汇总收据会把隔离 Docker
+> 真实 I/O、Host/Obs/Monitor 真实读取及其 PID/container/image identity 绑定同一提交；尚未
+> 形成 commit-bound 实栈 receipt。远端 Edge 不在本机、不会启动；真实模型与设备未配置时只能
+> `ACCEPTANCE_PENDING_EXTERNAL`。8 项 npm audit 告警继续开放。
 
 > 最新 locator 清点（2026-07-25）：生产具名 consumer/import、全部 import-form consumer、locator 模块、Container 字段/锁/引用均为 0。`process_service_container.py`、`process_services.py`、`process_environment.py` 与旧 wiring 已物理删除；ASGI/CLI 构造 fresh `ProcessApplicationPorts` 并显式传入 Host root。旧测试只通过 `tests/support/process_service_compat.py` 的 pytest-only bridge 运行，fresh 生产进程不会加载它。`HostAuthorityRuntimeOwner` 继续持有同一 epoch 的 canonical ledger、Episodic/LifeMemory、独立 Model 与 Capability 图。外部 Chroma/Neo4j namespace、Token/MCP durable restart、资源崩溃恢复、事务化 Chat 和完整 Worker/Obs Composition仍未闭环；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 

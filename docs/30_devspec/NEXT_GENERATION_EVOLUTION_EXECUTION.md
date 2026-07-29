@@ -318,6 +318,8 @@ Bond fetch。该 projection 是检索与 Motive 的唯一关系输入；scope/sc
 - 在隔离 runtime root 启动 Docker Neo4j/Chroma/Redis、Host、Obs、Monitor、Gateway，执行真实读写、重启、恢复与故障注入。
 - 至少使用一个真实非 mock model provider；只有用户允许且远端设备可用时才连接真实 Edge、ASR、TTS、VTS/VRM。
 - mock、scripted replay、端口占位和 fixture 都不能成为最终 PASS 证据。
+- `FullStackAcceptanceReceiptV1` 是唯一的本波汇总合同：它绑定完整 commit SHA、隔离 Docker receipt、固定 image/container identity、Host/Obs/Monitor 的真实 loopback HTTP evidence，以及外部组件的明确状态；不记录用户正文、模型输出、原始音视频或 secret。local `docker/neo4j/chroma/redis/host/obs/monitor` 必须全部真实通过；Gateway、远端 Edge、真实 provider、ASR、TTS 与 Avatar 任一未证明时只能形成 `ACCEPTANCE_PENDING_EXTERNAL`。
+- 本地启动器必须把 acceptance 解析后的 Host、Obs、Monitor 端口传给 detached child 和 teardown，并把 Compose 的 explicit network name 传给 stop；默认端口上的用户长期容器、数据根和远端 Edge 不得被复用、停止、写入或计入验收。当前实现/定向合同已完成，下一步是从干净提交重新启动隔离服务栈、生成 commit-bound 真实 receipt；未跑之前仍为 `DL-07_IN_PROGRESS`。
 
 ## 4. 质量与完成口径
 

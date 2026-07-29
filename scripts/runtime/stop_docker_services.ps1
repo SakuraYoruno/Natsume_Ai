@@ -2,6 +2,7 @@
 param(
   [string]$ComposeFile = "",
   [string]$ProjectName = "natsume-ext",
+  [string]$NetworkName = "",
   [switch]$RemoveVolumes
 )
 
@@ -61,6 +62,15 @@ if (-not $ComposeFile) {
 if (-not (Test-Path -Path $ComposeFile)) {
   throw "docker compose file not found: $ComposeFile"
 }
+if ($NetworkName) {
+  if ($NetworkName -notmatch '^[A-Za-z0-9][A-Za-z0-9_.-]*$') {
+    throw "invalid Docker network name: $NetworkName"
+  }
+  # Compose needs the same interpolated external network name at teardown as
+  # it received during startup.  Without this, an isolated acceptance project
+  # can remove its containers but leak the explicitly named network.
+  $env:NATSUME_DOCKER_NETWORK_NAME = $NetworkName
+}
 
 $dockerExe = Resolve-DockerExecutable
 $dockerDir = Split-Path -Path $dockerExe -Parent
@@ -80,6 +90,7 @@ $result = [ordered]@{
   status = "stopped"
   compose_file = $ComposeFile
   project_name = $ProjectName
+  network_name = if ($NetworkName) { $NetworkName } else { "default" }
   remove_volumes = [bool]$RemoveVolumes.IsPresent
 }
 $result | ConvertTo-Json -Depth 6

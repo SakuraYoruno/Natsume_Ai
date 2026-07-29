@@ -3,7 +3,9 @@ param(
   [string]$EnvFile = "",
   [string]$RuntimeRoot = "",
   [string]$PidFile = "",
-  [int]$Port = 0
+  [int]$Port = 0,
+  [int]$ObsPort = 0,
+  [int]$MonitorProxyPort = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,15 +124,35 @@ if (-not $PidFile) {
 $runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
-if ($Port -le 0) {
-  if ($envValues.ContainsKey("HOST_APP_PORT")) {
-    $Port = [int]$envValues["HOST_APP_PORT"]
-  } elseif ($env:HOST_APP_PORT) {
-    $Port = [int]$env:HOST_APP_PORT
-  } else {
-    $Port = 18080
+$runtimeValues = Read-EnvFile -Path $runtimeEnvFile
+
+function Resolve-RuntimePort {
+  param(
+    [int]$ExplicitPort,
+    [string]$Name,
+    [int]$DefaultPort
+  )
+  if ($ExplicitPort -gt 0) {
+    return $ExplicitPort
   }
+  if ($runtimeValues.ContainsKey($Name)) {
+    return [int]$runtimeValues[$Name]
+  }
+  if ($envValues.ContainsKey($Name)) {
+    return [int]$envValues[$Name]
+  }
+  $processValue = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ($processValue) {
+    return [int]$processValue
+  }
+  return $DefaultPort
 }
+
+if ($Port -le 0) {
+  $Port = Resolve-RuntimePort -ExplicitPort 0 -Name "HOST_APP_PORT" -DefaultPort 18080
+}
+$ObsPort = Resolve-RuntimePort -ExplicitPort $ObsPort -Name "HOST_OBS_APP_PORT" -DefaultPort 18082
+$MonitorProxyPort = Resolve-RuntimePort -ExplicitPort $MonitorProxyPort -Name "HOST_MONITOR_PROXY_PORT" -DefaultPort 18180
 
 $stopped = $false
 $hostPid = $null
@@ -195,13 +217,14 @@ if ($remainingHostPids.Count -gt 0) {
   $detail = ("stopped residual host processes: {0}" -f (($remainingHostPids | Sort-Object -Unique) -join ","))
 }
 
-Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue
-
 $obsProcessResult = $null
 $stopObsScript = Join-Path $PSScriptRoot "stop_obs_side.ps1"
 if (Test-Path -Path $stopObsScript) {
   try {
-    $obsRaw = & $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot
+    $obsRaw = & $stopObsScript `
+      -EnvFile $EnvFile `
+      -RuntimeRoot $RuntimeRoot `
+      -Port $ObsPort
     $obsJson = ($obsRaw | Out-String).Trim()
     if ($obsJson) {
       try {
@@ -229,7 +252,10 @@ $monitorProxyResult = $null
 $stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"
 if (Test-Path -Path $stopMonitorScript) {
   try {
-    $monitorRaw = & $stopMonitorScript -EnvFile $EnvFile -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")
+    $monitorRaw = & $stopMonitorScript `
+      -EnvFile $EnvFile `
+      -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy") `
+      -Port $MonitorProxyPort
     $monitorJson = ($monitorRaw | Out-String).Trim()
     if ($monitorJson) {
       try {
@@ -253,6 +279,8 @@ if (Test-Path -Path $stopMonitorScript) {
   }
 }
 
+Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue
+
 $result = [ordered]@{
   side = "host"
   status = if ($stopped) { "stopped" } else { "not_running" }
@@ -260,6 +288,8 @@ $result = [ordered]@{
   pid_file = $PidFile
   runtime_root = $RuntimeRoot
   port = $Port
+  obs_port = $ObsPort
+  monitor_proxy_port = $MonitorProxyPort
   detail = $detail
   obs_process = $obsProcessResult
   monitor_proxy = $monitorProxyResult

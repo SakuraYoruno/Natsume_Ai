@@ -362,6 +362,23 @@ Service Catalog 正常停止中间 rollout candidate，而不是最终服务自�
 以及 operation/snapshot SHA-256 响应头；不再接受 readiness、metrics 或
 单纯监听端口作为 Host 最终身份。
 
+### 8.3 DL-07 汇总收据与严格进程范围
+
+[`FullStackAcceptanceReceiptV1`](../../../natsume_contracts/life/full_stack_acceptance.py)
+把一个完整 Git commit 与两类真实证据绑定：先由
+`run_ne07_external_services_acceptance.py` 对隔离三库做写入、重启、读取和清理，
+再由 `run_dl07_full_stack_acceptance.py` 对实际运行的 Host、Obs 与 Nginx Monitor
+执行 loopback HTTP 读取。后者要求 Host `/health`、`/ready`、Digital Life runtime
+health，Obs `/health`，以及 Monitor HTML 和 `/obs/metrics` 都能实际响应；收据只保留
+摘要 digest、进程 PID、容器/image identity 和监听地址。
+
+acceptance Host 使用自定义端口时，`start_host_side.ps1` 必须把已解析的 Obs port
+显式传给 detached Obs launcher；`stop_host_side.ps1` 先从同一 runtime snapshot
+取回 Host/Obs/Monitor port，再停止子进程，最后才删除 snapshot。Compose 的 explicit
+network name 同样必须传给 `stop_docker_services.ps1`，以避免只删容器而泄漏隔离网络。
+这三个修复只保证本地实验范围正确；它们不启动另一台电脑上的 Edge，也不把
+`HOST_*_STAGED`、构建产物、端口监听或远端未配置设备当作物理送达证据。
+
 ## 9. 健康与降级语义
 
 ### 9.1 端点不是同义词
