@@ -79,7 +79,53 @@ class GlymphaticAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_recovery_writer_retired(self) -> bool:
+        """Whether canonical Life owns recovery and affect continuity.
+
+        The old Glymphatic loop inferred sleep, body load, loneliness and
+        continuity from process-global caches, then wrote semantic memory and
+        fanned the result into several legacy organs.  A scoped Life turn now
+        advances episode decay and Needs deterministically, so this module
+        must not recreate an unscoped recovery authority in canonical mode.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_recovery_result(
+        *,
+        operation: str,
+        source: str,
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_GLYMPHATIC_RECOVERY_WRITER_RETIRED",
+            "operation": str(operation),
+            "source": str(source or "glymphatic_agent"),
+            "accepted": False,
+            "projection": "UNAVAILABLE",
+            "executed": False,
+            "memory_written": False,
+            "in_recovery_window": False,
+            "ticked": False,
+            "phase": "unavailable",
+            "sleep_pressure": 0.0,
+            "consolidation_score": 0.0,
+            "noise_decay_factor": 0.0,
+            "ts_ms": max(0, int(ts_ms or 0)),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_recovery_writer_retired():
+            # A global phase/conversation/default-mode event has no exact
+            # relationship scope.  It cannot become a substitute Life clock.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -98,6 +144,12 @@ class GlymphaticAgent:
         now_ts_ms: int | None = None,
     ) -> dict[str, Any]:
         resolved_ts = int(now_ts_ms or now_ms())
+        if self._legacy_recovery_writer_retired():
+            return self._retired_legacy_recovery_result(
+                operation="run_recovery_cycle",
+                source=source,
+                ts_ms=resolved_ts,
+            )
         vital_signs = self.state_registry.aggregate_vital_signs()
         phase = str(vital_signs.get("circadian_phase") or "day").strip().lower()
         sleep_pressure = _clamp(float(vital_signs.get("sleep_pressure") or 0.2))
@@ -267,6 +319,10 @@ class GlymphaticAgent:
         Returns:
             记忆巩固摘要字符串，或 None（未触发/失败）。
         """
+        if self._legacy_recovery_writer_retired():
+            # Keep the public compatibility type while refusing the old
+            # unscoped model+memory write path.
+            return None
         pass  # 无触发条件限制，直接执行
 
         import logging as _logging  # noqa: PLC0415
@@ -323,6 +379,11 @@ class GlymphaticAgent:
 
     def export_runtime_state(self) -> dict[str, Any]:
         """T-241：读取 state_registry 快照，不触发 run_recovery_cycle（避免副作用）。"""
+        if self._legacy_recovery_writer_retired():
+            return self._retired_legacy_recovery_result(
+                operation="export_runtime_state",
+                source="export_runtime_state",
+            )
         prev = self.state_registry.get_state("glymphatic_agent") or {}
         prev_state = dict(prev.get("state") or {})
         last_cycle = dict(prev_state.get("last_cycle") or {})
@@ -340,23 +401,44 @@ class GlymphaticAgent:
             "last_updated_ts_ms": int(last_cycle.get("ts_ms") or 0),
         }
 
-    async def _on_circadian_phase_updated(self, event: Any) -> None:
+    async def _on_circadian_phase_updated(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_recovery_writer_retired():
+            return self._retired_legacy_recovery_result(
+                operation="circadian_phase_updated",
+                source="circadian_phase_updated",
+                ts_ms=int(getattr(event, "ts_ms", 0) or 0),
+            )
         self.run_recovery_cycle(
             source="circadian_phase_updated",
             now_ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
         )
+        return None
 
-    async def _on_conversation_ended(self, event: Any) -> None:
+    async def _on_conversation_ended(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_recovery_writer_retired():
+            return self._retired_legacy_recovery_result(
+                operation="conversation_ended",
+                source="conversation_ended",
+                ts_ms=int(getattr(event, "ts_ms", 0) or 0),
+            )
         self.run_recovery_cycle(
             source="conversation_ended",
             now_ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
         )
+        return None
 
-    async def _on_default_mode_ticked(self, event: Any) -> None:
+    async def _on_default_mode_ticked(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_recovery_writer_retired():
+            return self._retired_legacy_recovery_result(
+                operation="default_mode_ticked",
+                source="default_mode_ticked",
+                ts_ms=int(getattr(event, "ts_ms", 0) or 0),
+            )
         self.run_recovery_cycle(
             source="default_mode_ticked",
             now_ts_ms=int(getattr(event, "ts_ms", 0) or now_ms()),
         )
+        return None
 
     def tick_recovery_window(
         self,
@@ -372,6 +454,12 @@ class GlymphaticAgent:
         Returns:
             {"in_recovery_window": bool, "phase": str, "sleep_pressure": float}
         """
+        if self._legacy_recovery_writer_retired():
+            return self._retired_legacy_recovery_result(
+                operation="tick_recovery_window",
+                source=source,
+                ts_ms=now_ms(),
+            )
         import logging as _logging
         _log = _logging.getLogger("Natsume.tribe.glymphatic_agent")
         try:

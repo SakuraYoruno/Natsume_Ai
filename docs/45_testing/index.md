@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.61
+版本：v2.62
 维护日期：2026-07-28
 状态：当前证据
 
@@ -190,6 +190,11 @@
   `affective_time_advanced`，推进同 scope 的 episode 衰减与 Need，而不读取或调用 global recovery writer；首次命令已
   绑定 typed relationship subject，raw material 不进入该 event。当前 Fusion 与 DL-01 kernel 集合为
   `17 passed in 26.31s`；它不证明后台长期 idle、真实 Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
+
+- `test_dl06_glymphatic_recovery_retirement.py` 验证 canonical `GlymphaticAgent` 不注册全局 recovery subscription，
+  run/tick/callback/export 均显式退役，且不调用 registry、旧 memory、EventBus、Limbic/Interoception/PainReward/
+  DefaultMode/ANS；历史 Glymphatic/circadian/interoception/ANS 邻接集合为 `105 passed in 3.76s`。它不证明 scoped
+  background rhythm、真实 Host/Gateway、provider、远端 Edge、Monitor/Review 或 DL-07。
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：

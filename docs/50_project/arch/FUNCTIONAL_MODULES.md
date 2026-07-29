@@ -141,6 +141,12 @@ Limbic/Interoception/Endocrine/PainReward、`IMMUNE_BLOCK` 情感扇出或 Bond-
 ExpressionPlan 继续使用同一 scope。它是 replay-safe 的 Life command，不是 global ticker，也不拥有用户情绪、
 旧 body cache、设备状态或跨 session 写权。
 
+**Glymphatic 兼容恢复边界模块**位于
+[`tribe/glymphatic_agent.py`](../../../host_brain/tribe/glymphatic_agent.py)。canonical ports 下它不订阅
+circadian/conversation/default-mode EventBus，不读 global vitals/homeostasis，不写 registry 或旧 memory，也不触发
+Limbic/Interoception/PainReward/DefaultMode/ANS。run、tick、callback 和 export 返回
+`LEGACY_GLYMPHATIC_RECOVERY_WRITER_RETIRED / UNAVAILABLE`；后台情感连续性必须另以有 scope 的 Life command 实现。
+
 同一 `LimbicAgent` 的 legacy signal/session compatibility 入口在 canonical Host 也只返回退役结果：
 `handle_signal()` 与 `_touch_state()` 不写 `TribeStateRegistry`、不重发 EventBus；
 [`persona/session_hooks.py`](../../../host_brain/persona/session_hooks.py) 会在推导用户 VAD 或 default Bond id 前跳过

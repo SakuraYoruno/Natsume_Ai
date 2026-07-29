@@ -142,6 +142,11 @@ fan-out 与根据 Bond stage 放宽阈值已退役。安全决策不是情绪，
 不会让时间前进两次。这条 scoped Life clock 不是旧 Glymphatic、昼夜缓存或后台全局 tick；它仍不是远端 Edge、
 真实模型或 DL-07 服务栈验收。
 
+相应地，canonical `GlymphaticAgent` 已退出旧的“后台恢复即情感恢复”写链：它不再订阅全局昼夜、会话结束或
+DefaultMode 事件，也不会把聚合的 sleep/load/loneliness 写到旧语义记忆、Limbic、Interoception、PainReward、ANS
+或 registry。兼容入口显式返回 `LEGACY_GLYMPHATIC_RECOVERY_WRITER_RETIRED`；未来若需要后台陪伴演化，必须产生有
+scope、可验收的 Life command，不能重启这条无主体恢复回路。
+
 本切片补齐了 profile 的受认证撤销边界：`POST /v1/digital-life/relationship/companion-profile/rollback`
 要求独立的 `companion:profile:rollback`，并同时核验 `user principal == relationship_subject_id`、
 `tenant == workspace_id` 与 body 中的**当前** active profile identity。body 不能携带历史目标版本；

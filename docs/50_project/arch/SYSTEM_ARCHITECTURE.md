@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.44
+版本：v2.45
 核对日期：2026-07-28
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -216,6 +216,12 @@ fan-out 返回 `LEGACY_IMMUNE_AFFECT_FANOUT_RETIRED`，真实边界表达仍由 
 aggregate 中以 typed `relationship_subject_id` 完成首次 canonical binding，随后才记录 observation/Appraisal；它以
 同一 request-derived command id 做 exact replay，驱动只有该 workspace/person/session 的 episode decay 与 Need
 演化。它不从 Glymphatic、circadian、BodySense、全局 EventBus 或后台 tick 导入自我状态。
+
+`GlymphaticAgent` 在 canonical ports 下也不再形成后门 recovery authority：它不注册 circadian/conversation/
+default-mode EventBus，不读取 global vitals、homeostasis 或旧 memory，不写 registry/semantic memory，不发 cycle event，
+也不调用旧 Limbic/Interoception/PainReward/DefaultMode/ANS。run/tick/callback/export 返回
+`LEGACY_GLYMPHATIC_RECOVERY_WRITER_RETIRED / UNAVAILABLE`；真实后台节律尚待具备 scope 的 Life command，而非该兼容
+agent。
 
 生产 OBS runtime snapshot 也已进入相同的 authority boundary：`LifecycleRuntimeApplicationPorts` 通过 Host
 composition 获得 `LifeSnapshotReader`，对当前 relationship subject 只重开一条 canonical Life head。它把

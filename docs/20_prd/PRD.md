@@ -266,6 +266,11 @@ canonical Host 只能保留有界安全审计和 fail-closed 决策，真实情�
 同一 ingress replay 只能重开同一个 time receipt，不能重复消耗或恢复情绪。禁止让无 scope 的 Glymphatic、昼夜、
 BodySense 或后台 global tick 代替该命令。
 
+canonical `GlymphaticAgent` 不得订阅全局 phase/conversation/default-mode 事件，不得将 sleep、load、loneliness 或
+continuity 组合成 recovery，再写旧 memory、Limbic、Interoception、PainReward、ANS 或 registry。兼容入口只能返回
+`LEGACY_GLYMPHATIC_RECOVERY_WRITER_RETIRED`；任何未来后台时间推进均须有 relationship/workspace/session scope、
+Life receipt 与 exact replay 约束。
+
 完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
 Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
 `AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。
