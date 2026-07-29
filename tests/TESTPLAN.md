@@ -210,6 +210,11 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   是否形成 self-affect。当前 direct `test_edge_events_whitelist.py` 为 `11 passed in 0.43s`；连同 HTTP Edge、
   AffectFusion 与 ExpressionPlan 邻接回归的最终受影响集合为 `36 passed in 43.29s`；不代表远端 Edge、物理播放或
   DL-07 服务栈验收。
+- T-DL06-13：`_async_post_process()` 只能由 `surface.post_process` 的 committed Life projection 以
+  `life_projection_mode=True` 调用；任何 direct mode 必须在第一项 conversation、Memory、Bond、TTS/VTS、Tribe 或
+  persona growth 副作用前抛出 `LEGACY_DIRECT_POST_PROCESS_RETIRED`。实现不得保留 direct Bond update、VTS driver、
+  voice submit 或 drift/growth invocation。当前 durable projection/handler/Surface/acceptance 受影响集合为
+  `75 passed in 15.03s`；不代表真实 provider、远端 Edge/Avatar 或 DL-07 服务栈验收。
 - 当前本地证据：Host composition/startup 与 silence/BodySense 邻接最终集合 `88 passed in 11.33s`；它不证明
   真实调节体验、provider、远端 Edge、Monitor/Review 或 DL-07 服务栈。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集

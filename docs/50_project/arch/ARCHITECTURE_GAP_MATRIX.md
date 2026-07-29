@@ -100,6 +100,11 @@ volatile Bond queue 不再是生产关系 authority。其余 legacy reader、Rev
 直驱 VTS。Edge payload 未经过 scope-bound Input/Fusion/Appraisal 时没有 self-affect、关系或 Avatar authority；这关闭
 了一个用户情绪→七海情绪/表情的旁路，仍不证明远端 Edge、TTS/VTS 物理回执或 DL-07。
 
+**Direct post-process 退役修订：** `surface.post_process` 只能由 committed Life projection 调用。缺失
+`life_projection_mode` 时，worker 在 conversation、LifeMemory、Bond、TTS/VTS、Tribe 或 persona growth 副作用前
+失败关闭；旧直出实现已删除。该收口保证 `AffectiveTurnPlan / ExpressionPlan` 是同一 accepted turn 的唯一表达来源，
+但不替代真实 provider、远端 Edge、Monitor 或 DL-07 全服务栈验收。
+
 **Legacy emotion timeline 退役修订：** production `HostMemoryRuntimeOwner` 不再打开旧 action-log
 query repository 来 hydrate mutable `EmotionTimeline`；它返回 `RETIRED_CANONICAL_LIFE` 空投影，故不会把
 旧的 user/self 混合条目包装成 `NEUTRAL` 或现时 self-affect。Lifecycle snapshot/proactive dispatch 忽略该

@@ -40,10 +40,7 @@ from host_brain.agent_runtime.runtime_texts import (
     _run_in_post_process_executor,
 )
 from host_brain.persona.session_hooks import (
-    _infer_emotion_tag_for_tts,
     _resolve_persona_session_emotion,
-    _run_persona_session_end_hooks,
-    _run_surface_persona_session_end_sync,
 )
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
 
@@ -130,11 +127,7 @@ async def _async_post_process(
     reply_target: str | None = None,
 ) -> None:
     normalized_trace_stage_meta = _normalize_trace_stage_meta(trace_stage_meta)
-    voice_outputs_enabled = bool(normalized_trace_stage_meta.get("voice_outputs_enabled"))
     suppress_final_reply = bool(normalized_trace_stage_meta.get("suppress_final_reply"))
-    skip_heavy_persona_postprocess = bool(
-        normalized_trace_stage_meta.get("skip_heavy_persona_postprocess")
-    )
     surface_main_chain_used = bool(normalized_trace_stage_meta.get("surface_main_chain_used"))
     # A Digital Life projection is already running behind a durable outbox.
     # Conversation and LifeMemory writes performed by that projection are
@@ -143,6 +136,11 @@ async def _async_post_process(
     durable_projection_mode = bool(
         normalized_trace_stage_meta.get("life_projection_mode")
     )
+    if not durable_projection_mode:
+        raise RuntimeError(
+            "LEGACY_DIRECT_POST_PROCESS_RETIRED: post-process must run "
+            "from a committed Digital Life projection"
+        )
 
     try:
         from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction  # noqa: PLC0415
@@ -152,41 +150,32 @@ async def _async_post_process(
         pass
 
     if surface_main_chain_used:
-        # Relationship outcomes are committed by the canonical Life
-        # acceptance/aftereffect chain.  Calling the historical Surface flow
-        # after a reply would recreate an unbounded Bond writer that cannot
-        # participate in replay or recovery.
-        normalized_trace_stage_meta = {
-            **normalized_trace_stage_meta,
-            "surface_emotion_bond_flow": {
-                "status": "RETIRED_CANONICAL_LIFE",
-                "authority": "CANONICAL_LIFE_JOURNAL",
-                "reason_code": "LEGACY_SURFACE_BOND_FLOW_RETIRED",
-            },
-        }
-
-    # A response is already inside the canonical Life projection when it
-    # reaches this worker.  The former post-process tail used to publish a
-    # Tribe ``CONVERSATION_ENDED`` event and directly invoke VTS/TTS after that
-    # commit.  Those callbacks keep volatile Limbic/relationship state alive
-    # and can duplicate a Task-Acceptance-bound ExpressionPlan delivery.  Do
-    # not retain a conditional compatibility escape hatch here: the only
-    # production caller is the Life projection handler and every visible
-    # relationship or embodiment effect must be derived from its immutable
-    # receipt.
-    normalized_trace_stage_meta = {
-        **normalized_trace_stage_meta,
-        "legacy_post_process_side_effects": {
-            "status": "RETIRED_CANONICAL_LIFE",
-            "authority": "CANONICAL_LIFE_JOURNAL",
-            "reason_code": "LEGACY_POST_PROCESS_SIDE_EFFECTS_RETIRED",
-            "retired_operations": [
-                "tribe_conversation_ended",
-                "direct_vts_expression",
-                "bulk_tts_speak",
-            ],
-        },
-    }
+        try:
+            surface_bond_result = application_ports.apply_surface_emotion_bond_flow(
+                request_id=request_id,
+                person_id=person_id,
+                session_id=session_id,
+                user_message=user_message,
+                assistant_reply=narrative,
+                emotion_context=emotion_context,
+                bond_summary=bond_summary,
+                reply_plan=reply_plan,
+                retrieval_evidence_items=retrieval_evidence_items,
+                ts_ms=ts_ms,
+            )
+            normalized_trace_stage_meta = {
+                **normalized_trace_stage_meta,
+                "surface_emotion_bond_flow": surface_bond_result,
+            }
+        except Exception as exc:
+            _logger.debug("[%s] surface emotion-bond flow failed: %s", request_id, exc)
+            normalized_trace_stage_meta = {
+                **normalized_trace_stage_meta,
+                "surface_emotion_bond_flow": {
+                    "status": "DEGRADED",
+                    "reason_code": "SURFACE_EMOTION_BOND_FLOW_FAILED",
+                },
+            }
 
     try:
         await application_ports.persist_post_process_audit(
@@ -352,104 +341,11 @@ async def _async_post_process(
             raise
         _logger.debug("[%s] cortex_orchestrator post_process life memory failed: %s", request_id, exc)
 
-    if bool(normalized_trace_stage_meta.get("life_projection_mode")):
-        # AW-04 projection replay owns only durable audit, conversation,
-        # Memory and Bond projections above. Persona/Tribe mutations and all
-        # VTS/TTS transports below are separate Life intents/outbox messages;
-        # replaying them here would recreate parallel writers and duplicate
-        # external effects.
-        return
-
-    if skip_heavy_persona_postprocess and surface_main_chain_used:
-        try:
-            surface_session_end = await _run_in_post_process_executor(
-                _run_surface_persona_session_end_sync,
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=user_message,
-                emotion_context=emotion_context,
-            )
-            normalized_trace_stage_meta = {
-                **normalized_trace_stage_meta,
-                "surface_persona_session_end": surface_session_end,
-            }
-        except Exception as exc:
-            _logger.debug("[%s] surface persona session_end failed: %s", request_id, exc)
-
-    if skip_heavy_persona_postprocess:
-        _logger.debug(
-            "[%s] cortex_orchestrator post_process skip persona session_end",
-            request_id,
-        )
-    else:
-        try:
-            await _run_persona_session_end_hooks(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=user_message,
-                emotion_context=emotion_context,
-            )
-        except Exception as exc:
-            _logger.debug("[%s] cortex_orchestrator post_process persona session_end failed: %s", request_id, exc)
-
-    _logger.debug(
-        "[%s] cortex_orchestrator legacy Bond post-process is retired; "
-        "canonical Life acceptance owns relationship effects",
-        request_id,
-    )
-
-    _logger.debug(
-        "[%s] cortex_orchestrator legacy Tribe lifecycle and direct embodiment "
-        "post-process are retired; canonical Life acceptance owns both",
-        request_id,
-    )
-
-    if skip_heavy_persona_postprocess:
-        _logger.debug(
-            "[%s] cortex_orchestrator post_process skip drift/growth",
-            request_id,
-        )
-    else:
-        try:
-            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
-
-            drift_result = await _run_in_post_process_executor(
-                get_prefrontal_agent().run_persona_drift_cycle,
-                llm_output_text=narrative,
-                user_input_text=user_message,
-            )
-            drift_level = str(dict(drift_result or {}).get("alert_level") or "").strip().upper()
-            if drift_level in ("MODERATE", "SEVERE"):
-                _logger.info(
-                    "[%s] 人格漂移检测: level=%s dims=%s",
-                    request_id,
-                    drift_level,
-                    dict(drift_result or {}).get("drift_dims"),
-                )
-        except Exception as exc:
-            _logger.debug("[%s] cortex_orchestrator post_process drift_detector failed: %s", request_id, exc)
-
-        try:
-            from host_brain.tribe.prefrontal_agent import get_prefrontal_agent  # noqa: PLC0415
-
-            growth_payload = await _run_in_post_process_executor(
-                get_prefrontal_agent().run_growth_feedback_cycle,
-                session_id=session_id,
-                user_message=user_message,
-                assistant_reply=narrative,
-            )
-            if bool(dict(growth_payload or {}).get("applied")):
-                _logger.info(
-                    "[%s] 人格成长: user=%s rules=%s",
-                    request_id,
-                    dict(growth_payload or {}).get("user_id"),
-                    dict(growth_payload or {}).get("triggered_rules"),
-                )
-        except Exception as exc:
-            _logger.debug("[%s] cortex_orchestrator post_process growth_feedback failed: %s", request_id, exc)
-
+    # This function is only a post-Acceptance projection worker.  Text, Voice
+    # and Avatar effects have already been compiled into the immutable Life
+    # delivery protocol; replaying legacy session, Bond or Tribe callbacks
+    # here would recreate a second authority and duplicate effects.
+    return
 
 __all__ = [
     "_format_template_text",
@@ -497,8 +393,6 @@ __all__ = [
     "_build_retrieval_bond_summary",
     "_prefetch_retrieval_persona_inputs",
     "_resolve_persona_session_emotion",
-    "_run_persona_session_end_hooks",
-    "_infer_emotion_tag_for_tts",
     "_resolve_persisted_fallback_flag",
     "_async_post_process",
 ]

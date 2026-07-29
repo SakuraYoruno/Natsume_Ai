@@ -99,6 +99,12 @@
   该 direct 集合为 `11 passed in 0.43s`；加上 HTTP Edge、AffectFusion 与 ExpressionPlan 邻接回归的最终受影响集合为
   `36 passed in 43.29s`。两者均只是 Host-side authority cutover，不是远端 Edge、TTS/VTS 播放或 DL-07 证据。
 
+- `test_gr06_durable_surface_projection.py`、`test_aw04_life_projection_handlers.py`、Surface adapter 与
+  acceptance reconciliation 现在验证 `surface.post_process` 只接收 `life_projection_mode=True`：任何 legacy direct
+  调用在 assistant turn、Memory、Bond、TTS/VTS 或 persona growth 前抛出
+  `LEGACY_DIRECT_POST_PROCESS_RETIRED`；源文件中也不再保留这些直出符号。最终受影响集合为
+  `75 passed in 15.03s`，证明 durable Host projection 边界，不是外部模型、远端设备或 DL-07 验收。
+
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、
   `test_scheduling_center.py`、`test_ne01_skill_execution_policy.py` 与 ASGI composition 定向用例验证：
   `proactive_talk` 已从 production registry/catalog/executor/Scheduler-add 输入移除，Host 启动以 CAS

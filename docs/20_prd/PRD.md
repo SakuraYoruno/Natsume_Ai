@@ -226,6 +226,10 @@ Host、Obs、Gateway、Edge 和 Worker 只通过版本化 Command/Query/Event �
 Input bridge 重新进入用户观察，但不得直接写 Bond、七海 self-affect 或 Avatar/VTS。只有补全
 `workspace + relationship_subject` 并经 `AffectFusion → EventAppraisal` 的输入，才可能影响后续表达。
 
+完成回复后的 post-process 也不得成为旁路：它只接收 committed Life projection；非投影调用在任何可见对话、
+Memory、关系、TTS、VTS、Tribe 或 Persona 副作用前必须失败关闭。所有文本、声音和 Avatar 只能使用同一轮冻结
+`AffectiveTurnPlanV1` 与 `ExpressionPlanV1` 的 durable delivery protocol。
+
 ### FR-ARCH-005：Memory 与 Knowledge OS
 
 Life Memory 服务人格连续性；Knowledge OS 服务项目、概念、流程和决策。KnowledgeItem 必须记录 provenance、version、validity、confidence、conflict 和 decision refs，并支持 promotion、deprecation 和回滚。

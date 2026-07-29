@@ -110,6 +110,34 @@ async def test_durable_projection_rejects_missing_memory_receipt() -> None:
     assert ports.memory.calls == 1
 
 
+@pytest.mark.asyncio
+async def test_post_process_rejects_legacy_direct_mode_before_any_write() -> None:
+    ports = _ports(
+        assistant_result={"status": "OK"},
+        memory_receipt={
+            "status": "COMMITTED",
+            "request_id": "request-gr06-direct-retired",
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="LEGACY_DIRECT_POST_PROCESS_RETIRED"):
+        await _async_post_process(
+            application_ports=ports,
+            request_id="request-gr06-direct-retired",
+            person_id="person-gr06-direct-retired",
+            session_id="session-gr06-direct-retired",
+            user_message="legacy direct input",
+            narrative="legacy direct output",
+            emotion_context={"emotion_tag": "HAPPY"},
+            bond_summary={},
+            ts_ms=100,
+            render_target_lang="zh",
+            trace_stage_meta={},
+        )
+
+    assert ports.memory.calls == 0
+
+
 def test_durable_projection_has_no_legacy_conversation_experience_writer() -> None:
     import inspect
 
@@ -118,6 +146,11 @@ def test_durable_projection_has_no_legacy_conversation_experience_writer() -> No
     source = inspect.getsource(postprocess._async_post_process)
     assert "get_conversation_experience_store" not in source
     assert "update_assistant_reply" not in source
+    assert "post_process_bond_update" not in source
+    assert "drive_stream_vts_emotion" not in source
+    assert "submit_voice_command" not in source
+    assert "run_persona_drift_cycle" not in source
+    assert "run_growth_feedback_cycle" not in source
 
 
 def test_post_process_has_no_legacy_bond_writer_path() -> None:

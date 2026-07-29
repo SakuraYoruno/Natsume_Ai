@@ -211,6 +211,11 @@ post-process 在读取用户 VAD、topic 或 default Bond identity 前即返回
 Edge payload 没有精确 workspace/relationship subject 时只能是外部证据；它必须经 authenticated Input/Fusion 补全
 scope、写入用户观察并经 Appraisal 后，才可能影响七海的 self-affect 或一个冻结的 `ExpressionPlan`。
 
+`surface.post_process` 现在也只存在于 committed Life projection worker：调用者若没有
+`life_projection_mode=True` 会在首项写入前失败关闭。原先在这个便利回调中直接执行的 Bond update、conversation-end
+Tribe event、VTS driver、bulk TTS 与 Prefrontal drift/growth 已物理删除；accepted reply 的后续文本、声音和 Avatar
+只能继续使用同一冻结计划的 Life delivery protocol，不能在回复结束后重新以兼容 `emotion_context` 改写七海。
+
 默认模式目前也遵守这一 single-authority 约束：读取 `LifeSnapshotReader` 后，边界层只投影有限的 self-affect
 和 relationship texture 给 `inner_activity_agent`，并用 `CANONICAL_LIFE_JOURNAL` marker 禁止该 agent 回读
 EmotionTimeline 或 SocialBrain/Bond。该关系 texture 不包含身份、episode evidence 或 intimacy consent，亦不映射
