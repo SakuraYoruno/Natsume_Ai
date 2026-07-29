@@ -275,23 +275,8 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_inner_world_numeric_tick,
-            description="离线内心世界数值 tick：推进数值状态，不写 inner_stream。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="inner_world_numeric_tick",
-                seconds=60,
-                args={"user_id": "natsume_ai"},
-                trigger_env={
-                    "seconds": {
-                        "name": "HOST_INNER_WORLD_NUMERIC_TICK_INTERVAL_SECONDS",
-                        "default": 60,
-                        "low": 10,
-                        "high": 3600,
-                    },
-                },
-                description="Core organ tick: advances numeric inner-world continuity without writing inner_stream.",
-                resource_class="light",
-            ),
+            description="历史内心世界数值 tick 兼容入口：canonical Host 只返回 Life 投影并抑制旧事件、记忆和状态写入，不允许自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="inner_world_monologue_tick",
@@ -300,23 +285,8 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_inner_world_monologue_tick,
-            description="离线内心世界独白 tick：按较慢节奏生成 inner_stream 独白。",
-            scheduler_allowed=True,
-            scheduler_profile=_interval_profile(
-                task_id="inner_world_monologue_tick",
-                seconds=300,
-                args={"user_id": "natsume_ai"},
-                trigger_env={
-                    "seconds": {
-                        "name": "HOST_INNER_WORLD_MONOLOGUE_TICK_INTERVAL_SECONDS",
-                        "default": 300,
-                        "low": 30,
-                        "high": 7200,
-                    },
-                },
-                description="Core organ tick: slow inner-world stream update; LLM note generation remains gated separately.",
-                resource_class="background_llm",
-            ),
+            description="历史内心世界独白 tick 兼容入口：canonical Host 只返回 Life 投影并拒绝原始独白持久化，不允许自动调度。",
+            scheduler_allowed=False,
         ),
         SkillMeta(
             skill_name="inner_world_awaken",
@@ -335,7 +305,7 @@ def _register_inner_world_skills(registry: SkillRegistry) -> None:
             scope="host",
             reversible=False,
             handler=execute_inner_world_session_end,
-            description="离线内心世界会话结束：更新情绪基准和期待话题。",
+            description="历史内心世界会话结束兼容入口：canonical Host 固定退役，关系后效应只能由 accepted-chat 流写入。",
             scheduler_allowed=False,
         ),
     )

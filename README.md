@@ -462,7 +462,7 @@ NE-01 的预算 authority 已从“只有一条图级共享记录”推进到父
 
 当前启用的通用 worker 路线不再使用“worker 返回 `APPROVE`，验收器就把全部条件写成 `PASS`”的兼容逻辑。Chat、Skill、Delegate、Plan、Tool 与 Operator 的通用节点现在共享独立 `DurableWorkerCommitVerifier` 和 `DurableWorkerCommitAcceptance`：两阶段分别重开 durable WorkerProjection，并复验 command/request、graph revision、node、attempt、route/target、node grant、WorkOrder/context lineage、receipt digest、完整 COMMIT 与节点输出合同。只有固定的结构性策略可自动通过；不能由机器证据证明的自然语言条件进入 durable post-execution Review。Plan 的最终 Chat 还必须实际消费已验收前驱 TaskResult artifact，并携带 artifact/receipt/payload digest 的规范 bundle attestation；只有 DAG 边而没有数据消费不再算满足依赖。该切片把当前 Delegate/Plan 已启用路径的 `verification` 控制提升为 `PASS`，但通用 PlanningSearch、program-wide Budget、一般恢复、commit-bound 七路线验收和 NE-01 仍未完成。
 
-普通受治理 Skill 不再自动取得裸 `ModelAttemptService`。需要模型的 Skill 必须在注册元数据中显式声明 `model_budget_required`，由 Task Runtime 从当前 ACTIVE Budget 派生 graph/revision/node/attempt-bound guard，并只注入 `GovernedSkillModelBudgetRuntime`。每次真实模型调用都使用扣减后的剩余额度；cache、缺 usage、重复或不完整 measurement、额度超限以及 attestation 与 Task lineage 漂移全部失败关闭。worker 返回的服务端 attestation 还会在外层按 request/Budget/Graph/Node/Attempt 重验，再进入 `WorkerBudgetUsage` 和 durable Budget settlement。当前接线首先覆盖 `emergent_growth_weekly`；未声明的普通 Skill 没有裸模型端口，Agent Skill 继续使用其既有 sealed guard。该切片没有运行真实 provider，也不等于 program-wide Budget、Persona 演化或 NE-01 完成。
+普通受治理 Skill 不再自动取得裸 `ModelAttemptService`。需要模型的 Skill 必须在注册元数据中显式声明 `model_budget_required`，由 Task Runtime 从当前 ACTIVE Budget 派生 graph/revision/node/attempt-bound guard，并只注入 `GovernedSkillModelBudgetRuntime`。每次真实模型调用都使用扣减后的剩余额度；cache、缺 usage、重复或不完整 measurement、额度超限以及 attestation 与 Task lineage 漂移全部失败关闭。worker 返回的服务端 attestation 还会在外层按 request/Budget/Graph/Node/Attempt 重验，再进入 `WorkerBudgetUsage` 和 durable Budget settlement。`emergent_growth_weekly` 曾作为 typed-port 测试样例，现已退役为 legacy rollback 入口，不能再被写成当前在线模型 Skill；未声明的普通 Skill没有裸模型端口，Agent Skill 继续使用其既有 sealed guard。该切片没有运行真实 provider，也不等于 program-wide Budget、Persona 演化或 NE-01 完成。
 
 > 2026-07-26 的当前 locator 清点仍为具名业务 consumer `0`、具名 import `0`、全部 import-form consumer `0`，并且生产 `ProcessServiceContainer`、`process_services`、`process_environment` 与旧 wiring 文件均已物理删除；生产字段、锁和可变引用库存也是 `0/0/0`。ASGI 与 CLI 各自构造 fresh `ProcessApplicationPorts` 并显式传给 Host root，`build_production_host_application_ports()` 不再有全局回退。既有提交绑定测试数字只作历史证据。Chat 的本地持久投影屏障已接通，但 commit-bound 路线验收、外部 Chroma/Neo4j namespace、Token/MCP durable restart、跨进程租户隔离、通用 Delegate 和七路线 Runtime 仍未完成。波次集成与真实 Docker 服务栈未运行，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
@@ -582,6 +582,12 @@ episodic 文本或生成 Persona proposal 之前返回
 `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。保留的 LLM 分析与 typed model-budget 路径仅服务于隔离
 legacy rollback，不能计入七海的在线成长能力。未来正向成长必须从 workspace/relationship-scoped、已接受回应的
 aftereffect 证据进入低风险 companion profile 生命周期，核心人格仍需要独立 Review。
+
+历史 `inner_world_numeric_tick` 与 `inner_world_monologue_tick` 也不再自动调度。canonical Host 仍可从
+同一 Life head 返回有界的内在状态投影，但会抑制 legacy Tribe signal、DefaultMode tick、无范围 evolution
+event、原始独白的 background-memory 写入和 ANS EventBus fan-out；`inner_world_session_end` 固定退役，不能用
+caller VAD 或 pending topics 更新旧模型。这样保留七海可读取的连续在场感，而不会让私密独白或临时数值重新成为
+情感、关系或人格的第二写 authority。真正的后效应仍只能由 accepted chat/proactive receipt 进入 canonical journal。
 
 已退役的 Gateway 进度辅助也不再成为关系或情绪的侧门：它若在回滚窗口被显式调用，只能使用固定的
 `FRIEND / CALM` 技术陪伴纹理，既不信任 ingress payload 中的 `SOULMATE`/分数或用户情绪，也不重开

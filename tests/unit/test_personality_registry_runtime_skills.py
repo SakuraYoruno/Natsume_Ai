@@ -29,3 +29,8 @@ def test_build_personality_skill_registry_includes_runtime_skills() -> None:
     assert weekly is not None
     assert weekly.scheduler_allowed is False
     assert "兼容入口" in weekly.description
+
+    for skill_name in ("inner_world_numeric_tick", "inner_world_monologue_tick"):
+        skill = registry.get(skill_name)
+        assert skill is not None
+        assert skill.scheduler_allowed is False

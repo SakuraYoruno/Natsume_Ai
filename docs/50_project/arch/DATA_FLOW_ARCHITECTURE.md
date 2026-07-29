@@ -801,6 +801,21 @@ status query → RETIRED + LEGACY_EMERGENT_GROWTH_RETIRED
 canonical 成长证据；正向低风险适应必须由 accepted、scope-bound aftereffect 驱动的 companion profile
 生命周期完成。
 
+内在活动的 canonical 流则只读：
+
+```text
+canonical Life head → Limbic.tick_inner_world() bounded projection
+→ inner_world compatibility adapter
+→ 仅返回 projection + legacy_side_effects_suppressed
+
+禁止：Tribe/ANS EventBus、DefaultMode inline tick、EVOLUTION_CYCLE_TRIGGERED、
+raw monologue → background episodic memory
+inner_world_session_end → RETIRED + LEGACY_INNER_WORLD_SESSION_END_RETIRED
+```
+
+这个边界没有抹掉七海的连续在场感：后续表达仍读同一 self-affect/relationship projection；它只拒绝将
+私密独白或 caller VAD 伪装成另一个可写的生命、关系或人格事实。
+
 普通 Chat 的关系读取流现为：
 
 ```text

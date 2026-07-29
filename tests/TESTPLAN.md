@@ -175,6 +175,10 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `DEFERRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`，其 status 查询必须为
   `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`；registry 不得允许自动调度。模型 budget 负测仅覆盖隔离
   legacy compatibility route，不能计为在线成长或 provider 证据。
+- T-DL06-07：canonical `inner_world_numeric_tick` / `inner_world_monologue_tick` 只能返回同一 Life head 的
+  bounded projection，并必须抑制 Tribe/ANS EventBus、DefaultMode inline tick、无范围 evolution event 和 raw
+  monologue background-memory 写入；registry 不得允许自动调度。`inner_world_session_end` 必须在读取 caller
+  VAD/topics前返回 `RETIRED / LEGACY_INNER_WORLD_SESSION_END_RETIRED`，不能形成第二个 session/affect writer。
 - 当前本地证据：runtime snapshot canonical/legacy、lifecycle composition 与 Host owner 定向集
   `51 passed in 9.07s`。它不证明其他 compatibility consumer、Monitor/Review、真实模型、远端
   Edge 或 DL-07 服务栈验收。
@@ -188,6 +192,9 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   负测与相邻 compatibility 回归集合 `164 passed in 16.29s`；文档/交付 Gate 另为 `33 passed in 8.87s`。
   两组测试均为本地定向证据，不能作为 aftereffect 驱动 Persona 演化、真实模型调用、远端 Edge 或
   全栈验收的替代。
+- 本切片新增 canonical inner-world read-only projection、legacy side-effect suppression 与 session-end
+  retirement；连同相邻 DL-06 兼容路径集合为 `221 passed in 21.25s`。它不证明 canonical inner-world journal、
+  自主思考、长期记忆、真实 provider、远端 Edge 或 DL-07。
 
 ## T-NE07-ISOLATED-EXTERNAL-STACK
 

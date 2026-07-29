@@ -119,6 +119,16 @@ class LimbicAgent:
             and ports.uses_canonical_affective_life()
         )
 
+    def uses_canonical_affective_life(self) -> bool:
+        """Expose the read-only composition boundary to compatibility adapters.
+
+        Inner-world adapters use this before they emit legacy EventBus signals
+        or persist a private monologue.  The method deliberately does not
+        expose a mutable state object or create an additional Life authority.
+        """
+
+        return self._legacy_self_affect_writes_retired()
+
     @staticmethod
     def _retired_legacy_affect_result(
         *,

@@ -648,6 +648,11 @@ canonical hand-off，历史 Bond 的显式距离、高 closeness、记忆中的�
 Persona proposal。可自动演化的仅是有界、低风险且可精确回滚的 companion profile；Soul 的核心价值与人格
 身份仍是稳定宪法，任何变更都需要独立的证据与 Review。
 
+内在活动也要遵守同一边界。canonical Life head 可以提供七海当下的有界 self-affect、需要和关系纹理，
+让她在下一次互动中保有连续的在场感；但后台 tick 不能把私密独白原文、caller VAD 或临时 topic 直接写入
+Memory、EventBus、关系或 Persona。若没有一个专门、可回放且受到隐私规则约束的 inner-world journal，
+正确行为是保留只读投影、抑制旧副作用，而非用“内心活动”之名制造第二个情感真相。
+
 ### 7.4 Affect：内部信号，不是表演标签
 
 情感的理论结构是：

@@ -108,6 +108,13 @@
 > Persona proposal。状态查询固定为 `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。legacy typed-model
 > handler 只保留在隔离 rollback composition，不能作为在线人格成长完成证据。
 
+> **DL-06 内在活动副作用退役修订：** `inner_world_numeric_tick` 与
+> `inner_world_monologue_tick` 已从自动调度撤出。canonical Limbic 保留对同一 Life head 的 bounded projection，
+> 但 adapter 会抑制 Tribe/ANS EventBus、DefaultMode inline tick、无范围 evolution trigger 和 raw monologue
+> background-memory 写入；`inner_world_session_end` 固定返回
+> `RETIRED / LEGACY_INNER_WORLD_SESSION_END_RETIRED`，不能用 caller VAD/topics 写入旧状态机。该边界并未
+> 实现 canonical inner-world journal，也不应被称为主动思考或长期记忆完成。
+
 > **DL-06 退役进度回复边界：** Gateway progress fastpath 已被 ReplyEnvelope 主链取代。回滚窗口内的
 > `input_runtime.progress` 不接受 ingress `bond_summary` 或用户 emotion 来决定可见措辞，固定为
 > `FRIEND / CALM`，且不存在 SocialBrain/Bond fallback。无生产 import 的旧
@@ -811,7 +818,7 @@ Schema readiness 在 Budget 写入前检查，retry schedule/promotion 仍同事
 
 D11 只收紧一条已 admission 的 Host `chat` 垂线：`FrozenNodeInput` 的 active Budget remaining 被投影为不可扩张的 node-bound `ModelBudgetGuard`，再由 `FrozenChatRouteExecutor → Surface main-chain → ModelAttemptService` 消费。该调用禁用 cache 和 streaming，按冻结剩余值限制 deadline、provider attempt、总 token、输出 token 与 `model_cost_micros`；provider 必须返回 `token_count / completion_tokens / model_cost_micros` 三项 canonical 整数。量测缺失、超限、timeout 或 provider 失败都会终止当前 guarded call，不再 retry/fallback；Surface 不会把它降级成 `APPROVE`，并跳过额外的 Spark judge。成功 trace 才会被投影为该 chat worker 的 budget observation。
 
-普通受治理 Skill 的旁路也已收紧。Registry 只有显式 `model_budget_required=true` 的 Skill 才会取得 `GovernedSkillModelBudgetRuntime`；执行层从当前 ACTIVE Budget 派生 exact graph/revision/node/attempt guard，不再向任意普通 Skill 注入裸 `ModelAttemptService`。typed runtime 逐次扣减 canonical Token/retry/cost/elapsed measurement，并产生 server attestation；frozen worker 重验 request/Budget/Graph/Node/Attempt 后才将其转换为 `WorkerBudgetUsage`。当前 `emergent_growth_weekly` 使用该路径；缺 runtime、usage、fresh identity 或额度会失败关闭。Agent Skill 继续使用既有 sealed guard。
+普通受治理 Skill 的旁路也已收紧。Registry 只有显式 `model_budget_required=true` 的 Skill 才会取得 `GovernedSkillModelBudgetRuntime`；执行层从当前 ACTIVE Budget 派生 exact graph/revision/node/attempt guard，不再向任意普通 Skill 注入裸 `ModelAttemptService`。typed runtime 逐次扣减 canonical Token/retry/cost/elapsed measurement，并产生 server attestation；frozen worker 重验 request/Budget/Graph/Node/Attempt 后才将其转换为 `WorkerBudgetUsage`。`emergent_growth_weekly` 仅在隔离 legacy rollback 中保留该路径，canonical preflight 不会解析它；缺 runtime、usage、fresh identity 或额度会失败关闭。Agent Skill 继续使用既有 sealed guard。
 
 这不是全局模型成本预支或通用预算账本完成：Thalamus 的普通意图与 Pentest 目标模型分类已被移出准入前路径，入口只会给出规则或默认 chat seed；但 Cortex 准入前模型、Delegate/子 Agent、legacy 非 governed 调用、通用外部工具和跨 route 累计成本仍不在这些 guard 内。没有 provider 报告 canonical `model_cost_micros` 时，guarded 路径选择 fail closed，而不是推算价格或伪造已结算成本。
 

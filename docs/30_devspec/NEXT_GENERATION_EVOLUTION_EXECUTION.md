@@ -270,6 +270,12 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。其 legacy typed-model 路径只保留给隔离回滚，不能消耗
   canonical 成长证据或被计入在线人格演化。后续正向低风险学习只能从 scoped accepted aftereffect 进入
   companion profile；核心人格改动仍需 Review。
+- `inner_world_numeric_tick`、`inner_world_monologue_tick` 也从自动调度撤出。canonical Limbic 仍可读取
+  bounded Life projection，供连续在场感和诊断使用；但 Skill 会抑制 Tribe/ANS EventBus、DefaultMode inline
+  tick、无 scope evolution event 和 raw inner-monologue background-memory 写入。`inner_world_session_end`
+  在 canonical Host 固定返回 `RETIRED / LEGACY_INNER_WORLD_SESSION_END_RETIRED`，不接受 caller VAD/topics
+  更新旧 inner-world/body 模型。专用 canonical inner-world journal 尚未实现，不能把只读投影描述为
+  autonomous thought 或长期记忆能力。
 - OBS/runtime snapshot 已改为 composed `LifeSnapshotReader` 的只读 consumer：它以当前 relationship
   subject 的一条 canonical Life head 分别投影 `natsume_ai` self-affect 与 bounded user-affect observation，
   并输出无分数、非升级的关系纹理。reader 已组成后，任何 reader 故障、self-id 或 subject drift 都只会 degraded，

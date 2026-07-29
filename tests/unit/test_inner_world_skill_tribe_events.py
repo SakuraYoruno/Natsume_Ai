@@ -58,6 +58,11 @@ class _FakeLimbicAgent:
         return {"offline_hours": 2.0, "absence_band": "recent", "awakening_hint": "hi"}
 
 
+class _CanonicalFakeLimbicAgent(_FakeLimbicAgent):
+    def uses_canonical_affective_life(self) -> bool:
+        return True
+
+
 def test_inner_world_tick_emits_tick_and_evolution_event(monkeypatch) -> None:
     fake_limbic = _FakeLimbicAgent()
     monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
@@ -94,6 +99,56 @@ def test_inner_world_tick_emits_only_tick_when_spontaneous_too_old(monkeypatch) 
 
     event_types = [str(item.get("event_type")) for item in fake_limbic.calls]
     assert event_types == ["INNER_WORLD_TICKED"]
+
+
+def test_inner_world_tick_canonical_projection_suppresses_legacy_side_effects(monkeypatch) -> None:
+    fake_limbic = _CanonicalFakeLimbicAgent()
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+    monkeypatch.setattr(
+        "host_brain.tribe.ans_agent.get_ans_agent",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("canonical projection must not emit ANS EventBus messages")
+        ),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.default_mode_agent.get_default_mode_agent",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("canonical projection must not run legacy default-mode tick")
+        ),
+    )
+
+    result = execute_inner_world_monologue_tick(
+        args={"user_id": "u-canonical-inner"},
+        context={
+            "persist_background_event_memory": lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("canonical projection must not persist raw inner monologue")
+            )
+        },
+    )
+
+    assert result["status"] == "OK"
+    assert result["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert result["legacy_side_effects_suppressed"] is True
+    assert fake_limbic.tick_calls[0]["person_id"] == "u-canonical-inner"
+    assert fake_limbic.calls == []
+
+
+def test_inner_world_session_end_canonical_route_is_retired(monkeypatch) -> None:
+    fake_limbic = _CanonicalFakeLimbicAgent()
+    monkeypatch.setattr("host_brain.tribe.limbic_agent.get_limbic_agent", lambda: fake_limbic)
+
+    result = execute_inner_world_session_end(
+        args={"user_id": "u-canonical-end", "valence": 0.8, "pending_topics": ["music"]}
+    )
+
+    assert result == {
+        "status": "RETIRED",
+        "user_id": "u-canonical-end",
+        "reason_code": "LEGACY_INNER_WORLD_SESSION_END_RETIRED",
+        "inner_world_state": {},
+    }
+    assert fake_limbic.session_end_calls == []
+    assert fake_limbic.calls == []
 
 
 def test_inner_world_monologue_tick_updates_default_mode_when_heavy_background_disabled(monkeypatch) -> None:

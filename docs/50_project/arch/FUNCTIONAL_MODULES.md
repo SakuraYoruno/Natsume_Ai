@@ -81,6 +81,14 @@ mock transport、fake store 或端口占位均不能把体验验收提升为 PAS
 `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`。legacy typed-model handler 仅为隔离 rollback 保存，不能作为
 在线人格成长的正向能力或 evidence。
 
+**Inner-world compatibility projection 模块**仍由
+[`skills/impl/inner_world_skill.py`](../../../host_brain/skills/impl/inner_world_skill.py) 与
+[`tribe/limbic_agent.py`](../../../host_brain/tribe/limbic_agent.py) 提供。canonical Host 只可读同一 Life head
+的 bounded inner-world projection，numeric/monologue tick 均不得自动调度；legacy EventBus、DefaultMode
+inline tick、无范围 evolution event 与 raw monologue background-memory 均被抑制。`inner_world_session_end`
+固定退役，不能以 caller VAD/topics 写状态。此模块是 read-only continuity projection，不是 canonical
+inner-world journal 或可自动成长的人格 authority。
+
 同一模块的 `run_growth_feedback_cycle()` 在 canonical authority 下已退役 legacy session feedback：
 `INTERACTION_RECORDED` 的 raw text/session 不再解析 Bond user 或调用 `PersonaGrowthTracker`，而是返回
 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。
