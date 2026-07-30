@@ -202,6 +202,16 @@ worker 会复验同一 identity。`0150_task_runtime_chat_delivery_recovery.sql`
 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，不会重新调用模型。它不提前写 Life、Memory、Voice、Avatar 或 transport。
 普通 Chat 切流、受认证连接恢复、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
+### DL-05 已接受表达的 Host 出箱边界
+
+`companion_expression_acceptance.py` 是 Task Acceptance 到 embodiment outbox 的唯一编译边界。
+它不相信 worker 携带的 Voice/Avatar 行：必须根据 accepted foreground 中的 frozen
+`AffectiveTurnPlanV1`、accepted narrative 与 exact protocol projection 重建，再校验 plan scope、
+digest、sentence/control receipt、graph/revision/node/attempt 与 node grant。对应 accepted handler 会先
+重开 `life.foreground_completed=APPLIED` 与 terminal Action Preview，之后才调用 app-local
+`HostEmbodimentRuntime.enqueue()`；duplicate/restart 只重开同一 outbox row。该 row 的本地状态从不等同
+于远端 TTS/VTS/Avatar 的物理执行，远端 Edge 仍未启动。
+
 ### DL-04 受治理 Chat 主体分离修订
 
 已入场 frozen Chat 的 Secure Ingress principal 与陪伴对象不再混用。`RuntimeContext v1` 冻结的

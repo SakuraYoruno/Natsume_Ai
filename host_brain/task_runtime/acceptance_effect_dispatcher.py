@@ -61,8 +61,11 @@ _EFFECT_TYPE_ORDER = {
     "conversation.preference_signal": 3,
     "life.conversation_turn_recorded": 4,
     "life.foreground_completed": 5,
-    "surface.reply_delivery": 6,
-    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 7,
+    # This is Host-local durable admission, not an Edge physical result.  It
+    # must only run after the exact foreground Life command is applied.
+    "host.companion_expression_enqueue": 6,
+    "surface.reply_delivery": 7,
+    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 8,
 }
 
 _RECOVERY_POLL_SECONDS = 0.25
@@ -309,6 +312,7 @@ class AcceptanceEffectDispatcher:
         risk_level = {
             "host.sys_mode_transition": 4,
             "edge.embodiment_enqueue": 4,
+            "host.companion_expression_enqueue": 4,
             # Level 5 is an unconditional ActionArbiter block.  Signed repair
             # is level 4 so an exact Preview + consumed Review may authorize
             # it; it is never silently executable.

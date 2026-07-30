@@ -3,8 +3,8 @@
 
 # 图 06：Gateway 与 Edge 输入输出
 
-版本：v2.2
-核对日期：2026-07-16
+版本：v2.3
+核对日期：2026-07-30
 
 Gateway 处理“平台消息”，Edge RPC 处理“本机感知与动作”。两者可以在同一 Edge lifecycle 中运行，但 transport authority 和 effect authority 不应混为一体。
 
@@ -95,6 +95,25 @@ flowchart LR
 
 真实动作必须绑定 command identity、重放保护和 receipt。语音/Avatar 状态、截图内容或设备 telemetry 是观察材料，不拥有 Host 的任务、Persona 或事实裁决权。
 
+## 受治理陪伴表达的 Host 出箱边界
+
+```mermaid
+flowchart LR
+    A["Task Acceptance"] --> L["Life foreground receipt = APPLIED"]
+    L --> P["Terminal Action Preview"]
+    P --> C["从 frozen plan、accepted narrative、protocol 重建 command"]
+    C --> O["Host durable embodiment outbox"]
+    O --> R["Host admission / exact reopen"]
+    R -. "尚未发生物理动作" .-> E["Edge RPC / TTS / Avatar"]
+    E --> X["独立 physical receipt"]
+```
+
+受治理 Chat 不能直接把 worker 提供的 Voice/Avatar command 送往设备。Host 先重开同一
+`life.foreground_completed` receipt 和 exact Action Preview，再以 immutable `AffectiveTurnPlanV1`、
+accepted narrative 与 protocol 重新推导 command，并按 idempotency key 写入本地 outbox。outbox 的
+`PENDING/DISPATCHING/IN_DOUBT/APPLIED/REJECTED` 只描述 Host 的 durable admission 或后续对账状态；
+它不是 TTS 已播放、VTS/VRM 已转场的证据。远端 Edge 位于另一台电脑，本波没有启动。
+
 ## 三类入口
 
 | 入口 | 用途 | Authority |
@@ -115,6 +134,7 @@ Edge event 不是用户对话输入；平台 inbox 也不是设备 receipt。把
 - 平台 adapters：`edge_client/gateway/adapters/`
 - Host input runtime：`host_brain/input_runtime/`
 - Accepted delivery handler：`host_brain/app/acceptance_effect_handlers.py`
+- Accepted companion-expression outbox：`host_brain/digital_life/companion_expression_acceptance.py`、`host_brain/app/accepted_companion_expression_handler.py`
 - Edge HTTP/RPC：`edge_client/app/fastapi_app.py`、`edge_client/rpc/`
 - Host Edge event：`host_brain/app/app_factory.py` 及对应 input runtime handler
 - 跨进程合同：`natsume_contracts/edge/`

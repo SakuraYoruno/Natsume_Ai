@@ -127,6 +127,13 @@ Voice text、channel/action、plan/sync/self-affect revision、workspace/subject
 定向集合为 `38 passed in 38.50s`；
 未连接远端 Edge，因此不能升级为真实 TTS/VTS 或实体 Avatar 的完成状态。
 
+DL-05 的 accepted-expression 子切片现将上述 protocol 接到 Host durable embodiment outbox：
+Acceptance compiler 仅接受带同一 frozen plan、accepted narrative 和 exact protocol projection 的
+`life.foreground_completed`；它先重开 `APPLIED` Life receipt 与 terminal Action Preview，再生成
+idempotent Voice/Avatar enqueue command。Host outbox admission、reconciliation 与物理 Edge receipt
+是三个不同阶段，当前只完成前者；远端 Edge 不启动、不连接，也不能由 `PENDING/APPLIED` outbox
+状态推导出播放或转场。
+
 `POST /v1/chat` 的本机个人入口现于 AffectFusion、检索预取和 Runtime Context 之前绑定
 `natsume.direct-chat-scope.v1`：由 `HOST_DEFAULT_USER_ID` 派生唯一 subject/principal 和
 `personal:<subject>` workspace，调用方的 `person_id`、`workspace_id` 及 nested emotion-context

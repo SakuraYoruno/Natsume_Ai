@@ -103,6 +103,16 @@
 - 真实 provider、guarded streaming、远端 Edge、物理 Voice/Avatar、真人体验盲评和 DL-07 服务栈均未运行，远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`。
 
+## DL-05 已接受表达的 Host 出箱切片
+
+- `test_dl05_expression_delivery.py` 与 `test_gr06_acceptance_effect_compiler.py` 覆盖 frozen
+  plan/narrative/protocol 的确定性重建、worker protocol drift 拒绝、`life.foreground_completed`
+  receipt 必须为 `APPLIED`、terminal Action Preview、幂等 Host outbox enqueue 与 exact reopen。
+  当前定向命令为 `29 passed`；测试明确断言本地 receipt 只可写 `host_outbox_status`，不生成
+  `EDGE_APPLIED` 或伪造 physical receipt。
+- 该集合没有启动远端 Edge、TTS、VTS、VRM、真实模型或 Docker 服务栈；它只能证明 Host
+  admission/reconciliation 边界，最终体验和物理设备验收仍属于 DL-07。
+
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_hippocampus_memory_writer_retirement.py` 验证 canonical `HippocampusAgent` 不注册

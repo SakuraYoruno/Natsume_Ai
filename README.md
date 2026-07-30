@@ -76,6 +76,14 @@ ports 实例还只计数固定 projection ID 的旧 assembler 读取与被拒绝
 workspace、正文或情绪内容，也不是新的 Life authority。它只覆盖这一条 OBS snapshot rollback
 window；其他 compatibility reader、Monitor/Review、长期 canary 与真实服务栈仍未完成。
 
+本次 DL-05 进一步让**受治理 Chat**在 Graph Acceptance 之后重新校验冻结
+`AffectiveTurnPlanV1`、文本分句和 protocol receipt，并把 Voice/Avatar 的每一个
+`SPEAK`、`TRANSITION`、`RELEASE` 命令写入 Host 自己的 durable embodiment outbox。
+该 outbox 只证明本地 admission，并需要独立的 terminal Action Preview 与已落库的
+`life.foreground_completed` receipt；它没有启动、连接或调用远端 Edge，也不产生
+`EDGE_APPLIED` 声明。远端设备恢复、真实 TTS/VTS/VRM receipt 与同轮时延仍是 DL-07 的
+`ACCEPTANCE_PENDING_EXTERNAL` 验收项。
+
 0148 已补上“受认证的直接偏好控制”这一窄入口：`POST /v1/digital-life/relationship/companion-profile` 只接受完整、严格的低风险偏好 JSON，要求 `companion:profile:write`、`user principal == relationship_subject_id` 与 `tenant == workspace_id`。它不会从聊天文字推断偏好，也不能立即激活 profile；Host 只会从 canonical 强 aftereffect 历史选取证据、创建五次互动的 CANARY，并把 Secure Ingress audit ref 一并固化。该接口不是 Monitor 的用户反馈/审核界面，仍不改变 Soul、关系许可或 self-affect；CANARY 证据收集、长期收益、旧 writer 清零和真实服务栈验收仍未完成。
 
 本次又接入 `POST /v1/digital-life/relationship/response-feedback`：用户只能对一条仍处于 provisional 状态、已有 canonical receipt 的回复提交 `HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY`。它要求独立的 `companion:feedback:write`、精确 user/subject 与 tenant/workspace 绑定；`HELPFUL` 才会成为 `0.95` 的 receipt-scoped 强 aftereffect，且只能推进一个已经存在的 profile CANARY；第五条合格后效应才会由 lifecycle 自动激活它，外部请求不能创建或指定激活 profile。当前本地生命周期证据不再篡改文本分类器置信度：它通过真实 receipt-bound 显式反馈自动推进 CANARY，并验证 activation 与 exact rollback 会实际改变、再恢复下一轮的文本锚点、TTS 语速和 Avatar 动作强度。自然语言关键词识别仍是保守的 `0.72`，只用于普通关系理解；它不能伪装为学习证据，也不等同于真实用户长期收益或远端播放验收。

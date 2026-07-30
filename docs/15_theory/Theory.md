@@ -693,6 +693,13 @@ avatar head 读取前一表达；旧 `_prev_emotion_tag` 不能再把用户观�
 `HOST_*_STAGED` 仅说明 Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由独立 Edge
 receipt 说明，不能各自把文本标签再解释一次。
 
+受治理 Chat 的后半段现在也不能停在 protocol trace：只有同一份 frozen foreground 已取得
+`life.foreground_completed=APPLIED` receipt，且 terminal `ActionPreview` 重开完全相同的
+effect 参数后，Host 才会从计划、accepted narrative 与 staged protocol **重新推导** Voice/Avatar
+command，并按 idempotency key 写入 app-local durable embodiment outbox。这个 outbox 是“可以由
+Host 以后投递”的本地事实，不是“声音已播放”或“Avatar 已转场”；`PENDING`、`DISPATCHING`、
+`IN_DOUBT`、`APPLIED`、`REJECTED` 都仍须与未来 Edge 的独立物理 receipt 区分。
+
 模型流还必须区分“字符已经到达”与“这次调用已可计量”。`ModelAttemptService.stream_with_result()`
 把这两个时刻显式拆开：它只允许 typed delta，结束时必须收到唯一一份 provider-owned
 `ProviderResponse`，再把模型、provider 与 transport 证据，以及 provider 显式给出的 usage 写入 canonical Attempt；任何一项

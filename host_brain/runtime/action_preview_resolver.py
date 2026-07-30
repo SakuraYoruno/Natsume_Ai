@@ -308,6 +308,7 @@ def _effect_descriptor(
         "conversation.user_turn": 1,
         "conversation.preference_signal": 1,
         "edge.embodiment_enqueue": 4,
+        "host.companion_expression_enqueue": 4,
         "host.sys_mode_transition": 4,
         "host.operator_state_control": 4,
         "task.terminal_reconciliation": 4,

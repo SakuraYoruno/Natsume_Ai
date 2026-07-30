@@ -263,7 +263,11 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   因此仅把同一冻结协议附入 acceptance effect，不能提前发送或驱动设备。若 Task 已经逐句
   暂存并外显，Acceptance 必须逐句保留该精确边界：每一可见句恰有一条 Voice `SPEAK` 和一条
   Avatar `TRANSITION`，结束时再恰有一对覆盖完成前缀的 `RELEASE`。合并两句、丢失一条、
-  sync/revision/scope 漂移或 Host staging receipt 缺失都会在 frozen executor 失败关闭。
+   sync/revision/scope 漂移或 Host staging receipt 缺失都会在 frozen executor 失败关闭。
+- Graph Acceptance 现在会以 accepted foreground 的 plan、narrative 与 protocol 重新构造 Host
+  embodiment command；只有 foreground receipt 已为 `APPLIED` 且 terminal Action Preview 绑定完全一致时，
+  才可幂等写入 app-local outbox。该状态只代表 Host admission/reconciliation，不能提升为 Edge、TTS、
+  VTS 或 Avatar physical receipt。
 - 单通道不可用只能标记通道降级，不能把 self-affect 改写为 `NEUTRAL`。当前远端 Edge 位于
   另一台电脑，本波只完成 Host 接线、合同测试与可回放 protocol evidence，未启动远端服务。
 

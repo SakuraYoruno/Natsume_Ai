@@ -670,6 +670,20 @@ plan、sync、self-affect revision、workspace、relationship subject、session 
 任意合并、遗漏、重复或漂移都阻断 effect。`0146` 只记录这份 Host protocol 的不可变投影，仍不代表
 远端 TTS 已播放或 Avatar 已应用。
 
+已接受表达继续进入本地 outbox 时，边界严格为：
+
+```text
+Task Acceptance
+  → reopen Life foreground receipt (APPLIED)
+  → reopen terminal Action Preview
+  → rebuild frozen plan + accepted narrative + protocol
+  → Host durable embodiment outbox (idempotent enqueue / exact reopen)
+  → later Edge dispatch and independent physical receipt
+```
+
+前四步是当前 DL-05 的本机证据；最后一步尚未运行。outbox row 不回写 self-affect，也不把
+Host admission 写成 Voice/TTS/Avatar 已完成。
+
 0147 将 `companion_profile` 作为同一 relation aggregate 的 bounded head，而不是 Surface、TTS
 或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only
 `relational_aftereffect_recorded` 事件：五条独立 user-input ref、跨至少三 UTC 日、`HELPFUL`、

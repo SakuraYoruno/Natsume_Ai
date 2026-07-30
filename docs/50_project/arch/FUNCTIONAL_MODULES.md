@@ -41,6 +41,9 @@
 > 只能在 Acceptance 后各生成一条 Voice `SPEAK` 与 Avatar `TRANSITION`，再以一对 `RELEASE`
 > 覆盖完成前缀。模块会复核文字、plan、sync、self-affect revision、scope 和 Host receipt；
 > 合并句子或协议漂移失败关闭。此为本机 SQLite Host protocol 证据，不是远端物理效果。
+> Acceptance compiler 随后只以已 `APPLIED` 的 foreground receipt、同一 terminal Action Preview 和
+> frozen plan/narrative/protocol 重建命令，写入 app-local embodiment outbox；它不信任 worker 原样传入的
+> command，也不启动远端 Edge。outbox admission/reopen 仍不是 TTS 播放或 Avatar transition receipt。
 
 **Legacy Motor/Cerebellum 执行兼容边界**位于
 [`tribe/motor_cortex_agent.py`](../../../host_brain/tribe/motor_cortex_agent.py) 与
