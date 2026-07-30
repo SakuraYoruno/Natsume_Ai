@@ -476,6 +476,10 @@ self-reflection reader 与真实 canonical companion profile activation 仍分�
 language registry、不向 PainReward/Endocrine/Limbic/Interoception fan-out、也不直接调用 Motor TTS。`PeripheralAgent`
 同样不再订阅/处理裸 `EMOTION_STATE_CHANGED` 来生成 voice/avatar 建议或回写 Limbic；平台连接和安全抑制保留为
 独立外设状态，实际具身输出仍必须来自 accepted `ExpressionPlan`。
+`PainRewardAgent` 在 canonical mode 同样不能保存 rejection/loneliness/Bond/task/emotion event 的 hedonic
+accumulator：pain/reward、decay、event subscription、JSON persistence、reflection 及 Limbic/Endocrine/
+Interoception/DefaultMode fan-out 全部短路为 retirement projection。真实 pain/reward 语义只存在于 Life journal
+的 Appraisal、Episode、Need、Regulation 链，不从旧 registry 或磁盘恢复。
 production
 BodySense 同样不再被 Surface/startup warmup/read：`project_body_sense_from_life_snapshot()` 只读取当前
 relationship subject 的 canonical Life snapshot，Limbic canonical mode 的 tick/loneliness/conversation

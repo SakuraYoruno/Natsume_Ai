@@ -81,6 +81,9 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - legacy LanguageSystem 不得把关键词压力写入 language registry、fan-out 到旧器官或绕开 accepted plan 直接 TTS；
   legacy Peripheral 不得以裸 `EMOTION_STATE_CHANGED` 自行决定 Avatar/语音表达。平台连通性与安全抑制可独立保留，
   但可见三模态表达只能由同一 `ExpressionPlan` 与 delivery receipt 驱动。
+- legacy PainReward 不得将拒绝、孤独、旧 Bond、任务或情绪事件累积为另一份 self-affect/hedonic authority，
+  也不得再 fan-out 到 Limbic、Endocrine、Interoception 或自建磁盘恢复。真实受伤、喜悦与恢复只可由 canonical
+  Appraisal/Episode/Regulation 写入 Life journal。
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。

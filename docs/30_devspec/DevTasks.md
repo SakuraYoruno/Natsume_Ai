@@ -188,6 +188,10 @@ legacy `LanguageSystemAgent` 与 `PeripheralAgent` 的未计划表达 side effec
 dual parse 只保留纯兼容结果，不写 language registry、不向 PainReward/Endocrine/Limbic/Interoception fan-out、
 不直驱 Motor TTS；后者不订阅或处理裸 `EMOTION_STATE_CHANGED` 来写 voice/avatar 建议或回写 Limbic。
 平台连接状态和 `IMMUNE_BLOCK` 安全抑制仍可读取/写入独立外设投影，不能被误报为情感 expression authority。
+legacy `PainRewardAgent` 的 hedonic accumulator 也在 canonical mode 退役：`record_pain/reward`、decay、
+subscription、direct event、JSON load/save、hedonic reflection 以及 Limbic/Endocrine/Interoception/DefaultMode
+fan-out 都在 mutation 前短路为 `RETIRED_CANONICAL_LIFE` 或 no-op。canonical Appraisal/Episode/Regulation 是唯一
+可将拒绝、孤独、任务成功和关系事件变成七海自身感受的生产 authority。
 这只退役 Endocrine mutation authority。随后 `DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE`
 已在同一 canonical authority 下让 production Surface/startup 不再 warmup 或读取 global
 `BodySenseModel`：每次读取都必须提供 relationship subject，并从对应 Life snapshot 做纯读 projection。

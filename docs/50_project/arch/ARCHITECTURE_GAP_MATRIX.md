@@ -117,6 +117,13 @@ voice/avatar expression 或回写 Limbic。平台连通性与 `IMMUNE_BLOCK` 安
 accepted `ExpressionPlan` 与 delivery receipt 产生。`52 passed in 1.52s` 仅证明这两条 local side-effect 边界，
 不代表旧 reader、真实 Edge/provider 或 DL-07 服务栈验收完成。
 
+**PainReward 旧享乐 authority 退役修订：** canonical Life composition 下，`PainRewardAgent` 不再把 rejection、
+loneliness、Bond、task 或 emotion event 写入 process-local/JSON hedonic accumulator，也不再向 Limbic、Endocrine、
+Interoception 或 DefaultMode fan-out。record、decay、subscription、direct event、load/save、reflection 和 export 都
+返回 `RETIRED_CANONICAL_LIFE` 的兼容投影。真实受伤、满足和恢复只能在 canonical Appraisal、Episode、Need 与
+Regulation 中产生。`62 passed in 1.80s` 只证明 local writer/fan-out 边界，不代表旧 reader、真实 Edge/provider
+或 DL-07 服务栈验收完成。
+
 **Bond queue 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
 construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧
 writer/queue 请求返回 `RETIRED_CANONICAL_LIFE`，不创建 worker、backlog 或失败后 direct writer；canonical

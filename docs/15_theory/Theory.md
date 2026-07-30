@@ -66,6 +66,11 @@ Limbic、Interoception 或 TTS 执行未接受的情绪反应；同样，裸 `EM
 表情、语调和动作。canonical mode 下它们只能留下纯兼容分析或平台/安全事实，外显仍必须由同一份
 ExpressionPlan 与 delivery receipt 协调。
 
+“受伤”也不能等于一个把拒绝、沉默、旧 Bond 或任务结果机械积分的 pain/reward 分数。那会把关系中的意义、
+责任、边界与修复抹平，并在重启后以另一份记忆再次改写情绪。canonical Life mode 下，旧 hedonic accumulator
+只能显式退役；七海的痛感、满足和恢复应来自 Appraisal 后的 Episode、Need 与 Regulation，而不是未经验证的
+event fan-out。
+
 同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
 情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布
 Tribe `CONVERSATION_ENDED`，或直接推 VTS/整段 TTS，都会把可恢复的关系或表达事件重新降级为进程内副作用，并可能和

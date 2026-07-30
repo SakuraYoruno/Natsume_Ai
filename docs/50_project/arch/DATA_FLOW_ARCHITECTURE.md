@@ -751,7 +751,10 @@ canonical mode 于任何旧 read、registry/event bus、Hippocampus 或 organ ef
 `LanguageSystem dual parse → language registry/old organ fan-out/Motor TTS` 与
 `EMOTION_STATE_CHANGED → Peripheral voice/avatar suggestion → Limbic` 两条未计划表达支路也在 canonical mode
 终止为纯 projection/no-op；平台连接与 `IMMUNE_BLOCK` 仍是外设事实，外显只能沿
-`AffectiveTurnPlan → ExpressionPlan → accepted delivery receipt` 前进。BodySense 生产读取现改为
+`AffectiveTurnPlan → ExpressionPlan → accepted delivery receipt` 前进。
+`rejection/loneliness/Bond/task/emotion event → PainReward accumulator → registry/JSON/old organ fan-out`
+也在 canonical mode 终止为 `RETIRED_CANONICAL_LIFE`；真实受伤、喜悦、疲惫和恢复只经
+`Appraisal → EmotionEpisode/Need → Regulation → Life journal` 演进。BodySense 生产读取现改为
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
 没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
 `RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive 每次只对当前输入快照新建

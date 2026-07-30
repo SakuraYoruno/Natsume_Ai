@@ -170,6 +170,11 @@
   裸 `EMOTION_STATE_CHANGED` 以产生 unplanned expression，平台/安全订阅仍保留。本次相邻集合为
   `52 passed in 1.52s`；与本 PR 前三条 authority 切流的最终合并集合为 `163 passed in 7.01s`。这些都未覆盖
   remaining reader、真实 Edge、provider 或 DL-07。
+- `test_pain_reward_agent.py::test_pain_reward_canonical_life_retires_hedonic_writer_and_fanout` 验证 canonical
+  mode 下旧 pain/reward、decay、subscription、event、磁盘 load/save、reflection 与 organ/DefaultMode fan-out
+  均不触及 registry 或旧依赖，只返回显式 retirement projection；相邻 PainReward/Limbic/Endocrine 集合为
+  `62 passed in 1.80s`；当前五条 authority 切流合并集合为 `191 passed in 7.80s`。这些未覆盖 remaining reader、
+  真实 provider、远端 Edge 或 DL-07。
 - `test_limbic_agent.py` 现额外验证 canonical mode 下的 BodySense 只能从 exact
   relationship subject 的 Life snapshot 纯投影，不会解析 global `BodySenseModel`、写 Tribe state、
   调整 silence penalty 或把 legacy BODY_SENSE_UPDATED 再推进 self-affect；缺 subject 明确

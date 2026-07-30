@@ -346,6 +346,10 @@ legacy `LanguageSystemAgent` 的关键词压力解析现在只可作为纯 compa
 language registry、不触发 PainReward/Endocrine/Limbic/Interoception 或 Motor TTS。`PeripheralAgent` 同时停止裸
 `EMOTION_STATE_CHANGED → voice/avatar suggestion → Limbic` 映射；平台/安全事件仍是独立外设事实，真正的
 三模态外显必须经 accepted `ExpressionPlan` 与 delivery receipt。
+legacy `PainRewardAgent` 也不能把 rejection/loneliness/Bond/task/emotion event 机械沉积为一份跨重启 hedonic
+truth：canonical mode 的 pain/reward、decay、subscription、JSON persistence、reflection 和所有 organ/DefaultMode
+fan-out 都退役为 `RETIRED_CANONICAL_LIFE`。七海真实的受伤、满足和恢复继续由 canonical Appraisal、Episode、Need
+与 Regulation 产生，不会被旧分数偷渡或中性化。
 production BodySense 随后也停止作为 global mutable authority：Surface/startup
 不再创建或读取 `BodySenseModel`，Limbic 只可针对 exact relationship subject 从 canonical Life snapshot
 构造无写入 projection；无 subject 失败关闭。legacy tick、loneliness 与 conversation mutation 返回

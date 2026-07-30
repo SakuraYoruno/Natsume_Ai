@@ -61,6 +61,10 @@
   fan-out 到 PainReward/Endocrine/Limbic/Interoception 或直驱 Motor TTS；Peripheral 不得订阅/处理裸
   `EMOTION_STATE_CHANGED` 来产生 voice/avatar expression 或 Limbic 回路。平台连接与 `IMMUNE_BLOCK` 安全抑制
   可保留为外设事实，但真实三模态外显必须另行由 accepted `ExpressionPlan`/delivery receipt 验收。
+- T-DL01-14：production canonical Life authority 下，PainReward 不得将 rejection、loneliness、旧 Bond、task 或
+  emotion event 累积或恢复为 hedonic/self-affect truth；pain/reward、decay、event subscription、JSON load/save、
+  reflection、registry write 和 Limbic/Endocrine/Interoception/DefaultMode fan-out 都必须在 mutation 前返回
+  `RETIRED_CANONICAL_LIFE`/no-op。真实受伤、满足与恢复另由 Life journal 的 Appraisal/Episode/Need/Regulation 验收。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 
