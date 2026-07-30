@@ -63,7 +63,7 @@ class MirrorNeuronAgent:
         Limbic/Endocrine happen to reject some of the writes.
         """
 
-        ports = self.application_ports
+        ports = getattr(self, "application_ports", None)
         return bool(
             isinstance(ports, TribeApplicationPorts)
             and ports.uses_canonical_affective_life()

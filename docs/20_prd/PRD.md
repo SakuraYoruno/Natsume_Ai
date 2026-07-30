@@ -73,6 +73,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
   canonical mode 只能作为退役兼容入口，绝不能绕过 Life journal 修改七海的 self-affect。
 - legacy MirrorNeuron 不得用用户 emotion、Bond vector 或事件总线直接生成可写共振状态、共情模型 hint 或
   organ fan-out；canonical mode 只能给出显式退役标记，陪伴动作必须来自 Appraisal 后冻结的计划。
+- legacy InitiativeGovernor 不得用旧 Bond、器官缓存、event bus、模型话题或 registry 取得主动发送 authority；
+  canonical mode 只能 `DEFER`，真正的主动联系仍由 canonical relationship permission、aftereffect 与 outbox 决定。
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。

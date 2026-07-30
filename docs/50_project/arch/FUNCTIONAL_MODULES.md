@@ -268,7 +268,10 @@ Tribe ports 还会令 Limbic 的 legacy persistence、metabolism、timeline appe
 孤独、风险拦截、内感受、interaction-recorded callback 全部 no-op 并返回 `RETIRED_CANONICAL_LIFE`，避免 event callback 重建第二份 self-affect。这不是完整
 organ 退役：Endocrine 的 legacy delta/last-state/hint/fan-out 现同样 no-op；Circadian 只能调用它的受控
 compatibility port，不再触碰私有字段。MirrorNeuron 在 canonical mode 下不再订阅旧 emotion event、读取 Bond、
-写共振 registry、生成共情模型 hint 或调用任何 organ fan-out，只返回退役兼容投影。BodySense 的 legacy global model 也不再被
+写共振 registry、生成共情模型 hint 或调用任何 organ fan-out，只返回退役兼容投影。
+`InitiativeGovernorAgent` 在 canonical mode 下同样不再订阅旧 Circadian/Proprioception/Bond/Glymphatic event、读取
+旧 Bond/organ state、写 decision registry、生成 topic hint 或 fan-out；遗留 gate 只能 `DEFER`，而 canonical relationship
+permission/aftereffect/outbox 是唯一主动发送 authority。BodySense 的 legacy global model 也不再被
 production Surface/startup 读取，canonical Limbic 必须从 scoped Life snapshot 做纯投影，且 legacy tick/
 loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond queue/writer 已退役；production
 Host 也不再从旧 action log hydrate `EmotionTimeline`，而是以显式 retired 空投影失败关闭读取，不能用它重建

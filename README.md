@@ -490,7 +490,11 @@ EmotionVector metabolism、`emotion_timeline` append、periodic decay，以及 B
 投影，不能消费 cortisol/oxytocin delta、更新 `_last_state`、生成 hormonal hint 或 fan-out 到 Limbic、
 Interoception/PainReward；所有 legacy delta/event 写入显式返回 `RETIRED_CANONICAL_LIFE`。Circadian 不再触碰
 Endocrine 私有字段；MirrorNeuron 在 canonical Host 中进一步停用旧事件订阅、Bond 读取、registry 共振写入、
-共情模型 hint 与全部 organ fan-out，只返回 `RETIRED_CANONICAL_LIFE` 的兼容标记。第四条切断进一步退役 production 全局
+共情模型 hint 与全部 organ fan-out，只返回 `RETIRED_CANONICAL_LIFE` 的兼容标记。
+`InitiativeGovernor` 也在该 authority 下停止订阅旧 Circadian/Proprioception/Bond/Glymphatic event、读取旧 Bond 或
+organ 状态、写 decision registry、生成主动话题模型 hint 及 downstream fan-out；旧 `initiative_request`/受门控 Motor
+调用固定得到 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`。这不会关闭 canonical Life 的 relationship permission、
+aftereffect 与 outbox 主动陪伴链，后者仍是唯一生产发送 authority。第四条切断进一步退役 production 全局
 `BodySenseModel`：Surface 不再 warmup 或读取该单例，而是按当前 `relationship_subject_id` 从
 canonical Life snapshot 纯投影 fatigue、drowsiness 与 loneliness；缺 subject 会明确不可用，绝不回退到
 其他会话的 global state。legacy BodySense tick、loneliness 注入和会话开始/结束只返回

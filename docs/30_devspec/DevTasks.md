@@ -175,6 +175,10 @@ fan-out。`record_stress_event`、Bond/loneliness/task/immune callback 与显式
 mode 均返回 `RETIRED_CANONICAL_LIFE`；Circadian 已停止直接写 Endocrine 私有字段。MirrorNeuron 在
 canonical mode 下进一步不订阅旧 emotion event、不读 Bond、不写共振 registry，也不调用共情模型或任何 organ fan-out，
 统一退役为 `RETIRED_CANONICAL_LIFE` / 无 hint 的兼容投影。
+同一 authority 现也退役 legacy `InitiativeGovernorAgent`：它不订阅 Circadian/Proprioception/Bond/Glymphatic
+event，不读取旧 Bond/organ state、不写 decision registry、不生成主动话题模型 hint 或 fan-out；旧门控请求固定
+返回 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`。canonical relationship permission、aftereffect 和 outbox 的
+主动陪伴路径不依赖该 agent，仍是唯一生产发送 authority。
 这只退役 Endocrine mutation authority。随后 `DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE`
 已在同一 canonical authority 下让 production Surface/startup 不再 warmup 或读取 global
 `BodySenseModel`：每次读取都必须提供 relationship subject，并从对应 Life snapshot 做纯读 projection。

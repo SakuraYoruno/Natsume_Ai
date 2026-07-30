@@ -334,7 +334,10 @@ callback 统一返回 `RETIRED_CANONICAL_LIFE`，禁止写入或重建旧 self-a
 cortisol/oxytocin buffer、`_last_state`、hormonal hint 和 downstream fan-out 也在 canonical mode
 退役：只返回 hard-state projection 与 `RETIRED_CANONICAL_LIFE`，不消费 event delta；Circadian 不再直接操作
 它的私有字段。MirrorNeuron 在 canonical mode 下也不再订阅旧情绪事件、读取 Bond、写共振 registry、生成模型 hint
-或向任何 organ fan-out，只保留显式 retirement projection。production BodySense 随后也停止作为 global mutable authority：Surface/startup
+或向任何 organ fan-out，只保留显式 retirement projection。legacy `InitiativeGovernorAgent` 也不再被当作主动联系 authority：
+canonical mode 停止其旧 event subscription、Bond/
+organ read、registry write、模型 topic hint 与 fan-out，并对旧 gate 只返回 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`；
+canonical relationship permission、aftereffect 和 outbox 主动陪伴仍不依赖它。production BodySense 随后也停止作为 global mutable authority：Surface/startup
 不再创建或读取 `BodySenseModel`，Limbic 只可针对 exact relationship subject 从 canonical Life snapshot
 构造无写入 projection；无 subject 失败关闭。legacy tick、loneliness 与 conversation mutation 返回
 `RETIRED_CANONICAL_LIFE` 并且 retired tick 不发布 EventBus update。Motive 与 production volatile

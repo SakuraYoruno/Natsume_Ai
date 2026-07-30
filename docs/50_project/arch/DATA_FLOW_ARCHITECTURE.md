@@ -740,7 +740,10 @@ authority 存在时均经 `AffectFusionService` 形成 scoped observation/apprai
 timeline/decay 与 Bond、任务成功、幽默、孤独、风险拦截、内感受、interaction-recorded callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
 回调追加为另一个 self-affect 事实。Endocrine 的 delta buffer/last-state/hint/fan-out 也由同一 gate
 拒绝；Circadian 不再直写其私有字段。MirrorNeuron 在 canonical mode 下不订阅旧 emotion event、不读取 Bond、
-不写共振或调用模型/organ fan-out，只暴露 retirement marker。BodySense 生产读取现改为
+不写共振或调用模型/organ fan-out，只暴露 retirement marker。`InitiativeGovernorAgent` 的旧
+`Circadian/Proprioception/Bond/Glymphatic event → Bond/organ read → registry/model/fan-out` 流也在 canonical
+mode 终止为 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`；新的主动陪伴只走 relationship permission、aftereffect
+与 outbox。BodySense 生产读取现改为
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
 没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
 `RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive 每次只对当前输入快照新建

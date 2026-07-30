@@ -153,6 +153,11 @@
   验证 canonical `TribeApplicationPorts` 下 MirrorNeuron 不会订阅旧 event bus、读取 SocialBrain/Bond、写 registry、
   调用共情模型或 fan-out 到 Limbic/Endocrine/Interoception/PainReward/DefaultMode；所有旧入口退役，离线兼容测试仍保留。
   本次 Mirror/Limbic/Endocrine 邻接集合为 `59 passed in 1.69s`，不代表真实模型、Edge 或 DL-07。
+- `test_initiative_governor_agent.py::test_initiative_governor_retires_legacy_bond_and_organ_fanout_with_canonical_life`
+  验证 canonical `TribeApplicationPorts` 下 InitiativeGovernor 不订阅旧 Circadian/Proprioception/Bond/Glymphatic
+  event，不读取旧 Bond 或 organ state、不写 decision registry、不生成模型 topic hint 或 fan-out；旧 gate 明确
+  `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`，canonical relationship permission/aftereffect/outbox 主动链不依赖它。
+  本次 Initiative/Mirror/Limbic/Endocrine/Motor/production-composition 邻接集合为 `93 passed in 6.21s`，不代表剩余 reader、真实模型、Edge 或 DL-07。
 - `test_limbic_agent.py` 现额外验证 canonical mode 下的 BodySense 只能从 exact
   relationship subject 的 Life snapshot 纯投影，不会解析 global `BodySenseModel`、写 Tribe state、
   调整 silence penalty 或把 legacy BODY_SENSE_UPDATED 再推进 self-affect；缺 subject 明确

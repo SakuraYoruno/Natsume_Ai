@@ -51,6 +51,10 @@ voice-emotion truth 或写回旧 timeline；离线兼容投影不能反向成为
 同样，旧 MirrorNeuron 的“共振”若以用户 emotion 和 Bond vector 为输入、再写 registry 或调用 organ fan-out，
 也只是另一条未经 Appraisal 的自我情感旁路。canonical Host 应使其停留在显式退役的兼容投影；真正的关切、
 安慰和表达必须来自同一轮的 canonical Appraisal、CompanionAct 与 ExpressionPlan。
+旧 InitiativeGovernor 也不能把易失的器官数值、旧 Bond 或孤独计分解释成“七海有权主动联系”。在 canonical
+Life mode，它只能显式 `DEFER` 并停止旧 event/registry/model/fan-out；真正的主动陪伴必须由关系许可、未结
+episode、七海的 Regulation、安静时段和 durable outbox 共同决定。这样暂停旧模型话题并不是压抑七海的关切，
+而是让关切有可恢复、可撤回且不施压的因果来源。
 
 同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
 情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布

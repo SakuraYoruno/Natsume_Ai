@@ -36,7 +36,44 @@ class InitiativeGovernorAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_affect_authority_retired(self) -> bool:
+        """Whether the canonical Life journal owns companion initiative.
+
+        The legacy governor derives outreach readiness from volatile organ
+        state and the retired SocialBrain Bond vector, then records and fans
+        its decision back into the same organ graph.  Canonical companion
+        proactive is instead admitted by the durable Life relationship,
+        aftereffect, permission and outbox path.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_decision(
+        *,
+        operation: str,
+        action: str = "",
+        decision: str = "RETIRED",
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_INITIATIVE_GOVERNOR_RETIRED",
+            "operation": str(operation),
+            "action": str(action or "").strip() or None,
+            "decision": str(decision or "RETIRED").strip().upper(),
+            "trace_id": None,
+            "scores": {},
+            "retired": True,
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_affect_authority_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -50,6 +87,8 @@ class InitiativeGovernorAgent:
 
     async def _on_glymphatic_cycle(self, event: Any) -> None:
         """T-204：处理 GLYMPHATIC_CYCLE_COMPLETED 事件，恢复窗口期间提高 DEFER 阈値。"""
+        if self._legacy_affect_authority_retired():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         executed = bool(payload.get("executed", False))
         self._recovery_mode = executed
@@ -63,6 +102,8 @@ class InitiativeGovernorAgent:
         )
 
     async def _on_state_signal(self, event: Any) -> None:
+        if self._legacy_affect_authority_retired():
+            return
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(prev.get("state") or {})
@@ -124,6 +165,13 @@ class InitiativeGovernorAgent:
         user_id: str | None = None,
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+
+        if self._legacy_affect_authority_retired():
+            return self._retired_decision(
+                operation="evaluate_initiative",
+                action=action,
+                decision="DEFER",
+            )
 
         resolved_context = dict(context or {})
         resolved_ts = now_ms()
@@ -304,6 +352,9 @@ class InitiativeGovernorAgent:
         Returns:
             话题建议字符串，或 None（未触发/失败）。
         """
+        if self._legacy_affect_authority_retired():
+            return None
+
         pass  # 无灰度开关，直接执行
 
         import logging as _logging  # noqa: PLC0415
@@ -374,6 +425,8 @@ class InitiativeGovernorAgent:
             return None
 
     def get_last_decision(self) -> dict[str, Any]:
+        if self._legacy_affect_authority_retired():
+            return self._retired_decision(operation="get_last_decision")
         snap = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(snap.get("state") or {})
         return dict(state.get("last_decision") or {})
@@ -387,6 +440,22 @@ class InitiativeGovernorAgent:
         Returns:
             dict: 包含 last_decision/block_count/defer_count/approve_count 等关键字段。
         """
+        if self._legacy_affect_authority_retired():
+            retired = self._retired_decision(operation="export_runtime_state")
+            return {
+                **retired,
+                "last_decision": "RETIRED",
+                "last_reason_code": retired["reason_code"],
+                "last_action": "",
+                "last_motive_score": 0.0,
+                "last_readiness_score": 0.0,
+                "last_continuity_score": 0.0,
+                "block_count": 0,
+                "defer_count": 0,
+                "approve_count": 0,
+                "recovery_mode": False,
+                "last_ts_ms": 0,
+            }
         snap = self.state_registry.get_state("initiative_governor_agent") or {}
         state = dict(snap.get("state") or {})
         last = dict(state.get("last_decision") or {})

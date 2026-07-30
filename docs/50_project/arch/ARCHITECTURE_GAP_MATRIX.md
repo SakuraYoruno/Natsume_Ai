@@ -94,6 +94,14 @@ Appraisal、CompanionAct 与 ExpressionPlan。未组成 canonical port 的离线
 行为作为回滚窗口。本地 `59 passed in 1.69s` 证明这条 writer/fan-out 边界，不代表 InitiativeGovernor、
 Prefrontal 等剩余 compatibility reader、真实 provider、远端 Edge 或服务栈验收已经完成。
 
+**InitiativeGovernor 旧主动 authority 退役修订：** composed production `TribeApplicationPorts` 选择 canonical
+Life journal 时，`InitiativeGovernorAgent` 不再订阅 Circadian、Proprioception、Bond 或 Glymphatic event，也不会
+读取旧 SocialBrain/organ state、写 decision registry、调用模型生成主动话题或 fan-out 到其它 organ。历史
+`initiative_request` 与受门控 Motor 路径得到明确 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`，而不是悄悄
+准许旧主动发送；canonical relationship permission、aftereffect、Regulation 和 outbox 的主动陪伴链不依赖该
+agent，仍是唯一生产 authority。离线/test compatibility root 保留旧行为作为回滚窗口。`93 passed in 6.21s`
+仅证明这条 local authority 边界，不代表 Prefrontal 等 reader、真实 provider、远端 Edge 或服务栈验收已完成。
+
 **Bond queue 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
 construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧
 writer/queue 请求返回 `RETIRED_CANONICAL_LIFE`，不创建 worker、backlog 或失败后 direct writer；canonical

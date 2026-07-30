@@ -49,6 +49,10 @@
 - T-DL01-10：production canonical Life authority 下，MirrorNeuron 不得订阅 legacy emotion event、读取
   SocialBrain/Bond、写共振 registry、生成共情模型 hint，或 fan-out 到 Limbic/Endocrine/Interoception/
   PainReward/DefaultMode；直接调用与 event callback 都只能形成显式 retirement projection 或 no-op。
+- T-DL01-11：production canonical Life authority 下，InitiativeGovernor 不得订阅 legacy
+  Circadian/Proprioception/Bond/Glymphatic event、读取旧 Bond/organ state、写 decision registry、生成模型
+  topic hint 或 fan-out；`initiative_request` 与受门控 Motor 调用必须明确 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`，
+  且 canonical relationship permission、aftereffect、Regulation 与 outbox 主动链不得依赖该旧 agent。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 

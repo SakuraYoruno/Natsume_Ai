@@ -465,7 +465,10 @@ Endocrine 的 legacy
 cortisol/oxytocin delta buffer、`_last_state`、hormonal hint、callback 与 fan-out 在同一 canonical mode
 也全部退役；Circadian 只能走受控 compatibility method，不能直写私有字段。MirrorNeuron 还会在 canonical
 mode 下关闭旧 event subscription、Bond read、registry resonance write、empathy model hint 和 organ fan-out，
-仅返回显式 retirement projection。production
+仅返回显式 retirement projection。`InitiativeGovernorAgent` 也不再把旧 Circadian/Proprioception/Bond/Glymphatic
+event、Bond/organ read、decision registry、模型 topic hint 或 fan-out 变成主动联系 authority；canonical gate 固定
+`DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`，实际主动陪伴仍只经 relationship permission、aftereffect 与 outbox。
+production
 BodySense 同样不再被 Surface/startup warmup/read：`project_body_sense_from_life_snapshot()` 只读取当前
 relationship subject 的 canonical Life snapshot，Limbic canonical mode 的 tick/loneliness/conversation
 mutation 统一退役，且 retired tick 不发布 Bus update。`MotiveEngine` 同时移除模块级 `_engine`，factory
