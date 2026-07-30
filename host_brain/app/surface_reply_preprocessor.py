@@ -86,6 +86,10 @@ class SurfaceReplyInput:
     suppress_edge_tts: Optional[bool] = None
     suppress_edge_vts: Optional[bool] = None
     defer_effects_to_task_runtime: bool = False
+    # Opaque, app-local authority injected only by a frozen governed Chat
+    # worker.  It stages an attempt/lease/grant-bound sentence before SSE
+    # visibility; it is never caller data or an external delivery port.
+    governed_delivery_authority: Any | None = field(default=None, repr=False)
     reply_depth_policy: str = "normal"  # legacy metadata only; transport source must not alter text generation
     thread_id: Optional[str] = None
     ts_ms: int = 0

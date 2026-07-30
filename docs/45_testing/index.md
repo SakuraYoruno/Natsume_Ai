@@ -1431,3 +1431,13 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   结果 `47 passed in 3.10s`。这是模型合同和 direct Host stream 的本地证据；默认 Vault adapter、
   governed node 的逐句 visibility/cancel/restart、真实 provider、远端 Edge 与 DL-07 服务栈均未运行。
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### DL-04 受治理 Chat 可见句账本
+
+- `0149_task_runtime_chat_delivery.sql` 新增 file-backed immutable ledger。每条 `PLAN_FROZEN`、
+  `SENTENCE_STAGED` 或 stream control 都经 SQLite trigger 绑定同一 graph/revision/node/attempt/
+  lease owner/fence/node grant；update/delete、跨身份 insert、过期 lease 和 payload replay drift 均失败关闭。
+- `TaskBoundChatDeliveryAuthority → FrozenChatRouteExecutor → GovernedFrozenNodeWorker` 只允许已落库的
+  `TASK_NODE_SENTENCE_STAGED` 在 Acceptance 前外显，并重复校验 request/self/relationship/workspace 与
+  lease/fence/grant。Surface 的 governed 分支不在此时写 Life、Memory、TTS、Avatar 或通道 outbox。
+- 定向集合：`python -m pytest tests/unit/test_gr05_frozen_route_executors.py tests/unit/test_gr05_governed_frozen_workers.py tests/unit/test_dl04_task_chat_delivery_store.py tests/unit/test_dl04_native_affective_stream.py tests/unit/test_aw02_task_runtime_composition.py -q`，结果 `50 passed in 14.54s`。这只证明 frozen Chat vertical slice；普通 Chat、HTTP connection resume、真实 provider、远端 Edge 和 DL-07 服务栈仍未通过。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

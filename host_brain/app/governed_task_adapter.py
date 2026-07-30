@@ -1330,6 +1330,11 @@ def build_governed_host_runtime(
             executor=FrozenChatRouteExecutor(
                 ports=route_execution_ports,
                 stream_chat_with_context=stream_governed_chat_with_context,
+                chat_delivery_store=getattr(
+                    task_runtime_container,
+                    "chat_delivery_store",
+                    None,
+                ),
             ),
             node_grants=node_grant_verifier,
             projections=projection_store,

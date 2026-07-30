@@ -53,6 +53,7 @@ from host_brain.persistence.terminal_operator_command_store import (
 from host_brain.persistence.task_runtime_feature_canary_repository import (
     SQLiteTaskRuntimeFeatureCanaryReceiptStore,
 )
+from host_brain.persistence.task_chat_delivery_store import TaskChatDeliveryStore
 from host_brain.task_runtime.graph_cancellation_continuation_worker import (
     GraphCancellationContinuationWorker,
 )
@@ -157,6 +158,7 @@ RuntimeEventStoreBuilder = Callable[..., RuntimeEventStore]
 RuntimeOutboxPublisherBuilder = Callable[..., RuntimeOutboxPublisher]
 TerminalOperatorCommandStoreBuilder = Callable[..., TerminalOperatorCommandStore]
 FeatureCanaryStoreBuilder = Callable[..., SQLiteTaskRuntimeFeatureCanaryReceiptStore]
+TaskChatDeliveryStoreBuilder = Callable[..., TaskChatDeliveryStore]
 
 
 _PROCESS_BOOT_ID = uuid.uuid4().hex
@@ -168,6 +170,7 @@ _INFRASTRUCTURE_ORDER = (
     "migration_runner",
     "feature_canary_store",
     "task_store",
+    "chat_delivery_store",
     "review_store",
     "review_continuation_store",
     "worker_projection_store",
@@ -193,6 +196,7 @@ class ProcessTaskRuntimeContainer:
     feature_canary_store: SQLiteTaskRuntimeFeatureCanaryReceiptStore
     feature_canary_signature_verifier: Ed25519ReconciliationProofVerifier | None
     task_store: DurableTaskStore
+    chat_delivery_store: TaskChatDeliveryStore
     recovery_id: str
     recovery_report: RecoveryReport
     review_store: ReviewStore
@@ -764,6 +768,7 @@ def build_process_task_runtime_container(
     feature_canary_store_builder: FeatureCanaryStoreBuilder = (
         SQLiteTaskRuntimeFeatureCanaryReceiptStore
     ),
+    chat_delivery_store_builder: TaskChatDeliveryStoreBuilder = TaskChatDeliveryStore,
     reconciliation_public_keys: Mapping[str, bytes] | None = None,
     feature_canary_public_keys: Mapping[str, bytes] | None = None,
     terminal_reconciliation_auto_enabled: bool = False,
@@ -833,6 +838,8 @@ def build_process_task_runtime_container(
         task_store.assert_node_verification_ready()
         task_store.assert_node_acceptance_ready()
         task_store.assert_review_denial_settlement_ready()
+        chat_delivery_store = chat_delivery_store_builder(canonical)
+        constructed.append(("chat_delivery_store", chat_delivery_store))
         terminal_operator_command_store = terminal_operator_command_store_builder(
             canonical
         )
@@ -999,6 +1006,7 @@ def build_process_task_runtime_container(
         feature_canary_store=feature_canary_store,
         feature_canary_signature_verifier=feature_canary_signature_verifier,
         task_store=task_store,
+        chat_delivery_store=chat_delivery_store,
         recovery_id=recovery_id,
         recovery_report=recovery_report,
         review_store=review_store,

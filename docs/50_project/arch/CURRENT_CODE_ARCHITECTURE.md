@@ -117,7 +117,12 @@ head，下一轮只在 exact person/workspace/subject/session scope 读取上次
 VTS compatibility transition 不再读取 legacy `_prev_emotion_tag`。`HOST_PROTOCOL_STAGED` 只表示
 Host 持久化了协议，不表示远端已播放或已改变 Avatar。受治理 Chat 虽有新的模型终态合同，却仍缺
 node/attempt-bound 的逐句可见性、取消与重启去重 authority，因而继续使用 buffered acceptance；
-远端 Edge、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
+`0149_task_runtime_chat_delivery.sql` 再将**已入场的冻结 Chat TaskNode**的 plan、稳定句和
+`STREAM_COMPLETED/INTERRUPTED/CANCELLED` control 写入独立 Task ledger；它在 write trigger 与
+application 两侧绑定 graph/revision/node/attempt/lease owner/fence/node grant、request/self/relationship/
+workspace、sync 和 self-affect revision。Surface 仅在 ledger receipt 成功后生成可见句，Frozen executor/
+worker 会复验同一 identity；它不提前写 Life、Memory、Voice、Avatar 或 transport。普通 Chat 切流、连接恢复、
+真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
 ## 1. 结论
 

@@ -633,12 +633,13 @@ flowchart LR
 ```
 
 当前已有显式 provider-final result 与条件 usage 合同，但默认 Vault adapter 没有绑定它，且它本身不创建
-用户可见 authority。因此带 node-bound `ModelBudgetGuard` 的 Governed Chat 仍保持 usage-safe
-buffered path：Task Runtime 还必须先提供逐句 node/attempt/lease-bound delivery intent、cancel、
-restart replay 与 duplicate fence，不能为了首 token 延迟静默去掉预算或 acceptance authority。
-Governed Chat 已不再无条件抑制 TTS/VTS，但仍只把 protocol 随 Task Acceptance effect 暂存，不能在
-speculative worker 中提前触发物理输出。远端 Edge、真实 TTS/Avatar channel receipt、connection
-resume 与全服务栈验收仍不在这条本地 Host protocol 切片的完成范围。
+用户可见 authority。`0149` 现在让带 node-bound `ModelBudgetGuard` 的**冻结 Chat vertical slice**先写
+`TaskChatDeliveryStore`，再让唯一已落库的 `TASK_NODE_SENTENCE_STAGED` 事件经 Frozen executor 与 Worker
+转发：每句同时绑定 graph/revision/node/attempt/lease owner/fence/node grant、self、relationship subject、
+workspace、plan/sync/self-affect revision；旧 lease、grant 或 payload drift 一律拒绝。它不改变 Life、Memory、
+TTS、Avatar 或 transport，后者仍只在 Task Acceptance effect 后执行。普通 Chat 的治理切流、connection resume、
+跨进程完整 recovery、远端 Edge、真实 TTS/Avatar channel receipt 与全服务栈验收仍不在这条本地 Host protocol
+切片的完成范围。
 
 `DL-06_HOST_EMOTION_RUNTIME_CUTOVER_SLICE` 已令 production Host root 不再构造
 `HostEmotionRuntime`，且 ASGI 为 Input 与 Tribe 都注入 lazy Life command provider；二者在

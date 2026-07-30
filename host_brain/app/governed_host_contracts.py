@@ -82,6 +82,9 @@ def _build_frozen_context(
         if isinstance(item, Mapping)
     ]
     frozen = {
+        "relationship_subject_id": str(
+            getattr(request_body, "person_id", "") or ""
+        ).strip(),
         "surface_user_message": str(surface_user_message or "")[:_MAX_DURABLE_TEXT],
         "prepared_emotion_context": dict(emotion_context or {}),
         "emotion_snapshot": dict(emotion_snapshot or {}),
@@ -96,6 +99,10 @@ def _build_frozen_context(
         "prepared_render_target_lang": str(render_target_lang or "zh")[:16],
         "request_body": {
             "input_source": str(getattr(request_body, "input_source", "") or "").strip(),
+            "workspace_id": str(getattr(request_body, "workspace_id", "") or "").strip(),
+            "relationship_subject_id": str(
+                getattr(request_body, "person_id", "") or ""
+            ).strip(),
             "response_form": str(getattr(request_body, "response_form", "") or "").strip(),
             "render_policy": dict(getattr(request_body, "render_policy", {}) or {}),
             "attachments": attachments,

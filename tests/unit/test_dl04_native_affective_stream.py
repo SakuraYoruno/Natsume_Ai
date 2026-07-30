@@ -20,6 +20,10 @@ from host_brain.model_runtime import (
     ProviderTarget,
     RouteDecision,
 )
+from host_brain.model_runtime.contracts import ModelBudgetGuard
+from host_brain.task_runtime.chat_delivery_authority import (
+    TaskBoundChatDeliveryAuthority,
+)
 
 
 SOUL = "你是七海。中文私聊，真诚、有分寸，不操控用户。"
@@ -207,6 +211,170 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
     assert foreground["emotion_context"]["emotion_tag"] == "CALM"
     assert foreground["emotion_context"]["emotion_source"] == "affective_turn_plan"
     assert foreground["surface_result"]["plan_id"] == submitted[0]["payload"]["affective_turn_plan"]["plan_id"]
+
+
+@pytest.mark.asyncio
+async def test_governed_stream_uses_task_bound_sentence_receipts_not_life_writes(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """The real governed branch must persist text before SSE but defer effects."""
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class RecordingTaskDeliveryAuthority(TaskBoundChatDeliveryAuthority):
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int]] = []
+
+        def stage_plan(self, plan):  # noqa: ANN001
+            assert plan["self_id"] == "natsume_ai"
+            assert plan["relationship_subject_id"] == "person-stream"
+            assert plan["workspace_id"] == "workspace-stream"
+            self.calls.append(("PLAN_FROZEN", -1))
+            return {
+                "event_id": "taskchat://" + "a" * 64,
+                "delivery_status": "TASK_NODE_STREAM_RECORDED",
+                "replayed": False,
+            }
+
+        def stage_sentence(self, *, plan, sentence, sentence_index):  # noqa: ANN001
+            assert plan["self_id"] == "natsume_ai"
+            self.calls.append(("SENTENCE_STAGED", int(sentence_index)))
+            return {
+                "phase": "SENTENCE",
+                "sentence": sentence,
+                "sentence_index": sentence_index,
+                "delivery_id": "taskchat://" + f"{sentence_index + 1:064x}",
+                "delivery_status": "TASK_NODE_SENTENCE_STAGED",
+                "replayed": False,
+                "request_id": "request-stream",
+                "graph_id": "graph-stream",
+                "graph_revision": 1,
+                "node_id": "node-stream",
+                "attempt_id": "attempt-stream",
+                "lease_id": "lease-stream",
+                "lease_owner_id": "owner-stream",
+                "fencing_token": 1,
+                "node_grant_ref": "governor-grant://child/stream",
+                "self_id": "natsume_ai",
+                "relationship_subject_id": "person-stream",
+                "workspace_id": "workspace-stream",
+                "plan_id": str(plan["plan_id"]),
+                "synchronization_id": str(plan["expression_plan"]["synchronization_id"]),
+                "self_affect_revision": int(plan["self_affect_revision"]),
+            }
+
+        def record_stream_control(self, *, plan, event_kind, sent_sentence_count, reason_code=""):  # noqa: ANN001
+            self.calls.append((str(event_kind), int(sent_sentence_count)))
+            return {
+                "event_id": "taskchat://" + "f" * 64,
+                "event_kind": event_kind,
+                "delivery_status": "TASK_NODE_STREAM_RECORDED",
+            }
+
+    class GuardedStreamingModel:
+        async def stream_with_result(self, request):  # noqa: ANN001
+            yield ModelAttemptStreamEvent.delta("我在。")
+            target = ProviderTarget("surface-guarded", "provider", "model")
+            yield ModelAttemptStreamEvent.final(
+                ModelAttemptResult(
+                    request_id=request.request_id,
+                    success=True,
+                    route_decision=RouteDecision(
+                        "route-surface-guarded", (target,), "test", max_attempts=1
+                    ),
+                    attempts=(
+                        ModelAttemptRecord(
+                            attempt_id="attempt-model-guarded",
+                            request_id=request.request_id,
+                            route_decision_id="route-surface-guarded",
+                            attempt_index=1,
+                            status=AttemptStatus.SUCCEEDED,
+                            retry_reason="initial",
+                            adapter_id="surface-guarded",
+                            provider="provider",
+                            model_id="model",
+                            prompt_id="surface.main.text.v1",
+                            prompt_version="1",
+                            prompt_digest="b" * 64,
+                            started_at_ms=1,
+                            ended_at_ms=2,
+                            latency_ms=1,
+                            metadata={
+                                "provider_budget_measurements": {
+                                    "token_count": 8,
+                                    "completion_tokens": 4,
+                                    "model_cost_micros": 16,
+                                }
+                            },
+                        ),
+                    ),
+                    response=ProviderResponse(
+                        content="我在。",
+                        usage={
+                            "total_tokens": 8,
+                            "completion_tokens": 4,
+                            "model_cost_micros": 16,
+                        },
+                    ),
+                    final_target=target,
+                )
+            )
+
+    def unexpected_life_write(**_kwargs: Any) -> dict[str, Any]:
+        pytest.fail("governed streaming must not write Life before Task Acceptance")
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.delivery_audit.submit_life_command",
+        unexpected_life_write,
+    )
+    authority = RecordingTaskDeliveryAuthority()
+    guard = ModelBudgetGuard(
+        budget_id="budget://stream",
+        graph_id="graph-stream",
+        graph_revision=1,
+        node_id="node-stream",
+        attempt_id="attempt-stream",
+        deadline_ms=4_000,
+        max_provider_attempts=1,
+        max_token_count=64,
+        max_output_tokens=64,
+        max_model_cost_micros=1_000,
+    )
+    agent_input = _agent_input()
+    agent_input.defer_effects_to_task_runtime = True
+    agent_input.governed_delivery_authority = authority
+    agent_input.trace_stage_meta = {"governed_model_budget": guard.as_dict()}
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=lambda: GuardedStreamingModel(),
+    )
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(agent_input, ports=ports)
+    ]
+
+    sentences = [event for event in events if event.get("phase") == "SENTENCE"]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    assert [event["delivery_status"] for event in sentences] == [
+        "TASK_NODE_SENTENCE_STAGED"
+    ]
+    assert not [event for event in events if event.get("phase") == "DELIVERY"]
+    assert authority.calls == [
+        ("PLAN_FROZEN", -1),
+        ("SENTENCE_STAGED", 0),
+        ("STREAM_COMPLETED", 1),
+    ]
+    assert commit["decision"] == "APPROVE"
+    assert commit["acceptance_effect_intents"][0]["effect_type"] == (
+        "life.foreground_completed"
+    )
+    assert commit["audit_refs"]["surface_main_chain"]["mode"] == (
+        "governed_node_sentence_stream"
+    )
 
 
 @pytest.mark.asyncio

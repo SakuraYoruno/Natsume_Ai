@@ -285,6 +285,11 @@ def _build_chat_input(
         defer_effects_to_task_runtime=bool(
             getattr(request_body, "defer_effects_to_task_runtime", False)
         ),
+        governed_delivery_authority=getattr(
+            request_body,
+            "governed_delivery_authority",
+            None,
+        ),
         ts_ms=ts_ms,
         intent_draft=dict(intent_draft or {}),
         trace_stage_meta=chat_trace_stage_meta,
