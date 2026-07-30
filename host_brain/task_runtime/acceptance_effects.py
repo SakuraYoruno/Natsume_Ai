@@ -219,7 +219,7 @@ def compile_graph_acceptance_effects(
         for descriptor in descriptors
         if descriptor["effect_type"] == "life.foreground_completed"
     )
-    companion_subject_id = _frozen_companion_subject_id(
+    companion_subject_id, companion_workspace_id = _frozen_companion_scope(
         command=command,
         pack=pack,
     )
@@ -241,12 +241,21 @@ def compile_graph_acceptance_effects(
         node_id=node_ref,
         worker_commit=commit,
     )
-    has_affective_plan = isinstance(
-        _json_mapping(foreground.get("payload"), field_name="foreground.payload").get(
-            "affective_turn_plan"
-        ),
-        Mapping,
-    )
+    raw_affective_plan = _json_mapping(
+        foreground.get("payload"),
+        field_name="foreground.payload",
+    ).get("affective_turn_plan")
+    if raw_affective_plan is None or raw_affective_plan == {}:
+        # Compatibility/task routes that did not freeze a companion plan may
+        # still accept their text result.  They cannot manufacture Voice or
+        # Avatar effects from an empty placeholder.
+        has_affective_plan = False
+    elif not isinstance(raw_affective_plan, Mapping) or (
+        raw_affective_plan.get("schema_version") != "affective_turn_plan.v1"
+    ):
+        raise AcceptanceEffectCompileError("affective turn plan is invalid")
+    else:
+        has_affective_plan = True
     companion_expression_effects: tuple[dict[str, Any], ...] = ()
     if has_affective_plan:
         if preview_context is None:
@@ -262,6 +271,8 @@ def compile_graph_acceptance_effects(
                     attempt_id=attempt_ref,
                     request_id=command.request_id,
                     principal_id=command.principal_id,
+                    relationship_subject_id=companion_subject_id,
+                    workspace_id=companion_workspace_id,
                     session_id=command.session_id,
                     node_grant_ref=str(preview_context["node_grant_ref"]),
                     foreground=foreground,
@@ -1437,11 +1448,11 @@ def _trusted_foreground_command(
     }
 
 
-def _frozen_companion_subject_id(
+def _frozen_companion_scope(
     *,
     command: HostCommand,
     pack: Mapping[str, Any],
-) -> str:
+) -> tuple[str, str]:
     """Resolve the immutable relationship subject for companion projections.
 
     Runtime Context v1 deliberately separates an authenticated transport
@@ -1454,7 +1465,7 @@ def _frozen_companion_subject_id(
 
     schema = pack.get("runtime_context_schema")
     if schema is None:
-        return str(command.principal_id or "").strip()
+        return str(command.principal_id or "").strip(), ""
     if schema != "natsume.runtime-context.request.v1":
         raise AcceptanceEffectCompileError(
             "runtime-context companion subject schema is invalid"
@@ -1465,7 +1476,7 @@ def _frozen_companion_subject_id(
         raise AcceptanceEffectCompileError(
             "runtime-context companion projection has no canonical subject or workspace"
         )
-    return subject_id
+    return subject_id, workspace_id
 
 
 def _spec(

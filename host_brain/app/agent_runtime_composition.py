@@ -24,7 +24,6 @@ from host_brain.app.route_catalog_runtime import (
     resolve_host_llm_runtime_async_from_catalog,
     resolve_surface_reply_llm_runtime,
 )
-from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.observability.runtime_audit import _persist_post_process_audit
 
@@ -93,7 +92,6 @@ def build_agent_runtime_application_ports(
     prompt_registry = host_services.require_provider("prompt_registry")
     model_attempt_service = host_services.require_provider("model_attempt_service")
     model_route_catalog = host_services.require_provider("model_route_catalog")
-    bond_stage_engine = host_services.require_provider("bond_stage_engine")
     session_topic_ledger_store = host_services.require_provider(
         "session_topic_ledger_store"
     )
@@ -178,12 +176,6 @@ def build_agent_runtime_application_ports(
             **kwargs,
         )
 
-    async def resolve_state_arbiter_bond_fact_with_engine(**kwargs: Any) -> Any:
-        return await _resolve_state_arbiter_bond_fact(
-            bond_stage_engine=bond_stage_engine(),
-            **kwargs,
-        )
-
     def build_user_preference_pack_with_ledger(**kwargs: Any) -> dict[str, Any]:
         return build_user_preference_pack(ledger=ledger(), **kwargs)
 
@@ -212,7 +204,6 @@ def build_agent_runtime_application_ports(
         resolve_surface_reply_llm_runtime=(
             resolve_surface_reply_llm_runtime_with_catalog
         ),
-        resolve_state_arbiter_bond_fact=resolve_state_arbiter_bond_fact_with_engine,
         build_conversation_experience_read_pack=conversation_experience_read_pack,
         conversation_history=conversation_history,
         life_memory_service=life_memory_service,

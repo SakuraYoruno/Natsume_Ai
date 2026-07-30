@@ -496,6 +496,14 @@ clue 以及 lover task 都没有再次升温的机会；只有 rupture/rejected 
 Bond fetch。该 projection 是检索与 Motive 的唯一关系输入；scope/schema 失效也只给 guarded，不向旧 Bond 回退。
 定向验证为 `34 passed in 5.64s`，不能外推为其它 reader、真实模型或 DL-07 已完成。
 
+**Agent Runtime 缺失 hand-off 收口：** production `AgentRuntimeApplicationPorts` 已删除 legacy
+`resolve_state_arbiter_bond_fact`，composition 不再解析 `bond_stage_engine`。因此即使某个 caller 漏掉 Life
+hand-off，`fastpaths` 也不会再读旧 Bond；它只提供 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / guarded` 的
+有界安全 projection 给 Retrieval/Motive。该轮还把 governed expression compiler 改为以冻结 relationship
+subject/workspace 和稳定分句重建 Host Voice/Avatar protocol，禁止 service principal 混入关系 scope、禁止接受阶段重切句。
+定向 unit/contract/邻接 SQLite integration 为 `81 passed in 50.78s`；这不证明 Monitor/Review、其他 compatibility
+reader、真实 provider/Gateway/Edge 或 DL-07。
+
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。
 任何遗漏 Life authority 的 Host request 都稳定拒绝为 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不再以

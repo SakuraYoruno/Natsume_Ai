@@ -14,7 +14,8 @@ import json
 from typing import Any
 
 from host_brain.digital_life.affective_expression_delivery import (
-    build_buffered_expression_delivery,
+    build_expression_delivery_controls,
+    build_sentence_expression_delivery,
     parse_expression_delivery_intent,
     parse_expression_delivery_receipt,
 )
@@ -46,6 +47,8 @@ def compile_companion_expression_effect_payloads(
     attempt_id: str,
     request_id: str,
     principal_id: str,
+    relationship_subject_id: str,
+    workspace_id: str,
     session_id: str,
     node_grant_ref: str,
     foreground: Mapping[str, Any],
@@ -65,6 +68,8 @@ def compile_companion_expression_effect_payloads(
         attempt_id=attempt_id,
         request_id=request_id,
         principal_id=principal_id,
+        relationship_subject_id=relationship_subject_id,
+        workspace_id=workspace_id,
         session_id=session_id,
         node_grant_ref=node_grant_ref,
     )
@@ -75,27 +80,26 @@ def compile_companion_expression_effect_payloads(
         return ()
     plan = _mapping(raw_plan, "affective_turn_plan")
     _require_plan_scope(plan=plan, command_scope=command_scope)
+    if foreground_value["person_id"] != command_scope["relationship_subject_id"]:
+        raise CompanionExpressionEffectError("AFFECTIVE_TURN_PLAN_SCOPE_DRIFT")
     if str(payload.get("affective_turn_plan_digest") or "") != digest_json(plan):
         raise CompanionExpressionEffectError("AFFECTIVE_TURN_PLAN_DIGEST_DRIFT")
-    created_at_ms = _non_negative_int(
+    foreground_created_at_ms = _non_negative_int(
         foreground_value.get("created_at_ms"), "foreground.created_at_ms"
     )
     narrative = _required_text(payload.get("assistant_reply"), "assistant_reply", 32_000)
     try:
-        sentence_intents, controls, receipts = build_buffered_expression_delivery(
+        sentence_intents, controls, receipts = _rebuild_frozen_expression_protocol(
             affective_turn_plan=plan,
             narrative=narrative,
-            created_at_ms=created_at_ms,
+            foreground_created_at_ms=foreground_created_at_ms,
+            payload=payload,
         )
+    except CompanionExpressionEffectError:
+        raise
     except ValueError as exc:
         raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_INVALID") from exc
     expected_intents = tuple((*sentence_intents, *controls))
-    _require_protocol_projection(
-        payload=payload,
-        intents=expected_intents,
-        sentence_intent_count=len(sentence_intents),
-        receipts=receipts,
-    )
     life_binding = _foreground_life_binding(foreground_value)
     values: list[dict[str, Any]] = []
     for sequence, (intent, receipt) in enumerate(zip(expected_intents, receipts, strict=True)):
@@ -186,6 +190,9 @@ def verify_companion_expression_command(
 
 
 def _required_scope(**value: Any) -> dict[str, Any]:
+    workspace_id = str(value.get("workspace_id") or "").strip()
+    if len(workspace_id) > 240:
+        raise CompanionExpressionEffectError("WORKSPACE_ID_INVALID")
     return {
         "graph_id": _required_text(value.get("graph_id"), "graph_id", 240),
         "graph_revision": _positive_int(value.get("graph_revision"), "graph_revision"),
@@ -193,6 +200,15 @@ def _required_scope(**value: Any) -> dict[str, Any]:
         "attempt_id": _required_text(value.get("attempt_id"), "attempt_id", 240),
         "request_id": _required_text(value.get("request_id"), "request_id", 240),
         "principal_id": _required_text(value.get("principal_id"), "principal_id", 240),
+        "relationship_subject_id": _required_text(
+            value.get("relationship_subject_id"),
+            "relationship_subject_id",
+            240,
+        ),
+        # Runtime Context v1 always freezes this.  The empty branch remains
+        # only for the bounded pre-context replay window, where the plan still
+        # has to carry a non-empty workspace of its own.
+        "workspace_id": workspace_id,
         "session_id": _required_text(value.get("session_id"), "session_id", 240),
         "node_grant_ref": _required_text(value.get("node_grant_ref"), "node_grant_ref", 512),
     }
@@ -221,37 +237,138 @@ def _foreground_command(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _require_plan_scope(*, plan: Mapping[str, Any], command_scope: Mapping[str, Any]) -> None:
-    if (
-        plan.get("schema_version") != "affective_turn_plan.v1"
-        or str(plan.get("self_id") or "") != "natsume_ai"
-        or str(plan.get("request_id") or "") != command_scope["request_id"]
-        or str(plan.get("relationship_subject_id") or "")
-        != command_scope["principal_id"]
-        or str(plan.get("session_id") or "") != command_scope["session_id"]
-        or not str(plan.get("workspace_id") or "").strip()
+    plan_workspace_id = str(plan.get("workspace_id") or "").strip()
+    drifted: list[str] = []
+    if plan.get("schema_version") != "affective_turn_plan.v1":
+        drifted.append("schema")
+    if str(plan.get("self_id") or "") != "natsume_ai":
+        drifted.append("self")
+    if str(plan.get("request_id") or "") != command_scope["request_id"]:
+        drifted.append("request")
+    if str(plan.get("relationship_subject_id") or "") != command_scope[
+        "relationship_subject_id"
+    ]:
+        drifted.append("relationship_subject")
+    if str(plan.get("session_id") or "") != command_scope["session_id"]:
+        drifted.append("session")
+    if not plan_workspace_id or (
+        bool(command_scope["workspace_id"])
+        and plan_workspace_id != command_scope["workspace_id"]
     ):
-        raise CompanionExpressionEffectError("AFFECTIVE_TURN_PLAN_SCOPE_DRIFT")
+        drifted.append("workspace")
+    if drifted:
+        raise CompanionExpressionEffectError(
+            "AFFECTIVE_TURN_PLAN_SCOPE_DRIFT:" + ",".join(drifted)
+        )
 
 
-def _require_protocol_projection(
+def _rebuild_frozen_expression_protocol(
     *,
+    affective_turn_plan: Mapping[str, Any],
+    narrative: str,
+    foreground_created_at_ms: int,
     payload: Mapping[str, Any],
-    intents: Sequence[Any],
-    sentence_intent_count: int,
-    receipts: Sequence[Any],
-) -> None:
+) -> tuple[tuple[Any, ...], tuple[Any, ...], tuple[Any, ...]]:
+    """Rebuild a governed protocol from its exact frozen sentence boundaries.
+
+    Stable sentence boundaries can differ from generic text segmentation.  The
+    raw worker projection is therefore never used as authority by itself: each
+    sentence pair and terminal control is rebuilt from the immutable plan,
+    exact frozen text and its persisted protocol timestamp.  This preserves
+    already-visible task-owned sentences without collapsing them into a new
+    buffered utterance at Acceptance.
+    """
+
     raw_intents = _sequence(payload.get("expression_delivery_intents"), "expression_delivery_intents")
     raw_controls = _sequence(payload.get("expression_delivery_controls"), "expression_delivery_controls")
     raw_receipts = _sequence(payload.get("expression_delivery_receipts"), "expression_delivery_receipts")
-    expected_sentence = [item.as_dict() for item in intents[:sentence_intent_count]]
-    expected_controls = [item.as_dict() for item in intents[sentence_intent_count:]]
-    expected_receipts = [item.as_dict() for item in receipts]
+    try:
+        parsed_intents = tuple(
+            parse_expression_delivery_intent(item) for item in raw_intents
+        )
+        parsed_controls = tuple(
+            parse_expression_delivery_intent(item) for item in raw_controls
+        )
+        parsed_receipts = tuple(
+            parse_expression_delivery_receipt(item) for item in raw_receipts
+        )
+    except ValueError as exc:
+        raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT") from exc
+
+    if not parsed_intents or len(parsed_intents) % 2 or len(parsed_controls) != 2:
+        raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+
+    expected_sentence_intents: list[Any] = []
+    expected_sentence_receipts: list[Any] = []
+    sentence_texts: list[str] = []
+    sentence_count = len(parsed_intents) // 2
+    for sentence_index in range(sentence_count):
+        offset = sentence_index * 2
+        raw_pair = parsed_intents[offset : offset + 2]
+        voice, avatar = raw_pair
+        if (
+            voice.channel != "VOICE"
+            or voice.action != "SPEAK"
+            or avatar.channel != "AVATAR"
+            or avatar.action != "TRANSITION"
+            or voice.sentence_index != sentence_index
+            or avatar.sentence_index != sentence_index
+            or voice.created_at_ms != avatar.created_at_ms
+        ):
+            raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+        sentence = _required_text(
+            _mapping(voice.payload, "voice.payload").get("text"),
+            "voice.payload.text",
+            2_000,
+        )
+        expected_pair, expected_pair_receipts = build_sentence_expression_delivery(
+            affective_turn_plan=affective_turn_plan,
+            sentence=sentence,
+            sentence_index=sentence_index,
+            created_at_ms=voice.created_at_ms,
+        )
+        if [item.as_dict() for item in raw_pair] != [
+            item.as_dict() for item in expected_pair
+        ]:
+            raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+        expected_sentence_intents.extend(expected_pair)
+        expected_sentence_receipts.extend(expected_pair_receipts)
+        sentence_texts.append(sentence)
+
+    if "".join(sentence_texts).strip() != narrative:
+        raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+
+    voice_control, avatar_control = parsed_controls
     if (
-        raw_intents != expected_sentence
-        or raw_controls != expected_controls
-        or raw_receipts != expected_receipts
+        voice_control.channel != "VOICE"
+        or voice_control.action != "RELEASE"
+        or avatar_control.channel != "AVATAR"
+        or avatar_control.action != "RELEASE"
+        or voice_control.sentence_index != sentence_count
+        or avatar_control.sentence_index != sentence_count
+        or voice_control.created_at_ms != avatar_control.created_at_ms
+        or voice_control.created_at_ms != foreground_created_at_ms
     ):
         raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+    expected_controls, expected_control_receipts = build_expression_delivery_controls(
+        affective_turn_plan=affective_turn_plan,
+        action="RELEASE",
+        sent_sentence_count=sentence_count,
+        created_at_ms=foreground_created_at_ms,
+    )
+    if [item.as_dict() for item in parsed_controls] != [
+        item.as_dict() for item in expected_controls
+    ]:
+        raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+
+    expected_receipts = tuple(
+        (*expected_sentence_receipts, *expected_control_receipts)
+    )
+    if [item.as_dict() for item in parsed_receipts] != [
+        item.as_dict() for item in expected_receipts
+    ]:
+        raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+    return tuple(expected_sentence_intents), tuple(expected_controls), expected_receipts
 
 
 def _foreground_life_binding(foreground: Mapping[str, Any]) -> dict[str, str]:

@@ -269,6 +269,23 @@ relationship subject/principal，并写入 `personal:<subject>` workspace；请�
 `LOCAL_PERSONAL_UNATTESTED`，不含 Secure Ingress claim/audit/tenant，不能外推为多用户认证；
 Gateway 和多用户关系始终由 `/v1/host/input` 的签名身份建立。
 
+### DL-06 Agent Runtime 旧 Bond 读取退役
+
+`AgentRuntimeApplicationPorts` 已不再包含 state-arbiter Bond read port，app-local Agent Runtime composition
+不会解析 `bond_stage_engine`。Cortex retrieval prefetch 因而只接受 scope/schema/self-id 全部校验通过的
+canonical `RelationshipStateV2` 投影；hand-off 缺失时采用 `CANONICAL_RELATIONSHIP_UNAVAILABLE` 的
+`FRIEND / stepsibling / guarded` 安全下限，不读历史 score、stage、label 或 interaction count。该变化只收紧
+Agent Runtime 的生产读取边界；rollback-window Bond read API、其它 compatibility reader 和真实服务栈证据仍独立。
+
+### DL-05/06 受治理表达 Acceptance scope
+
+`task_runtime/acceptance_effects.py` 从 Runtime Context 冻结 relationship subject 与 workspace，服务 principal 仍只
+绑定 HostCommand/Grant。`companion_expression_acceptance.py` 对 `AffectiveTurnPlanV1` 同时核验 request、subject、
+workspace 与 session，再从持久化的每一对 `VOICE/SPEAK + AVATAR/TRANSITION` 分句重建 intent、receipt 和末尾
+`RELEASE`；通用 buffered re-segmentation 不再拥有写 authority。没有 plan 或只有 `{}` 兼容占位的任务只接受文本，
+不能凭空排队 TTS/Avatar。实际 Host ASGI 已提供 embodiment runtime；本地集成也只写 Host protocol ledger，远端 Edge
+physical receipt 仍未启动。
+
 ### DL-06 签名 Gateway conversation scope 修订
 
 `runtime/conversation_scope.py` 现在是 `/v1/host/input` 与 Runtime Context 共用的 scope contract。

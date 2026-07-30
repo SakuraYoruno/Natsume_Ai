@@ -40,7 +40,6 @@ def _agent_runtime_ports() -> AgentRuntimeApplicationPorts:
         resolve_surface_reply_llm_runtime=lambda **kwargs: dict(
             kwargs.get("base_runtime") or {}
         ),
-        resolve_state_arbiter_bond_fact=_async_value,
         build_conversation_experience_read_pack=lambda **_kwargs: {},
         conversation_history=lambda: object(),
         life_memory_service=lambda: object(),

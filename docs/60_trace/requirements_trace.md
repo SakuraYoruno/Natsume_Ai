@@ -365,6 +365,29 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 `LOCAL_PROFILE_TEXT_COMPILER_PASS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / EMOTIONAL_DIGITAL_LIFE_PARTIAL`；
 它不代表真实模型、Gateway 平台、TTS/VTS/Avatar、盲评或 DL-07 全栈体验通过。
 
+### TRACE-DL06-AGENT-RUNTIME-BOND-READ-19
+
+`FR-CHAT / FR-NLE-003 / FR-PRIVACY` 要求检索和动机不能在 canonical Life hand-off 缺失时以 legacy
+Bond 作为关系补全。`agent_runtime/application_ports.py` 已移除该 port，
+`app/agent_runtime_composition.py` 不再 resolve `bond_stage_engine`，`agent_runtime/fastpaths.py` 仅在
+hand-off 完整时读取无分数 projection；否则固定输出
+`CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / stepsibling / guarded`。证据为
+`test_dl06_retrieval_canonical_relationship_cutover.py`、`test_ne01_agent_runtime_composition.py` 与邻接
+contract/integration 组合；与受治理表达 Acceptance 的同波最终集合为 `81 passed in 50.78s`。状态为
+`LOCAL_AGENT_RUNTIME_READ_CUTOVER_PASS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / EMOTIONAL_DIGITAL_LIFE_PARTIAL`；
+未证明其它 compatibility reader、真实 provider/Gateway、远端 Edge 或 DL-07。
+
+### TRACE-DL05-GOVERNED-EXPRESSION-SCOPE-20
+
+`FR-CHAT / FR-NLE-003 / FR-PRIVACY` 要求 Gateway service principal 不能替代 companion relationship subject。
+`task_runtime/acceptance_effects.py` 从 frozen Runtime Context 读取 subject/workspace，
+`digital_life/companion_expression_acceptance.py` 核验 plan scope、重建每一条已持久化稳定分句的 Voice/Avatar pair
+及 terminal release，并逐项核对 receipt。空 `{}` compatibility plan 不产生 expression effect。证据为
+`test_dl05_expression_delivery.py` 与 `test_gr05_universal_host_runtime.py`：后者在真实 SQLite TaskGraph、Acceptance
+handler 和受控 Gateway transport 中确认 6 个 Host-staged protocol effect；同波集合 `81 passed in 50.78s`。状态为
+`LOCAL_HOST_PROTOCOL_PASS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / REMOTE_EDGE_NOT_STARTED`，不得解释为物理 TTS/VTS/Avatar
+播放或 DL-07。
+
 ## 4. Planning Search
 
 | Trace | FR | 合同 | 生产落点 | 证据 | 当前状态 | 下一波 |

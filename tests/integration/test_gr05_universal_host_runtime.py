@@ -185,7 +185,6 @@ def _production_acceptance_effect_ports(
         resolve_surface_reply_llm_runtime=lambda **kwargs: dict(
             kwargs.get("base_runtime") or {}
         ),
-        resolve_state_arbiter_bond_fact=_unused_async,
         build_conversation_experience_read_pack=lambda **_kwargs: {},
         conversation_history=lambda: None,
         life_memory_service=lambda: life_memory_service,
@@ -642,10 +641,16 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                     ledger
                 ),
                     preference_store=UserPreferenceStore(ledger=ledger),
-                    life_command_service_provider=lambda: life.command_service,
-                    life_receipt_reader_provider=lambda: life.snapshot_reader,
+                life_command_service_provider=lambda: life.command_service,
+                life_receipt_reader_provider=lambda: life.snapshot_reader,
                 life_projection_dispatcher=projection_dispatcher,
                 agent_runtime_ports=agent_runtime_ports,
+                # The Host ASGI composition supplies the same durable
+                # embodiment runtime to accepted companion-expression effects.
+                # This integration fixture creates that real Host runtime above,
+                # so keep its wiring production-equivalent rather than leaving
+                # expression receipts without a committed handler.
+                embodiment_runtime_provider=lambda: embodiment_runtime,
             ),
             owner_id="gr05-universal-acceptance-effects",
             action_preview_service=action_preview_service,
@@ -1344,13 +1349,18 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         assert acceptance_effects == [
             ("conversation.preference_signal", "GRAPH", "COMMITTED", 4),
             ("conversation.user_turn", "GRAPH", "COMMITTED", 4),
+            # DL-05 freezes two stable sentences and one terminal release
+            # for both Voice and Avatar before Gateway delivery.  They are
+            # Host-staged protocol receipts here, not a claim that a remote
+            # Edge device physically played or applied them.
+            ("host.companion_expression_enqueue", "GRAPH", "COMMITTED", 6),
             ("life.conversation_turn_recorded", "GRAPH", "COMMITTED", 4),
             ("life.foreground_completed", "GRAPH", "COMMITTED", 4),
             ("surface.reply_delivery", "GRAPH", "COMMITTED", 1),
         ]
         assert results["chat"][-1]["audit_refs"]["acceptance_effects"] == {
-            "count": 5,
-            "committed": 5,
+            "count": 11,
+            "committed": 11,
             "failed": 0,
             "pending": 0,
             "recovery_pending": 0,

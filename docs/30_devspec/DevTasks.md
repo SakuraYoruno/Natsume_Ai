@@ -75,6 +75,15 @@ relationship aftereffect 继续由 canonical Life/Acceptance owner 处理，不�
 跨线程 event loop；ANS 仅留在 isolated compatibility catalog。此为本地 application-boundary
 authority 收口，不代表全局删除 ANS、真实模型、Gateway、远端 Edge 或 DL-07 验收完成。
 
+**DL-06 Agent Runtime 旧 Bond 读取退役：** `AgentRuntimeApplicationPorts` 不再发布
+`resolve_state_arbiter_bond_fact`，`agent_runtime_composition.py` 也不再解析 `bond_stage_engine`。
+`fastpaths` 只有在内部 canonical Life hand-off 完整时才将无分数的朋友关系纹理投入 Retrieval/Motive；hand-off
+缺失则固定为 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / guarded`，不会读取历史 score、stage、label 或互动次数。
+同轮还修正 governed expression Acceptance：service principal 与 relationship subject/workspace 分离，按冻结稳定分句
+而非通用文本分句重建 Voice/Avatar protocol，空兼容 plan 不产生多模态 effect。受影响 unit/contract/SQLite integration
+为 `81 passed in 50.78s`；Gateway transport 为受控本地 handler，仍不代表真实 provider、第三方 Gateway、远端 Edge
+或 DL-07 服务栈已完成。
+
 **DL-06 canonical 主动节律修订：** Scheduler 的发送 policy 现在先以 canonical
 `self-affect + relationship + regulation + profile + frozen Scene` 编译实际
 `AffectiveTurnPlanV1`，然后把 plan id、`synchronization_id`、content digest、scope 与 cadence

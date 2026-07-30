@@ -284,6 +284,8 @@ def _companion_effects() -> tuple[dict[str, object], ...]:
         attempt_id="attempt-dl05",
         request_id="request-dl05",
         principal_id="person-dl05",
+        relationship_subject_id="person-dl05",
+        workspace_id="workspace-dl05",
         session_id="session-dl05",
         node_grant_ref="node-grant://dl05",
         foreground=_governed_foreground(),
@@ -324,10 +326,106 @@ def test_governed_expression_acceptance_rejects_worker_protocol_drift() -> None:
             attempt_id="attempt-dl05",
             request_id="request-dl05",
             principal_id="person-dl05",
+            relationship_subject_id="person-dl05",
+            workspace_id="workspace-dl05",
             session_id="session-dl05",
             node_grant_ref="node-grant://dl05",
             foreground=foreground,
         )
+
+
+def test_governed_expression_acceptance_keeps_service_principal_separate_from_companion_subject() -> None:
+    effects = compile_companion_expression_effect_payloads(
+        graph_id="graph-dl05",
+        graph_revision=1,
+        node_id="node-dl05",
+        attempt_id="attempt-dl05",
+        request_id="request-dl05",
+        principal_id="service.edge.gateway",
+        relationship_subject_id="person-dl05",
+        workspace_id="workspace-dl05",
+        session_id="session-dl05",
+        node_grant_ref="node-grant://dl05",
+        foreground=_governed_foreground(),
+    )
+
+    assert len(effects) == 4
+    assert all(
+        parse_companion_expression_effect_payload(effect)["life_foreground"]["person_id"]
+        == "person-dl05"
+        for effect in effects
+    )
+
+
+def test_governed_expression_acceptance_rejects_subject_or_workspace_drift() -> None:
+    with pytest.raises(CompanionExpressionEffectError, match="SCOPE_DRIFT"):
+        compile_companion_expression_effect_payloads(
+            graph_id="graph-dl05",
+            graph_revision=1,
+            node_id="node-dl05",
+            attempt_id="attempt-dl05",
+            request_id="request-dl05",
+            principal_id="service.edge.gateway",
+            relationship_subject_id="other-person",
+            workspace_id="other-workspace",
+            session_id="session-dl05",
+            node_grant_ref="node-grant://dl05",
+            foreground=_governed_foreground(),
+        )
+
+
+def test_governed_expression_acceptance_preserves_frozen_sentence_boundaries() -> None:
+    foreground = _governed_foreground(narrative="先听我说再缓一缓")
+    payload = foreground["payload"]
+    assert isinstance(payload, dict)
+    plan = payload["affective_turn_plan"]
+    assert isinstance(plan, dict)
+    first_intents, first_receipts = build_sentence_expression_delivery(
+        affective_turn_plan=plan,
+        sentence="先听我说",
+        sentence_index=0,
+        created_at_ms=NOW + 3,
+    )
+    second_intents, second_receipts = build_sentence_expression_delivery(
+        affective_turn_plan=plan,
+        sentence="再缓一缓",
+        sentence_index=1,
+        created_at_ms=NOW + 3,
+    )
+    controls, control_receipts = build_expression_delivery_controls(
+        affective_turn_plan=plan,
+        action="RELEASE",
+        sent_sentence_count=2,
+        created_at_ms=NOW + 3,
+    )
+    payload["expression_delivery_intents"] = [
+        *(item.as_dict() for item in first_intents),
+        *(item.as_dict() for item in second_intents),
+    ]
+    payload["expression_delivery_controls"] = [
+        *(item.as_dict() for item in controls),
+    ]
+    payload["expression_delivery_receipts"] = [
+        *(item.as_dict() for item in first_receipts),
+        *(item.as_dict() for item in second_receipts),
+        *(item.as_dict() for item in control_receipts),
+    ]
+
+    effects = compile_companion_expression_effect_payloads(
+        graph_id="graph-dl05",
+        graph_revision=1,
+        node_id="node-dl05",
+        attempt_id="attempt-dl05",
+        request_id="request-dl05",
+        principal_id="service.edge.gateway",
+        relationship_subject_id="person-dl05",
+        workspace_id="workspace-dl05",
+        session_id="session-dl05",
+        node_grant_ref="node-grant://dl05",
+        foreground=foreground,
+    )
+
+    assert len(effects) == 6
 
 
 def test_accepted_companion_expression_only_enqueues_host_outbox(monkeypatch) -> None:

@@ -39,7 +39,6 @@ def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRun
         resolve_surface_reply_llm_runtime=lambda **kwargs: dict(
             kwargs.get("base_runtime") or {}
         ),
-        resolve_state_arbiter_bond_fact=_async_stub,
         build_conversation_experience_read_pack=lambda **kwargs: {
             "source": "experience-read-pack",
             "arguments": dict(kwargs),

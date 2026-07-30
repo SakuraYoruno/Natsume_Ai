@@ -17,7 +17,6 @@ class AgentRuntimeApplicationPorts:
     build_user_preference_pack: Callable[..., Any]
     resolve_host_llm_runtime_async: Callable[..., Awaitable[Any]]
     resolve_surface_reply_llm_runtime: Callable[..., Any]
-    resolve_state_arbiter_bond_fact: Callable[..., Awaitable[Any]]
     build_conversation_experience_read_pack: Callable[..., dict[str, Any]]
     conversation_history: Callable[[], Any]
     life_memory_service: Callable[[], Any]

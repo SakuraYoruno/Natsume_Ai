@@ -362,7 +362,6 @@ __all__ = [
     "_maybe_build_previous_meaning_answer",
     "_extract_delegate_from_llm_output",
     "_extract_visible_text",
-    "_build_retrieval_bond_summary",
     "_prefetch_retrieval_persona_inputs",
     "_resolve_persona_session_emotion",
     "_resolve_persisted_fallback_flag",

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -149,24 +148,11 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
                 "available": True,
             }
 
-    class BondStageEngine:
-        def __init__(self) -> None:
-            self.session_ids: list[str] = []
-
-        def get_bond_state(self, *, session_id: str) -> SimpleNamespace:
-            self.session_ids.append(session_id)
-            return SimpleNamespace(
-                stage="FRIEND",
-                score=0.8,
-                label="host-scoped",
-                interaction_count=3,
-            )
-
     ledger = object()
     topic_store = object()
     tactic_store = object()
     catalog = RouteCatalog()
-    bond_engine = BondStageEngine()
+    legacy_bond_provider_calls: list[str] = []
     captured: dict[str, object] = {}
 
     def fake_record_assistant_turn(**kwargs):  # noqa: ANN003, ANN202
@@ -178,10 +164,15 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
         "record_assistant_turn",
         fake_record_assistant_turn,
     )
+
+    def forbidden_legacy_bond_provider() -> object:
+        legacy_bond_provider_calls.append("resolved")
+        raise AssertionError("canonical Agent Runtime must not resolve legacy Bond")
+
     host_services = _host_services(
         ledger=lambda: ledger,
         model_route_catalog=lambda: catalog,
-        bond_stage_engine=lambda: bond_engine,
+        bond_stage_engine=forbidden_legacy_bond_provider,
         session_topic_ledger_store=lambda: topic_store,
         session_tactic_ledger_store=lambda: tactic_store,
     )
@@ -214,16 +205,7 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
     )
     assert runtime["chat_provider_name"] == "host-scoped-provider"
     assert [call["scene_type"] for call in catalog.calls] == ["CHAT", "MULTIMODAL"]
-
-    bond_summary, evidence = asyncio.run(
-        ports.resolve_state_arbiter_bond_fact(
-            session_id="session-scoped-dependencies",
-            request_id="request-scoped-dependencies",
-        )
-    )
-    assert bond_summary["status"] == "APPLIED"
-    assert evidence is not None
-    assert bond_engine.session_ids == ["session-scoped-dependencies"]
+    assert legacy_bond_provider_calls == []
 
 
 def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(

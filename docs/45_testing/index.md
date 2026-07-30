@@ -514,6 +514,14 @@
   生成无 score 的 `FRIEND / stepsibling / familiar` 摘要；workspace drift 生成 guarded rejected 摘要；两者均不调用
   legacy state-arbiter Bond fetch，Motive 也只能收到该 bounded projection。Cortex workspace 传递、governed route、
   Surface 关系 Gate 一并为 `34 passed in 5.64s`。
+- 同一测试现进一步覆盖缺失 Life hand-off：`AgentRuntimeApplicationPorts` 已不再携带 legacy Bond read port，
+  `fastpaths` 也不访问该属性，而是给 Motive 固定的 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / guarded`
+  projection。`test_dl05_expression_delivery.py` 另覆盖 Gateway service principal 与 companion subject 分离、
+  subject/workspace drift 拒绝，以及 Acceptance 按冻结分句而非通用 segmentation 重建协议；
+  `test_gr05_universal_host_runtime.py` 在真实 SQLite TaskGraph/Acceptance handler 中核验两条 Voice、两条 Avatar
+  与两对 release 为 Host-staged receipt。八个受影响 unit/contract/integration 文件的本地组合为
+  `81 passed in 50.78s`；Gateway transport 为受控本地 handler，未启动 Docker、真实 provider、远端 Edge 或 DL-07，
+  远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-07 隔离外部服务栈
 

@@ -1452,6 +1452,18 @@ frozen chat execution
   → graph-scoped conversation/life/delivery effect intents
 ```
 
+在进入 worker 前，Cortex 的 Retrieval/Motive 预取只可读取同一 internal canonical Life hand-off 中的
+`RelationshipStateV2`。若该 hand-off 缺失，流向固定为
+`CANONICAL_RELATIONSHIP_UNAVAILABLE → FRIEND / guarded → Retrieval/Motive`；production Agent Runtime
+不再有通往 `BondStageEngine → score/stage/interaction_count` 的回读边。这是关系语气的安全降级，不是把七海的
+情感中性化，也不构成真实模型或设备链路验收。
+
+接受阶段的身份与协议流为：`Gateway service principal → HostCommand/grant audit` 与
+`Runtime Context relationship subject + workspace + session → AffectiveTurnPlan` 分离；只有后者可绑定关系记忆与
+表达。`life.foreground_completed → frozen stable sentence pairs → exact Voice/Avatar rebuild → Host protocol outbox`。
+空的兼容 plan 终止在文本 Acceptance，不能生成 Voice/Avatar effect；任何 scope、时间戳、句索引、payload 或 receipt
+漂移均失败关闭。Host-staged protocol 不等于另一台电脑上的 Edge 已播放或已驱动 Avatar。
+
 ### 4.2 Skill
 
 Direct Skill worker 使用每节点 child grant，从 durable grant ledger 加载授权，再执行 frozen governed skill。之后它记录 governed skill execution，校验 durable receipt projection，并返回 worker commit 和可计量 budget usage。
