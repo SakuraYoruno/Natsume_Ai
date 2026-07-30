@@ -453,6 +453,10 @@ Budget contention persistence 由 `TaskBudgetUsageStoreMixin` 唯一拥有：首
 
 ### 4.6 数字生命、人格与关系
 
+ASR 的 final ingress 由 Input Runtime 先做语义降权：关键词 bootstrap、外带 emotion
+字段、context 与观察列表均是不可信 telemetry，不可成为用户自述或自我情绪写 authority；只有
+明确可用、未降级的声学 attestation 才可交给 AffectFusion 作为短时 typed observation。
+
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|
 | Digital Life Core | LifeCommand、event、OCC/version、deterministic reducer、projection/outbox | [`digital_life/service.py`](../../../host_brain/digital_life/service.py)、[`digital_life/reducer.py`](../../../host_brain/digital_life/reducer.py)、[`persistence/life_command_repository.py`](../../../host_brain/persistence/life_command_repository.py)、[`app/system_handler.py`](../../../host_brain/app/system_handler.py)、[`agent_runtime/postprocess.py`](../../../host_brain/agent_runtime/postprocess.py) | Life contracts、repository port、projection/delivery port、受控 Host Input | Surface、Scheduler、Tribe、Edge ingress 或通用 reply post-process 各自维护平行 Life 真相，或以用户 telemetry 直接驱动 Bond/VTS | `DL01_EDGE_AND_POSTPROCESS_OBSERVATION_ONLY`；Edge 事件只写审计，final ASR 才可走 Host Input；Agent post-process 的 Surface/Cortex Bond fallback、Tribe 对话结束事件和 direct VTS/bulk TTS 均只留下 retired trace。七海的 self-affect/关系效果仍只能来自 canonical Life 与 accepted plan，Voice/Avatar 只能由 Task Acceptance 的 ExpressionPlan protocol 发起。远端 Edge 未启动 |

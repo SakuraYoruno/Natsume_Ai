@@ -61,8 +61,12 @@
 - T-DL02-05：生产 Input composition 注入 fusion service 后，不得推进
   `HostEmotionRuntime`；外部伪造 `affective_life` marker 不得取得 canonical
   authority，重复 request 与 SQLite restart/replay 必须稳定。
+- T-DL02-06：final ASR 的 `asr_text_bootstrap`、外带 `emotion_tag/intensity/context`
+  与伪造 observation list 不得成为用户 self-report；只有显式可用、未降级且字段完整的声学
+  attestation 可生成一条来源受限、TTL 5 秒的 typed ACOUSTIC observation，直接 Chat emotion
+  字段与 raw 输入均不得向下游透传。
 - 当前本地证据：DL-02 单元/重启集合 `9 passed in 21.66s`；受影响回归
-  `73 passed in 24.93s`。远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`，上述证据不等同
+  `73 passed in 24.93s`；ASR 语义边界联合定向集合为 `96 passed in 50.58s`。远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`，上述证据不等同
   真实 Host、provider、TTS/Avatar 或体验验收通过。
 
 ## T-DL03-RELATIONSHIP-AFTEREFFECT
