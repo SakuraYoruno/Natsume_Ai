@@ -338,6 +338,13 @@ class EndocrineAgent:
         FIX-4.1：订阅 ENDOCRINE_STATE_UPDATED，将激素状态同步到 GovernorRulesCache，
         使 Governor 在下次裁决时感知当前能量/压力水平。
         """
+        if self._legacy_endocrine_writes_retired():
+            # Production canonical Life must not even retain compatibility
+            # endocrine callbacks in its Host-owned EventBus. Individual
+            # callbacks already fail closed, but skipping registration closes
+            # the lifecycle boundary before a later handler can be mistaken
+            # for an active affect writer.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 

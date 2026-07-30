@@ -257,6 +257,10 @@ explicit permission、relationship episode、Regulation、aftereffect 和冻结 
 `silence_engine`、`emotion_timeline` 或 `bond_stage_engine`。这些 compatibility provider 必须在 port graph
 即失败关闭；仅隔离的 legacy fixture 可显式保留它们，不能由生产消费方自行回退。
 
+同一规则适用于 Endocrine：canonical Host 可以读取由 immutable hard-state 派生的技术 gate projection，
+但不得注册 Bond、孤独、任务成功、免疫拦截或 endocrine state EventBus handler，也不得保留 delta buffer、
+Hormone hint 或自我情绪 fan-out。
+
 旧 `ProprioceptionAgent` 不得把 conversation、channel interrupt、voice pipeline 或 task success 汇总为 process-global
 cognitive load、continuity、疲惫、压力、满足或主动节律，再回灌旧 organ。canonical Host 必须在 registry、EventBus、
 模型与旧器官副作用之前退役这些入口为 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`；真实 activity

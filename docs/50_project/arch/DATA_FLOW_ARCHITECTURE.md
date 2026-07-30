@@ -970,6 +970,11 @@ payload/authorization digest 及 target/scope，才追加 `relationship_proactiv
 authority guard；port fence 再保证任何遗漏路径会在解析时得到 `LEGACY_AFFECT_PORT_RETIRED:<port>`，而不是写入
 或读取第二份情感、关系和主动节律状态。
 
+对系统 gate 的兼容 Endocrine 投影也遵循相同边界：Host hard-state 可以在需要时请求 immutable projection，
+但 canonical `EndocrineAgent` 不向 EventBus 注册 legacy handler。因此 `BOND_PROGRESS`、`LONELINESS_SIGNAL`、
+`TASK_SUCCESS`、`IMMUNE_BLOCK` 与 `ENDOCRINE_STATE_UPDATED` 都不会进入任何 cortisol/oxytocin buffer 或
+Limbic fan-out。
+
 最新的 scheduler 命令不再把 decision 当成一段可覆盖的 `state_patch`。它先冻结
 `AffectiveTurnPlanV1 → ExpressionPlanV1.synchronization_id`，将 scope、两条 revision、content digest、
 decision id 和下次可联系时间随同唯一的 `proactive.gateway` intent 提交；reducer 必须同时重验两者才会更新

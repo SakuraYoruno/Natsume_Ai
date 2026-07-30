@@ -73,6 +73,11 @@
 > Prefrontal 内部检查 authority 更严格：遗漏调用无法重新打开第二份关系或情绪状态。没有 Life authority 的
 > isolated compatibility fixture 才保留旧 provider。
 
+> **DL-06 endocrine subscription cutover：** `EndocrineAgent` 在 canonical Life 下不注册 legacy EventBus
+> handler，因此 Bond、孤独、任务成功、免疫和旧 endocrine event 不能再唤醒 cortisol/oxytocin delta 路径。
+> `resolve_endocrine_state()` 仅可导出 immutable hard-state 的技术 gate projection；它不保存 buffer、生成
+> Hormone hint 或驱动 Limbic self-affect。
+
 > **DL-02 ASR 情绪语义边界：** final ASR 仍可进入标准 Host Input，但 Edge 附带的关键词
 > emotion、intensity、context 或 observation list 不会被映射为 ChatRequest self-report 字段；
 > 不可信字段被清除，原文本仅走既有低置信 TEXT observer。只有显式可用、未降级、tag/强度/置信度

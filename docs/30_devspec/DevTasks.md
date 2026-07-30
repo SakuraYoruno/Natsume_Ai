@@ -85,6 +85,10 @@ restart 集成已覆盖此 Host-side 链；受控本地 delivery handler 不代�
 而是返回 `LEGACY_AFFECT_PORT_RETIRED:<port>`。这让所有遗漏访问在 resolver 边界失败，不能重新打开 Bond、
 进程内 silence、EmotionTimeline 或 StageEngine；没有 Life authority 的 isolated compatibility fixture 仍保留原端口。
 
+**DL-06 endocrine subscription cutover：** canonical Life 模式下 `EndocrineAgent.register_subscriptions()`
+不再登记 Bond、loneliness、task success、immune block 或 endocrine state compatibility callback。`resolve_endocrine_state()`
+可保留 immutable hard-state 的技术投影，但不消费 delta、写 `_last_state`、生成 Hormone hint 或 fan-out 到 self-affect。
+
 **DL-06 签名 Gateway 关系 scope 修订：** `/v1/host/input` 在 Secure Ingress 允许后、任何
 Fusion/Appraisal 前，使用可信 `principal_id + tenant_id` 与签名 `from_id + conversation_id` 编译
 `SecureGatewayConversationScopeV1`。`from_id` 决定 opaque relationship subject，conversation 只决定

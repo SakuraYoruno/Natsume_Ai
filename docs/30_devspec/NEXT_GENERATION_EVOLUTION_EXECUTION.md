@@ -353,6 +353,9 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   `silence_engine`、`emotion_timeline` 与 `bond_stage_engine`：任何漏网 caller 都获得
   `LEGACY_AFFECT_PORT_RETIRED:<port>`，而不是重新解析旧 authority。无 Life authority 的 isolated fixture
   明确保留 compatibility provider，不能混同 Host production route。
+- `EndocrineAgent` 在 canonical Life 模式下也不再向 Host EventBus 注册 Bond、loneliness、task success、
+  immune block 或 endocrine state compatibility handler；immutable hard-state projection 不等于自我情绪，
+  不得消费 delta buffer、写 `_last_state` 或再 fan-out 到 Limbic。
 - 主动 outbox 现在要求 canonical `proactive_permission=ALLOWED`；`UNKNOWN/DENIED`、
   未结 relationship episode、repair required、`GIVE_SPACE/QUIET_PRESENCE/DEFER` regulation
   与低能量/高休息需要都会 hold。发送文本包含无回应压力约束，decision trace 只保存

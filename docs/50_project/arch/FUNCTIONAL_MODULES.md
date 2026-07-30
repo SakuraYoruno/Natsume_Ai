@@ -648,6 +648,10 @@ canonical Life 已可用时，Tribe 无法解析 `bond_update_queue`、`silence_
 `bond_stage_engine`。这不是删除离线测试资产，而是把 compatibility provider 留在非生产 fixture，防止遗漏
 consumer 重新获得可变情感或关系 authority。
 
+`EndocrineAgent` 则只保留 hard-state 技术 projection；canonical Host 不注册其旧 EventBus handler，因而
+Bond/孤独/任务/免疫事件不能再写 cortisol/oxytocin delta 或驱动 Limbic。该边界不模拟七海的感受，真实 Need
+和 self-affect 仍只来自 scoped canonical Life command。
+
 ### 4.7 渠道、Gateway 与 Edge
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |

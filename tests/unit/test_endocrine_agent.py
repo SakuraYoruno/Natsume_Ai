@@ -27,11 +27,23 @@ def test_endocrine_agent_resolve_state_and_vitals() -> None:
     assert 0.0 <= float(vitals["stress_index"]) <= 1.0
 
 
-def test_endocrine_agent_retires_legacy_buffer_with_canonical_life() -> None:
+def test_endocrine_agent_retires_legacy_buffer_with_canonical_life(monkeypatch) -> None:
+    class _Bus:
+        def __init__(self) -> None:
+            self.subscriptions: list[tuple[str, object]] = []
+
+        def subscribe(self, event_type: str, handler: object) -> None:
+            self.subscriptions.append((event_type, handler))
+
     agent = EndocrineAgent(
         application_ports=TribeApplicationPorts(
             affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
         ),
+    )
+    bus = _Bus()
+    monkeypatch.setattr(
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
+        lambda: bus,
     )
 
     state = agent.resolve_endocrine_state(
@@ -51,6 +63,7 @@ def test_endocrine_agent_retires_legacy_buffer_with_canonical_life() -> None:
     asyncio.run(agent._on_loneliness_signal(event))
     asyncio.run(agent._on_task_success_endocrine(event))
     asyncio.run(agent._on_immune_block_endocrine(event))
+    agent.register_subscriptions()
 
     assert state["status"] == "RETIRED_CANONICAL_LIFE"
     for result in (stress, direct):
@@ -60,6 +73,7 @@ def test_endocrine_agent_retires_legacy_buffer_with_canonical_life() -> None:
     assert agent._last_state == {}
     assert agent._bond_cortisol_delta == 0.0
     assert agent._bond_oxytocin_delta == 0.0
+    assert bus.subscriptions == []
     assert agent.generate_hormonal_state_hint(cortisol=0.9, oxytocin=0.9) is None
     runtime_state = agent.export_runtime_state()
     assert runtime_state["status"] == "RETIRED_CANONICAL_LIFE"

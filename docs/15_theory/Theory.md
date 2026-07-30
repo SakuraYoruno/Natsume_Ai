@@ -85,6 +85,8 @@ trust/safety/permission，也不伪造用户出现。只读 registry 仅把这�
 这类淘汰不能只靠每个旧 consumer 的善意。当前 production canonical Life 组成会在 Tribe port graph
 直接断开 Bond queue、mutable silence、EmotionTimeline 与 BondStageEngine；任何遗漏的解析都明确失败，
 而不是偷偷重新打开一份进程内情感或关系状态。离线兼容 fixture 仍可显式使用它们，但不属于 Host 运行时。
+同理，旧 Endocrine delta 不能靠“回调被触发后再什么也不做”来退役：canonical Host 不再注册这类
+Bond/孤独/任务/免疫 EventBus handler。它只保留无因果写权的技术投影，不能把系统压力转换为七海的情绪。
 
 因此，旧的定时问候器不能作为同一行为的“备用通道”：即使它保存了旧的关系分数、
 情绪时间线或固定问候模板，也没有资格重新解释七海的感受或发起联系。升级后的
