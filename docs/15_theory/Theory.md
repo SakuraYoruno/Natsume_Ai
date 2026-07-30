@@ -628,12 +628,13 @@ self-affect revision、调节方式、陪伴动作和 `ExpressionPlan` 绑定成
 模型不能用 `natsume_emotion_tag`、候选 JSON 或纯文本 fallback 倒灌状态。低歧义文本
 可以逐句送达，但每个稳定句必须先成为可重放的 delivery intent；因此“实时”不等于先
 说出去、以后再补写。高歧义、修复和边界场景宁可保留两候选择，也不以低延迟跳过分寸。
-DL-05 已把这条约束落实到 Host protocol：每个稳定句在文本可见前编译出配对的 Voice
-`SPEAK` 和 Avatar `TRANSITION`，并在结束或打断时追加 `RELEASE`/`CANCEL`。它们共享
-同一个 sync/self-affect revision，且下一轮只从 exact-scope 的 durable avatar head 读取前一
-表达；旧 `_prev_emotion_tag` 不能再把用户观察伪装成 Avatar 的起点。`HOST_*_STAGED` 仅说明
-Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由独立 Edge receipt 说明，不能各自把
-文本标签再解释一次。
+DL-05 已把这条约束落实到 Host protocol：直连句流会在文本可见前编译出配对的 Voice `SPEAK`
+和 Avatar `TRANSITION`；受治理句流则先以 Task receipt 固定可见句，待 Acceptance 后用**同一
+逐句边界**编译配对 protocol，不能把两句合成一条声音或动作。两种路线结束或打断都追加
+`RELEASE`/`CANCEL`。它们共享同一个 sync/self-affect revision，且下一轮只从 exact-scope 的 durable
+avatar head 读取前一表达；旧 `_prev_emotion_tag` 不能再把用户观察伪装成 Avatar 的起点。
+`HOST_*_STAGED` 仅说明 Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由独立 Edge
+receipt 说明，不能各自把文本标签再解释一次。
 
 模型流还必须区分“字符已经到达”与“这次调用已可计量”。`ModelAttemptService.stream_with_result()`
 把这两个时刻显式拆开：它只允许 typed delta，结束时必须收到唯一一份 provider-owned

@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-04_DIRECT_CHAT_GOVERNED_SENTENCE_STREAM_LOCAL_EVIDENCE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-05_GOVERNED_CHAT_ACCEPTANCE_EXPRESSION_PROTOCOL_BOUNDARY`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -71,6 +71,14 @@ provider-final-usage 合同的受控 OpenAI-compatible transport 后，会走 `H
 Task-bound sentence ledger → SSE SENTENCE → Acceptance`。首句前失败持久化 `STREAM_INTERRUPTED` 后以
 stable `REJECT` 收口，不进入 unknown-effect 重放；它不把 fixture transport 提升为真实 provider
 或 generic/multi-user Chat 完成证据。
+
+当前 DL-05 继续将这条窄链落入 Host expression protocol：两条已外显的 task-bound sentence 在
+Acceptance 后被重新读取为四条 immutable `HOST_PROTOCOL_STAGED` Voice/Avatar intent，并以两条
+`HOST_RELEASE_STAGED` control 收口；不是按合并 narrative 再次切分。frozen executor 会比较逐句
+Voice text、channel/action、plan/sync/self-affect revision、workspace/subject/session 和 receipt，
+任一缺失或漂移均失败关闭。本地 expression unit/restart/stream 与 real SQLite universal Runtime
+定向集合为 `38 passed in 38.50s`；
+未连接远端 Edge，因此不能升级为真实 TTS/VTS 或实体 Avatar 的完成状态。
 
 `POST /v1/chat` 的本机个人入口现于 AffectFusion、检索预取和 Runtime Context 之前绑定
 `natsume.direct-chat-scope.v1`：由 `HOST_DEFAULT_USER_ID` 派生唯一 subject/principal 和

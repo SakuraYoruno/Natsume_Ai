@@ -1094,6 +1094,34 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                     f"life::foreground_completed::{chat['request_id']}",
                 ),
             ).fetchall()
+            # DL-05 must not merely mark the frozen Task stream complete.
+            # Once its ``life.foreground_completed`` Acceptance Effect has
+            # committed, the same immutable affective plan must be projected
+            # to the durable Host Voice/Avatar protocol ledger.  This query
+            # intentionally reads the real SQLite projection rather than a
+            # worker-local trace or an Edge double; this integration fixture
+            # does not start a remote Edge and therefore must never claim
+            # physical playback/transition.
+            chat_expression_delivery_rows = conn.execute(
+                """
+                SELECT delivery_kind, channel, action, plan_id,
+                       synchronization_id, self_affect_revision,
+                       receipt_status, person_id, workspace_id,
+                       relationship_subject_id, session_id
+                FROM affective_expression_delivery_event_v1
+                WHERE person_id = ?
+                  AND workspace_id = ?
+                  AND relationship_subject_id = ?
+                  AND session_id = ?
+                ORDER BY created_at_ms, event_id, delivery_id
+                """,
+                (
+                    chat["person_id"],
+                    "tenant:gr05-universal",
+                    chat["person_id"],
+                    chat["session_id"],
+                ),
+            ).fetchall()
         assert sorted(row[0] for row in routes) == [
             "chat",
             "delegate",
@@ -1128,6 +1156,46 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             person_id == chat["person_id"]
             and person_id != chat_authority["principal_id"]
             for _command_id, person_id in chat_life_receipt_scopes
+        )
+        # Two stable text sentences become two paired Host intents; the
+        # accepted completion adds one paired RELEASE control.  The
+        # projection is still deliberately Host-staged, never an
+        # ``EDGE_APPLIED`` substitute, because no remote Edge is running in
+        # this test or this DL-05 Host slice.
+        assert len(chat_expression_delivery_rows) == 6
+        assert sum(
+            row[:3] == ("INTENT", "VOICE", "SPEAK")
+            and row[6] == "HOST_PROTOCOL_STAGED"
+            for row in chat_expression_delivery_rows
+        ) == 2
+        assert sum(
+            row[:3] == ("INTENT", "AVATAR", "TRANSITION")
+            and row[6] == "HOST_PROTOCOL_STAGED"
+            for row in chat_expression_delivery_rows
+        ) == 2
+        assert sum(
+            row[:3] == ("RELEASE", "VOICE", "RELEASE")
+            and row[6] == "HOST_RELEASE_STAGED"
+            for row in chat_expression_delivery_rows
+        ) == 1
+        assert sum(
+            row[:3] == ("RELEASE", "AVATAR", "RELEASE")
+            and row[6] == "HOST_RELEASE_STAGED"
+            for row in chat_expression_delivery_rows
+        ) == 1
+        assert len({row[3] for row in chat_expression_delivery_rows}) == 1
+        assert all(row[3] for row in chat_expression_delivery_rows)
+        assert len({row[4] for row in chat_expression_delivery_rows}) == 1
+        assert all(row[4] for row in chat_expression_delivery_rows)
+        assert all(type(row[5]) is int and row[5] >= 0 for row in chat_expression_delivery_rows)
+        assert all(
+            row[7:] == (
+                chat["person_id"],
+                "tenant:gr05-universal",
+                chat["person_id"],
+                chat["session_id"],
+            )
+            for row in chat_expression_delivery_rows
         )
         assert attempts == 6
         # Chat/delegate already froze worker projections; the plan's skill

@@ -1462,6 +1462,20 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   的本地证据；真实 provider、远端 Edge 与 DL-07 服务栈均未运行。
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+### DL-05 受治理 Chat 的 Acceptance-side Voice/Avatar 协议
+
+- 生产等价 SQLite universal Runtime 以受控 final-usage transport 跑过两句 governed Chat：
+  `PLAN_FROZEN → SENTENCE_STAGED ×2 → SSE ×2 → Task Acceptance → foreground_completed`。
+  测试直接重开 `0146_affective_expression_delivery`，确认两句各产生一条 Voice `SPEAK` 与一条
+  Avatar `TRANSITION`，再产生一对 `RELEASE`；全部共用同一个 plan、`synchronization_id`、
+  self-affect revision、workspace、relationship subject 与 session。
+- `FrozenChatRouteExecutor` 同时拒绝 effect 数量、逐句 Voice text、channel/action、completed-prefix
+  control、scope 或 Host staging receipt 与已外显 Task sentence 不一致的结果。故错误的“把两句合成一条
+  TTS/Avatar intent”无法通过 Acceptance。
+- 定向命令：`python -m pytest tests/unit/test_dl05_expression_delivery.py tests/integration/test_dl05_expression_delivery_restart.py tests/unit/test_dl04_native_affective_stream.py tests/unit/test_gr05_frozen_route_executors.py tests/integration/test_gr05_universal_host_runtime.py::test_chat_skill_delegate_and_plan_share_real_governed_runtime -q`，
+  结果 `38 passed in 38.50s`。这里未启动远端 Edge，也没有实际 TTS/VTS/Avatar 设备；
+  `HOST_PROTOCOL_STAGED` 与 `HOST_RELEASE_STAGED` 不能写成物理回执，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ### DL-04 受治理 Chat 可见句账本
 
 - `0149_task_runtime_chat_delivery.sql` 新增 file-backed immutable ledger。每条 `PLAN_FROZEN`、

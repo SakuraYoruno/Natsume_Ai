@@ -11,6 +11,13 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 本次 DL-04 修订把一条容易被掩盖的身份边界实际接通：Gateway 的 `principal_id` 仅保留为 HostCommand、lease/grant 和外发授权主体；`RuntimeContext v1` 中冻结的 relationship subject 才是七海陪伴的对象。已入场 frozen Chat 的 native sentence stream 会把同一 `model_node_id` 写入 canonical ModelAttempt audit，随后仅在 Task Acceptance 后以该 relationship subject 写 conversation、Life、Memory 与 delivery projection。SQLite 集成链已覆盖“服务主体授权 → TaskGraph → node-bound model attempt → 两句持久可见性 → Acceptance → Life/Gateway effect”，并明确断言服务主体不会进入用户关系记录。它仍只是受控本地 transport 的窄 vertical slice：普通 Chat 全量切流、受认证连接恢复、真实外部模型、远端 Edge/TTS/VTS 和 Docker 全栈验收均未执行，整体继续为 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+DL-05 进一步收口这条受治理链的表达边界：已对用户可见的每个 `SENTENCE_STAGED`，在
+Acceptance 后必须仍对应恰好一条 Voice `SPEAK` 和一条 Avatar `TRANSITION`；最后再用一对
+`RELEASE` 覆盖完成前缀。Host 会验证 plan、同步编号、self-affect revision、workspace、关系对象、
+session 和 staging receipt，任何合并分句、遗漏或漂移都失败关闭。真实 SQLite Runtime 回归已经重开
+`0146` 投影验证“两句 → 四条 Host-staged intent + 两条 release receipt”；这依然不是远端 Edge、
+TTS 或 VTS 已实际执行的证据，远端 Edge 本波没有启动。
+
 `POST /v1/chat` 现在也在 AffectFusion 之前收口为**本机单用户** scope：Host 从
 `HOST_DEFAULT_USER_ID` 派生 relationship subject、principal 与 `personal:<subject>` workspace，
 请求体中的 `person_id`、`workspace_id`（包括嵌套 emotion context）不能选择七海的关系或 Life

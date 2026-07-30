@@ -37,6 +37,10 @@
 > 受控 ASGI transport 已验证此顺序，但不能替代真实 provider 或多用户/connection-resume 证据。
 > 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
 > physical receipt 以及旧 writer 清零仍未完成。
+> 当前受治理 Chat 又补上 Acceptance-side boundary：已经 `SENTENCE_STAGED` 并外显的每一句，
+> 只能在 Acceptance 后各生成一条 Voice `SPEAK` 与 Avatar `TRANSITION`，再以一对 `RELEASE`
+> 覆盖完成前缀。模块会复核文字、plan、sync、self-affect revision、scope 和 Host receipt；
+> 合并句子或协议漂移失败关闭。此为本机 SQLite Host protocol 证据，不是远端物理效果。
 
 **退役 progress helper**位于 [`input_runtime/progress.py`](../../../host_brain/input_runtime/progress.py)。Gateway
 progress fastpath 已被禁用，故此文件只保留 rollback-window 的无状态技术文案 helper：它固定使用
