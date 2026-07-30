@@ -11,7 +11,7 @@ from host_brain.persona.surface_main_chain import (
 )
 from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMonologueDigest
 from host_brain.persona.body_sense import project_body_sense_from_life_snapshot
-from host_brain.persona.context.soul_runtime import get_compiled_soul
+from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.tribe.default_mode_agent import get_default_mode_agent
 import re
 import time
@@ -64,23 +64,13 @@ def _limit_surface_text(value: Any, *, limit: int) -> str:
 
 
 def _surface_soul_chat_anchor(soul: Any) -> str:
-    """Build a compact Soul prompt for live chat Surface replies."""
+    """Build the relationship-safe Soul anchor for live Surface replies."""
 
-    compact = _limit_surface_text(getattr(soul, "runtime_compact_text", ""), limit=1100)
-    style = _limit_surface_text(getattr(soul, "zh_text_style_anchor", ""), limit=1300)
-    full = _limit_surface_text(getattr(soul, "runtime_full_text", ""), limit=1800)
-    source = _limit_surface_text(getattr(soul, "source_text", ""), limit=1800)
-
-    parts: list[str] = []
-    if compact:
-        parts.append("【当前人格短锚】\n" + compact)
-    if style:
-        parts.append("【中文私聊风格锚】\n" + style)
-    if not parts:
-        fallback = full or source
-        if fallback:
-            parts.append("【当前人格锚】\n" + fallback)
-    return "\n\n".join(parts).strip()
+    # Do not fall back to ``source_text`` or an ad-hoc style block here.  The
+    # compiled runtime projection is the only model-facing representation of
+    # Soul; it carries the canonical relationship authority boundary itself.
+    compact = _limit_surface_text(render_runtime_soul_prompt(soul, compact=True), limit=2100)
+    return "【当前人格短锚】\n" + compact if compact else ""
 
 
 _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}

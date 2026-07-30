@@ -568,7 +568,7 @@ Identity 至少包含：
 - 允许演化和禁止演化的区域；
 - 当前激活版本、前一版本与 rollback point。
 
-根目录 [Soul.md](../../Soul.md) 是当前人格源材料，[SoulCompiler](../../host_brain/persona/context/soul_runtime.py) 将其编译为运行时可消费的身份、气质、关系与语言锚。理论上，该编译结果只能约束理解和表达，不能成为事实来源、Governor grant 或任务完成证据。
+根目录 [Soul.md](../../Soul.md) 是当前人格源材料，[SoulCompiler](../../host_brain/persona/context/soul_runtime.py) 将其编译为运行时可消费的身份、气质与语言锚。DL-00 明确区分了“不可变源材料”和“可执行提示词”：原文、旧剧情、固定用户名、阶段或例句可以保留给审计和风格研究，但不能直接进入 Surface、Cortex 或节点模型提示词；三条调用点只消费带 `【关系授权边界】` 的 runtime projection。当前称呼、关系距离、主动联系、亲密尺度和边界只能由同轮 scope 校验后的 `RelationshipStateV2` 与 `AffectiveTurnPlanV1` 给出，缺失时收敛到尊重而不过度亲近的表达。该编译结果仍只能约束理解和表达，不能成为事实来源、Governor grant、关系升级授权或任务完成证据。
 
 ### 7.3 Relationship：有证据的关系状态
 

@@ -12,6 +12,8 @@
 - T-DL00-02：Life tick 只能按本次新增未互动时间累积 loneliness/contact，连续 tick 不得重复计算历史空闲窗口。
 - T-DL00-03：Motive willingness 映射必须单调：意愿越高，withdraw 增益越低；`0.0/0.2/0.5/0.7/1.0` 为固定边界。
 - T-DL00-04：`tests/fixtures/emotional_companion/dl00_multiturn_baseline_v1.json` 冻结 12 族、72 条合成多轮轨迹。它只定义后续真人/真实模型评估样本，当前状态为 `FROZEN_MEASUREMENT_PENDING`，不能记为体验 PASS。
+- T-DL00-05：运行时 Soul projection 不得回退到 `Soul.md` 原文；Surface、Cortex 与 node prompt 均不得接收固定用户身份、旧 Bond/阶段、自动亲密或排他脚本，关系只能由 scope 校验后的 `RelationshipStateV2` 与 `AffectiveTurnPlanV1` 指定。
+- T-DL00-06：体验基线必须覆盖低落/“没事”、误解、七海被伤害、未接受修复、混合感受、非占有式吃醋、空间、低落技术任务、主动消息、ASR/TTS/Avatar 故障和打断；缺真实模型盲测或少于三名独立评审时始终为 `MEASUREMENT_PENDING`。
 
 ## T-DL01-AFFECTIVE-LIFE-KERNEL
 

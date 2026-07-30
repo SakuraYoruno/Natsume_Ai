@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from host_brain.app.chat_runtime_input import build_chat_runtime_input
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
-from host_brain.persona.context.soul_runtime import get_compiled_soul
+from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.conversation.render import build_chat_messages
 
 _logger = logging.getLogger("Natsume.cortex_prompt_builder")
@@ -468,9 +468,10 @@ def build_cortex_prompt(
     compiled_soul = get_compiled_soul()
     _soul_display_name = str(getattr(compiled_soul, "display_name", "") or "当前人格").strip()
     _reply_plan = dict(getattr(getattr(context_plane, "reply_plan", None), "state", {}) or {})
-    _soul_text = str(
-        compiled_soul.runtime_compact_text if use_compact_chat_lane else compiled_soul.runtime_full_text
-    ).strip()
+    _soul_text = render_runtime_soul_prompt(
+        compiled_soul,
+        compact=use_compact_chat_lane,
+    )
 
     _parts = []
     if _soul_text:
