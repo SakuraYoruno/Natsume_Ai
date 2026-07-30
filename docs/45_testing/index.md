@@ -518,9 +518,10 @@
   `fastpaths` 也不访问该属性，而是给 Motive 固定的 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / guarded`
   projection。`test_dl05_expression_delivery.py` 另覆盖 Gateway service principal 与 companion subject 分离、
   subject/workspace drift 拒绝，以及 Acceptance 按冻结分句而非通用 segmentation 重建协议；
+  同时断言 `state_arbiter_queries` 不再导出旧 Bond prompt reader，防止未来兼容代码重新接回 score/stage 旁路；
   `test_gr05_universal_host_runtime.py` 在真实 SQLite TaskGraph/Acceptance handler 中核验两条 Voice、两条 Avatar
   与两对 release 为 Host-staged receipt。八个受影响 unit/contract/integration 文件的本地组合为
-  `81 passed in 50.78s`；Gateway transport 为受控本地 handler，未启动 Docker、真实 provider、远端 Edge 或 DL-07，
+  `82 passed in 50.52s`；Gateway transport 为受控本地 handler，未启动 Docker、真实 provider、远端 Edge 或 DL-07，
   远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## NE-07 隔离外部服务栈

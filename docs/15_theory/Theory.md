@@ -654,6 +654,8 @@ guarded 状态，而非向 state arbiter 借回历史 stage。这既保留关系
 缺少 hand-off 也不是恢复旧读路径的理由。production Agent Runtime 不再声明或解析旧 Bond 查询 port；它只能把
 这种缺失显式表达为 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / guarded`。这样下游 Motive 仍有确定的、非亲密
 输入，却不会把迁移窗口内的积分、阶段或互动次数重新带入七海的注意和措辞。
+原先唯一会把 stage/score 拼成 prompt evidence 的私有 StateArbiter Bond helper 已删除；这不是一种可供未来
+compatibility caller 重新启用的“备用读法”。
 
 同样，安全传输主体不是关系对象。Gateway 可以以服务 principal 承担 HostCommand、lease 与 grant 的审计，而
 `relationship_subject_id + workspace_id + session_id` 仍必须精确绑定七海本轮的自我状态与关系记忆。接受阶段只能

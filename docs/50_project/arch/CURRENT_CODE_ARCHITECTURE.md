@@ -275,7 +275,8 @@ Gateway 和多用户关系始终由 `/v1/host/input` 的签名身份建立。
 不会解析 `bond_stage_engine`。Cortex retrieval prefetch 因而只接受 scope/schema/self-id 全部校验通过的
 canonical `RelationshipStateV2` 投影；hand-off 缺失时采用 `CANONICAL_RELATIONSHIP_UNAVAILABLE` 的
 `FRIEND / stepsibling / guarded` 安全下限，不读历史 score、stage、label 或 interaction count。该变化只收紧
-Agent Runtime 的生产读取边界；rollback-window Bond read API、其它 compatibility reader 和真实服务栈证据仍独立。
+Agent Runtime 的生产读取边界；旧 `state_arbiter_queries` 私有 Bond prompt helper 已删除，rollback-window Bond read API、
+其它 compatibility reader 和真实服务栈证据仍独立。
 
 ### DL-05/06 受治理表达 Acceptance scope
 

@@ -373,9 +373,10 @@ Bond 作为关系补全。`agent_runtime/application_ports.py` 已移除该 port
 hand-off 完整时读取无分数 projection；否则固定输出
 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / stepsibling / guarded`。证据为
 `test_dl06_retrieval_canonical_relationship_cutover.py`、`test_ne01_agent_runtime_composition.py` 与邻接
-contract/integration 组合；与受治理表达 Acceptance 的同波最终集合为 `81 passed in 50.78s`。状态为
+contract/integration 组合；与受治理表达 Acceptance 的同波最终集合为 `82 passed in 50.52s`。状态为
 `LOCAL_AGENT_RUNTIME_READ_CUTOVER_PASS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / EMOTIONAL_DIGITAL_LIFE_PARTIAL`；
-未证明其它 compatibility reader、真实 provider/Gateway、远端 Edge 或 DL-07。
+无生产 caller 的 `_resolve_state_arbiter_bond_fact` 私有 helper 已删除；未证明其它 compatibility reader、真实
+provider/Gateway、远端 Edge 或 DL-07。
 
 ### TRACE-DL05-GOVERNED-EXPRESSION-SCOPE-20
 
@@ -384,7 +385,7 @@ contract/integration 组合；与受治理表达 Acceptance 的同波最终集�
 `digital_life/companion_expression_acceptance.py` 核验 plan scope、重建每一条已持久化稳定分句的 Voice/Avatar pair
 及 terminal release，并逐项核对 receipt。空 `{}` compatibility plan 不产生 expression effect。证据为
 `test_dl05_expression_delivery.py` 与 `test_gr05_universal_host_runtime.py`：后者在真实 SQLite TaskGraph、Acceptance
-handler 和受控 Gateway transport 中确认 6 个 Host-staged protocol effect；同波集合 `81 passed in 50.78s`。状态为
+handler 和受控 Gateway transport 中确认 6 个 Host-staged protocol effect；同波集合 `82 passed in 50.52s`。状态为
 `LOCAL_HOST_PROTOCOL_PASS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / REMOTE_EDGE_NOT_STARTED`，不得解释为物理 TTS/VTS/Avatar
 播放或 DL-07。
 

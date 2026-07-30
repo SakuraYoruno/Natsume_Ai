@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from host_brain.app import state_arbiter_queries
 from host_brain.agent_runtime.fastpaths import (
     _build_canonical_retrieval_relationship_summary,
     _prefetch_retrieval_persona_inputs,
@@ -83,6 +84,12 @@ def test_invalid_claimed_canonical_context_becomes_guarded_without_legacy_fallba
         "relationship_phase": "stepsibling",
         "relationship_distance": "guarded",
     }
+
+
+def test_state_arbiter_no_longer_exports_a_bond_prompt_reader() -> None:
+    """No private compatibility helper may become a future production backdoor."""
+
+    assert not hasattr(state_arbiter_queries, "_resolve_state_arbiter_bond_fact")
 
 
 @pytest.mark.asyncio

@@ -1,15 +1,13 @@
-"""state_arbiter_queries.py — StateArbiter 四路查询（从 chat_stream_handler.py 迁移）。
+"""state_arbiter_queries.py — StateArbiter 只读查询（从 chat_stream_handler.py 迁移）。
 
 提供：
   - _resolve_state_arbiter_world_fact: 世界观查询
-  - _resolve_state_arbiter_bond_fact: Bond 关系查询
   - _resolve_state_arbiter_episodic_fact: 情节记忆查询
   - _normalize_state_arbiter_value / _build_state_arbiter_world_evidence_item: 辅助函数
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from typing import Any, Mapping
@@ -134,86 +132,6 @@ async def _resolve_state_arbiter_world_fact(
         )
         summary["status"] = "DEGRADED"
         summary["reason_code"] = "STATE_ARBITER_FAILED"
-        summary["detail"] = str(exc)
-        return summary, None
-
-
-async def _resolve_state_arbiter_bond_fact(
-    *,
-    session_id: str,
-    request_id: str,
-    bond_stage_engine: Any | None = None,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """查询 BondGraph 关系强度，注入 prompt 作为关系上下文。
-
-    Canonical Host composition supplies ``bond_stage_engine`` explicitly.
-    Compatibility callers without an app-bound engine fail closed.
-    """
-    summary: dict[str, Any] = {
-        "status": "SKIPPED",
-        "reason_code": "NOT_AVAILABLE",
-        "fact_key": "bond_graph_state",
-    }
-    try:
-        if bond_stage_engine is None:
-            summary["reason_code"] = "BOND_ENGINE_NOT_AVAILABLE"
-            return summary, None
-
-        _bond_state = await asyncio.to_thread(
-            bond_stage_engine.get_bond_state,
-            session_id=session_id,
-        )
-        if _bond_state is None:
-            summary["reason_code"] = "NO_BOND_STATE"
-            return summary, None
-
-        bond_stage = str(getattr(_bond_state, "stage", "") or "").strip()
-        bond_score = float(getattr(_bond_state, "score", 0.0) or 0.0)
-        bond_label = str(getattr(_bond_state, "label", "") or "").strip()
-        interaction_count = int(getattr(_bond_state, "interaction_count", 0) or 0)
-
-        if not bond_stage:
-            summary["reason_code"] = "EMPTY_BOND_STAGE"
-            return summary, None
-
-        fact_parts: list[str] = [f"当前关系阶段：{bond_stage}"]
-        if bond_label:
-            fact_parts.append(f"关系标签：{bond_label}")
-        if bond_score > 0:
-            fact_parts.append(f"关系强度：{bond_score:.2f}")
-        if interaction_count > 0:
-            fact_parts.append(f"累计互动次数：{interaction_count}")
-        fact_text = "，".join(fact_parts)
-
-        evidence_item = {
-            "slot_name": "bond_graph",
-            "doc_id": f"bond_graph::{session_id}",
-            "snippet": fact_text[:300],
-            "score": 0.65,
-            "source": "state_arbiter_bond",
-            "metadata": {
-                "fact_key": "bond_graph_state",
-                "bond_stage": bond_stage,
-                "bond_score": bond_score,
-                "interaction_count": interaction_count,
-                "source": "social_brain_agent",
-            },
-        }
-        summary["status"] = "APPLIED"
-        summary["reason_code"] = None
-        summary["bond_stage"] = bond_stage
-        summary["bond_score"] = bond_score
-        summary["value_chars"] = len(fact_text)
-        return summary, evidence_item
-
-    except Exception as exc:
-        _logger.debug(
-            "BondGraph 状态查询失败（降级）: %s",
-            exc,
-            extra={"request_id": request_id},
-        )
-        summary["status"] = "DEGRADED"
-        summary["reason_code"] = "BOND_GRAPH_FAILED"
         summary["detail"] = str(exc)
         return summary, None
 

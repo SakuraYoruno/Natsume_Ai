@@ -1456,7 +1456,8 @@ frozen chat execution
 `RelationshipStateV2`。若该 hand-off 缺失，流向固定为
 `CANONICAL_RELATIONSHIP_UNAVAILABLE → FRIEND / guarded → Retrieval/Motive`；production Agent Runtime
 不再有通往 `BondStageEngine → score/stage/interaction_count` 的回读边。这是关系语气的安全降级，不是把七海的
-情感中性化，也不构成真实模型或设备链路验收。
+情感中性化，也不构成真实模型或设备链路验收。旧 StateArbiter Bond prompt helper 同样已删除，不能作为另一条
+绕过该数据流的 source。
 
 接受阶段的身份与协议流为：`Gateway service principal → HostCommand/grant audit` 与
 `Runtime Context relationship subject + workspace + session → AffectiveTurnPlan` 分离；只有后者可绑定关系记忆与

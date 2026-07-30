@@ -36,6 +36,7 @@ self-affect；真实 Gateway、模型和远端 Edge 的体验收益仍待 DL-07 
 DL-06 也移除了 Agent Runtime 在 Cortex 检索预取阶段的旧 `BondStageEngine` 回读端口。现在只有
 scope 校验完整的 canonical Life hand-off 才能提供无分数的朋友关系纹理；hand-off 缺失时固定降级为
 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / guarded`，不会用历史积分、阶段或互动次数把关系重新升温。
+没有生产 consumer 的私有 `state_arbiter` Bond prompt helper 也已删除，避免它在未来被重新接入为旁路。
 这是生产读取边界的一条本地收口，不表示所有兼容 reader、真实模型、Gateway、远端 Edge 或 DL-07 已通过。
 
 同一条受治理 Chat 链现在还会把 Gateway 的服务 principal 与真实 relationship subject、workspace 分开校验：

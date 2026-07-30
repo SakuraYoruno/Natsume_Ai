@@ -501,7 +501,8 @@ Bond fetch。该 projection 是检索与 Motive 的唯一关系输入；scope/sc
 hand-off，`fastpaths` 也不会再读旧 Bond；它只提供 `CANONICAL_RELATIONSHIP_UNAVAILABLE / FRIEND / guarded` 的
 有界安全 projection 给 Retrieval/Motive。该轮还把 governed expression compiler 改为以冻结 relationship
 subject/workspace 和稳定分句重建 Host Voice/Avatar protocol，禁止 service principal 混入关系 scope、禁止接受阶段重切句。
-定向 unit/contract/邻接 SQLite integration 为 `81 passed in 50.78s`；这不证明 Monitor/Review、其他 compatibility
+没有生产 caller 的私有 StateArbiter Bond helper 已删除，不保留可被重新接线的 score/stage prompt evidence。
+定向 unit/contract/邻接 SQLite integration 为 `82 passed in 50.52s`；这不证明 Monitor/Review、其他 compatibility
 reader、真实 provider/Gateway/Edge 或 DL-07。
 
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
