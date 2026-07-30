@@ -192,6 +192,11 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 清零仍属于 DL-06。Motive 的模块级 `_engine` 已删除：其 factory 每次只创建无状态
 规则投影，不保存任何关系、情绪、时间或学习上下文，因此不能再成为隐性 self-affect writer。
 
+在 SocialBrain scope-safe retirement 和 Cortex stale-read scrub 收口后，DL-03 选定的波次
+integration（relationship restart、relationship lifecycle/surface、Bond compatibility、SocialBrain、Cortex、
+runtime snapshot）为 `30 passed in 25.94s`。该集合验证 journal restart 与 retirement marker 的恢复顺序，
+不与历史局部集合相加，也不替代真实 provider、远端 Edge 或 DL-07。
+
 退出：裂痕、修复、主动权限和关系纹理跨重启恢复，跨用户泄漏=0。
 
 ### DL-04：流式文本陪伴（本地切片已接线，未封板）

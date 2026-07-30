@@ -103,7 +103,8 @@
   `vital_signs`、顶层 context 与 runtime snapshot 内的旧 `bond_stage`、bond vector、trend 和
   repair；重启前 registry 中残留的高亲密值不得进入下一轮关系或语言上下文。
 - 当前本地证据：关系 reducer、restart/reconcile、Surface compiler、旧 Surface
-  回归和 Bond 边界为 `54 passed in 20.50s`。远程 CI 为
+  回归和 Bond 边界为 `54 passed in 20.50s`；scope-safe retirement、Cortex scrub 与真实 file-backed
+  relationship restart 的选定 DL-03 波次集成为 `30 passed in 25.94s`，两个集合不相加。远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`；主动陪伴、真人体验、真实 provider、TTS/Avatar/Edge
    与 DL-07 服务栈不在这项证据范围内。
 
