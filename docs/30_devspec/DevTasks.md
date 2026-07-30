@@ -184,6 +184,10 @@ legacy `PrefrontalAgent` 也不得再把 scheduler evolution、旧 interaction�
 stage/milestone/emergent growth 与自传 gate/commit 均在读取 Bond、写 registry/event bus、调用 organ 或
 Hippocampus 前返回 `RETIRED_CANONICAL_LIFE`（自传 gate 为 `BLOCK`）。这不删除纯 self-reflection reader，
 也不替代实际 canonical companion profile activation。
+legacy `LanguageSystemAgent` 与 `PeripheralAgent` 的未计划表达 side effect 也在 canonical mode 退役：前者的
+dual parse 只保留纯兼容结果，不写 language registry、不向 PainReward/Endocrine/Limbic/Interoception fan-out、
+不直驱 Motor TTS；后者不订阅或处理裸 `EMOTION_STATE_CHANGED` 来写 voice/avatar 建议或回写 Limbic。
+平台连接状态和 `IMMUNE_BLOCK` 安全抑制仍可读取/写入独立外设投影，不能被误报为情感 expression authority。
 这只退役 Endocrine mutation authority。随后 `DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE`
 已在同一 canonical authority 下让 production Surface/startup 不再 warmup 或读取 global
 `BodySenseModel`：每次读取都必须提供 relationship subject，并从对应 Life snapshot 做纯读 projection。

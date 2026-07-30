@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import asyncio
 
+import host_brain.tribe.peripheral_agent as peripheral_module
+from host_brain.tribe.application_ports import (
+    CANONICAL_AFFECT_LIFE_JOURNAL,
+    TribeApplicationPorts,
+)
 from host_brain.tribe.peripheral_agent import PeripheralAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
@@ -52,3 +57,44 @@ def test_peripheral_agent_platform_connection_updates_snapshot() -> None:
     assert exported["last_platform_event"] == "disconnected"
     assert exported["last_connected_ts_ms"] == 102
     assert exported["last_disconnected_ts_ms"] == 103
+
+
+def test_peripheral_canonical_life_retires_unplanned_emotion_expression(monkeypatch) -> None:
+    registry = TribeStateRegistry()
+    agent = PeripheralAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    def _unexpected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("canonical Life must not invoke legacy peripheral fan-out")
+
+    monkeypatch.setattr(peripheral_module, "get_limbic_agent", _unexpected)
+    _run(
+        agent._on_emotion_state_changed(
+            _Event(
+                payload={"emotion_tag": "JOY", "intensity": 0.95},
+                ts_ms=321,
+            )
+        )
+    )
+    assert registry.get_state("peripheral_agent") is None
+
+    subscriptions: list[str] = []
+
+    class _Bus:
+        def subscribe(self, event_type: str, _handler) -> None:  # noqa: ANN001
+            subscriptions.append(event_type)
+
+    monkeypatch.setattr(
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
+        lambda: _Bus(),
+    )
+    agent.register_subscriptions()
+
+    assert "EMOTION_STATE_CHANGED" not in subscriptions
+    assert {"IMMUNE_BLOCK", "PLATFORM_CONNECTED", "PERIPHERAL_STATE_UPDATED"}.issubset(
+        subscriptions
+    )

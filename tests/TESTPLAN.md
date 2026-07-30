@@ -57,6 +57,10 @@
   Bond stage、loneliness 或 immune event，也不得以旧 Bond/孤独输入执行 growth feedback、stage/milestone/emergent
   growth 或直接写 Hippocampus；所有旧入口必须在旧依赖前返回 `RETIRED_CANONICAL_LIFE`/no-op，自传记忆 gate
   必须明确 `BLOCK`。pure self-reflection reader 与 canonical companion profile activation 另行验收，不能由此测试冒充完成。
+- T-DL01-13：production canonical Life authority 下，LanguageSystem 的 dual parse 不得写 language registry、
+  fan-out 到 PainReward/Endocrine/Limbic/Interoception 或直驱 Motor TTS；Peripheral 不得订阅/处理裸
+  `EMOTION_STATE_CHANGED` 来产生 voice/avatar expression 或 Limbic 回路。平台连接与 `IMMUNE_BLOCK` 安全抑制
+  可保留为外设事实，但真实三模态外显必须另行由 accepted `ExpressionPlan`/delivery receipt 验收。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 

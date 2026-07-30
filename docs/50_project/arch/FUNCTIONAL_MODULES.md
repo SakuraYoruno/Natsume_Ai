@@ -276,6 +276,9 @@ permission/aftereffect/outbox 是唯一主动发送 authority。
 mode 同样被 short-circuit；它们不订阅旧事件，不写 registry/event bus/Hippocampus，并以
 `RETIRED_CANONICAL_LIFE` / `BLOCK` 结束。纯 self-reflection 与真正的 companion profile activation 保持独立，
 不能由旧关系积分或一次孤独信号自动改变七海。
+`LanguageSystemAgent` 在 canonical mode 只保留无写入 dual parse，不能写 language registry、触发旧 organ
+fan-out 或直驱 Motor TTS；`PeripheralAgent` 不再将裸 `EMOTION_STATE_CHANGED` 映射为 voice/avatar suggestion 或
+Limbic 回路。平台/安全 peripheral state 与 accepted ExpressionPlan 的真实具身 output 保持职责分离。
 BodySense 的 legacy global model 也不再被
 production Surface/startup 读取，canonical Limbic 必须从 scoped Life snapshot 做纯投影，且 legacy tick/
 loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond queue/writer 已退役；production

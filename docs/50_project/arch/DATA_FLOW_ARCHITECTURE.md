@@ -747,7 +747,11 @@ mode 终止为 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`；新的主动陪伴
 `PrefrontalAgent` 的旧 `scheduler/event → Bond/loneliness/interaction → growth/autobiographical write` 支路也在
 canonical mode 于任何旧 read、registry/event bus、Hippocampus 或 organ effect 前终止为
 `RETIRED_CANONICAL_LIFE`（autobiographical gate 为 `BLOCK`）；真实低风险成长只能沿
-`aftereffect → companion profile → reviewed activation` 前进。BodySense 生产读取现改为
+`aftereffect → companion profile → reviewed activation` 前进。
+`LanguageSystem dual parse → language registry/old organ fan-out/Motor TTS` 与
+`EMOTION_STATE_CHANGED → Peripheral voice/avatar suggestion → Limbic` 两条未计划表达支路也在 canonical mode
+终止为纯 projection/no-op；平台连接与 `IMMUNE_BLOCK` 仍是外设事实，外显只能沿
+`AffectiveTurnPlan → ExpressionPlan → accepted delivery receipt` 前进。BodySense 生产读取现改为
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
 没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
 `RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive 每次只对当前输入快照新建

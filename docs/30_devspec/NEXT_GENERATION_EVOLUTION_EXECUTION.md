@@ -342,6 +342,10 @@ canonical relationship permission、aftereffect 和 outbox 主动陪伴仍不依
 immune event 订阅，以及 growth feedback、stage/milestone/emergent growth 和直接自传记忆 gate/commit 全部退役；
 它们在旧 Bond、registry、event bus、Hippocampus 或 organ effect 前返回 `RETIRED_CANONICAL_LIFE`（gate 为 `BLOCK`）。
 这保留纯 self-reflection 与真实 canonical companion profile activation，不允许以旧积分自动塑造七海。
+legacy `LanguageSystemAgent` 的关键词压力解析现在只可作为纯 compatibility projection：canonical mode 不写
+language registry、不触发 PainReward/Endocrine/Limbic/Interoception 或 Motor TTS。`PeripheralAgent` 同时停止裸
+`EMOTION_STATE_CHANGED → voice/avatar suggestion → Limbic` 映射；平台/安全事件仍是独立外设事实，真正的
+三模态外显必须经 accepted `ExpressionPlan` 与 delivery receipt。
 production BodySense 随后也停止作为 global mutable authority：Surface/startup
 不再创建或读取 `BodySenseModel`，Limbic 只可针对 exact relationship subject 从 canonical Life snapshot
 构造无写入 projection；无 subject 失败关闭。legacy tick、loneliness 与 conversation mutation 返回

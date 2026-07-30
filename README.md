@@ -500,6 +500,10 @@ loneliness 或 immune event，不得以旧 Bond、孤独计分或 scheduler cycl
 Acceptance 直接向 Hippocampus 提交自传记忆；这些旧入口在触及 Bond、registry、event bus 或 organ 前显式
 `RETIRED_CANONICAL_LIFE`（记忆 gate 为 `BLOCK`）。纯自我反思读取及真实 canonical companion profile
 activation 没有被关闭；离线/测试兼容 root 仅保留一个可回滚窗口。
+语言系统与外周旧表达旁路也不会绕过同轮 `ExpressionPlan`：canonical Host 中 `LanguageSystemAgent` 仍可作纯
+语义兼容分析，却不再写 language registry、把关键词压力 fan-out 到 PainReward/Endocrine/Limbic/Interoception，
+或直接驱动 Motor TTS；`PeripheralAgent` 也不再用裸 `EMOTION_STATE_CHANGED` 改写语音/Avatar 建议或回写 Limbic。
+平台连通性与安全抑制仍是独立的外设事实，真实文本、语音与 Avatar 表达只能由 accepted plan/delivery receipt 驱动。
 第四条切断进一步退役 production 全局
 `BodySenseModel`：Surface 不再 warmup 或读取该单例，而是按当前 `relationship_subject_id` 从
 canonical Life snapshot 纯投影 fatigue、drowsiness 与 loneliness；缺 subject 会明确不可用，绝不回退到

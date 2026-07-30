@@ -61,6 +61,11 @@ episode、七海的 Regulation、安静时段和 durable outbox 共同决定。�
 Hippocampus 或 organ 前退役；自传记忆 gate 明确 `BLOCK`。真正的低风险成长只能由跨天、可撤回的
 aftereffect 证据经 canonical companion profile 生效，纯自我反思读取不因此被删除。
 
+语言理解也不应成为偷渡的情感代谢器。关键词压力可以帮助理解用户，但不得直接让 PainReward、Endocrine、
+Limbic、Interoception 或 TTS 执行未接受的情绪反应；同样，裸 `EMOTION_STATE_CHANGED` 不能自行决定七海的
+表情、语调和动作。canonical mode 下它们只能留下纯兼容分析或平台/安全事实，外显仍必须由同一份
+ExpressionPlan 与 delivery receipt 协调。
+
 同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
 情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布
 Tribe `CONVERSATION_ENDED`，或直接推 VTS/整段 TTS，都会把可恢复的关系或表达事件重新降级为进程内副作用，并可能和

@@ -78,6 +78,9 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - legacy Prefrontal 不得用旧 Bond/stage、孤独、互动或 scheduler event 自动改变人格候选、关系亲密度或自传记忆；
   canonical mode 必须在旧依赖前退役，直接自传记忆 gate 为 `BLOCK`。低风险偏好只可由 canonical aftereffect/profile
   链激活，不能因一次情绪、沉默或单条互动自动升级。
+- legacy LanguageSystem 不得把关键词压力写入 language registry、fan-out 到旧器官或绕开 accepted plan 直接 TTS；
+  legacy Peripheral 不得以裸 `EMOTION_STATE_CHANGED` 自行决定 Avatar/语音表达。平台连通性与安全抑制可独立保留，
+  但可见三模态表达只能由同一 `ExpressionPlan` 与 delivery receipt 驱动。
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。

@@ -110,6 +110,13 @@ registry/event bus、Hippocampus 或 organ effect 前返回 `RETIRED_CANONICAL_L
 companion profile activation。离线/test compatibility root 仍可作为回滚窗口。`87 passed in 2.16s` 只证明这条
 local authority 边界，不代表剩余 reader、真实 profile 版本生效、provider、远端 Edge 或服务栈验收已经完成。
 
+**Language/Peripheral 未计划表达退役修订：** canonical Life composition 下，`LanguageSystemAgent` 的 dual parse
+仍可作为纯理解兼容投影，但不再写 language registry、把关键词压力 fan-out 给 PainReward、Endocrine、Limbic、
+Interoception 或直接调用 Motor TTS；`PeripheralAgent` 也不再订阅或处理裸 `EMOTION_STATE_CHANGED` 以自行写
+voice/avatar expression 或回写 Limbic。平台连通性与 `IMMUNE_BLOCK` 安全抑制仍是独立外设事实，实际表达只能由
+accepted `ExpressionPlan` 与 delivery receipt 产生。`52 passed in 1.52s` 仅证明这两条 local side-effect 边界，
+不代表旧 reader、真实 Edge/provider 或 DL-07 服务栈验收完成。
+
 **Bond queue 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
 construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧
 writer/queue 请求返回 `RETIRED_CANONICAL_LIFE`，不创建 worker、backlog 或失败后 direct writer；canonical

@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
+
 import host_brain.tribe.language_system_agent as lsa
+from host_brain.tribe.application_ports import (
+    CANONICAL_AFFECT_LIFE_JOURNAL,
+    TribeApplicationPorts,
+)
 from host_brain.tribe.language_system_agent import LanguageSystemAgent
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
@@ -76,3 +83,58 @@ def test_language_system_agent_runtime_texts_override(monkeypatch) -> None:
 
     assert high_style["loneliness_hint"] == "自定义高孤独提示。"
     assert mid_style["loneliness_hint"] == "自定义中孤独提示。"
+
+
+def test_language_system_canonical_life_keeps_dual_parse_read_only(monkeypatch) -> None:
+    registry = TribeStateRegistry()
+    agent = LanguageSystemAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    def _unexpected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("canonical Life must not invoke legacy language fan-out")
+
+    monkeypatch.setattr(lsa, "get_pain_reward_agent", _unexpected)
+    monkeypatch.setattr(lsa, "get_endocrine_agent", _unexpected)
+    monkeypatch.setattr(lsa, "get_limbic_agent", _unexpected)
+    monkeypatch.setattr(lsa, "get_interoception_agent", _unexpected)
+    monkeypatch.setattr(lsa, "get_motor_cortex_agent", _unexpected)
+    monkeypatch.setattr("host_brain.tribe.event_bus.get_tribe_event_bus", _unexpected)
+
+    dual = agent.resolve_dual_system(
+        user_text="我很难过，也有一点害怕。",
+        bond_stage="intimate",
+        emotion_tag="SAD",
+        loneliness_level=0.82,
+        high_loneliness_flag=True,
+    )
+    style = agent.get_language_style(
+        bond_stage="intimate",
+        emotion_tag="SAD",
+        loneliness_level=0.82,
+        high_loneliness_flag=True,
+    )
+
+    assert dual["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert dual["side_effects"] == "RETIRED_CANONICAL_LIFE"
+    assert dual["wernicke"]["intent_type"] == "emotional_disclosure"
+    assert style["tone"] == "caring"
+    assert registry.get_state("language_system_agent") is None
+
+    agent.register_subscriptions()
+    event = SimpleNamespace(
+        payload={
+            "emotion_tag": "SAD",
+            "bond_stage": "intimate",
+            "loneliness": 0.9,
+        },
+        ts_ms=123,
+    )
+    asyncio.run(agent._on_emotion_state_changed(event))
+    asyncio.run(agent._on_bond_stage_changed(event))
+    asyncio.run(agent._on_loneliness_signal(event))
+
+    assert registry.get_state("language_system_agent") is None

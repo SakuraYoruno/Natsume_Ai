@@ -472,6 +472,10 @@ event、Bond/organ read、decision registry、模型 topic hint 或 fan-out 变�
 stage/milestone/emergent growth 及直接自传记忆 gate/commit 也在同一 canonical mode 退役：它们在读取旧 Bond、
 写 registry/event bus、调用 organ 或 Hippocampus 前返回 `RETIRED_CANONICAL_LIFE`，记忆 gate 为 `BLOCK`。纯
 self-reflection reader 与真实 canonical companion profile activation 仍分别审计，不能把此切断写成完整成长闭环。
+`LanguageSystemAgent` 的 dual parse 在 canonical mode 只是一份无写入 compatibility projection：它不保存
+language registry、不向 PainReward/Endocrine/Limbic/Interoception fan-out、也不直接调用 Motor TTS。`PeripheralAgent`
+同样不再订阅/处理裸 `EMOTION_STATE_CHANGED` 来生成 voice/avatar 建议或回写 Limbic；平台连接和安全抑制保留为
+独立外设状态，实际具身输出仍必须来自 accepted `ExpressionPlan`。
 production
 BodySense 同样不再被 Surface/startup warmup/read：`project_body_sense_from_life_snapshot()` 只读取当前
 relationship subject 的 canonical Life snapshot，Limbic canonical mode 的 tick/loneliness/conversation

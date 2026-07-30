@@ -33,6 +33,21 @@ class PeripheralAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_expression_authority_retired(self) -> bool:
+        """Whether an accepted ExpressionPlan owns emotional embodiment.
+
+        Platform health and security suppression remain valid peripheral facts.
+        What is retired is the old event-to-expression mapper, which could
+        turn an unbound emotion event into voice/avatar state outside the
+        canonical affect revision and delivery receipt.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
     def get_peripheral_state(self) -> dict[str, Any]:
         """返回当前外周神经系统状态快照。"""
         try:
@@ -57,7 +72,8 @@ class PeripheralAgent:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
             bus = get_tribe_event_bus()
-            bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)
+            if not self._legacy_expression_authority_retired():
+                bus.subscribe("EMOTION_STATE_CHANGED", self._on_emotion_state_changed)
             bus.subscribe("IMMUNE_BLOCK", self._on_immune_block)
             bus.subscribe("PLATFORM_CONNECTED", self._on_platform_connected)
             bus.subscribe("PLATFORM_DISCONNECTED", self._on_platform_disconnected)
@@ -76,6 +92,8 @@ class PeripheralAgent:
         T-110：情绪变化时，根据 emotion_tag 生成外周表达建议
         （表情强度、语调建议、动作幅度），供 edge_client 驱动外设输出。
         """
+        if self._legacy_expression_authority_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()

@@ -81,6 +81,21 @@ class LanguageSystemAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_affective_side_effects_retired(self) -> bool:
+        """Whether canonical Life owns emotional and expression effects.
+
+        Language understanding may remain a pure compatibility projection, but
+        a keyword-derived emotional-pressure score must never write a second
+        affect state, trigger an organ cascade, or speak outside the accepted
+        ``ExpressionPlan`` once the Host composes canonical Life.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
     def wernicke_understand(
         self,
         *,
@@ -213,6 +228,12 @@ class LanguageSystemAgent:
             "broca": broca,
             "style": style,
         }
+        if self._legacy_affective_side_effects_retired():
+            return {
+                **payload,
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "side_effects": "RETIRED_CANONICAL_LIFE",
+            }
         try:
             self.state_registry.set_state(
                 "language_system_agent",
@@ -384,7 +405,7 @@ class LanguageSystemAgent:
                 response_goal=response_goal,
             )
             result["dual_system"] = dual
-        else:
+        elif not self._legacy_affective_side_effects_retired():
             try:
                 self.state_registry.set_state(
                     "language_system_agent",
@@ -525,6 +546,8 @@ class LanguageSystemAgent:
             return None
 
     def register_subscriptions(self) -> None:
+        if self._legacy_affective_side_effects_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -536,6 +559,8 @@ class LanguageSystemAgent:
             pass
 
     async def _on_emotion_state_changed(self, event: Any) -> None:
+        if self._legacy_affective_side_effects_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper()
@@ -548,6 +573,8 @@ class LanguageSystemAgent:
             pass
 
     async def _on_bond_stage_changed(self, event: Any) -> None:
+        if self._legacy_affective_side_effects_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             bond_stage = str(payload.get("new_stage") or payload.get("bond_stage") or "friend").strip().lower()
@@ -560,6 +587,8 @@ class LanguageSystemAgent:
             pass
 
     async def _on_loneliness_signal(self, event: Any) -> None:
+        if self._legacy_affective_side_effects_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = _clamp(float(payload.get("loneliness") or 0.0))

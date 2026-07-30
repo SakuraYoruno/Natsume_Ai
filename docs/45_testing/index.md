@@ -164,6 +164,12 @@
   写 Hippocampus；所有旧入口在旧依赖前退役，自传 gate 明确 `BLOCK`。本次 Prefrontal 邻接集合为
   `87 passed in 2.16s`；与 Mirror/Initiative 等相邻 authority 的最终合并定向集合为 `139 passed in 6.25s`。这些
   都不代表 pure reader、真实 profile activation、真实模型、Edge 或 DL-07。
+- `test_language_system_agent.py::test_language_system_canonical_life_keeps_dual_parse_read_only` 与
+  `test_peripheral_agent.py::test_peripheral_canonical_life_retires_unplanned_emotion_expression` 验证 canonical
+  mode 下 LanguageSystem 只返回纯 dual parse，不写 registry、不 fan-out 到旧 organ/TTS；Peripheral 不再订阅或处理
+  裸 `EMOTION_STATE_CHANGED` 以产生 unplanned expression，平台/安全订阅仍保留。本次相邻集合为
+  `52 passed in 1.52s`；与本 PR 前三条 authority 切流的最终合并集合为 `163 passed in 7.01s`。这些都未覆盖
+  remaining reader、真实 Edge、provider 或 DL-07。
 - `test_limbic_agent.py` 现额外验证 canonical mode 下的 BodySense 只能从 exact
   relationship subject 的 Life snapshot 纯投影，不会解析 global `BodySenseModel`、写 Tribe state、
   调整 silence penalty 或把 legacy BODY_SENSE_UPDATED 再推进 self-affect；缺 subject 明确
