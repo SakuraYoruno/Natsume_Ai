@@ -164,7 +164,7 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   排他、负罪施压和内部计划泄漏。取消会记录 sent count，不发送未
   staging 的句子。
 - 本切片没有把受治理 Budget stream 伪装成已完成：模型层已具备 final canonical result 合同，
-  默认 Vault provider 尚未绑定它。`0149` 现为已入场的冻结 Chat 建立 node/attempt/lease/fence/grant-bound
+  Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage，并转发 provider final usage、transport identity 与调用延迟；缺 token/completion/cost、终局帧或 identity 仍失败关闭，其他 provider 不会被放宽。仅有本地协议与 adapter 测试，尚无真实凭据或 provider 调用。`0149` 现为已入场的冻结 Chat 建立 node/attempt/lease/fence/grant-bound
   的逐句 visibility ledger：Surface 在调用模型前冻结 plan，每句落库后才可 SSE 外显，内容或 lease/grant
   漂移拒绝；`STREAM_CANCELLED/INTERRUPTED` 同样持久化。`0150` 在替代 attempt 写 plan 时原子检出前序
   delivery evidence，并返回 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止盲目重跑模型。它仍是窄 vertical slice，普通 Chat route、

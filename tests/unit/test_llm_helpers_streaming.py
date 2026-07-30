@@ -4,7 +4,7 @@ import json
 from types import SimpleNamespace
 
 import host_brain.integrations.llm_helpers as llm_helpers
-from host_brain.integrations.llm_helpers import stream_llm_chunks
+from host_brain.integrations.llm_helpers import stream_llm_chunks, stream_llm_stream_events
 
 
 def test_stream_llm_chunks_passes_max_tokens_to_native_gemini(monkeypatch) -> None:
@@ -284,6 +284,47 @@ def test_stream_llm_chunks_uses_direct_openai_compat_sse(monkeypatch) -> None:
     assert chunks == ["夏目", "蓝。"]
     assert captured["url"] == "https://api.deepseek.com/v1/chat/completions"
     assert captured["body"]["stream"] is True
+
+
+def test_governed_openai_stream_preserves_terminal_usage_frame(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(request, timeout=0):  # noqa: ANN001, ANN202
+        captured["url"] = request.full_url
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeStreamingHTTPResponse(
+            [
+                'data: {"choices":[{"delta":{"content":"夏目"}}]}\n',
+                'data: {"choices":[{"delta":{"content":"蓝。"},"finish_reason":"stop"}]}\n',
+                'data: {"choices":[],"usage":{"total_tokens":11,"completion_tokens":4}}\n',
+                "data: [DONE]\n",
+            ]
+        )
+
+    monkeypatch.setattr(llm_helpers.urllib.request, "urlopen", _fake_urlopen)
+
+    events = list(
+        stream_llm_stream_events(
+            provider_name="deepseek",
+            model_id="deepseek-v4-flash",
+            api_key="test-key",
+            timeout_ms=5000,
+            messages=[{"role": "user", "content": "你是谁"}],
+        )
+    )
+
+    assert events == [
+        {"kind": "delta", "text": "夏目"},
+        {"kind": "delta", "text": "蓝。"},
+        {
+            "kind": "final",
+            "content": "夏目蓝。",
+            "finish_reason": "stop",
+            "usage": {"total_tokens": 11, "completion_tokens": 4},
+        },
+    ]
+    assert captured["url"] == "https://api.deepseek.com/v1/chat/completions"
+    assert captured["body"]["stream_options"] == {"include_usage": True}
 
 
 def test_stream_llm_chunks_uses_minimax_standard_sse_for_m2_her(monkeypatch) -> None:

@@ -320,6 +320,66 @@ async def test_vault_backed_adapter_uses_native_provider_stream(monkeypatch) -> 
     assert received[0]["base_url_override"] == "https://api.openai.com/v1"
 
 
+@pytest.mark.asyncio
+async def test_vault_backed_adapter_forwards_real_final_usage_stream_without_estimation(
+    monkeypatch,
+) -> None:
+    received: list[dict[str, object]] = []
+
+    async def _native_stream_events(**kwargs):  # noqa: ANN003
+        received.append(dict(kwargs))
+        yield {"kind": "delta", "text": "先缓一下。"}
+        yield {
+            "kind": "final",
+            "content": "先缓一下。",
+            "usage": {"total_tokens": 9, "completion_tokens": 4},
+        }
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.astream_llm_stream_events",
+        _native_stream_events,
+    )
+    registry = build_vault_backed_provider_registry(
+        ("openai",),
+        credential_resolver=lambda _provider: "stream-key",
+        base_url_resolver=lambda _provider: "https://api.openai.com/v1",
+        transport=lambda **_kwargs: {"content": "buffered fallback must not run"},
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(provider_name="openai", model_id="gpt-stream"),
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-stream-result",
+        attempt_id="attempt-stream-result",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    adapter = registry.get("production.openai")
+    assert adapter.supports_canonical_stream_result is True
+    events = [event async for event in adapter.stream_with_result(request)]
+
+    assert [event.kind.value for event in events] == ["DELTA", "FINAL"]
+    assert events[-1].response is not None
+    assert events[-1].response.usage == {
+        "total_tokens": 9,
+        "completion_tokens": 4,
+    }
+    # The adapter forwards only provider-owned values.  A missing price stays
+    # missing so the guarded ModelAttempt service can reject it fail-closed.
+    assert "model_cost_micros" not in events[-1].response.usage
+    assert events[-1].response.metadata["transport_external"] is True
+    assert received[0]["model_id"] == "gpt-stream"
+    assert received[0]["base_url_override"] == "https://api.openai.com/v1"
+
+
 @pytest.mark.parametrize(
     "base_url",
     (

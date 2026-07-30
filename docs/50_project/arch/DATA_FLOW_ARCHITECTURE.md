@@ -632,7 +632,7 @@ flowchart LR
     R --> CP["0147 profile lifecycle projection\nopaque evidence and bounded head"]
 ```
 
-当前已有显式 provider-final result 与条件 usage 合同，但默认 Vault adapter 没有绑定它，且它本身不创建
+当前已有显式 provider-final result 与条件 usage 合同；Vault-backed openai、openai_compatible 与 deepseek 已在 transport adapter 请求 stream_options.include_usage 并转发 provider final usage、transport identity 与调用延迟。缺 token/completion/cost、终局帧或 identity 的 guarded attempt 仍失败关闭；这不构成真实 provider 运行证据，且它本身不创建
 用户可见 authority。`0149` 现在让带 node-bound `ModelBudgetGuard` 的**冻结 Chat vertical slice**先写
 `TaskChatDeliveryStore`，再让唯一已落库的 `TASK_NODE_SENTENCE_STAGED` 事件经 Frozen executor 与 Worker
 转发：每句同时绑定 graph/revision/node/attempt/lease owner/fence/node grant、self、relationship subject、
