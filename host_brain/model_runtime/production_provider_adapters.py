@@ -16,7 +16,12 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urlsplit
 
-from host_brain.model_runtime.contracts import ProviderAttemptRequest, ProviderResponse
+from host_brain.model_runtime.contracts import (
+    ProviderAttemptRequest,
+    ProviderResponse,
+    ProviderStreamEvent,
+    ProviderStreamEventKind,
+)
 from host_brain.model_runtime.provider_adapters import (
     CallableProviderAdapter,
     ProviderAdapterError,
@@ -227,6 +232,12 @@ class VaultBackedSingleAttemptAdapter:
     def adapter_id(self) -> str:
         return self._adapter_id
 
+    @property
+    def supports_canonical_stream_result(self) -> bool:
+        """Expose only transports with a real final provider usage frame."""
+
+        return self._provider in {"openai", "openai_compatible", "deepseek"}
+
     async def complete(self, request: ProviderAttemptRequest) -> ProviderResponse:
         credential = str(self._credential_resolver(self._provider) or "").strip()
         if not credential and self._provider != "codex":
@@ -295,6 +306,9 @@ class VaultBackedSingleAttemptAdapter:
     def stream(self, request: ProviderAttemptRequest):
         return self._stream(request)
 
+    def stream_with_result(self, request: ProviderAttemptRequest):
+        return self._stream_with_result(request)
+
     async def _stream(self, request: ProviderAttemptRequest):
         """Use the real provider stream for unguarded live Surface calls.
 
@@ -329,6 +343,79 @@ class VaultBackedSingleAttemptAdapter:
             text = str(chunk or "")
             if text:
                 yield text
+
+    async def _stream_with_result(self, request: ProviderAttemptRequest):
+        """Forward a provider-final usage record without deriving a cost.
+
+        This is the production counterpart to the injected binding protocol.
+        It is deliberately unavailable for providers whose native stream has
+        no canonical terminal usage frame, so governed Chat keeps its safe
+        buffered behaviour instead of accepting an inferred budget charge.
+        """
+
+        if not self.supports_canonical_stream_result:
+            raise ProductionProviderConfigurationError(
+                "provider does not support canonical final usage for governed streaming"
+            )
+        credential = str(self._credential_resolver(self._provider) or "").strip()
+        if not credential:
+            raise ProductionProviderConfigurationError(
+                f"provider credential unavailable: {self._provider}"
+            )
+        from host_brain.integrations.llm_helpers import (  # noqa: PLC0415
+            astream_llm_stream_events,
+        )
+
+        provider_name = "openai" if self._provider == "openai_compatible" else self._provider
+        base_url_override = self._base_url_resolver(self._provider)
+        transport_identity_digest, transport_external = _transport_identity(
+            provider=provider_name,
+            base_url=base_url_override,
+        )
+        started_ns = time.monotonic_ns()
+        async for raw_event in astream_llm_stream_events(
+            provider_name=provider_name,
+            model_id=request.target.model_id,
+            api_key=credential,
+            timeout_ms=request.timeout_ms,
+            messages=request.prompt.as_message_dicts(),
+            gen_params=_transport_generation_parameters(request),
+            base_url_override=base_url_override,
+        ):
+            event = dict(raw_event) if isinstance(raw_event, Mapping) else {}
+            kind = str(event.get("kind") or "").strip().upper()
+            if kind == ProviderStreamEventKind.DELTA.value:
+                text = str(event.get("text") or "")
+                if text:
+                    yield ProviderStreamEvent.delta(text)
+                continue
+            if kind != ProviderStreamEventKind.FINAL.value:
+                raise ProductionProviderConfigurationError(
+                    "provider stream emitted an unsupported final-usage frame"
+                )
+            elapsed_ms = max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
+            usage = event.get("usage")
+            metadata = event.get("metadata")
+            transport_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+            transport_metadata.update(
+                {
+                    "provider_latency_ms": int(elapsed_ms),
+                    "transport_identity_digest": transport_identity_digest,
+                    "transport_external": transport_external,
+                }
+            )
+            yield ProviderStreamEvent.final(
+                ProviderResponse(
+                    content=str(event.get("content") or ""),
+                    finish_reason=(
+                        str(event.get("finish_reason"))
+                        if event.get("finish_reason") is not None
+                        else None
+                    ),
+                    usage=dict(usage) if isinstance(usage, Mapping) else {},
+                    metadata=transport_metadata,
+                )
+            )
 
 
 def _transport_identity(*, provider: str, base_url: str | None) -> tuple[str, bool]:

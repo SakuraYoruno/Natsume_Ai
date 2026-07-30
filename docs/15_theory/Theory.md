@@ -638,7 +638,7 @@ Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由
 模型流还必须区分“字符已经到达”与“这次调用已可计量”。`ModelAttemptService.stream_with_result()`
 把这两个时刻显式拆开：它只允许 typed delta，结束时必须收到唯一一份 provider-owned
 `ProviderResponse`，再把模型、provider 与 transport 证据，以及 provider 显式给出的 usage 写入 canonical Attempt；任何一项
-缺失都不能由文本长度、字符数或本地价格表补成成本。直连 Host 的 native sentence stream 只会在
+缺失都不能由文本长度、字符数或本地价格表补成成本。Vault-backed openai、openai_compatible 与 deepseek 已在 transport 边界请求 stream_options.include_usage 并转发终局 usage/identity/latency；这只说明代码拥有证据入口，不能替代真实凭据、provider 或成本测量。直连 Host 的 native sentence stream 只会在
 provider 在首个 delta 前明确不支持该合同的情况下回退兼容 stream，并留下无终态 usage 标记。受治理
 Chat 即使拥有终态 result，也仍不能直接把任意 worker delta 推给用户。`0149` 只为已经入场的冻结 Chat 建立了可恢复的
 node/attempt/lease/fence/grant-bound visibility receipt：先持久化 plan 与稳定句，再让同一 Worker 转发；内容或 fence 漂移会失败关闭，取消/中断保留 control receipt。`0150` 又在替代 attempt 写新 plan 的同一 SQLite 事务中检查前序 delivery evidence：替代 attempt 或同 attempt 重入必须进入 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止把恢复误作可再次调用模型的重试。它不写 Life、Memory、TTS、Avatar 或 transport，也没有把普通 Chat、受认证连接恢复或真实播放升级为完成。因此“模型可报告终态用量”或“窄路径可见”都不是“所有 Chat 已可实时展示”的同义词。

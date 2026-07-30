@@ -106,8 +106,8 @@ DL-04 已新增 immutable `AffectiveTurnPlanV1`、`CompanionActV1` 与
 typed delta，且必须以唯一 `ProviderResponse` 终止；终态 Attempt 会带模型与 transport 证据，
 只有 token、completion token 与 cost 齐全时才带可计量 usage。直连 native stream 会优先使用这个协议；只有在首个 delta 前得到
 `MODEL_STREAM_RESULT_UNSUPPORTED` 才允许回退旧 `stream()`，并留下
-`STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE`，绝不估算 token/cost。默认 Vault adapter 尚未实现
-该 protocol。`0145_affective_turn_delivery.sql` 只从 immutable event 派生 plan/sync/sentence
+`STREAM_ATTEMPT_AUDITED_NO_FINAL_USAGE`，绝不估算 token/cost。Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/identity/latency；
+这只有本地 protocol/adapter 测试，缺 token/completion/cost、终局帧或 identity 时 guarded attempt 仍失败关闭，未运行真实 provider。`0145_affective_turn_delivery.sql` 只从 immutable event 派生 plan/sync/sentence
 digest projection。Surface model 结果不再拥有 self-affect 写权；外部 emotion hint 也不会成为
 七海的情绪。DL-05 已将同一份 `ExpressionPlanV1` 编译成成对的
 `ExpressionDeliveryIntentV1`：native 稳定句在 SSE 可见前先把 Voice `SPEAK` 与 Avatar
@@ -115,8 +115,8 @@ digest projection。Surface model 结果不再拥有 self-affect 写权；外部
 `0146_affective_expression_delivery.sql` 从相同 immutable event 派生隐私最小化 Host protocol
 head，下一轮只在 exact person/workspace/subject/session scope 读取上次已暂存 Avatar expression；
 VTS compatibility transition 不再读取 legacy `_prev_emotion_tag`。`HOST_PROTOCOL_STAGED` 只表示
-Host 持久化了协议，不表示远端已播放或已改变 Avatar。受治理 Chat 虽有新的模型终态合同，却仍缺
-node/attempt-bound 的逐句可见性、取消与重启去重 authority，因而继续使用 buffered acceptance；
+Host 持久化了协议，不表示远端已播放或已改变 Avatar。受治理 Chat 已有
+node/attempt-bound 的逐句可见性、取消与重启去重 authority，但只覆盖已入场的冻结 vertical slice；其余路径继续使用 buffered acceptance；
 `0149_task_runtime_chat_delivery.sql` 再将**已入场的冻结 Chat TaskNode**的 plan、稳定句和
 `STREAM_COMPLETED/INTERRUPTED/CANCELLED` control 写入独立 Task ledger；它在 write trigger 与
 application 两侧绑定 graph/revision/node/attempt/lease owner/fence/node grant、request/self/relationship/

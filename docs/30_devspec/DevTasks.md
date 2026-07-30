@@ -27,7 +27,7 @@ Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的�
 下一次输入的 aftereffect、boundary/repair/proactive permission 和 Surface 的可信关系
 约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。DL-04 已将
 可信 hand-off 冻结为 `AffectiveTurnPlanV1`，普通低歧义文本可优先使用
-`ModelAttemptService.stream_with_result()` 的 typed delta + provider final result（完整字段时才计量）逐句输出；每个稳定句先写 canonical Life delivery
+`ModelAttemptService.stream_with_result()` 的 typed delta + provider final result（完整字段时才计量）逐句输出；Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/transport/latency，但没有真实凭据或外部 provider 运行；每个稳定句先写 canonical Life delivery
 intent，只有在首个 delta 前明确不支持终态合同才回退兼容 stream 并保留无 usage 标记。候选模型输出和纯文本 fallback 均不能改写 self-affect，高歧义/边界/修复仅
 允许恰好两候 buffered selection。DL-05 已将同一冻结 `ExpressionPlanV1` 编译为 Voice
 `SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，并在结束/打断时追加

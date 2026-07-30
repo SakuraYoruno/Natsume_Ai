@@ -1233,6 +1233,7 @@ def _build_openai_compat_payload(
     messages: list[Mapping[str, Any]],
     gen_params: dict[str, Any] | None = None,
     stream: bool = False,
+    include_stream_usage: bool = False,
 ) -> dict[str, Any]:
     params = dict(gen_params or {})
     hard_max_tokens = _internal_hard_max_output_tokens(params)
@@ -1246,6 +1247,12 @@ def _build_openai_compat_payload(
         "messages": _build_openai_compat_messages(messages),
         "stream": bool(stream),
     }
+    # This is requested only by the result-attested streaming path.  A final
+    # provider usage frame is evidence, not an estimate from emitted text.
+    # Normal live streaming remains compatible with transports that do not
+    # implement this OpenAI-compatible extension.
+    if stream and include_stream_usage:
+        payload["stream_options"] = {"include_usage": True}
     if "temperature" in params:
         payload["temperature"] = float(params.get("temperature", 0.4))
     else:
@@ -1453,6 +1460,100 @@ def _iter_openai_compat_stream(
         raise RuntimeError(f"OpenAI-compatible stream failed HTTP {exc.code}: {body[:1000]}") from exc
     if final_message:
         yield final_message
+
+
+def _iter_openai_compat_stream_events(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
+) -> "Generator[dict[str, Any], None, None]":
+    """Yield text deltas and one provider-owned final usage record.
+
+    The terminal record deliberately preserves an empty usage mapping when a
+    provider omits it.  The governed ModelAttempt authority will then reject
+    the attempt rather than reverse-engineering tokens or cost from text.
+    """
+
+    endpoint = _resolve_openai_compat_chat_endpoint(
+        provider_name,
+        base_url_override=base_url_override,
+    )
+    payload = _build_openai_compat_payload(
+        model_id=model_id,
+        messages=messages,
+        gen_params=gen_params,
+        stream=True,
+        include_stream_usage=True,
+    )
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        },
+        method="POST",
+    )
+    chunks: list[str] = []
+    final_content = ""
+    final_usage: dict[str, Any] = {}
+    final_finish_reason: str | None = None
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=max(1.0, float(timeout_ms) / 1000.0),
+        ) as response:
+            while True:
+                raw_line = response.readline()
+                if not raw_line:
+                    break
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line or line.startswith(":") or not line.startswith("data:"):
+                    continue
+                data_text = line[len("data:") :].strip()
+                if data_text == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_text)
+                except Exception:
+                    continue
+                if not isinstance(chunk, Mapping):
+                    continue
+                usage = chunk.get("usage")
+                if isinstance(usage, Mapping):
+                    final_usage = dict(usage)
+                choices = chunk.get("choices")
+                if isinstance(choices, list) and choices:
+                    first = choices[0] if isinstance(choices[0], Mapping) else {}
+                    finish_reason = first.get("finish_reason") if isinstance(first, Mapping) else None
+                    if finish_reason is not None:
+                        final_finish_reason = str(finish_reason)
+                    message = first.get("message") if isinstance(first, Mapping) else None
+                    if isinstance(message, Mapping):
+                        candidate = _extract_text_from_response_content(message.get("content"))
+                        if candidate:
+                            final_content = candidate
+                text = _extract_openai_compat_text(chunk)
+                if text:
+                    chunks.append(text)
+                    yield {"kind": "delta", "text": text}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(
+            f"OpenAI-compatible stream failed HTTP {exc.code}: {body[:1000]}"
+        ) from exc
+    yield {
+        "kind": "final",
+        "content": final_content or "".join(chunks),
+        "finish_reason": final_finish_reason,
+        "usage": final_usage,
+    }
 
 
 def _build_chat_google_genai_kwargs(
@@ -2161,6 +2262,42 @@ def stream_llm_chunks(
     )
 
 
+def stream_llm_stream_events(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
+) -> "Generator[dict[str, Any], None, None]":
+    """Stream deltas plus a terminal usage record for governed chat.
+
+    Only the OpenAI-compatible protocol is enabled here because it has a
+    concrete final usage frame (`stream_options.include_usage`).  Unsupported
+    providers fail explicitly; a caller must not turn missing evidence into a
+    token or cost estimate.
+    """
+
+    provider = str(provider_name or "").strip().lower()
+    if provider not in {PROVIDER_OPENAI, PROVIDER_DEEPSEEK}:
+        raise RuntimeError(
+            "provider does not support canonical final usage for governed streaming"
+        )
+    if not str(api_key or "").strip():
+        raise RuntimeError(f"missing api key for provider={provider_name}")
+    yield from _iter_openai_compat_stream_events(
+        provider_name=provider_name,
+        model_id=model_id,
+        api_key=api_key,
+        timeout_ms=timeout_ms,
+        messages=messages,
+        gen_params=gen_params,
+        base_url_override=base_url_override,
+    )
+
+
 async def astream_llm_chunks(
     *,
     provider_name: str,
@@ -2227,6 +2364,59 @@ async def astream_llm_chunks(
             # 重新抛出生产者线程中的异常，确保调用方可以感知流式生成失败
             raise item
         yield item  # type: ignore[misc]
+
+
+async def astream_llm_stream_events(
+    *,
+    provider_name: str,
+    model_id: str,
+    api_key: str,
+    timeout_ms: int,
+    messages: list[Mapping[str, Any]],
+    gen_params: dict[str, Any] | None = None,
+    base_url_override: str | None = None,
+) -> "AsyncGenerator[dict[str, Any], None]":
+    """Bridge the usage-attested synchronous SSE reader into async code.
+
+    Exceptions are propagated to the consumer rather than becoming an empty
+    stream.  The terminal `final` mapping is deliberately passed through even
+    when its usage mapping is empty; the ModelAttempt authority owns the
+    resulting fail-closed budget decision.
+    """
+
+    import asyncio
+    import threading
+
+    loop = asyncio.get_running_loop()
+    event_queue: asyncio.Queue[dict[str, Any] | BaseException | None] = asyncio.Queue()
+    sentinel = None
+
+    def _producer() -> None:
+        try:
+            for event in stream_llm_stream_events(
+                provider_name=provider_name,
+                model_id=model_id,
+                api_key=api_key,
+                timeout_ms=timeout_ms,
+                messages=messages,
+                gen_params=gen_params,
+                base_url_override=base_url_override,
+            ):
+                asyncio.run_coroutine_threadsafe(event_queue.put(dict(event)), loop)
+        except Exception as exc:
+            asyncio.run_coroutine_threadsafe(event_queue.put(exc), loop)
+        finally:
+            asyncio.run_coroutine_threadsafe(event_queue.put(sentinel), loop)
+
+    thread = threading.Thread(target=_producer, daemon=True)
+    thread.start()
+    while True:
+        item = await event_queue.get()
+        if item is sentinel:
+            break
+        if isinstance(item, BaseException):
+            raise item
+        yield dict(item)
 
 
 async def astream_llm_chunks_with_pool(

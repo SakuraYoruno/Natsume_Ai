@@ -25,7 +25,7 @@
 > episode 与旧 writer 清零仍待后续 DL 波。Input/Tribe composition 也已删除旧 runtime fallback：缺 Life authority 时拒绝，不能构造 `HostEmotionRuntime`。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`
 > 接到 Surface 主链：普通低歧义文本在可见前逐句落 journal，model runtime 会优先使用
-> `typed delta → provider final result / conditional usage` 合同并在没有首句前明确不支持时才回退兼容流；模型输出不能回写
+> `typed delta → provider final result / conditional usage` 合同并在没有首句前明确不支持时才回退兼容流；Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/identity/latency，但真实 provider 尚未运行；模型输出不能回写
 > self-affect；高歧义回合只能两候 buffered selection。DL-05 使 `ExpressionPlanV1`
 > 在同一 revision/sync 上编译 Voice `SPEAK` 与 Avatar `TRANSITION` 的 Host protocol，
 > 并将 `CANCEL`/`RELEASE` 与隐私最小化 0146 projection 接到 canonical Life journal。
