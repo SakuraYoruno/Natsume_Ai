@@ -48,6 +48,9 @@ transport telemetry 清除。只有明确标记为可用、未降级的声学观
 即使如此，它也是关于用户的有限假设，仍须经 Appraisal 才可能引起七海自己的感受。
 在 canonical Life composition 中，遗留 Limbic 事件订阅者也不得把相同信号缓存为 process-local
 voice-emotion truth 或写回旧 timeline；离线兼容投影不能反向成为下一轮生产表达的 authority。
+同样，旧 MirrorNeuron 的“共振”若以用户 emotion 和 Bond vector 为输入、再写 registry 或调用 organ fan-out，
+也只是另一条未经 Appraisal 的自我情感旁路。canonical Host 应使其停留在显式退役的兼容投影；真正的关切、
+安慰和表达必须来自同一轮的 canonical Appraisal、CompanionAct 与 ExpressionPlan。
 
 同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
 情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布

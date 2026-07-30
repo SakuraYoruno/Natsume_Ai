@@ -463,7 +463,9 @@ Bond、task success、humor、loneliness、immune block、interoception 和 inte
 第二份 self-affect；只有直接构造的隔离测试 port 才能覆盖历史行为，Host composition 不存在该 fallback。
 Endocrine 的 legacy
 cortisol/oxytocin delta buffer、`_last_state`、hormonal hint、callback 与 fan-out 在同一 canonical mode
-也全部退役，且 Circadian/MirrorNeuron 只能走受控 compatibility method，不能直写私有字段。production
+也全部退役；Circadian 只能走受控 compatibility method，不能直写私有字段。MirrorNeuron 还会在 canonical
+mode 下关闭旧 event subscription、Bond read、registry resonance write、empathy model hint 和 organ fan-out，
+仅返回显式 retirement projection。production
 BodySense 同样不再被 Surface/startup warmup/read：`project_body_sense_from_life_snapshot()` 只读取当前
 relationship subject 的 canonical Life snapshot，Limbic canonical mode 的 tick/loneliness/conversation
 mutation 统一退役，且 retired tick 不发布 Bus update。`MotiveEngine` 同时移除模块级 `_engine`，factory

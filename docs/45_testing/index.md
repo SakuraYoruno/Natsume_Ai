@@ -149,6 +149,10 @@
   immune 与 generic delta 输入均显式退役。Circadian/MirrorNeuron 的邻接测试还验证它们改为调用受控
   compatibility port，而非写 Endocrine 私有字段。该受影响集合为 `72 passed in 2.11s`；它不证明
   BodySense、Motive、Bond queue、真实 Edge/provider 或 DL-07 服务栈完成。
+- `test_mirror_neuron_agent.py::test_mirror_neuron_retires_user_affect_and_legacy_bond_fanout_with_canonical_life`
+  验证 canonical `TribeApplicationPorts` 下 MirrorNeuron 不会订阅旧 event bus、读取 SocialBrain/Bond、写 registry、
+  调用共情模型或 fan-out 到 Limbic/Endocrine/Interoception/PainReward/DefaultMode；所有旧入口退役，离线兼容测试仍保留。
+  本次 Mirror/Limbic/Endocrine 邻接集合为 `59 passed in 1.69s`，不代表真实模型、Edge 或 DL-07。
 - `test_limbic_agent.py` 现额外验证 canonical mode 下的 BodySense 只能从 exact
   relationship subject 的 Life snapshot 纯投影，不会解析 global `BodySenseModel`、写 Tribe state、
   调整 silence penalty 或把 legacy BODY_SENSE_UPDATED 再推进 self-affect；缺 subject 明确

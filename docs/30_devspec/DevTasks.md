@@ -172,7 +172,9 @@ decay、Bond progress/regress、task success、humor landed、loneliness、immun
 Endocrine 只能返回输入 hard-state 的无状态 compatibility projection，不能消费或累加旧
 cortisol/oxytocin delta、更新 `_last_state`、生成旧 hormonal hint 或向 Limbic/Interoception/PainReward
 fan-out。`record_stress_event`、Bond/loneliness/task/immune callback 与显式 delta 入口在 canonical
-mode 均返回 `RETIRED_CANONICAL_LIFE`；Circadian/MirrorNeuron 已停止直接写 Endocrine 私有字段。
+mode 均返回 `RETIRED_CANONICAL_LIFE`；Circadian 已停止直接写 Endocrine 私有字段。MirrorNeuron 在
+canonical mode 下进一步不订阅旧 emotion event、不读 Bond、不写共振 registry，也不调用共情模型或任何 organ fan-out，
+统一退役为 `RETIRED_CANONICAL_LIFE` / 无 hint 的兼容投影。
 这只退役 Endocrine mutation authority。随后 `DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE`
 已在同一 canonical authority 下让 production Surface/startup 不再 warmup 或读取 global
 `BodySenseModel`：每次读取都必须提供 relationship subject，并从对应 Life snapshot 做纯读 projection。

@@ -488,8 +488,9 @@ EmotionVector metabolism、`emotion_timeline` append、periodic decay，以及 B
 风险拦截、内感受和 interaction-recorded callback 全部返回 `RETIRED_CANONICAL_LIFE`，不再写入或重建旧自我情感状态；离线/测试兼容 composition 才可保留
 原行为。第三条切断沿用同一 authority 给 Endocrine：production endocrine 只可返回 hard-state 的无状态
 投影，不能消费 cortisol/oxytocin delta、更新 `_last_state`、生成 hormonal hint 或 fan-out 到 Limbic、
-Interoception/PainReward；所有 legacy delta/event 写入显式返回 `RETIRED_CANONICAL_LIFE`。Circadian 与
-MirrorNeuron 也不再触碰 Endocrine 私有字段。第四条切断进一步退役 production 全局
+Interoception/PainReward；所有 legacy delta/event 写入显式返回 `RETIRED_CANONICAL_LIFE`。Circadian 不再触碰
+Endocrine 私有字段；MirrorNeuron 在 canonical Host 中进一步停用旧事件订阅、Bond 读取、registry 共振写入、
+共情模型 hint 与全部 organ fan-out，只返回 `RETIRED_CANONICAL_LIFE` 的兼容标记。第四条切断进一步退役 production 全局
 `BodySenseModel`：Surface 不再 warmup 或读取该单例，而是按当前 `relationship_subject_id` 从
 canonical Life snapshot 纯投影 fatigue、drowsiness 与 loneliness；缺 subject 会明确不可用，绝不回退到
 其他会话的 global state。legacy BodySense tick、loneliness 注入和会话开始/结束只返回

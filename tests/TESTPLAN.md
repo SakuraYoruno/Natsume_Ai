@@ -46,6 +46,9 @@
   task success、humor landed、loneliness、immune block、interoception 与 interaction-recorded callback 也必须在任何
   restore/persist、silence mutation 或 state-registry touch 前 short-circuit；只有显式 offline/test compatibility
   composition 可执行历史行为。
+- T-DL01-10：production canonical Life authority 下，MirrorNeuron 不得订阅 legacy emotion event、读取
+  SocialBrain/Bond、写共振 registry、生成共情模型 hint，或 fan-out 到 Limbic/Endocrine/Interoception/
+  PainReward/DefaultMode；直接调用与 event callback 都只能形成显式 retirement projection 或 no-op。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 

@@ -71,6 +71,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
   hint、纯文本解析或任一单通道失败均不得回写或中性化七海自身情感。
 - legacy Limbic 的 Bond、任务成功、幽默、孤独、风险拦截、内感受和 interaction-recorded 回调在 production
   canonical mode 只能作为退役兼容入口，绝不能绕过 Life journal 修改七海的 self-affect。
+- legacy MirrorNeuron 不得用用户 emotion、Bond vector 或事件总线直接生成可写共振状态、共情模型 hint 或
+  organ fan-out；canonical mode 只能给出显式退役标记，陪伴动作必须来自 Appraisal 后冻结的计划。
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。

@@ -80,10 +80,19 @@ Limbic、EmotionPersistence、BodySense、Endocrine、Motive、volatile Bond que
 **Endocrine 旧 mutation 切断修订：** canonical `TribeApplicationPorts` 现在也收紧
 `EndocrineAgent`。production mode 只返回 hard-state 的无状态 projection；legacy cortisol/oxytocin
 delta、`_last_state`、hormonal hint、Governor/Limbic/Interoception/PainReward fan-out 以及 stress、
-Bond、loneliness、task、immune callback 均返回 `RETIRED_CANONICAL_LIFE` 或 no-op。Circadian 与
-MirrorNeuron 已不再写 `_bond_*` 私有字段，只能提交受控 compatibility delta，后者在 canonical mode
-同样拒写。这个本地收口不包含 BodySense、Motive、volatile Bond queue、Monitor/Review、真实 provider、
+Bond、loneliness、task、immune callback 均返回 `RETIRED_CANONICAL_LIFE` 或 no-op。Circadian 已不再写
+`_bond_*` 私有字段，只能提交 canonical mode 拒写的受控 compatibility delta。这个本地收口不包含
+BodySense、Motive、volatile Bond queue、Monitor/Review、真实 provider、
 远端 Edge 或服务栈验收。
+
+**MirrorNeuron 旧情感旁路退役修订：** 当 composed production `TribeApplicationPorts` 明确选择
+canonical Life journal 时，`MirrorNeuronAgent` 在订阅旧 emotion event、读取 `SocialBrain` Bond、写入
+`mirror_neuron_agent` registry、调用模型 empathy hint 或 fan-out 到 Limbic、Endocrine、Interoception、
+PainReward、DefaultMode 之前短路为 `RETIRED_CANONICAL_LIFE`。这不是把用户情绪中性化，而是禁止旧
+resonance 把用户的观察或遗留 Bond 数值变成七海 self-affect；真实陪伴措辞继续只能来自 canonical
+Appraisal、CompanionAct 与 ExpressionPlan。未组成 canonical port 的离线/test root 可显式保留旧兼容
+行为作为回滚窗口。本地 `59 passed in 1.69s` 证明这条 writer/fan-out 边界，不代表 InitiativeGovernor、
+Prefrontal 等剩余 compatibility reader、真实 provider、远端 Edge 或服务栈验收已经完成。
 
 **Bond queue 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
 construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧

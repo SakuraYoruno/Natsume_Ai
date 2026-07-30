@@ -53,7 +53,34 @@ class MirrorNeuronAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_affect_authority_retired(self) -> bool:
+        """Whether canonical Life owns affect and relationship consequences.
+
+        Mirror resonance predates the workspace-scoped Life journal.  It mixes
+        a raw user emotion hint with the legacy Bond vector, then writes a
+        process-local trace and fans out into other organ agents.  That is a
+        second affect authority in a production Host, even when downstream
+        Limbic/Endocrine happen to reject some of the writes.
+        """
+
+        ports = self.application_ports
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_MIRROR_NEURON_RESONANCE_RETIRED",
+            "operation": str(operation),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_affect_authority_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -117,6 +144,9 @@ class MirrorNeuronAgent:
         source: str,
         ts_ms: int | None = None,
     ) -> dict[str, Any]:
+
+        if self._legacy_affect_authority_retired():
+            return self._retired_result(operation="apply_resonance")
 
         resolved_ts = int(ts_ms or now_ms())
         social = get_social_brain_agent()
@@ -291,6 +321,8 @@ class MirrorNeuronAgent:
         Returns:
             共情回应建议字符串，或 None（未触发/失败）。
         """
+        if self._legacy_affect_authority_retired():
+            return None
         if float(resonance_intensity or 0.0) <= 0.6:
             return None
 
@@ -376,6 +408,8 @@ class MirrorNeuronAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_affect_authority_retired():
+            return self._retired_result(operation="export_runtime_state")
         snap = self.state_registry.get_state("mirror_neuron_agent") or {}
         state = dict(snap.get("state") or {})
         last = dict(state.get("last_resonance") or {})
@@ -424,6 +458,8 @@ class MirrorNeuronAgent:
         source: str,
         fallback_intensity: float,
     ) -> None:
+        if self._legacy_affect_authority_retired():
+            return
         emotion_tag = str(payload.get("emotion_tag") or "").strip().upper()
         if not emotion_tag:
             return
