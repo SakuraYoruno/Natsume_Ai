@@ -23,7 +23,7 @@ class ChatSettings(BaseSettings):
     sys_mode: str = Field(default="normal", alias="HOST_SYS_MODE")
 
     mateengine_chat_bubble_enabled: bool = Field(
-        default=True,
+        default=False,
         alias="HOST_MATEENGINE_CHAT_BUBBLE_ENABLED",
     )
     mateengine_chat_bubble_max_chars: int = Field(
@@ -32,7 +32,7 @@ class ChatSettings(BaseSettings):
         alias="HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS",
     )
     mateengine_state_cues_enabled: bool = Field(
-        default=True,
+        default=False,
         alias="HOST_MATEENGINE_STATE_CUES_ENABLED",
     )
     mateengine_thinking_cue_delay_ms: int = Field(

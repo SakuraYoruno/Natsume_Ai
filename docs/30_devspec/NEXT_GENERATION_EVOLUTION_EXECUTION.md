@@ -277,6 +277,10 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   VTS 或 Avatar physical receipt。
 - 单通道不可用只能标记通道降级，不能把 self-affect 改写为 `NEUTRAL`。当前远端 Edge 位于
   另一台电脑，本波只完成 Host 接线、合同测试与可回放 protocol evidence，未启动远端服务。
+- `/v1/chat` 的旧 MateEngine 气泡/状态 callback 已硬退役。它不能从 final narrative、route label 或
+  缺失 performance tag 猜测 `NEUTRAL` 并直写 Host embodiment outbox；即使遗留环境键被设置，也只能
+  解析配置，不能恢复这条 direct authority。桌宠/Avatar 的陪伴表达只能由 accepted
+  `ExpressionPlanV1` 的 Task Acceptance effect 发起。
 
 本地生产等价 SQLite Runtime 已覆盖两句 `SENTENCE_STAGED → SSE → Acceptance →
 foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL_STAGED` intent 与两条

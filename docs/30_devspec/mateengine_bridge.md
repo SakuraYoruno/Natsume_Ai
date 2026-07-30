@@ -194,19 +194,16 @@ The next useful bridge layer should expose:
 
 Host remains responsible for deciding when and why an event happens. MateEngine remains responsible for rendering the desktop body.
 
-### 本机桌宠与 Edge/VTS 情绪镜像隔离
+### 本机桌宠与 Edge/VTS 表达边界
 
-Host 侧 MateEngine 桌宠现在优先由聊天生命周期状态驱动，例如 `focus -> speak -> home`。为避免 Edge/VTS 表情解析的异步结果在对话结束后覆盖本机桌宠最终状态，`HOST_MATEENGINE_VTS_EMOTION_MIRROR_ENABLED` 默认关闭。
+`/v1/chat` 不再以聊天生命周期的 `focus -> speak -> home`、最终文本或 `reply_envelope.performance`
+直接驱动 MateEngine。那类 callback 没有冻结的 `ExpressionPlanV1`、同步编号或 Acceptance Preview，且缺失
+标签时曾可能伪造 `NEUTRAL`；它已被硬退役。遗留 `HOST_MATEENGINE_*` 配置键仅为回滚窗口保持可解析，不能
+重新打开 Chat→MateEngine 写 authority。
 
-如确实需要把 VTS 情绪解析结果同步给本机 MateEngine，可显式设置：
-
-```powershell
-$env:HOST_MATEENGINE_VTS_EMOTION_MIRROR_ENABLED="1"
-```
-
-### 回复表现层情绪驱动本机说话状态
-
-本机 MateEngine 桌宠的 `speak` 阶段现在从 `/v1/chat` 的 `reply_envelope.performance` / `audit.natsume_emotion_tag` 中提取本轮回复情绪，并作为 `emotion_tag` / `intensity` 发送给 MateEngine。这样桌宠说话时的表情来源是本轮 Natsume 输出本身，而不是 Edge/VTS 的异步表情镜像。
+面向陪伴的桌宠/Avatar 表达必须由同轮 accepted `ExpressionPlanV1` 经 Task Acceptance 写入 Host durable
+outbox；Host admission 仍不等于设备播放或动作完成。显式 Operator 动作接口保留给隔离的设备调试和验收，
+不得被聊天回调、模型输出或关系/情绪标签自动调用。
 
 ### 桌宠动作验证标准
 

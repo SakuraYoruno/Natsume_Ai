@@ -705,6 +705,10 @@ command，并按 idempotency key 写入 app-local durable embodiment outbox。�
 Host 以后投递”的本地事实，不是“声音已播放”或“Avatar 已转场”；`PENDING`、`DISPATCHING`、
 `IN_DOUBT`、`APPLIED`、`REJECTED` 都仍须与未来 Edge 的独立物理 receipt 区分。
 
+因此 `/v1/chat` 不能在最终 `COMMIT` 后重新解析 narrative、route state 或模型 performance，再发送
+MateEngine 气泡/状态提示。那种旁路既没有 frozen plan、同步编号和 terminal Preview，也会在缺失标签时
+伪造 `NEUTRAL`；它现在被硬退役。保留的环境兼容键只保证旧部署配置可读取，不能重新打开具身写 authority。
+
 模型流还必须区分“字符已经到达”与“这次调用已可计量”。`ModelAttemptService.stream_with_result()`
 把这两个时刻显式拆开：它只允许 typed delta，结束时必须收到唯一一份 provider-owned
 `ProviderResponse`，再把模型、provider 与 transport 证据，以及 provider 显式给出的 usage 写入 canonical Attempt；任何一项

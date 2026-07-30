@@ -143,6 +143,10 @@
   `EDGE_APPLIED` 或伪造 physical receipt。
 - 该集合没有启动远端 Edge、TTS、VTS、VRM、真实模型或 Docker 服务栈；它只能证明 Host
   admission/reconciliation 边界，最终体验和物理设备验收仍属于 DL-07。
+- `test_dl05_chat_embodiment_retirement.py` 额外锁定 `/v1/chat` 的旧 MateEngine 气泡/状态旁路：遗留
+  环境键可以被解析，但不能重新启用 direct Chat→MateEngine enqueue，也不能由 final text/route state
+  或缺失标签伪造 `NEUTRAL`。与 Chat 主链、DL-04/DL-05 protocol/restart 和具身 authority 合计
+  `38 passed in 7.11s`；它只证明 Host 侧 writer 退役，未启动任何远端设备。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 

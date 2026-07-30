@@ -50,7 +50,16 @@ def _action_arbiter_enabled() -> bool:
 
 
 def _mateengine_chat_bubble_enabled() -> bool:
-    return get_chat_settings().mateengine_chat_bubble_enabled
+    """Keep retired direct Chat→MateEngine output disabled.
+
+    A chat commit is not an embodiment authority.  The old switch is retained
+    only so existing environment files remain parseable during the rollback
+    window; it cannot re-enable a text-derived Avatar command.  Accepted
+    ``ExpressionPlanV1`` effects are emitted later by the Task-owned Host
+    outbox with their exact synchronization and preview bindings.
+    """
+
+    return False
 
 
 def _mateengine_bubble_text_limit() -> int:
@@ -194,35 +203,21 @@ def _send_mateengine_chat_bubble(
     emotion_intensity: float | None = None,
     embodiment_runtime: Any | None = None,
 ) -> None:
-    if not text or not _mateengine_chat_bubble_enabled():
-        return
-    try:
-        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
+    """Compatibility no-op for the retired text-derived embodiment path.
 
-        queue_mateengine_command(
-            action="command",
-            payload={
-                "command": {
-                    "type": "say",
-                    "text": text,
-                    "emotion": str(emotion_tag or "NEUTRAL").strip().upper(),
-                    "intensity": emotion_intensity,
-                }
-            },
-            request_id=request_id,
-            idempotency_key=f"{request_id}:mateengine:chat-bubble",
-            runtime=embodiment_runtime,
-        )
-    except Exception as exc:
-        _logger.debug(
-            "[%s] MateEngine chat bubble send failed: %s",
-            request_id,
-            exc,
-        )
+    It intentionally does not inspect the final text or synthesize a neutral
+    emotion.  A visible Avatar command may only originate from the accepted
+    frozen expression plan, never from this presentation-layer callback.
+    """
+
+    return None
 
 
 def _mateengine_state_cues_enabled() -> bool:
-    return get_chat_settings().mateengine_state_cues_enabled
+    # Intent/terminal event labels are not emotional authority.  Direct
+    # Chat→MateEngine state cues are retired in favour of the accepted,
+    # synchronization-bound expression protocol.
+    return False
 
 
 def _mateengine_thinking_cue_delay_s() -> float:
@@ -278,49 +273,14 @@ def _send_mateengine_state_cue(
     force: bool = False,
     embodiment_runtime: Any | None = None,
 ) -> bool:
-    if not _mateengine_state_cues_enabled():
-        return False
-    if lifecycle.get("done") and not force:
-        return False
-    clean_state = str(state or "").strip().lower()
-    if not clean_state:
-        return False
-    cue_text = _mateengine_state_cue_text(state)
-    if not cue_text and clean_state not in _MATEENGINE_VISIBLE_STATE_CUES:
-        return False
-    if lifecycle.get("last_state") == clean_state and not force:
-        return False
-    lifecycle["state_cued"] = True
-    lifecycle["last_state"] = clean_state
-    try:
-        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
+    """Compatibility no-op for retired direct state/typing cues.
 
-        queue_mateengine_command(
-            action="command",
-            payload={
-                "command": {
-                    "type": "state",
-                    "state": clean_state,
-                    "text": cue_text,
-                }
-            },
-            request_id=request_id,
-            idempotency_key=f"{request_id}:mateengine:state:{clean_state}",
-            runtime=embodiment_runtime,
-        )
-    except Exception as exc:
-        _logger.debug(
-            "[%s] MateEngine state action send failed: %s",
-            request_id,
-            exc,
-        )
-        if cue_text:
-            _send_mateengine_chat_bubble(
-                cue_text,
-                request_id=request_id,
-                embodiment_runtime=embodiment_runtime,
-            )
-    return True
+    The old callback accepted route and lifecycle labels without an accepted
+    affective plan or action preview.  It must never enqueue a physical effect
+    or fall back to a text bubble; Task Acceptance owns that boundary.
+    """
+
+    return False
 
 
 def _infer_mateengine_state_from_intent(intent_draft: Dict[str, Any] | None) -> str:

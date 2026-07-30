@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,6 +18,7 @@ from host_brain.app.emotion_context import (
 from host_brain.app.chat_handler import handle_chat
 import host_brain.app.chat_handler as chat_handler_module
 from host_brain.app.schemas import ChatRequest
+from host_brain.app.settings.chat import get_chat_settings
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 
 
@@ -460,14 +462,25 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
     assert raw_intent["_surface_route_override"]["reason_code"] == "THALAMUS_RULE_MEMORY_RECALL"
 
 
-def test_chat_settings_are_typed_and_resolved_without_module_reload(monkeypatch) -> None:
+def test_chat_settings_cannot_reenable_direct_mateengine_output_authority(monkeypatch) -> None:
     monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_STATE_CUES_ENABLED", "true")
     monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "64")
     monkeypatch.setenv("HOST_MATEENGINE_MEMORY_RECALL_CUE_TEXT", "正在找记忆")
 
-    assert chat_handler_module._action_arbiter_enabled() is True
+    # The legacy environment keys remain parseable for the rollback window,
+    # but cannot reopen a Chat→MateEngine side effect without a frozen,
+    # accepted ExpressionPlan.
+    assert get_chat_settings().action_arbiter_enabled is True
+    assert get_chat_settings().mateengine_chat_bubble_enabled is True
+    assert get_chat_settings().mateengine_state_cues_enabled is True
+    assert chat_handler_module._mateengine_chat_bubble_enabled() is False
+    assert chat_handler_module._mateengine_state_cues_enabled() is False
     assert chat_handler_module._mateengine_bubble_text_limit() == 64
     assert chat_handler_module._mateengine_state_cue_text("memory_recall") == "正在找记忆"
+    source = Path(chat_handler_module.__file__).read_text(encoding="utf-8")
+    assert "queue_mateengine_command" not in source
 
 
 @pytest.mark.asyncio

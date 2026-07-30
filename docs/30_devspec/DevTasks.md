@@ -40,7 +40,9 @@ intent，只有在首个 delta 前明确不支持终态合同才回退兼容 str
 允许恰好两候 buffered selection。DL-05 已将同一冻结 `ExpressionPlanV1` 编译为 Voice
 `SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，并在结束/打断时追加
 `RELEASE`/`CANCEL`；0146 只投影 Host staging，远端 Edge 尚未启动，因此不能声称播放或
-Avatar 已执行。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_permission=ALLOWED`、
+Avatar 已执行。`/v1/chat` 旧 MateEngine 气泡/状态 callback 已硬退役：它不再从 final reply、route state
+或缺失标签猜测 `NEUTRAL` 并尝试直接入队；保留环境键仅为回滚窗口解析配置，不能越过
+Task Acceptance/ExpressionPlan。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_permission=ALLOWED`、
 无 repair/未结 episode 且 self regulation 未要求克制时，才以 bounded canonical
 self-affect 生成无回应压力的主动消息；旧 Bond、legacy `affect` 与固定模板均无发送权。
 已接受 foreground reply 现在会把 scope-bound `CompanionProactiveTargetV1` 与 provisional
