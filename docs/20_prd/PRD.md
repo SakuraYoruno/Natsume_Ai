@@ -249,6 +249,10 @@ Regulation 或 self-affect 的身体输入都需要 scoped、可重放的 Life �
 决策显式退役为 `LEGACY_INITIATIVE_GOVERNOR_RETIRED / DEFER`；真正的主动联系只能由同一 Life journal 内的
 explicit permission、relationship episode、Regulation、aftereffect 和冻结 Scene 共同裁决。
 
+已接受 transport 的单一 `PROACTIVE_MESSAGE` 可在完整 24 小时宽限期后被 Scheduler 作为**维护目标**重开，
+只用于写入 `SILENCE` aftereffect 并放慢未来联系；registry 不得把其它未结 relationship episode 或尚未到期的
+主动消息混入发送候选。该维护操作不得降低 trust/safety、撤销或扩大 permission，亦不得伪造用户出现。
+
 旧 `ProprioceptionAgent` 不得把 conversation、channel interrupt、voice pipeline 或 task success 汇总为 process-global
 cognitive load、continuity、疲惫、压力、满足或主动节律，再回灌旧 organ。canonical Host 必须在 registry、EventBus、
 模型与旧器官副作用之前退役这些入口为 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`；真实 activity

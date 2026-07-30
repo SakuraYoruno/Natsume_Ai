@@ -5,8 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.app.host_life_scheduler_wiring import submit_life_tick_command
 from host_brain.digital_life.outbox import LifeOutboxDispatcher
-from host_brain.digital_life.policy import build_life_tick_payload
 from host_brain.digital_life.companion_proactive import decide_companion_proactive
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.relationship_lifecycle import (
@@ -43,6 +43,25 @@ class _Clock:
 
     def __call__(self) -> int:
         return self.value
+
+
+class _FrozenRuntimeContext:
+    """Narrow scheduler-facing wrapper around an already frozen context pack.
+
+    The production handler is intentionally exercised here instead of calling
+    the Life policy directly.  Full World/Scene composition is covered by its
+    own integration suite; this test proves that the scheduler refuses to
+    invent a context and passes the already frozen identity to the real Life
+    command boundary.
+    """
+
+    def __init__(self, frozen_context: dict[str, object]) -> None:
+        self._frozen_context = dict(frozen_context)
+        self.requested_packs: list[dict[str, object]] = []
+
+    def require_frozen(self, raw: dict[str, object]) -> SimpleNamespace:
+        self.requested_packs.append(dict(raw))
+        return SimpleNamespace(to_dict=lambda: dict(self._frozen_context))
 
 
 def _runtime(
@@ -196,34 +215,56 @@ def _seed_warm_self_affect(
     assert receipt.status is LifeCommandStatus.APPLIED
 
 
-def _submit_tick(
+def _submit_host_scheduler_tick(
     service: LifeCommandService,
+    reader: LifeSnapshotReader,
     scope: RelationshipScope,
     clock: _Clock,
     *,
-    command_id: str,
     occurrence_payload: dict[str, object],
-) -> object:
-    def build(snapshot):  # noqa: ANN001, ANN202
-        return LifeCommand(
-            command_id=command_id,
-            person_id=scope.aggregate_id,
-            command_type="tick",
-            payload=build_life_tick_payload(
-                snapshot,
-                scheduled_at_ms=clock(),
-                occurrence_payload=occurrence_payload,
-                task_id="life_tick",
-                definition_revision=1,
-            ),
-            expected_version=snapshot.version,
-            created_at_ms=clock(),
-            correlation_id=command_id,
-            causation_id=command_id,
-            metadata={"producer": "dl06-local-integration"},
-        )
-
-    return service.submit_next(scope.aggregate_id, build)
+    occurrence_id: str,
+) -> tuple[dict[str, object], _FrozenRuntimeContext]:
+    frozen_context = {
+        "scene_decision_v2": occurrence_payload["scene_decision_v2"],
+        "scene_identity_v2": occurrence_payload["scene_identity_v2"],
+    }
+    runtime_context = _FrozenRuntimeContext(frozen_context)
+    occurrence = SimpleNamespace(
+        occurrence_id=occurrence_id,
+        task_id="life_tick",
+        definition_revision=1,
+        scheduled_at_ms=clock(),
+        payload={"timezone": "Asia/Shanghai"},
+        principal_id="scheduler-service",
+    )
+    definition = SimpleNamespace(
+        intent_template={
+            "skill_name": "life_tick",
+            "args": {"person_id": "default"},
+        }
+    )
+    command = SimpleNamespace(
+        command_id=f"host-command::{occurrence_id}",
+        request_id=f"scheduler-request::{occurrence_id}",
+        principal_id="scheduler-service",
+        governor_grant_ref=_DELIVERY_AUTHORIZATION["governor_grant_ref"],
+    )
+    result = submit_life_tick_command(
+        occurrence=occurrence,
+        definition=definition,
+        command=command,
+        execution_context={
+            "frozen_input_pack": {
+                "schema_version": "runtime-context-frozen-input.v1",
+                **frozen_context,
+            }
+        },
+        runtime_context_application=runtime_context,  # type: ignore[arg-type]
+        life_command_service=service,
+        life_snapshot_reader=reader,
+        clock_ms=clock,
+    )
+    return dict(result), runtime_context
 
 
 def test_canonical_proactive_tick_commits_plan_outbox_and_silence_backoff_across_restart(
@@ -251,18 +292,21 @@ def test_canonical_proactive_tick_commits_plan_outbox_and_silence_backoff_across
         timezone_name="Asia/Shanghai",
     )
     assert pre_tick_decision.send_allowed is True, pre_tick_decision
-    queued = _submit_tick(
+    queued, runtime_context = _submit_host_scheduler_tick(
         service,
+        reader,
         scope,
         clock,
-        command_id="dl06-canonical-proactive-tick",
         occurrence_payload=occurrence_payload,
+        occurrence_id="scheduleroccurrence://sha256/dl06-canonical-proactive-tick",
     )
 
-    assert queued.status is LifeCommandStatus.APPLIED
+    assert queued["status"] == "SUCCEEDED"
+    assert len(runtime_context.requested_packs) == 1
     queued_snapshot = reader.get_snapshot(scope.aggregate_id)
     queued_head = queued_snapshot.state["companion_proactive"]
-    queued_outbox = repository.list_outbox(command_id="dl06-canonical-proactive-tick")
+    scheduler_command_id = "life_tick::scheduleroccurrence://sha256/dl06-canonical-proactive-tick"
+    queued_outbox = repository.list_outbox(command_id=scheduler_command_id)
     assert len(queued_outbox) == 1
     assert queued_outbox[0]["destination"] == "proactive.gateway"
     queued_payload = json.loads(str(queued_outbox[0]["payload_json"]))
@@ -291,6 +335,9 @@ def test_canonical_proactive_tick_commits_plan_outbox_and_silence_backoff_across
     assert sent == [queued_outbox[0]["delivery_key"]]
     assert len(active_episodes) == 1
     assert active_episodes[0]["source_kind"] == "PROACTIVE_MESSAGE"
+    maintenance_targets = reader.list_companion_proactive_targets(limit=10)
+    assert maintenance_targets[0]["aggregate_id"] == scope.aggregate_id
+    assert maintenance_targets[0]["pending_proactive_opened_at_ms"] == active_episodes[0]["opened_at_ms"]
 
     # A fresh repository/reader/service must see the same canonical state
     # before a scheduler observes the unanswered episode.
@@ -301,20 +348,38 @@ def test_canonical_proactive_tick_commits_plan_outbox_and_silence_backoff_across
 
     prior_user_seen = int(delivered_snapshot.state["clock"]["last_user_seen_ms"])
     clock.value += _SILENCE_GRACE_MS + 1
-    silent = _submit_tick(
+    silent, silence_runtime_context = _submit_host_scheduler_tick(
         restarted_service,
+        restarted_reader,
         scope,
         clock,
-        command_id="dl06-canonical-proactive-silence",
         occurrence_payload=occurrence_payload,
+        occurrence_id="scheduleroccurrence://sha256/dl06-canonical-proactive-silence",
     )
 
-    assert silent.status is LifeCommandStatus.APPLIED
+    assert silent["status"] == "SUCCEEDED"
+    assert len(silence_runtime_context.requested_packs) == 1
     recovered = restarted_reader.get_snapshot(scope.aggregate_id)
     assert recovered.state["relationship_v2"]["active_episodes"] == []
     assert recovered.state["relationship_v2"]["last_aftereffect"]["outcome"] == "SILENCE"
     assert int(recovered.state["clock"]["last_user_seen_ms"]) == prior_user_seen
     assert recovered.state["companion_proactive"]["consecutive_unanswered"] == 1
     assert recovered.state["companion_proactive"]["next_allowed_at_ms"] > clock()
-    assert repository.list_outbox(command_id="dl06-canonical-proactive-silence") == []
+    assert repository.list_outbox(
+        command_id="life_tick::scheduleroccurrence://sha256/dl06-canonical-proactive-silence"
+    ) == []
     assert restarted_service.replay(scope.aggregate_id).as_dict() == recovered.as_dict()
+
+    replayed, replay_runtime_context = _submit_host_scheduler_tick(
+        restarted_service,
+        restarted_reader,
+        scope,
+        clock,
+        occurrence_payload=occurrence_payload,
+        occurrence_id="scheduleroccurrence://sha256/dl06-canonical-proactive-silence",
+    )
+    assert replayed["status"] == "SUCCEEDED"
+    assert replayed["replayed"] is True
+    # Receipt replay still validates the Scheduler's frozen Runtime Context;
+    # it must not silently reuse a receipt under a missing or forged scene.
+    assert len(replay_runtime_context.requested_packs) == 1

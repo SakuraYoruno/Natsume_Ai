@@ -950,8 +950,9 @@ DL-06 的 Scheduler 主动消息已开始走同一条 canonical 边界。accepte
 reply 先把 `CompanionProactiveTargetV1` 与 provisional relationship episode 原子写入同一
 Life command；这个 target 绑定 workspace、relationship subject、session、route 与来源
 receipt，但登记不等于主动许可。read-only registry 只重开 explicit `ALLOWED`、无
-repair/active episode 且 scope-valid 的 target，Scheduler 再从与 frozen Scene 匹配的集合稳定
-选择一个 aggregate。`companion_proactive` adapter 读取其 `relationship_v2`、`state.affective`、
+repair/active episode 且 scope-valid 的 target；例外是唯一、已 receipt-backed 的 `PROACTIVE_MESSAGE`，它只会
+在满 24 小时后作为 maintenance target 被 Scheduler 优先选择，以关闭等待中的 episode，绝不作为新外发候选。
+Scheduler 再从与 frozen Scene 匹配的集合稳定选择一个 aggregate。`companion_proactive` adapter 读取其 `relationship_v2`、`state.affective`、
 clock 和 admitted timezone，先验证无给空间 regulation、能量和休息需要，才调用既有的纯
 impulse/risk 算法；Bond score、legacy `state.affect`、旧 `last_target`、私密 inner note 和
 project title 不会进入该输入。decision trace 只记录 content digest；真正的消息仅存在于已经
@@ -967,10 +968,10 @@ payload/authorization digest 及 target/scope，才追加 `relationship_proactiv
 最新的 scheduler 命令不再把 decision 当成一段可覆盖的 `state_patch`。它先冻结
 `AffectiveTurnPlanV1 → ExpressionPlanV1.synchronization_id`，将 scope、两条 revision、content digest、
 decision id 和下次可联系时间随同唯一的 `proactive.gateway` intent 提交；reducer 必须同时重验两者才会更新
-bounded cadence head。delivery receipt 打开的 `PROACTIVE_MESSAGE` 若完整 24 小时没有新的用户输入，下一 tick
-会生成 source-bound `SILENCE` aftereffect：关闭 episode、指数放慢下一次联系，且保持 trust/safety/permission 与
-`last_user_seen_ms` 不变。流程被真实 SQLite command、outbox、receipt 和 restart 重放测试覆盖；本地 transport
-handler 只用于 Host-side integration，不能当作真实 Gateway、平台或远端设备回执。
+bounded cadence head。delivery receipt 打开的 `PROACTIVE_MESSAGE` 若完整 24 小时没有新的用户输入，实际 Scheduler
+handler 会优先选中其 maintenance target，并生成 source-bound `SILENCE` aftereffect：关闭 episode、指数放慢下一次联系，
+且保持 trust/safety/permission 与 `last_user_seen_ms` 不变。流程被真实 SQLite Scheduler command、outbox、receipt 和
+restart 重放测试覆盖；本地 transport handler 只用于 Host-side integration，不能当作真实 Gateway、平台或远端设备回执。
 
 历史 `proactive_talk` 不再属于这张发送图：它已从 production Skill、Tool、executor 和新 Scheduler
 definition 输入移除，Host composition 还会对升级前遗留的 `proactive_talk_periodic` head 执行 CAS disable。

@@ -639,8 +639,9 @@ canonical Life composition 下的 Limbic event subscriber 也已 no-op，不能�
 **DL-06 当前模块边界：** `Relationship Lifecycle / Companion Policy` 的 scheduler decision 已由 reducer
 拥有 cadence head 写权。冻结 plan、scope/revision/digest 和 `proactive.gateway` intent 只有在同一 Life
 transaction 中全部匹配时才可提交；delivery receipt 后的 `PROACTIVE_MESSAGE` 超过 24 小时无新输入，
-只会关闭 episode 并持久化联系降频，绝不会给关系扣分或减少用户许可。此处的 SQLite integration 使用受控本地
-transport 来证明 outbox/restart 语义，尚不是第三方平台、远端 Edge 或完整体验验收。
+只会以唯一 receipt-backed episode 的 Scheduler maintenance target 关闭 episode 并持久化联系降频；其它未结
+episode 仍不进入发送候选，绝不会给关系扣分或减少用户许可。此处的 SQLite integration 经真实 Scheduler handler
+使用受控本地 transport 来证明 outbox/restart 语义，尚不是第三方平台、远端 Edge 或完整体验验收。
 
 ### 4.7 渠道、Gateway 与 Edge
 

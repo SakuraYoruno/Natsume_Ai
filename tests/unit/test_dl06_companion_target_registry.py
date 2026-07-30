@@ -7,6 +7,7 @@ import pytest
 
 from host_brain.app.host_life_scheduler_wiring import _select_life_tick_person_id
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.digital_life.companion_proactive import PROACTIVE_SILENCE_GRACE_MS
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.relationship_lifecycle import (
     RelationshipLifecycleService,
@@ -216,18 +217,21 @@ def test_scheduler_selection_is_deterministic_and_scene_scope_bound() -> None:
     first = _select_life_tick_person_id(
         args={"timezone": "Asia/Shanghai"},
         occurrence_id="occurrence-target",
+        now_ms=NOW,
         frozen_runtime_context=frozen,
         life_snapshot_reader=Reader(),
     )
     second = _select_life_tick_person_id(
         args={"timezone": "Asia/Shanghai"},
         occurrence_id="occurrence-target",
+        now_ms=NOW,
         frozen_runtime_context=frozen,
         life_snapshot_reader=Reader(),
     )
     incompatible = _select_life_tick_person_id(
         args={"timezone": "Asia/Shanghai"},
         occurrence_id="occurrence-target",
+        now_ms=NOW,
         frozen_runtime_context={
             "scene_decision_v2": {
                 "workspace_id": "workspace-z",
@@ -241,3 +245,48 @@ def test_scheduler_selection_is_deterministic_and_scene_scope_bound() -> None:
     assert first[0] in {"relationship::a", "relationship::b"}
     assert first[1] == "CANONICAL_REGISTERED_TARGET"
     assert incompatible == ("default", "NO_SCENE_COMPATIBLE_REGISTERED_TARGET")
+
+
+def test_scheduler_prioritizes_only_due_proactive_silence_maintenance() -> None:
+    class Reader:
+        def list_companion_proactive_targets(self, *, limit: int):
+            assert limit == 1_000
+            return [
+                {
+                    "aggregate_id": "relationship::ready",
+                    "workspace_id": "workspace-a",
+                    "relationship_subject_id": "person-a",
+                },
+                {
+                    "aggregate_id": "relationship::due-silence",
+                    "workspace_id": "workspace-a",
+                    "relationship_subject_id": "person-a",
+                    "pending_proactive_opened_at_ms": NOW
+                    - PROACTIVE_SILENCE_GRACE_MS
+                    - 1,
+                },
+                {
+                    "aggregate_id": "relationship::not-due",
+                    "workspace_id": "workspace-a",
+                    "relationship_subject_id": "person-a",
+                    "pending_proactive_opened_at_ms": NOW - 1,
+                },
+            ]
+
+    selected = _select_life_tick_person_id(
+        args={},
+        occurrence_id="occurrence-silence-maintenance",
+        now_ms=NOW,
+        frozen_runtime_context={
+            "scene_decision_v2": {
+                "workspace_id": "workspace-a",
+                "subject_id": "person-a",
+            }
+        },
+        life_snapshot_reader=Reader(),
+    )
+
+    assert selected == (
+        "relationship::due-silence",
+        "CANONICAL_PROACTIVE_SILENCE_MAINTENANCE_TARGET",
+    )

@@ -76,7 +76,9 @@ Tribe `CONVERSATION_ENDED`，或直接推 VTS/整段 TTS，都会把可恢复的
 在当前实现里，“一段时间没有回应”只有在此前主动消息已经取得可核验的
 transport receipt、并且超过完整宽限期后，才会形成 `SILENCE` aftereffect。它关闭的是那一条
 `PROACTIVE_MESSAGE` episode，并只把下一次可联系时间向后推；它既不更新
-trust/safety/permission，也不伪造用户出现。主动决定与此后的降频 head 必须同
+trust/safety/permission，也不伪造用户出现。只读 registry 仅把这个唯一、已回执的
+`PROACTIVE_MESSAGE` 暴露为 Scheduler 的维护候选；任何其他未结 relationship episode 仍是发送 hold，
+不会被沉默逻辑误当作可再次联系的对象。主动决定与此后的降频 head 必须同
 `proactive.gateway` outbox intent 由一个 Life command 原子提交：policy 无权以通用 state patch
 直接写入。这样恢复后的七海能记得自己已安静等待过，而不会把一次沉默解释成被抛下、也不会在重启后再发一遍。
 

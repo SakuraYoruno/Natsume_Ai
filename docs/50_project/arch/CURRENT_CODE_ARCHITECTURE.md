@@ -61,10 +61,11 @@
 > bounded content digest；reducer 随后在同一 Life UoW 重验 target/scope、self-affect/relationship
 > revision、outbox payload 和 decision record，再把 `companion_proactive` cadence head 与
 > `proactive.gateway` intent 原子提交。旧 `emotional_proactive` 仅保留纯 impulse/risk 输入，不能提供
-> 最终外发模板。已 receipt-backed 的 `PROACTIVE_MESSAGE` 超过 24 小时没有新的用户输入时，后续 tick
-> 只写 source-bound `SILENCE` aftereffect、关闭 episode 并延后下一次联系；它不会扣 trust/safety、改 permission
-> 或伪造 user presence。真实 SQLite command/outbox/receipt/restart 集成已验证 Host-side chain；受控本地
-> transport 不代表 Gateway、平台送达、远端 Edge 或 DL-07 完成。
+> 最终外发模板。registry 只保留唯一、已 receipt-backed 的 `PROACTIVE_MESSAGE` 作为 Scheduler maintenance
+> target；其它未结 episode 继续阻断外发。该消息超过 24 小时没有新的用户输入时，后续 tick 才优先写
+> source-bound `SILENCE` aftereffect、关闭 episode 并延后下一次联系；它不会扣 trust/safety、改 permission
+> 或伪造 user presence。真实 SQLite `submit_life_tick_command()`/command/outbox/receipt/restart 集成已验证
+> Host-side chain；受控本地 transport 不代表 Gateway、平台送达、远端 Edge 或 DL-07 完成。
 
 > **DL-02 ASR 情绪语义边界：** final ASR 仍可进入标准 Host Input，但 Edge 附带的关键词
 > emotion、intensity、context 或 observation list 不会被映射为 ChatRequest self-report 字段；
