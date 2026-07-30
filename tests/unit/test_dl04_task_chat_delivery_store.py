@@ -9,6 +9,7 @@ import pytest
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.task_chat_delivery_store import (
     TASK_CHAT_DELIVERY_FENCE_LOST,
+    TASK_CHAT_DELIVERY_RECOVERY_REQUIRED,
     TASK_CHAT_DELIVERY_REPLAY_DRIFT,
     TaskChatDeliveryContext,
     TaskChatDeliveryStore,
@@ -130,6 +131,70 @@ def _insert_live_task_node(db_path: Path) -> None:
         )
 
 
+def _insert_replacement_attempt(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        # A retry may only claim a replacement after the predecessor has
+        # become non-live.  Its immutable Chat delivery rows deliberately
+        # remain, which is the recovery boundary under test.
+        conn.execute(
+            "UPDATE task_runtime_lease SET status = 'EXPIRED', released_ts_ms = 2 "
+            "WHERE lease_id = 'lease-chat-delivery'"
+        )
+        conn.execute(
+            "UPDATE task_runtime_attempt SET status = 'FAILED', completed_ts_ms = 2, "
+            "updated_ts_ms = 2 WHERE attempt_id = 'attempt-chat-delivery'"
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_attempt(
+                attempt_id, graph_id, graph_revision, node_id, attempt_no,
+                status, status_version, owner_id, operation_scope,
+                operation_fingerprint, created_ts_ms, acquired_ts_ms,
+                started_ts_ms, completed_ts_ms, updated_ts_ms, error_ref
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "attempt-chat-delivery-replacement",
+                "graph-chat-delivery",
+                1,
+                "node-chat-delivery",
+                2,
+                "RUNNING",
+                0,
+                "worker-chat-delivery-replacement",
+                "chat-delivery",
+                "sha256:" + "c" * 64,
+                2,
+                2,
+                2,
+                None,
+                2,
+                None,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO task_runtime_lease(
+                lease_id, attempt_id, owner_id, fencing_token, acquired_ts_ms,
+                heartbeat_ts_ms, expires_ts_ms, released_ts_ms, status, status_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "lease-chat-delivery-replacement",
+                "attempt-chat-delivery-replacement",
+                "worker-chat-delivery-replacement",
+                4,
+                2,
+                2,
+                10_000,
+                None,
+                "ACTIVE",
+                0,
+            ),
+        )
+
+
 def _context() -> TaskChatDeliveryContext:
     return TaskChatDeliveryContext(
         graph_id="graph-chat-delivery",
@@ -243,6 +308,68 @@ def test_delivery_plan_cannot_be_reopened_under_a_different_lease(
         store.stage_plan(changed_fence)
 
     assert raised.value.reason_code == TASK_CHAT_DELIVERY_REPLAY_DRIFT
+
+
+def test_replacement_attempt_must_reconcile_prior_delivery_before_model_rerun(
+    tmp_path: Path,
+) -> None:
+    """A new attempt cannot turn a visible prefix into a second provider call."""
+
+    db_path = _migrated_database(tmp_path)
+    _insert_live_task_node(db_path)
+    store = TaskChatDeliveryStore(db_path, clock=lambda: 100)
+    context = _context()
+    store.stage_plan(context)
+    store.stage_sentence(context, sentence="这句话已经可见。", sentence_index=0)
+    _insert_replacement_attempt(db_path)
+    replacement = TaskChatDeliveryContext(
+        **{
+            **context.identity_payload(),
+            "attempt_id": "attempt-chat-delivery-replacement",
+            "lease_id": "lease-chat-delivery-replacement",
+            "lease_owner_id": "worker-chat-delivery-replacement",
+            "fencing_token": 4,
+        }
+    )
+
+    with pytest.raises(TaskChatDeliveryStoreError) as raised:
+        store.stage_plan(replacement)
+
+    assert raised.value.reason_code == TASK_CHAT_DELIVERY_RECOVERY_REQUIRED
+
+
+def test_task_bound_authority_rejects_reentered_plan_before_provider_work(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_database(tmp_path)
+    _insert_live_task_node(db_path)
+    store = TaskChatDeliveryStore(db_path, clock=lambda: 100)
+    frozen = SimpleNamespace(
+        route="chat",
+        graph_id="graph-chat-delivery",
+        graph_revision=1,
+        node_id="node-chat-delivery",
+        attempt_id="attempt-chat-delivery",
+        lease_id="lease-chat-delivery",
+        lease_owner_id="worker-chat-delivery",
+        fencing_token=3,
+        node_grant_ref="governor-grant://child/chat-delivery",
+        request_id="request-chat-delivery",
+        session_id="session-chat-delivery",
+        principal_id="person-chat-delivery",
+    )
+    authority = TaskBoundChatDeliveryAuthority(
+        store=store,
+        frozen=frozen,
+        workspace_id="workspace-chat-delivery",
+        relationship_subject_id="person-chat-delivery",
+    )
+    authority.stage_plan(_plan())
+
+    with pytest.raises(TaskChatDeliveryStoreError) as raised:
+        authority.stage_plan(_plan())
+
+    assert raised.value.reason_code == TASK_CHAT_DELIVERY_RECOVERY_REQUIRED
 
 
 def test_task_bound_authority_rejects_cross_subject_plan_before_visibility(

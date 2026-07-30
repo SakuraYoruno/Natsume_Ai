@@ -641,7 +641,7 @@ Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由
 缺失都不能由文本长度、字符数或本地价格表补成成本。直连 Host 的 native sentence stream 只会在
 provider 在首个 delta 前明确不支持该合同的情况下回退兼容 stream，并留下无终态 usage 标记。受治理
 Chat 即使拥有终态 result，也仍不能直接把任意 worker delta 推给用户。`0149` 只为已经入场的冻结 Chat 建立了可恢复的
-node/attempt/lease/fence/grant-bound visibility receipt：先持久化 plan 与稳定句，再让同一 Worker 转发；内容或 fence 漂移会失败关闭，取消/中断保留 control receipt。它不写 Life、Memory、TTS、Avatar 或 transport，也没有把普通 Chat、连接恢复或真实播放升级为完成。因此“模型可报告终态用量”或“窄路径可见”都不是“所有 Chat 已可实时展示”的同义词。
+node/attempt/lease/fence/grant-bound visibility receipt：先持久化 plan 与稳定句，再让同一 Worker 转发；内容或 fence 漂移会失败关闭，取消/中断保留 control receipt。`0150` 又在替代 attempt 写新 plan 的同一 SQLite 事务中检查前序 delivery evidence：替代 attempt 或同 attempt 重入必须进入 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止把恢复误作可再次调用模型的重试。它不写 Life、Memory、TTS、Avatar 或 transport，也没有把普通 Chat、受认证连接恢复或真实播放升级为完成。因此“模型可报告终态用量”或“窄路径可见”都不是“所有 Chat 已可实时展示”的同义词。
 
 情感系统必须满足：
 

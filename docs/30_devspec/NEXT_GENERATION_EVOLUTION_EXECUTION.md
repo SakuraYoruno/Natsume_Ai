@@ -166,8 +166,9 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 - 本切片没有把受治理 Budget stream 伪装成已完成：模型层已具备 final canonical result 合同，
   默认 Vault provider 尚未绑定它。`0149` 现为已入场的冻结 Chat 建立 node/attempt/lease/fence/grant-bound
   的逐句 visibility ledger：Surface 在调用模型前冻结 plan，每句落库后才可 SSE 外显，内容或 lease/grant
-  漂移拒绝；`STREAM_CANCELLED/INTERRUPTED` 同样持久化。它仍是窄 vertical slice，普通 Chat route、
-  connection resume、跨进程完整 recovery、真实 TTS/Avatar、真实 Edge 和完整服务栈实测仍未完成。
+  漂移拒绝；`STREAM_CANCELLED/INTERRUPTED` 同样持久化。`0150` 在替代 attempt 写 plan 时原子检出前序
+  delivery evidence，并返回 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止盲目重跑模型。它仍是窄 vertical slice，普通 Chat route、
+  受认证 connection resume、跨进程完整 recovery、真实 TTS/Avatar、真实 Edge 和完整服务栈实测仍未完成。
 
 退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
 Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。
