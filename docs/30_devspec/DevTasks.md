@@ -27,7 +27,8 @@ Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的�
 下一次输入的 aftereffect、boundary/repair/proactive permission 和 Surface 的可信关系
 约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。Edge ingress 的情绪事件也已从
 fire-and-forget Bond/VTS 旁路退役：它只记录观测，final ASR 才能进入正常 Host Input，Voice/Avatar 只能由已接受
-的 `AffectiveTurnPlanV1` 驱动；通用 Agent post-process 的 Surface/Cortex Bond fallback 也已退役为 trace-only。
+的 `AffectiveTurnPlanV1` 驱动；通用 Agent post-process 的 Surface/Cortex Bond fallback、Tribe 对话结束事件与
+直接 VTS/整段 TTS 也已退役为 trace-only，表达只能等 Task Acceptance 的协议 effect。
 DL-04 已将
 可信 hand-off 冻结为 `AffectiveTurnPlanV1`，普通低歧义文本可优先使用
 `ModelAttemptService.stream_with_result()` 的 typed delta + provider final result（完整字段时才计量）逐句输出；Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/transport/latency，但没有真实凭据或外部 provider 运行；每个稳定句先写 canonical Life delivery

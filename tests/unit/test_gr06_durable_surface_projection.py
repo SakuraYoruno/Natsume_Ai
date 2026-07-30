@@ -131,6 +131,18 @@ def test_post_process_has_no_legacy_bond_writer_path() -> None:
     assert "LEGACY_SURFACE_BOND_FLOW_RETIRED" in source
 
 
+def test_post_process_has_no_legacy_tribe_or_direct_embodiment_path() -> None:
+    import inspect
+
+    from host_brain.agent_runtime import postprocess
+
+    source = inspect.getsource(postprocess._async_post_process)
+    assert "emit_conversation_ended(" not in source
+    assert "drive_stream_vts_emotion(" not in source
+    assert "submit_voice_command(" not in source
+    assert "LEGACY_POST_PROCESS_SIDE_EFFECTS_RETIRED" in source
+
+
 def test_life_acceptance_handler_requires_applied_receipt(monkeypatch) -> None:
     monkeypatch.setattr(
         PROCESS_LIFE_PROVIDER,

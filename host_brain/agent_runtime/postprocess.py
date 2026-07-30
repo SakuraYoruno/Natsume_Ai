@@ -32,7 +32,6 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _summarize_emotion_context_for_trace,
     _summarize_persona_resident_memory_for_trace,
 )
-from host_brain.core.orchestration_settings import get_orchestration_settings
 from host_brain.core.soft_fail import soft_fail  # OPT-3 Batch B：业务路径统一降级
 import time
 
@@ -136,9 +135,6 @@ async def _async_post_process(
     skip_heavy_persona_postprocess = bool(
         normalized_trace_stage_meta.get("skip_heavy_persona_postprocess")
     )
-    skip_default_mode_on_conversation_end = bool(
-        normalized_trace_stage_meta.get("skip_default_mode_on_conversation_end")
-    )
     surface_main_chain_used = bool(normalized_trace_stage_meta.get("surface_main_chain_used"))
     # A Digital Life projection is already running behind a durable outbox.
     # Conversation and LifeMemory writes performed by that projection are
@@ -168,6 +164,29 @@ async def _async_post_process(
                 "reason_code": "LEGACY_SURFACE_BOND_FLOW_RETIRED",
             },
         }
+
+    # A response is already inside the canonical Life projection when it
+    # reaches this worker.  The former post-process tail used to publish a
+    # Tribe ``CONVERSATION_ENDED`` event and directly invoke VTS/TTS after that
+    # commit.  Those callbacks keep volatile Limbic/relationship state alive
+    # and can duplicate a Task-Acceptance-bound ExpressionPlan delivery.  Do
+    # not retain a conditional compatibility escape hatch here: the only
+    # production caller is the Life projection handler and every visible
+    # relationship or embodiment effect must be derived from its immutable
+    # receipt.
+    normalized_trace_stage_meta = {
+        **normalized_trace_stage_meta,
+        "legacy_post_process_side_effects": {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_POST_PROCESS_SIDE_EFFECTS_RETIRED",
+            "retired_operations": [
+                "tribe_conversation_ended",
+                "direct_vts_expression",
+                "bulk_tts_speak",
+            ],
+        },
+    }
 
     try:
         await application_ports.persist_post_process_audit(
@@ -381,99 +400,11 @@ async def _async_post_process(
         request_id,
     )
 
-    try:
-        from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415
-
-        ec = dict(emotion_context or {})
-        event_user_id = str(person_id or "")
-        if surface_main_chain_used:
-            from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
-
-            event_user_id = resolve_bond_user_id(event_user_id or None, session_id=session_id or None)
-        _get_cortex().emit_conversation_ended(
-            user_id=event_user_id,
-            session_id=str(session_id or ""),
-            request_id=str(request_id or ""),
-            emotion_tag=str(ec.get("emotion_tag") or "NEUTRAL").strip().upper(),
-            emotion_intensity=float(ec.get("emotion_intensity") or 0.5),
-            skip_default_mode_inner_activity=skip_default_mode_on_conversation_end,
-            summary={
-                "user_message": str(user_message or ""),
-                "user_message_preview": str(user_message or "")[:64],
-                "assistant_reply": str(narrative or "")[:512],
-                "ts_ms": int(ts_ms),
-            },
-        )
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process conversation_ended tribe event failed: %s", request_id, exc)
-
-    try:
-        await application_ports.drive_stream_vts_emotion(
-            request_id=request_id,
-            emotion_context=emotion_context,
-            ts_ms=ts_ms,
-        )
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process vts failed: %s", request_id, exc)
-
-    try:
-        orchestration_settings = get_orchestration_settings()
-        skip_bulk_tts = orchestration_settings.tts_sentence_stream_enabled
-        if orchestration_settings.stream_tts_enabled and narrative.strip() and not skip_bulk_tts:
-            from host_brain.channels.embodiment import submit_voice_command  # noqa: PLC0415
-            base_etag = str(emotion_context.get("emotion_tag") or "NEUTRAL").strip().upper()
-            tts_route = application_ports.resolve_tts_route(
-                text=narrative,
-                emotion_context={**dict(emotion_context), "emotion_tag": base_etag},
-                bond_summary=bond_summary or None,
-            )
-            etag = str(tts_route.get("emotion_tag") or _infer_emotion_tag_for_tts(narrative, base_etag)).strip()
-            intensity_raw = emotion_context.get("emotion_intensity")
-            intensity: float | None = None
-            if intensity_raw is not None:
-                try:
-                    intensity = max(0.0, min(1.0, float(intensity_raw)))
-                except (TypeError, ValueError):
-                    pass
-            tts_result = await submit_voice_command(
-                action="speak",
-                payload={
-                    "text": narrative,
-                    "session_id": session_id,
-                    "speed": float(tts_route.get("speed") or 1.0),
-                    "pitch": float(tts_route.get("pitch") or 0.0),
-                    "emotion_tag": etag,
-                    "emotion_intensity": intensity,
-                    "style_note": str(tts_route.get("style_note") or ""),
-                    "lang_hint": str(tts_route.get("lang_hint") or render_target_lang),
-                },
-                request_id=request_id,
-                idempotency_key=f"{request_id}:bulk-tts",
-            )
-
-            try:
-                application_ports.audit_ledger().log_voice_event(
-                    {
-                        "request_id": request_id,
-                        "session_id": session_id,
-                        "event_type": "TTS_SPEAK",
-                        "direction": "EGRESS",
-                        "status": str(getattr(tts_result, "status", "OK")),
-                        "latency_ms": int(getattr(tts_result, "latency_ms", 0)),
-                        "payload": {
-                            "text_len": len(narrative),
-                            "emotion_tag": etag,
-                            "speed": float(tts_route.get("speed") or 1.0),
-                            "pitch": float(tts_route.get("pitch") or 0.0),
-                            "lang_hint": str(tts_route.get("lang_hint") or render_target_lang),
-                        },
-                        "ts_ms": int(time.time() * 1000),
-                    }
-                )
-            except Exception:
-                pass
-    except Exception as exc:
-        _logger.debug("[%s] cortex_orchestrator post_process tts failed: %s", request_id, exc)
+    _logger.debug(
+        "[%s] cortex_orchestrator legacy Tribe lifecycle and direct embodiment "
+        "post-process are retired; canonical Life acceptance owns both",
+        request_id,
+    )
 
     if skip_heavy_persona_postprocess:
         _logger.debug(
