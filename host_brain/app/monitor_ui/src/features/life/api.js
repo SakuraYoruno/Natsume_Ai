@@ -76,10 +76,6 @@ export function fetchBondSummary(userId) {
   return endpointGet(digitalLife.bondSummary, {}, { userId })
 }
 
-export function submitBondEvent(body) {
-  return endpointPost(digitalLife.bondEvent, body)
-}
-
 export function fetchSysModeStatus() {
   return endpointGet(digitalLife.sysMode)
 }

@@ -30,7 +30,6 @@ class HostRoutePorts:
     tool_catalog_provider: RouteProvider | None = None
     governed_tool_application_provider: RouteProvider | None = None
     bond_engine_provider: RouteProvider | None = None
-    bond_writer_provider: RouteProvider | None = None
     mode_transition_service_provider: RouteProvider | None = None
     embodiment_runtime_provider: RouteProvider | None = None
     security_immune_agent_provider: RouteProvider | None = None
@@ -49,7 +48,6 @@ class HostRoutePorts:
             "tool_catalog_provider",
             "governed_tool_application_provider",
             "bond_engine_provider",
-            "bond_writer_provider",
             "mode_transition_service_provider",
             "embodiment_runtime_provider",
             "security_immune_agent_provider",

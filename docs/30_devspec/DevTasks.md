@@ -25,7 +25,11 @@ Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的�
 使用户 observation 先落 journal、再可选形成七海自身 CARE/CONCERN 等 self-affect，
 而非镜像用户标签。DL-03 已把 accepted reply 的 provisional relation episode、
 下一次输入的 aftereffect、boundary/repair/proactive permission 和 Surface 的可信关系
-约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。Edge ingress 的情绪事件也已从
+约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。最新 DL-01 public cutover
+进一步删除 Host route composition 的 `bond_writer_provider`：`POST /bond/event` 只返回
+`410 LEGACY_BOND_WRITE_RETIRED`，不解析或调用 `BondDynamicsWriter`。Monitor 同步删除人工补录
+关系事件的表单、API 与 registry 项，历史 Bond 页面只读展示回滚窗口投影，不能重新成为关系或
+情感 authority。此为本地公开写入口收口，不构成真人、远端 Edge 或全服务栈验收。Edge ingress 的情绪事件也已从
 fire-and-forget Bond/VTS 旁路退役：它只记录观测，final ASR 才能进入正常 Host Input，Voice/Avatar 只能由已接受
 的 `AffectiveTurnPlanV1` 驱动；通用 Agent post-process 的 Surface/Cortex Bond fallback 也已退役为 trace-only。
 DL-04 已将

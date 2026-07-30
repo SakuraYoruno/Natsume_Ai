@@ -116,7 +116,6 @@ def create_host_fastapi_app(
     get_tool_broker: Callable[[], Any],
     get_tool_catalog: Callable[[], Any],
     get_bond_engine: Callable[[], Any],
-    get_bond_writer: Callable[[], Any] | None = None,
     chat_endpoint: Callable[[ChatRequest, Request], Awaitable[Response]],
     edge_events_endpoint: Callable[[EdgeEventsRequest], Awaitable[EdgeEventsResponse]],
     root_endpoint: Callable[[], Awaitable[Response]],
@@ -149,7 +148,6 @@ def create_host_fastapi_app(
         tool_broker_provider=get_tool_broker,
         tool_catalog_provider=get_tool_catalog,
         bond_engine_provider=get_bond_engine,
-        bond_writer_provider=get_bond_writer,
     )
     app = FastAPI(
         title="Natsume AI Host Brain",

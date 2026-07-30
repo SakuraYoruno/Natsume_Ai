@@ -2,10 +2,10 @@
 
 DevSpec §25：Bond 阶段自动晋级 REST API。
 端点：
-  GET  /bond/stage/{user_id}           — 查询用户当前 Bond 阶段与积分状态
-  GET  /bond/summary/{user_id}         — 获取 context-pack-safe Bond Summary（不含数值）
-  POST /bond/event                     — 提交 Bond 事件（触发积分计算与晋级判断）
-  GET  /bond/users                     — 列出所有有 Bond 状态的用户
+  GET  /bond/stage/{user_id}           — 查询迁移窗口内的历史 Bond 投影
+  GET  /bond/summary/{user_id}         — 获取历史 Bond 摘要（不含数值）
+  POST /bond/event                     — 已退役：拒绝旧积分写入
+  GET  /bond/users                     — 列出历史 Bond 投影用户
   GET  /bond/health                    — BondStageEngine 健康状态
 """
 
@@ -15,14 +15,13 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from host_brain.bond.bond_stage_engine import (
     STAGE_ORDER,
     BondStageEngine,
 )
-from host_brain.bond.bond_dynamics import BondDynamicsWriter
 from host_brain.bond.user_identity import collapse_bond_user_ids, resolve_bond_user_id
 from host_brain.app.host_route_ports import (
     HostRoutePorts,
@@ -31,7 +30,6 @@ from host_brain.app.host_route_ports import (
 from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.bond_routes")
-_EVIDENCE_REFS_REQUIRED_DETAIL = "evidence_refs 不能为空（FR-BOND-002）"
 
 def _get_engine(route_ports: HostRoutePorts) -> BondStageEngine:
     provider = route_ports.bond_engine_provider
@@ -39,14 +37,6 @@ def _get_engine(route_ports: HostRoutePorts) -> BondStageEngine:
     if engine is None:
         raise RuntimeError("BondStageEngine provider not configured")
     return engine
-
-
-def _get_writer(route_ports: HostRoutePorts) -> BondDynamicsWriter:
-    provider = route_ports.bond_writer_provider
-    writer = provider() if provider is not None else None
-    if writer is None:
-        raise RuntimeError("BondDynamicsWriter provider not configured")
-    return writer
 
 
 # ---------------------------------------------------------------------------
@@ -78,25 +68,24 @@ class BondSummaryResponse(BaseModel):
 
 
 class BondEventRequest(BaseModel):
-    """POST /bond/event 请求体。"""
+    """已退役 ``POST /bond/event`` 的兼容请求体。
+
+    保留该形状仅为让旧客户端获得稳定、可诊断的 410 响应；字段绝不再
+    驱动 Bond 积分、阶段或任何七海关系状态。
+    """
     user_id: str = Field(..., description="用户 ID")
     update_kind: str = Field(..., description="事件类型: INTERACTION/DEEP_TALK/EMOTIONAL_SUPPORT/...")
     evidence_refs: List[str] = Field(default_factory=list, description="证据引用列表")
     request_id: Optional[str] = Field(default=None, description="关联请求 ID（可选）")
-    # 修复审计问题 #9：添加情感参数，支持外部提交 Bond 事件时传入情感信息
-    emotion_tag: Optional[str] = Field(default=None, description="情感标签（可选，如 JOY/SADNESS/NEUTRAL）")
-    emotion_intensity: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="情感强度（可选，0.0-1.0，默认 0.5）")
+    emotion_tag: Optional[str] = Field(default=None, description="旧客户端兼容字段；不会写入自我情感")
+    emotion_intensity: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="旧客户端兼容字段；不会写入关系状态")
 
 
-class BondEventResponse(BaseModel):
-    """POST /bond/event 响应体。"""
-    user_id: str
-    from_stage: str
-    to_stage: str
-    transition_status: str = Field(..., description="PROMOTED/DEMOTED/STABLE")
-    score_delta: int
-    total_score: int
-    transition_id: str
+class RetiredBondWriteResponse(BaseModel):
+    """旧 Bond 写入被拒绝时的稳定兼容响应。"""
+
+    status: str = Field(default="RETIRED")
+    reason_code: str = Field(default="LEGACY_BOND_WRITE_RETIRED")
     detail: str
     request_id: str
     timestamp: int
@@ -244,85 +233,27 @@ async def get_bond_stage(
 
 async def submit_bond_event(
     body: BondEventRequest,
+    response: Response,
     *,
     _route_ports: HostRoutePorts,
-) -> BondEventResponse:
-    """提交 Bond 事件，触发积分计算与阶段晋级判断。
+) -> RetiredBondWriteResponse:
+    """拒绝旧 Bond 分数写入，避免它重新成为关系 authority。
 
-    - evidence_refs 不能为空（FR-BOND-002）
-    - update_kind 决定积分增量
-    - 晋级/降级写入审计链
+    ``_route_ports`` 有意不被读取：即使某个测试或旧装配仍携带 writer，
+    该 HTTP 路线也不能解析、调用或间接激活它。真实关系变化只可由
+    canonical Digital Life relationship episode/aftereffect 生命周期产生。
     """
     request_id = body.request_id or new_request_id()
     ts_ms = int(time.time() * 1000)
-
-    # FR-BOND-002：evidence_refs 不能为空
-    refs = [r.strip() for r in (body.evidence_refs or []) if r.strip()]
-    if not refs:
-        raise HTTPException(
-            status_code=422,
-            detail=_EVIDENCE_REFS_REQUIRED_DETAIL,
-            headers={"X-Reason-Code": "BOND_EVIDENCE_REQUIRED"},
-        )
-
-    try:
-        writer = _get_writer(_route_ports)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-
-    try:
-        canonical_user_id = resolve_bond_user_id(body.user_id)
-        result = writer.apply_update(
-            request_id=request_id,
-            intent_id=f"bond_event:{request_id}",
-            session_id="bond_api",
-            seq=0,
-            user_id=canonical_user_id,
-            topic_id="bond_event",
-            capability_hint="bond_stage_event",
-            evidence_refs=refs,
-            payload={"source": "bond_api"},
-            update_kind=body.update_kind,
-            ts_ms=ts_ms,
-            emotion_tag=str(body.emotion_tag or "NEUTRAL"),
-            emotion_intensity=float(body.emotion_intensity if body.emotion_intensity is not None else 0.5),
-        )
-        if not result.success:
-            if str(result.reason_code or "") == "LEGACY_BOND_WRITE_RETIRED":
-                raise HTTPException(
-                    status_code=410,
-                    detail="Legacy Bond score writes are retired; use canonical Digital Life relationship commands.",
-                    headers={"X-Reason-Code": "LEGACY_BOND_WRITE_RETIRED"},
-                )
-            raise HTTPException(
-                status_code=409,
-                detail=result.detail,
-                headers={"X-Reason-Code": str(result.reason_code or "BOND_UPDATE_REJECTED")},
-            )
-        transition = result.event.get("stage_transition")
-        if not isinstance(transition, dict):
-            raise HTTPException(
-                status_code=503,
-                detail="Bond stage projection unavailable after governed write",
-                headers={"X-Reason-Code": "BOND_STAGE_PROJECTION_UNAVAILABLE"},
-            )
-        return BondEventResponse(
-            user_id=canonical_user_id,
-            from_stage=str(transition.get("from_stage") or ""),
-            to_stage=str(transition.get("to_stage") or ""),
-            transition_status=str(transition.get("transition_status") or ""),
-            score_delta=int(transition.get("score_delta") or 0),
-            total_score=int(transition.get("total_score") or 0),
-            transition_id=str(transition.get("transition_id") or result.event.get("event_id") or ""),
-            detail=str(transition.get("detail") or result.detail),
-            request_id=request_id,
-            timestamp=ts_ms,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        _logger.error("submit_bond_event 接口异常: %s", exc, extra={"request_id": request_id})
-        raise HTTPException(status_code=500, detail=str(exc))
+    response.headers["X-Reason-Code"] = "LEGACY_BOND_WRITE_RETIRED"
+    return RetiredBondWriteResponse(
+        detail=(
+            "Legacy Bond score writes are retired; relationship changes are "
+            "owned by canonical Digital Life lifecycle."
+        ),
+        request_id=request_id,
+        timestamp=ts_ms,
+    )
 
 
 def create_bond_router(route_ports: HostRoutePorts) -> APIRouter:
@@ -356,10 +287,15 @@ def create_bond_router(route_ports: HostRoutePorts) -> APIRouter:
         "/event",
         submit_bond_event,
         methods=["POST"],
-        response_model=BondEventResponse,
-        status_code=200,
+        response_model=RetiredBondWriteResponse,
+        status_code=410,
     )
     return router
 
 
-__all__ = ["BondEventRequest", "create_bond_router", "submit_bond_event"]
+__all__ = [
+    "BondEventRequest",
+    "RetiredBondWriteResponse",
+    "create_bond_router",
+    "submit_bond_event",
+]

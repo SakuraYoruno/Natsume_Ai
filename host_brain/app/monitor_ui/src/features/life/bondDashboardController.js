@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import useAppStore from '../../store/useAppStore.js'
-import { submitBondEvent } from './api.js'
 import { buildBondDashboardViewModel } from './bondModel.js'
 import { useBondOverviewQuery, useBondUserDetailQuery } from './bondQueries.js'
 
@@ -11,8 +10,6 @@ export function useBondDashboardController() {
   const pollingTick = useAppStore((state) => state.pollingTick)
 
   const [selectedUser, setSelectedUser] = useState(null)
-  const [submitResult, setSubmitResult] = useState(null)
-  const [submitLoading, setSubmitLoading] = useState(false)
 
   const {
     health,
@@ -78,25 +75,6 @@ export function useBondDashboardController() {
     ])
   }, [refetch, refetchUserDetail, selectedUser])
 
-  const handleSubmitEvent = useCallback(async (body) => {
-    setSubmitLoading(true)
-    setSubmitResult(null)
-    const shouldRefreshDetail = body.user_id === selectedUser
-    try {
-      const result = await submitBondEvent(body)
-      setSubmitResult({ ok: true, data: result })
-      await refetch()
-      if (shouldRefreshDetail) {
-        await refetchUserDetail()
-      }
-      setSelectedUser(body.user_id)
-    } catch (submitError) {
-      setSubmitResult({ ok: false, error: submitError.message || '提交失败' })
-    } finally {
-      setSubmitLoading(false)
-    }
-  }, [refetch, refetchUserDetail, selectedUser])
-
   return {
     ...dashboardView,
     users,
@@ -107,10 +85,7 @@ export function useBondDashboardController() {
     refreshing,
     detailLoading,
     detailRefreshing,
-    submitLoading,
-    submitResult,
     onRefresh: handleRefresh,
     onSelectUser: setSelectedUser,
-    onSubmitEvent: handleSubmitEvent,
   }
 }

@@ -658,7 +658,7 @@ class TestBondAPIIntegration:
             assert field in data, f"missing field: {field}"
 
     def test_bond_submit_event_interaction(self, test_client):
-        """T-INT-BOND-04: POST /bond/event 提交 INTERACTION 事件。"""
+        """T-INT-BOND-04: POST /bond/event 拒绝旧积分写入。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -667,14 +667,13 @@ class TestBondAPIIntegration:
                 "evidence_refs": ["evt::integration::001"],
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 410
         data = resp.json()
-        assert data["user_id"] == "default"
-        assert data["transition_status"] in {"STABLE", "PROMOTED", "DEMOTED"}
-        assert data["score_delta"] > 0
+        assert data["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
+        assert resp.headers["x-reason-code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_submit_event_deep_talk(self, test_client):
-        """T-INT-BOND-05: POST /bond/event 提交 DEEP_TALK 事件，积分更高。"""
+        """T-INT-BOND-05: DEEP_TALK 也不能通过旧入口改变关系。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -683,12 +682,11 @@ class TestBondAPIIntegration:
                 "evidence_refs": ["evt::integration::002"],
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["score_delta"] > 0
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_submit_event_empty_refs_422(self, test_client):
-        """T-INT-BOND-06: POST /bond/event 空 evidence_refs → 422。"""
+        """T-INT-BOND-06: 空 evidence 也不会进入旧 Bond writer。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -697,7 +695,8 @@ class TestBondAPIIntegration:
                 "evidence_refs": [],
             },
         )
-        assert resp.status_code == 422
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_summary_no_numeric(self, test_client):
         """T-INT-BOND-07: GET /bond/summary 返回不含数值的摘要。"""
@@ -708,9 +707,8 @@ class TestBondAPIIntegration:
             assert isinstance(data[key], str), f"summary[{key}] should be string"
 
     def test_bond_users_list(self, test_client):
-        """T-INT-BOND-08: GET /bond/users 返回用户列表。"""
-        # 先提交一个事件确保有用户
-        test_client.post(
+        """T-INT-BOND-08: 被拒绝的旧写入不会创建历史投影用户。"""
+        write_response = test_client.post(
             "/bond/event",
             json={
                 "user_id": "integration_test_user_list_001",
@@ -718,14 +716,15 @@ class TestBondAPIIntegration:
                 "evidence_refs": ["evt::list::001"],
             },
         )
+        assert write_response.status_code == 410
         resp = test_client.get("/bond/users")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == 1
-        assert data["users"] == ["default"]
+        assert data["total"] == 0
+        assert data["users"] == []
 
     def test_bond_event_with_emotion_fields(self, test_client):
-        """T-INT-BOND-09: POST /bond/event 支持 emotion_tag 和 emotion_intensity 字段（审计修复 #5）。"""
+        """T-INT-BOND-09: 旧 emotion 字段不能写入七海关系或自我状态。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -736,12 +735,11 @@ class TestBondAPIIntegration:
                 "emotion_intensity": 0.9,
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["transition_status"] in {"STABLE", "PROMOTED", "DEMOTED"}
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_custom_request_id_passthrough(self, test_client):
-        """T-INT-BOND-10: POST /bond/event 自定义 request_id 透传到响应。"""
+        """T-INT-BOND-10: 退役响应仍保留旧客户端 request_id。"""
         resp = test_client.post(
             "/bond/event",
             json={
@@ -751,14 +749,13 @@ class TestBondAPIIntegration:
                 "request_id": "custom-integration-req-001",
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 410
         data = resp.json()
         assert data["request_id"] == "custom-integration-req-001"
 
     def test_bond_stage_updates_after_promotion(self, test_client):
-        """T-INT-BOND-11: 多次 DEEP_TALK 后阶段晋级到 CLOSE_FRIEND。"""
+        """T-INT-BOND-11: 多次旧请求也不能自动升级亲密关系。"""
         user_id = "integration_test_user_promote_001"
-        canonical_user_id = user_id
         for i in range(14):
             event_resp = test_client.post(
                 "/bond/event",
@@ -768,11 +765,11 @@ class TestBondAPIIntegration:
                     "evidence_refs": [f"evt::promote::{i}"],
                 },
             )
-            canonical_user_id = event_resp.json()["user_id"]
-        resp = test_client.get(f"/bond/stage/{canonical_user_id}")
+            assert event_resp.status_code == 410
+        resp = test_client.get(f"/bond/stage/{user_id}")
         data = resp.json()
-        assert data["current_stage"] == "CLOSE_FRIEND"
-        assert data["total_score"] >= 70
+        assert data["current_stage"] == "FRIEND"
+        assert data["total_score"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -915,8 +912,8 @@ class TestEndToEndPipeline:
         """T-INT-E2E-04: Bond stage 和 summary 阶段字段一致。"""
         user_id = "e2e_consistency_user_001"
 
-        # 提交事件
-        test_client.post(
+        # 旧写入被拒绝；读投影仍保持可查询。
+        write_response = test_client.post(
             "/bond/event",
             json={
                 "user_id": user_id,
@@ -924,6 +921,7 @@ class TestEndToEndPipeline:
                 "evidence_refs": ["evt::consistency::001"],
             },
         )
+        assert write_response.status_code == 410
 
         stage_resp = test_client.get(f"/bond/stage/{user_id}")
         summary_resp = test_client.get(f"/bond/summary/{user_id}")

@@ -84,8 +84,10 @@ MirrorNeuron 已不再写 `_bond_*` 私有字段，只能提交受控 compatibil
 construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧
 writer/queue 请求返回 `RETIRED_CANONICAL_LIFE`，不创建 worker、backlog 或失败后 direct writer；canonical
 Cortex 在解析 queue 前即拒绝旧 mutation，Surface post-process 也只记录 retired result。历史
-`POST /bond/event` 在 production adapter 下返回 `410 LEGACY_BOND_WRITE_RETIRED`。因此 volatile Bond
-queue 不再是生产关系 authority；legacy emotion timeline、Monitor/Review、受治理 Budget、真实 provider/Edge
+`POST /bond/event` 现在不再解析任何 writer，Host route ports 的 `bond_writer_provider` 已删除，并稳定返回
+`410 LEGACY_BOND_WRITE_RETIRED`；Monitor 也删除了人工补录表单、API 与 endpoint registry 项，仅保留历史
+score/stage 的只读展示。因而公开 HTTP/UI 不能重新激活旧关系 authority；volatile Bond
+queue 不再是生产关系 authority。其余 legacy reader、Review、受治理 Budget、真实 provider/Edge
 与服务栈验收仍未完成。
 
 **Legacy emotion timeline 退役修订：** production `HostMemoryRuntimeOwner` 不再打开旧 action-log

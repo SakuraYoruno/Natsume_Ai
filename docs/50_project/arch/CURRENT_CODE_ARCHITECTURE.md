@@ -486,9 +486,11 @@ retrieval prefetch 也在 canonical hand-off 存在时跳过 legacy state arbite
 **Bond queue 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
 `BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 只保留 stage/graph 的
 read compatibility，并返回没有 worker、backlog 或直接 writer fallback 的 retired adapter；canonical
-Cortex 也会在解析 queue 前拒绝旧 Bond mutation。`/bond/event` 仍为历史写 API，但遇到该 adapter 固定
-返回 `410 LEGACY_BOND_WRITE_RETIRED`。旧 timeline 现在是显式 retired 空投影，而不是 canonical projection；
-它的退役不证明其它 compatibility reader 已清零。
+Cortex 也会在解析 queue 前拒绝旧 Bond mutation。`/bond/event` 已不再解析或调用 writer：Host
+route ports 物理删除 `bond_writer_provider`，端点稳定返回 `410 LEGACY_BOND_WRITE_RETIRED`。Monitor
+同步删除人工补录关系事件的表单、API 和 endpoint registry 项，历史 score/stage 仅在回滚窗口内只读；
+它们不能影响亲密、主动许可或七海 self-affect。旧 timeline 现在是显式 retired 空投影，而不是 canonical
+projection；该公开入口退役不证明其它 compatibility reader 已清零。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

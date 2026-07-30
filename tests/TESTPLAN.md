@@ -38,6 +38,9 @@
 - T-DL01-07：通用 Agent reply post-process 不得调用旧 Surface Bond flow 或 Cortex Bond writer；trace 只能标记
   `RETIRED_CANONICAL_LIFE`。关系效果必须由 accepted reply 的 canonical Life acceptance/aftereffect 链产生，
   不能退回进程内 queue。
+- T-DL01-08：Host route ports 不得暴露 `bond_writer_provider`；`POST /bond/event` 对兼容 payload 只能返回
+  `410 LEGACY_BOND_WRITE_RETIRED`，不得解析 writer、改变历史 score/stage、self-affect 或 relationship
+  aggregate。Monitor 不得再包含人工 Bond 补录表单、调用 API 或 endpoint registry 项；历史投影只能只读。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 

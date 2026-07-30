@@ -101,6 +101,12 @@ raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life ev
 设备实测。通用 Agent post-process 同时不再调用 Surface Bond flow 或 Cortex Bond writer；它只保留
 `RETIRED_CANONICAL_LIFE` trace，relationship effect 必须回到 Acceptance/aftereffect 的 canonical Life 链。
 
+DL-01 的公开旧 Bond authority 同步退役：`POST /bond/event` 不再从 Host route ports 取得 writer，
+而是稳定返回 `410 LEGACY_BOND_WRITE_RETIRED`；请求中的 `emotion_tag`、积分事件和 evidence 绝不写入
+七海 self-affect 或关系 aggregate。Monitor 删除人工补录表单、调用 API 与 endpoint registry 项，并将
+score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删除隔离 compatibility 类或其测试，不构成
+所有旧 reader、真人体验、远端 Edge 或 DL-07 完成。
+
 这只证明内核和持久化 UoW 已完成本地验证；Host ingress、实际 Fusion/Appraisal
 服务和旧 compatibility writer 的清零分别属于 DL-02 与 DL-06，不能据此称为
 完整情感生命或生产切流。

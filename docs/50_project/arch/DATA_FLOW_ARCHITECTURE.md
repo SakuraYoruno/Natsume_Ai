@@ -23,6 +23,12 @@
 > 因此不能把现有流写成完整生产闭环。Host-local runtime、Limbic 与 Surface 的旧情感
 > 上下文只可作为待替换的 compatibility 输入，不能被解释为 canonical self-affect writer。
 
+公开旧 Bond 写流现已被截断：`POST /bond/event` 不读取 writer provider，也不产生 score、stage、
+self-affect 或关系事件，而是返回 `410 LEGACY_BOND_WRITE_RETIRED`。Monitor 不再拥有人工补录 API/
+表单；其 Bond 页面只能读取历史 projection。因而实际关系流只能是
+`accepted reply → canonical relationship episode → next input aftereffect`，不能从 HTTP/UI 的积分
+补录旁路写回。
+
 NE-01 代码封口后的证据流固定为：
 
 ```text

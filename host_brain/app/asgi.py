@@ -424,7 +424,6 @@ def create_app(
         tool_catalog_provider=host_services.tool_catalog,
         governed_tool_application_provider=tool_composition.provide_tool_application,
         bond_engine_provider=bond_engine_provider,
-        bond_writer_provider=application_ports.bond_dynamics_writer,
         mode_transition_service_provider=(
             host_lifecycle.get_mode_transition_service
         ),
@@ -1486,7 +1485,6 @@ def create_app(
         get_tool_broker=tool_composition.provide_tool_broker,
         get_tool_catalog=host_services.tool_catalog,
         get_bond_engine=bond_engine_provider,
-        get_bond_writer=application_ports.bond_dynamics_writer,
         chat_endpoint=chat_endpoint_with_runtime,
         edge_events_endpoint=edge_events_endpoint_with_runtime,
         root_endpoint=root_endpoint,
