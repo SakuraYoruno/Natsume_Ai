@@ -253,6 +253,10 @@ explicit permission、relationship episode、Regulation、aftereffect 和冻结 
 只用于写入 `SILENCE` aftereffect 并放慢未来联系；registry 不得把其它未结 relationship episode 或尚未到期的
 主动消息混入发送候选。该维护操作不得降低 trust/safety、撤销或扩大 permission，亦不得伪造用户出现。
 
+当 canonical `AffectFusion → Life` 已组成时，Tribe 不得继续取得旧 `bond_update_queue`、mutable
+`silence_engine`、`emotion_timeline` 或 `bond_stage_engine`。这些 compatibility provider 必须在 port graph
+即失败关闭；仅隔离的 legacy fixture 可显式保留它们，不能由生产消费方自行回退。
+
 旧 `ProprioceptionAgent` 不得把 conversation、channel interrupt、voice pipeline 或 task success 汇总为 process-global
 cognitive load、continuity、疲惫、压力、满足或主动节律，再回灌旧 organ。canonical Host 必须在 registry、EventBus、
 模型与旧器官副作用之前退役这些入口为 `LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED / UNAVAILABLE`；真实 activity

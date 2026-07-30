@@ -80,6 +80,11 @@ delivery receipt 仍是打开 `PROACTIVE_MESSAGE` episode 的唯一依据；regi
 trust/safety、改变 permission 或伪造 user presence。真实 SQLite `submit_life_tick_command()`/command/outbox/receipt/
 restart 集成已覆盖此 Host-side 链；受控本地 delivery handler 不代表真实 Gateway、第三方平台、远端 Edge 或体验验收。
 
+**DL-06 canonical Tribe port fence：** 当 `AffectFusionService` 已从 Life authority 组成时，Tribe 的
+`bond_update_queue`、`silence_engine`、`emotion_timeline` 与 `bond_stage_engine` 不再转发 Host legacy provider，
+而是返回 `LEGACY_AFFECT_PORT_RETIRED:<port>`。这让所有遗漏访问在 resolver 边界失败，不能重新打开 Bond、
+进程内 silence、EmotionTimeline 或 StageEngine；没有 Life authority 的 isolated compatibility fixture 仍保留原端口。
+
 **DL-06 签名 Gateway 关系 scope 修订：** `/v1/host/input` 在 Secure Ingress 允许后、任何
 Fusion/Appraisal 前，使用可信 `principal_id + tenant_id` 与签名 `from_id + conversation_id` 编译
 `SecureGatewayConversationScopeV1`。`from_id` 决定 opaque relationship subject，conversation 只决定

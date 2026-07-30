@@ -216,6 +216,20 @@ def build_tribe_application_ports(
             ),
         )
 
+    def resolve_legacy_affect_port(field_name: str) -> Callable[..., Any]:
+        """Fence retired mutable affect ports once canonical Life is composed.
+
+        Legacy/offline compositions retain the historic providers for their
+        explicit rollback-window fixtures.  A production Host must not merely
+        rely on every consumer remembering to check the authority flag: an
+        accidental resolver call must fail before it can open a Bond queue,
+        mutable silence engine or emotion timeline.
+        """
+
+        if canonical_affect_fusion is not None:
+            return _retired_legacy_affect_port(field_name)
+        return _host_provider(host_services, field_name)
+
     def resolve_process_mode_transition_service():
         if mode_transition_service_provider is not None:
             return mode_transition_service_provider()
@@ -244,15 +258,15 @@ def build_tribe_application_ports(
     return TribeApplicationPorts(
         activity_monitor=resolved_activity_monitor_provider,
         mode_transition_service=resolve_process_mode_transition_service,
-        bond_update_queue=_host_provider(host_services, "bond_update_queue"),
+        bond_update_queue=resolve_legacy_affect_port("bond_update_queue"),
         ledger=ledger_provider,
         life_snapshot_reader=_host_provider(host_services, "life_snapshot_reader"),
-        silence_engine=_host_provider(host_services, "silence_engine"),
+        silence_engine=resolve_legacy_affect_port("silence_engine"),
         state_write_arbiter=_host_provider(host_services, "state_write_arbiter"),
-        emotion_timeline=_host_provider(host_services, "emotion_timeline"),
+        emotion_timeline=resolve_legacy_affect_port("emotion_timeline"),
         hard_state=hard_state_provider or _missing_host_hard_state_owner,
         resource_manager=resolved_resource_manager_provider,
-        bond_stage_engine=_host_provider(host_services, "bond_stage_engine"),
+        bond_stage_engine=resolve_legacy_affect_port("bond_stage_engine"),
         shared_memory_index=_host_provider(host_services, "shared_memory_index"),
         milestone_tracker=_host_provider(host_services, "milestone_tracker"),
         model_attempt_service=_host_provider(host_services, "model_attempt_service"),
@@ -289,6 +303,19 @@ def _host_provider(
     if host_services is None:
         return _missing_app_local_provider
     return host_services.require_provider(field_name)
+
+
+def _retired_legacy_affect_port(
+    field_name: str,
+) -> Callable[..., Any]:
+    """Return an explicit fail-closed provider for retired mutable ports."""
+
+    normalized_name = str(field_name or "unknown").strip() or "unknown"
+
+    def reject_legacy_access(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError(f"LEGACY_AFFECT_PORT_RETIRED:{normalized_name}")
+
+    return reject_legacy_access
 
 
 def _optional_host_provider(

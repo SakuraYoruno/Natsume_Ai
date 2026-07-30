@@ -866,6 +866,18 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
     assert ports.canonical_affect_fusion is not None
     assert ports.uses_canonical_affective_life() is True
 
+    for port_name in (
+        "bond_update_queue",
+        "silence_engine",
+        "emotion_timeline",
+        "bond_stage_engine",
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match=rf"LEGACY_AFFECT_PORT_RETIRED:{port_name}",
+        ):
+            ports.require(port_name)()
+
 
 def test_input_composition_fails_closed_when_life_authority_is_missing() -> None:
     def legacy_runtime_must_not_be_resolved() -> HostEmotionRuntime:

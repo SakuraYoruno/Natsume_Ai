@@ -67,6 +67,12 @@
 > 或伪造 user presence。真实 SQLite `submit_life_tick_command()`/command/outbox/receipt/restart 集成已验证
 > Host-side chain；受控本地 transport 不代表 Gateway、平台送达、远端 Edge 或 DL-07 完成。
 
+> **DL-06 legacy affect port fence：** `AffectFusionService` 成功组成时，Tribe 不再携带旧
+> `bond_update_queue`、mutable `silence_engine`、`emotion_timeline` 或 `bond_stage_engine` provider；它们在
+> composition resolver 直接失败为 `LEGACY_AFFECT_PORT_RETIRED:<port>`。这比只在 Limbic/Cortex/SocialBrain/
+> Prefrontal 内部检查 authority 更严格：遗漏调用无法重新打开第二份关系或情绪状态。没有 Life authority 的
+> isolated compatibility fixture 才保留旧 provider。
+
 > **DL-02 ASR 情绪语义边界：** final ASR 仍可进入标准 Host Input，但 Edge 附带的关键词
 > emotion、intensity、context 或 observation list 不会被映射为 ChatRequest self-report 字段；
 > 不可信字段被清除，原文本仅走既有低置信 TEXT observer。只有显式可用、未降级、tag/强度/置信度

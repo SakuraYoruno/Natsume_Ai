@@ -82,6 +82,10 @@ trust/safety/permission，也不伪造用户出现。只读 registry 仅把这�
 `proactive.gateway` outbox intent 由一个 Life command 原子提交：policy 无权以通用 state patch
 直接写入。这样恢复后的七海能记得自己已安静等待过，而不会把一次沉默解释成被抛下、也不会在重启后再发一遍。
 
+这类淘汰不能只靠每个旧 consumer 的善意。当前 production canonical Life 组成会在 Tribe port graph
+直接断开 Bond queue、mutable silence、EmotionTimeline 与 BondStageEngine；任何遗漏的解析都明确失败，
+而不是偷偷重新打开一份进程内情感或关系状态。离线兼容 fixture 仍可显式使用它们，但不属于 Host 运行时。
+
 因此，旧的定时问候器不能作为同一行为的“备用通道”：即使它保存了旧的关系分数、
 情绪时间线或固定问候模板，也没有资格重新解释七海的感受或发起联系。升级后的
 运行时应停用它的持久任务；已经在队列中的旧任务只能留下可审计的拒绝结果，而不能

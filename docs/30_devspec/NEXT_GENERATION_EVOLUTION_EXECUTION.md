@@ -349,6 +349,10 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   aftereffect、关闭 episode 并指数放慢下一次联系；它不扣 trust/safety、不改 permission、也不虚构 user
   presence。真实 SQLite `submit_life_tick_command()`/command/outbox/receipt/restart 集成覆盖该 Host 侧路径；本地
   transport handler 不是真实 Gateway/平台送达、远端 Edge 或 DL-07 验收证据。
+- production canonical Life 的 Tribe port graph 同时在 composition 层断开 `bond_update_queue`、mutable
+  `silence_engine`、`emotion_timeline` 与 `bond_stage_engine`：任何漏网 caller 都获得
+  `LEGACY_AFFECT_PORT_RETIRED:<port>`，而不是重新解析旧 authority。无 Life authority 的 isolated fixture
+  明确保留 compatibility provider，不能混同 Host production route。
 - 主动 outbox 现在要求 canonical `proactive_permission=ALLOWED`；`UNKNOWN/DENIED`、
   未结 relationship episode、repair required、`GIVE_SPACE/QUIET_PRESENCE/DEFER` regulation
   与低能量/高休息需要都会 hold。发送文本包含无回应压力约束，decision trace 只保存

@@ -965,6 +965,11 @@ payload/authorization digest 及 target/scope，才追加 `relationship_proactiv
 第三方平台送达或用户已阅读。未知/拒绝、裂痕、等待后效应或自我克制均为 hold，而不是用沉默
 惩罚用户。
 
+在 production canonical Life 组成中，Tribe graph 不再把旧 Bond queue、mutable silence、EmotionTimeline
+或 BondStageEngine 放入可解析的 provider 集。Limbic、Cortex、SocialBrain 和 Prefrontal 本身已有 canonical
+authority guard；port fence 再保证任何遗漏路径会在解析时得到 `LEGACY_AFFECT_PORT_RETIRED:<port>`，而不是写入
+或读取第二份情感、关系和主动节律状态。
+
 最新的 scheduler 命令不再把 decision 当成一段可覆盖的 `state_patch`。它先冻结
 `AffectiveTurnPlanV1 → ExpressionPlanV1.synchronization_id`，将 scope、两条 revision、content digest、
 decision id 和下次可联系时间随同唯一的 `proactive.gateway` intent 提交；reducer 必须同时重验两者才会更新

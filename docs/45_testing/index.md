@@ -160,6 +160,12 @@
   受控本地 transport，不能推导
   第三方平台送达、远端 TTS/VTS/Avatar、真实模型或 DL-07 服务栈通过。
 
+- `test_dl02_affect_fusion.py` 现断言 production canonical `TribeApplicationPorts` 在解析
+  `bond_update_queue`、`silence_engine`、`emotion_timeline` 或 `bond_stage_engine` 时明确失败为
+  `LEGACY_AFFECT_PORT_RETIRED:<port>`；同一 130 项定向组合还覆盖 Limbic、Prefrontal、runtime snapshot 与
+  Host lifecycle，结果为 `130 passed in 72.39s`。它只证明本地 composition fence，不替代真实 Host、Gateway、
+  provider、远端 Edge 或 DL-07 全栈验收。
+
 - `test_dl06_hippocampus_memory_writer_retirement.py` 验证 canonical `HippocampusAgent` 不注册
   interaction/loneliness/task EventBus，不写 legacy episodic/semantic/autobiographical layer 或 registry，也不向
   DefaultMode/PainReward/Interoception/Limbic fan-out；三类写入显式退役为

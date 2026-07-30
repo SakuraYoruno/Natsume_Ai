@@ -643,6 +643,11 @@ transaction 中全部匹配时才可提交；delivery receipt 后的 `PROACTIVE_
 episode 仍不进入发送候选，绝不会给关系扣分或减少用户许可。此处的 SQLite integration 经真实 Scheduler handler
 使用受控本地 transport 来证明 outbox/restart 语义，尚不是第三方平台、远端 Edge 或完整体验验收。
 
+同一 production composition 还让 `Relationship Lifecycle / Companion Policy` 的旧支持端口 fail-closed：
+canonical Life 已可用时，Tribe 无法解析 `bond_update_queue`、`silence_engine`、`emotion_timeline` 或
+`bond_stage_engine`。这不是删除离线测试资产，而是把 compatibility provider 留在非生产 fixture，防止遗漏
+consumer 重新获得可变情感或关系 authority。
+
 ### 4.7 渠道、Gateway 与 Edge
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
