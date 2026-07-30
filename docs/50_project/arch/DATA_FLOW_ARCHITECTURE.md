@@ -902,6 +902,10 @@ flowchart LR
 
 Edge 入站与下行现在都明确分权：`EMOTION_DETECTED`、`USER_REACTION` 等入站 telemetry 只进入 Host 审计观察，不能直接调用 Bond writer、改变 self-affect 或驱动 VTS；只有 final ASR 文本可进入标准 Host Input，再经 Fusion/Appraisal/accepted plan 取得表达因果。Tribe 的平台/情绪事件同样只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。
 
+同一规则覆盖普通回复的收尾阶段：`agent_runtime.postprocess` 不再调用 `apply_surface_emotion_bond_flow` 或
+`CortexAgent.post_process_bond_update`。它只能写 `RETIRED_CANONICAL_LIFE` trace；有效 relationship effect 必须由
+Task Acceptance 后的 canonical Life command 与下一次输入关联的 aftereffect 形成。
+
 ```mermaid
 flowchart LR
     O["Tribe platform / emotion observation"] --> S["Host-owned state only"]

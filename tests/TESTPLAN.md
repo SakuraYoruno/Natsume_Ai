@@ -35,6 +35,9 @@
 - T-DL01-06：Edge `EMOTION_DETECTED`、`USER_REACTION` 等入站 telemetry 只能审计或经 final ASR
   进入标准 Host Input；不得直接调用 Bond writer、写七海 self-affect 或驱动 VTS。Voice/Avatar 只能从已接受的
   `AffectiveTurnPlanV1` / `ExpressionPlanV1` 发起，远端 Edge 未启动时不得声称设备实测。
+- T-DL01-07：通用 Agent reply post-process 不得调用旧 Surface Bond flow 或 Cortex Bond writer；trace 只能标记
+  `RETIRED_CANONICAL_LIFE`。关系效果必须由 accepted reply 的 canonical Life acceptance/aftereffect 链产生，
+  不能退回进程内 queue。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 
