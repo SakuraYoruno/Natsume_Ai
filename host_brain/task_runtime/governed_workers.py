@@ -1098,6 +1098,17 @@ def _positive_event_int(value: Any, *, field_name: str) -> int:
     return parsed
 
 
+def _is_zero_visible_sentence_count(value: Any) -> bool:
+    """Recognize only a well-formed zero without leaking parser failures."""
+
+    if isinstance(value, bool):
+        return False
+    try:
+        return int(value) == 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _frozen_relationship_subject_id(frozen: FrozenNodeInput) -> str:
     input_pack = frozen.input_pack
     request_body = input_pack.get("request_body")
@@ -1135,10 +1146,28 @@ def _assert_terminal(event: Mapping[str, Any], *, frozen: FrozenNodeInput) -> No
     narrative = str(event.get("narrative") or "").strip()
     supplied_route = str(event.get("route_type") or frozen.route).strip().lower()
     supplied_target = str(event.get("target_id") or frozen.target_id).strip()
-    if decision not in {"APPROVE", "REJECT"} or not narrative:
+    audit_refs = event.get("audit_refs")
+    task_delivery = (
+        audit_refs.get("task_bound_sentence_delivery")
+        if isinstance(audit_refs, Mapping)
+        else None
+    )
+    no_visible_chat_reply = (
+        frozen.route == "chat"
+        and decision == "REJECT"
+        and not narrative
+        and isinstance(task_delivery, Mapping)
+        and str(task_delivery.get("status") or "") == "NO_VISIBLE_REPLY"
+        and _is_zero_visible_sentence_count(
+            task_delivery.get("visible_sentence_count")
+        )
+    )
+    if decision not in {"APPROVE", "REJECT"} or (
+        not narrative and not no_visible_chat_reply
+    ):
         raise GovernedNodeWorkerError(
             GOVERNED_NODE_COMMIT_INVALID,
-            "terminal event requires APPROVE/REJECT and non-empty narrative",
+            "terminal event requires APPROVE/REJECT and a narrative unless a Chat failure proved no visible reply",
         )
     if supplied_route != frozen.route or supplied_target != frozen.target_id:
         raise GovernedNodeWorkerError(

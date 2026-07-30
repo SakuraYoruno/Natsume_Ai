@@ -30,6 +30,23 @@ class _GovernedRuntime:
         }
 
 
+class _RejectedGovernedChatRuntime(_GovernedRuntime):
+    async def execute_stream(self, **kwargs):  # noqa: ANN003
+        self.calls.append(dict(kwargs))
+        yield {
+            "phase": "TERMINAL",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": "SURFACE_REPLY_RUNTIME_FAILED",
+            "governed": True,
+            "execution_receipt": {
+                "accepted": False,
+                "status": "FAILED",
+                "reason_code": "SURFACE_REPLY_RUNTIME_FAILED",
+            },
+        }
+
+
 def _ports() -> SimpleNamespace:
     async def run_retrieval(**_kwargs):  # noqa: ANN003
         return {"status": "OK"}, [{"evidence_ref": "memory://governed/context"}]
@@ -172,6 +189,41 @@ async def test_canonical_route_fails_closed_when_governed_runtime_cannot_support
     assert events[-1]["decision"] == "REJECT"
     assert events[-1]["reason_code"] == "GOVERNED_ROUTE_UNSUPPORTED"
     assert governed.calls == []
+
+
+@pytest.mark.asyncio
+async def test_chat_projects_a_durable_terminal_rejection_to_one_public_commit() -> None:
+    """Chat clients never need to understand Task Runtime's TERMINAL phase."""
+
+    governed = _RejectedGovernedChatRuntime()
+    events = [
+        event
+        async for event in _cortex_orchestrator_sse_generator_impl(
+            application_ports=_ports(),
+            request_body=_request_body(),
+            request_id="request-gr05-terminal-chat",
+            session_id="session-gr05-cortex",
+            ts_ms=1_000,
+            intent_draft=_intent("chat"),
+            emotion_context={},
+            emotion_snapshot={},
+            governor_result={"decision": "APPROVE"},
+            intent_id="intent-gr05-cortex",
+            metrics=object(),
+            sse_fn=lambda value: dict(value),
+            airlock_sanitize_input_fn=lambda value: (value, True),
+            resolve_person_id_fn=lambda *_args, **_kwargs: "person-gr05-cortex",
+            governed_command_application=governed,
+        )
+    ]
+
+    terminal = events[-1]
+    assert terminal["phase"] == "COMMIT"
+    assert terminal["done"] is True
+    assert terminal["decision"] == "REJECT"
+    assert terminal["reason_code"] == "SURFACE_REPLY_RUNTIME_FAILED"
+    assert terminal["narrative"] == ""
+    assert terminal["execution_receipt"]["accepted"] is False
 
 
 def test_cortex_runtime_has_no_direct_chat_or_postprocess_compatibility_hooks() -> None:

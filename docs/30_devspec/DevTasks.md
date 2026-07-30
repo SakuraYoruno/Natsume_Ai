@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-04_GOVERNED_CHAT_ACCEPTANCE_SCOPE_LOCAL_EVIDENCE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-04_DIRECT_CHAT_GOVERNED_SENTENCE_STREAM_LOCAL_EVIDENCE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -65,6 +65,12 @@ Gateway service principal 保留为 command/lease/grant/delivery authority，can
 acceptance 对 node drift fail-closed。受控 SQLite integration 已验证两句流、acceptance effect 与 Gateway
 delivery 的端到端窄链；真实 provider、远端 Edge、authenticated connection resume 与 generic Chat cutover
 仍未完成，状态必须保持 `PARTIAL / REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+本次补充的 ASGI 回归已验证：`POST /v1/chat` 的本机个人、低歧义 text route 在显式选择具备
+provider-final-usage 合同的受控 OpenAI-compatible transport 后，会走 `HostCommand → TaskGraph →
+Task-bound sentence ledger → SSE SENTENCE → Acceptance`。首句前失败持久化 `STREAM_INTERRUPTED` 后以
+stable `REJECT` 收口，不进入 unknown-effect 重放；它不把 fixture transport 提升为真实 provider
+或 generic/multi-user Chat 完成证据。
 
 `POST /v1/chat` 的本机个人入口现于 AffectFusion、检索预取和 Runtime Context 之前绑定
 `natsume.direct-chat-scope.v1`：由 `HOST_DEFAULT_USER_ID` 派生唯一 subject/principal 和

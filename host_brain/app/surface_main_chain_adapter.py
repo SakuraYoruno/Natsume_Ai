@@ -720,9 +720,10 @@ async def _native_affective_sentence_stream(
             pass
         raise
     except Exception as exc:
+        interruption_reason = _native_stream_failure_reason(exc)
         trace["native_sentence_stream"] = {
             "status": "INTERRUPTED",
-            "reason_code": str(exc).split(":", 1)[0][:160],
+            "reason_code": interruption_reason,
             "sent_sentence_count": sent_sentence_count,
         }
         if governed_delivery_authority is not None:
@@ -731,8 +732,7 @@ async def _native_affective_sentence_stream(
                     record_stream_control(
                         event_kind="STREAM_INTERRUPTED",
                         sent_count=sent_sentence_count,
-                        reason_code=str(exc).split(":", 1)[0][:160]
-                        or "SURFACE_STREAM_INTERRUPTED",
+                        reason_code=interruption_reason,
                     )
                 )
             except Exception:
@@ -740,6 +740,31 @@ async def _native_affective_sentence_stream(
                 # boundary either way.  Never manufacture a terminal reject
                 # after a sentence has become visible.
                 pass
+            if sent_sentence_count == 0:
+                # No text, Voice or Avatar action has crossed the visibility
+                # boundary.  This is a normal fail-closed terminal outcome,
+                # not an ``unknown effect`` recovery case.  Preserve the
+                # stable model/runtime cause in the immutable Task delivery
+                # journal so the worker can release its lease and budget
+                # without re-running an unseen provider attempt.
+                yield _sse(
+                    {
+                        "phase": "COMMIT",
+                        "done": True,
+                        "decision": "REJECT",
+                        "reason_code": interruption_reason,
+                        "narrative": "",
+                        "request_id": request_id,
+                        "sent_sentence_count": 0,
+                        "audit_refs": {
+                            "request_id": request_id,
+                            "path": "surface_reply:native_affective_stream",
+                            "durability": "fail_closed_before_visibility",
+                            "trace_stage_meta": dict(trace),
+                        },
+                    }
+                )
+                return
             raise RuntimeError("TASK_CHAT_STREAM_INTERRUPTED") from exc
         yield _sse(
             {
@@ -1567,6 +1592,28 @@ def _governed_model_budget_failure_reason(exc: BaseException) -> str:
     if candidate.startswith("MODEL_"):
         return candidate
     return "MODEL_BUDGET_GUARD_REJECTED"
+
+
+def _native_stream_failure_reason(exc: BaseException) -> str:
+    """Return a public-safe, machine-stable cause for an unseen stream failure.
+
+    The native sentence path is allowed to surface the cause only before a
+    sentence becomes visible.  Do not forward provider prose, URLs or Python
+    trace text into the client or immutable task receipt.
+    """
+
+    candidate = str(getattr(exc, "code", "") or "").strip().upper()
+    if not candidate:
+        candidate = str(exc).split(":", 1)[0].strip().upper()
+    compact = candidate.replace("_", "")
+    if (
+        3 <= len(candidate) <= 160
+        and compact.isalnum()
+        and candidate[:1] in "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        and all(char in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" for char in candidate)
+    ):
+        return candidate
+    return "SURFACE_STREAM_INTERRUPTED"
 
 
 def _surface_failure_fallback_text(agent_input: Any, *, exc: BaseException) -> str:
