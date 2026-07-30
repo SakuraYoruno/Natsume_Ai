@@ -44,8 +44,12 @@
 - canonical Life composition 下的 Limbic EMOTION_INFERENCE_UPDATED callback 也被定向约束为
   no-write：不创建 TribeStateRegistry voice-emotion 项，亦不追加 legacy timeline；离线 compatibility
   组合的历史测试不被当成 production authority。
-- 本次联合定向集合为 `126 passed in 51.62s`，覆盖 Input routes、AffectFusion、Limbic 与
-  Edge event whitelist。它是本机代码证据；没有启动远端 Edge、TTS 或 VTS，也没有运行真实声学 provider。
+- test_http_edge_events_acceptance.py 通过真实 Host ASGI 的 /v1/edge/events 验证 final ASR
+  bridge 交给标准 Host Input 后，伪造 self-report 会被剥离，而可用声学 attestation 保留为唯一 typed
+  ACOUSTIC observation。
+- 本次联合定向集合为 `127 passed in 53.34s`，覆盖 Host ASGI edge bridge、Input routes、
+  AffectFusion、Limbic 与 Edge event whitelist。它是本机代码证据；没有启动远端 Edge、TTS 或 VTS，
+  也没有运行真实声学 provider。
 
 ## DL-04 本机直连 Chat scope 切流
 

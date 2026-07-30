@@ -76,7 +76,8 @@ provider 轨迹和至少三名独立评审盲测出现前，状态只能是 `MEA
 DL-02 还收口了 ASR 到 Host Input 的语义边界：Edge 的关键词推断、外带 emotion tag、强度、context
 和伪造观察列表都不能升格为用户 self-report；它们只可让原文本走既有低置信 TEXT observer。仅有明确
 可用且未降级的声学 attestation 才会形成一条 5 秒 TTL 的 typed ACOUSTIC observation，且不回传
-raw audio、原始 context 或直接 Chat emotion 字段。本地定向证据不代表远端 Edge 已启动或声学模型已验收。
+raw audio、原始 context 或直接 Chat emotion 字段。真实 Host ASGI 的 final ASR bridge 也已定向验证同一
+payload 语义；它不代表远端 Edge 已启动或声学模型已验收。
 
 在 canonical Life composition 中，Limbic 的 EMOTION_INFERENCE_UPDATED 订阅也不再写
 TribeStateRegistry 的运行期 voice-emotion 项或旧 emotion timeline；真正 final ASR 只能按上面的
