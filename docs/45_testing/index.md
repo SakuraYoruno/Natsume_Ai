@@ -104,9 +104,22 @@
   用户确认才以 deterministic `affective_episode_resolved` 收束原 session-scoped episode。
   覆盖跨 session 续接、pending target 消费、restart replay、opaque resolution ref 与原文不入
   两份 journal。
+- 用户已经明确接受修复时，`relationship_repair_accepted → RELIEF / CARE` 的冻结计划必须选择
+  `ACKNOWLEDGE`，而不是继续 `REPAIR`；该断言防止七海在修复已被接住后反复道歉或向用户索求安抚。
 - 当前该桥与 DL-02、DL-03、DL-04、DL-05 邻接集为 `38 passed in 62.16s`。它是本地 SQLite
   因果/恢复证据；不证明真实 Host 长会话、模型自然度、真人盲评、远端 Edge、物理 Voice/Avatar、
   Docker 服务栈或远程 CI 通过（`NOT_RUN_ACCOUNT_QUOTA`）。
+
+## DL-00～DL-06 本地波次回归
+
+- `2026-07-30` 的完整本地波次集合执行了全部 48 个 `test_dl00_*` 至 `test_dl06_*` 单测、
+  集成与合同文件，结果为 `188 passed in 254.76s`。它覆盖 canonical Life 的 replay/restart、
+  用户与七海 self-affect 隔离、关系 aftereffect、冻结表达计划、Voice/Avatar Host protocol、
+  主动权限、profile 生命周期与 legacy writer 退役。
+- 该集合额外断言：用户明确接受修复后的 `REPAIR_ACCEPTED` 只能令当前 Plan 选择 `ACKNOWLEDGE` 的
+  自然回暖，不能继续 `REPAIR` 形成反复道歉或索求安抚的循环。
+- 这是本地代码与 SQLite 证据，不是 DL-07 真实验收：Docker、真实 provider、远端 Edge/TTS/VTS、
+  真人盲测与平台投递均未运行；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-04 确定性表达不绕过情感协议切片
 

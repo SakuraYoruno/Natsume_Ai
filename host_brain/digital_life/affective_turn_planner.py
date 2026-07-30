@@ -530,9 +530,15 @@ def _select_companion_act(
     if appraisal_kind in {
         "NATSUME_MAY_HAVE_HURT_USER",
         "REPAIR_SIGNAL",
-        "RELATIONSHIP_REPAIR_ACCEPTED",
     }:
         return "REPAIR"
+    if appraisal_kind == "RELATIONSHIP_REPAIR_ACCEPTED":
+        # A user-confirmed repair closes the current rupture.  The next
+        # sentence may acknowledge the reopening warmly, but must not keep
+        # apologising or act as though the user now owes a further repair.
+        # ``REPAIR`` remains reserved for an unresolved rupture or a fresh
+        # signal that Natsume may have missed the user again.
+        return "ACKNOWLEDGE"
     if appraisal_kind == "DIRECTED_DISRESPECT_TOWARD_NATSUME":
         return "SET_BOUNDARY"
     if appraisal_kind == "USER_MIXED_AFFECT":

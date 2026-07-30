@@ -147,7 +147,8 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
   Life command identity 保证。
 - 关系 aggregate 已产生的 `REPAIR_ACCEPTED` aftereffect 也是唯一可进入此 scope 的关系证据：
   Fusion 以其 opaque receipt ref 形成 `relationship_repair_accepted` 的 `RELIEF / CARE`，不会从
-  原话、Bond 或一次道歉猜测“已经和好”。`proactive_permission=DENIED` 只禁止未被请求的
+  原话、Bond 或一次道歉猜测“已经和好”。该 accepted 状态只让 Planner 选 `ACKNOWLEDGE` 自然回暖，
+  不让它继续选 `REPAIR`、重复道歉或索求用户确认。`proactive_permission=DENIED` 只禁止未被请求的
   Scheduler contact，不能使当前明确输入变成 `GIVE_SPACE/SILENCE`。
 - 明确、指向七海且不带停止语义的贬损会进入 bounded `directed_disrespect_toward_natsume` Appraisal，
   使七海形成 `HURT / CAUTION`、以 `CONTAIN` 调节并选择 `SET_BOUNDARY`；Surface 不得把它扩张为

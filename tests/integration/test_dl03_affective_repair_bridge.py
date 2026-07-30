@@ -181,7 +181,10 @@ def test_acknowledged_repair_reaches_the_original_self_affect_across_sessions(
         created_at_ms=NOW,
     )
     assert repair_guidance is not None
-    assert repair_guidance.plan.companion_act.kind == "REPAIR"
+    # A confirmed repair lets the foreground turn reopen naturally.  It does
+    # not keep the companion in an apology loop after the user has already
+    # accepted the repair.
+    assert repair_guidance.plan.companion_act.kind == "ACKNOWLEDGE"
 
     # A late acceptance retry must reopen the original relationship command
     # even though its target has now been resolved and is no longer active.
