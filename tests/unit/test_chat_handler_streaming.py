@@ -205,7 +205,7 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
 
     assert fake_thalamus.calls == 0
     assert metrics.chat_calls == 1
-    assert input_ports.get_ans_agent is None
+    assert not hasattr(input_ports, "get_ans_agent")
 
     body_iter = response.body_iterator
     first_chunk = await body_iter.__anext__()

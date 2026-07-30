@@ -34,7 +34,6 @@ class InputRuntimeApplicationPorts:
     render_quick_gateway_realign_text: Callable[..., str]
     get_embodiment_runtime: Callable[[], Any | None] | None = None
     get_thalamus_agent: Callable[[], Any] | None = None
-    get_ans_agent: Callable[[], Any] | None = None
     get_immune_agent: Callable[[], Any] | None = None
     get_evolution_activation_service: Callable[[], Any] | None = None
     get_evolution_scope: Callable[[], tuple[str, str]] | None = None
@@ -43,12 +42,6 @@ class InputRuntimeApplicationPorts:
         return _require_runtime_agent(
             self.get_thalamus_agent,
             "HOST_INPUT_THALAMUS_AGENT_NOT_INJECTED",
-        )
-
-    def require_ans_agent(self) -> Any:
-        return _require_runtime_agent(
-            self.get_ans_agent,
-            "HOST_INPUT_ANS_AGENT_NOT_INJECTED",
         )
 
     def require_immune_agent(self) -> Any:

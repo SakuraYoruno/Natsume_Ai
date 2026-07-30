@@ -94,7 +94,6 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
             tribe_application_ports=TribeApplicationPorts(),
             tribe_runtime_agent_ports=TribeRuntimeAgentPorts(
                 get_thalamus_agent=object,
-                get_ans_agent=object,
             ),
             tribe_runtime=_TribeRuntime(),
             begin_authority_runtime=lambda: events.append(

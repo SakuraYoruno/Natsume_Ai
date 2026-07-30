@@ -29,13 +29,11 @@ class TribeRuntimeAgentPorts:
     """
 
     get_thalamus_agent: Callable[[], Any]
-    get_ans_agent: Callable[[], Any]
     get_immune_agent: Callable[[], Any] | None = None
 
     def __post_init__(self) -> None:
-        for field_name in ("get_thalamus_agent", "get_ans_agent"):
-            if not callable(getattr(self, field_name)):
-                raise TypeError(f"{field_name} must be callable")
+        if not callable(self.get_thalamus_agent):
+            raise TypeError("get_thalamus_agent must be callable")
         if self.get_immune_agent is not None and not callable(self.get_immune_agent):
             raise TypeError("get_immune_agent must be callable when provided")
 
@@ -43,12 +41,6 @@ class TribeRuntimeAgentPorts:
         return _require_runtime_agent(
             self.get_thalamus_agent,
             "HOST_TRIBE_THALAMUS_AGENT_NOT_INJECTED",
-        )
-
-    def require_ans_agent(self) -> Any:
-        return _require_runtime_agent(
-            self.get_ans_agent,
-            "HOST_TRIBE_ANS_AGENT_NOT_INJECTED",
         )
 
     def require_immune_agent(self) -> Any:
@@ -73,7 +65,6 @@ def build_production_tribe_runtime_agent_ports(
         get_thalamus_agent=lambda: tribe_runtime.require_agent(
             "thalamus_agent"
         ),
-        get_ans_agent=lambda: tribe_runtime.require_agent("ans_agent"),
         get_immune_agent=lambda: tribe_runtime.require_agent("immune_agent"),
     )
 

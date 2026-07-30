@@ -1823,7 +1823,6 @@ def test_host_obs_semantic_prewarm_failure_preserves_governance_sources(
         "build_production_tribe_runtime_agent_ports",
         lambda **_kwargs: TribeRuntimeAgentPorts(
             get_thalamus_agent=object,
-            get_ans_agent=object,
             get_immune_agent=object,
         ),
     )

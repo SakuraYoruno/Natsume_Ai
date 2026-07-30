@@ -26,7 +26,8 @@
 普通 `/v1/chat` 的提交分支也不再形成旧事件旁路：它只通过 app-local Input ports
 取得 Thalamus 与 canonical emotion context，`COMMIT` 后不会向 `ANSAgent` 发布
 `TASK_SUCCESS`。因此该事件既不能写回 Life 也不能被 Endocrine 等兼容消费者重解释为
-七海的情绪；关系 aftereffect 仍须沿 accepted outcome 的 canonical 路径持久化。
+七海的情绪；Input port bundle 不含 ANS provider，Host 也不注册 ANS cross-thread event loop。
+关系 aftereffect 仍须沿 accepted outcome 的 canonical 路径持久化。
 
 签名 Gateway 的实际身份流已补上一条前置绑定，而不是先以 `default` 写情感再补 authority：
 

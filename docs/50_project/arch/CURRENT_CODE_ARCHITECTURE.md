@@ -58,9 +58,10 @@
 
 > **DL-06 普通 Chat ANS 回路退役：** `chat_handler.handle_chat()` 只预检
 > `require_thalamus_agent()`；SSE `COMMIT` 不再解析 `get_ans_agent` 或调用
-> `emit_task_success()`。已接受回复的关系意义仍由 canonical Life/Acceptance effect
-> 处理，不能由 legacy task-success 事件补写 self-affect。该切片仅覆盖本地 Chat 热路径，
-> 不是全部 ANS 接口删除，也不证明真实 Host/provider/Gateway/Edge 或 DL-07。
+> `emit_task_success()`。`InputRuntimeApplicationPorts` 与其 composition 已无 ANS port，
+> Host lifespan 也不再注册 ANS event loop。已接受回复的关系意义仍由 canonical
+> Life/Acceptance effect 处理，不能由 legacy task-success 事件补写 self-affect。ANS 仍在
+> isolated compatibility catalog，不证明真实 Host/provider/Gateway/Edge 或 DL-07。
 
 > **DL-06 canonical 主动节律修订：** `companion_proactive` 的 policy 不再直接 patch
 > scheduler state。它先冻结实际的 `AffectiveTurnPlanV1`、`ExpressionPlanV1.synchronization_id` 和

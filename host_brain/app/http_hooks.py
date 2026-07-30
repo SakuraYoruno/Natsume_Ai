@@ -584,15 +584,10 @@ def runtime_lifespan(
             except Exception as _vts_loop_exc:
                 logger.warning("VTS 主事件循环注册失败（降级）: %s", _vts_loop_exc)
 
-            # [ANSAgent] 注册主事件循环到 ANSAgent，使 Timer 线程可跨线程发布 Tribe 事件
-            # Phase 1：ANSAgent.emit_from_thread() 依赖此循环引用
-            try:
-                tribe_runtime_agent_ports.require_ans_agent().set_event_loop(
-                    asyncio.get_running_loop()
-                )
-                logger.info("ANSAgent 主事件循环已注册")
-            except Exception as _ans_loop_exc:
-                logger.warning("ANSAgent 主事件循环注册失败（降级）: %s", _ans_loop_exc)
+            new_module_statuses["ans_legacy_event_loop"] = (
+                "RETIRED: canonical Life owns affect; Host does not bind an "
+                "ANS cross-thread event loop"
+            )
 
             # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
             if defer_activity_monitor:

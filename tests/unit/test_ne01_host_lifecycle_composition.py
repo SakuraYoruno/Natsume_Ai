@@ -868,7 +868,6 @@ def test_retired_unbudgeted_surface_reply_judge_is_deleted() -> None:
 def test_typed_host_bundle_supplies_input_runtime_without_locator() -> None:
     sentinel = object()
     thalamus = object()
-    ans = object()
     immune = object()
     provider = lambda: sentinel
     notify_calls: list[str] = []
@@ -886,7 +885,6 @@ def test_typed_host_bundle_supplies_input_runtime_without_locator() -> None:
         notify_user_interaction_callback=lambda: notify_calls.append("notify"),
         tribe_runtime_agent_ports=TribeRuntimeAgentPorts(
             get_thalamus_agent=lambda: thalamus,
-            get_ans_agent=lambda: ans,
             get_immune_agent=lambda: immune,
         ),
     )
@@ -897,7 +895,6 @@ def test_typed_host_bundle_supplies_input_runtime_without_locator() -> None:
     assert input_ports.get_multimodal_observer is provider
     assert input_ports.get_multimodal_processor is provider
     assert input_ports.require_thalamus_agent() is thalamus
-    assert input_ports.require_ans_agent() is ans
     assert input_ports.require_immune_agent() is immune
     input_ports.notify_user_interaction()
     assert notify_calls == ["notify"]

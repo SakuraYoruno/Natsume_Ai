@@ -22,7 +22,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 
 回复成功本身不得成为旧情感 writer 的输入。每个已接受的回复只能通过 canonical
 relationship aftereffect 解释其后续关系意义；Chat 路由不得以 `TASK_SUCCESS`、文本标签或
-设备状态补写七海自身 Affect。
+设备状态补写七海自身 Affect。普通输入 composition 与 Host startup 也不得为了该旧事件
+旁路注入其 provider 或 event loop。
 
 历史 Bond 积分只允许作为可撤回的兼容只读投影，不能自动或人工升级亲密、浪漫、依赖或主动权限。产品不得提供能把 Bond 分数写回关系的公开 API、Operator 按钮或后台补录入口；旧客户端必须得到明确的退役结果，而不是静默降级或假成功。
 

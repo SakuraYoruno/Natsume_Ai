@@ -25,6 +25,7 @@
 > episode 与旧 writer 清零仍待后续 DL 波。Input/Tribe composition 也已删除旧 runtime fallback：缺 Life authority 时拒绝，不能构造 `HostEmotionRuntime`。
 > 普通 `/v1/chat` 现在只以 Thalamus 作为入口 preflight，提交后不再调用
 > `ANSAgent.emit_task_success()`；该 legacy event 不能借聊天成功回流为第二份 Affect。
+> `InputRuntimeApplicationPorts` 不再携带 ANS provider，Host startup 也不注册其 event loop；
 > accepted outcome 的关系后效应仍属于 canonical Life/Acceptance，不代表全部 ANS
 > compatibility consumer 或 DL-07 已完成。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`

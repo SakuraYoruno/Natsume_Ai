@@ -85,7 +85,7 @@ def test_production_tribe_scope_binds_compatibility_agents_to_owned_state() -> N
         tribe_runtime=runtime,
     )
     with pytest.raises(RuntimeError, match="TRIBE_RUNTIME_SCOPE_NOT_BOUND"):
-        agent_ports.require_ans_agent()
+        agent_ports.require_thalamus_agent()
     compatibility_getters = {
         name: getattr(
             importlib.import_module(provider.__module__),
@@ -105,7 +105,7 @@ def test_production_tribe_scope_binds_compatibility_agents_to_owned_state() -> N
         RuntimeError,
         match="TRIBE_RUNTIME_EXECUTION_CONTEXT_NOT_ACTIVE",
     ):
-        agent_ports.require_ans_agent()
+        agent_ports.require_thalamus_agent()
     activation = runtime.activate_execution_context(owner=owner)
     try:
         agents = {
@@ -121,8 +121,8 @@ def test_production_tribe_scope_binds_compatibility_agents_to_owned_state() -> N
             for name, agent in agents.items()
         )
         assert agent_ports.require_thalamus_agent() is agents["thalamus_agent"]
-        assert agent_ports.require_ans_agent() is agents["ans_agent"]
         assert agent_ports.require_immune_agent() is agents["immune_agent"]
+        assert not hasattr(agent_ports, "require_ans_agent")
         assert all(
             agent.application_ports is ports
             for agent in agents.values()

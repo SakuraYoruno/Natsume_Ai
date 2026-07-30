@@ -105,10 +105,6 @@ def build_input_runtime_application_ports(
         tribe_runtime_agent_ports,
         "get_thalamus_agent",
     )
-    get_ans_agent = _tribe_agent_provider(
-        tribe_runtime_agent_ports,
-        "get_ans_agent",
-    )
     get_immune_agent = _tribe_agent_provider(
         tribe_runtime_agent_ports,
         "get_immune_agent",
@@ -176,7 +172,6 @@ def build_input_runtime_application_ports(
         render_quick_gateway_realign_text=render_quick_gateway_realign_text,
         get_embodiment_runtime=embodiment_runtime_provider,
         get_thalamus_agent=get_thalamus_agent,
-        get_ans_agent=get_ans_agent,
         get_immune_agent=get_immune_agent,
         get_evolution_activation_service=(
             get_evolution_activation_service
