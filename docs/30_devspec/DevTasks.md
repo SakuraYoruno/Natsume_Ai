@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_SIGNED_GATEWAY_CONVERSATION_SCOPE_BINDING`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_CANONICAL_PROACTIVE_CADENCE_AND_PLAN_COMMIT`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -67,6 +67,17 @@ exact duplicate/restart replay。0147 已将低风险表达 profile 接入 canon
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。
+
+**DL-06 canonical 主动节律修订：** Scheduler 的发送 policy 现在先以 canonical
+`self-affect + relationship + regulation + profile + frozen Scene` 编译实际
+`AffectiveTurnPlanV1`，然后把 plan id、`synchronization_id`、content digest、scope 与 cadence
+作为严格 decision record 交给 Life reducer。reducer 只在相同 tick 已存在对应
+`proactive.gateway` intent、revision/scope/digest 全部匹配时，才将该 record 写入有界
+`companion_proactive` head；因此 policy 不能通过 `state_patch` 建立第二条节律 writer。已接受的
+delivery receipt 仍是打开 `PROACTIVE_MESSAGE` episode 的唯一依据；其后满 24 小时无新的用户输入时，
+下一 tick 写入 source-bound `SILENCE` aftereffect，关闭 episode 并指数放慢下一次联系，绝不降低
+trust/safety、改变 permission 或伪造 user presence。真实 SQLite command/outbox/receipt/restart 集成已覆盖此
+Host-side 链；受控本地 delivery handler 不代表真实 Gateway、第三方平台、远端 Edge 或体验验收。
 
 **DL-06 签名 Gateway 关系 scope 修订：** `/v1/host/input` 在 Secure Ingress 允许后、任何
 Fusion/Appraisal 前，使用可信 `principal_id + tenant_id` 与签名 `from_id + conversation_id` 编译

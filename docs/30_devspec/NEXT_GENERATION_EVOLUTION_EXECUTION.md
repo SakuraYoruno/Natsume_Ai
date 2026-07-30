@@ -340,6 +340,14 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   `canonical_life_companion` adapter：只向它提供 bounded `state.affective`、
   `relationship_v2` 和 scheduler-admitted timezone，绝不提供 Bond stage、旧 `affect`、
   private inner note 或 project title。固定早/晚/默认三句模板已从该 route 删除。
+- 当前 scheduler tick 会先冻结实际的 `AffectiveTurnPlanV1` 与其
+  `ExpressionPlanV1.synchronization_id`；纯 impulse/risk 算法只可提供有界 motive，不能再提供最终外发
+  文本。delivery intent、scope/revision/content digest 与 cadence decision 由 reducer 在同一个 Life UoW
+  重验并原子写入 `companion_proactive` head，policy 的 generic `state_patch` 不拥有该写权。已送达的
+  `PROACTIVE_MESSAGE` 超过 24 小时没有新的用户输入时，下一 tick 只记录 source-bound `SILENCE`
+  aftereffect、关闭 episode 并指数放慢下一次联系；它不扣 trust/safety、不改 permission、也不虚构 user
+  presence。真实 SQLite command/outbox/receipt/restart 集成覆盖该 Host 侧路径；本地 transport handler 不是
+  真实 Gateway/平台送达、远端 Edge 或 DL-07 验收证据。
 - 主动 outbox 现在要求 canonical `proactive_permission=ALLOWED`；`UNKNOWN/DENIED`、
   未结 relationship episode、repair required、`GIVE_SPACE/QUIET_PRESENCE/DEFER` regulation
   与低能量/高休息需要都会 hold。发送文本包含无回应压力约束，decision trace 只保存

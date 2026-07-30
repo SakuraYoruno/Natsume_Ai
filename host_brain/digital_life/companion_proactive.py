@@ -18,7 +18,12 @@ import hashlib
 import json
 from typing import Any
 
-from natsume_contracts.life import CompanionProfileStateV1
+from natsume_contracts.life import (
+    AffectiveTurnPlanV1,
+    CompanionActV1,
+    CompanionProfileStateV1,
+    ExpressionPlanV1,
+)
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from host_brain.persona.emotional_proactive import (
@@ -40,9 +45,25 @@ _MANIPULATIVE_MARKERS = (
 )
 _HOLD_REGULATION_MODES = frozenset({"GIVE_SPACE", "QUIET_PRESENCE", "DEFER"})
 
+# This is deliberately a contact-frequency control, not a relationship score.
+# A missed proactive message may make the next *attempt* less frequent, but it
+# can never lower trust, revoke consent, or be interpreted as a rejection.
+_PROACTIVE_BACKOFF_MAX_MS = 7 * 24 * 60 * 60 * 1_000
+_PROACTIVE_BASE_CADENCE_MS = 4 * 60 * 60 * 1_000
+# Silence is only a cadence signal after a long grace period.  It is never a
+# relationship verdict and cannot cause a consent or trust transition.
+PROACTIVE_SILENCE_GRACE_MS = 24 * 60 * 60 * 1_000
+
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def proactive_silence_backoff_ms(consecutive_unanswered: int) -> int:
+    """Return a bounded, deterministic pause after a real unanswered ping."""
+
+    count = max(1, min(8, int(consecutive_unanswered)))
+    return min(_PROACTIVE_BACKOFF_MAX_MS, 12 * 60 * 60 * 1_000 * (2 ** (count - 1)))
 
 
 def _unit(value: Any, default: float = 0.0) -> float:
@@ -59,6 +80,13 @@ def _signed(value: Any, default: float = 0.0) -> float:
     except (TypeError, ValueError):
         number = float(default)
     return max(-1.0, min(1.0, number))
+
+
+def _number(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def _integer(value: Any, default: int = 0) -> int:
@@ -107,6 +135,10 @@ class CompanionProactiveDecision:
     companion_profile_id: str = ""
     companion_profile_stage: str = ""
     reason_tags: tuple[str, ...] = ()
+    decision_id: str = ""
+    next_allowed_at_ms: int = 0
+    consecutive_unanswered: int = 0
+    affective_turn_plan: dict[str, Any] | None = None
 
     def as_trace(self) -> dict[str, Any]:
         return {
@@ -124,10 +156,55 @@ class CompanionProactiveDecision:
             "companion_profile_stage": self.companion_profile_stage,
             "target_id": self.target_id,
             "reason_tags": list(self.reason_tags[:8]),
+            "decision_id": self.decision_id,
+            "next_allowed_at_ms": _integer(self.next_allowed_at_ms),
+            "consecutive_unanswered": min(8, _integer(self.consecutive_unanswered)),
+            "affective_turn_plan_id": str(
+                _mapping(self.affective_turn_plan).get("plan_id") or ""
+            ),
+            "synchronization_id": str(
+                _mapping(_mapping(self.affective_turn_plan).get("expression_plan")).get(
+                    "synchronization_id"
+                )
+                or ""
+            ),
             "content_digest": (
                 f"sha256:{_digest({'content': self.content})}"
                 if self.content
                 else ""
+            ),
+        }
+
+    def as_state_record(self) -> dict[str, Any]:
+        """Return the bounded reducer input for a queued proactive message.
+
+        The message body and profile text do not become snapshot state.  The
+        canonical reducer receives only stable scope, revision, cadence and
+        plan identities, then writes the bounded lifecycle head atomically
+        with the outbox intent.
+        """
+
+        plan = _mapping(self.affective_turn_plan)
+        expression = _mapping(plan.get("expression_plan"))
+        return {
+            "schema_version": "companion_proactive_decision.v2",
+            "decision_id": self.decision_id,
+            "target_id": self.target_id,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "self_affect_revision": _integer(self.self_affect_revision),
+            "relationship_revision": _integer(self.relationship_revision),
+            "reason_code": self.reason_code,
+            "motive": self.motive,
+            "action": self.action,
+            "content_digest": self.as_trace()["content_digest"],
+            "affective_turn_plan_id": str(plan.get("plan_id") or ""),
+            "synchronization_id": str(expression.get("synchronization_id") or ""),
+            "next_allowed_at_ms": _integer(self.next_allowed_at_ms),
+            "consecutive_unanswered": min(8, _integer(self.consecutive_unanswered)),
+            "created_at_ms": _integer(
+                _mapping(plan).get("created_at_ms")
             ),
         }
 
@@ -214,6 +291,17 @@ def decide_companion_proactive(
             relationship=relationship,
         )
 
+    proactive_head = _mapping(life.get("companion_proactive"))
+    next_allowed_at_ms = _integer(proactive_head.get("next_allowed_at_ms"))
+    if next_allowed_at_ms and int(now_ms) < next_allowed_at_ms:
+        return _hold(
+            "PROACTIVE_RECENCY_BACKOFF",
+            platform=platform,
+            conversation_id=conversation_id,
+            affective=_mapping(life.get("affective")),
+            relationship=relationship,
+        )
+
     affective = _mapping(life.get("affective"))
     mood = _mapping(affective.get("mood"))
     needs = _mapping(affective.get("needs"))
@@ -238,7 +326,7 @@ def decide_companion_proactive(
 
     clock = _mapping(life.get("clock"))
     local_hour = _local_hour(now_ms, timezone_name)
-    profile, profile_stage = _effective_companion_profile(
+    profile, profile_revision, profile_stage = _effective_companion_profile(
         life,
         relationship=relationship,
     )
@@ -296,7 +384,22 @@ def decide_companion_proactive(
             affective=affective,
             relationship=relationship,
         )
-    content = _non_coercive_content(episode)
+    affective_turn_plan = _build_proactive_turn_plan(
+        affective=affective,
+        relationship=relationship,
+        profile=profile,
+        profile_revision=profile_revision,
+        profile_stage=profile_stage,
+        episode=episode,
+        now_ms=now_ms,
+        target=target,
+    )
+    content = _compose_non_coercive_content(
+        episode=episode,
+        affective=affective,
+        profile=profile,
+        turn_plan=affective_turn_plan,
+    )
     if not content:
         return _episode_hold(
             episode,
@@ -306,6 +409,18 @@ def decide_companion_proactive(
             affective=affective,
             relationship=relationship,
         )
+    decision_seed = {
+        "schema": "companion-proactive-decision.v2",
+        "target_id": str(target.get("target_id") or ""),
+        "self_affect_revision": _integer(affective.get("revision")),
+        "relationship_revision": _integer(relationship.get("revision")),
+        "episode_id": episode.episode_id,
+        "motive": episode.motive,
+        "action": episode.chosen_action,
+        "created_at_ms": max(0, int(now_ms)),
+        "plan_id": str(affective_turn_plan.get("plan_id") or ""),
+        "profile_revision": _integer(profile_revision),
+    }
     return CompanionProactiveDecision(
         send_allowed=True,
         reason_code="PROACTIVE_CANONICAL_IMPULSE_READY",
@@ -326,6 +441,12 @@ def decide_companion_proactive(
         companion_profile_id=profile.profile_id,
         companion_profile_stage=profile_stage,
         reason_tags=tuple(str(item) for item in episode.reason_tags[:8]),
+        decision_id=f"companion-proactive::{_digest(decision_seed)[:40]}",
+        next_allowed_at_ms=max(0, int(now_ms)) + _PROACTIVE_BASE_CADENCE_MS,
+        consecutive_unanswered=min(
+            8, _integer(proactive_head.get("consecutive_unanswered"))
+        ),
+        affective_turn_plan=affective_turn_plan,
     )
 
 
@@ -439,28 +560,32 @@ def _effective_companion_profile(
     state: Mapping[str, Any],
     *,
     relationship: Mapping[str, Any],
-) -> tuple[Any | None, str]:
+) -> tuple[Any | None, int, str]:
     """Read only the canonical bounded profile; absent legacy state is neutral."""
 
     raw = state.get("companion_profile")
     if raw is None:
-        return _NeutralCompanionProfile(), "BASELINE"
+        return _NeutralCompanionProfile(), 0, "BASELINE"
     if not isinstance(raw, Mapping):
-        return None, ""
+        return None, 0, ""
     try:
         profile_state = CompanionProfileStateV1.from_mapping(raw)
     except ValueError:
-        return None, ""
+        return None, 0, ""
     if (
         profile_state.workspace_id != str(relationship.get("workspace_id") or "")
         or profile_state.relationship_subject_id
         != str(relationship.get("relationship_subject_id") or "")
     ):
-        return None, ""
+        return None, 0, ""
     if profile_state.canary_profile is not None:
-        return profile_state.canary_profile, "CANARY"
+        return profile_state.canary_profile, _integer(profile_state.revision), "CANARY"
     profile = profile_state.active_profile
-    return profile, "BASELINE" if profile.is_baseline else "ACTIVE"
+    return (
+        profile,
+        _integer(profile_state.revision),
+        "BASELINE" if profile.is_baseline else "ACTIVE",
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,16 +621,315 @@ def _local_hour(now_ms: int, timezone_name: str) -> int:
     return datetime.fromtimestamp(max(0, int(now_ms)) / 1_000.0, tz=timezone.utc).astimezone(zone).hour
 
 
-def _non_coercive_content(episode: EmotionalProactiveEpisode) -> str:
-    content = str(episode.opening_message or "").strip()[:240]
-    if not content:
-        return ""
+def _build_proactive_turn_plan(
+    *,
+    affective: Mapping[str, Any],
+    relationship: Mapping[str, Any],
+    profile: Any,
+    profile_revision: int,
+    profile_stage: str,
+    episode: EmotionalProactiveEpisode,
+    now_ms: int,
+    target: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Freeze a real affective plan before a proactive sentence is composed.
+
+    A periodic scheduler has no user utterance to hand to Surface, but it still
+    must not bypass the same causal contract used by an ordinary turn.  This
+    small compiler therefore derives a bounded CompanionAct and
+    ExpressionPlan from canonical self-affect only.  It never reads the legacy
+    Bond projection, arbitrary prompt text, or a user-controlled emotion tag.
+    """
+
+    components = [
+        _mapping(item)
+        for item in list(affective.get("components") or [])
+        if isinstance(item, Mapping)
+    ]
+    top = components[0] if components else {}
+    emotion = str(top.get("emotion") or "CALM").strip().upper()
+    intensity = _unit(top.get("intensity"), 0.24)
+    act_kind = _proactive_companion_act(episode=episode, emotion=emotion)
+    regulation = _mapping(affective.get("last_regulation"))
+    regulation_mode = str(regulation.get("mode") or "EXPRESS").strip().upper()
+    if not regulation_mode:
+        regulation_mode = "EXPRESS"
+    profile_id = str(getattr(profile, "profile_id", "") or "").strip()
+    profile_digest = str(getattr(profile, "profile_digest", "") or "").strip()
+    if bool(profile_id) != bool(profile_digest):
+        profile_id = ""
+        profile_digest = ""
+    profile_stage_for_plan = profile_stage if profile_id else "COMPATIBILITY_UNBOUND"
+    preferences = getattr(profile, "preferences", _NeutralCompanionPreferences())
+    seed = {
+        "schema": "companion-proactive-turn.v1",
+        "target_id": str(target.get("target_id") or ""),
+        "self_affect_revision": _integer(affective.get("revision")),
+        "relationship_revision": _integer(relationship.get("revision")),
+        "episode_id": episode.episode_id,
+        "motive": episode.motive,
+        "act": act_kind,
+        "emotion": emotion,
+        "profile_id": profile_id,
+        "profile_revision": _integer(profile_revision),
+        "created_at_ms": max(0, int(now_ms)),
+    }
+    seed_digest = _digest(seed)
+    expression = _proactive_expression_controls(
+        act_kind=act_kind,
+        emotion=emotion,
+        regulation_mode=regulation_mode,
+        preferences=preferences,
+    )
+    expression_plan = ExpressionPlanV1(
+        expression_plan_id=f"expression::{seed_digest[:40]}",
+        synchronization_id=f"sync::{seed_digest[:40]}",
+        self_affect_revision=_integer(affective.get("revision")),
+        text_pacing=expression["text_pacing"],
+        voice_style=expression["voice_style"],
+        avatar_expression=expression["avatar_expression"],
+        regulation_mode=regulation_mode,
+        created_at_ms=max(0, int(now_ms)),
+        voice_rate=expression["voice_rate"],
+        voice_energy=expression["voice_energy"],
+        voice_pitch=expression["voice_pitch"],
+        voice_pause_ms=expression["voice_pause_ms"],
+        avatar_gaze=expression["avatar_gaze"],
+        avatar_posture=expression["avatar_posture"],
+        avatar_transition_ms=expression["avatar_transition_ms"],
+        avatar_behavior=expression["avatar_behavior"],
+        avatar_motion_intensity=expression["avatar_motion_intensity"],
+        companion_profile_id=profile_id,
+        companion_profile_digest=profile_digest,
+        previous_avatar_expression="NEUTRAL",
+        previous_expression_source="FALLBACK_NEUTRAL",
+    )
+    companion_act = CompanionActV1(
+        companion_act_id=f"companion::{seed_digest[:40]}",
+        relationship_subject_id=str(relationship.get("relationship_subject_id") or ""),
+        kind=act_kind,
+        intensity=intensity,
+        reason_refs=(
+            f"affect://sha256/{_digest(affective)}",
+            f"relationship://revision/{_integer(relationship.get('revision'))}",
+        ),
+        created_at_ms=max(0, int(now_ms)),
+    )
+    plan = AffectiveTurnPlanV1(
+        plan_id=f"affective-turn::{seed_digest[:40]}",
+        workspace_id=str(relationship.get("workspace_id") or ""),
+        relationship_subject_id=str(relationship.get("relationship_subject_id") or ""),
+        session_id=str(target.get("session_id") or ""),
+        request_id=f"proactive::{episode.episode_id}",
+        self_affect_revision=_integer(affective.get("revision")),
+        self_affect_digest=_digest(affective),
+        self_emotion_tag=_proactive_emotion_tag(emotion),
+        relationship_revision=_integer(relationship.get("revision")),
+        regulation_ref=(
+            f"regulation://{str(regulation.get('regulation_id') or '').strip()}"
+            if str(regulation.get("regulation_id") or "").strip()
+            else None
+        ),
+        companion_act=companion_act,
+        expression_plan=expression_plan,
+        generation_mode="STREAM_ONE",
+        candidate_count=1,
+        created_at_ms=max(0, int(now_ms)),
+        companion_profile_id=profile_id,
+        companion_profile_digest=profile_digest,
+        companion_profile_revision=_integer(profile_revision),
+        companion_profile_stage=profile_stage_for_plan,
+    )
+    return plan.as_dict()
+
+
+def _proactive_companion_act(*, episode: EmotionalProactiveEpisode, emotion: str) -> str:
+    motive = str(episode.motive or "").strip().lower()
+    if motive == "playful_ping" or emotion in {"SHARED_JOY", "JOY", "DELIGHT"}:
+        return "PLAY"
+    if motive in {"soft_care", "quiet_goodnight"} or emotion in {"CARE", "TENDERNESS"}:
+        return "COMFORT"
+    if motive == "lonely_murmur" and _unit(episode.disturbance_risk) >= 0.45:
+        return "GIVE_SPACE"
+    return "ACKNOWLEDGE"
+
+
+def _proactive_emotion_tag(emotion: str) -> str:
+    normalized = str(emotion or "").strip().upper()
+    return {
+        "SHARED_JOY": "JOY",
+        "DELIGHT": "JOY",
+        "TENDERNESS": "CARE",
+        "HURT": "SAD",
+        "IRRITATION": "THINKING",
+        "JEALOUSY": "THINKING",
+    }.get(normalized, normalized if normalized else "CALM")
+
+
+def _proactive_expression_controls(
+    *,
+    act_kind: str,
+    emotion: str,
+    regulation_mode: str,
+    preferences: Any,
+) -> dict[str, Any]:
+    tts_scale = _unit(_number(getattr(preferences, "tts_rate_scale", 1.0), 1.0) / 1.15, 0.87)
+    voice_rate = round(0.85 + tts_scale * 0.3, 6)
+    motion = _unit(getattr(preferences, "avatar_motion_intensity", 0.5), 0.5)
+    if act_kind == "PLAY":
+        return {
+            "text_pacing": "BRISK",
+            "voice_style": "WARM_PLAYFUL",
+            "avatar_expression": "SHARED_JOY",
+            "voice_rate": min(1.12, voice_rate + 0.05),
+            "voice_energy": 0.62,
+            "voice_pitch": 0.12,
+            "voice_pause_ms": 90,
+            "avatar_gaze": "OPEN",
+            "avatar_posture": "LIGHT",
+            "avatar_transition_ms": 180,
+            "avatar_behavior": "SHARED_JOY",
+            "avatar_motion_intensity": min(0.8, motion + 0.08),
+        }
+    if act_kind == "COMFORT":
+        return {
+            "text_pacing": "SOFT",
+            "voice_style": "SOFT_COMFORT",
+            "avatar_expression": "SOFT_COMFORT",
+            "voice_rate": max(0.82, voice_rate - 0.05),
+            "voice_energy": 0.4,
+            "voice_pitch": -0.04,
+            "voice_pause_ms": 220,
+            "avatar_gaze": "SOFT",
+            "avatar_posture": "OPEN_GENTLE",
+            "avatar_transition_ms": 260,
+            "avatar_behavior": "SOFT_COMFORT",
+            "avatar_motion_intensity": min(0.52, motion),
+        }
+    if act_kind == "GIVE_SPACE" or regulation_mode in _HOLD_REGULATION_MODES:
+        return {
+            "text_pacing": "SPARSE",
+            "voice_style": "QUIET_PRESENCE",
+            "avatar_expression": "QUIET_PRESENCE",
+            "voice_rate": max(0.8, voice_rate - 0.08),
+            "voice_energy": 0.3,
+            "voice_pitch": -0.08,
+            "voice_pause_ms": 280,
+            "avatar_gaze": "AVERTED",
+            "avatar_posture": "STILL",
+            "avatar_transition_ms": 320,
+            "avatar_behavior": "QUIET_PRESENCE",
+            "avatar_motion_intensity": min(0.35, motion),
+        }
+    return {
+        "text_pacing": "STEADY",
+        "voice_style": "CALM_ATTENTIVE",
+        "avatar_expression": "CALM_ATTENTIVE" if emotion == "CALM" else "SOFT_COMFORT",
+        "voice_rate": voice_rate,
+        "voice_energy": 0.48,
+        "voice_pitch": 0.0,
+        "voice_pause_ms": 140,
+        "avatar_gaze": "ATTENTIVE",
+        "avatar_posture": "RELAXED",
+        "avatar_transition_ms": 220,
+        "avatar_behavior": "CALM_ATTENTIVE",
+        "avatar_motion_intensity": motion,
+    }
+
+
+def _compose_non_coercive_content(
+    *,
+    episode: EmotionalProactiveEpisode,
+    affective: Mapping[str, Any],
+    profile: Any,
+    turn_plan: Mapping[str, Any],
+) -> str:
+    """Compose bounded Chinese prose from the frozen plan rather than a template.
+
+    This is not a hidden language-model call: it is deterministic, replayable
+    wording for a scheduler-owned message.  The semantic fragments vary with
+    the canonical action, inner weather and low-risk accepted profile; neither
+    raw memories nor user text are available to it.
+    """
+
+    companion = _mapping(turn_plan.get("companion_act"))
+    act = str(companion.get("kind") or "ACKNOWLEDGE").upper()
+    seed = {
+        "plan_id": turn_plan.get("plan_id"),
+        "episode_id": episode.episode_id,
+        "motive": episode.motive,
+        "act": act,
+        "revision": _integer(affective.get("revision")),
+    }
+    openings = {
+        "PLAY": (
+            "刚才心里冒出一点小小的玩心，来敲一下门。",
+            "路过的时候忽然有点想跟你分享一小点轻松。",
+            "我这边冒出一个亮亮的小念头，想先放在你门口。",
+        ),
+        "COMFORT": (
+            "刚才想到你，想轻轻问一句：今天还撑得住吗？",
+            "我没有急事，只是想把一句关心放在这里。",
+            "忽然有点惦记你现在是不是太累了。",
+        ),
+        "GIVE_SPACE": (
+            "我只是留一盏很轻的灯，不打扰你。",
+            "这会儿不想把话塞给你，只想在旁边待一小会儿。",
+            "我路过来放个安静的记号，然后就先收住。",
+        ),
+        "ACKNOWLEDGE": (
+            "刚才有个很轻的瞬间，让我想到你。",
+            "我路过一段安静的时候，想来和你打个招呼。",
+            "没有正事，只是想把一点存在感留给你。",
+        ),
+    }
+    bridges = {
+        "PLAY": (
+            "不需要接住它，看到就好。",
+            "等你空下来再笑一下也行。",
+            "先把这点小开心寄存在这里。",
+        ),
+        "COMFORT": (
+            "如果你正忙，就把它当作一声很轻的问候。",
+            "不用马上整理好心情给我看。",
+            "我不急着问细节，只想让你知道我在意。",
+        ),
+        "GIVE_SPACE": (
+            "你可以继续忙你的，不需要解释。",
+            "我会把分寸留好。",
+            "安静也完全没关系。",
+        ),
+        "ACKNOWLEDGE": (
+            "这句不用特意接住。",
+            "我只是想让你知道我在这里。",
+            "你看到的时候，给自己留一点空也好。",
+        ),
+    }
+    opening = _variant(seed, openings.get(act, openings["ACKNOWLEDGE"]), "opening")
+    bridge = _variant(seed, bridges.get(act, bridges["ACKNOWLEDGE"]), "bridge")
+    response_length = str(
+        getattr(getattr(profile, "preferences", None), "response_length", "BALANCED")
+        or "BALANCED"
+    ).upper()
+    content = opening if response_length == "SHORT" else f"{opening} {bridge}"
+    if not any(marker in content for marker in _SAFE_NO_REPLY_MARKERS):
+        content = f"{content} 不方便回也没关系。"
     normalized = content.lower()
     if any(marker in normalized for marker in _MANIPULATIVE_MARKERS):
         return ""
-    if not any(marker in content for marker in _SAFE_NO_REPLY_MARKERS):
-        content = f"{content} 不方便回也没关系。"
     return content[:280]
 
 
-__all__ = ["CompanionProactiveDecision", "decide_companion_proactive"]
+def _variant(seed: Mapping[str, Any], options: tuple[str, ...], slot: str) -> str:
+    if not options:
+        return ""
+    digest = _digest({"seed": dict(seed), "slot": slot})
+    return options[int(digest[:8], 16) % len(options)]
+
+
+__all__ = [
+    "CompanionProactiveDecision",
+    "PROACTIVE_SILENCE_GRACE_MS",
+    "decide_companion_proactive",
+    "proactive_silence_backoff_ms",
+]

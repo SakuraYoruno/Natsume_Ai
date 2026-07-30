@@ -150,6 +150,14 @@
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
+- `tests/integration/test_dl06_canonical_proactive_tick.py` 使用真实 SQLite migration、
+  `LifeCommandService`、repository、outbox dispatcher 与重建后的 reader/service 验证一条完整 Host-side
+  scheduler 链：canonical self-affect 先经 appraisal 建立，tick 原子提交冻结 plan/cadence head 与
+  `proactive.gateway` intent；已接受 transport receipt 打开 `PROACTIVE_MESSAGE`；重启后满 24 小时无新输入的
+  tick 只写 `SILENCE` aftereffect、关闭 episode 并增长 contact backoff，保持 trust/permission/
+  `last_user_seen_ms` 不变。该文件当前为 `1 passed in 2.67s`；handler 是受控本地 transport，不能推导
+  第三方平台送达、远端 TTS/VTS/Avatar、真实模型或 DL-07 服务栈通过。
+
 - `test_dl06_hippocampus_memory_writer_retirement.py` 验证 canonical `HippocampusAgent` 不注册
   interaction/loneliness/task EventBus，不写 legacy episodic/semantic/autobiographical layer 或 registry，也不向
   DefaultMode/PainReward/Interoception/Limbic fan-out；三类写入显式退役为

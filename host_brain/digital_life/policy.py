@@ -8,8 +8,13 @@ from typing import Any
 from natsume_contracts.life import (
     LifeDeliveryAuthorization,
     LifeSnapshot,
+    RelationalAftereffectV1,
+    digest_json,
 )
-from host_brain.digital_life.companion_proactive import decide_companion_proactive
+from host_brain.digital_life.companion_proactive import (
+    PROACTIVE_SILENCE_GRACE_MS,
+    decide_companion_proactive,
+)
 from host_brain.runtime.scene_consumer_projection import (
     SceneConsumerProjectionError,
     project_scene_decision_v2,
@@ -140,6 +145,18 @@ def build_life_tick_payload(
         ],
         "deliveries": [],
     }
+    silence_aftereffect = _due_companion_proactive_silence_aftereffect(
+        state,
+        now_ms=now_value,
+    )
+    if silence_aftereffect is not None:
+        # Close only the stale proactive episode in this tick.  A new message
+        # must wait for the following canonical tick and its persisted cadence
+        # backoff; we never turn silence into a burst of follow-up contact.
+        payload["companion_proactive_silence_aftereffect"] = (
+            silence_aftereffect.as_dict()
+        )
+        return payload
     timezone_name = str(
         dict(occurrence_payload or {}).get("timezone") or "Asia/Shanghai"
     ).strip()
@@ -171,25 +188,17 @@ def build_life_tick_payload(
                 preview_context
             )
         payload["deliveries"] = [proactive]
-        state_patch["proactive"] = {
-            "last_attempt_ms": now_value,
-            "last_status": "QUEUED",
-            "last_reason_code": str(
-                _mapping(_mapping(proactive.get("payload")).get("raw_extra"))
-                .get("decision_reason_code")
-                or "PROACTIVE_CANONICAL_IMPULSE_READY"
-            )[:120],
-            "last_motive": str(
-                _mapping(_mapping(proactive.get("payload")).get("raw_extra"))
-                .get("motive")
-                or "soft_reconnect"
-            )[:120],
-        }
-        state_patch["companion_proactive"] = _mapping(
+        decision_record = _mapping(
             _mapping(_mapping(proactive.get("payload")).get("raw_extra")).get(
-                "companion_proactive"
+                "companion_proactive_decision"
             )
         )
+        if not decision_record:
+            raise ValueError("canonical proactive delivery lacks reducer decision record")
+        # The reducer, rather than a generic state patch, is the single writer
+        # for cadence/proactive state.  That makes outbox intent and bounded
+        # lifecycle head atomic under the Life command CAS transaction.
+        payload["companion_proactive_decision"] = decision_record
     return payload
 
 
@@ -263,6 +272,8 @@ def _proactive_delivery(
                 "motive": decision.motive,
                 "decision_reason_code": decision.reason_code,
                 "companion_proactive": decision.as_trace(),
+                "companion_proactive_decision": decision.as_state_record(),
+                "affective_turn_plan": dict(decision.affective_turn_plan or {}),
                 "state_version": int(state.get("version") or 0),
                 "scene_id": str(scene_identity.get("scene_id") or ""),
                 "scene_revision": int(scene_identity.get("revision") or 0),
@@ -272,6 +283,72 @@ def _proactive_delivery(
             },
         },
     }
+
+
+def _due_companion_proactive_silence_aftereffect(
+    state: Mapping[str, Any],
+    *,
+    now_ms: int,
+) -> RelationalAftereffectV1 | None:
+    """Return one stale proactive episode as a cadence-only SILENCE outcome.
+
+    This is intentionally derived from a delivered relationship episode, not
+    from a missing network receipt or a vague inactivity score.  It contains
+    no user text and cannot alter relationship trust or contact consent.
+    """
+
+    relationship = _mapping(state.get("relationship_v2"))
+    candidates = [
+        _mapping(item)
+        for item in list(relationship.get("active_episodes") or [])
+        if isinstance(item, Mapping)
+        and str(_mapping(item).get("source_kind") or "").strip().upper()
+        == "PROACTIVE_MESSAGE"
+    ]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda item: (
+            max(0, int(item.get("opened_at_ms") or 0)),
+            str(item.get("episode_id") or ""),
+        )
+    )
+    episode = candidates[0]
+    opened_at_ms = max(0, int(episode.get("opened_at_ms") or 0))
+    if not opened_at_ms or now_ms < opened_at_ms + PROACTIVE_SILENCE_GRACE_MS:
+        return None
+    workspace_id = str(relationship.get("workspace_id") or "").strip()
+    subject_id = str(relationship.get("relationship_subject_id") or "").strip()
+    session_id = str(episode.get("session_id") or "").strip()
+    episode_id = str(episode.get("episode_id") or "").strip()
+    source_receipt_ref = str(episode.get("response_receipt_ref") or "").strip()
+    if not all((workspace_id, subject_id, session_id, episode_id, source_receipt_ref)):
+        return None
+    identity = {
+        "schema": "companion-proactive-silence.v1",
+        "workspace_id": workspace_id,
+        "relationship_subject_id": subject_id,
+        "episode_id": episode_id,
+        "source_receipt_ref": source_receipt_ref,
+        "observed_at_ms": now_ms,
+    }
+    digest = digest_json(identity)
+    silence_ref = f"scheduler-proactive-silence://sha256/{digest}"
+    return RelationalAftereffectV1(
+        aftereffect_id=f"aftereffect_{digest[:32]}",
+        episode_id=episode_id,
+        workspace_id=workspace_id,
+        relationship_subject_id=subject_id,
+        session_id=session_id,
+        source_receipt_ref=source_receipt_ref,
+        user_input_ref=silence_ref,
+        outcome="SILENCE",
+        helpfulness=0.0,
+        boundary_respected=True,
+        repair_acknowledged=False,
+        observed_at_ms=now_ms,
+        evidence_refs=(source_receipt_ref, silence_ref),
+    )
 
 
 def _mapping(value: Any) -> dict[str, Any]:

@@ -3,14 +3,14 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.77
-核对日期：2026-07-28
+版本：v5.78
+核对日期：2026-07-30
 合并基线：`origin/dev@fcb8997fa`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> 2026-07-28 口径纠偏：当前活动波为 `NE-08 / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING`。
+> 2026-07-30 口径纠偏：当前活动波为 `NE-08 / DL-06_CANONICAL_PROACTIVE_CADENCE_AND_PLAN_COMMIT`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、
 > episode、mood、need 与 regulation fold 纳入既有 command/event/CAS/replay
 > 链；ASGI 的 Input composition 现会构造 app-local `AffectFusionService`，把
@@ -55,6 +55,16 @@
 > `HostEmotionRuntime`、Limbic、Endocrine 与 global BodySense 的生产写入已逐项切断，Motive 也已降为无模块级缓存的纯规则投影，production
 > Bond queue/writer 已退役为 no-write adapter；Life projection 的 post-process 也不再发布旧 Tribe 对话结束事件或直接推 VTS/整段 TTS。production Host 也不会从旧 action log 预热 legacy emotion timeline：它返回显式 retired 空投影，且 Runtime snapshot 不会把 user profile 升格为 self-affect，canonical Limbic/Prefrontal 不会读取该投影；但 Surface 的其它兼容 state、Monitor 审核、canary 长期收益、真实模型和三模态物理服务仍未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
+
+> **DL-06 canonical 主动节律修订：** `companion_proactive` 的 policy 不再直接 patch
+> scheduler state。它先冻结实际的 `AffectiveTurnPlanV1`、`ExpressionPlanV1.synchronization_id` 和
+> bounded content digest；reducer 随后在同一 Life UoW 重验 target/scope、self-affect/relationship
+> revision、outbox payload 和 decision record，再把 `companion_proactive` cadence head 与
+> `proactive.gateway` intent 原子提交。旧 `emotional_proactive` 仅保留纯 impulse/risk 输入，不能提供
+> 最终外发模板。已 receipt-backed 的 `PROACTIVE_MESSAGE` 超过 24 小时没有新的用户输入时，后续 tick
+> 只写 source-bound `SILENCE` aftereffect、关闭 episode 并延后下一次联系；它不会扣 trust/safety、改 permission
+> 或伪造 user presence。真实 SQLite command/outbox/receipt/restart 集成已验证 Host-side chain；受控本地
+> transport 不代表 Gateway、平台送达、远端 Edge 或 DL-07 完成。
 
 > **DL-02 ASR 情绪语义边界：** final ASR 仍可进入标准 Host Input，但 Edge 附带的关键词
 > emotion、intensity、context 或 observation list 不会被映射为 ChatRequest self-report 字段；

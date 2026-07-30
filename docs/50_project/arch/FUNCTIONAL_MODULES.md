@@ -636,6 +636,12 @@ canonical Life composition 下的 Limbic event subscriber 也已 no-op，不能�
 | Lifecycle Runtime | Scheduler handler、Life jobs、背景投影和 proactive dispatch | [`lifecycle_runtime/composition.py`](../../../host_brain/lifecycle_runtime/composition.py)、[`lifecycle_runtime/life_jobs.py`](../../../host_brain/lifecycle_runtime/life_jobs.py)、[`lifecycle_runtime/proactive_dispatch.py`](../../../host_brain/lifecycle_runtime/proactive_dispatch.py) | Scheduler、Life Command、Governor、delivery ports | 新的时钟 authority、人格直写 | `PARTIAL`；定时执行闭环受 Scheduler runtime 故障限制 |
 | Evolution / Identity | 实验隔离策略、ExperimentSpec/Run/Report/Proposal、Feedback/Knowledge/Identity version activation 与 exact rollback | NE-04 既有 trusted Lab；[`evolution/version_activation.py`](../../../host_brain/evolution/version_activation.py)、[`persistence/evolution_activation_v2_repository.py`](../../../host_brain/persistence/evolution_activation_v2_repository.py)、[`release/identity_activation.py`](../../../host_brain/release/identity_activation.py) | 0138～0142、ReviewStore、version/snapshot authority | raw trace 落库、直接生产激活、伪造 URI evidence、legacy V1 mutation、Operator 直写 | Evolution Lab 保持 proposal-only；NE-06 0142 已本地完成 real authority resolution、active owner switch 与 rollback，0110 只读。真实 release deployment 和全栈验收待 NE-07 |
 
+**DL-06 当前模块边界：** `Relationship Lifecycle / Companion Policy` 的 scheduler decision 已由 reducer
+拥有 cadence head 写权。冻结 plan、scope/revision/digest 和 `proactive.gateway` intent 只有在同一 Life
+transaction 中全部匹配时才可提交；delivery receipt 后的 `PROACTIVE_MESSAGE` 超过 24 小时无新输入，
+只会关闭 episode 并持久化联系降频，绝不会给关系扣分或减少用户许可。此处的 SQLite integration 使用受控本地
+transport 来证明 outbox/restart 语义，尚不是第三方平台、远端 Edge 或完整体验验收。
+
 ### 4.7 渠道、Gateway 与 Edge
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |

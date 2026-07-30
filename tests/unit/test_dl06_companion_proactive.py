@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from host_brain.digital_life.companion_proactive import decide_companion_proactive
+from natsume_contracts.life import CompanionProfileStateV1, baseline_companion_profile
 
 
 NOW = 1_783_814_400_000
 
 
 def _state(*, permission: str = "ALLOWED") -> dict:
+    profile = baseline_companion_profile(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+    )
     return {
         "proactive": {
             "last_target": {"platform": "qq", "conversation_id": "conversation-a"},
@@ -69,6 +74,13 @@ def _state(*, permission: str = "ALLOWED") -> dict:
             "last_regulation": {},
         },
         "clock": {"last_user_seen_ms": NOW - 5 * 60 * 60 * 1_000},
+        "companion_profile": CompanionProfileStateV1(
+            workspace_id="workspace-a",
+            relationship_subject_id="person-a",
+            revision=5,
+            active_profile=profile,
+            known_profiles=(profile,),
+        ).as_dict(),
         # A deliberately hostile compatibility value proves the decision does
         # not read legacy self-affect as an authority.
         "affect": {"tension": 1.0, "fatigue": 1.0, "loneliness": 1.0},
@@ -87,8 +99,20 @@ def test_canonical_proactive_requires_explicit_permission_not_bond_or_legacy_aff
     assert decision.relationship_revision == 7
     assert decision.self_affect_revision == 11
     assert decision.target_id == "companion_target_a"
-    assert "不用回" in decision.content
-    assert decision.as_trace()["content_digest"].startswith("sha256:")
+    assert "不方便回也没关系" in decision.content
+    trace = decision.as_trace()
+    assert trace["content_digest"].startswith("sha256:")
+    assert trace["affective_turn_plan_id"].startswith("affective-turn::")
+    assert trace["synchronization_id"].startswith("sync::")
+    assert decision.affective_turn_plan is not None
+    assert decision.affective_turn_plan["self_affect_revision"] == 11
+    assert decision.affective_turn_plan["relationship_revision"] == 7
+    assert decision.affective_turn_plan["companion_profile_revision"] == 5
+    assert decision.affective_turn_plan["companion_profile_stage"] == "BASELINE"
+    assert (
+        decision.affective_turn_plan["expression_plan"]["synchronization_id"]
+        == trace["synchronization_id"]
+    )
 
 
 def test_unknown_or_denied_permission_holds_without_sending() -> None:

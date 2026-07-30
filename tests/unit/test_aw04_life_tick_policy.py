@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timezone
 
+import pytest
+
 from natsume_contracts.life import LifeSnapshot, digest_json
+from host_brain.digital_life.domain_reducer import reduce_life_domains
+from host_brain.digital_life.companion_proactive import (
+    PROACTIVE_SILENCE_GRACE_MS,
+    decide_companion_proactive,
+)
 from host_brain.digital_life.policy import (
     PROACTIVE_IDLE_THRESHOLD_MS,
     build_life_tick_payload,
@@ -170,7 +178,7 @@ def test_tick_is_deterministic_and_only_emits_outbox_after_known_idle_target() -
     assert delivery["authorization"] == AUTHORIZATION
     assert delivery["payload"]["platform"] == "qq"
     assert delivery["payload"]["conversation_id"] == "chat-1"
-    assert "不用回" in delivery["payload"]["content"]
+    assert "不方便回也没关系" in delivery["payload"]["content"]
     trace = delivery["payload"]["raw_extra"]["companion_proactive"]
     assert trace["send_allowed"] is True
     assert trace["relationship_revision"] == 3
@@ -180,7 +188,18 @@ def test_tick_is_deterministic_and_only_emits_outbox_after_known_idle_target() -
     assert delivery["payload"]["raw_extra"]["scene_decision_digest"] == _scene_context()[
         "scene_identity_v2"
     ]["decision_digest"]
-    assert first["state_patch"]["companion_proactive"] == trace
+    assert "companion_proactive" not in first["state_patch"]
+    assert first["companion_proactive_decision"]["decision_id"] == trace["decision_id"]
+    assert (
+        delivery["payload"]["raw_extra"]["affective_turn_plan"]["plan_id"]
+        == trace["affective_turn_plan_id"]
+    )
+    assert (
+        delivery["payload"]["raw_extra"]["affective_turn_plan"]["expression_plan"][
+            "synchronization_id"
+        ]
+        == trace["synchronization_id"]
+    )
 
 
 def test_tick_without_durable_target_never_creates_external_delivery() -> None:
@@ -190,6 +209,151 @@ def test_tick_without_durable_target_never_creates_external_delivery() -> None:
         scheduled_at_ms=PROACTIVE_IDLE_THRESHOLD_MS + 10,
     )
     assert payload["deliveries"] == []
+
+
+def test_tick_decision_is_reducer_owned_and_commits_with_its_outbox_intent() -> None:
+    scheduled = int(
+        datetime(2026, 7, 12, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
+    )
+    snapshot = _snapshot(
+        {
+            "clock": {
+                "last_integrated_ms": scheduled - 60_000,
+                "last_user_seen_ms": scheduled - PROACTIVE_IDLE_THRESHOLD_MS - 1,
+            },
+            **_canonical_companion_state(),
+        }
+    )
+    payload = build_life_tick_payload(
+        snapshot,
+        scheduled_at_ms=scheduled,
+        occurrence_payload={
+            "timezone": "Asia/Shanghai",
+            "delivery_authorization": AUTHORIZATION,
+            **_scene_context(),
+        },
+    )
+
+    reduced = reduce_life_domains(
+        snapshot.state,
+        person_id="person-1",
+        command_id="life_tick::reducer-owned-proactive",
+        command_type="tick",
+        payload=payload,
+        created_at_ms=scheduled,
+    )
+
+    head = reduced["companion_proactive"]
+    record = payload["companion_proactive_decision"]
+    assert head["last_decision_id"] == record["decision_id"]
+    assert head["last_plan_id"] == record["affective_turn_plan_id"]
+    assert head["last_synchronization_id"] == record["synchronization_id"]
+    assert head["last_status"] == "QUEUED"
+    assert head["next_allowed_at_ms"] == record["next_allowed_at_ms"]
+    assert reduced["proactive"]["last_reason_code"] == record["reason_code"]
+
+
+def test_tick_rejects_a_proactive_plan_with_self_affect_digest_drift() -> None:
+    scheduled = int(
+        datetime(2026, 7, 12, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
+    )
+    snapshot = _snapshot(
+        {
+            "clock": {
+                "last_integrated_ms": scheduled - 60_000,
+                "last_user_seen_ms": scheduled - PROACTIVE_IDLE_THRESHOLD_MS - 1,
+            },
+            **_canonical_companion_state(),
+        }
+    )
+    payload = build_life_tick_payload(
+        snapshot,
+        scheduled_at_ms=scheduled,
+        occurrence_payload={
+            "timezone": "Asia/Shanghai",
+            "delivery_authorization": AUTHORIZATION,
+            **_scene_context(),
+        },
+    )
+    tampered = deepcopy(payload)
+    tampered["deliveries"][0]["payload"]["raw_extra"]["affective_turn_plan"][
+        "self_affect_digest"
+    ] = "0" * 64
+
+    with pytest.raises(ValueError, match="affective turn plan drift"):
+        reduce_life_domains(
+            snapshot.state,
+            person_id="person-1",
+            command_id="life_tick::tampered-proactive-plan",
+            command_type="tick",
+            payload=tampered,
+            created_at_ms=scheduled,
+        )
+
+
+def test_unanswered_proactive_closes_after_grace_and_slows_only_future_contact() -> None:
+    scheduled = int(
+        datetime(2026, 7, 12, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
+    )
+    state = _canonical_companion_state()
+    state["relationship_v2"]["active_episodes"] = [
+        {
+            "schema_version": "relationship_episode.v1",
+            "episode_id": "proactive-episode-silence",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace::default",
+            "relationship_subject_id": "person-1",
+            "session_id": "session-1",
+            "source_kind": "PROACTIVE_MESSAGE",
+            "response_receipt_ref": "life-delivery://proactive-outbox-silence",
+            "response_digest": "sha256:" + "a" * 64,
+            "opened_at_ms": scheduled - PROACTIVE_SILENCE_GRACE_MS - 1,
+            "evidence_refs": ["life-delivery://proactive-outbox-silence"],
+            "affect_repair_target": None,
+        }
+    ]
+    snapshot = _snapshot(
+        {
+            "clock": {
+                "last_integrated_ms": scheduled - 60_000,
+                "last_user_seen_ms": scheduled - 6 * 60 * 60 * 1_000,
+            },
+            **state,
+        }
+    )
+
+    payload = build_life_tick_payload(snapshot, scheduled_at_ms=scheduled)
+
+    assert payload["deliveries"] == []
+    elapsed = payload["companion_proactive_silence_aftereffect"]
+    assert elapsed["outcome"] == "SILENCE"
+    assert elapsed["user_input_ref"].startswith(
+        "scheduler-proactive-silence://sha256/"
+    )
+    reduced = reduce_life_domains(
+        snapshot.state,
+        person_id="person-1",
+        command_id="life_tick::silent-proactive",
+        command_type="tick",
+        payload=payload,
+        created_at_ms=scheduled,
+    )
+
+    assert reduced["relationship_v2"]["active_episodes"] == []
+    assert reduced["relationship_v2"]["last_aftereffect"]["outcome"] == "SILENCE"
+    assert reduced["clock"]["last_user_seen_ms"] == snapshot.state["clock"][
+        "last_user_seen_ms"
+    ]
+    head = reduced["companion_proactive"]
+    assert head["consecutive_unanswered"] == 1
+    assert head["next_allowed_at_ms"] > scheduled
+    decision = decide_companion_proactive(
+        reduced,
+        now_ms=scheduled + 1,
+        timezone_name="Asia/Shanghai",
+    )
+    assert decision.send_allowed is False
+    assert decision.reason_code == "PROACTIVE_RECENCY_BACKOFF"
 
 
 def test_tick_with_target_but_without_grant_commits_projection_only() -> None:

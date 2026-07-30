@@ -135,6 +135,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 主动表达必须结合显式用户偏好、场景、关系边界、打扰成本和当前任务。
 - 每次主动动作必须经过 Intent Arbitration、Governor、durable outbox 和 receipt。
 - 用户可暂停、限制、解释或撤销主动能力。
+- 主动消息必须先冻结七海自身的 AffectiveTurnPlan/ExpressionPlan；已送达但未回应只能在宽限期后降低下一次联系频率，不能扣信任、撤销许可、伪造用户出现或施加回应义务。
 - 主动行为和后台演化不得直接修改 Persona trait；成长只能形成 proposal。
 
 ## 3. 统一执行与规划
