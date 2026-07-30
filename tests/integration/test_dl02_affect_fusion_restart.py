@@ -134,5 +134,8 @@ def test_restart_reopens_the_same_direct_space_appraisal_and_turn_plan(
     assert first_guidance is not None and replayed_guidance is not None
     assert first_guidance.plan.companion_act.kind == "GIVE_SPACE"
     assert replayed_guidance.plan.companion_act.kind == "GIVE_SPACE"
+    assert first_guidance.plan.expression_plan.regulation_mode == "GIVE_SPACE"
+    assert replayed_guidance.plan.expression_plan.regulation_mode == "GIVE_SPACE"
+    assert first_guidance.plan.regulation_ref == replayed_guidance.plan.regulation_ref
     assert first_guidance.plan.plan_id == replayed_guidance.plan.plan_id
     assert "想一个人待会" not in str(after.state)

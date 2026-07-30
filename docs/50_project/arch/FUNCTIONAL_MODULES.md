@@ -234,8 +234,9 @@ Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskSto
 `AffectiveTurnPlanV1` 中退化为一般确认；用户明确说明七海伤到自己时才触发 repair-open；同一
 可信 observation 的喜悦与痛感并存时使用 `HOLD_COMPLEXITY`。这三个决策只在内部 hand-off
 的本请求 `appraisal_id` 与 canonical `state.affective.last_appraisal` 精确一致时读取，模型与外部
-`emotion_context` 无权重写；旧 appraisal 不会永久捕获下一轮。Voice/Avatar 仍只收到 Host protocol
-intent，远端实际执行另行验收。
+`emotion_context` 无权重写；选定 appraisal 会生成同一 episode-bound `RegulationDecisionV1`，但只有
+本请求的 reason ref 匹配时才进入表达，旧 appraisal/regulation 不会永久捕获下一轮。Voice/Avatar 仍只
+收到 Host protocol intent，远端实际执行另行验收。
 
 当前 production Host root 不再实例化该 compatibility runtime；`user_emotion_profile` 也不再
 作为 process-wide port 发布。`build_tribe_application_ports()` 接收 ASGI 的 lazy Life command

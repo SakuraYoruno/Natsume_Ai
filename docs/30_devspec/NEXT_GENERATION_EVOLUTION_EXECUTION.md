@@ -115,7 +115,9 @@ raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life ev
   冻结本轮 `GIVE_SPACE`；`natsume_may_have_hurt_user` 生成七海自身
   `CARE / OPENNESS / CAUTION` 并冻结 `REPAIR`；同一可信 observation 内的正负支持共同
   达阈值时生成 `user_mixed_affect → HOLD_COMPLEXITY`。它们不保存原话，也不将用户
-  `SAD/HAPPY` 写入 self-affect；跨进程 exact replay 仍由同一 Life command identity 保证。
+  `SAD/HAPPY` 写入 self-affect。选定 candidate 会同步写可回放的 `RegulationDecisionV1`；
+  Planner 仅当其 reason ref 绑定本请求 `appraisal_id` 时才使用，跨进程 exact replay 仍由同一
+  Life command identity 保证。
 
 本地覆盖包含 9 项 DL-02 unit/restart 集成和 73 项受影响 Host/聊天/内核回归。它不
 证明真实 Host 部署、模型、语音、Avatar、关系后效应或旧 writer 已清零。

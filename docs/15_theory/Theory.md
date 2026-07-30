@@ -656,7 +656,9 @@ unknown-effect 重放。这只证明本机、受控 transport 的顺序；真实
 七海的“你刚才伤到我了”才可形成她自己的 `CARE / OPENNESS / CAUTION` 与 `REPAIR`，不能把
 任何用户悲伤都当成七海受伤；同一可信 observation 内同时存在喜悦和不舍时，
 `user_mixed_affect → HOLD_COMPLEXITY` 要保留两面，而不是通过中性化、鸡汤或单标签逃避判断。
-这些判断只写 typed appraisal、component 与 opaque evidence ref，原话仍不进入 Life journal。
+这些判断只写 typed appraisal、component、与 appraisal reason ref 绑定的 regulation 以及 opaque
+evidence ref，原话仍不进入 Life journal。上一次 regulation 是持续状态的一部分，但不自动支配新的
+Surface 回合：只有本请求 hand-off 的 appraisal id 与 regulation reason ref 精确相连才可影响表达。
 
 情感系统必须满足：
 

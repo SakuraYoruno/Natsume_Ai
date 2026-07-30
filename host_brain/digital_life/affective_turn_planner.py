@@ -211,8 +211,20 @@ def build_affective_turn_guidance(
         else ""
     )
     regulation = _mapping(self_affect.get("last_regulation"))
-    regulation_id = _text(regulation.get("regulation_id"))
-    regulation_mode = _text(regulation.get("mode"), default="EXPRESS").upper()
+    stored_regulation_id = _text(regulation.get("regulation_id"))
+    regulation_reason_refs = {
+        _text(value, limit=512)
+        for value in list(regulation.get("reason_refs") or [])
+    }
+    regulation_is_current = bool(appraisal_id) and (
+        f"appraisal://{appraisal_id}" in regulation_reason_refs
+    )
+    regulation_id = stored_regulation_id if regulation_is_current else ""
+    regulation_mode = (
+        _text(regulation.get("mode"), default="EXPRESS").upper()
+        if regulation_is_current
+        else "EXPRESS"
+    )
     relationship_life = _mapping(life.get("relationship_life"))
     relationship_state = _mapping(relationship_life.get("state"))
     if relationship_state and _text(

@@ -506,8 +506,10 @@ journal。深路径至多生成两个 appraisal 候选；选定 appraisal 的自
 外部 affective context 只能作为不可信输入，不能伪造 canonical head。最新 DL-02 细化将
 `user_boundary_or_space`、`natsume_may_have_hurt_user` 与 `user_mixed_affect` 作为 bounded
 Appraisal event kind：它们分别冻结 `GIVE_SPACE`、`REPAIR` 与 `HOLD_COMPLEXITY`，并只通过
-七海自己的 component 进入 `state.affective`。用户的 `SAD/HAPPY` 分布、原话和原始模态
-不会越过这条边界成为 self-affect 或 Surface 的可伪造输入。
+七海自己的 component 进入 `state.affective`。每个选定 candidate 会紧随 appraisal 写入
+`affective_regulation_decided`；其 `reason_refs` 带 exact `appraisal://` identity，Surface 只消费
+本请求匹配的 regulation。用户的 `SAD/HAPPY` 分布、原话和原始模态不会越过这条边界成为
+self-affect 或 Surface 的可伪造输入。
 
 ~~~mermaid
 flowchart LR

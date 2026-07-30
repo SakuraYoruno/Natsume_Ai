@@ -64,10 +64,11 @@
   `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不会构造任何 compatibility runtime。
 - 同文件现覆盖三个可见因果：首次明确空间请求必须得到 canonical `GIVE_SPACE`，明确说明
   七海伤到用户必须得到 `REPAIR` 而非用户情绪镜像，可信喜忧并存必须得到
-  `HOLD_COMPLEXITY`。`test_dl02_affect_fusion_restart.py` 进一步以真实 SQLite 重开相同
-  request，断言 space Appraisal、snapshot digest 与 frozen plan identity 完全一致；测试中不
-  使用 mock transport、raw media 或内存关系队列。当前受影响的 DL-02/DL-04/DL-05 定向集合为
-  `32 passed in 56.78s`；它不包含真实 provider、远端 Edge 或 DL-07 服务栈。
+  `HOLD_COMPLEXITY`，并断言对应 `RegulationDecisionV1` 使用正确 mode。`test_dl02_affect_fusion_restart.py`
+  进一步以真实 SQLite 重开相同 request，断言 space Appraisal、regulation、snapshot digest 与 frozen
+  plan identity 完全一致；测试中不使用 mock transport、raw media 或内存关系队列。当前受影响的
+  DL-01/DL-02/DL-04/DL-05/DL-06 定向集合为
+  `43 passed in 62.76s`；它不包含真实 provider、远端 Edge 或 DL-07 服务栈。
 - `test_ne01_host_lifecycle_composition.py` 与 `test_dl02_affect_fusion.py` 现额外验证
   production Host root 不再构造或发布 mutable `HostEmotionRuntime` / global user profile，
   ASGI Tribe 具备 Life authority 时会和 Input 一样走 canonical fusion，且不会解析旧 runtime。

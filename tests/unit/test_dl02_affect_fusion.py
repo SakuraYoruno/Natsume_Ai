@@ -131,6 +131,9 @@ def test_direct_space_request_becomes_canonical_give_space_not_generic_acknowled
     }
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "GIVE_SPACE"
+    assert state["affective"]["last_regulation"]["mode"] == "GIVE_SPACE"
+    assert guidance.plan.expression_plan.regulation_mode == "GIVE_SPACE"
+    assert guidance.plan.regulation_ref
     assert guidance.plan.expression_plan.voice_style == "QUIET_PRESENCE"
     assert any("不要追问" in item for item in guidance.must_not_do)
 
@@ -155,6 +158,8 @@ def test_prior_space_appraisal_does_not_capture_a_later_neutral_turn(
     assert later.appraisal_id is None
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "ACKNOWLEDGE"
+    assert guidance.plan.regulation_ref is None
+    assert guidance.plan.expression_plan.regulation_mode == "EXPRESS"
 
 
 def test_user_signal_that_natsume_hurt_them_freezes_repair_without_mirroring_sadness(
@@ -179,6 +184,9 @@ def test_user_signal_that_natsume_hurt_them_freezes_repair_without_mirroring_sad
     assert "SAD" not in {item["emotion"] for item in state["affective"]["components"]}
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "REPAIR"
+    assert state["affective"]["last_regulation"]["mode"] == "SEEK_REPAIR"
+    assert guidance.plan.expression_plan.regulation_mode == "SEEK_REPAIR"
+    assert guidance.plan.regulation_ref
     assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
@@ -218,8 +226,45 @@ def test_mixed_user_affect_is_preserved_as_a_complex_companion_act(
     )
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert state["affective"]["last_regulation"]["mode"] == "EXPRESS"
+    assert guidance.plan.expression_plan.regulation_mode == "EXPRESS"
+    assert guidance.plan.regulation_ref
     assert guidance.plan.expression_plan.voice_style == "SOFT_COMFORT"
     assert any("复杂感受" in item for item in guidance.must_not_do)
+
+
+def test_regulation_stays_appraisal_bound_when_episode_head_is_full(
+    tmp_path: Path,
+) -> None:
+    """A bounded episode head must not make the fifth turn partially commit."""
+
+    fusion, reader, _ = _runtime(tmp_path)
+    for index in range(4):
+        fusion.resolve_request(
+            request_body=_request(message="先别问了，我想一个人待会儿。"),
+            request_id=f"request-space-{index}",
+        )
+
+    result = fusion.resolve_request(
+        request_body=_request(
+            message="今天真的很开心。",
+            emotion_tag="HAPPY",
+            emotion_intensity=0.8,
+        ),
+        request_id="request-after-full-episode-head",
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    regulation = state["affective"]["last_regulation"]
+
+    assert result.path == "DEEP"
+    assert state["affective"]["last_appraisal"]["event_kind"] == "shared_positive_moment"
+    assert len(state["affective"]["active_episodes"]) == 4
+    assert regulation["mode"] == "EXPRESS"
+    assert regulation["episode_id"] is None
+    assert f"appraisal://{result.appraisal_id}" in regulation["reason_refs"]
+    assert any(
+        receipt.command_id.startswith("affect_") for receipt in result.receipts
+    )
 
 
 def test_fused_context_does_not_advance_legacy_host_emotion_runtime(tmp_path: Path) -> None:

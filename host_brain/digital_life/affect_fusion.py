@@ -30,6 +30,7 @@ from natsume_contracts.life import (
     EventAppraisalV1,
     LifeCommand,
     LifeCommandReceipt,
+    RegulationDecisionV1,
     UserAffectObservationV1,
 )
 
@@ -454,7 +455,7 @@ class AffectFusionService:
             path = "DEEP"
             selected = candidates[0]
             try:
-                appraisal_id, receipt = self._submit_appraisal(
+                appraisal_id, appraisal_receipts = self._submit_appraisal(
                     service=service,
                     scope=scope,
                     request_id=stable_request_id,
@@ -462,7 +463,7 @@ class AffectFusionService:
                     observations=active,
                     created_at_ms=now_ms,
                 )
-                receipts.append(receipt)
+                receipts.extend(appraisal_receipts)
             except (TypeError, ValueError):
                 # Do not retry an invalid candidate indefinitely. The turn
                 # still has its durable observations and explicitly takes the
@@ -558,7 +559,7 @@ class AffectFusionService:
         candidate: _AppraisalCandidate,
         observations: Sequence[UserAffectObservationV1],
         created_at_ms: int,
-    ) -> tuple[str, LifeCommandReceipt]:
+    ) -> tuple[str, tuple[LifeCommandReceipt, LifeCommandReceipt]]:
         observation_refs = tuple(
             f"affect-observation://{item.observation_id}"
             for item in observations[:8]
@@ -598,7 +599,30 @@ class AffectFusionService:
             decay_half_life_ms=600_000,
             evidence_refs=(target_ref, *observation_refs[:8]),
         )
-        receipt = self._submit(
+        regulation_mode = _regulation_mode_for_candidate(candidate)
+        regulation_seed = {
+            "schema": "regulation-decision.v1",
+            "appraisal_id": appraisal_id,
+            "mode": regulation_mode,
+        }
+        regulation = RegulationDecisionV1(
+            regulation_id=f"regulation_{_digest(regulation_seed)[:32]}",
+            relationship_subject_id=scope.relationship_subject_id,
+            mode=regulation_mode,
+            # The current-turn planner reopens this exact provenance link.
+            # It must not apply an old durable regulation to a later, unrelated
+            # input merely because it happens to be the latest snapshot head.
+            reason_refs=(f"appraisal://{appraisal_id}", target_ref),
+            decided_at_ms=max(0, int(created_at_ms)),
+            # The affective head keeps only four active episodes.  An
+            # appraisal can therefore be journaled even when its low-salience
+            # episode is immediately pruned; binding regulation to that
+            # optional active id would turn a valid current-turn decision into
+            # a partial-write failure.  The immutable appraisal ref remains
+            # the authoritative causal link.
+            episode_id=None,
+        )
+        appraisal_receipt = self._submit(
             service=service,
             scope=scope,
             request_id=request_id,
@@ -607,7 +631,16 @@ class AffectFusionService:
             payload={"appraisal": appraisal.as_dict(), "episode": episode.as_dict()},
             created_at_ms=created_at_ms,
         )
-        return appraisal_id, receipt
+        regulation_receipt = self._submit(
+            service=service,
+            scope=scope,
+            request_id=request_id,
+            ordinal=1_000,
+            command_type="affective_regulation_decided",
+            payload={"regulation": regulation.as_dict()},
+            created_at_ms=created_at_ms,
+        )
+        return appraisal_id, (appraisal_receipt, regulation_receipt)
 
 
 def _collect_observation_drafts(
@@ -891,6 +924,22 @@ def _signals_natsume_may_have_hurt_user(message: str) -> bool:
     if "你" not in normalized and "you" not in normalized:
         return False
     return any(marker in normalized for marker in _NATSUME_HARM_MARKERS)
+
+
+def _regulation_mode_for_candidate(candidate: _AppraisalCandidate) -> str:
+    """Choose the bounded expression regulation for one just-appraised event.
+
+    The mapping is deterministic and lives beside the candidate semantics so
+    no model, Surface renderer, or compatibility state can invent a different
+    regulation after the self-affect episode has been committed.
+    """
+
+    return {
+        "user_boundary_or_space": "GIVE_SPACE",
+        "natsume_may_have_hurt_user": "SEEK_REPAIR",
+        "repair_signal": "SEEK_REPAIR",
+        "user_affect_conflict": "CONTAIN",
+    }.get(candidate.kind, "EXPRESS")
 
 
 def _build_appraisal_candidates(

@@ -500,7 +500,9 @@ Life 状态、关系后效应、人格策略和最终文本不是同一种 autho
 `appraisal_id` 与 canonical head 精确一致，且 event 是 `user_boundary_or_space`、
 `natsume_may_have_hurt_user` 或 `user_mixed_affect` 时，才分别冻结 `GIVE_SPACE`、`REPAIR` 或
 `HOLD_COMPLEXITY`。这让当前回合的文本/Voice/Avatar plan 有共同的可重放因果来源，也避免旧边界
-捕获后续中性回合；它没有新增 migration、没有赋予模型重判权限，也没有宣称远端 Edge 已实际应用。
+捕获后续中性回合。选定 appraisal 还会以同一 episode 写 `RegulationDecisionV1`，其 exact reason ref
+是 planner 消费 regulation 的前提；它没有新增 migration、没有赋予模型重判权限，也没有宣称远端 Edge
+已实际应用。
 
 ### 3.7 记忆、知识素材与状态层
 
