@@ -606,6 +606,14 @@ RuntimeContext v1 relationship subject + workspace
 和 Gateway delivery 上验证该分离。普通 Chat、连接恢复、真实 provider、远端 Edge 和物理 Voice/Avatar
 receipt 仍不在这份局部数据流的证明范围内。
 
+对这条**受治理**句流，Voice/Avatar 不能在 speculative 阶段跟随文本提前发送；但 Acceptance 也不能
+重新按段落切分已经可见的文字。Surface 将本地 Gate 后的稳定句序列冻结到内部 summary，
+`foreground_completed` 只在 Task Acceptance 后把该序列编译为每句一对 Voice `SPEAK` / Avatar
+`TRANSITION`，并追加覆盖已完成前缀的一对 `RELEASE`。`FrozenChatRouteExecutor` 重新比对每句文本、
+plan、sync、self-affect revision、workspace、relationship subject、session 与 Host staging receipt；
+任意合并、遗漏、重复或漂移都阻断 effect。`0146` 只记录这份 Host protocol 的不可变投影，仍不代表
+远端 TTS 已播放或 Avatar 已应用。
+
 0147 将 `companion_profile` 作为同一 relation aggregate 的 bounded head，而不是 Surface、TTS
 或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only
 `relational_aftereffect_recorded` 事件：五条独立 user-input ref、跨至少三 UTC 日、`HELPFUL`、

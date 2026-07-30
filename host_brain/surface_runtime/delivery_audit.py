@@ -330,13 +330,22 @@ def _submit_surface_foreground_completed(
     # Task-bound text visibility receipt before SSE; Voice/Avatar intents stay
     # deferred until Task Verification and Acceptance.  Treat it like the
     # buffered route here so the Task runtime remains the only effect writer.
-    direct_native_sentence_stream = (
-        str(_safe_mapping(stream_summary).get("mode") or "")
-        == "native_sentence_stream"
-    )
+    stream_metadata = _safe_mapping(stream_summary)
+    stream_mode = str(stream_metadata.get("mode") or "").strip()
+    direct_native_sentence_stream = stream_mode == "native_sentence_stream"
     buffered_expression_segments: list[str] = []
     if affective_turn_plan and narrative and not direct_native_sentence_stream:
-        buffered_expression_segments = _bounded_expression_segments(str(narrative or ""))
+        # A governed native stream has already made each sentence visible via
+        # the Task-owned delivery ledger.  Do not destroy that immutable
+        # boundary by re-segmenting the completed narrative here: voice and
+        # avatar must receive one paired protocol per exact visible sentence.
+        # The summary is constructed inside the Surface runtime, then checked
+        # again below before it can influence the accepted Life command.
+        buffered_expression_segments = _expression_segments_for_foreground(
+            narrative=str(narrative or ""),
+            stream_mode=stream_mode,
+            stream_summary=stream_metadata,
+        )
         for sentence_index, segment in enumerate(buffered_expression_segments):
             intents, receipts, trace = _expression_sentence_protocol(
                 plan=affective_turn_plan,
@@ -658,6 +667,51 @@ def _bounded_expression_segments(narrative: str, *, maximum: int = 2_000) -> lis
             cut = len(segment)
         segments.append(segment)
         remaining = remaining[cut:].lstrip()
+    return segments
+
+
+def _expression_segments_for_foreground(
+    *,
+    narrative: str,
+    stream_mode: str,
+    stream_summary: Mapping[str, Any],
+) -> list[str]:
+    """Return the only sentence boundaries eligible for Host protocol.
+
+    Buffered paths have no previously visible sentence ledger, so they retain
+    the bounded local segmentation used before DL-05.  A governed native
+    stream is different: each sentence became visible under a Task attempt
+    before Acceptance.  Its Voice/Avatar payload must preserve that exact
+    sequence, or fail closed instead of silently coalescing two spoken and
+    visible turns into one delivery intent.
+    """
+
+    text = str(narrative or "").strip()
+    if not text:
+        return []
+    if stream_mode != "governed_node_sentence_stream":
+        return _bounded_expression_segments(text)
+
+    raw_segments = stream_summary.get("stable_sentences")
+    if not isinstance(raw_segments, Sequence) or isinstance(
+        raw_segments,
+        (str, bytes, bytearray),
+    ):
+        raise RuntimeError("AFFECTIVE_GOVERNED_SENTENCE_BOUNDARIES_REQUIRED")
+    segments: list[str] = []
+    for index, raw in enumerate(raw_segments):
+        segment = str(raw or "").strip()
+        if not segment or len(segment) > 2_000:
+            raise RuntimeError(
+                "AFFECTIVE_GOVERNED_SENTENCE_BOUNDARY_INVALID"
+                f":index={index}"
+            )
+        segments.append(segment)
+    declared_count = _coerce_int(stream_summary.get("sentence_count"), default=-1)
+    if not segments or declared_count != len(segments):
+        raise RuntimeError("AFFECTIVE_GOVERNED_SENTENCE_COUNT_DRIFT")
+    if "".join(segments) != text:
+        raise RuntimeError("AFFECTIVE_GOVERNED_SENTENCE_CONTENT_DRIFT")
     return segments
 
 

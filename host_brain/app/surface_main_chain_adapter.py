@@ -835,6 +835,12 @@ async def _native_affective_sentence_stream(
             else "native_sentence_stream"
         ),
         "sentence_count": sent_sentence_count,
+        # This field never becomes a public stream trace.  It is the exact
+        # locally-gated sentence sequence needed to compile the deferred
+        # Acceptance-side Voice/Avatar protocol for a governed node.  Keeping
+        # it here prevents foreground completion from coalescing visible
+        # sentences into a different utterance boundary.
+        "stable_sentences": tuple(narrative_parts),
         "plan_id": plan_id,
         "synchronization_id": synchronization_id,
         "self_affect_revision": plan.get("self_affect_revision"),

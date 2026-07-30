@@ -529,6 +529,79 @@ async def test_chat_executor_rejects_incomplete_canonical_runtime_scope() -> Non
 async def test_chat_executor_forwards_only_task_bound_staged_sentence_receipts() -> None:
     frozen = _frozen(route="chat", target_id="surface_reply")
     delivery_id = "taskchat://" + "d" * 64
+    protocol_scope = {
+        "plan_id": "plan-frozen-route",
+        "synchronization_id": "sync-frozen-route",
+        "self_affect_revision": 4,
+        "self_id": "natsume_ai",
+        "workspace_id": "workspace-frozen-route",
+        "relationship_subject_id": frozen.principal_id,
+        "session_id": frozen.session_id,
+    }
+
+    def expression_intent(
+        *,
+        delivery_id: str,
+        channel: str,
+        action: str,
+        sentence_index: int,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
+        return {
+            "delivery_id": delivery_id,
+            "channel": channel,
+            "action": action,
+            "sentence_index": sentence_index,
+            "payload": payload,
+            **protocol_scope,
+        }
+
+    intents = [
+        expression_intent(
+            delivery_id="voice-frozen-route-0",
+            channel="VOICE",
+            action="SPEAK",
+            sentence_index=0,
+            payload={"text": "我在。"},
+        ),
+        expression_intent(
+            delivery_id="avatar-frozen-route-0",
+            channel="AVATAR",
+            action="TRANSITION",
+            sentence_index=0,
+            payload={},
+        ),
+    ]
+    controls = [
+        expression_intent(
+            delivery_id="voice-frozen-route-release",
+            channel="VOICE",
+            action="RELEASE",
+            sentence_index=1,
+            payload={},
+        ),
+        expression_intent(
+            delivery_id="avatar-frozen-route-release",
+            channel="AVATAR",
+            action="RELEASE",
+            sentence_index=1,
+            payload={},
+        ),
+    ]
+    receipts = [
+        {
+            "delivery_id": item["delivery_id"],
+            "synchronization_id": protocol_scope["synchronization_id"],
+            "channel": item["channel"],
+            "action": item["action"],
+            "status": (
+                "HOST_PROTOCOL_STAGED"
+                if item in intents
+                else "HOST_RELEASE_STAGED"
+            ),
+        }
+        for item in [*intents, *controls]
+    ]
 
     async def stream(**_kwargs):  # noqa: ANN003
         yield {
@@ -559,10 +632,23 @@ async def test_chat_executor_forwards_only_task_bound_staged_sentence_receipts()
             "done": True,
             "decision": "APPROVE",
             "narrative": "我在。",
-            "route_type": "chat",
-            "target_id": "surface_reply",
-            "audit_refs": {},
-        }
+                "route_type": "chat",
+                "target_id": "surface_reply",
+                "audit_refs": {},
+                "acceptance_effect_intents": [
+                    {
+                        "effect_type": "life.foreground_completed",
+                        "commit_scope": "NODE",
+                        "payload": {
+                            "payload": {
+                                "expression_delivery_intents": intents,
+                                "expression_delivery_controls": controls,
+                                "expression_delivery_receipts": receipts,
+                            }
+                        },
+                    }
+                ],
+            }
 
     executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
     events = [event async for event in executor.execute_stream(frozen)]

@@ -202,9 +202,16 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   avatar predecessor 和 Host receipt status，不复制文字、原始音视频或模型推理；它支持重启、
   作用域隔离和下一轮稳定读取，但不是 Edge physical receipt。
 - Governed Chat 不再无条件设置 TTS/VTS suppression；它仍在 Task Acceptance 前保持 speculative，
-  因此仅把同一冻结协议附入 acceptance effect，不能提前发送或驱动设备。
+  因此仅把同一冻结协议附入 acceptance effect，不能提前发送或驱动设备。若 Task 已经逐句
+  暂存并外显，Acceptance 必须逐句保留该精确边界：每一可见句恰有一条 Voice `SPEAK` 和一条
+  Avatar `TRANSITION`，结束时再恰有一对覆盖完成前缀的 `RELEASE`。合并两句、丢失一条、
+  sync/revision/scope 漂移或 Host staging receipt 缺失都会在 frozen executor 失败关闭。
 - 单通道不可用只能标记通道降级，不能把 self-affect 改写为 `NEUTRAL`。当前远端 Edge 位于
   另一台电脑，本波只完成 Host 接线、合同测试与可回放 protocol evidence，未启动远端服务。
+
+本地生产等价 SQLite Runtime 已覆盖两句 `SENTENCE_STAGED → SSE → Acceptance →
+foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL_STAGED` intent 与两条
+`HOST_RELEASE_STAGED` receipt；它不包含远端设备，不得解释为 TTS 已播放或 Avatar 已转场。
 
 退出：文本、语音、Avatar 使用同一个 sync id 与 self-affect revision，并有真实 Edge 的
 `EDGE_APPLIED/DEGRADED/REJECTED` channel receipt；当前只达到前半段 Host protocol staging。

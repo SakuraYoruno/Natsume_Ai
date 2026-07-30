@@ -333,13 +333,19 @@ class FrozenChatRouteExecutor:
             decision=decision,
             audit_refs=audit_refs,
         )
+        acceptance_effect_intents = _acceptance_effect_intents(terminal)
+        _assert_task_bound_expression_delivery(
+            acceptance_effect_intents,
+            visible_sentences=visible_sentences,
+            frozen=frozen,
+        )
         yield _terminal_commit(
             frozen=frozen,
             decision=decision,
             narrative=narrative,
             reason_code=reason_code,
             audit_refs=audit_refs,
-            acceptance_effect_intents=_acceptance_effect_intents(terminal),
+            acceptance_effect_intents=acceptance_effect_intents,
             budget_usage=_worker_budget_payload(
                 frozen,
                 observations=_chat_budget_observations(terminal),
@@ -1010,6 +1016,261 @@ def _acceptance_effect_intents(event: Mapping[str, Any]) -> tuple[dict[str, Any]
             }
         )
     return tuple(normalized)
+
+
+def _assert_task_bound_expression_delivery(
+    effects: Sequence[Mapping[str, Any]],
+    *,
+    visible_sentences: Sequence[Mapping[str, Any]],
+    frozen: FrozenNodeInput,
+) -> None:
+    """Bind accepted Voice/Avatar protocol to the exact visible sentences.
+
+    A governed native stream is allowed to expose only Task-owned staged text
+    before Acceptance.  The deferred foreground effect must therefore carry
+    precisely one paired Voice/Avatar intent for every already-visible
+    sentence, plus one paired release control for the completed prefix.  A
+    worker cannot quietly merge those sentences into a different utterance
+    boundary or smuggle a mismatched plan through the generic Life effect.
+    """
+
+    if not visible_sentences:
+        return
+    if len(effects) != 1:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound chat requires exactly one accepted foreground effect",
+        )
+    outer = _safe_mapping(effects[0].get("payload"))
+    payload = _safe_mapping(outer.get("payload"))
+    intents = _expression_delivery_items(
+        payload.get("expression_delivery_intents"),
+        field_name="expression_delivery_intents",
+    )
+    controls = _expression_delivery_items(
+        payload.get("expression_delivery_controls"),
+        field_name="expression_delivery_controls",
+    )
+    receipts = _expression_delivery_items(
+        payload.get("expression_delivery_receipts"),
+        field_name="expression_delivery_receipts",
+    )
+    expected_count = len(visible_sentences)
+    if len(intents) != expected_count * 2 or len(controls) != 2:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound chat expression protocol count does not match visible sentences",
+        )
+    if len(receipts) != len(intents) + len(controls):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound chat expression receipt count drifted",
+        )
+    delivery_ids = [
+        str(item.get("delivery_id") or "").strip()
+        for item in (*intents, *controls)
+    ]
+    if not all(delivery_ids) or len(set(delivery_ids)) != len(delivery_ids):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression delivery identities are not unique",
+        )
+
+    expected_scope = {
+        "plan_id": str(visible_sentences[0].get("affective_turn_plan_id") or ""),
+        "synchronization_id": str(visible_sentences[0].get("synchronization_id") or ""),
+        "self_affect_revision": _strict_non_negative_int(
+            visible_sentences[0].get("self_affect_revision"),
+            field_name="self_affect_revision",
+        ),
+        "workspace_id": str(visible_sentences[0].get("workspace_id") or ""),
+        "relationship_subject_id": _frozen_relationship_subject_id(frozen),
+        "session_id": str(frozen.session_id or ""),
+    }
+    if not all(
+        value != ""
+        for key, value in expected_scope.items()
+        if key != "self_affect_revision"
+    ):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound chat expression scope is incomplete",
+        )
+    for sentence in visible_sentences:
+        if (
+            str(sentence.get("affective_turn_plan_id") or "")
+            != expected_scope["plan_id"]
+            or str(sentence.get("synchronization_id") or "")
+            != expected_scope["synchronization_id"]
+            or _strict_non_negative_int(
+                sentence.get("self_affect_revision"),
+                field_name="self_affect_revision",
+            )
+            != expected_scope["self_affect_revision"]
+            or str(sentence.get("workspace_id") or "")
+            != expected_scope["workspace_id"]
+        ):
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                "task-bound visible sentences do not share one expression scope",
+            )
+
+    receipt_by_delivery_id: dict[str, Mapping[str, Any]] = {}
+    for receipt in receipts:
+        delivery_id = str(receipt.get("delivery_id") or "")
+        if not delivery_id or delivery_id in receipt_by_delivery_id:
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                "task-bound expression receipt identity is invalid",
+        )
+        receipt_by_delivery_id[delivery_id] = receipt
+    if len(receipt_by_delivery_id) != len(receipts):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression receipts are not uniquely addressable",
+        )
+
+    expected_intent_keys: set[tuple[int, str, str]] = set()
+    for index, staged in enumerate(visible_sentences):
+        text = str(staged.get("sentence") or "").strip()
+        if not text:
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                "task-bound visible sentence is empty",
+            )
+        for channel, action in (("VOICE", "SPEAK"), ("AVATAR", "TRANSITION")):
+            expected_intent_keys.add((index, channel, action))
+            matching = [
+                item
+                for item in intents
+                if _expression_delivery_key(item) == (index, channel, action)
+            ]
+            if len(matching) != 1:
+                raise GovernedRouteExecutorError(
+                    GOVERNED_ROUTE_OUTPUT_INVALID,
+                    "task-bound expression intent does not map one-to-one to a visible sentence",
+                )
+            intent = matching[0]
+            _assert_expression_delivery_scope(intent, expected_scope=expected_scope)
+            if channel == "VOICE":
+                voice_payload = _safe_mapping(intent.get("payload"))
+                if str(voice_payload.get("text") or "").strip() != text:
+                    raise GovernedRouteExecutorError(
+                        GOVERNED_ROUTE_OUTPUT_INVALID,
+                        "task-bound voice text differs from its visible sentence",
+                    )
+            _assert_expression_delivery_receipt(
+                intent,
+                receipt_by_delivery_id=receipt_by_delivery_id,
+                expected_status="HOST_PROTOCOL_STAGED",
+            )
+    if {_expression_delivery_key(item) for item in intents} != expected_intent_keys:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression intents contain an unexpected sentence or channel",
+        )
+
+    expected_control_keys = {
+        (expected_count, "VOICE", "RELEASE"),
+        (expected_count, "AVATAR", "RELEASE"),
+    }
+    if {_expression_delivery_key(item) for item in controls} != expected_control_keys:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression release controls do not cover the completed prefix",
+        )
+    for control in controls:
+        _assert_expression_delivery_scope(control, expected_scope=expected_scope)
+        _assert_expression_delivery_receipt(
+            control,
+            receipt_by_delivery_id=receipt_by_delivery_id,
+            expected_status="HOST_RELEASE_STAGED",
+        )
+
+
+def _expression_delivery_items(value: Any, *, field_name: str) -> tuple[Mapping[str, Any], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            f"task-bound {field_name} must be a sequence",
+        )
+    items = tuple(item for item in value if isinstance(item, Mapping))
+    if len(items) != len(value):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            f"task-bound {field_name} must contain mappings only",
+        )
+    return items
+
+
+def _expression_delivery_key(item: Mapping[str, Any]) -> tuple[int, str, str]:
+    return (
+        _strict_non_negative_int(
+            item.get("sentence_index"), field_name="expression sentence_index"
+        ),
+        str(item.get("channel") or "").strip().upper(),
+        str(item.get("action") or "").strip().upper(),
+    )
+
+
+def _assert_expression_delivery_scope(
+    item: Mapping[str, Any],
+    *,
+    expected_scope: Mapping[str, Any],
+) -> None:
+    for field in (
+        "plan_id",
+        "synchronization_id",
+        "workspace_id",
+        "relationship_subject_id",
+        "session_id",
+    ):
+        if str(item.get(field) or "").strip() != str(expected_scope[field]):
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                f"task-bound expression {field} drifted from visible sentence authority",
+            )
+    if str(item.get("self_id") or "").strip() != "natsume_ai":
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression self_id is invalid",
+        )
+    if _strict_non_negative_int(
+        item.get("self_affect_revision"),
+        field_name="expression self_affect_revision",
+    ) != expected_scope["self_affect_revision"]:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression self-affect revision drifted",
+        )
+
+
+def _assert_expression_delivery_receipt(
+    item: Mapping[str, Any],
+    *,
+    receipt_by_delivery_id: Mapping[str, Mapping[str, Any]],
+    expected_status: str,
+) -> None:
+    delivery_id = str(item.get("delivery_id") or "").strip()
+    receipt = receipt_by_delivery_id.get(delivery_id)
+    if receipt is None:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression intent lacks its Host staging receipt",
+        )
+    if (
+        str(receipt.get("synchronization_id") or "").strip()
+        != str(item.get("synchronization_id") or "").strip()
+        or str(receipt.get("channel") or "").strip().upper()
+        != str(item.get("channel") or "").strip().upper()
+        or str(receipt.get("action") or "").strip().upper()
+        != str(item.get("action") or "").strip().upper()
+        or str(receipt.get("status") or "").strip().upper() != expected_status
+    ):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound expression receipt drifted from its intent",
+        )
 
 
 def _normalize_terminal_decision(event: Mapping[str, Any]) -> str:
