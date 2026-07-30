@@ -68,7 +68,9 @@
 > runtime export 与所有 Bond event callback 都在调用 Bond engine、旧 registry、event bus 或 Limbic 前短路为
 > `RETIRED_CANONICAL_LIFE` 的中性兼容投影。其历史 API 只有裸 `person_id/user_id`，没有
 > `workspace + relationship_subject`，所以绝不尝试反查或猜测 Life aggregate。真正的关系上下文仍只能
-> 由带完整 scope 的 `AffectFusion → RelationshipStateV2` 内部 hand-off 供给。离线 compatibility 行为未删除，
+> 由带完整 scope 的 `AffectFusion → RelationshipStateV2` 内部 hand-off 供给。Cortex collector/analyzer
+> 识别该退役投影后会清除 mixed vital snapshot、顶层 context 和 runtime snapshot 中的 legacy
+> stage/vector/trend/repair，离线 compatibility 行为未删除，
 > 本地定向边界也不构成真实 provider、远端 Edge 或 DL-07 验收。
 
 > **DL-06 旧主动路径退役：** `proactive_talk` 已不再注册为 Personality Skill、Tool Catalog、executor 或

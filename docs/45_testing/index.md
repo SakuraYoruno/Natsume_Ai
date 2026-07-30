@@ -58,7 +58,11 @@
   `TribeStateRegistry`，也不会借 repair callback 调用 Limbic。返回的 `RETIRED_CANONICAL_LIFE` 只提供
   中性兼容字段；裸用户 ID 不会被猜测为 workspace-scoped relationship aggregate。
 - 同一集合与 `test_dl03_relationship_lifecycle.py`、`test_dl03_bond_stage_compatibility.py`、
-  `test_dl06_runtime_snapshot_canonical_cutover.py` 为 `15 passed in 16.75s`。它只证明本地
+  `test_dl06_runtime_snapshot_canonical_cutover.py` 为 `15 passed in 16.75s`。随后
+  `test_cortex_collect_context_extensions.py::test_cortex_context_blocks_stale_social_brain_relationship_values_after_cutover`
+  以含伪造 `SOULMATE` / 高 dependency 的 retired response 及旧 registry 快照，验证两个 Cortex 聚合器都清除
+  `bond_stage`、vector、trend 与 repair，不会把缓存关系值传入 prompt context；另覆盖 context read 异常但 runtime export
+  仍报告 retirement 的恢复顺序，扩展集合为 `22 passed in 17.49s`。它只证明本地
   production-authority 边界；未启动远端 Edge、真实 provider、
   Docker/Host/Obs/Monitor/Gateway，也不构成体验或完整关系生命周期通过。
 

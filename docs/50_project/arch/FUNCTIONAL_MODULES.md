@@ -66,7 +66,8 @@ retrieval/Motive 输出无分数 `FRIEND / stepsibling / familiar|guarded` proje
 **SocialBrain 关系兼容模块**位于 [`tribe/social_brain_agent.py`](../../../host_brain/tribe/social_brain_agent.py)。
 它的历史输入只有裸 `person_id/user_id`，所以在 canonical Life composition 中不能反查 Bond、registry、旧
 narrative/milestone 或回调，再将结果伪装成关系事实。该模式统一返回 `RETIRED_CANONICAL_LIFE` 的中性兼容
-投影，且不调用旧 Limbic repair 联动；`AffectFusion → RelationshipStateV2` 的完整 scope hand-off 才是当前
+投影，且不调用旧 Limbic repair 联动；Cortex collector/analyzer 随即从 mixed vital、context/runtime
+snapshot 清除 legacy stage/vector/trend/repair；`AffectFusion → RelationshipStateV2` 的完整 scope hand-off 才是当前
 关系上下文的唯一来源。离线 compatibility 夹具仍可显式保留旧行为，不能作为 production fallback。
 
 **Soul Runtime Projection 与体验基线模块**位于

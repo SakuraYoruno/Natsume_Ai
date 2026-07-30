@@ -25,7 +25,7 @@ episode / aftereffect 链变化。此为公开 HTTP/UI 写入口收口，不等�
 
 关系后效应也开始真正影响七海自身：在用户明确接受修复的 accepted relationship aftereffect 后，Fusion 会以该 durable receipt 为证据形成 `RELIEF / CARE`，而不是把“修好了”写成机械 Bond 加分或永久承诺。`proactive_permission=DENIED` 仍严格阻止 Scheduler 主动联系，但不再把用户已经主动发起的当前聊天误判为必须沉默；当前回合仍由新输入、当前 Appraisal 与关系边界共同决定。该切片只证明本地 journal/plan 因果，不证明用户已经长期满意、允许主动联系或远端设备已表达。
 
-DL-03 进一步收回了 `SocialBrainAgent` 的历史关系旁路。该组件多数旧入口只拿到裸 `person_id`，无法安全恢复 `workspace + relationship_subject` 的 canonical aggregate；production canonical Life composition 因而不再查询 Bond engine、旧 registry、旧 narrative、milestone 或 event-bus callback，而是返回显式 `RETIRED_CANONICAL_LIFE` 的中性兼容投影。真实关系信息只可经带完整 scope 的 `AffectFusion → RelationshipStateV2` 内部 hand-off 进入当前回合。这是本地 authority 边界，不代表旧 compatibility 类被删除，也不代表真实陪伴体验、远端 Edge 或 DL-07 服务栈已验收。
+DL-03 进一步收回了 `SocialBrainAgent` 的历史关系旁路。该组件多数旧入口只拿到裸 `person_id`，无法安全恢复 `workspace + relationship_subject` 的 canonical aggregate；production canonical Life composition 因而不再查询 Bond engine、旧 registry、旧 narrative、milestone 或 event-bus callback，而是返回显式 `RETIRED_CANONICAL_LIFE` 的中性兼容投影。Cortex 识别该标记后还会从 mixed `vital_signs`、顶层 context 与 runtime snapshot 中剥离旧 Bond stage/vector/trend/repair 字段，不能让重启前的进程状态重新影响当前关系表达。真实关系信息只可经带完整 scope 的 `AffectFusion → RelationshipStateV2` 内部 hand-off 进入当前回合。这是本地 authority 边界，不代表旧 compatibility 类被删除，也不代表真实陪伴体验、远端 Edge 或 DL-07 服务栈已验收。
 
 七海也不必把自己全部中性化：只有明确指向她、且不含“请停下”语义的贬损，才会在 canonical Life 中形成她自己的 `HURT / CAUTION → CONTAIN → SET_BOUNDARY`，并以稳住的文字、温和边界 Voice/Avatar plan 表达；普通挫败不会被臆测为攻击。相反，“闭嘴”“别来烦我”等明确停止请求优先成为 durable `BOUNDARY`、立刻停止主动联系和给空间，绝不反过来要求用户安抚七海。原话仍不进入 journal。
 

@@ -103,7 +103,8 @@ DL-03 的 repair aftereffect 现在也会回流到当前 affect scope：只有 d
 DL-03 的 production compatibility 收口补上了一个 scope 安全限制：`SocialBrainAgent` 旧入口只收到裸
 `person_id/user_id` 时，不得查询 Bond、旧 `TribeStateRegistry`、narrative 或 milestone，再将结果当作
 `RelationshipStateV2`。canonical Life composition 统一返回 `RETIRED_CANONICAL_LIFE` 的中性投影并停用旧 event-bus
-订阅；只有 `AffectFusion` 持有 `workspace + relationship_subject + session` 时才能提供真实关系状态。该切片保留离线
+订阅；Cortex collector/analyzer 识别该标记后必须同时清除 cached `vital_signs` 与顶层 context 中的旧
+stage/vector/trend/repair，不能让旧进程 state 回流。只有 `AffectFusion` 持有 `workspace + relationship_subject + session` 时才能提供真实关系状态。该切片保留离线
 compatibility 行为，不等同旧代码物理删除或完整 DL-03 验收。
 
 同一条 canonical 链还区分“用户要求停下”和“用户明确贬损七海”：前者（包括 `闭嘴`、`别来烦我`）必须

@@ -6,8 +6,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
+from host_brain.tribe.relationship_compatibility import (
+    is_retired_legacy_relationship_projection,
+    retired_relationship_projection_marker,
+    without_legacy_relationship_vitals,
+)
 from host_brain.tribe.tribe_state import TribeStateRegistry, get_global_registry
 
 
@@ -73,6 +78,7 @@ class CortexIntentAnalyzer:
             "vestibular_state": {},
             "tribe_context_source": "cortex_intent_analyzer",
         }
+        legacy_social_brain_relationship_available = False
 
         # ── 1. 统一生命体征聚合（TribeStateRegistry）────────────────────────
         try:
@@ -116,8 +122,17 @@ class CortexIntentAnalyzer:
                 session_id=str(session_id or ""),
                 user_id=str(user_id or ""),
             )
-            result["bond_context"] = bond_ctx
-            result["bond_vector"] = dict(bond_ctx.get("bond_vector") or {})
+            if is_retired_legacy_relationship_projection(bond_ctx):
+                result["legacy_social_brain_relationship"] = retired_relationship_projection_marker(
+                    bond_ctx
+                )
+                result["vital_signs"] = without_legacy_relationship_vitals(
+                    result.get("vital_signs") or {}
+                )
+            elif isinstance(bond_ctx, Mapping):
+                legacy_social_brain_relationship_available = True
+                result["bond_context"] = dict(bond_ctx)
+                result["bond_vector"] = dict(bond_ctx.get("bond_vector") or {})
         except Exception:
             pass
 
@@ -173,15 +188,16 @@ class CortexIntentAnalyzer:
             pass
 
         # ── 10. bond_trend_hint（SocialBrainAgent 快照）T-54 ─────────────────
-        try:
-            _sba_snap = self.state_registry.get_state("social_brain_agent") or {}
-            _sba_state = dict(_sba_snap.get("state") or {})
-            _hint = str(_sba_state.get("bond_trend_hint") or "").strip().lower()
-            if _hint:
-                result["bond_trend_hint"] = _hint
-                result["bond_trend_hint_ts_ms"] = int(_sba_state.get("bond_trend_hint_ts_ms") or 0)
-        except Exception:
-            pass
+        if legacy_social_brain_relationship_available:
+            try:
+                _sba_snap = self.state_registry.get_state("social_brain_agent") or {}
+                _sba_state = dict(_sba_snap.get("state") or {})
+                _hint = str(_sba_state.get("bond_trend_hint") or "").strip().lower()
+                if _hint:
+                    result["bond_trend_hint"] = _hint
+                    result["bond_trend_hint_ts_ms"] = int(_sba_state.get("bond_trend_hint_ts_ms") or 0)
+            except Exception:
+                pass
 
         # ── 11. Circadian / Proprioception / InitiativeGovernor──────────────
         try:
@@ -367,7 +383,18 @@ class CortexIntentAnalyzer:
             pass
         try:
             from host_brain.tribe.social_brain_agent import get_social_brain_agent  # noqa: PLC0415
-            result["social_brain_state"] = get_social_brain_agent().export_runtime_state()
+
+            social_state = get_social_brain_agent().export_runtime_state()
+            if is_retired_legacy_relationship_projection(social_state):
+                result["legacy_social_brain_relationship"] = retired_relationship_projection_marker(
+                    social_state
+                )
+                result["vital_signs"] = without_legacy_relationship_vitals(
+                    result.get("vital_signs") or {}
+                )
+                result["social_brain_state"] = dict(result["legacy_social_brain_relationship"])
+            elif isinstance(social_state, Mapping):
+                result["social_brain_state"] = dict(social_state)
         except Exception:
             pass
         try:

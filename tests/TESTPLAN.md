@@ -99,6 +99,9 @@
   narrative 或 milestone 前返回 `RETIRED_CANONICAL_LIFE` 的中性投影；它不得猜测
   `workspace + relationship_subject`，也不得触发旧 Limbic/关系修复写入。离线 compatibility
   composition 的历史行为不构成 production fallback。
+- T-DL03-08：Cortex collector 与 analyzer 一旦收到 `RETIRED_CANONICAL_LIFE`，必须清除
+  `vital_signs`、顶层 context 与 runtime snapshot 内的旧 `bond_stage`、bond vector、trend 和
+  repair；重启前 registry 中残留的高亲密值不得进入下一轮关系或语言上下文。
 - 当前本地证据：关系 reducer、restart/reconcile、Surface compiler、旧 Surface
   回归和 Bond 边界为 `54 passed in 20.50s`。远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`；主动陪伴、真人体验、真实 provider、TTS/Avatar/Edge

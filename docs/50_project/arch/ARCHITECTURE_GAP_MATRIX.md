@@ -45,6 +45,11 @@ narrative、shared-memory/milestone、runtime export 与 event-bus callback 都�
 `AffectFusion → RelationshipStateV2` 的内部 hand-off 进入。这是定向本地 boundary evidence，不是全部旧 reader
 清零、真实 provider/Edge、真人体验或 DL-07 服务栈通过。
 
+该 retirement marker 还必须由 `cortex_context_collector` 与 `CortexIntentAnalyzer` 消费：一旦识别，
+它们会从聚合的 vital/context/runtime snapshot 中清除旧 Bond stage/vector/trend/repair，避免 stale
+`TribeStateRegistry` 在重启后通过另一条读取路径重新影响关系表达。此处仍是 local authority evidence，
+其余 compatibility reader inventory 与真实服务验收未完成。
+
 **Limbic 事件回调收紧修订：** canonical Life authority 现会在任何 legacy `EmotionPersistence`
 restore/persist、silence mutation 或 registry touch 之前 short-circuit Bond、task success、humor landed、
 loneliness、immune block、interoception 与 interaction-recorded callback。它们不能把事件总线回调重新变成第二条 self-affect

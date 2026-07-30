@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from host_brain.tribe.cortex_agent import CortexAgent
+from host_brain.tribe.cortex_intent_analyzer import CortexIntentAnalyzer
 from host_brain.tribe.tribe_state import TribeStateRegistry
 
 
@@ -18,6 +19,28 @@ class _FakeSocial:
             "bond_stage": "friend",
             "bond_vector": {"trust": 0.7, "affinity": 0.68, "safety": 0.72, "repair_confidence": 0.63},
         }
+
+
+class _RetiredSocial:
+    _retired = {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_SOCIAL_BRAIN_RELATIONSHIP_RETIRED",
+        # Deliberately unsafe legacy values. Cortex must not expose them.
+        "bond_stage": "SOULMATE",
+        "bond_vector": {"trust": 0.99, "dependency": 0.99},
+    }
+
+    def get_bond_context(self, *, session_id: str, user_id: str):  # noqa: ANN001
+        return dict(self._retired)
+
+    def export_runtime_state(self) -> dict:
+        return dict(self._retired)
+
+
+class _RetiredExportOnlySocial(_RetiredSocial):
+    def get_bond_context(self, *, session_id: str, user_id: str):  # noqa: ANN001
+        raise RuntimeError("legacy context read is unavailable")
 
 
 class _FakeEndocrine:
@@ -166,3 +189,81 @@ def test_cortex_collect_tribe_context_includes_extended_fields(monkeypatch) -> N
     assert context["cerebellum_state"]["last_strategy"] == "NO_ADJUST"
     assert context["glymphatic_state"]["executed"] is True
     assert context["vestibular_state"]["stability_state"] == "stable"
+
+
+def test_cortex_context_blocks_stale_social_brain_relationship_values_after_cutover(monkeypatch) -> None:
+    registry = TribeStateRegistry()
+    registry.set_state(
+        "social_brain_agent",
+        {
+            "bond_trend_hint": "progress",
+            "bond_trend_hint_ts_ms": 123,
+            "bond_vector": {"trust": 0.99, "dependency": 0.99},
+        },
+        writer="legacy-test",
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.social_brain_agent.get_social_brain_agent",
+        lambda: _RetiredSocial(),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _FakeLimbic(registry),
+    )
+
+    context = CortexAgent(state_registry=registry).collect_tribe_context(
+        session_id="sess-canonical",
+        user_id="user-canonical",
+    )
+    analyzer_context = CortexIntentAnalyzer(state_registry=registry).collect_tribe_context(
+        session_id="sess-canonical",
+        user_id="user-canonical",
+    )
+
+    expected_marker = {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_SOCIAL_BRAIN_RELATIONSHIP_RETIRED",
+    }
+    for collected in (context, analyzer_context):
+        assert collected["bond_context"] == {}
+        assert collected["bond_vector"] == {}
+        assert "bond_trend_hint" not in collected
+        assert "bond_stage" not in collected["vital_signs"]
+        assert "bond_vector" not in collected["vital_signs"]
+        assert "bond_trend_hint" not in collected["vital_signs"]
+        assert collected["legacy_social_brain_relationship"] == expected_marker
+        assert collected["social_brain_state"] == expected_marker
+
+
+def test_cortex_context_scrubs_stale_relationship_vitals_when_retirement_is_only_in_export(monkeypatch) -> None:
+    registry = TribeStateRegistry()
+    registry.set_state(
+        "social_brain_agent",
+        {
+            "bond_stage": "SOULMATE",
+            "bond_trend_hint": "progress",
+            "bond_vector": {"trust": 0.99, "dependency": 0.99},
+            "repair_state": {"repair_needed": True},
+        },
+        writer="legacy-test",
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.social_brain_agent.get_social_brain_agent",
+        lambda: _RetiredExportOnlySocial(),
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _FakeLimbic(registry),
+    )
+
+    for collected in (
+        CortexAgent(state_registry=registry).collect_tribe_context(),
+        CortexIntentAnalyzer(state_registry=registry).collect_tribe_context(),
+    ):
+        assert collected["legacy_social_brain_relationship"]["status"] == "RETIRED_CANONICAL_LIFE"
+        assert collected["bond_context"] == {}
+        assert collected["bond_vector"] == {}
+        assert "bond_trend_hint" not in collected
+        for field in ("bond_stage", "bond_vector", "bond_trend_hint", "bond_repair_needed"):
+            assert field not in collected["vital_signs"]
