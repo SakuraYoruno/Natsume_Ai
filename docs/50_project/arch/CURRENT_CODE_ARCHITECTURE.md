@@ -447,8 +447,8 @@ Host 情感上下文有两层边界。生产 ASGI 的 `InputRuntimeApplicationPo
 解析或调用 `HostEmotionRuntime`；遗漏 authority 不再存在 local/offline runtime fallback，而是失败关闭。
 Lifecycle 的 global profile consumer 现为 optional read-only compatibility slot，production 留空。
 `TribeApplicationPorts` 还显式携带 affective-life authority：
-canonical mode 下 Limbic 的 legacy `EmotionPersistence`、metabolism、timeline append、decay 和
-Bond progress/regress callback 统一 short-circuit 为 `RETIRED_CANONICAL_LIFE`，不得再构造或写入
+canonical mode 下 Limbic 的 legacy `EmotionPersistence`、metabolism、timeline append、decay，以及
+Bond、task success、humor、loneliness、immune block 和 interaction-recorded callback 统一 short-circuit 为 `RETIRED_CANONICAL_LIFE`，不得再构造或写入
 第二份 self-affect；只有直接构造的隔离测试 port 才能覆盖历史行为，Host composition 不存在该 fallback。
 Endocrine 的 legacy
 cortisol/oxytocin delta buffer、`_last_state`、hormonal hint、callback 与 fan-out 在同一 canonical mode

@@ -484,8 +484,8 @@ composition 独占，回放和 render 保持纯读取。
 
 DL-06 的第二条旧 writer 切断使 `TribeApplicationPorts` 明确携带 affective-life authority：当
 production composition 选中 canonical Life journal 时，Limbic 的 legacy `EmotionPersistence`、
-EmotionVector metabolism、`emotion_timeline` append、periodic decay 和 Bond progress/regress callback
-全部返回 `RETIRED_CANONICAL_LIFE`，不再写入或重建旧自我情感状态；离线/测试兼容 composition 才可保留
+EmotionVector metabolism、`emotion_timeline` append、periodic decay，以及 Bond、任务成功、幽默、孤独、
+风险拦截和 interaction-recorded callback 全部返回 `RETIRED_CANONICAL_LIFE`，不再写入或重建旧自我情感状态；离线/测试兼容 composition 才可保留
 原行为。第三条切断沿用同一 authority 给 Endocrine：production endocrine 只可返回 hard-state 的无状态
 投影，不能消费 cortisol/oxytocin delta、更新 `_last_state`、生成 hormonal hint 或 fan-out 到 Limbic、
 Interoception/PainReward；所有 legacy delta/event 写入显式返回 `RETIRED_CANONICAL_LIFE`。Circadian 与

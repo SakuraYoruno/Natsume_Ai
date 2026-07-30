@@ -152,7 +152,7 @@ writer。该类只保留给直接隔离测试，不能作为 Host fallback。
 当前 `DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE` 已在同一 immutable
 `TribeApplicationPorts` 上标记 canonical Life authority。production Limbic 遇到 legacy
 `EmotionPersistence` restore/persist、EmotionVector metabolism、`emotion_timeline` append、scheduler
-decay 或 Bond progress/regress callback 时，统一返回 `RETIRED_CANONICAL_LIFE`，不再创建、更新或追加
+decay、Bond progress/regress、task success、humor landed、loneliness、immune block 或 interaction-recorded callback 时，统一返回 `RETIRED_CANONICAL_LIFE`，不再创建、更新或追加
 第二份 self-affect；这个 gate 只在明确 offline/test compatibility composition 未选 canonical Life 时放开。
 它没有替代新的 Life command，也没有退休 BodySense、Endocrine、Motive 或 volatile Bond queue，故 DL-06
 仍为进行中。

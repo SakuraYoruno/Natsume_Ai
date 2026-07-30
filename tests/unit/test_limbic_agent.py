@@ -81,6 +81,59 @@ def test_limbic_agent_retires_bond_callbacks_with_canonical_life() -> None:
     assert agent.state_registry.get_state("limbic") is None
 
 
+def test_limbic_agent_retires_all_legacy_event_metabolism_callbacks() -> None:
+    class _Persistence:
+        def restore(self, **_kwargs) -> object:  # noqa: ANN003
+            raise AssertionError("canonical Life must not restore legacy affect")
+
+        def persist(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not persist legacy affect")
+
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            silence_engine=lambda: (_ for _ in ()).throw(
+                AssertionError("canonical Life must not mutate legacy silence")
+            ),
+        ),
+    )
+    agent._emotion_persistence = _Persistence()
+
+    asyncio.run(
+        agent._on_task_success_emotion(
+            SimpleNamespace(payload={"intensity": 1.0}, ts_ms=1)
+        )
+    )
+    asyncio.run(
+        agent._on_humor_landed_emotion(
+            SimpleNamespace(payload={"intensity": 1.0}, ts_ms=2)
+        )
+    )
+    asyncio.run(
+        agent._on_loneliness_signal_emotion(
+            SimpleNamespace(payload={"loneliness": 1.0}, ts_ms=3)
+        )
+    )
+    asyncio.run(
+        agent._on_immune_block_emotion(
+            SimpleNamespace(
+                payload={"risk_level": "critical", "score": 1.0},
+                ts_ms=4,
+            )
+        )
+    )
+    asyncio.run(
+        agent._on_interaction_recorded_metabolism(
+            SimpleNamespace(
+                payload={"emotion_tag": "SAD", "valence": -1.0, "arousal": 1.0},
+                ts_ms=5,
+            )
+        )
+    )
+
+    assert agent.state_registry.get_state("limbic") is None
+
+
 def test_limbic_agent_projects_body_sense_from_canonical_life_without_global_mutation(
     monkeypatch,
 ) -> None:
