@@ -29,6 +29,7 @@
 > self-affect；高歧义回合只能两候 buffered selection。DL-05 使 `ExpressionPlanV1`
 > 在同一 revision/sync 上编译 Voice `SPEAK` 与 Avatar `TRANSITION` 的 Host protocol，
 > 并将 `CANCEL`/`RELEASE` 与隐私最小化 0146 projection 接到 canonical Life journal。
+> `0149` 还为已入场的冻结 Chat 把 plan/稳定句/control 落入 Task Runtime 的 immutable delivery ledger，且外显链复验 attempt/lease/fence/grant；它不代表普通 Chat 已全量切流或已具备连接恢复。
 > 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
 > physical receipt 以及旧 writer 清零仍未完成。
 

@@ -246,7 +246,7 @@ Budget ledger 支持 token、tool call、time、concurrency、retry 和 model co
 - `DurableBudgetRuntime._charge` 的 CAS attempt budget 必须至少为 `policy.limits.concurrency + 1`，同时保留显式 configured retry floor；不得恢复固定最多 4 次。concurrency=8 时连续前 8 次 `TASK_STORE_CAS_CONFLICT` 后第 9 次成功是稳定单测合同。该规则只是 admitted writer wave 的重试容量，不等于 concurrency 维度已计量或 program-wide Budget 已完成。
 - provider 未返回 usage 时记录 `UNMEASURED`，不得伪造精确值。
 - ModelAttempt 用量投影的 prompt、completion、total 三维必须保持 `Optional`；只允许在 prompt 与 completion 都明确测得时推导 total。总览、模型分组与时序桶必须同时携带 measured-call coverage 和 lower-bound 标志：部分覆盖的和只能解释为下界，完全缺测为 `null`，真实零则以 measured-call 证据与缺测区分。
-- ModelAttempt 的兼容 `stream()` 仍是无终态 usage 的 `UNMEASURED` 流；`stream_with_result()` 必须以 typed delta 加唯一 final `ProviderResponse` 把 provider 最终审计结果交回 Attempt，只有 token、completion token 与成本齐全时才构成完整计量，缺失时不得用字符串长度估算。当前只有显式 capability binding 的 provider 可使用该合同；默认 Vault adapter、受治理节点级逐句可见性与恢复仍未完成，不能把协议存在写成预算计量或 Governed Chat 实时流完成。
+- ModelAttempt 的兼容 `stream()` 仍是无终态 usage 的 `UNMEASURED` 流；`stream_with_result()` 必须以 typed delta 加唯一 final `ProviderResponse` 把 provider 最终审计结果交回 Attempt，只有 token、completion token 与成本齐全时才构成完整计量，缺失时不得用字符串长度估算。当前只有显式 capability binding 的 provider 可使用该合同；`0149` 已为已入场冻结 Chat 建立 node/attempt/lease/fence/grant-bound 逐句 visibility ledger，但默认 Vault adapter、普通 Chat 切流、connection resume 与完整恢复仍未完成，不能把协议存在写成预算计量或 Governed Chat 实时流完成。
 - 超限策略 `BLOCK/DEGRADE/REVIEW` 必须有确定性分支和 receipt。
 - model retry、tool retry 与 Task retry 都进入同一 root budget。
 - Planner、worker 和 provider 不能自行扩大预算。

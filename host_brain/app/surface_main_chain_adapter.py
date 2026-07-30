@@ -137,6 +137,29 @@ def _record_surface_memory_guard_packet(
         trace_stage_meta["surface_memory_recall_packet"] = guard_packet
 
 
+def _governed_task_delivery_authority(agent_input: Any) -> Any | None:
+    """Return only the app-local Task visibility authority for frozen Chat.
+
+    This rejects an arbitrary object smuggled through an ordinary Surface
+    input.  The authority is constructed by ``FrozenChatRouteExecutor`` from
+    the live node attempt/lease/grant tuple and never comes from HTTP input.
+    """
+
+    authority = getattr(agent_input, "governed_delivery_authority", None)
+    if authority is None:
+        return None
+    from host_brain.task_runtime.chat_delivery_authority import (  # noqa: PLC0415
+        TaskBoundChatDeliveryAuthority,
+    )
+
+    if (
+        not isinstance(authority, TaskBoundChatDeliveryAuthority)
+        or not bool(getattr(agent_input, "defer_effects_to_task_runtime", False))
+    ):
+        raise RuntimeError("TASK_CHAT_DELIVERY_AUTHORITY_INVALID")
+    return authority
+
+
 def _native_affective_stream_preparation(
     agent_input: Any,
     *,
@@ -146,6 +169,7 @@ def _native_affective_stream_preparation(
     """Compile once and select the native stream only for a frozen safe plan."""
 
     governed_model_budget = _governed_model_budget_guard(trace_stage_meta)
+    governed_delivery_authority = _governed_task_delivery_authority(agent_input)
     surface_input = build_surface_main_chain_input_from_surface_reply_input(
         agent_input,
         ports=ports,
@@ -159,6 +183,7 @@ def _native_affective_stream_preparation(
     if not should_use_native_sentence_stream(
         trace_stage_meta,
         has_governed_model_budget=governed_model_budget is not None,
+        has_governed_delivery_authority=governed_delivery_authority is not None,
     ):
         return None
     plan = affective_turn_plan_from_trace(trace_stage_meta)
@@ -377,14 +402,24 @@ async def _native_affective_sentence_stream(
     plan_id = str(plan.get("plan_id") or "").strip()
     expression = _safe_mapping(plan.get("expression_plan"))
     synchronization_id = str(expression.get("synchronization_id") or "").strip()
+    governed_delivery_authority = _governed_task_delivery_authority(agent_input)
+    governed_model_budget = _governed_model_budget_guard(trace)
     try:
-        planned_receipt = await asyncio.to_thread(
-            _submit_surface_affective_turn_planned,
-            life_command_service=ports.get_life_command_service(),
-            life_snapshot_reader=ports.get_life_snapshot_reader(),
-            agent_input=agent_input,
-            trace_stage_meta=trace,
-        )
+        if governed_delivery_authority is not None:
+            # A governed worker is still pre-Acceptance.  Its immutable plan
+            # belongs in the Task-owned visibility ledger, never in Life.
+            planned_receipt = await asyncio.to_thread(
+                governed_delivery_authority.stage_plan,
+                plan,
+            )
+        else:
+            planned_receipt = await asyncio.to_thread(
+                _submit_surface_affective_turn_planned,
+                life_command_service=ports.get_life_command_service(),
+                life_snapshot_reader=ports.get_life_snapshot_reader(),
+                agent_input=agent_input,
+                trace_stage_meta=trace,
+            )
     except Exception as exc:
         trace["life_causality"] = {
             "status": "FAILED",
@@ -410,9 +445,12 @@ async def _native_affective_sentence_stream(
         return
     trace["affective_turn_plan_receipt"] = {
         "command_id": planned_receipt.get("command_id"),
-        "event_id": planned_receipt.get("event_id"),
+        "event_id": planned_receipt.get("event_id") or planned_receipt.get("delivery_id"),
         "state_version": planned_receipt.get("state_version"),
         "replayed": bool(planned_receipt.get("replayed")),
+        "authority": (
+            "TASK_BOUND_VISIBILITY" if governed_delivery_authority is not None else "LIFE"
+        ),
     }
 
     messages = native_stream_messages(build_isolated_surface_messages(compiled_request))
@@ -427,8 +465,9 @@ async def _native_affective_sentence_stream(
         scene_type="CHAT_SURFACE",
         cognitive_tier="A",
         prompt=PromptRef(SURFACE_MAIN_TEXT_PROMPT_ID, {"messages": messages}),
-        deadline_ms=_surface_model_deadline_ms(None),
+        deadline_ms=_surface_model_deadline_ms(governed_model_budget),
         foreground=True,
+        model_budget_guard=governed_model_budget,
         metadata={
             "chain": "surface_main_native_sentence_stream",
             "affective_turn_plan_id": plan_id,
@@ -499,6 +538,109 @@ async def _native_affective_sentence_stream(
             if chunk:
                 yield chunk
 
+    async def stage_sentence_receipt(
+        sentence: str,
+        *,
+        sentence_index: int,
+    ) -> Mapping[str, Any]:
+        if governed_delivery_authority is not None:
+            return await asyncio.to_thread(
+                governed_delivery_authority.stage_sentence,
+                plan=plan,
+                sentence=sentence,
+                sentence_index=sentence_index,
+            )
+        return await asyncio.to_thread(
+            _submit_surface_sentence_delivery_intent,
+            life_command_service=ports.get_life_command_service(),
+            life_snapshot_reader=ports.get_life_snapshot_reader(),
+            agent_input=agent_input,
+            trace_stage_meta=trace,
+            sentence=sentence,
+            sentence_index=sentence_index,
+        )
+
+    async def record_stream_control(
+        *,
+        event_kind: str,
+        sent_count: int,
+        reason_code: str,
+    ) -> Mapping[str, Any] | None:
+        if governed_delivery_authority is not None:
+            return await asyncio.to_thread(
+                governed_delivery_authority.record_stream_control,
+                plan=plan,
+                event_kind=event_kind,
+                sent_sentence_count=sent_count,
+                reason_code=reason_code,
+            )
+        return None
+
+    async def emit_staged_sentence(
+        sentence: str,
+        *,
+        sentence_index: int,
+    ) -> AsyncGenerator[str, None]:
+        """Persist one final sentence before any user-visible stream frame."""
+
+        receipt = await stage_sentence_receipt(sentence, sentence_index=sentence_index)
+        delivery_id = str(receipt.get("delivery_id") or receipt.get("event_id") or "").strip()
+        if governed_delivery_authority is not None and not delivery_id:
+            raise RuntimeError("TASK_CHAT_DELIVERY_RECEIPT_INVALID")
+        sentence_receipts.append(
+            {
+                "command_id": receipt.get("command_id"),
+                "event_id": receipt.get("event_id") or delivery_id,
+                "delivery_id": delivery_id or None,
+                "sentence_index": sentence_index,
+                "replayed": bool(receipt.get("replayed")),
+                "expression_delivery": _safe_mapping(receipt.get("expression_delivery")),
+            }
+        )
+        narrative_parts.append(sentence)
+        # Direct Host streaming retains its pre-staged expression protocol.
+        # Governed nodes defer Voice/Avatar intents to Task Acceptance, so no
+        # external or protocol effect is exposed before verification.
+        if governed_delivery_authority is None:
+            delivery_event = _expression_delivery_sse(
+                receipt,
+                sentence_index=sentence_index,
+            )
+            if delivery_event is not None:
+                yield _sse(delivery_event)
+        yield _sse({"phase": "RENDER", "chunk": sentence})
+        sentence_event: dict[str, Any] = {
+            "phase": "SENTENCE",
+            "sentence": sentence,
+            "sentence_index": sentence_index,
+            "affective_turn_plan_id": plan_id,
+            "synchronization_id": synchronization_id,
+        }
+        if governed_delivery_authority is not None:
+            sentence_event.update(
+                {
+                    "delivery_id": delivery_id,
+                    "delivery_status": str(
+                        receipt.get("delivery_status") or "TASK_NODE_SENTENCE_STAGED"
+                    ),
+                    "replayed": bool(receipt.get("replayed")),
+                    "request_id": receipt.get("request_id"),
+                    "graph_id": receipt.get("graph_id"),
+                    "graph_revision": receipt.get("graph_revision"),
+                    "node_id": receipt.get("node_id"),
+                    "attempt_id": receipt.get("attempt_id"),
+                    "lease_id": receipt.get("lease_id"),
+                    "lease_owner_id": receipt.get("lease_owner_id"),
+                    "fencing_token": receipt.get("fencing_token"),
+                    "node_grant_ref": receipt.get("node_grant_ref"),
+                    "self_id": receipt.get("self_id"),
+                    "relationship_subject_id": receipt.get("relationship_subject_id"),
+                    "workspace_id": receipt.get("workspace_id"),
+                    "self_affect_revision": receipt.get("self_affect_revision"),
+                }
+            )
+        yield _sse(sentence_event)
+
     try:
         async for raw_chunk in model_chunks():
             if first_token_ms is None:
@@ -515,43 +657,11 @@ async def _native_affective_sentence_stream(
                 gate = gate_stream_sentence(candidate)
                 if not gate.accepted:
                     raise RuntimeError(gate.reason_code)
-                sentence_receipt = await asyncio.to_thread(
-                    _submit_surface_sentence_delivery_intent,
-                    life_command_service=ports.get_life_command_service(),
-                    life_snapshot_reader=ports.get_life_snapshot_reader(),
-                    agent_input=agent_input,
-                    trace_stage_meta=trace,
-                    sentence=gate.sentence,
+                async for event in emit_staged_sentence(
+                    gate.sentence,
                     sentence_index=sent_sentence_count,
-                )
-                sentence_receipts.append(
-                    {
-                        "command_id": sentence_receipt.get("command_id"),
-                        "event_id": sentence_receipt.get("event_id"),
-                        "sentence_index": sent_sentence_count,
-                        "replayed": bool(sentence_receipt.get("replayed")),
-                        "expression_delivery": _safe_mapping(
-                            sentence_receipt.get("expression_delivery")
-                        ),
-                    }
-                )
-                narrative_parts.append(gate.sentence)
-                delivery_event = _expression_delivery_sse(
-                    sentence_receipt,
-                    sentence_index=sent_sentence_count,
-                )
-                if delivery_event is not None:
-                    yield _sse(delivery_event)
-                yield _sse({"phase": "RENDER", "chunk": gate.sentence})
-                yield _sse(
-                    {
-                        "phase": "SENTENCE",
-                        "sentence": gate.sentence,
-                        "sentence_index": sent_sentence_count,
-                        "affective_turn_plan_id": plan_id,
-                        "synchronization_id": synchronization_id,
-                    }
-                )
+                ):
+                    yield event
                 sent_sentence_count += 1
             if len(splitter.buffer) > 2_000:
                 raise RuntimeError("SURFACE_STREAM_SENTENCE_BOUNDARY_REQUIRED")
@@ -566,57 +676,34 @@ async def _native_affective_sentence_stream(
             gate = gate_stream_sentence(candidate)
             if not gate.accepted:
                 raise RuntimeError(gate.reason_code)
-            sentence_receipt = await asyncio.to_thread(
-                _submit_surface_sentence_delivery_intent,
-                life_command_service=ports.get_life_command_service(),
-                life_snapshot_reader=ports.get_life_snapshot_reader(),
-                agent_input=agent_input,
-                trace_stage_meta=trace,
-                sentence=gate.sentence,
+            async for event in emit_staged_sentence(
+                gate.sentence,
                 sentence_index=sent_sentence_count,
-            )
-            sentence_receipts.append(
-                {
-                    "command_id": sentence_receipt.get("command_id"),
-                    "event_id": sentence_receipt.get("event_id"),
-                    "sentence_index": sent_sentence_count,
-                    "replayed": bool(sentence_receipt.get("replayed")),
-                    "expression_delivery": _safe_mapping(
-                        sentence_receipt.get("expression_delivery")
-                    ),
-                }
-            )
-            narrative_parts.append(gate.sentence)
-            delivery_event = _expression_delivery_sse(
-                sentence_receipt,
-                sentence_index=sent_sentence_count,
-            )
-            if delivery_event is not None:
-                yield _sse(delivery_event)
-            yield _sse({"phase": "RENDER", "chunk": gate.sentence})
-            yield _sse(
-                {
-                    "phase": "SENTENCE",
-                    "sentence": gate.sentence,
-                    "sentence_index": sent_sentence_count,
-                    "affective_turn_plan_id": plan_id,
-                    "synchronization_id": synchronization_id,
-                }
-            )
+            ):
+                yield event
             sent_sentence_count += 1
     except asyncio.CancelledError:
         try:
-            await asyncio.shield(
-                asyncio.to_thread(
-                    _submit_surface_stream_cancelled,
-                    life_command_service=ports.get_life_command_service(),
-                    life_snapshot_reader=ports.get_life_snapshot_reader(),
-                    agent_input=agent_input,
-                    trace_stage_meta=trace,
-                    sent_sentence_count=sent_sentence_count,
-                    reason_code="SURFACE_STREAM_CANCELLED",
+            if governed_delivery_authority is not None:
+                await asyncio.shield(
+                    record_stream_control(
+                        event_kind="STREAM_CANCELLED",
+                        sent_count=sent_sentence_count,
+                        reason_code="SURFACE_STREAM_CANCELLED",
+                    )
                 )
-            )
+            else:
+                await asyncio.shield(
+                    asyncio.to_thread(
+                        _submit_surface_stream_cancelled,
+                        life_command_service=ports.get_life_command_service(),
+                        life_snapshot_reader=ports.get_life_snapshot_reader(),
+                        agent_input=agent_input,
+                        trace_stage_meta=trace,
+                        sent_sentence_count=sent_sentence_count,
+                        reason_code="SURFACE_STREAM_CANCELLED",
+                    )
+                )
         except Exception:
             # Cancellation must still propagate.  The next connection can
             # inspect the staged sentence receipts and reconcile the stream.
@@ -628,6 +715,22 @@ async def _native_affective_sentence_stream(
             "reason_code": str(exc).split(":", 1)[0][:160],
             "sent_sentence_count": sent_sentence_count,
         }
+        if governed_delivery_authority is not None:
+            try:
+                await asyncio.shield(
+                    record_stream_control(
+                        event_kind="STREAM_INTERRUPTED",
+                        sent_count=sent_sentence_count,
+                        reason_code=str(exc).split(":", 1)[0][:160]
+                        or "SURFACE_STREAM_INTERRUPTED",
+                    )
+                )
+            except Exception:
+                # The Task Runtime will classify this as a recovery-required
+                # boundary either way.  Never manufacture a terminal reject
+                # after a sentence has become visible.
+                pass
+            raise RuntimeError("TASK_CHAT_STREAM_INTERRUPTED") from exc
         yield _sse(
             {
                 "phase": "COMMIT",
@@ -648,6 +751,12 @@ async def _native_affective_sentence_stream(
 
     narrative = "".join(narrative_parts).strip()
     if not narrative:
+        if governed_delivery_authority is not None:
+            await record_stream_control(
+                event_kind="STREAM_COMPLETED",
+                sent_count=0,
+                reason_code="SURFACE_STREAM_EMPTY_RESPONSE",
+            )
         yield _sse(
             {
                 "phase": "COMMIT",
@@ -665,11 +774,31 @@ async def _native_affective_sentence_stream(
         )
         return
 
+    stream_control_receipt: Mapping[str, Any] | None = None
+    if governed_delivery_authority is not None:
+        try:
+            stream_control_receipt = await record_stream_control(
+                event_kind="STREAM_COMPLETED",
+                sent_count=sent_sentence_count,
+                reason_code="",
+            )
+        except Exception as exc:
+            trace["native_sentence_stream"] = {
+                "status": "INTERRUPTED",
+                "reason_code": "TASK_CHAT_STREAM_CONTROL_FAILED",
+                "sent_sentence_count": sent_sentence_count,
+            }
+            raise RuntimeError("TASK_CHAT_STREAM_CONTROL_FAILED") from exc
+
     total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
     llm_latency_ms = max(0, int((time.perf_counter() - stream_started) * 1000))
     final_usage_attested = _final_stream_usage_is_attested(final_model_attempt)
     stream_summary = {
-        "mode": "native_sentence_stream",
+        "mode": (
+            "governed_node_sentence_stream"
+            if governed_delivery_authority is not None
+            else "native_sentence_stream"
+        ),
         "sentence_count": sent_sentence_count,
         "plan_id": plan_id,
         "synchronization_id": synchronization_id,
@@ -704,6 +833,9 @@ async def _native_affective_sentence_stream(
         "synchronization_id": synchronization_id,
         "sent_sentence_count": sent_sentence_count,
         "sentence_receipts": sentence_receipts,
+        "stream_control_receipt": (
+            dict(stream_control_receipt) if stream_control_receipt is not None else None
+        ),
         "model_stream_protocol": (
             "FINAL_RESULT_WITH_USAGE"
             if final_usage_attested
@@ -754,6 +886,18 @@ async def _native_affective_sentence_stream(
             "error_type": type(exc).__name__,
             "sent_sentence_count": sent_sentence_count,
         }
+        if governed_delivery_authority is not None:
+            try:
+                await asyncio.shield(
+                    record_stream_control(
+                        event_kind="STREAM_INTERRUPTED",
+                        sent_count=sent_sentence_count,
+                        reason_code="TASK_ACCEPTANCE_EFFECT_INTENT_BUILD_FAILED",
+                    )
+                )
+            except Exception:
+                pass
+            raise RuntimeError("TASK_CHAT_ACCEPTANCE_EFFECT_INTENT_BUILD_FAILED") from exc
         yield _sse(
             {
                 "phase": "COMMIT",

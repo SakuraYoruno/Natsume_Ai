@@ -71,7 +71,13 @@ def _frozen(
     budget: dict[str, Any] | None = None,
 ) -> FrozenNodeInput:
     artifacts = list(input_artifacts or [])
-    frozen_pack = dict(input_pack or {"user_message": "hello"})
+    frozen_pack = dict(
+        input_pack
+        or {
+            "user_message": "hello",
+            "relationship_subject_id": "principal-frozen-route",
+        }
+    )
     if route == "delegate":
         frozen_pack.setdefault(
             "delegate_target_policy",
@@ -397,6 +403,91 @@ async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative
     assert guard["max_output_tokens"] == 60
     assert events[0]["budget_usage"]["measurements"]["token_count"] == 18
     assert events[0]["budget_usage"]["measurements"]["model_cost_micros"] == 27
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_forwards_only_task_bound_staged_sentence_receipts() -> None:
+    frozen = _frozen(route="chat", target_id="surface_reply")
+    delivery_id = "taskchat://" + "d" * 64
+
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "SENTENCE",
+            "sentence": "我在。",
+            "sentence_index": 0,
+            "delivery_id": delivery_id,
+            "delivery_status": "TASK_NODE_SENTENCE_STAGED",
+            "replayed": False,
+            "request_id": frozen.request_id,
+            "graph_id": frozen.graph_id,
+            "graph_revision": frozen.graph_revision,
+            "node_id": frozen.node_id,
+            "attempt_id": frozen.attempt_id,
+            "lease_id": frozen.lease_id,
+            "lease_owner_id": frozen.lease_owner_id,
+            "fencing_token": frozen.fencing_token,
+            "node_grant_ref": frozen.node_grant_ref,
+            "self_id": "natsume_ai",
+            "relationship_subject_id": frozen.principal_id,
+            "workspace_id": "workspace-frozen-route",
+            "affective_turn_plan_id": "plan-frozen-route",
+            "synchronization_id": "sync-frozen-route",
+            "self_affect_revision": 4,
+        }
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "narrative": "我在。",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {},
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [event async for event in executor.execute_stream(frozen)]
+
+    assert [event["phase"] for event in events] == ["SENTENCE", "COMMIT"]
+    assert events[0]["delivery_id"] == delivery_id
+    assert events[1]["narrative"] == "我在。"
+    staged = events[1]["audit_refs"]["task_bound_sentence_delivery"]
+    assert staged["status"] == "VISIBLE_BEFORE_ACCEPTANCE"
+    assert staged["delivery_ids"] == [delivery_id]
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_rejects_staged_sentence_from_stale_lease() -> None:
+    frozen = _frozen(route="chat", target_id="surface_reply")
+
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "SENTENCE",
+            "sentence": "不能混入新执行。",
+            "sentence_index": 0,
+            "delivery_id": "taskchat://" + "c" * 64,
+            "delivery_status": "TASK_NODE_SENTENCE_STAGED",
+            "request_id": frozen.request_id,
+            "graph_id": frozen.graph_id,
+            "graph_revision": frozen.graph_revision,
+            "node_id": frozen.node_id,
+            "attempt_id": frozen.attempt_id,
+            "lease_id": "lease-from-an-old-worker",
+            "lease_owner_id": frozen.lease_owner_id,
+            "fencing_token": frozen.fencing_token,
+            "node_grant_ref": frozen.node_grant_ref,
+            "self_id": "natsume_ai",
+            "relationship_subject_id": frozen.principal_id,
+            "workspace_id": "workspace-frozen-route",
+            "affective_turn_plan_id": "plan-frozen-route",
+            "synchronization_id": "sync-frozen-route",
+            "self_affect_revision": 4,
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [event async for event in executor.execute_stream(frozen)]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_ROUTE_DRIFT
 
 
 @pytest.mark.asyncio

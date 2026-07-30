@@ -37,6 +37,10 @@ from host_brain.contracts.agent_runtime.node_input_attestation import (
     NodeInputArtifactAttestationError,
     build_node_input_artifact_attestation,
 )
+from host_brain.persistence.task_chat_delivery_store import TaskChatDeliveryStore
+from host_brain.task_runtime.chat_delivery_authority import (
+    TaskBoundChatDeliveryAuthority,
+)
 
 
 GOVERNED_ROUTE_INPUT_INVALID = "GOVERNED_ROUTE_INPUT_INVALID"
@@ -67,6 +71,8 @@ class _FrozenChatRequestBody:
     """Authority-free request projection consumed by ``_build_chat_input``."""
 
     input_source: str
+    workspace_id: str
+    relationship_subject_id: str
     response_form: str
     reply_channel: None
     reply_target: None
@@ -78,6 +84,7 @@ class _FrozenChatRequestBody:
     attachments: tuple[Any, ...]
     multimodal_observations: Mapping[str, Any]
     attachment_summary: str
+    governed_delivery_authority: Any | None
 
 
 class FrozenDelegateRouteExecutor:
@@ -141,20 +148,34 @@ class FrozenDelegateRouteExecutor:
 
 
 class FrozenChatRouteExecutor:
-    """Buffer an injected chat stream into one authority-free terminal result."""
+    """Execute a frozen Chat route and forward only staged sentence receipts."""
 
-    def __init__(self, *, ports: Any, stream_chat_with_context: ChatStreamPort) -> None:
+    def __init__(
+        self,
+        *,
+        ports: Any,
+        stream_chat_with_context: ChatStreamPort,
+        chat_delivery_store: TaskChatDeliveryStore | None = None,
+    ) -> None:
         if ports is None:
             raise ValueError("ports is required")
         if not callable(stream_chat_with_context):
             raise ValueError("stream_chat_with_context must be callable")
         self._ports = ports
         self._stream_chat = stream_chat_with_context
+        self._chat_delivery_store = chat_delivery_store
 
     async def execute_stream(self, frozen: FrozenNodeInput) -> AsyncIterator[Mapping[str, Any]]:
         _require_frozen_route(frozen, expected="chat")
         input_pack = _input_pack(frozen)
-        stream = self._stream_chat(**_chat_call_kwargs(self._ports, frozen=frozen, input_pack=input_pack))
+        stream = self._stream_chat(
+            **_chat_call_kwargs(
+                self._ports,
+                frozen=frozen,
+                input_pack=input_pack,
+                chat_delivery_store=self._chat_delivery_store,
+            )
+        )
         if inspect.isawaitable(stream):
             stream = await stream
         if not isinstance(stream, AsyncIterable):
@@ -168,6 +189,7 @@ class FrozenChatRouteExecutor:
         event_count = 0
         render_fragments: list[str] = []
         sentence_fragments: list[str] = []
+        visible_sentences: list[dict[str, Any]] = []
         pending_sse = ""
 
         async for raw in stream:
@@ -210,6 +232,18 @@ class FrozenChatRouteExecutor:
                     terminal_count += 1
                     terminal = event
                     continue
+                staged_sentence = _task_bound_staged_sentence_event(event, frozen=frozen)
+                if staged_sentence is not None:
+                    _assert_next_staged_sentence(
+                        staged_sentence,
+                        prior=visible_sentences,
+                    )
+                    visible_sentences.append(staged_sentence)
+                    # This is the sole pre-Acceptance event that may leave a
+                    # governed worker: it was committed to the immutable Task
+                    # delivery ledger before Surface emitted the SSE frame.
+                    yield staged_sentence
+                    continue
                 _buffer_narrative(event, render_fragments, sentence_fragments)
 
         if pending_sse.strip():
@@ -232,6 +266,21 @@ class FrozenChatRouteExecutor:
 
         decision = _normalize_terminal_decision(terminal)
         narrative = str(terminal.get("narrative") or "").strip()
+        visible_narrative = "".join(
+            str(item["sentence"]) for item in visible_sentences
+        ).strip()
+        if visible_sentences and decision != "APPROVE":
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_OUTPUT_INVALID,
+                "a visible task-bound sentence stream requires an approved terminal result",
+            )
+        if visible_narrative:
+            if narrative and narrative != visible_narrative:
+                raise GovernedRouteExecutorError(
+                    GOVERNED_ROUTE_OUTPUT_INVALID,
+                    "terminal narrative differs from already-visible staged sentences",
+                )
+            narrative = visible_narrative
         if not narrative:
             narrative = "".join(render_fragments).strip()
         if not narrative:
@@ -251,6 +300,17 @@ class FrozenChatRouteExecutor:
                 "edge_vts_suppressed": False,
                 "affective_delivery_mode": "deferred_to_task_acceptance",
                 "delivery_authorized": False,
+                "task_bound_sentence_delivery": {
+                    "status": (
+                        "VISIBLE_BEFORE_ACCEPTANCE"
+                        if visible_sentences
+                        else "NOT_USED"
+                    ),
+                    "visible_sentence_count": len(visible_sentences),
+                    "delivery_ids": [
+                        str(item["delivery_id"]) for item in visible_sentences
+                    ],
+                },
             }
         )
         _assert_guarded_chat_terminal(
@@ -273,10 +333,38 @@ class FrozenChatRouteExecutor:
         )
 
 
-def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mapping[str, Any]) -> dict[str, Any]:
+def _chat_call_kwargs(
+    ports: Any,
+    *,
+    frozen: FrozenNodeInput,
+    input_pack: Mapping[str, Any],
+    chat_delivery_store: TaskChatDeliveryStore | None = None,
+) -> dict[str, Any]:
     raw_body = _safe_mapping(input_pack.get("request_body"))
+    workspace_id = str(
+        raw_body.get("workspace_id")
+        or input_pack.get("workspace_id")
+        or ""
+    ).strip()
+    relationship_subject_id = str(
+        raw_body.get("relationship_subject_id")
+        or input_pack.get("relationship_subject_id")
+        or ""
+    ).strip()
+    governed_delivery_authority = (
+        TaskBoundChatDeliveryAuthority(
+            store=chat_delivery_store,
+            frozen=frozen,
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+        )
+        if chat_delivery_store is not None and workspace_id and relationship_subject_id
+        else None
+    )
     request_body = _FrozenChatRequestBody(
         input_source="GOVERNED_TASK_RUNTIME",
+        workspace_id=workspace_id,
+        relationship_subject_id=relationship_subject_id,
         response_form=str(raw_body.get("response_form") or input_pack.get("response_form") or "text").strip(),
         reply_channel=None,
         reply_target=None,
@@ -292,6 +380,7 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         attachment_summary=str(
             raw_body.get("attachment_summary") or input_pack.get("attachment_summary") or ""
         ).strip(),
+        governed_delivery_authority=governed_delivery_authority,
     )
     message = _required_narrative(
         input_pack.get("sanitized_message") or input_pack.get("user_message") or frozen.objective,
@@ -305,6 +394,15 @@ def _chat_call_kwargs(ports: Any, *, frozen: FrozenNodeInput, input_pack: Mappin
         "graph_revision": frozen.graph_revision,
         "node_id": frozen.node_id,
         "attempt_id": frozen.attempt_id,
+        "governed_task_chat_delivery": {
+            "status": (
+                "TASK_BOUND_VISIBILITY_READY"
+                if governed_delivery_authority is not None
+                else "BUFFERED_NO_TASK_DELIVERY_SCOPE"
+            ),
+            "workspace_id": workspace_id or None,
+            "relationship_subject_id": relationship_subject_id or None,
+        },
         "pii_ingress_stats": _safe_mapping(input_pack.get("pii_ingress_stats")),
         "motive_state": _safe_mapping(input_pack.get("motive_state")),
     }
@@ -874,6 +972,196 @@ def _terminal_reason_code(event: Mapping[str, Any], *, decision: str) -> str | N
 
 def _is_terminal(event: Mapping[str, Any]) -> bool:
     return event.get("done") is True or str(event.get("phase") or "").strip().upper() == "COMMIT"
+
+
+def _task_bound_staged_sentence_event(
+    event: Mapping[str, Any],
+    *,
+    frozen: FrozenNodeInput,
+) -> dict[str, Any] | None:
+    """Validate the one nonterminal Chat event allowed past the worker.
+
+    Plain ``SENTENCE`` frames remain speculative Surface data and are buffered
+    like every other worker event.  A frame claiming task delivery authority
+    must prove every immutable identity field; it is never downgraded to an
+    ordinary buffered frame on mismatch.
+    """
+
+    phase = str(event.get("phase") or "").strip().upper()
+    authority_markers = {
+        "delivery_id",
+        "delivery_status",
+        "graph_id",
+        "attempt_id",
+        "lease_id",
+        "node_grant_ref",
+        "relationship_subject_id",
+    }
+    claims_task_delivery = bool(authority_markers.intersection(event))
+    if phase != "SENTENCE" and not claims_task_delivery:
+        return None
+    if phase != "SENTENCE":
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound delivery authority is valid only for a sentence frame",
+        )
+    if not claims_task_delivery:
+        return None
+    delivery_id = str(event.get("delivery_id") or "").strip()
+    if not re.fullmatch(r"taskchat://[0-9a-f]{64}", delivery_id):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound sentence has no canonical delivery id",
+        )
+    if str(event.get("delivery_status") or "").strip() != "TASK_NODE_SENTENCE_STAGED":
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound sentence was not durably staged",
+        )
+    sentence = str(event.get("sentence") or "").strip()
+    if not sentence or len(sentence) > 2_000:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound sentence content is invalid",
+        )
+    sentence_index = _strict_non_negative_int(
+        event.get("sentence_index"), field_name="sentence_index"
+    )
+    graph_revision = _strict_non_negative_int(
+        event.get("graph_revision"), field_name="graph_revision"
+    )
+    self_affect_revision = _strict_non_negative_int(
+        event.get("self_affect_revision"), field_name="self_affect_revision"
+    )
+    relationship_subject_id = _frozen_relationship_subject_id(frozen)
+    expected = {
+        "request_id": frozen.request_id,
+        "graph_id": frozen.graph_id,
+        "graph_revision": frozen.graph_revision,
+        "node_id": frozen.node_id,
+        "attempt_id": frozen.attempt_id,
+        "lease_id": frozen.lease_id,
+        "lease_owner_id": frozen.lease_owner_id,
+        "fencing_token": frozen.fencing_token,
+        "node_grant_ref": frozen.node_grant_ref,
+        "self_id": "natsume_ai",
+        "relationship_subject_id": relationship_subject_id,
+    }
+    actual = {
+        "request_id": str(event.get("request_id") or "").strip(),
+        "graph_id": str(event.get("graph_id") or "").strip(),
+        "graph_revision": graph_revision,
+        "node_id": str(event.get("node_id") or "").strip(),
+        "attempt_id": str(event.get("attempt_id") or "").strip(),
+        "lease_id": str(event.get("lease_id") or "").strip(),
+        "lease_owner_id": str(event.get("lease_owner_id") or "").strip(),
+        "fencing_token": _strict_positive_int(
+            event.get("fencing_token"), field_name="fencing_token"
+        ),
+        "node_grant_ref": str(event.get("node_grant_ref") or "").strip(),
+        "self_id": str(event.get("self_id") or "").strip(),
+        "relationship_subject_id": str(event.get("relationship_subject_id") or "").strip(),
+    }
+    if actual != expected:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_ROUTE_DRIFT,
+            "task-bound sentence identity differs from frozen node authority",
+        )
+    workspace_id = str(event.get("workspace_id") or "").strip()
+    plan_id = str(event.get("affective_turn_plan_id") or "").strip()
+    synchronization_id = str(event.get("synchronization_id") or "").strip()
+    if not workspace_id or not plan_id or not synchronization_id:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound sentence lacks affective scope identity",
+        )
+    return {
+        "phase": "SENTENCE",
+        "sentence": sentence,
+        "sentence_index": sentence_index,
+        "delivery_id": delivery_id,
+        "delivery_status": "TASK_NODE_SENTENCE_STAGED",
+        "replayed": bool(event.get("replayed")),
+        "request_id": frozen.request_id,
+        "graph_id": frozen.graph_id,
+        "graph_revision": graph_revision,
+        "node_id": frozen.node_id,
+        "attempt_id": frozen.attempt_id,
+        "self_id": "natsume_ai",
+        "relationship_subject_id": relationship_subject_id,
+        "workspace_id": workspace_id,
+        "affective_turn_plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "self_affect_revision": self_affect_revision,
+    }
+
+
+def _assert_next_staged_sentence(
+    event: Mapping[str, Any],
+    *,
+    prior: Sequence[Mapping[str, Any]],
+) -> None:
+    expected_index = len(prior)
+    if int(event["sentence_index"]) != expected_index:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound sentence indices must be contiguous from zero",
+        )
+    if str(event["delivery_id"]) in {
+        str(item.get("delivery_id") or "") for item in prior
+    }:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            "task-bound sentence delivery id was repeated in one stream",
+        )
+
+
+def _frozen_relationship_subject_id(frozen: FrozenNodeInput) -> str:
+    input_pack = frozen.input_pack
+    request_body = input_pack.get("request_body")
+    request_body = request_body if isinstance(request_body, Mapping) else {}
+    subject = str(
+        input_pack.get("relationship_subject_id")
+        or request_body.get("relationship_subject_id")
+        or ""
+    ).strip()
+    if not subject:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_INPUT_INVALID,
+            "frozen Chat context lacks relationship_subject_id",
+        )
+    return subject
+
+
+def _strict_non_negative_int(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            f"task-bound {field_name} must be an integer",
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            f"task-bound {field_name} must be an integer",
+        ) from exc
+    if parsed < 0:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            f"task-bound {field_name} must be non-negative",
+        )
+    return parsed
+
+
+def _strict_positive_int(value: Any, *, field_name: str) -> int:
+    parsed = _strict_non_negative_int(value, field_name=field_name)
+    if parsed < 1:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_OUTPUT_INVALID,
+            f"task-bound {field_name} must be positive",
+        )
+    return parsed
 
 
 def _buffer_narrative(

@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 import hashlib
 import json
+import re
 from typing import Any, Protocol
 from urllib.parse import unquote
 
@@ -252,6 +253,7 @@ class GovernedFrozenNodeWorker:
         terminal: dict[str, Any] | None = None
         terminal_count = 0
         buffered_event_count = 0
+        visible_event_count = 0
         execute_with_recovery = getattr(
             self._executor,
             "execute_stream_with_recovery",
@@ -279,10 +281,21 @@ class GovernedFrozenNodeWorker:
                 terminal_count += 1
                 terminal = event
                 continue
+            if _task_bound_chat_visibility_event(
+                event,
+                frozen=frozen,
+                route_kind=self._route_kind,
+                expected_index=visible_event_count,
+            ):
+                visible_event_count += 1
+                # The frozen executor has already verified that this text was
+                # written into the immutable Task delivery ledger.  It is the
+                # only pre-Acceptance event permitted past a governed worker.
+                yield event
+                continue
             # A worker is still speculative until Verification and Acceptance
-            # commit.  Streaming its deltas here would expose user-visible or
-            # externally actionable output before the governed decision.  The
-            # accepted terminal projection is the only public worker output.
+            # commit.  All other deltas remain non-public until the accepted
+            # terminal projection is available.
             buffered_event_count += 1
         if terminal_count != 1 or terminal is None:
             raise GovernedNodeWorkerError(
@@ -295,6 +308,7 @@ class GovernedFrozenNodeWorker:
             preview=preview,
             terminal=terminal,
             buffered_event_count=buffered_event_count,
+            visible_event_count=visible_event_count,
         )
 
     def recover_sealed_checkpoint(
@@ -426,6 +440,7 @@ class GovernedFrozenNodeWorker:
         preview: Mapping[str, Any] | None,
         terminal: Mapping[str, Any],
         buffered_event_count: int,
+        visible_event_count: int = 0,
     ) -> dict[str, Any]:
         projection, worker_commit = self._build_terminal_projection(
             frozen=frozen,
@@ -433,6 +448,7 @@ class GovernedFrozenNodeWorker:
             preview=preview,
             terminal=terminal,
             buffered_event_count=buffered_event_count,
+            visible_event_count=visible_event_count,
         )
         projection_id = str(projection["projection_id"])
         payload_digest = str(projection["payload_digest"])
@@ -459,6 +475,7 @@ class GovernedFrozenNodeWorker:
         preview: Mapping[str, Any] | None,
         terminal: Mapping[str, Any],
         buffered_event_count: int,
+        visible_event_count: int = 0,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         _assert_terminal(terminal, frozen=frozen)
         normalized = {
@@ -498,6 +515,9 @@ class GovernedFrozenNodeWorker:
             normalized["budget_usage"] = budget_usage.to_payload()
         normalized["audit_refs"]["buffered_pre_acceptance_events"] = int(
             buffered_event_count
+        )
+        normalized["audit_refs"]["task_bound_visible_pre_acceptance_events"] = int(
+            visible_event_count
         )
         normalized["audit_refs"].update(
             {
@@ -960,6 +980,139 @@ def _projection(value: Any) -> dict[str, Any]:
     projector = getattr(value, "to_dict", None)
     projected = projector() if callable(projector) else None
     return dict(projected) if isinstance(projected, Mapping) else {}
+
+
+def _task_bound_chat_visibility_event(
+    event: Mapping[str, Any],
+    *,
+    frozen: FrozenNodeInput,
+    route_kind: str,
+    expected_index: int,
+) -> bool:
+    """Prove that a nonterminal event is one durable Chat sentence receipt."""
+
+    markers = {
+        "delivery_id",
+        "delivery_status",
+        "graph_id",
+        "attempt_id",
+        "lease_id",
+        "node_grant_ref",
+        "relationship_subject_id",
+    }
+    claims_visibility = bool(markers.intersection(event))
+    if not claims_visibility:
+        return False
+    if route_kind != "chat" or str(event.get("phase") or "").strip().upper() != "SENTENCE":
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "only a frozen Chat sentence may carry pre-acceptance visibility authority",
+        )
+    delivery_id = str(event.get("delivery_id") or "").strip()
+    if (
+        not re.fullmatch(r"taskchat://[0-9a-f]{64}", delivery_id)
+        or str(event.get("delivery_status") or "").strip()
+        != "TASK_NODE_SENTENCE_STAGED"
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "pre-acceptance Chat sentence does not have a canonical durable receipt",
+        )
+    sentence = str(event.get("sentence") or "").strip()
+    if not sentence or len(sentence) > 2_000:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "pre-acceptance Chat sentence content is invalid",
+        )
+    try:
+        sentence_index = int(event.get("sentence_index"))
+        revision = int(event.get("graph_revision"))
+        affect_revision = int(event.get("self_affect_revision"))
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "pre-acceptance Chat sentence has invalid numeric identity",
+        ) from exc
+    relationship_subject_id = _frozen_relationship_subject_id(frozen)
+    if (
+        sentence_index != expected_index
+        or revision != frozen.graph_revision
+        or affect_revision < 0
+        or {
+            "request_id": str(event.get("request_id") or "").strip(),
+            "graph_id": str(event.get("graph_id") or "").strip(),
+            "node_id": str(event.get("node_id") or "").strip(),
+            "attempt_id": str(event.get("attempt_id") or "").strip(),
+            "lease_id": str(event.get("lease_id") or "").strip(),
+            "lease_owner_id": str(event.get("lease_owner_id") or "").strip(),
+            "fencing_token": _positive_event_int(
+                event.get("fencing_token"), field_name="fencing_token"
+            ),
+            "node_grant_ref": str(event.get("node_grant_ref") or "").strip(),
+            "self_id": str(event.get("self_id") or "").strip(),
+            "relationship_subject_id": str(
+                event.get("relationship_subject_id") or ""
+            ).strip(),
+        }
+        != {
+            "request_id": frozen.request_id,
+            "graph_id": frozen.graph_id,
+            "node_id": frozen.node_id,
+            "attempt_id": frozen.attempt_id,
+            "lease_id": frozen.lease_id,
+            "lease_owner_id": frozen.lease_owner_id,
+            "fencing_token": frozen.fencing_token,
+            "node_grant_ref": frozen.node_grant_ref,
+            "self_id": "natsume_ai",
+            "relationship_subject_id": relationship_subject_id,
+        }
+        or not str(event.get("workspace_id") or "").strip()
+        or not str(event.get("affective_turn_plan_id") or "").strip()
+        or not str(event.get("synchronization_id") or "").strip()
+    ):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "pre-acceptance Chat sentence differs from frozen Task identity",
+        )
+    return True
+
+
+def _positive_event_int(value: Any, *, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            f"pre-acceptance Chat sentence has invalid {field_name}",
+        )
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            f"pre-acceptance Chat sentence has invalid {field_name}",
+        ) from exc
+    if parsed < 1:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            f"pre-acceptance Chat sentence has invalid {field_name}",
+        )
+    return parsed
+
+
+def _frozen_relationship_subject_id(frozen: FrozenNodeInput) -> str:
+    input_pack = frozen.input_pack
+    request_body = input_pack.get("request_body")
+    request_body = request_body if isinstance(request_body, Mapping) else {}
+    subject = str(
+        input_pack.get("relationship_subject_id")
+        or request_body.get("relationship_subject_id")
+        or ""
+    ).strip()
+    if not subject:
+        raise GovernedNodeWorkerError(
+            GOVERNED_NODE_COMMIT_INVALID,
+            "frozen Chat context lacks relationship_subject_id",
+        )
+    return subject
 
 
 def _assert_terminal(event: Mapping[str, Any], *, frozen: FrozenNodeInput) -> None:

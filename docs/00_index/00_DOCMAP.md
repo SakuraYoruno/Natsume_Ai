@@ -30,7 +30,7 @@ workspace/subject 连续，session 只保留事件上下文，边界和误解不
 投递失败被自动消解。Surface 只消费可信内部 hand-off 来收紧话术，不能由外部
 请求伪造。DL-04 进一步在可信 hand-off 后冻结 `AffectiveTurnPlanV1`；普通低歧义
 文本可优先通过生产 `ModelAttemptService.stream_with_result()` 的 typed delta + provider final result
-逐句输出；每个稳定句先写 canonical Life delivery intent，再对外可见。只有首个 delta 前明确不支持
+逐句输出；direct Host 的每个稳定句先写 canonical Life delivery intent，再对外可见。`0149` 还让已经入场的冻结 governed Chat 将计划与可见句先写入独立 Task ledger，并精确绑定 attempt/lease/fence/grant、workspace 与关系对象；它不是对所有 Chat 路径的切流。只有首个 delta 前明确不支持
 终态合同才可回退兼容 stream 并标记无 usage；高歧义/修复回合保持恰好两候的 buffered selection。
 模型候选和纯文本 fallback 均不能改写七海 self-affect。DL-05 让同一份
 `ExpressionPlanV1` 编译出 Voice `SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，
@@ -52,7 +52,7 @@ aftereffect 才能开始五次真实互动 canary；第五条合格 canary 后�
 该 profile 只收紧或调整称呼、长度、追问、安慰、主动时段、语速和动作强度；它不能修改 Soul、
 relationship consent 或 self-affect。CANARY/ACTIVE identity 会冻结进入后续文本/Voice/Avatar Host
 plan 与 delivery intent；生产的保守文本分类仅为 `0.72`，不会自动伪造强偏好证据。直接反馈入口、
-Monitor 审核、旧 writer 清零、受治理 Chat 的 node/attempt-bound 逐句可见性、连接恢复与真实服务验收
+Monitor 审核、旧 writer 清零、普通 Chat 的受治理切流、连接恢复与真实服务验收
 仍未完成；模型 final result / conditional usage 合同并不替代 Task Runtime 的 acceptance authority。当前生产 Host 已移除 `HostEmotionRuntime`，而 canonical Tribe authority 又令 Limbic 的
 legacy persistence、metabolism、timeline、decay 和 Bond callback 统一拒写并返回
 `RETIRED_CANONICAL_LIFE`；Endocrine 的 legacy delta、last-state、hint 与 fan-out 也已在 canonical
@@ -147,7 +147,7 @@ governed manifest 入口。NE-05 另以 0141 V2 lifecycle authority 约束版本
 `builtin-skill-alias.v1` 指向可信内置 handler；外部 bundle 不被目录扫描或
 直接 import。
 
-当前文档 catalog 基线为 migration head `0146_affective_expression_delivery.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset；0141 原子持有 Skill canary、activation evidence、maturity、active projection、operation 与 terminal receipt；0142 原子持有 Feedback/Knowledge/Identity 的真实 evidence resolution、version decision、operation、active projection 与 transition receipt，并将 0110 V1 mutation 冻结为只读；0143 把七海的 typed observation/appraisal/self-affect episode head 投影到既有 immutable Life journal；0144 只从 canonical Life event 派生 workspace/subject-scoped relationship episode、aftereffect 和状态 head；0145 再从同一 journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only 读模型；0146 只从同一 immutable event 派生 Voice/Avatar Host protocol intent、cancel/release 和同步身份的隐私最小化投影。0146 不会升级旧 NE-01 七路线收据：该历史收据仍精确绑定 0142，coverage manifest 会同时声明 accepted head 与 current catalog head。
+当前文档 catalog 基线为 migration head `0149_task_runtime_chat_delivery.sql`：0130～0135 继续负责 Task recovery、Budget、Verification、Acceptance 与 Review denial；0136 独立持有 PlanningSearch 24/20/30 cohort evidence 与 proposal；0137 独立持有 runtime-fenced 长期目标 event/head，并经 World/Intent 消费 restrict-only 约束；0138～0140 独立持有 proposal-only trusted Lab、redaction 与 sanitized dataset；0141 原子持有 Skill canary、activation evidence、maturity、active projection、operation 与 terminal receipt；0142 原子持有 Feedback/Knowledge/Identity 的真实 evidence resolution、version decision、operation、active projection 与 transition receipt，并将 0110 V1 mutation 冻结为只读；0143 把七海的 typed observation/appraisal/self-affect episode head 投影到既有 immutable Life journal；0144 只从 canonical Life event 派生 workspace/subject-scoped relationship episode、aftereffect 和状态 head；0145 再从同一 journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only 读模型；0146 只从同一 immutable event 派生 Voice/Avatar Host protocol intent、cancel/release 和同步身份的隐私最小化投影；0149 则是 Task Runtime 自己的 immutable governed Chat visibility ledger，保存 plan/sentence/control 的 identity 与 digest，不写 Life 或外部 delivery。0149 不会升级旧 NE-01 七路线收据：该历史收据仍精确绑定 0142，coverage manifest 会同时声明 accepted head 与 current catalog head。
 
 当前 Chat 文档基线为 exact Life projection barrier：assistant turn 与 LifeMemory admission 的 durable receipts是 external reply的必要前置条件；首次调用可完成 exact pending intent，reclaimed reconciliation只读。该项只关闭 Chat 的 `transactional_side_effects` 控制，不改变七路线 `INCOMPLETE`、external eventual delivery、wave integration或 NE-07状态。
 

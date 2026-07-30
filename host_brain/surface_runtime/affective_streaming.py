@@ -66,19 +66,17 @@ def should_use_native_sentence_stream(
     trace_stage_meta: Mapping[str, Any] | None,
     *,
     has_governed_model_budget: bool,
+    has_governed_delivery_authority: bool = False,
 ) -> bool:
     """Choose the low-latency route only when its authority is complete.
 
-    ``ModelAttemptService.stream_with_result`` can now carry provider-final
-    canonical usage, but a governed Chat node still buffers its worker events
-    and has no node/attempt-bound, durable *per-sentence visibility* authority.
-    It therefore remains on the buffered acceptance path until that Task
-    Runtime delivery protocol exists.  This is intentionally explicit rather
-    than silently dropping the budget guard or treating a model terminal
-    result as a user-visible receipt.
+    A governed model budget may coexist with live text only after the caller
+    supplies the Task Runtime's node/attempt/lease/grant-bound visibility
+    authority.  A provider's final model result is still never itself a
+    user-visible receipt.
     """
 
-    if has_governed_model_budget:
+    if has_governed_model_budget and not has_governed_delivery_authority:
         return False
     plan = affective_turn_plan_from_trace(trace_stage_meta)
     return bool(plan) and str(plan.get("generation_mode") or "").upper() == _STREAMABLE_MODE

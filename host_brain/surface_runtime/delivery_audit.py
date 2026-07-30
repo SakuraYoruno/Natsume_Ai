@@ -325,13 +325,17 @@ def _submit_surface_foreground_completed(
     expression_controls: list[dict[str, Any]] = []
     expression_receipts: list[dict[str, Any]] = []
     expression_traces: list[dict[str, Any]] = []
-    # The native stream already stages every gated sentence before it becomes
-    # visible.  Buffered/governed Chat reaches this function only after Task
-    # Acceptance, so stage its one accepted utterance here rather than using
-    # the retired direct TTS/VTS side path.
-    native_sentence_stream = str(_safe_mapping(stream_summary).get("mode") or "") == "native_sentence_stream"
+    # Direct Host native streaming has already staged its expression protocol
+    # before text visibility.  A governed-node sentence stream stages only a
+    # Task-bound text visibility receipt before SSE; Voice/Avatar intents stay
+    # deferred until Task Verification and Acceptance.  Treat it like the
+    # buffered route here so the Task runtime remains the only effect writer.
+    direct_native_sentence_stream = (
+        str(_safe_mapping(stream_summary).get("mode") or "")
+        == "native_sentence_stream"
+    )
     buffered_expression_segments: list[str] = []
-    if affective_turn_plan and narrative and not native_sentence_stream:
+    if affective_turn_plan and narrative and not direct_native_sentence_stream:
         buffered_expression_segments = _bounded_expression_segments(str(narrative or ""))
         for sentence_index, segment in enumerate(buffered_expression_segments):
             intents, receipts, trace = _expression_sentence_protocol(

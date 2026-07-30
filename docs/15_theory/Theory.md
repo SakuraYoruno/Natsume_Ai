@@ -640,8 +640,8 @@ Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由
 `ProviderResponse`，再把模型、provider 与 transport 证据，以及 provider 显式给出的 usage 写入 canonical Attempt；任何一项
 缺失都不能由文本长度、字符数或本地价格表补成成本。直连 Host 的 native sentence stream 只会在
 provider 在首个 delta 前明确不支持该合同的情况下回退兼容 stream，并留下无终态 usage 标记。受治理
-Chat 即使拥有终态 result，也仍不能直接把 worker delta 推给用户：它还需要 node/attempt-bound 的可恢复
-visibility receipt、取消语义与重启去重。因此“模型可报告终态用量”不是“所有 Chat 已可实时展示”的同义词。
+Chat 即使拥有终态 result，也仍不能直接把任意 worker delta 推给用户。`0149` 只为已经入场的冻结 Chat 建立了可恢复的
+node/attempt/lease/fence/grant-bound visibility receipt：先持久化 plan 与稳定句，再让同一 Worker 转发；内容或 fence 漂移会失败关闭，取消/中断保留 control receipt。它不写 Life、Memory、TTS、Avatar 或 transport，也没有把普通 Chat、连接恢复或真实播放升级为完成。因此“模型可报告终态用量”或“窄路径可见”都不是“所有 Chat 已可实时展示”的同义词。
 
 情感系统必须满足：
 

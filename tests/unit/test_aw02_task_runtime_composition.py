@@ -319,6 +319,7 @@ def _build_fake_container(
             lambda _db_path: SimpleNamespace(read=lambda _ref: {})
         ),
         feature_canary_store_builder=lambda _db_path: _FeatureCanaryStore(),
+        chat_delivery_store_builder=lambda _db_path: object(),
         authenticated_outcome_lookup=authenticated_outcome_lookup,
     )
 
@@ -477,6 +478,7 @@ def test_startup_recovery_failure_is_fail_closed_before_other_stores_or_publish(
             canonical_db_path=path,
             migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
             task_store_builder=build_store,
+            chat_delivery_store_builder=lambda _db_path: object(),
             terminal_operator_command_store_builder=(
                 lambda _path: SimpleNamespace(read=lambda _ref: {})
             ),
@@ -560,6 +562,7 @@ def test_partial_construction_failure_closes_completed_slots_in_reverse_order(
             canonical_db_path=path,
             migration_runner_builder=lambda **_kwargs: _MigrationRunner(events),
             task_store_builder=build_store,
+            chat_delivery_store_builder=lambda _db_path: object(),
             terminal_operator_command_store_builder=(
                 lambda _path: SimpleNamespace(read=lambda _ref: {})
             ),

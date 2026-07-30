@@ -76,6 +76,7 @@ def _contracts(route: str = "chat", target: str = "surface_reply"):
         objective="frozen objective",
         input_pack={
             "user_message": "hello",
+            "relationship_subject_id": "principal-workers",
             # A caller-owned input pack must never expand the authoritative
             # runtime reservation frozen below.
             "budget": {"remaining": {"token_count": 999_999_999}},
@@ -222,6 +223,67 @@ async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_comm
     copied_budget = dict(executor.inputs[0].budget)
     copied_budget["remaining"]["token_count"] = 999
     assert executor.inputs[0].budget["remaining"]["token_count"] == 120
+
+
+@pytest.mark.asyncio
+async def test_chat_worker_forwards_only_exact_task_bound_sentence_before_commit() -> None:
+    command, order, context = _contracts()
+    delivery_id = "taskchat://" + "e" * 64
+
+    class _TaskBoundSentenceExecutor:
+        async def execute_stream(self, frozen):  # noqa: ANN001
+            yield {
+                "phase": "SENTENCE",
+                "sentence": "我在。",
+                "sentence_index": 0,
+                "delivery_id": delivery_id,
+                "delivery_status": "TASK_NODE_SENTENCE_STAGED",
+                "request_id": frozen.request_id,
+                "graph_id": frozen.graph_id,
+                "graph_revision": frozen.graph_revision,
+                "node_id": frozen.node_id,
+                "attempt_id": frozen.attempt_id,
+                "lease_id": frozen.lease_id,
+                "lease_owner_id": frozen.lease_owner_id,
+                "fencing_token": frozen.fencing_token,
+                "node_grant_ref": frozen.node_grant_ref,
+                "self_id": "natsume_ai",
+                "relationship_subject_id": frozen.principal_id,
+                "workspace_id": "workspace-workers",
+                "affective_turn_plan_id": "plan-workers",
+                "synchronization_id": "sync-workers",
+                "self_affect_revision": 2,
+            }
+            yield {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "我在。",
+                "route_type": "chat",
+                "target_id": "surface_reply",
+                "audit_refs": {},
+            }
+
+    projections = _ProjectionStore()
+    worker = GovernedFrozenNodeWorker(
+        route_kind="chat",
+        executor=_TaskBoundSentenceExecutor(),
+        node_grants=_GrantVerifier(),
+        projections=projections,
+    )
+    events = [
+        event
+        async for event in worker.execute_stream(
+            command=command,
+            work_order=order,
+            execution_context=context,
+        )
+    ]
+
+    assert [event["phase"] for event in events] == ["SENTENCE", "COMMIT"]
+    assert events[0]["delivery_id"] == delivery_id
+    assert events[1]["audit_refs"]["task_bound_visible_pre_acceptance_events"] == 1
+    assert events[1]["audit_refs"]["buffered_pre_acceptance_events"] == 0
 
 
 @pytest.mark.asyncio

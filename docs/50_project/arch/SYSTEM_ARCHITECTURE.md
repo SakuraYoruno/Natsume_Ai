@@ -460,7 +460,7 @@ Effect fence 的证据规则为 fail closed：一般 handler/transport `FAILED` 
 
 ### 3.5 模型与能力执行层
 
-- `host_brain/model_runtime/`：prompt contract、provider route、ModelAttempt、重试与用量证据。`stream_with_result()` 将流拆为 typed delta 与唯一 provider final response；只有 final response 的显式 usage/transport 可进入 Attempt audit，默认 Vault adapter 尚未绑定该能力。该模型协议不授予 Governed Chat 逐句外显权，后者仍需要 Task node/attempt/lease-bound delivery、cancel 与 restart duplicate fence。
+- `host_brain/model_runtime/`：prompt contract、provider route、ModelAttempt、重试与用量证据。`stream_with_result()` 将流拆为 typed delta 与唯一 provider final response；只有 final response 的显式 usage/transport 可进入 Attempt audit，默认 Vault adapter 尚未绑定该能力。`0149` 已把已入场冻结 Chat 的逐句外显权收进 Task node/attempt/lease/fence/grant-bound delivery ledger；普通 Chat、connection resume 与完整 restart recovery 仍需后续切流。
 - `host_brain/capability_plane/`：Capability Broker、descriptor policy、execution journal。
 - `host_brain/skills/`：内置 Skill 定义、executor、确定性 SkillDraft/bundle 编译器和签名供应链资产。0141 真实重开 Lab、Review、Supply Chain 与 canary evidence 后才写 active projection；Host 运行时只解析批准的 version binding，不扫描目录、不直接 import 外部 Python。
 - `host_brain/tools/`、`host_brain/mcp/`、`host_brain/lsp/`：具体工具和协议 adapter。
@@ -491,7 +491,7 @@ Life 状态、关系后效应、人格策略和最终文本不是同一种 autho
 - `host_brain/persistence/`：typed repositories 和只读 query repositories。
 - `host_brain/audit/`：SQLite ledger、migration、journal 和审计资产。
 
-当前连续 SQLite migration head 为 `0146_affective_expression_delivery.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill 与 version activation authority；0143 保存 affective observation/appraisal/self-affect head；0144 只从 canonical Life event 派生 relationship episode、aftereffect 与有界状态 head；0145 从同一 immutable journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only read model；0146 再派生 Voice/Avatar Host protocol intent、cancel/release 与 scoped predecessor read head。0146 的 Host staging 不拥有物理 Edge action authority，也不能声明设备已应用。后续资产都不拥有 Task activation authority。
+当前连续 SQLite migration head 为 `0149_task_runtime_chat_delivery.sql`；旧 migration 不重写，后续资产继续从 next-free 编号扩展。0118～0135 继续封闭各自既有 Task/Review 边界；0136 独立保存 PlanningSearch cohort evidence/proposal；0137 独立保存 runtime-fenced 长期目标 event/head；0138～0140 独立保存 proposal-only trusted Lab、redaction 与 sanitized dataset；0141～0142 保存 Skill 与 version activation authority；0143 保存 affective observation/appraisal/self-affect head；0144 只从 canonical Life event 派生 relationship episode、aftereffect 与有界状态 head；0145 从同一 immutable journal 派生 affective turn plan、sentence delivery intent、cancel 和 foreground 的 digest-only read model；0146 再派生 Voice/Avatar Host protocol intent、cancel/release 与 scoped predecessor read head；0149 由 Task Runtime 保存 frozen Chat 的 immutable plan/sentence/stream-control visibility event，并以 SQLite identity trigger 封闭 exact attempt lease fence。0146 的 Host staging 不拥有物理 Edge action authority，0149 也不拥有 Life 或外部 channel authority，二者都不能声明设备已应用。
 
 向量、图和缓存只用于召回与投影，不能独立覆盖 canonical state。Memory/Canon 的写入必须经过对应 application/repository 合同并保留 provenance。
 
@@ -640,7 +640,7 @@ Scheduler 与 Internal Agent 已统一进入 `WorkOrderV3 + BudgetPolicy` admiss
 | Historical terminal reconciliation | 0099 immutable case/proof/supersession + `DurableTaskStore` CAS | 主 Host/独立 Obs physical query-only repository | 单次启动最多 10,000 Graph；唯一 graph-scope exact-only；历史替代链最终必须有可信 proof；system auto 默认 OFF、canary 未跑 |
 | Host mode HardState / Policy | app-local `HostHardStateOwner` + 0115 journal；`HostModePolicyOwner` + 0129 journal | ModeTransition history、runtime snapshot、Obs Life Body | 两个聚合各自 runtime-scoped event/head 同事务；expected revision CAS；exact Host lease/fence；完整 chain replay 后恢复。mode、auto-rules、last-interaction 与 event outcome 均有 canonical owner；canary未跑 |
 | Governor / Grant | canonical audit ledger 与 grant resolver | Operator/trace projection | token 必须绑定 scope 和 subject |
-| Model invocation | `ModelAttemptService` 及持久记录 | 用量和健康投影 | terminal attempt 去重；三维 token 为 Optional 并携带 measured coverage/lower-bound；provider 缺失时不得伪造精确成本；`stream_with_result()` 已定义 typed final result，只有完整 token/completion/cost 才计量；默认 Vault provider、Governed Chat visibility 与真实生产调用仍未接 |
+| Model invocation | `ModelAttemptService` 及持久记录；`0149` Task Chat delivery ledger | 用量和健康投影；已入场 frozen Chat 的可见句 receipt | terminal attempt 去重；三维 token 为 Optional 并携带 measured coverage/lower-bound；provider 缺失时不得伪造精确成本；`stream_with_result()` 已定义 typed final result，只有完整 token/completion/cost 才计量；0149 仅接通 graph/node/attempt/lease/fence/grant-bound frozen Chat visibility，默认 Vault provider、普通 Chat、connection resume 与真实生产调用仍未接 |
 | Capability execution | Capability Broker journal/receipt | maturity scorecard | maturity 投影本身不是执行 authority |
 | Life | Life command/event/reducer | Life projection、UI | 业务模块不能直接改 projection |
 | Acceptance Effect recovery | Effect row + app-local dispatcher + domain read authority | Guardian SLO | privacy gate fail-closed；disabled=`DISABLED`且零 event/profile；0118 sealed child + full-set reconcile；admitted-time/exact conversation/session delivery digest；Gateway同SQLite payload校验effect_id，`NOT_FOUND`仍`UNKNOWN` |

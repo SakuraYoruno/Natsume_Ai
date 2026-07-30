@@ -37,7 +37,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 ### FR-CHAT：连续对话
 
 - 支持流式对话，并区分非权威在场信号、权威提交结果和提交后投影。
-- 流式 provider 若要声明用量已计量，必须在 typed delta 后提供唯一的 provider-owned final response；不得从文本长度或本地估价推断 token、成本或 provider identity。缺少 node/attempt-bound 可见性与恢复 authority 的受治理 Chat 必须继续走 buffered acceptance，不能因模型协议存在而提前外显。
+- 流式 provider 若要声明用量已计量，必须在 typed delta 后提供唯一的 provider-owned final response；不得从文本长度或本地估价推断 token、成本或 provider identity。已入场的冻结 Chat TaskNode 可凭 `0149` 的 node/attempt/lease/fence/grant-bound 句回执提前外显；其他 Chat 路径缺少同级可见性与恢复 authority 时必须继续走 buffered acceptance，不能因模型协议存在而提前外显。
 - 最终可发送文本必须经过唯一 Reply/Surface authority 收口。
 - 对话可使用经授权的记忆、关系、情绪、场景和任务上下文，但不得泄漏 raw thought、密钥或未授权私密正文。
 - 普通聊天、技能调用、委派和复杂计划必须共享同一受治理执行链；不得因界面不同切回第二套执行 Runtime。
@@ -69,6 +69,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。
+
+  - 已入场的冻结 Chat 必须使用 immutable Task delivery ledger，而非将 speculative 文本写入 Life、Memory 或通道 outbox；回执同时绑定 self、relationship subject、workspace 与同步/affect revision。lease 或 grant 漂移必须失败关闭。该窄路径尚不代表普通 Chat 已完成连接恢复。
 - Voice `SPEAK`、Avatar `TRANSITION` 与文本必须从同一 `ExpressionPlan`、同步编号和
   self-affect revision 编译；Host 暂存、取消与释放 receipt 必须与物理 Edge receipt 分开。
   某个通道不可用只能独立降级，不能将七海 self-affect 中性化或把 `HOST_PROTOCOL_STAGED`
