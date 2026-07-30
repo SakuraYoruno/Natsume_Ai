@@ -5,7 +5,7 @@
 
 版本：v3.39
 
-核对日期：2026-07-28
+核对日期：2026-07-30
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -554,7 +554,20 @@ plan/sync/sentence digest，不复制句子正文、原始观察或私密媒体�
 plan 下为每个稳定句生成 Voice `SPEAK` 和 Avatar `TRANSITION` 成对 Host protocol；结束和
 打断生成 `RELEASE`/`CANCEL`。`0146_affective_expression_delivery.sql` 只投影 channel/action、
 sync、self-affect revision、avatar predecessor 与 Host staging status，绝不复制文本、原始媒体
-或模型推理。该读模型的 “last accepted” 是**最后一次 Host 暂存**，不是远端设备实际状态。
+或模型推理。受治理 Chat 则在 immutable Graph Acceptance 后执行下列**Host-local**补偿链：
+
+```text
+accepted narrative + frozen AffectiveTurnPlan + protocol receipt
+  → deterministic rebuild / exact comparison
+  → applied life.foreground_completed receipt
+  → terminal Action Preview (node grant bound)
+  → Host embodiment outbox row
+  → later independent Edge dispatcher / physical receipt
+```
+
+前四步不打开 Edge 连接；outbox 的 `PENDING`、`IN_DOUBT` 或 `REJECTED` 也不会回写
+self-affect，更不能被描述为音频播放或 Avatar 变更。该读模型的 “last accepted” 是**最后一次
+Host 暂存**，不是远端设备实际状态。
 
 0147 将 `companion_profile` 作为同一 relation aggregate 的 bounded head，而不是 Surface、TTS
 或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only

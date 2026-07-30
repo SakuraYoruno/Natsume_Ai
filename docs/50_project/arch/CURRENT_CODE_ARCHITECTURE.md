@@ -4,8 +4,8 @@
 # Natsume AI 当前代码架构事实
 
 版本：v5.77
-核对日期：2026-07-28
-合并基线：`origin/dev@fcb8997fa`；当前事实以本文所在提交的工作树为准
+核对日期：2026-07-30
+合并基线：`origin/dev@a989eccaa`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
@@ -110,9 +110,12 @@ self-affect 写权；外部 emotion hint 也不会成为七海的情绪。DL-05 
 再写 `RELEASE`/`CANCEL`。`0146_affective_expression_delivery.sql` 从相同 immutable event
 派生隐私最小化 Host protocol head，下一轮只在 exact person/workspace/subject/session scope
 读取上次已暂存 Avatar expression；VTS compatibility transition 不再读取 legacy
-`_prev_emotion_tag`。`HOST_PROTOCOL_STAGED` 只表示 Host 持久化了协议，不表示远端已播放或
-已改变 Avatar。高歧义回合保持两候 buffered selection；带 governed budget 的 stream 因缺最终
-provider usage 仍禁止启用，远端 Edge、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
+`_prev_emotion_tag`。受治理 Chat 的 immutable worker output 不能自行执行 channel action：Graph
+Acceptance 会重新计算计划对应的分句、intent 与 staging receipt，并在 exact Life foreground receipt
+与 node-bound terminal Preview 后才把每条 command 写入 Host embodiment outbox。`HOST_PROTOCOL_STAGED`
+和该 outbox row 都只表示 Host 持久化了协议，不表示远端已播放或已改变 Avatar。高歧义回合保持两候
+buffered selection；带 governed budget 的 stream 因缺最终 provider usage 仍禁止启用，远端 Edge、真实
+TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
 ## 1. 结论
 

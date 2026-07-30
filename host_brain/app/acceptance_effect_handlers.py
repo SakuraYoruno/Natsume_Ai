@@ -31,6 +31,8 @@ from host_brain.app.accepted_effect_reconciliation_handler import (
 from host_brain.app.accepted_edge_embodiment_handler import (
     AcceptedEdgeEmbodimentEnqueueHandler,
 )
+from host_brain.app.accepted_companion_expression_handler import AcceptedCompanionExpressionEnqueueHandler
+from host_brain.digital_life.companion_expression_acceptance import COMPANION_EXPRESSION_ENQUEUE_EFFECT
 from host_brain.app.accepted_sys_mode_receipt import (
     sys_mode_transition_handler_receipt_ref,
 )
@@ -172,11 +174,13 @@ def build_production_acceptance_effect_handlers(
     if embodiment_runtime_provider is not None:
         if not callable(embodiment_runtime_provider):
             raise TypeError("embodiment_runtime_provider must be callable")
-        handlers["edge.embodiment_enqueue"] = (
-            AcceptedEdgeEmbodimentEnqueueHandler(
-                runtime_provider=embodiment_runtime_provider,
+        handlers["edge.embodiment_enqueue"] = AcceptedEdgeEmbodimentEnqueueHandler(runtime_provider=embodiment_runtime_provider)
+        if life_receipt_reader_provider is not None:
+            if not callable(life_receipt_reader_provider):
+                raise TypeError("life_receipt_reader_provider must be callable")
+            handlers[COMPANION_EXPRESSION_ENQUEUE_EFFECT] = AcceptedCompanionExpressionEnqueueHandler(
+                runtime_provider=embodiment_runtime_provider, life_receipt_reader_provider=life_receipt_reader_provider
             )
-        )
     if scheduler_operation_handler is not None:
         if not callable(scheduler_operation_handler):
             raise TypeError("scheduler_operation_handler must be callable")
@@ -223,7 +227,6 @@ def build_production_acceptance_effect_handlers(
         evidence_store=effect_reconciliation_evidence_store,
     )
     return handlers
-
 
 class _AcceptedConversationUserTurnHandler:
     """Commit one visible turn and reconcile only from canonical SQLite rows."""
@@ -465,7 +468,6 @@ class _AcceptedLifeConversationHandler:
         if not isinstance(projected, Mapping):
             raise TypeError("Life conversation receipt is not mapping-compatible")
         return _validated_life_conversation_receipt(request, projected)
-
 
 class _AcceptedLifeForegroundHandler:
     """Submit one Life command and require its exact local projection receipts."""

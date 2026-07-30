@@ -4,8 +4,21 @@
 # 测试与验收目录
 
 版本：v2.53
-维护日期：2026-07-28
+维护日期：2026-07-30
 状态：当前证据
+
+## DL-05 受治理 Chat 的 Host expression outbox 切片
+
+- `test_dl05_expression_delivery.py` 验证冻结 plan 的文本分段、Voice/Avatar 成对 intent、
+  `RELEASE`、protocol drift 拒绝，以及 `AcceptedCompanionExpressionEnqueueHandler` 只写入本地
+  embodiment outbox、不声称物理 receipt。
+- `test_gr06_acceptance_effect_compiler.py` 验证 Graph Acceptance 只能在
+  `life.foreground_completed` 后生成四条有序的 `host.companion_expression_enqueue` effect，且每条
+  command 绑定 node grant Preview；篡改 worker 的 expression protocol 必须失败关闭。
+- 本次定向回归还包含 `test_ne03_action_preview_authority.py`、
+  `test_ne01_governed_operator_edge_command.py` 与 `test_gr06_acceptance_effect_dispatcher.py`：
+  `50 passed`。其中没有启动 Docker、Host、远端 Edge、真实 TTS/VTS/VRM 或 provider，因此只证明
+  Host admission / replay / Preview 边界，最终结论仍为 `ACCEPTANCE_PENDING_EXTERNAL`。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 

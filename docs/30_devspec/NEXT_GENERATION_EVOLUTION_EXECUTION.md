@@ -4,12 +4,12 @@
 # 七海实时情感数字生命正式执行合同
 
 版本：v5.0
-日期：2026-07-28
+日期：2026-07-30
 状态：`NE-08_IN_PROGRESS / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
-已经拥有持续情感生命”推导为完成。本合同以当前 `dev@fcb8997fa` 为基线，
+已经拥有持续情感生命”推导为完成。本合同以当前 `origin/dev@a989eccaa` 为基线，
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。
 
 ## 1. 产品结果
@@ -180,9 +180,14 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   avatar predecessor 和 Host receipt status，不复制文字、原始音视频或模型推理；它支持重启、
   作用域隔离和下一轮稳定读取，但不是 Edge physical receipt。
 - Governed Chat 不再无条件设置 TTS/VTS suppression；它仍在 Task Acceptance 前保持 speculative，
-  因此仅把同一冻结协议附入 acceptance effect，不能提前发送或驱动设备。
+  因此仅把同一冻结协议附入 acceptance effect，不能提前发送或驱动设备。Acceptance compiler 会从
+  immutable plan、accepted narrative 与 protocol receipt 重建每一条 Voice/Avatar command；只有
+  exact `life.foreground_completed` receipt、node grant Preview 与同一 Host runtime 通过后，才会写入
+  app-local durable embodiment outbox。
 - 单通道不可用只能标记通道降级，不能把 self-affect 改写为 `NEUTRAL`。当前远端 Edge 位于
-  另一台电脑，本波只完成 Host 接线、合同测试与可回放 protocol evidence，未启动远端服务。
+  另一台电脑，本波只完成 Host 接线、合同测试与可回放 protocol evidence，未启动远端服务。outbox
+  `PENDING/DISPATCHING/IN_DOUBT/APPLIED/REJECTED` 是 Host 状态；只有后续独立 channel receipt
+  才能断言设备效果。
 
 退出：文本、语音、Avatar 使用同一个 sync id 与 self-affect revision，并有真实 Edge 的
 `EDGE_APPLIED/DEGRADED/REJECTED` channel receipt；当前只达到前半段 Host protocol staging。

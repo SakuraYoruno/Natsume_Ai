@@ -1,19 +1,32 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from host_brain.app.vts_emotion_driver import _previous_durable_avatar_tag
 from host_brain.digital_life.affective_expression_delivery import (
+    build_buffered_expression_delivery,
     build_expression_delivery_controls,
     build_sentence_expression_delivery,
     expression_delivery_trace,
+)
+from host_brain.digital_life.companion_expression_acceptance import (
+    COMPANION_EXPRESSION_ENQUEUE_EFFECT,
+    CompanionExpressionEffectError,
+    compile_companion_expression_effect_payloads,
+    parse_companion_expression_effect_payload,
+)
+from host_brain.app.accepted_companion_expression_handler import (
+    AcceptedCompanionExpressionEnqueueHandler,
 )
 from host_brain.digital_life.affective_turn_planner import build_affective_turn_guidance
 from host_brain.surface_runtime.reply_context import _surface_emotion_context
 from host_brain.surface_runtime.delivery_audit import _bounded_expression_segments
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
+from natsume_contracts.life import digest_json
 
 
 NOW = 1_900_000_000_000
@@ -231,3 +244,208 @@ def test_canonical_expression_plan_retires_legacy_embodiment_delivery_path(monke
         "VOICE",
         "AVATAR",
     ]
+
+
+def _governed_foreground(*, narrative: str = "我在，慢一点也没关系。") -> dict[str, object]:
+    plan = _plan()
+    intents, controls, receipts = build_buffered_expression_delivery(
+        affective_turn_plan=plan,
+        narrative=narrative,
+        created_at_ms=NOW + 3,
+    )
+    return {
+        "command_type": "foreground_completed",
+        "person_id": "person-dl05",
+        "command_id": "life::foreground_completed::request-dl05",
+        "correlation_id": "request-dl05",
+        "payload": {
+            "assistant_reply": narrative,
+            "affective_turn_plan": plan,
+            "affective_turn_plan_digest": digest_json(plan),
+            "expression_delivery_intents": [item.as_dict() for item in intents],
+            "expression_delivery_controls": [item.as_dict() for item in controls],
+            "expression_delivery_receipts": [item.as_dict() for item in receipts],
+        },
+        "created_at_ms": NOW + 3,
+        "metadata": {
+            "source": "governed_task_acceptance",
+            "reply_sendable": True,
+            "reply_persistable": True,
+            "delivery_authorized": False,
+        },
+    }
+
+
+def _companion_effects() -> tuple[dict[str, object], ...]:
+    return compile_companion_expression_effect_payloads(
+        graph_id="graph-dl05",
+        graph_revision=1,
+        node_id="node-dl05",
+        attempt_id="attempt-dl05",
+        request_id="request-dl05",
+        principal_id="person-dl05",
+        session_id="session-dl05",
+        node_grant_ref="node-grant://dl05",
+        foreground=_governed_foreground(),
+    )
+
+
+def test_governed_expression_acceptance_rebuilds_exact_host_outbox_commands() -> None:
+    effects = _companion_effects()
+
+    assert len(effects) == 4  # paired sentence protocol followed by paired release
+    assert [effect["delivery_sequence"] for effect in effects] == [0, 1, 2, 3]
+    parsed = [parse_companion_expression_effect_payload(item) for item in effects]
+    assert [item["command"].kind for item in parsed] == ["voice", "avatar", "voice", "avatar"]
+    assert [item["command"].action for item in parsed] == ["speak", "set_expression", "release", "release"]
+    assert all(item["command"].session_id == "session-dl05" for item in parsed)
+    assert all(item["intent"].self_affect_revision == 31 for item in parsed)
+    assert all(item["protocol_receipt"].physical_receipt_ref is None for item in parsed)
+    assert all(
+        item["command"].authority_ref.startswith("authority://task-acceptance/sha256/")
+        for item in parsed
+    )
+    assert COMPANION_EXPRESSION_ENQUEUE_EFFECT == "host.companion_expression_enqueue"
+
+
+def test_governed_expression_acceptance_rejects_worker_protocol_drift() -> None:
+    foreground = _governed_foreground()
+    payload = foreground["payload"]
+    assert isinstance(payload, dict)
+    intents = payload["expression_delivery_intents"]
+    assert isinstance(intents, list)
+    intents[0] = {**intents[0], "payload": {**intents[0]["payload"], "text": "伪造"}}
+
+    with pytest.raises(CompanionExpressionEffectError, match="PROTOCOL_DRIFT"):
+        compile_companion_expression_effect_payloads(
+            graph_id="graph-dl05",
+            graph_revision=1,
+            node_id="node-dl05",
+            attempt_id="attempt-dl05",
+            request_id="request-dl05",
+            principal_id="person-dl05",
+            session_id="session-dl05",
+            node_grant_ref="node-grant://dl05",
+            foreground=foreground,
+        )
+
+
+def test_accepted_companion_expression_only_enqueues_host_outbox(monkeypatch) -> None:
+    from host_brain.governor import action_preview
+
+    effect = _companion_effects()[0]
+    business = dict(effect)
+    calls: list[object] = []
+
+    class PreviewService:
+        def require_execution(self, **kwargs: object) -> object:
+            calls.append(kwargs)
+            encoded = json.dumps(
+                business,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            return SimpleNamespace(
+                payload={
+                    "authority_kind": "ACCEPTANCE_EFFECT",
+                    "action_kind": "acceptance-effect.host.companion_expression_enqueue",
+                    "action_scope": "acceptance-effect://dl05/0",
+                    "risk_level": 4,
+                    "action_args_digest": "sha256:" + hashlib.sha256(encoded).hexdigest(),
+                }
+            )
+
+    monkeypatch.setattr(action_preview, "ActionPreviewService", PreviewService)
+
+    class Runtime:
+        runtime_scope_id = "runtime-dl05"
+
+        def __init__(self) -> None:
+            self.rows: dict[str, dict[str, object]] = {}
+
+        def enqueue(self, command: object, **_kwargs: object) -> object:
+            calls.append(command)
+            self.rows[command.command_id] = {
+                "outbox_id": "outbox-dl05",
+                "runtime_scope_id": self.runtime_scope_id,
+                "command_id": command.command_id,
+                "idempotency_key": command.idempotency_key,
+                "status": "PENDING",
+                "command": command.as_dict(),
+            }
+            return SimpleNamespace(
+                outbox_id="outbox-dl05",
+                command_id=command.command_id,
+                idempotency_key=command.idempotency_key,
+            )
+
+        def reopen_outbox_command(self, command: object) -> dict[str, object] | None:
+            return self.rows.get(command.command_id)
+
+    runtime = Runtime()
+    life = effect["life_foreground"]
+    assert isinstance(life, dict)
+
+    class Reader:
+        def get_receipt(self, command_id: str) -> dict[str, object] | None:
+            if command_id != life["command_id"]:
+                return None
+            return {
+                "status": "APPLIED",
+                "command_id": life["command_id"],
+                "person_id": life["person_id"],
+                "command_hash": life["command_hash"],
+                "event_id": "life_evt_dl05",
+            }
+
+    boundary = {
+        "action_kind": "acceptance-effect.host.companion_expression_enqueue",
+        "action_scope": "acceptance-effect://dl05/0",
+        "risk_level": 4,
+        "action_args": business,
+        "node_grant_ref": "node-grant://dl05",
+        "authority_context": {
+            "schema_version": "Natsume.action_preview.acceptance_effect_authority_request.v1",
+            "effect_id": "acceptance-effect://dl05/0",
+            "lease_owner_id": "dispatcher-dl05",
+            "fencing_token": 1,
+        },
+    }
+    handler = AcceptedCompanionExpressionEnqueueHandler(
+        runtime_provider=lambda: runtime,
+        life_receipt_reader_provider=Reader,
+    )
+    receipt = handler(
+        {
+            **business,
+            "_action_preview_terminal_proof": {
+                "service": PreviewService(),
+                "event_id": "preview-dl05",
+                "boundary": boundary,
+            },
+        }
+    )
+
+    assert receipt["host_outbox_status"] == "PENDING"
+    assert receipt["physical_receipt_ref"] is None
+    assert receipt["receipt_ref"].startswith("embodiment-outbox://")
+    assert len(runtime.rows) == 1
+    assert len([item for item in calls if hasattr(item, "command_id")]) == 1
+
+
+def test_production_handler_registry_requires_life_receipt_reader() -> None:
+    from host_brain.app.acceptance_effect_handlers import (
+        build_production_acceptance_effect_handlers,
+    )
+
+    handlers = build_production_acceptance_effect_handlers(
+        embodiment_runtime_provider=lambda: object(),
+        life_receipt_reader_provider=lambda: object(),
+    )
+
+    assert "host.companion_expression_enqueue" in handlers
+    assert isinstance(
+        handlers["host.companion_expression_enqueue"],
+        AcceptedCompanionExpressionEnqueueHandler,
+    )

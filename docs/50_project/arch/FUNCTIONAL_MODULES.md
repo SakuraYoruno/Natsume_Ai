@@ -4,7 +4,7 @@
 # Natsume AI 功能模块与责任边界
 
 版本：v2.45
-核对日期：2026-07-28
+核对日期：2026-07-30
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
@@ -435,7 +435,7 @@ Budget contention persistence 由 `TaskBudgetUsageStoreMixin` 唯一拥有：首
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|
-| Host Channels | Edge transport、TTS/VTS/MateEngine mapping、embodiment outbox 和 Life delivery transport | [`channels/edge_transport.py`](../../../host_brain/channels/edge_transport.py)、[`channels/embodiment.py`](../../../host_brain/channels/embodiment.py)、[`channels/embodiment_outbox.py`](../../../host_brain/channels/embodiment_outbox.py)、[`channels/mateengine.py`](../../../host_brain/channels/mateengine.py) | 跨进程 contracts、Acceptance effect/outbox、terminal Action Preview | 未验证直接物理副作用、无 Preview 的高风险网络/设备调用 | `PARTIAL_FIRST_GOVERNED_EXPRESSION_SLICE / DEVICE_DEPENDENT`；raw HTTP transport 与低层 command port 不再公开；Operator 表情命令经 `edge.embodiment_enqueue`、terminal Preview 与 durable outbox 进入 `set_expression`，exact replay/receipt reconciliation 已接。旧 voice/performance/avatar 直通和更多 command type 仍失败关闭，真实设备留 NE-07 |
+| Host Channels | Edge transport、TTS/VTS/MateEngine mapping、embodiment outbox 和 Life delivery transport | [`channels/edge_transport.py`](../../../host_brain/channels/edge_transport.py)、[`channels/embodiment.py`](../../../host_brain/channels/embodiment.py)、[`channels/embodiment_outbox.py`](../../../host_brain/channels/embodiment_outbox.py)、[`app/accepted_companion_expression_handler.py`](../../../host_brain/app/accepted_companion_expression_handler.py)、[`digital_life/companion_expression_acceptance.py`](../../../host_brain/digital_life/companion_expression_acceptance.py) | 跨进程 contracts、Acceptance effect/outbox、terminal Action Preview、applied Life receipt | 未验证直接物理副作用、无 Preview 的高风险网络/设备调用、worker 提前 channel dispatch | `PARTIAL_GOVERNED_COMPANION_EXPRESSION_HOST_OUTBOX / DEVICE_DEPENDENT`；raw HTTP transport 与低层 command port 不再公开。Operator 表情命令仍经 `edge.embodiment_enqueue`；受治理 Chat 新增 `host.companion_expression_enqueue`，只在 foreground Life receipt、冻结 ExpressionPlan 重建和 node-bound Preview 全部一致后逐条进入 Host durable outbox。它不是 Edge apply；真实设备、连续连接与 physical receipt 留 DL-07 |
 | Gateway Transport | 平台 webhook 验签、归一化、durable intake/delivery、receipt 和重试 | [`edge_client/gateway/server.py`](../../../edge_client/gateway/server.py)、[`edge_client/gateway/delivery_runtime.py`](../../../edge_client/gateway/delivery_runtime.py)、[`persistence/gateway_transport_repository.py`](../../../host_brain/persistence/gateway_transport_repository.py) | `natsume_contracts.edge`、Host HMAC 输入端、平台 adapter | Host 业务实现、对话状态真相 | `WIRED`；Gateway store factory 通过合同注入，但当前组装较大 |
 | Edge Runtime | 本地 sensor/actuator composition、语音 pipeline、Avatar 状态和健康 | [`edge_client/runtime/bootstrap.py`](../../../edge_client/runtime/bootstrap.py)、[`edge_client/runtime/voice_pipeline.py`](../../../edge_client/runtime/voice_pipeline.py)、[`edge_client/actuators/`](../../../edge_client/actuators)、[`edge_client/senses/`](../../../edge_client/senses) | Edge contracts、本地 provider/OS adapter | Host app/audit 实现、全局任务 authority | `WIRED / ENVIRONMENT_DEPENDENT`；边界扫描禁止 Edge 导入 Host 实现 |
 | Gateway Platform Adapters | QQ、微信、飞书、企微、Telegram、LINE 协议适配 | [`edge_client/gateway/adapters/`](../../../edge_client/gateway/adapters) | 平台 SDK/API、Gateway model | 跨平台业务策略、Host 任务状态 | `PLATFORM_DEPENDENT`；未配凭据或本地 bridge 时应显式 degraded |

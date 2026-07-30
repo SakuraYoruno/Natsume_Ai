@@ -4,7 +4,7 @@
 # 当前架构程序注册表
 
 版本：v4.7
-维护日期：2026-07-28
+维护日期：2026-07-30
 状态：`ONE_ACTIVE_PROGRAM`
 
 ## 唯一活动程序
@@ -31,7 +31,9 @@ Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的�
 intent，候选模型输出和纯文本 fallback 均不能改写 self-affect，高歧义/边界/修复仅
 允许恰好两候 buffered selection。DL-05 已将同一冻结 `ExpressionPlanV1` 编译为 Voice
 `SPEAK` 与 Avatar `TRANSITION` 的成对 Host protocol，并在结束/打断时追加
-`RELEASE`/`CANCEL`；0146 只投影 Host staging，远端 Edge 尚未启动，因此不能声称播放或
+`RELEASE`/`CANCEL`；受治理 Chat 现在只在 Graph Acceptance 后重建并核验该协议，以 terminal
+Action Preview 和 `life.foreground_completed` receipt 为前提逐条写入 Host embodiment outbox。0146
+只投影 Host staging，outbox admission 也不是物理 effect；远端 Edge 尚未启动，因此不能声称播放或
 Avatar 已执行。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_permission=ALLOWED`、
 无 repair/未结 episode 且 self regulation 未要求克制时，才以 bounded canonical
 self-affect 生成无回应压力的主动消息；旧 Bond、legacy `affect` 与固定模板均无发送权。

@@ -18,6 +18,7 @@ from host_brain.digital_life.application_boundary import (
     submit_life_command,
 )
 from host_brain.digital_life.affective_expression_delivery import (
+    bounded_expression_segments,
     build_expression_delivery_controls,
     build_sentence_expression_delivery,
     expression_delivery_trace,
@@ -627,34 +628,9 @@ def _expression_sentence_protocol(
 
 
 def _bounded_expression_segments(narrative: str, *, maximum: int = 2_000) -> list[str]:
-    """Split a buffered accepted reply without silently dropping its tail.
+    """Compatibility wrapper for the shared canonical segmentation rule."""
 
-    Native streaming already yields stable sentences.  A governed/buffered
-    reply becomes visible only after Acceptance, so it may be compiled here.
-    The Voice protocol retains its per-intent bound; a long reply is split at
-    a nearby natural boundary, falling back to a bounded Unicode slice.
-    """
-
-    remaining = str(narrative or "").strip()
-    if not remaining:
-        return []
-    maximum = max(64, int(maximum))
-    segments: list[str] = []
-    separators = "。！？!?；;，,、\n"
-    while remaining:
-        if len(remaining) <= maximum:
-            segments.append(remaining)
-            break
-        window = remaining[:maximum]
-        boundary = max(window.rfind(marker) for marker in separators)
-        cut = boundary + 1 if boundary >= maximum // 2 else maximum
-        segment = remaining[:cut].strip()
-        if not segment:  # defensive only; a non-empty source always advances
-            segment = remaining[:maximum]
-            cut = len(segment)
-        segments.append(segment)
-        remaining = remaining[cut:].lstrip()
-    return segments
+    return list(bounded_expression_segments(narrative, maximum=maximum))
 
 
 def _expression_control_protocol(

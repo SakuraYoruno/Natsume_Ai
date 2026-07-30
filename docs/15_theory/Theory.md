@@ -5,7 +5,7 @@
 
 版本：v2.37
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-28
+维护日期：2026-07-30
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -629,11 +629,13 @@ self-affect revision、调节方式、陪伴动作和 `ExpressionPlan` 绑定成
 可以逐句送达，但每个稳定句必须先成为可重放的 delivery intent；因此“实时”不等于先
 说出去、以后再补写。高歧义、修复和边界场景宁可保留两候选择，也不以低延迟跳过分寸。
 DL-05 已把这条约束落实到 Host protocol：每个稳定句在文本可见前编译出配对的 Voice
-`SPEAK` 和 Avatar `TRANSITION`，并在结束或打断时追加 `RELEASE`/`CANCEL`。它们共享
-同一个 sync/self-affect revision，且下一轮只从 exact-scope 的 durable avatar head 读取前一
-表达；旧 `_prev_emotion_tag` 不能再把用户观察伪装成 Avatar 的起点。`HOST_*_STAGED` 仅说明
-Host 已持久化协议，实际设备是否播放、降级或拒绝仍必须由独立 Edge receipt 说明，不能各自把
-文本标签再解释一次。
+`SPEAK` 和 Avatar `TRANSITION`，并在结束或打断时追加 `RELEASE`/`CANCEL`。受治理 Chat
+则必须等 Graph Acceptance 后重新从冻结计划和已接受文本导出相同命令，再以 exact Preview 与
+`life.foreground_completed` receipt 绑定写入 Host durable outbox；因此 speculative worker 不能提前
+驱动设备或改写表达。它们共享同一个 sync/self-affect revision，且下一轮只从 exact-scope 的 durable
+avatar head 读取前一表达；旧 `_prev_emotion_tag` 不能再把用户观察伪装成 Avatar 的起点。
+`HOST_*_STAGED` 或 Host outbox admission 仅说明本地协议已持久化，实际设备是否播放、降级或拒绝
+仍必须由独立 Edge receipt 说明，不能各自把文本标签再解释一次。
 
 情感系统必须满足：
 

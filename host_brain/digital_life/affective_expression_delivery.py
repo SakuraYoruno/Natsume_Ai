@@ -323,6 +323,174 @@ def build_expression_delivery_controls(
     return intents, receipts
 
 
+def bounded_expression_segments(
+    narrative: str,
+    *,
+    maximum: int = 2_000,
+) -> tuple[str, ...]:
+    """Split one accepted buffered reply without dropping any visible text.
+
+    Native streaming already supplies gated sentence boundaries.  Governed
+    Chat reaches Acceptance as one buffered narrative, so this deterministic
+    splitter is shared by the Surface adapter and the Acceptance compiler.
+    Keeping it here prevents the worker-side protocol and the canonical
+    post-Acceptance protocol from quietly using different text boundaries.
+    """
+
+    remaining = str(narrative or "").strip()
+    if not remaining:
+        return ()
+    maximum = max(64, int(maximum))
+    segments: list[str] = []
+    separators = "。！？!?；;，,、\n"
+    while remaining:
+        if len(remaining) <= maximum:
+            segments.append(remaining)
+            break
+        window = remaining[:maximum]
+        boundary = max(window.rfind(marker) for marker in separators)
+        cut = boundary + 1 if boundary >= maximum // 2 else maximum
+        segment = remaining[:cut].strip()
+        if not segment:  # Defensive only; non-empty input must advance.
+            segment = remaining[:maximum]
+            cut = len(segment)
+        segments.append(segment)
+        remaining = remaining[cut:].lstrip()
+    return tuple(segments)
+
+
+def build_buffered_expression_delivery(
+    *,
+    affective_turn_plan: Mapping[str, Any],
+    narrative: str,
+    created_at_ms: int,
+) -> tuple[
+    tuple[ExpressionDeliveryIntentV1, ...],
+    tuple[ExpressionDeliveryIntentV1, ...],
+    tuple[ExpressionDeliveryReceiptV1, ...],
+]:
+    """Compile the complete Host protocol for one accepted buffered reply.
+
+    The return order is ``(sentence_intents, terminal_controls, receipts)``.
+    It deliberately describes only Host protocol staging; physical channel
+    application remains an independently receipted outbox concern.
+    """
+
+    text = _text(narrative, field_name="narrative", limit=32_000)
+    created = _integer(created_at_ms, field_name="created_at_ms")
+    sentence_intents: list[ExpressionDeliveryIntentV1] = []
+    receipts: list[ExpressionDeliveryReceiptV1] = []
+    segments = bounded_expression_segments(text)
+    for sentence_index, sentence in enumerate(segments):
+        intents, staged = build_sentence_expression_delivery(
+            affective_turn_plan=affective_turn_plan,
+            sentence=sentence,
+            sentence_index=sentence_index,
+            created_at_ms=created,
+        )
+        sentence_intents.extend(intents)
+        receipts.extend(staged)
+    controls, terminal_receipts = build_expression_delivery_controls(
+        affective_turn_plan=affective_turn_plan,
+        action="RELEASE",
+        sent_sentence_count=len(segments),
+        created_at_ms=created,
+    )
+    receipts.extend(terminal_receipts)
+    return tuple(sentence_intents), controls, tuple(receipts)
+
+
+def parse_expression_delivery_intent(
+    raw: Mapping[str, Any] | Any,
+) -> ExpressionDeliveryIntentV1:
+    """Reopen one immutable intent and reject any projection drift."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("AFFECTIVE_EXPRESSION_INTENT_INVALID")
+    value = dict(raw)
+    required = {
+        "schema_version",
+        "delivery_id",
+        "plan_id",
+        "synchronization_id",
+        "self_id",
+        "self_affect_revision",
+        "workspace_id",
+        "relationship_subject_id",
+        "session_id",
+        "channel",
+        "action",
+        "sentence_index",
+        "payload",
+        "payload_digest",
+        "created_at_ms",
+    }
+    if set(value) != required or value.get("schema_version") != "expression_delivery_intent.v1":
+        raise ValueError("AFFECTIVE_EXPRESSION_INTENT_INVALID")
+    try:
+        intent = ExpressionDeliveryIntentV1(
+            delivery_id=str(value.get("delivery_id") or ""),
+            plan_id=str(value.get("plan_id") or ""),
+            synchronization_id=str(value.get("synchronization_id") or ""),
+            self_id=str(value.get("self_id") or ""),
+            self_affect_revision=value.get("self_affect_revision"),
+            workspace_id=str(value.get("workspace_id") or ""),
+            relationship_subject_id=str(value.get("relationship_subject_id") or ""),
+            session_id=str(value.get("session_id") or ""),
+            channel=str(value.get("channel") or ""),
+            action=str(value.get("action") or ""),
+            sentence_index=value.get("sentence_index"),
+            payload=value.get("payload"),
+            created_at_ms=value.get("created_at_ms"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("AFFECTIVE_EXPRESSION_INTENT_INVALID") from exc
+    if value != intent.as_dict():
+        raise ValueError("AFFECTIVE_EXPRESSION_INTENT_DRIFT")
+    return intent
+
+
+def parse_expression_delivery_receipt(
+    raw: Mapping[str, Any] | Any,
+) -> ExpressionDeliveryReceiptV1:
+    """Reopen one immutable Host protocol receipt without upgrading it."""
+
+    if not isinstance(raw, Mapping):
+        raise ValueError("AFFECTIVE_EXPRESSION_RECEIPT_INVALID")
+    value = dict(raw)
+    required = {
+        "schema_version",
+        "receipt_id",
+        "delivery_id",
+        "synchronization_id",
+        "channel",
+        "action",
+        "status",
+        "reason_code",
+        "physical_receipt_ref",
+        "created_at_ms",
+    }
+    if set(value) != required or value.get("schema_version") != "expression_delivery_receipt.v1":
+        raise ValueError("AFFECTIVE_EXPRESSION_RECEIPT_INVALID")
+    try:
+        receipt = ExpressionDeliveryReceiptV1(
+            receipt_id=str(value.get("receipt_id") or ""),
+            delivery_id=str(value.get("delivery_id") or ""),
+            synchronization_id=str(value.get("synchronization_id") or ""),
+            channel=str(value.get("channel") or ""),
+            action=str(value.get("action") or ""),
+            status=str(value.get("status") or ""),
+            reason_code=value.get("reason_code"),
+            physical_receipt_ref=value.get("physical_receipt_ref"),
+            created_at_ms=value.get("created_at_ms"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("AFFECTIVE_EXPRESSION_RECEIPT_INVALID") from exc
+    if value != receipt.as_dict():
+        raise ValueError("AFFECTIVE_EXPRESSION_RECEIPT_DRIFT")
+    return receipt
+
+
 def expression_delivery_trace(
     intents: Sequence[ExpressionDeliveryIntentV1],
     receipts: Sequence[ExpressionDeliveryReceiptV1],
@@ -342,7 +510,11 @@ def expression_delivery_trace(
 
 
 __all__ = [
+    "bounded_expression_segments",
+    "build_buffered_expression_delivery",
     "build_expression_delivery_controls",
     "build_sentence_expression_delivery",
     "expression_delivery_trace",
+    "parse_expression_delivery_intent",
+    "parse_expression_delivery_receipt",
 ]

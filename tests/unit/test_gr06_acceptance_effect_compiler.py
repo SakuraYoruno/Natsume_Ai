@@ -13,6 +13,12 @@ from host_brain.contracts.agent_runtime.control_route_execution_policy import (
 from host_brain.orchestration.host_route_contracts import (
     build_direct_host_route_contracts,
 )
+from host_brain.digital_life.affective_expression_delivery import (
+    build_buffered_expression_delivery,
+)
+from host_brain.digital_life.affective_turn_planner import (
+    build_affective_turn_guidance,
+)
 from host_brain.persistence.task_repository import AcceptanceEffectCommitScope
 from host_brain.task_runtime.acceptance_effects import (
     ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID,
@@ -20,6 +26,7 @@ from host_brain.task_runtime.acceptance_effects import (
     compile_graph_acceptance_effects,
 )
 from natsume_contracts.task import HostCommandSurface
+from natsume_contracts.life import digest_json
 
 
 _OPERATOR_REQUEST_ID = "request-gr06-operator-sys-mode"
@@ -92,6 +99,134 @@ def _contracts():
             "retrieval_summary": {"status": "OK"},
         },
     )
+
+
+def _affective_chat_contracts():
+    fact = WorldFactV2(
+        workspace_id="workspace-gr06-affective",
+        subject_id="person-gr06-compiler",
+        key="relationship.state",
+        value="connected",
+        source_ref="world-observation://gr06/affective/1",
+        confidence=1.0,
+        observed_at_ms=100,
+        expires_at_ms=10_000,
+    )
+    snapshot = WorldSnapshotV2(
+        workspace_id=fact.workspace_id,
+        subject_id=fact.subject_id,
+        revision=1,
+        facts=(fact,),
+    )
+    contracts = build_direct_host_route_contracts(
+        surface=HostCommandSurface.CHAT,
+        request_id="request-gr06-affective",
+        session_id="session-gr06-affective",
+        principal_id="person-gr06-compiler",
+        ts_ms=100,
+        intent_draft={
+            "id": "intent-gr06-affective",
+            "route": "chat",
+            "target_id": "surface_reply",
+            "action": "exec_intent",
+            "target": "host",
+            "task": "reply with companionship",
+        },
+        governor_result={
+            "request_id": "request-gr06-affective",
+            "intent_id": "intent-gr06-affective",
+            "decision": "APPROVE",
+            "risk_level": 1,
+            "ts_ms": 100,
+        },
+        sanitized_message="我今天有点累",
+        person_id="person-gr06-compiler",
+        frozen_context={
+            "runtime_context_schema": "natsume.runtime-context.request.v1",
+            "workspace_id": fact.workspace_id,
+            "subject_id": fact.subject_id,
+            "world_snapshot_v2": snapshot.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": fact.workspace_id,
+                "subject_id": fact.subject_id,
+                "scene_id": "scene.companion",
+                "revision": 1,
+                "decision_digest": "f" * 64,
+            },
+        },
+    )
+    return contracts
+
+
+def _affective_foreground_descriptor() -> dict:
+    guidance = build_affective_turn_guidance(
+        emotion_context={
+            "_affective_life_internal": True,
+            "affective_life": {
+                "schema_version": "affective_turn_context.v1",
+                "self_id": "natsume_ai",
+                "workspace_id": "workspace-gr06-affective",
+                "relationship_subject_id": "person-gr06-compiler",
+                "session_id": "session-gr06-affective",
+                "self_affect": {
+                    "self_id": "natsume_ai",
+                    "relationship_subject_id": "person-gr06-compiler",
+                    "revision": 6,
+                    "components": [{"emotion": "CARE", "intensity": 0.6}],
+                    "last_regulation": {
+                        "regulation_id": "reg-gr06-affective",
+                        "mode": "EXPRESS",
+                    },
+                },
+                "user_observations": [],
+                "relationship_life": {
+                    "state": {
+                        "relationship_subject_id": "person-gr06-compiler",
+                        "revision": 3,
+                        "repair_required": False,
+                        "proactive_permission": "UNKNOWN",
+                    },
+                    "aftereffect": {"outcome": "UNKNOWN"},
+                },
+            },
+        },
+        request_id="request-gr06-affective",
+        workspace_id="workspace-gr06-affective",
+        relationship_subject_id="person-gr06-compiler",
+        session_id="session-gr06-affective",
+        created_at_ms=100,
+        previous_avatar_expression="NEUTRAL",
+        previous_expression_source="FALLBACK_NEUTRAL",
+    )
+    assert guidance is not None
+    plan = guidance.plan.as_dict()
+    narrative = "我在这儿，先歇一会儿也好。"
+    intents, controls, receipts = build_buffered_expression_delivery(
+        affective_turn_plan=plan,
+        narrative=narrative,
+        created_at_ms=100,
+    )
+    return {
+        "effect_type": "life.foreground_completed",
+        "commit_scope": "NODE",
+        "payload": {
+            "command_type": "foreground_completed",
+            "person_id": "person-gr06-compiler",
+            "command_id": "life::foreground_completed::request-gr06-affective",
+            "correlation_id": "request-gr06-affective",
+            "created_at_ms": 100,
+            "metadata": {"source": "surface_main_chain"},
+            "payload": {
+                "assistant_reply": narrative,
+                "affective_turn_plan": plan,
+                "affective_turn_plan_digest": digest_json(plan),
+                "expression_delivery_intents": [item.as_dict() for item in intents],
+                "expression_delivery_controls": [item.as_dict() for item in controls],
+                "expression_delivery_receipts": [item.as_dict() for item in receipts],
+            },
+        },
+    }
 
 
 def _operator_contracts():
@@ -460,6 +595,39 @@ def test_compiler_rebuilds_graph_scoped_user_life_and_delivery_effects() -> None
     delivery = first[4].payload
     assert delivery["reply_target"] == "conversation-gr06"
     assert delivery["authority"]["governor_grant_ref"] == contracts.command.governor_grant_ref
+
+
+def test_compiler_places_frozen_companion_expression_after_life_acceptance() -> None:
+    contracts = _affective_chat_contracts()
+    effects = compile_graph_acceptance_effects(
+        command=contracts.command,
+        work_order=contracts.work_order,
+        node_id=contracts.graph.nodes[0].node_id,
+        attempt_id="attempt-gr06-affective",
+        worker_commit={
+            "decision": "APPROVE",
+            "request_id": contracts.command.request_id,
+            "narrative": "我在这儿，先歇一会儿也好。",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {
+                "node_grant_ref": "node-grant://gr06-affective",
+                "node_grant_digest": "sha256:" + "4" * 64,
+            },
+            "acceptance_effect_intents": [_affective_foreground_descriptor()],
+        },
+    )
+
+    effect_types = [item.effect_type for item in effects]
+    first_expression = effect_types.index("host.companion_expression_enqueue")
+    assert effect_types[first_expression - 1] == "life.foreground_completed"
+    assert effect_types.count("host.companion_expression_enqueue") == 4
+    expression = effects[first_expression]
+    assert expression.payload["embodiment_command"]["kind"] == "voice"
+    assert expression.payload["embodiment_command"]["action"] == "speak"
+    assert expression.payload["_action_preview_context"]["node_grant_ref"] == (
+        "node-grant://gr06-affective"
+    )
 
 
 def test_compiler_rejects_worker_forged_authority_and_scope() -> None:

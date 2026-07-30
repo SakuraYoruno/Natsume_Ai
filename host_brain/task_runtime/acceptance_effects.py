@@ -55,6 +55,11 @@ from host_brain.task_runtime.operation_reconciliation_acceptance_effect import (
 from host_brain.task_runtime.worker_authority_guard import forbidden_worker_authority_path
 from host_brain.task_runtime import agent_workspace_acceptance_effect as agent_workspace_effects
 from host_brain.agent_runtime.workspace_artifact_effect import AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
+from host_brain.digital_life.companion_expression_acceptance import (
+    COMPANION_EXPRESSION_ENQUEUE_EFFECT,
+    CompanionExpressionEffectError,
+    compile_companion_expression_effect_payloads,
+)
 
 ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
 _EFFECT_TYPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
@@ -225,6 +230,40 @@ def compile_graph_acceptance_effects(
         bond_summary=bond_summary,
         pack=pack,
     )
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_ref,
+        worker_commit=commit,
+    )
+    has_affective_plan = isinstance(
+        _json_mapping(foreground.get("payload"), field_name="foreground.payload").get(
+            "affective_turn_plan"
+        ),
+        Mapping,
+    )
+    companion_expression_effects: tuple[dict[str, Any], ...] = ()
+    if has_affective_plan:
+        if preview_context is None:
+            raise AcceptanceEffectCompileError(
+                "affective companion delivery requires a Runtime Context Preview binding"
+            )
+        try:
+            companion_expression_effects = (
+                compile_companion_expression_effect_payloads(
+                    graph_id=command.graph_id,
+                    graph_revision=command.graph_revision,
+                    node_id=node_ref,
+                    attempt_id=attempt_ref,
+                    request_id=command.request_id,
+                    principal_id=command.principal_id,
+                    session_id=command.session_id,
+                    node_grant_ref=str(preview_context["node_grant_ref"]),
+                    foreground=foreground,
+                )
+            )
+        except CompanionExpressionEffectError as exc:
+            raise AcceptanceEffectCompileError(str(exc)) from exc
     user_turn = {
         "request_id": command.request_id,
         "session_id": command.session_id,
@@ -288,6 +327,10 @@ def compile_graph_acceptance_effects(
         ),
         ("life.foreground_completed", foreground),
     ])
+    payloads.extend(
+        (COMPANION_EXPRESSION_ENQUEUE_EFFECT, payload)
+        for payload in companion_expression_effects
+    )
     reply_channel = str(delivery_context.get("reply_channel") or "").strip()
     reply_target = str(delivery_context.get("reply_target") or "").strip()
     if reply_channel and reply_target:
@@ -312,12 +355,6 @@ def compile_graph_acceptance_effects(
             )
         )
 
-    preview_context = _action_preview_context(
-        command=command,
-        work_order=work_order,
-        node_id=node_ref,
-        worker_commit=commit,
-    )
     if preview_context is not None:
         payloads = [
             (
