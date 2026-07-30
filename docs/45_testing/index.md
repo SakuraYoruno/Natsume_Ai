@@ -20,6 +20,13 @@
   这批本地合同只证明测量样本和提示词边界，当前状态是 `MEASUREMENT_PENDING`；真实 provider、
   48 条盲测轨迹、至少三名独立评审、远端 Edge 和 DL-07 服务栈均未运行。
 
+## DL-01 Edge 观测与情感 authority 退役
+
+- `test_edge_events_whitelist.py` 证明 `EMOTION_DETECTED` 仍可作为 Edge 审计事件被接收，但不会再触发
+  Cortex Bond 更新或 VTS 驱动；同一文件还静态约束 `system_handler.py` 不保留这两个 fire-and-forget 调用。
+- `test_http_edge_events_acceptance.py` 继续覆盖真实 ASGI 中 final ASR → Host Input 的受控入站桥。
+  当前定向集合为 `18 passed`；没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
+
 ## DL-04 本机直连 Chat scope 切流
 
 - `test_chat_handler_streaming.py` 验证 `/v1/chat` 在 Thalamus、AffectFusion 和 Cortex 前，将 caller

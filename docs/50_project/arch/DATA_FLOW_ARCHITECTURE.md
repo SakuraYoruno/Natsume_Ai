@@ -900,7 +900,7 @@ flowchart LR
 
 初始 marker 只把已知中断从 `RESERVED` 立即推进为待对账状态；它本身不关闭 Attempt/Node/Graph/Budget/Lease，不清理 Workspace，也不从异常类型推断外部动作。unknown/cancellation case 的 current 性只随 exact Operation version 与取消身份变化：后续 Budget 计量、Lease 过期或 Attempt/Node/Graph 围栏仍留在历史 subject 中，但不会让未决 case 从恢复 inventory 消失；后到的 Graph cancellation 会追加 intent-bound successor，并使旧 unknown case退出 current。只有后续签名、无取消、无投影/Effect、过期 Lease、唯一 graph Budget 的 `NO_SIDE_EFFECT` 证据才能终结该精确节点；多节点 Graph/Budget 只能由 0090 fan-in 终结，READY sibling 在裁决前不会执行。其它场景无法取得完整签名证据时必须继续 hold；本地临时密钥证明也不替代默认关闭的 Operator HTTP/key canary。
 
-Edge 下行现在明确分成两条：Tribe 的平台/情绪事件只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。
+Edge 入站与下行现在都明确分权：`EMOTION_DETECTED`、`USER_REACTION` 等入站 telemetry 只进入 Host 审计观察，不能直接调用 Bond writer、改变 self-affect 或驱动 VTS；只有 final ASR 文本可进入标准 Host Input，再经 Fusion/Appraisal/accepted plan 取得表达因果。Tribe 的平台/情绪事件同样只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。
 
 ```mermaid
 flowchart LR

@@ -18,14 +18,16 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-00_SOUL_RUNTIME_RELATIONSHIP_AUTHORITY_AND_EXPERIENCE_BASELINE`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-01_AFFECTIVE_LIFE_KERNEL_LEGACY_EDGE_MUTATION_RETIREMENT`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
 使用户 observation 先落 journal、再可选形成七海自身 CARE/CONCERN 等 self-affect，
 而非镜像用户标签。DL-03 已把 accepted reply 的 provisional relation episode、
 下一次输入的 aftereffect、boundary/repair/proactive permission 和 Surface 的可信关系
-约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。DL-04 已将
+约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。Edge ingress 的情绪事件也已从
+fire-and-forget Bond/VTS 旁路退役：它只记录观测，final ASR 才能进入正常 Host Input，Voice/Avatar 只能由已接受
+的 `AffectiveTurnPlanV1` 驱动。DL-04 已将
 可信 hand-off 冻结为 `AffectiveTurnPlanV1`，普通低歧义文本可优先使用
 `ModelAttemptService.stream_with_result()` 的 typed delta + provider final result（完整字段时才计量）逐句输出；Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/transport/latency，但没有真实凭据或外部 provider 运行；每个稳定句先写 canonical Life delivery
 intent，只有在首个 delta 前明确不支持终态合同才回退兼容 stream 并保留无 usage 标记。候选模型输出和纯文本 fallback 均不能改写 self-affect，高歧义/边界/修复仅
