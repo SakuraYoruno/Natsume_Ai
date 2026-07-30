@@ -407,6 +407,41 @@ async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative
 
 
 @pytest.mark.asyncio
+async def test_chat_executor_returns_clean_reject_when_surface_failed_before_any_visible_sentence() -> None:
+    """An empty failure must not be escalated into unknown visible delivery."""
+
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "NO_REPLY",
+            "reason_code": "SURFACE_REPLY_RUNTIME_FAILED",
+            "narrative": "",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {"path": "surface_reply:runtime"},
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(route="chat", target_id="surface_reply")
+        )
+    ]
+
+    assert len(events) == 1
+    assert events[0]["decision"] == "REJECT"
+    assert events[0]["reason_code"] == "SURFACE_REPLY_RUNTIME_FAILED"
+    assert events[0]["narrative"] == ""
+    assert events[0]["audit_refs"]["task_bound_sentence_delivery"] == {
+        "status": "NO_VISIBLE_REPLY",
+        "visible_sentence_count": 0,
+        "delivery_ids": [],
+    }
+
+
+@pytest.mark.asyncio
 async def test_chat_executor_uses_canonical_runtime_context_for_companion_scope() -> None:
     """A transport principal must not replace the frozen relationship subject."""
 

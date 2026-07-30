@@ -570,6 +570,24 @@ POST /v1/chat（本机个人 UI）
   → governed Chat
 ```
 
+当 server-owned `CHAT_SURFACE` 路由明确选择支持 final-usage stream 的 provider 时，最后一跳的
+受治理执行顺序进一步固定为：
+
+```text
+frozen AffectiveTurnPlan
+  → PLAN_FROZEN (0149 SQLite)
+  → provider typed delta
+  → SENTENCE_STAGED (0149 SQLite)
+  → SSE SENTENCE
+  → STREAM_COMPLETED
+  → Task Verification / Acceptance
+```
+
+首句前的模型协议、预算或运行时失败改为 `STREAM_INTERRUPTED → REJECT`，不会制造一个尚未可见却
+需要 unknown-effect replay 的任务；可见前缀仍由 `0150` 在替代 attempt 前强制 reconciliation。该
+图已经由受控 OpenAI-compatible ASGI transport 验证，尚未成为真实 provider、connection resume 或
+远端 Voice/Avatar 的验收证据。
+
 上图是 `LOCAL_PERSONAL_UNATTESTED` scope，不含 Secure Ingress claim、audit 或 tenant；它不能承载
 Gateway 或多用户身份。那些输入必须走下列签名数据流：
 

@@ -18,6 +18,15 @@ aggregate。该 scope 会同样传给 Cortex 和 Runtime Context；它不生成 
 外部认证或多用户隔离。已签名的 Gateway/多用户输入仍必须走 `/v1/host/input`，而不是把
 `/v1/chat` 当作替代入口。
 
+本次 DL-04 又把这个本机入口接入受治理的**真实句子可见性顺序**：在显式配置支持 provider final
+usage 的模型路由时，`/v1/chat → HostCommand → TaskGraph` 会冻结同一 `AffectiveTurnPlanV1`，每个稳定句先写
+`0149` 的 task-bound delivery ledger，随后才产生 SSE `SENTENCE`，最后由 Task Acceptance 结算。首句前的
+模型协议、预算或运行时失败会以带稳定原因码的 `REJECT` 收口并记录 `STREAM_INTERRUPTED`，不会把未展示的
+调用升级成 unknown-effect 重放；已展示句子仍保持原有 reconciliation 约束。本地 ASGI 测试使用受控的
+OpenAI-compatible final-usage transport 验证该顺序，不代表已验证真实 provider、连接恢复、多用户输入、
+远端 Edge/TTS/VTS 或 Docker 全栈；整体仍是 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，
+`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 0148 已补上“受认证的直接偏好控制”这一窄入口：`POST /v1/digital-life/relationship/companion-profile` 只接受完整、严格的低风险偏好 JSON，要求 `companion:profile:write`、`user principal == relationship_subject_id` 与 `tenant == workspace_id`。它不会从聊天文字推断偏好，也不能立即激活 profile；Host 只会从 canonical 强 aftereffect 历史选取证据、创建五次互动的 CANARY，并把 Secure Ingress audit ref 一并固化。该接口不是 Monitor 的用户反馈/审核界面，仍不改变 Soul、关系许可或 self-affect；CANARY 证据收集、长期收益、旧 writer 清零和真实服务栈验收仍未完成。
 
 本次又接入 `POST /v1/digital-life/relationship/response-feedback`：用户只能对一条仍处于 provisional 状态、已有 canonical receipt 的回复提交 `HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY`。它要求独立的 `companion:feedback:write`、精确 user/subject 与 tenant/workspace 绑定；`HELPFUL` 才会成为 `0.95` 的 receipt-scoped 强 aftereffect，且只能推进一个已经存在的 profile CANARY；第五条合格后效应才会由 lifecycle 自动激活它，外部请求不能创建或指定激活 profile。自然语言关键词识别仍是保守的 `0.72`，只用于普通关系理解；它不能伪装为学习证据。

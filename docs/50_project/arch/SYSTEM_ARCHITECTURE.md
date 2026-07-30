@@ -461,6 +461,12 @@ Effect fence 的证据规则为 fail closed：一般 handler/transport `FAILED` 
 ### 3.5 模型与能力执行层
 
 - `host_brain/model_runtime/`：prompt contract、provider route、ModelAttempt、重试与用量证据。`stream_with_result()` 将流拆为 typed delta 与唯一 provider final response；只有 final response 的显式 usage/transport 可进入 Attempt audit，Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/identity/latency；缺 token/completion/cost、终局帧或 identity 仍失败关闭，且尚无真实 provider 验证。`0149` 已把已入场冻结 Chat 的逐句外显权收进 Task node/attempt/lease/fence/grant-bound delivery ledger；`0150` 使已有 delivery evidence 的替代 attempt 或同 attempt 重入先进入 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，不能重跑模型；普通 Chat、受认证 connection resume 与完整 restart recovery 仍需后续切流。
+
+本机 `POST /v1/chat` 的低歧义 text 路线已接到上述模块边界：显式具备 final-usage stream 合同的
+server-owned provider route 才允许 `HostCommand → TaskGraph → PLAN_FROZEN → SENTENCE_STAGED → SSE
+SENTENCE → Acceptance`。在第一句可见前失败的调用会追加 `STREAM_INTERRUPTED` 并带稳定 `REJECT`，
+不会以 unknown-effect 名义重放；该事实仅由受控 ASGI transport 证明，真实 provider、受认证连接恢复、
+多用户、远端 Edge 和完整服务栈继续是未验收边界。
 - `host_brain/capability_plane/`：Capability Broker、descriptor policy、execution journal。
 - `host_brain/skills/`：内置 Skill 定义、executor、确定性 SkillDraft/bundle 编译器和签名供应链资产。0141 真实重开 Lab、Review、Supply Chain 与 canary evidence 后才写 active projection；Host 运行时只解析批准的 version binding，不扫描目录、不直接 import 外部 Python。
 - `host_brain/tools/`、`host_brain/mcp/`、`host_brain/lsp/`：具体工具和协议 adapter。

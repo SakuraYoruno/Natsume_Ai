@@ -382,6 +382,98 @@ async def test_governed_stream_uses_task_bound_sentence_receipts_not_life_writes
 
 
 @pytest.mark.asyncio
+async def test_governed_unseen_stream_failure_is_a_durable_clean_reject(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """An unexposed provider failure must not become an unknown-effect replay."""
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class RecordingTaskDeliveryAuthority(TaskBoundChatDeliveryAuthority):
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int]] = []
+
+        def stage_plan(self, _plan):  # noqa: ANN001
+            self.calls.append(("PLAN_FROZEN", -1))
+            return {
+                "event_id": "taskchat://" + "a" * 64,
+                "delivery_status": "TASK_NODE_STREAM_RECORDED",
+                "replayed": False,
+            }
+
+        def record_stream_control(
+            self,
+            *,
+            plan,
+            event_kind,
+            sent_sentence_count,
+            reason_code="",
+        ):  # noqa: ANN001
+            del plan, reason_code
+            self.calls.append((str(event_kind), int(sent_sentence_count)))
+            return {
+                "event_id": "taskchat://" + "f" * 64,
+                "event_kind": event_kind,
+                "delivery_status": "TASK_NODE_STREAM_RECORDED",
+            }
+
+    class FailingStreamingModel:
+        async def stream_with_result(self, _request):  # noqa: ANN001
+            raise ModelStreamProtocolError(
+                "provider final result is malformed",
+                code="MODEL_STREAM_RESULT_INVALID",
+            )
+            yield ModelAttemptStreamEvent.delta("unreachable")  # pragma: no cover
+
+    def unexpected_life_write(**_kwargs: Any) -> dict[str, Any]:
+        pytest.fail("governed streaming must not write Life before Task Acceptance")
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.delivery_audit.submit_life_command",
+        unexpected_life_write,
+    )
+    authority = RecordingTaskDeliveryAuthority()
+    guard = ModelBudgetGuard(
+        budget_id="budget://unseen-stream-failure",
+        graph_id="graph-stream",
+        graph_revision=1,
+        node_id="node-stream",
+        attempt_id="attempt-stream",
+        deadline_ms=4_000,
+        max_provider_attempts=1,
+        max_token_count=64,
+        max_output_tokens=64,
+        max_model_cost_micros=1_000,
+    )
+    agent_input = _agent_input()
+    agent_input.defer_effects_to_task_runtime = True
+    agent_input.governed_delivery_authority = authority
+    agent_input.trace_stage_meta = {"governed_model_budget": guard.as_dict()}
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=lambda: FailingStreamingModel(),
+    )
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(agent_input, ports=ports)
+    ]
+
+    assert not [event for event in events if event.get("phase") == "SENTENCE"]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    assert commit["decision"] == "REJECT"
+    assert commit["reason_code"] == "MODEL_STREAM_RESULT_INVALID"
+    assert commit["audit_refs"]["durability"] == "fail_closed_before_visibility"
+    assert authority.calls == [
+        ("PLAN_FROZEN", -1),
+        ("STREAM_INTERRUPTED", 0),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_native_stream_records_terminal_usage_attestation_when_available(
     monkeypatch,
     surface_runtime_ports_factory,

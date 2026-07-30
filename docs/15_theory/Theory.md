@@ -643,6 +643,13 @@ provider 在首个 delta 前明确不支持该合同的情况下回退兼容 str
 Chat 即使拥有终态 result，也仍不能直接把任意 worker delta 推给用户。`0149` 只为已经入场的冻结 Chat 建立了可恢复的
 node/attempt/lease/fence/grant-bound visibility receipt：先持久化 plan 与稳定句，再让同一 Worker 转发；内容或 fence 漂移会失败关闭，取消/中断保留 control receipt。`0150` 又在替代 attempt 写新 plan 的同一 SQLite 事务中检查前序 delivery evidence：替代 attempt 或同 attempt 重入必须进入 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止把恢复误作可再次调用模型的重试。它不写 Life、Memory、TTS、Avatar 或 transport，也没有把普通 Chat、受认证连接恢复或真实播放升级为完成。因此“模型可报告终态用量”或“窄路径可见”都不是“所有 Chat 已可实时展示”的同义词。
 
+本机 `POST /v1/chat` 的低歧义 text 路线现在把这条理论落实为一条受控的因果顺序：当
+server-owned provider route 具有 final-usage stream 合同时，`AffectiveTurnPlan → PLAN_FROZEN →
+SENTENCE_STAGED → 用户可见句 → Acceptance` 不能倒置。首句前失败在语义上仍是“没有任何外显
+效果”，所以必须记为带稳定原因码的 durable `REJECT`，而不是把没有展示过的模型调用扩大成
+unknown-effect 重放。这只证明本机、受控 transport 的顺序；真实 provider、连接恢复与实体设备仍
+需要各自独立证据。
+
 情感系统必须满足：
 
 - 有时间衰减，不能无限携带单轮情绪；

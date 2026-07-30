@@ -159,6 +159,12 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   `surface_sentence_delivery_intent`，再发 SSE；计划、
   句子 digest、sync id 与最终 foreground receipt 由 migration
   `0145_affective_turn_delivery.sql` 从 immutable Life event 派生只读 projection。
+- `POST /v1/chat` 的本机个人 text 路线现会实际进入 `HostCommand → TaskGraph → frozen Chat`
+  竖切片。对于支持 final-usage stream 的显式 provider 路由，计划和每个稳定句先写
+  `0149` task-bound visibility ledger，再对 SSE 可见，随后才进入 Acceptance；集成测试以受控
+  OpenAI-compatible transport 覆盖这一顺序。首句前的预算、模型协议或运行时失败会写
+  `STREAM_INTERRUPTED` 并以稳定原因码 `REJECT` 收口，而不是被错误标成 unknown-effect recovery；
+  已可见前缀仍必须走 `0150` reconciliation，不能重跑模型。
 - 高歧义、边界或修复回合冻结为恰好两候的 buffered selection；本地 scorer 必须选择
   一条后再经非操控 Gate 才可进入既有 buffered renderer。Gate 会在可见前拦截威胁、
   排他、负罪施压和内部计划泄漏。取消会记录 sent count，不发送未
@@ -167,8 +173,9 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage，并转发 provider final usage、transport identity 与调用延迟；缺 token/completion/cost、终局帧或 identity 仍失败关闭，其他 provider 不会被放宽。仅有本地协议与 adapter 测试，尚无真实凭据或 provider 调用。`0149` 现为已入场的冻结 Chat 建立 node/attempt/lease/fence/grant-bound
   的逐句 visibility ledger：Surface 在调用模型前冻结 plan，每句落库后才可 SSE 外显，内容或 lease/grant
   漂移拒绝；`STREAM_CANCELLED/INTERRUPTED` 同样持久化。`0150` 在替代 attempt 写 plan 时原子检出前序
-  delivery evidence，并返回 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止盲目重跑模型。它仍是窄 vertical slice，普通 Chat route、
-  受认证 connection resume、跨进程完整 recovery、真实 TTS/Avatar、真实 Edge 和完整服务栈实测仍未完成。
+  delivery evidence，并返回 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止盲目重跑模型。它仍是窄 vertical slice：
+  仅本机个人的低歧义 text Chat 已接入；受认证 connection resume、跨进程完整 recovery、真实 provider、
+  真实 TTS/Avatar、真实 Edge 和完整服务栈实测仍未完成。
 - 本次修订已让该 narrow governed route 走完一次生产 handler 的本地 SQLite 链：Gateway service
   principal 只保留在 HostCommand 与 Task delivery authority；`RuntimeContext v1.subject_id` 是唯一
   conversation、Life、Memory 与可见 reply projection 的 relationship subject。native stream 与 buffered

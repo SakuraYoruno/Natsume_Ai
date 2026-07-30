@@ -19,6 +19,20 @@
   这些是本机单用户边界证据；不代表 Gateway 多用户认证、连接恢复、真实 provider、远端 Edge 或
   DL-07 全栈验收。
 
+## DL-04 本机 Chat 的受治理句流顺序
+
+- `tests/integration/test_host_integration.py::TestChatEndpoint` 通过真实 ASGI lifespan 验证本机
+  `POST /v1/chat`：冻结后的 canonical affect context 会进入 TaskGraph；在受控、显式 OpenAI-compatible
+  final-usage transport 上，`SENTENCE` 必须携带 task-bound delivery、graph/node/attempt 和
+  self-affect revision，并严格先于 accepted `COMMIT`。
+- `tests/unit/test_dl04_native_affective_stream.py::test_governed_unseen_stream_failure_is_a_durable_clean_reject`
+  验证模型在首句前失败时只追加 `PLAN_FROZEN → STREAM_INTERRUPTED`，以稳定 `REJECT` 收口，不产生
+  Life/Memory/Voice/Avatar effect，也不把未展示调用误判为可重跑的未知副作用。
+- 最终合并受影响集合为 `44 passed in 101.59s`，覆盖 native-stream、Cortex/冻结 Chat 终局与
+  `TestChatEndpoint` 的真实 ASGI lifespan。该 transport 为测试替身；真实 provider、认证 connection
+  resume、多用户、远端 Edge/TTS/VTS 和
+  Docker 服务栈仍必须在 DL-07 单独验收。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、

@@ -90,8 +90,32 @@ def test_client(mem_ledger):
             "route_reason_code": None,
         }
 
-    async def _mock_astream(*args, **kwargs):
-        yield "你好，我是夏目。"
+    attested_stream_calls: list[dict[str, Any]] = []
+
+    async def _mock_attested_stream(*args, **kwargs):
+        """Current governed Surface protocol: deltas plus final usage.
+
+        ``/v1/chat`` now reaches ``ModelAttemptService.stream_with_result``.
+        Patching the retired raw-chunk helper made this integration fixture
+        silently exercise the fail-closed no-reply branch instead of the
+        actual sentence-delivery path.
+        """
+
+        del args
+        attested_stream_calls.append(dict(kwargs))
+        text = "你好，我是夏目。"
+        yield {"kind": "delta", "text": text}
+        yield {
+            "kind": "final",
+            "content": text,
+            "finish_reason": "stop",
+            "usage": {
+                "prompt_tokens": 12,
+                "completion_tokens": 8,
+                "total_tokens": 20,
+                "model_cost_micros": 1,
+            },
+        }
 
     with (
         patch.dict(
@@ -105,6 +129,14 @@ def test_client(mem_ledger):
                 # than the mocked chat resolver, and workspace composition is
                 # deliberately fail-closed without its signing secret.
                 "OPENAI_API_KEY": "test-openai-key",
+                # Governed Chat can reveal a sentence only through a provider
+                # that supplies a terminal usage frame.  The production
+                # default may be a non-streaming provider; this isolated
+                # fixture pins the explicit OpenAI-compatible lane whose
+                # transport is mocked just below.
+                "HOST_LLM_PROVIDER": "openai",
+                "HOST_MODEL_ROUTE_SCENE_CHAT_SURFACE_PROVIDER": "openai",
+                "HOST_OPENAI_MODEL_ID": "test-openai-model",
                 "HOST_AGENT_WORKSPACE_HMAC_SECRET": "test-workspace-secret-at-least-32-bytes",
             },
             clear=False,
@@ -113,8 +145,10 @@ def test_client(mem_ledger):
               new=_mock_llm_runtime),
         patch("host_brain.app.graph_config_builder.resolve_host_llm_runtime",
               new=_mock_llm_runtime),
-        patch("host_brain.integrations.llm_helpers.astream_llm_chunks",
-              new=_mock_astream),
+        patch(
+            "host_brain.integrations.llm_helpers.astream_llm_stream_events",
+            new=_mock_attested_stream,
+        ),
     ):
         from host_brain.app.asgi import app
         # ``TestClient`` only enters the ASGI lifespan when used as a context
@@ -123,6 +157,7 @@ def test_client(mem_ledger):
         # exercise an impossible production state and incorrectly turn the
         # fail-closed 503 contract into a fixture failure.
         with TestClient(app, raise_server_exceptions=False) as client:
+            client.app.state.test_attested_stream_calls = attested_stream_calls
             yield client
 
     # 清理单例，避免跨测试污染
@@ -436,6 +471,72 @@ class TestChatEndpoint:
         commit = next((e for e in events if e.get("phase") == "COMMIT" and e.get("done")), None)
         assert commit is not None
         assert "request_id" in commit
+
+    def test_chat_governed_stream_stages_sentence_before_acceptance(
+        self,
+        test_client,
+    ):
+        """T-INT-CHAT-04A: 当前 ModelAttempt 流先持久暂存句子再接受任务。"""
+        resp = test_client.post(
+            "/v1/chat",
+            json={"message": "你好，夏目"},
+        )
+        assert resp.status_code == 200
+        events = parse_sse_events(resp.text)
+        sentence_indexes = [
+            index
+            for index, event in enumerate(events)
+            if event.get("phase") == "SENTENCE"
+        ]
+        terminal_event = next(event for event in events if event.get("done"))
+        command_id = terminal_event["execution_receipt"]["command_id"]
+        runtime_container = test_client.app.state.task_runtime_container_provider()
+        assert runtime_container is not None
+        admitted = runtime_container.command_repository.get(command_id)
+        assert admitted is not None
+        input_pack = admitted["work_order"].input_pack
+        assert input_pack["emotion_context"].get(
+            "_affective_life_internal"
+        ) is True
+        from host_brain.digital_life.affective_turn_planner import (  # noqa: PLC0415
+            build_affective_turn_guidance,
+        )
+
+        guidance = build_affective_turn_guidance(
+            emotion_context=input_pack["emotion_context"],
+            request_id=str(terminal_event["request_id"]),
+            workspace_id=str(input_pack["workspace_id"]),
+            relationship_subject_id=str(input_pack["subject_id"]),
+            session_id=str(admitted["command"].session_id),
+        )
+        assert guidance is not None
+        assert len(sentence_indexes) == 1
+        assert len(test_client.app.state.test_attested_stream_calls) == 1
+        sentence = events[sentence_indexes[0]]
+        assert sentence["sentence"] == "你好，我是夏目。"
+        for field in (
+            "delivery_id",
+            "graph_id",
+            "node_id",
+            "attempt_id",
+            "self_id",
+            "relationship_subject_id",
+            "workspace_id",
+        ):
+            assert sentence.get(field), field
+        # Revision zero is the valid initial canonical Life snapshot; do not
+        # mistake it for a missing authority binding.
+        assert sentence.get("self_affect_revision") is not None
+
+        commit_index, commit = next(
+            (index, event)
+            for index, event in enumerate(events)
+            if event.get("phase") == "COMMIT" and event.get("done")
+        )
+        assert sentence_indexes[0] < commit_index
+        assert commit["decision"] == "APPROVE"
+        assert commit["execution_receipt"]["accepted"] is True
+        assert commit["execution_receipt"]["status"] == "ACCEPTED"
 
     def test_chat_with_session_id(self, test_client):
         """T-INT-CHAT-05: /v1/chat 支持 session_id 参数。"""

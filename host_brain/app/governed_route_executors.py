@@ -285,7 +285,20 @@ class FrozenChatRouteExecutor:
             narrative = "".join(render_fragments).strip()
         if not narrative:
             narrative = "\n".join(sentence_fragments).strip()
-        narrative = _required_narrative(narrative, field_name="chat terminal narrative")
+
+        # A Surface runtime can fail before it exposes any text at all.  That
+        # is a rejected task result, not an unknown visible side effect: no
+        # sentence receipt exists for a client to reconcile and forcing a
+        # placeholder narrative would falsely turn a transport/runtime fault
+        # into companion speech.  Keep approvals strict; an approved Chat
+        # node must still have either a staged sentence or a terminal
+        # narrative.
+        no_visible_reply = not narrative and decision == "REJECT" and not visible_sentences
+        if not no_visible_reply:
+            narrative = _required_narrative(
+                narrative,
+                field_name="chat terminal narrative",
+            )
         reason_code = _terminal_reason_code(terminal, decision=decision)
         audit_refs = _safe_mapping(terminal.get("audit_refs"))
         audit_refs.update(
@@ -304,6 +317,8 @@ class FrozenChatRouteExecutor:
                     "status": (
                         "VISIBLE_BEFORE_ACCEPTANCE"
                         if visible_sentences
+                        else "NO_VISIBLE_REPLY"
+                        if no_visible_reply
                         else "NOT_USED"
                     ),
                     "visible_sentence_count": len(visible_sentences),

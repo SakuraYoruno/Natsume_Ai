@@ -30,6 +30,11 @@
 > 在同一 revision/sync 上编译 Voice `SPEAK` 与 Avatar `TRANSITION` 的 Host protocol，
 > 并将 `CANCEL`/`RELEASE` 与隐私最小化 0146 projection 接到 canonical Life journal。
 > `0149` 还为已入场的冻结 Chat 把 plan/稳定句/control 落入 Task Runtime 的 immutable delivery ledger，且外显链复验 attempt/lease/fence/grant；`0150` 会把已有前序 delivery evidence 的替代 attempt 或同 attempt 重入转为 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止重跑模型；它不代表普通 Chat 已全量切流或已具备受认证连接恢复。
+> 本机 `POST /v1/chat` 的低歧义 text 分支现已消费这一 frozen Chat 模块：在明确具有
+> final-usage stream 合同的 server-owned provider 路由下，模块按
+> `PLAN_FROZEN → SENTENCE_STAGED → SSE SENTENCE → Acceptance` 工作。首句前失败仅写
+> `STREAM_INTERRUPTED` 并以稳定 `REJECT` 完结，不能被该模块升级为 unknown-effect replay；
+> 受控 ASGI transport 已验证此顺序，但不能替代真实 provider 或多用户/connection-resume 证据。
 > 它尚未调用远端设备：`HOST_PROTOCOL_STAGED` 不能写成播放/Avatar 已执行，真实 Edge、
 > physical receipt 以及旧 writer 清零仍未完成。
 
