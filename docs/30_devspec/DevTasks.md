@@ -53,7 +53,7 @@ exact duplicate/restart replay。0147 已将低风险表达 profile 接入 canon
 `companion:profile:write`、`user principal == relationship subject` 与 `tenant == workspace`；它只能
 从 canonical strong aftereffect history 启动 candidate canary，不能从自然语言推断、直接指定 activation
 或改写 Soul/consent/self-affect，Secure Ingress audit ref 与 candidate 一同持久化。Monitor 审核控件、
- canary 真实证据、旧 writer 清零仍未完成，不得称为主动陪伴闭环。`0149` 已让已入场的冻结 Chat 用 attempt/lease/fence/grant-bound immutable Task ledger 在 SSE 前暂存 plan 与稳定句，取消/中断也有控制回执；它不写 Life/Memory/设备 effect。普通 Chat 切流、连接恢复、跨进程完整 recovery 与真实外设仍由后续 DL-04～DL-07 交付；模型终态 result 合同不替代这些 Task Runtime authority。此前 NE-01～NE-07 的 Universal Runtime、搜索、
+ canary 真实证据、旧 writer 清零仍未完成，不得称为主动陪伴闭环。`0149` 已让已入场的冻结 Chat 用 attempt/lease/fence/grant-bound immutable Task ledger 在 SSE 前暂存 plan 与稳定句，取消/中断也有控制回执；`0150` 要求已有前序 delivery evidence 的替代 attempt 或同 attempt 重入先 durable reconciliation，禁止盲目重跑模型；它不写 Life/Memory/设备 effect。普通 Chat 切流、受认证连接恢复、跨进程完整 recovery 与真实外设仍由后续 DL-04～DL-07 交付；模型终态 result 合同不替代这些 Task Runtime authority。此前 NE-01～NE-07 的 Universal Runtime、搜索、
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。

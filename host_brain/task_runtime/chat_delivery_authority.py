@@ -14,6 +14,7 @@ from typing import Any
 from natsume_contracts.life import digest_json
 
 from host_brain.persistence.task_chat_delivery_store import (
+    TASK_CHAT_DELIVERY_RECOVERY_REQUIRED,
     TaskChatDeliveryContext,
     TaskChatDeliveryStore,
     TaskChatDeliveryStoreError,
@@ -65,6 +66,15 @@ class TaskBoundChatDeliveryAuthority:
     def stage_plan(self, plan: Mapping[str, Any]) -> dict[str, Any]:
         context = self._context_for(plan)
         receipt = self._store.stage_plan(context)
+        if bool(receipt.get("replayed")):
+            # A second invocation of the same live attempt has no authority
+            # to call the provider again.  The immutable plan marker exists
+            # precisely so recovery can replay its already-staged prefix via
+            # a separately authenticated reader rather than regenerate it.
+            raise TaskChatDeliveryStoreError(
+                TASK_CHAT_DELIVERY_RECOVERY_REQUIRED,
+                "governed Chat plan was already staged; reconcile before rerunning the model",
+            )
         return self._with_scope(receipt, context=context)
 
     def stage_sentence(

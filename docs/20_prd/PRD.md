@@ -37,7 +37,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 ### FR-CHAT：连续对话
 
 - 支持流式对话，并区分非权威在场信号、权威提交结果和提交后投影。
-- 流式 provider 若要声明用量已计量，必须在 typed delta 后提供唯一的 provider-owned final response；不得从文本长度或本地估价推断 token、成本或 provider identity。已入场的冻结 Chat TaskNode 可凭 `0149` 的 node/attempt/lease/fence/grant-bound 句回执提前外显；其他 Chat 路径缺少同级可见性与恢复 authority 时必须继续走 buffered acceptance，不能因模型协议存在而提前外显。
+- 流式 provider 若要声明用量已计量，必须在 typed delta 后提供唯一的 provider-owned final response；不得从文本长度或本地估价推断 token、成本或 provider identity。已入场的冻结 Chat TaskNode 可凭 `0149` 的 node/attempt/lease/fence/grant-bound 句回执提前外显；`0150` 规定一旦存在前序 delivery evidence，替代 attempt 或同 attempt 重入必须先进入 durable reconciliation，不能重新调用模型。其他 Chat 路径缺少同级可见性与恢复 authority 时必须继续走 buffered acceptance，不能因模型协议存在而提前外显。
 - 最终可发送文本必须经过唯一 Reply/Surface authority 收口。
 - 对话可使用经授权的记忆、关系、情绪、场景和任务上下文，但不得泄漏 raw thought、密钥或未授权私密正文。
 - 普通聊天、技能调用、委派和复杂计划必须共享同一受治理执行链；不得因界面不同切回第二套执行 Runtime。

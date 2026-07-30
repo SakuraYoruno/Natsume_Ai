@@ -637,7 +637,9 @@ flowchart LR
 `TaskChatDeliveryStore`，再让唯一已落库的 `TASK_NODE_SENTENCE_STAGED` 事件经 Frozen executor 与 Worker
 转发：每句同时绑定 graph/revision/node/attempt/lease owner/fence/node grant、self、relationship subject、
 workspace、plan/sync/self-affect revision；旧 lease、grant 或 payload drift 一律拒绝。它不改变 Life、Memory、
-TTS、Avatar 或 transport，后者仍只在 Task Acceptance effect 后执行。普通 Chat 的治理切流、connection resume、
+TTS、Avatar 或 transport，后者仍只在 Task Acceptance effect 后执行。`0150` 在替代 attempt 写新 `PLAN_FROZEN`
+的同一 SQLite 事务中检查相同 immutable node 的前序 delivery evidence；替代 attempt 或同 attempt 重入会被
+`TASK_CHAT_DELIVERY_RECOVERY_REQUIRED` 阻断，不能盲目再次调用模型。普通 Chat 的治理切流、受认证 connection resume、
 跨进程完整 recovery、远端 Edge、真实 TTS/Avatar channel receipt 与全服务栈验收仍不在这条本地 Host protocol
 切片的完成范围。
 

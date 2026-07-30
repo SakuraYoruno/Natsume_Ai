@@ -121,8 +121,10 @@ node/attempt-bound 的逐句可见性、取消与重启去重 authority，因而
 `STREAM_COMPLETED/INTERRUPTED/CANCELLED` control 写入独立 Task ledger；它在 write trigger 与
 application 两侧绑定 graph/revision/node/attempt/lease owner/fence/node grant、request/self/relationship/
 workspace、sync 和 self-affect revision。Surface 仅在 ledger receipt 成功后生成可见句，Frozen executor/
-worker 会复验同一 identity；它不提前写 Life、Memory、Voice、Avatar 或 transport。普通 Chat 切流、连接恢复、
-真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
+worker 会复验同一 identity。`0150_task_runtime_chat_delivery_recovery.sql` 会在替代 attempt 写入
+`PLAN_FROZEN` 的同一事务中检出前序 delivery evidence；替代 attempt 或同 attempt 重入必须进入
+`TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，不会重新调用模型。它不提前写 Life、Memory、Voice、Avatar 或 transport。
+普通 Chat 切流、受认证连接恢复、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
 ## 1. 结论
 

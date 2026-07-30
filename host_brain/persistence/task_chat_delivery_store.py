@@ -27,10 +27,14 @@ TASK_CHAT_DELIVERY_SCHEMA_NOT_READY = "TASK_CHAT_DELIVERY_SCHEMA_NOT_READY"
 TASK_CHAT_DELIVERY_FENCE_LOST = "TASK_CHAT_DELIVERY_FENCE_LOST"
 TASK_CHAT_DELIVERY_REPLAY_DRIFT = "TASK_CHAT_DELIVERY_REPLAY_DRIFT"
 TASK_CHAT_DELIVERY_NOT_FOUND = "TASK_CHAT_DELIVERY_NOT_FOUND"
+TASK_CHAT_DELIVERY_RECOVERY_REQUIRED = "TASK_CHAT_DELIVERY_RECOVERY_REQUIRED"
 
-_MIGRATION_ID = 149
-_MIGRATION_NAME = "task_runtime_chat_delivery"
+_REQUIRED_MIGRATIONS = (
+    (149, "task_runtime_chat_delivery"),
+    (150, "task_runtime_chat_delivery_recovery"),
+)
 _TABLE = "task_runtime_chat_delivery_event"
+_RECOVERY_SCOPE_INDEX = "idx_task_runtime_chat_delivery_recovery_scope"
 _EVENT_KINDS = frozenset(
     {
         "PLAN_FROZEN",
@@ -282,10 +286,15 @@ class TaskChatDeliveryStore:
     def assert_schema_ready(self) -> None:
         try:
             with self._connect() as conn:
-                migration = conn.execute(
-                    "SELECT name FROM schema_migrations WHERE migration_id = ?",
-                    (_MIGRATION_ID,),
-                ).fetchone()
+                migration_rows = conn.execute(
+                    "SELECT migration_id, name FROM schema_migrations "
+                    "WHERE migration_id IN (?, ?)",
+                    tuple(item[0] for item in _REQUIRED_MIGRATIONS),
+                ).fetchall()
+                migrations = {
+                    int(row["migration_id"]): str(row["name"] or "")
+                    for row in migration_rows
+                }
                 columns = tuple(
                     str(row["name"])
                     for row in conn.execute(f"PRAGMA table_info({_TABLE})").fetchall()
@@ -297,20 +306,30 @@ class TaskChatDeliveryStore:
                         (_TABLE,),
                     ).fetchall()
                 )
+                indexes = frozenset(
+                    str(row["name"])
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=?",
+                        (_TABLE,),
+                    ).fetchall()
+                )
         except sqlite3.Error as exc:
             raise TaskChatDeliveryStoreError(
                 TASK_CHAT_DELIVERY_SCHEMA_NOT_READY,
                 "task chat delivery schema cannot be inspected",
             ) from exc
         if (
-            migration is None
-            or str(migration["name"] or "") != _MIGRATION_NAME
+            any(
+                migrations.get(migration_id) != migration_name
+                for migration_id, migration_name in _REQUIRED_MIGRATIONS
+            )
             or columns != _COLUMNS
             or triggers != _TRIGGERS
+            or _RECOVERY_SCOPE_INDEX not in indexes
         ):
             raise TaskChatDeliveryStoreError(
                 TASK_CHAT_DELIVERY_SCHEMA_NOT_READY,
-                "migration 0149 immutable task chat delivery schema is unavailable",
+                "migration 0149/0150 immutable task chat delivery schema is unavailable",
             )
 
     def stage_plan(self, context: TaskChatDeliveryContext) -> dict[str, Any]:
@@ -537,6 +556,11 @@ class TaskChatDeliveryStore:
                 self._assert_context_identity(
                     conn, context=context, require_live_lease=require_live_lease, now_value=now_value
                 )
+                if kind == "PLAN_FROZEN":
+                    self._assert_no_prior_attempt_delivery(
+                        conn,
+                        context=context,
+                    )
                 row = {
                     "event_id": event_id,
                     "schema_version": TASK_CHAT_DELIVERY_SCHEMA_VERSION,
@@ -569,6 +593,59 @@ class TaskChatDeliveryStore:
                 "task chat delivery event could not be persisted",
             ) from exc
         return self._public_event(row, replayed=False)
+
+    @staticmethod
+    def _assert_no_prior_attempt_delivery(
+        conn: sqlite3.Connection,
+        *,
+        context: TaskChatDeliveryContext,
+    ) -> None:
+        """Block a replacement worker from regenerating already-owned output.
+
+        A governed Chat worker may reach a provider or expose a sentence after
+        its task operation is reserved.  Once another attempt for the same
+        immutable graph node has staged *any* delivery event, a fresh provider
+        call is no longer a harmless retry: it can duplicate a visible reply
+        or hide an unknown provider-side outcome.  The Task Runtime must enter
+        its durable reconciliation path instead.  This check deliberately
+        stays inside the same immediate transaction as ``PLAN_FROZEN`` so two
+        replacement attempts cannot both pass it.
+        """
+
+        predecessor = conn.execute(
+            f"""
+            SELECT event_id
+            FROM {_TABLE}
+            WHERE graph_id = ?
+              AND graph_revision = ?
+              AND node_id = ?
+              AND request_id = ?
+              AND session_id = ?
+              AND principal_id = ?
+              AND self_id = ?
+              AND relationship_subject_id = ?
+              AND workspace_id = ?
+              AND attempt_id <> ?
+            LIMIT 1
+            """,
+            (
+                context.graph_id,
+                context.graph_revision,
+                context.node_id,
+                context.request_id,
+                context.session_id,
+                context.principal_id,
+                context.self_id,
+                context.relationship_subject_id,
+                context.workspace_id,
+                context.attempt_id,
+            ),
+        ).fetchone()
+        if predecessor is not None:
+            raise TaskChatDeliveryStoreError(
+                TASK_CHAT_DELIVERY_RECOVERY_REQUIRED,
+                "a prior governed Chat attempt owns delivery evidence; reconcile before retry",
+            )
 
     @staticmethod
     def _assert_context_identity(
@@ -716,6 +793,7 @@ __all__ = [
     "TASK_CHAT_DELIVERY_FENCE_LOST",
     "TASK_CHAT_DELIVERY_INVALID",
     "TASK_CHAT_DELIVERY_NOT_FOUND",
+    "TASK_CHAT_DELIVERY_RECOVERY_REQUIRED",
     "TASK_CHAT_DELIVERY_REPLAY_DRIFT",
     "TASK_CHAT_DELIVERY_SCHEMA_NOT_READY",
     "TASK_CHAT_DELIVERY_SCHEMA_VERSION",
