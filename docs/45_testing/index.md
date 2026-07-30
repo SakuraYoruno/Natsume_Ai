@@ -25,8 +25,9 @@
 - `test_edge_events_whitelist.py` 证明 `EMOTION_DETECTED` 仍可作为 Edge 审计事件被接收，但不会再触发
   Cortex Bond 更新或 VTS 驱动；同一文件还静态约束 `system_handler.py` 不保留这两个 fire-and-forget 调用。
 - `test_http_edge_events_acceptance.py` 继续覆盖真实 ASGI 中 final ASR → Host Input 的受控入站桥。
-  `test_gr06_durable_surface_projection.py` 同时约束通用 Agent post-process 不再调用 Surface/Cortex 的旧 Bond writer。
-  当前定向集合为 `17 passed`（本切片）及此前 Edge HTTP 集；没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
+  `test_gr06_durable_surface_projection.py` 同时约束通用 Agent post-process 不再调用 Surface/Cortex 的旧 Bond writer、
+  Tribe `CONVERSATION_ENDED`、direct VTS 或 bulk TTS；核心退役子集为 `14 passed in 1.13s`，连同相邻
+  Surface/Expression 协议回归为 `64 passed in 4.51s`。没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
 - `test_bond_routes_api.py`、`test_nle_appraisal_bond_contract.py` 与 Monitor 边界测试覆盖公开旧 Bond
   写入口：Host route ports 不再暴露 writer provider，`POST /bond/event` 对任何兼容 payload 都返回
   `410 LEGACY_BOND_WRITE_RETIRED`，且请求不能改变历史 projection；Monitor 不再包含

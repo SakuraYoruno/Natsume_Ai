@@ -119,9 +119,10 @@ Host composition 通过 fresh `ProcessApplicationPorts` 与 frozen Host/Agent/Co
 历史 score/stage 只读且不能影响关系、主动许可或 self-affect。这只关闭公开写入边界，不代替
 其它 compatibility reader 清理或真实服务验收。
 
-通用 Agent reply post-process 也不再保留例外：无论 Surface 是否参与，它都不能触发旧 Surface Bond flow 或
-`CortexAgent.post_process_bond_update`。返回 trace 只说明该遗留动作被拒绝；它不替代 accepted reply、relationship
-episode、aftereffect 或用户下一次真实回应的 durable 因果。
+通用 Agent reply post-process 也不再保留例外：无论 Surface 是否参与，它都不能触发旧 Surface Bond flow、
+`CortexAgent.post_process_bond_update`、Tribe `CONVERSATION_ENDED`，或绕过 Task Acceptance 直推 VTS/整段 TTS。
+返回 trace 只说明该遗留动作被拒绝；它不替代 accepted reply、relationship episode、aftereffect、同一
+`ExpressionPlan` protocol effect 或用户下一次真实回应的 durable 因果。
 
 对已入场的受治理 Chat，文本可见性与具身协议现在有明确的两阶段边界：Task ledger 先冻结并外显
 `SENTENCE_STAGED`，Voice/Avatar 则必须等 node Acceptance 的 `life.foreground_completed` effect。effect

@@ -49,7 +49,7 @@
 > Voice 与 Avatar plan，不能修改 Soul、consent 或 self-affect。生产文本 classifier 的 `0.72`
 > 不满足门槛，不能被当成自动成长成功。
 > `HostEmotionRuntime`、Limbic、Endocrine 与 global BodySense 的生产写入已逐项切断，Motive 也已降为无模块级缓存的纯规则投影，production
-> Bond queue/writer 已退役为 no-write adapter。production Host 也不会从旧 action log 预热 legacy emotion timeline：它返回显式 retired 空投影，且 Runtime snapshot 不会把 user profile 升格为 self-affect，canonical Limbic/Prefrontal 不会读取该投影；但 Surface 的其它兼容 state、Monitor 审核、canary 长期收益、真实模型和三模态物理服务仍未闭环。因此状态仍为
+> Bond queue/writer 已退役为 no-write adapter；Life projection 的 post-process 也不再发布旧 Tribe 对话结束事件或直接推 VTS/整段 TTS。production Host 也不会从旧 action log 预热 legacy emotion timeline：它返回显式 retired 空投影，且 Runtime snapshot 不会把 user profile 升格为 self-affect，canonical Limbic/Prefrontal 不会读取该投影；但 Surface 的其它兼容 state、Monitor 审核、canary 长期收益、真实模型和三模态物理服务仍未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
 > **DL-06 旧主动路径退役：** `proactive_talk` 已不再注册为 Personality Skill、Tool Catalog、executor 或

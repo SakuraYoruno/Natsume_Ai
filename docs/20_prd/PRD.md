@@ -79,6 +79,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
   self-affect revision 编译；Host 暂存、取消与释放 receipt 必须与物理 Edge receipt 分开。
   某个通道不可用只能独立降级，不能将七海 self-affect 中性化或把 `HOST_PROTOCOL_STAGED`
   描述为已经播放、已经驱动 Avatar。
+- 回复收尾的 post-process 只能持久化受限审计或等待 canonical projection；不得发布旧 Tribe
+  生命周期事件、补写 Bond，或绕过 Task Acceptance 直接调用 TTS/VTS。
 - 人格核心和关系边界不得由单次模型输出、后台里程碑或交互统计直接修改。
 
 验收：同一已裁决输入在冻结版本下可复现表达控制；relationship episode/aftereffect 的重复、重启和 response-loss reconcile 不得重复写入；可见文本能追溯到冻结的情感计划且取消/重放不重复投递；边界与未完成修复的表达不得含负罪施压、威胁、排他控制或回应义务。人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。

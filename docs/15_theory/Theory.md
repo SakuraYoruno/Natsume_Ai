@@ -43,9 +43,10 @@ Operator 界面同时停止：旧客户端得到可诊断的退役结果，历�
 Avatar 表情。文本、声音与动作都应从同一轮已冻结、被接受的 `AffectiveTurnPlan` / `ExpressionPlan` 取得原因；
 否则一次不可重放的传感器噪声会同时破坏情绪因果、关系连续性与三模态一致性。
 
-同样地，回复完成后的后台 post-process 不能成为关系账本的备用写入口。即使它已经拿到用户消息、回复文本和
-情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface Bond flow 或 Cortex
-Bond writer 会把一个可恢复的关系事件重新降级为进程内队列的副作用。
+同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
+情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布
+Tribe `CONVERSATION_ENDED`，或直接推 VTS/整段 TTS，都会把可恢复的关系或表达事件重新降级为进程内副作用，并可能和
+同一 `ExpressionPlan` 的 accepted delivery 重复执行。
 
 主动陪伴也不是由亲密分数或七海一时想念自动取得的权利。它必须同时满足明确
 的主动联系许可、当前没有未结裂痕或等待用户后效应的 episode、七海自身没有

@@ -9,7 +9,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 DL-00 已修正一个会直接破坏陪伴关系的提示词边界：根目录 `Soul.md` 仍是不可在线改写的人格源材料和 digest 来源，但不再把其中的旧剧情、固定用户名或自动关系阶段原样送入模型。Surface、Cortex 与节点生成现在只消费受限的 runtime projection；本轮称呼、关系距离、主动联系和边界必须来自 scope 校验后的 `RelationshipStateV2` 与 `AffectiveTurnPlanV1`。同时，72 条合成多轮陪伴场景已明确覆盖低落、“没事”、误解、七海被伤害、裂痕/未接受修复、混合喜忧、非占有式吃醋、空间、技术任务、主动消息、ASR/TTS/Avatar 故障和打断；它们只是 `MEASUREMENT_PENDING` 的盲评样本，fixture、scripted replay、mock 或端口占位绝不能被写成体验通过。
 
-DL-01 继续清除了两个真实的旧 authority 旁路：Edge 上报的 `EMOTION_DETECTED`、`USER_REACTION` 等事件现在仅作为审计观测保存；它们不能 fire-and-forget 改 Bond、写七海 self-affect 或直接驱动 VTS。通用 Agent post-process 也不再调用旧 Surface Bond flow 或 Cortex Bond writer；它只留下 `RETIRED_CANONICAL_LIFE` trace。只有 final ASR 文本可通过既有 Host 输入桥进入正常的 scope、Fusion、Appraisal 与 `AffectiveTurnPlanV1` 链；Voice/Avatar 仍必须来自已接受的表达计划。远端 Edge 未启动，此处不构成设备实测。
+DL-01 继续清除了真实的旧 authority 旁路：Edge 上报的 `EMOTION_DETECTED`、`USER_REACTION` 等事件现在仅作为审计观测保存；它们不能 fire-and-forget 改 Bond、写七海 self-affect 或直接驱动 VTS。通用 Agent post-process 也不再调用旧 Surface/Cortex Bond writer、发布 Tribe `CONVERSATION_ENDED`，或直接推送 VTS 与整段 TTS；它只留下可审计的 `RETIRED_CANONICAL_LIFE` trace。只有 final ASR 文本可通过既有 Host 输入桥进入正常的 scope、Fusion、Appraisal 与 `AffectiveTurnPlanV1` 链；Voice/Avatar 必须由 Task Acceptance 后、同一表达计划的协议 effect 发起。远端 Edge 未启动，此处不构成设备实测。
 
 DL-01 的下一条公开 authority 也已收口：`POST /bond/event` 不再解析或调用
 `BondDynamicsWriter`，稳定返回 `410 LEGACY_BOND_WRITE_RETIRED`；Host HTTP 路由 composition

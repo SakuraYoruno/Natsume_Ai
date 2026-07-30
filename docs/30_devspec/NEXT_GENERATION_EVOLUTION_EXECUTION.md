@@ -98,8 +98,9 @@ raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life ev
 本次补充的 DL-01 cutover 关闭 Edge 入站的旧双写：`EMOTION_DETECTED`、`USER_REACTION` 和类似 telemetry
 只写入审计观测，不能后台调用 Cortex Bond writer 或 VTS driver。最终 ASR 文本仍可进入标准 Host Input，随后才可能
 经 scope、Fusion、Appraisal 和 accepted `AffectiveTurnPlanV1` 形成七海的表达；远端 Edge 未启动，也没有将此定为
-设备实测。通用 Agent post-process 同时不再调用 Surface Bond flow 或 Cortex Bond writer；它只保留
-`RETIRED_CANONICAL_LIFE` trace，relationship effect 必须回到 Acceptance/aftereffect 的 canonical Life 链。
+设备实测。通用 Agent post-process 同时不再调用 Surface/Cortex Bond writer、发布 Tribe `CONVERSATION_ENDED`，或直接
+推送 VTS/整段 TTS；它只保留 `RETIRED_CANONICAL_LIFE` trace，relationship effect 必须回到
+Acceptance/aftereffect 的 canonical Life 链，Voice/Avatar 必须由 Task Acceptance 的 ExpressionPlan protocol 发起。
 
 DL-01 的公开旧 Bond authority 同步退役：`POST /bond/event` 不再从 Host route ports 取得 writer，
 而是稳定返回 `410 LEGACY_BOND_WRITE_RETIRED`；请求中的 `emotion_tag`、积分事件和 evidence 绝不写入

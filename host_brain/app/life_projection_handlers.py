@@ -102,7 +102,6 @@ async def _handle_surface_post_process(
             "life_projection_intent_id": message.intent_id,
             "life_projection_event_id": message.event_id,
             "skip_heavy_persona_postprocess": True,
-            "skip_default_mode_on_conversation_end": True,
             "surface_main_chain_used": True,
         }
     )
