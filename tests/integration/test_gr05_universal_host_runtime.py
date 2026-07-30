@@ -34,6 +34,7 @@ from host_brain.composition.life import (
 )
 from host_brain.composition.memory import build_process_memory_container
 from host_brain.app.model_provider_composition import ApplicationModelAttemptServicePort
+from host_brain.app.emotion_context import resolve_chat_emotion_context
 from host_brain.app.production_authority import (
     build_durable_production_authority_verifier,
 )
@@ -41,6 +42,7 @@ from host_brain.app.surface_runtime_composition import build_surface_runtime_por
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.task_runtime import build_process_task_runtime_container
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
+from host_brain.digital_life.affect_fusion import AffectFusionService
 from host_brain.governor.action_preview import ActionPreviewService
 from host_brain.governor.decision import IntentDecisionEngine
 from host_brain.governor.tokens import TokenService
@@ -57,6 +59,7 @@ from host_brain.persistence.universal_route_acceptance_reader import (
 from host_brain.model_runtime import (
     CallableProviderAdapter,
     ProviderResponse,
+    ProviderStreamEvent,
     ProviderTarget,
     RouteDecision,
     StaticRoutePolicy,
@@ -226,6 +229,7 @@ async def _execute(
     governor: dict,
     request_body: object | None = None,
     command_authority: dict | None = None,
+    emotion_context: dict | None = None,
 ) -> list[dict]:  # noqa: ANN001
     if request_body is None:
         request_body = SimpleNamespace()
@@ -246,7 +250,11 @@ async def _execute(
             governor_result=governor,
             person_id=intent["person_id"],
             sanitized_message=intent["task"],
-            emotion_context={"emotion_tag": "NEUTRAL"},
+            emotion_context=(
+                dict(emotion_context)
+                if isinstance(emotion_context, dict)
+                else {"emotion_tag": "NEUTRAL"}
+            ),
             render_target_lang="zh",
             command_authority=command_authority,
         )
@@ -330,6 +338,7 @@ def _gateway_ingress_authority(
     )
     return store, {
         "principal_id": "service.edge.gateway",
+        "tenant_id": "gr05-universal",
         "claim_ref": str(claim.claim_ref),
         "audit_ref": str(audit_ref),
         "body_sha256": body_sha256,
@@ -375,6 +384,36 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 "transport_identity": "controlled-provider://gr05/chat-budget",
                 "cache_hit": False,
             },
+        )
+
+    async def controlled_provider_stream(attempt):  # noqa: ANN001, ANN202
+        """Emit the same controlled provider through the typed final stream.
+
+        This is deliberately a local transport double, not an external-model
+        acceptance claim.  The Host composition, ModelAttemptService,
+        TaskGraph, budget ledger and SQLite delivery ledger remain real.
+        """
+
+        provider_calls.append(attempt)
+        sentence_one = "先固定目标和边界。"
+        sentence_two = "再执行下一步。"
+        yield ProviderStreamEvent.delta(sentence_one)
+        yield ProviderStreamEvent.delta(sentence_two)
+        yield ProviderStreamEvent.final(
+            ProviderResponse(
+                content=sentence_one + sentence_two,
+                finish_reason="stop",
+                usage={
+                    "prompt_tokens": 12,
+                    "completion_tokens": 8,
+                    "total_tokens": 20,
+                    "model_cost_micros": 30,
+                },
+                metadata={
+                    "transport_identity": "controlled-provider://gr05/chat-stream",
+                    "cache_hit": False,
+                },
+            )
         )
 
     def frozen_skill_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
@@ -482,6 +521,7 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             CallableProviderAdapter(
                 "gr05.controlled-provider",
                 complete_fn=controlled_provider,
+                stream_result_fn=controlled_provider_stream,
             ),
         ),
         ledger=ledger,
@@ -497,6 +537,7 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
     embodiment_runtime = None
     life = None
     memory = None
+    chat_ingress_store = None
     ingress_store = None
     mismatch_ingress_store = None
     try:
@@ -603,8 +644,9 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 conversation_event_reader=MemoryEventRepository.from_ledger(
                     ledger
                 ),
-                preference_store=UserPreferenceStore(ledger=ledger),
-                life_receipt_reader_provider=lambda: life.snapshot_reader,
+                    preference_store=UserPreferenceStore(ledger=ledger),
+                    life_command_service_provider=lambda: life.command_service,
+                    life_receipt_reader_provider=lambda: life.snapshot_reader,
                 life_projection_dispatcher=projection_dispatcher,
                 agent_runtime_ports=agent_runtime_ports,
             ),
@@ -642,6 +684,36 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             target_id="surface_reply",
             task="reply through governed chat",
         )
+        chat_ingress_store, chat_authority = _gateway_ingress_authority(
+            db_path,
+            request_id=chat["request_id"],
+            suffix="chat",
+        )
+        chat["principal_id"] = chat_authority["principal_id"]
+        # Build the emotion hand-off through the actual canonical fusion
+        # service before the governed runtime freezes it.  In particular, the
+        # secure transport principal remains separate from the relationship
+        # subject and can never become Natsume's self-affect identity.
+        chat_fusion_request = SimpleNamespace(
+            message=chat["task"],
+            workspace_id="tenant:gr05-universal",
+            person_id=chat["person_id"],
+            session_id=chat["session_id"],
+            emotion_context={},
+            emotion_tag=None,
+            emotion_intensity=None,
+            multimodal_observations={},
+        )
+        chat_affect_fusion = resolve_chat_emotion_context(
+            affect_fusion_service=AffectFusionService(
+                command_service_provider=lambda: life.command_service,
+                snapshot_reader_provider=lambda: life.snapshot_reader,
+                clock_ms=lambda: chat["ts_ms"],
+            ),
+            request_body=chat_fusion_request,
+            request_id=chat["request_id"],
+        )
+        assert chat_affect_fusion["_affective_life_internal"] is True
         skill = _intent(
             request_id="request-gr05-skill",
             session_id="session-gr05-universal",
@@ -681,6 +753,8 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             # Keep this direct-runtime test on that same side of the boundary:
             # person_id remains the conversational projection, while the
             # durable Governor grant is bound to the command principal.
+            if value["route"] == "chat":
+                value["principal_id"] = chat_authority["principal_id"]
             if value["route"] == "plan":
                 value["principal_id"] = plan_authority["principal_id"]
             governor = engine.evaluate_intent(
@@ -693,6 +767,16 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             assert runtime.supports(value) is True
             governors[value["route"]] = governor
             execution_kwargs: dict[str, object] = {}
+            if value["route"] == "chat":
+                execution_kwargs = {
+                    "request_body": SimpleNamespace(
+                        input_source="GATEWAY",
+                        reply_channel="qq",
+                        reply_target="qq_dm_gr05_universal",
+                    ),
+                    "command_authority": chat_authority,
+                    "emotion_context": chat_affect_fusion,
+                }
             if value["route"] == "plan":
                 execution_kwargs = {
                     "request_body": SimpleNamespace(input_source="GATEWAY"),
@@ -704,7 +788,9 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 governor=governor,
                 **execution_kwargs,
             )
-
+        assert results["chat"][-1]["execution_receipt"]["status"] == "ACCEPTED", (
+            json.dumps(results["chat"], ensure_ascii=False, indent=2)
+        )
         delegate_waiting = results["delegate"][-1]["execution_receipt"]
         assert delegate_waiting["status"] == "WAITING_APPROVAL"
         assert delegate_waiting["attempt_id"] is None
@@ -761,6 +847,13 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             runtime,
             intent=chat,
             governor=governors["chat"],
+            request_body=SimpleNamespace(
+                input_source="GATEWAY",
+                reply_channel="qq",
+                reply_target="qq_dm_gr05_universal",
+            ),
+            command_authority=chat_authority,
+            emotion_context=chat_affect_fusion,
         )
 
         # A direct caller that skips Cortex keeps the conversational principal
@@ -953,6 +1046,24 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 """,
                 (plan["request_id"],),
             ).fetchone()
+            chat_graph = conn.execute(
+                """
+                SELECT graph_id, graph_revision, surface, principal_id
+                FROM host_command_journal
+                WHERE request_id = ?
+                """,
+                (chat["request_id"],),
+            ).fetchone()
+            chat_delivery_rows = conn.execute(
+                """
+                SELECT event_kind, request_id, principal_id,
+                       relationship_subject_id, workspace_id
+                FROM task_runtime_chat_delivery_event
+                WHERE request_id = ?
+                ORDER BY created_ts_ms, event_id
+                """,
+                (chat["request_id"],),
+            ).fetchall()
             assistant_turns = conn.execute(
                 """
                 SELECT request_id, content
@@ -961,6 +1072,27 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 ORDER BY request_id
                 """,
                 (chat["session_id"],),
+            ).fetchall()
+            chat_conversation_scopes = conn.execute(
+                """
+                SELECT role, person_id
+                FROM conversation_turn
+                WHERE request_id = ?
+                ORDER BY turn_index
+                """,
+                (chat["request_id"],),
+            ).fetchall()
+            chat_life_receipt_scopes = conn.execute(
+                """
+                SELECT command_id, person_id
+                FROM life_command_receipt
+                WHERE command_id IN (?, ?)
+                ORDER BY command_id
+                """,
+                (
+                    f"life::conversation_turn::{chat['request_id']}::user",
+                    f"life::foreground_completed::{chat['request_id']}",
+                ),
             ).fetchall()
         assert sorted(row[0] for row in routes) == [
             "chat",
@@ -973,6 +1105,30 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         assert plan_graph[4] == plan_authority["claim_ref"]
         assert plan_graph[5] == plan_authority["audit_ref"]
         assert plan_graph[6] == "sha256:" + plan_authority["body_sha256"]
+        assert chat_graph[2:] == (
+            HostCommandSurface.GATEWAY.value,
+            chat_authority["principal_id"],
+        )
+        assert [row[0] for row in chat_delivery_rows] == [
+            "PLAN_FROZEN",
+            "SENTENCE_STAGED",
+            "SENTENCE_STAGED",
+            "STREAM_COMPLETED",
+        ]
+        assert all(row[1] == chat["request_id"] for row in chat_delivery_rows)
+        assert all(row[2] == chat_authority["principal_id"] for row in chat_delivery_rows)
+        assert all(row[3] == chat["person_id"] for row in chat_delivery_rows)
+        assert all(row[4] == "tenant:gr05-universal" for row in chat_delivery_rows)
+        assert chat_conversation_scopes == [
+            ("user", chat["person_id"]),
+            ("assistant", chat["person_id"]),
+        ]
+        assert len(chat_life_receipt_scopes) == 2
+        assert all(
+            person_id == chat["person_id"]
+            and person_id != chat_authority["principal_id"]
+            for _command_id, person_id in chat_life_receipt_scopes
+        )
         assert attempts == 6
         # Chat/delegate already froze worker projections; the plan's skill
         # node now does so as well, giving every accepted route the same B5
@@ -987,9 +1143,13 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         assert all(
             projection["budget_usage"]["measurements"]
             == {
-                "model_cost_micros": 27,
+                "model_cost_micros": (
+                    30 if projection["request_id"] == chat["request_id"] else 27
+                ),
                 "retry_count": 0,
-                "token_count": 18,
+                "token_count": (
+                    20 if projection["request_id"] == chat["request_id"] else 18
+                ),
             }
             for projection in chat_projection_payloads
         )
@@ -1035,9 +1195,13 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 )
             } == {
                 "concurrency": 0,
-                "model_cost_micros": 27,
+                "model_cost_micros": (
+                    30 if projection["request_id"] == chat["request_id"] else 27
+                ),
                 "retry_count": 0,
-                "token_count": 18,
+                "token_count": (
+                    20 if projection["request_id"] == chat["request_id"] else 18
+                ),
                 "tool_call_count": 0,
             }
             assert type(delta["time_ms"]) is int and delta["time_ms"] >= 0
@@ -1058,6 +1222,10 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             chat["request_id"],
             plan["request_id"],
         }
+        model_node_by_request = {
+            projection["request_id"]: projection["node_id"]
+            for projection in chat_projection_payloads
+        }
         for row in model_attempt_rows:
             assert row[2:7] == (
                 "gr05-controlled-surface-route",
@@ -1070,11 +1238,12 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             assert len(row[8]) == 64
             metadata = json.loads(row[9])
             assert metadata["provider_budget_measurements"] == {
-                "completion_tokens": 6,
-                "model_cost_micros": 27,
+                "completion_tokens": 8 if row[1] == chat["request_id"] else 6,
+                "model_cost_micros": 30 if row[1] == chat["request_id"] else 27,
                 "prompt_tokens": 12,
-                "token_count": 18,
+                "token_count": 20 if row[1] == chat["request_id"] else 18,
             }
+            assert metadata["model_node_id"] == model_node_by_request[row[1]]
         assert delegate_projection_payloads[0]["budget_usage"][
             "measurements"
         ] == {
@@ -1204,6 +1373,8 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             "identifiers_are_digested": True,
         }
     finally:
+        if chat_ingress_store is not None:
+            chat_ingress_store.close()
         if mismatch_ingress_store is not None:
             mismatch_ingress_store.close()
         if ingress_store is not None:

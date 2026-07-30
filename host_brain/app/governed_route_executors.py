@@ -341,16 +341,11 @@ def _chat_call_kwargs(
     chat_delivery_store: TaskChatDeliveryStore | None = None,
 ) -> dict[str, Any]:
     raw_body = _safe_mapping(input_pack.get("request_body"))
-    workspace_id = str(
-        raw_body.get("workspace_id")
-        or input_pack.get("workspace_id")
-        or ""
-    ).strip()
-    relationship_subject_id = str(
-        raw_body.get("relationship_subject_id")
-        or input_pack.get("relationship_subject_id")
-        or ""
-    ).strip()
+    (
+        workspace_id,
+        relationship_subject_id,
+        scope_authority,
+    ) = _frozen_chat_delivery_scope(input_pack=input_pack, raw_body=raw_body)
     governed_delivery_authority = (
         TaskBoundChatDeliveryAuthority(
             store=chat_delivery_store,
@@ -402,6 +397,7 @@ def _chat_call_kwargs(
             ),
             "workspace_id": workspace_id or None,
             "relationship_subject_id": relationship_subject_id or None,
+            "scope_authority": scope_authority,
         },
         "pii_ingress_stats": _safe_mapping(input_pack.get("pii_ingress_stats")),
         "motive_state": _safe_mapping(input_pack.get("motive_state")),
@@ -440,7 +436,11 @@ def _chat_call_kwargs(
         "route_reason": "governed_frozen_node",
         "request_id": frozen.request_id,
         "session_id": frozen.session_id,
-        "person_id": frozen.principal_id,
+        # The Task node principal is the authenticated caller of the command;
+        # it is not automatically the relationship subject of a companion
+        # turn.  Surface, AffectiveTurnPlan and delivery receipts must all use
+        # the one subject frozen by Runtime Context instead.
+        "person_id": relationship_subject_id or frozen.principal_id,
         "sanitized_message": message,
         "emotion_context": _safe_mapping(
             input_pack.get("emotion_context")
@@ -479,6 +479,56 @@ def _chat_call_kwargs(
         # manufactures delivery authority from an APPROVE decision.
         "governor_result": {},
     }
+
+
+def _frozen_chat_delivery_scope(
+    *,
+    input_pack: Mapping[str, Any],
+    raw_body: Mapping[str, Any],
+) -> tuple[str, str, str]:
+    """Resolve Chat delivery scope from the immutable frozen authority.
+
+    ``RuntimeContextApplicationService`` deliberately derives workspace and
+    subject from Secure Ingress rather than a caller supplied ``ChatRequest``.
+    Once that context is present, accepting the request-body values here would
+    let ordinary Chat fall back to an unscoped buffer (and could confuse a
+    transport principal with the relationship subject).  Historic graphs that
+    predate Runtime Context remain readable during the rollback window, but
+    cannot claim canonical task-bound scope.
+    """
+
+    context_schema = str(input_pack.get("runtime_context_schema") or "").strip()
+    if context_schema:
+        if context_schema != "natsume.runtime-context.request.v1":
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_INPUT_INVALID,
+                "frozen Chat runtime context schema is invalid",
+            )
+        workspace_id = str(input_pack.get("workspace_id") or "").strip()
+        relationship_subject_id = str(input_pack.get("subject_id") or "").strip()
+        if not workspace_id or not relationship_subject_id:
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_INPUT_INVALID,
+                "frozen Chat runtime context has no canonical workspace or subject",
+            )
+        return (
+            workspace_id,
+            relationship_subject_id,
+            "CANONICAL_RUNTIME_CONTEXT",
+        )
+
+    # Compatibility only: old accepted graphs have no typed Runtime Context.
+    # They may finish/replay through their original request projection, but new
+    # Host Input always takes the canonical branch above.
+    workspace_id = str(
+        raw_body.get("workspace_id") or input_pack.get("workspace_id") or ""
+    ).strip()
+    relationship_subject_id = str(
+        raw_body.get("relationship_subject_id")
+        or input_pack.get("relationship_subject_id")
+        or ""
+    ).strip()
+    return workspace_id, relationship_subject_id, "LEGACY_FROZEN_REQUEST"
 
 
 def _accepted_artifact_evidence_items(
@@ -1087,6 +1137,15 @@ def _task_bound_staged_sentence_event(
         "graph_revision": graph_revision,
         "node_id": frozen.node_id,
         "attempt_id": frozen.attempt_id,
+        # Preserve the exact lease/grant lineage after validating the Surface
+        # frame.  GovernedNodeWorker verifies this same receipt one layer
+        # later before it allows the already-staged sentence to remain
+        # visible; dropping the fields here incorrectly turns a valid stream
+        # into an unknown-side-effect recovery boundary.
+        "lease_id": frozen.lease_id,
+        "lease_owner_id": frozen.lease_owner_id,
+        "fencing_token": frozen.fencing_token,
+        "node_grant_ref": frozen.node_grant_ref,
         "self_id": "natsume_ai",
         "relationship_subject_id": relationship_subject_id,
         "workspace_id": workspace_id,
@@ -1120,15 +1179,31 @@ def _frozen_relationship_subject_id(frozen: FrozenNodeInput) -> str:
     input_pack = frozen.input_pack
     request_body = input_pack.get("request_body")
     request_body = request_body if isinstance(request_body, Mapping) else {}
-    subject = str(
-        input_pack.get("relationship_subject_id")
-        or request_body.get("relationship_subject_id")
-        or ""
-    ).strip()
+    context_schema = str(input_pack.get("runtime_context_schema") or "").strip()
+    if context_schema:
+        # New Host Input freezes the relationship subject in the typed Runtime
+        # Context.  The authenticated transport principal is intentionally
+        # separate, and a request-body relationship_subject_id must not get a
+        # chance to override the canonical value while a sentence is being
+        # made visible.
+        if context_schema != "natsume.runtime-context.request.v1":
+            raise GovernedRouteExecutorError(
+                GOVERNED_ROUTE_INPUT_INVALID,
+                "frozen Chat runtime context schema is invalid",
+            )
+        subject = str(input_pack.get("subject_id") or "").strip()
+    else:
+        # Compatibility only for accepted graphs that predate typed Runtime
+        # Context.  New input always takes the canonical branch above.
+        subject = str(
+            input_pack.get("relationship_subject_id")
+            or request_body.get("relationship_subject_id")
+            or ""
+        ).strip()
     if not subject:
         raise GovernedRouteExecutorError(
             GOVERNED_ROUTE_INPUT_INVALID,
-            "frozen Chat context lacks relationship_subject_id",
+            "frozen Chat context lacks canonical relationship subject",
         )
     return subject
 

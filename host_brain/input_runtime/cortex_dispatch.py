@@ -248,7 +248,13 @@ def _require_governed_command_authority(
 
     authority = {
         key: str(dict(command_authority or {}).get(key) or "").strip()
-        for key in ("principal_id", "claim_ref", "audit_ref", "body_sha256")
+        for key in (
+            "principal_id",
+            "tenant_id",
+            "claim_ref",
+            "audit_ref",
+            "body_sha256",
+        )
     }
     missing = [key for key, value in authority.items() if not value]
     if missing:

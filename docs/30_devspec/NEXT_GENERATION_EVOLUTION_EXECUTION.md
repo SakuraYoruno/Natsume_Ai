@@ -169,6 +169,11 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   漂移拒绝；`STREAM_CANCELLED/INTERRUPTED` 同样持久化。`0150` 在替代 attempt 写 plan 时原子检出前序
   delivery evidence，并返回 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，禁止盲目重跑模型。它仍是窄 vertical slice，普通 Chat route、
   受认证 connection resume、跨进程完整 recovery、真实 TTS/Avatar、真实 Edge 和完整服务栈实测仍未完成。
+- 本次修订已让该 narrow governed route 走完一次生产 handler 的本地 SQLite 链：Gateway service
+  principal 只保留在 HostCommand 与 Task delivery authority；`RuntimeContext v1.subject_id` 是唯一
+  conversation、Life、Memory 与可见 reply projection 的 relationship subject。native stream 与 buffered
+  path 一样把 frozen `ModelBudgetGuard.node_id` 写入 `ModelAttempt` audit，Acceptance 会拒绝任何 node
+  drift。该结论来自受控本地 model/Gateway transport 的集成验证，不可替代真实 provider、平台或 Edge 验收。
 
 退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
 Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。

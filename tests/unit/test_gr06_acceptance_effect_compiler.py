@@ -94,6 +94,77 @@ def _contracts():
     )
 
 
+def _gateway_companion_contracts(*, context_schema: str = "natsume.runtime-context.request.v1"):
+    """Build a gateway turn whose transport principal differs from its user."""
+
+    relationship_subject_id = "person-gr06-companion"
+    workspace_id = "tenant:gr06-companion"
+    fact = WorldFactV2(
+        workspace_id=workspace_id,
+        subject_id=relationship_subject_id,
+        key="host.runtime",
+        value="ready",
+        source_ref="world-observation://gr06/companion/1",
+        confidence=1.0,
+        observed_at_ms=111,
+        expires_at_ms=10_000,
+    )
+    snapshot = WorldSnapshotV2(
+        workspace_id=workspace_id,
+        subject_id=relationship_subject_id,
+        revision=1,
+        facts=(fact,),
+    )
+    return build_direct_host_route_contracts(
+        surface=HostCommandSurface.GATEWAY,
+        request_id="request-gr06-companion",
+        session_id="session-gr06-companion",
+        principal_id="service.edge.gateway",
+        ts_ms=111,
+        intent_draft={
+            "id": "intent-gr06-companion",
+            "route": "chat",
+            "target_id": "surface_reply",
+            "action": "exec_intent",
+            "target": "host",
+            "task": "reply with the frozen companion scope",
+        },
+        governor_result={
+            "request_id": "request-gr06-companion",
+            "intent_id": "intent-gr06-companion",
+            "decision": "APPROVE",
+            "risk_level": 1,
+            "ts_ms": 111,
+        },
+        sanitized_message="please keep my companion scope",
+        person_id=relationship_subject_id,
+        frozen_context={
+            "runtime_context_schema": context_schema,
+            "workspace_id": workspace_id,
+            "subject_id": relationship_subject_id,
+            "world_snapshot_v2": snapshot.to_dict(),
+            "scene_identity_v2": {
+                "schema": "natsume.scene-identity.v2",
+                "workspace_id": workspace_id,
+                "subject_id": relationship_subject_id,
+                "scene_id": "scene.casual-chat",
+                "revision": 1,
+                "decision_digest": "f" * 64,
+            },
+            "request_body": {
+                "input_source": "GATEWAY",
+                "response_form": "text",
+                "attachments": [],
+                "multimodal_observations": {},
+            },
+            "delivery_context": {
+                "reply_channel": "qq",
+                "reply_target": "conversation-gr06-companion",
+            },
+        },
+    )
+
+
 def _operator_contracts():
     fact = WorldFactV2(
         workspace_id="workspace-operator",
@@ -460,6 +531,70 @@ def test_compiler_rebuilds_graph_scoped_user_life_and_delivery_effects() -> None
     delivery = first[4].payload
     assert delivery["reply_target"] == "conversation-gr06"
     assert delivery["authority"]["governor_grant_ref"] == contracts.command.governor_grant_ref
+
+
+def test_compiler_keeps_gateway_authority_separate_from_companion_subject() -> None:
+    contracts = _gateway_companion_contracts()
+    effects = compile_graph_acceptance_effects(
+        command=contracts.command,
+        work_order=contracts.work_order,
+        node_id=contracts.graph.nodes[0].node_id,
+        attempt_id="attempt-gr06-companion",
+        worker_commit={
+            "decision": "APPROVE",
+            "request_id": contracts.command.request_id,
+            "narrative": "I will keep the relationship scope intact.",
+            "route_type": "chat",
+            "target_id": "surface_reply",
+            "audit_refs": {
+                "node_grant_ref": "node-grant://gr06-companion",
+                "node_grant_digest": "sha256:" + "b" * 64,
+            },
+        },
+    )
+
+    assert contracts.command.principal_id == "service.edge.gateway"
+    by_type = {effect.effect_type: effect.payload for effect in effects}
+    for effect_type in (
+        "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
+        "life.foreground_completed",
+        "surface.reply_delivery",
+    ):
+        assert by_type[effect_type]["person_id"] == "person-gr06-companion"
+    assert (
+        by_type["conversation.user_turn"]["metadata"]["authority_principal_id"]
+        == "service.edge.gateway"
+    )
+    life = by_type["life.foreground_completed"]
+    assert life["payload"]["person_id"] == "person-gr06-companion"
+    assert (
+        life["payload"]["projection_intents"][0]["payload"]["person_id"]
+        == "person-gr06-companion"
+    )
+    assert (
+        by_type["surface.reply_delivery"]["authority"]["authority_principal_id"]
+        == "service.edge.gateway"
+    )
+
+
+def test_compiler_rejects_runtime_context_without_the_supported_scope_schema() -> None:
+    contracts = _gateway_companion_contracts(context_schema="runtime-context.unsupported")
+    with pytest.raises(AcceptanceEffectCompileError, match="subject schema"):
+        compile_graph_acceptance_effects(
+            command=contracts.command,
+            work_order=contracts.work_order,
+            node_id=contracts.graph.nodes[0].node_id,
+            attempt_id="attempt-gr06-companion-invalid",
+            worker_commit={
+                "decision": "APPROVE",
+                "request_id": contracts.command.request_id,
+                "narrative": "this must not compile",
+                "route_type": "chat",
+                "target_id": "surface_reply",
+            },
+        )
 
 
 def test_compiler_rejects_worker_forged_authority_and_scope() -> None:

@@ -471,6 +471,16 @@ async def _native_affective_sentence_stream(
         metadata={
             "chain": "surface_main_native_sentence_stream",
             "affective_turn_plan_id": plan_id,
+            **(
+                # The durable attempt journal must be tied to the immutable
+                # TaskNode that owns this stream.  The buffered Surface path
+                # already carries this field; without it a native stream can
+                # finish delivery but is correctly rejected at acceptance as
+                # an unbound model attempt.
+                {"model_node_id": governed_model_budget.node_id}
+                if governed_model_budget is not None
+                else {}
+            ),
         },
     )
     final_model_attempt: Any | None = None

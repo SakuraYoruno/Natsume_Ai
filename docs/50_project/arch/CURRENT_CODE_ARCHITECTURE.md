@@ -126,6 +126,17 @@ worker 会复验同一 identity。`0150_task_runtime_chat_delivery_recovery.sql`
 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，不会重新调用模型。它不提前写 Life、Memory、Voice、Avatar 或 transport。
 普通 Chat 切流、受认证连接恢复、真实 TTS/VTS、物理 receipt 和完整恢复验收仍未完成。
 
+### DL-04 受治理 Chat 主体分离修订
+
+已入场 frozen Chat 的 Secure Ingress principal 与陪伴对象不再混用。`RuntimeContext v1` 冻结的
+`subject_id` / workspace 是 Surface、AffectiveTurnPlan、sentence receipt 和 Acceptance effect 的唯一
+陪伴 scope；Gateway service principal 仅保留为 HostCommand、lease、grant 与通道授权 audit 主体。
+`surface_main_chain_native_sentence_stream` 现从不可变 `ModelBudgetGuard` 写入 exact `model_node_id`，
+使 canonical `model_attempt_log` 可由最终 route acceptance 重开核验。Task Acceptance 后，用户 turn、
+assistant turn、Life `foreground_completed` 和 reply delivery projection 均使用 frozen subject，不能把
+`service.edge.gateway` 写进关系历史。此链有本地 SQLite production-handler integration evidence；它不代表
+generic Chat、connection resume、真实 provider 或远端 Edge 完成。
+
 ## 1. 结论
 
 NE-01 当前代码波次为

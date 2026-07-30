@@ -31,6 +31,7 @@ def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
             claim_ref="secure-ingress-claim://host-input-test",
             audit_ref="secure-ingress-audit://host-input-test",
             principal_id="service.edge.gateway.test",
+            tenant_id="workspace-host-input-test",
             idempotency_key="host-input-test",
             body_sha256="0" * 64,
             request_id="request-host-input-test",
@@ -47,8 +48,7 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
@@ -59,9 +59,6 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
                 "msg_type": "text",
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
@@ -78,8 +75,7 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
@@ -89,9 +85,6 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
                 "msg_type": "text",
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
@@ -110,8 +103,7 @@ def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatc
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
@@ -122,9 +114,6 @@ def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatc
                 "msg_type": "text",
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
@@ -136,8 +125,7 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
     dispatch_mock = AsyncMock(return_value={"decision": "APPROVE"})
     monkeypatch.setattr("host_brain.input_runtime.ingress._dispatch_to_graph", dispatch_mock)
 
-    client = _build_client(monkeypatch)
-    try:
+    with _build_client(monkeypatch) as client:
         response = client.post(
             "/v1/host/input",
             json={
@@ -149,9 +137,6 @@ def test_v1_host_input_asr_http_accepts_final_segment(monkeypatch) -> None:
                 "seq": 7,
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is True
@@ -172,7 +157,7 @@ def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None
         "host_brain.input_runtime.ingress._evaluate_immune_gate_for_input",
         lambda **_kwargs: {"decision": "BLOCK", "reason_codes": ["PROMPT_INJECTION_DETECTED"]},
     )
-    try:
+    with client:
         response = client.post(
             "/v1/host/input",
             json={
@@ -183,9 +168,6 @@ def test_v1_host_input_http_rejects_when_immune_gate_blocks(monkeypatch) -> None
                 "is_final": True,
             },
         )
-    finally:
-        client.close()
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["success"] is False

@@ -1102,15 +1102,30 @@ def _frozen_relationship_subject_id(frozen: FrozenNodeInput) -> str:
     input_pack = frozen.input_pack
     request_body = input_pack.get("request_body")
     request_body = request_body if isinstance(request_body, Mapping) else {}
-    subject = str(
-        input_pack.get("relationship_subject_id")
-        or request_body.get("relationship_subject_id")
-        or ""
-    ).strip()
+    context_schema = str(input_pack.get("runtime_context_schema") or "").strip()
+    if context_schema:
+        # The runtime context is the immutable ingress authority for new Host
+        # graphs.  It intentionally keeps the relationship subject distinct
+        # from the authenticated transport principal; do not fall back to a
+        # caller-controlled request field once it exists.
+        if context_schema != "natsume.runtime-context.request.v1":
+            raise GovernedNodeWorkerError(
+                GOVERNED_NODE_COMMIT_INVALID,
+                "frozen Chat runtime context schema is invalid",
+            )
+        subject = str(input_pack.get("subject_id") or "").strip()
+    else:
+        # Compatibility only for already accepted graphs from before typed
+        # Runtime Context was introduced.
+        subject = str(
+            input_pack.get("relationship_subject_id")
+            or request_body.get("relationship_subject_id")
+            or ""
+        ).strip()
     if not subject:
         raise GovernedNodeWorkerError(
             GOVERNED_NODE_COMMIT_INVALID,
-            "frozen Chat context lacks relationship_subject_id",
+            "frozen Chat context lacks canonical relationship subject",
         )
     return subject
 

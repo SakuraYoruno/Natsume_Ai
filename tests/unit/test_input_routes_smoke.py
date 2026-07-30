@@ -50,6 +50,7 @@ def _secure_host_input(monkeypatch: pytest.MonkeyPatch) -> None:
             claim_ref="secure-ingress-claim://unit-smoke",
             audit_ref="secure-ingress-audit://unit-smoke",
             principal_id="service.edge.input.unit",
+            tenant_id="workspace-unit-smoke",
             idempotency_key="unit-smoke",
             body_sha256="0" * 64,
             request_id="request.unit.smoke",

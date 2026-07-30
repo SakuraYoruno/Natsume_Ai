@@ -214,9 +214,14 @@ def compile_graph_acceptance_effects(
         for descriptor in descriptors
         if descriptor["effect_type"] == "life.foreground_completed"
     )
+    companion_subject_id = _frozen_companion_subject_id(
+        command=command,
+        pack=pack,
+    )
     foreground = _trusted_foreground_command(
         descriptors=foreground_descriptors,
         command=command,
+        companion_subject_id=companion_subject_id,
         surface_message=surface_message,
         narrative=narrative,
         render_lang=render_lang,
@@ -228,7 +233,11 @@ def compile_graph_acceptance_effects(
     user_turn = {
         "request_id": command.request_id,
         "session_id": command.session_id,
-        "person_id": command.principal_id,
+        # A HostCommand principal authorizes execution.  It is not necessarily
+        # the relationship subject: Gateway and Edge requests commonly carry
+        # a service principal.  Conversation/Life projections must remain
+        # scoped to the immutable Runtime Context subject instead.
+        "person_id": companion_subject_id,
         "content": surface_message,
         "ts_ms": command.created_at_ms,
         "lang": render_lang,
@@ -242,6 +251,7 @@ def compile_graph_acceptance_effects(
             ),
             "attachment_summary": str(request_body.get("attachment_summary") or ""),
             "source": "governed_task_acceptance",
+            "authority_principal_id": command.principal_id,
         },
     }
     payloads: list[tuple[str, Mapping[str, Any]]] = []
@@ -297,7 +307,7 @@ def compile_graph_acceptance_effects(
                 {
                     "request_id": command.request_id,
                     "session_id": command.session_id,
-                    "person_id": command.principal_id,
+                    "person_id": companion_subject_id,
                     "reply_channel": reply_channel,
                     "reply_target": reply_target,
                     "decision": "APPROVE",
@@ -1291,6 +1301,7 @@ def _trusted_foreground_command(
     *,
     descriptors: Sequence[Mapping[str, Any]],
     command: HostCommand,
+    companion_subject_id: str,
     surface_message: str,
     narrative: str,
     render_lang: str,
@@ -1312,7 +1323,7 @@ def _trusted_foreground_command(
     projection_payload = {
         "request_id": command.request_id,
         "session_id": command.session_id,
-        "person_id": command.principal_id,
+        "person_id": companion_subject_id,
         "user_message": surface_message,
         "assistant_reply": narrative,
         "narrative": narrative,
@@ -1338,6 +1349,7 @@ def _trusted_foreground_command(
             "reply_source": "governed_task_runtime",
             "life_projection_mode": True,
         },
+        "authority_principal_id": command.principal_id,
     }
     existing_projection = next(
         (
@@ -1355,7 +1367,7 @@ def _trusted_foreground_command(
         **payload,
         "request_id": command.request_id,
         "session_id": command.session_id,
-        "person_id": command.principal_id,
+        "person_id": companion_subject_id,
         "user_message": surface_message,
         "assistant_reply": narrative,
         "completed_at_ms": completed_at_ms,
@@ -1374,7 +1386,7 @@ def _trusted_foreground_command(
     }
     return {
         "command_type": "foreground_completed",
-        "person_id": command.principal_id,
+        "person_id": companion_subject_id,
         "command_id": f"life::foreground_completed::{command.request_id}",
         "correlation_id": command.request_id,
         "payload": canonical_payload,
@@ -1386,6 +1398,37 @@ def _trusted_foreground_command(
             "delivery_authorized": False,
         },
     }
+
+
+def _frozen_companion_subject_id(
+    *,
+    command: HostCommand,
+    pack: Mapping[str, Any],
+) -> str:
+    """Resolve the immutable relationship subject for companion projections.
+
+    Runtime Context v1 deliberately separates an authenticated transport
+    principal from the human whom Natsume is accompanying.  Gateway requests
+    therefore keep their service principal in HostCommand and Preview
+    authority, while conversation, Life, Memory and delivery projections use
+    the frozen subject.  Pre-context accepted graphs retain their historical
+    principal-scoped projection during the rollback window only.
+    """
+
+    schema = pack.get("runtime_context_schema")
+    if schema is None:
+        return str(command.principal_id or "").strip()
+    if schema != "natsume.runtime-context.request.v1":
+        raise AcceptanceEffectCompileError(
+            "runtime-context companion subject schema is invalid"
+        )
+    subject_id = str(pack.get("subject_id") or "").strip()
+    workspace_id = str(pack.get("workspace_id") or "").strip()
+    if not subject_id or not workspace_id:
+        raise AcceptanceEffectCompileError(
+            "runtime-context companion projection has no canonical subject or workspace"
+        )
+    return subject_id
 
 
 def _spec(
