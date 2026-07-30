@@ -419,6 +419,7 @@ async def receive_input(
                 ),
                 command_authority={
                     "principal_id": gateway_ingress.principal_id,
+                    "tenant_id": gateway_ingress.tenant_id,
                     "claim_ref": gateway_ingress.claim_ref,
                     "audit_ref": gateway_ingress.audit_ref,
                     "body_sha256": gateway_ingress.body_sha256,

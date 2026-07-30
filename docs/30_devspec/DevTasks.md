@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-04_GOVERNED_CHAT_SENTENCE_VISIBILITY_FOUNDATION`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-04_GOVERNED_CHAT_ACCEPTANCE_SCOPE_LOCAL_EVIDENCE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -57,6 +57,14 @@ exact duplicate/restart replay。0147 已将低风险表达 profile 接入 canon
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。
+
+DL-04 当前新增的是一条**已入场 frozen Chat 的本地 acceptance 证据链**，不是普通 Chat 封板：
+Gateway service principal 保留为 command/lease/grant/delivery authority，canonical Runtime Context 的
+`subject_id` 与 workspace 才进入七海的 AffectiveTurnPlan、conversation、Life、Memory 与 reply projection。
+原生句流会把 immutable model budget guard 的 exact node id 写入 canonical ModelAttempt audit；最终
+acceptance 对 node drift fail-closed。受控 SQLite integration 已验证两句流、acceptance effect 与 Gateway
+delivery 的端到端窄链；真实 provider、远端 Edge、authenticated connection resume 与 generic Chat cutover
+仍未完成，状态必须保持 `PARTIAL / REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 本切片同时新增 receipt-scoped `CompanionResponseFeedbackRequestV1`：
 `POST /v1/digital-life/relationship/response-feedback` 只允许 `HELPFUL/NEUTRAL/MISUNDERSTOOD/BOUNDARY`，

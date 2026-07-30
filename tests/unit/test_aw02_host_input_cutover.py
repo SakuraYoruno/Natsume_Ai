@@ -29,6 +29,7 @@ def _secure_outcome() -> HostGatewayIngressOutcome:
         claim_ref="secure-ingress-claim://aw02/input",
         audit_ref="secure-ingress-audit://aw02/input",
         principal_id="service.edge.gateway",
+        tenant_id="workspace-aw02",
         idempotency_key="aw02-input",
         body_sha256="a" * 64,
         request_id="request.gateway.aw02.input",
@@ -108,6 +109,7 @@ def test_dispatch_is_awaited_and_carries_authority(
     provider = Mock(name="governed_provider")
     authority = {
         "principal_id": "service.edge.gateway",
+        "tenant_id": "workspace-aw02",
         "claim_ref": "secure-ingress-claim://aw02/awaited",
         "audit_ref": "secure-ingress-audit://aw02/awaited",
         "body_sha256": "b" * 64,
@@ -151,6 +153,7 @@ def test_dispatch_is_awaited_and_carries_authority(
 def test_governed_cortex_binds_secure_ingress_principal_before_governor() -> None:
     authority = {
         "principal_id": "service.edge.gateway",
+        "tenant_id": "workspace-aw02",
         "claim_ref": "secure-ingress-claim://aw02/principal-bind",
         "audit_ref": "secure-ingress-audit://aw02/principal-bind",
         "body_sha256": "c" * 64,
@@ -236,7 +239,7 @@ def test_governed_cortex_rejects_incomplete_authority_before_governor() -> None:
 
     with pytest.raises(
         RuntimeError,
-        match="governed_command_authority_incomplete:claim_ref,audit_ref,body_sha256",
+        match="governed_command_authority_incomplete:tenant_id,claim_ref,audit_ref,body_sha256",
     ):
         _run(
             cortex_dispatch._run_cortex_orchestrator_pipeline(
@@ -295,6 +298,7 @@ def test_receive_input_returns_durable_command_receipt_without_legacy_overwrite(
     legacy_complete.assert_not_called()
     assert dispatch.await_args.kwargs["command_authority"] == {
         "principal_id": "service.edge.gateway",
+        "tenant_id": "workspace-aw02",
         "claim_ref": "secure-ingress-claim://aw02/input",
         "audit_ref": "secure-ingress-audit://aw02/input",
         "body_sha256": "a" * 64,

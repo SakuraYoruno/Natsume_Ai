@@ -275,8 +275,11 @@ async def test_governed_stream_uses_task_bound_sentence_receipts_not_life_writes
                 "delivery_status": "TASK_NODE_STREAM_RECORDED",
             }
 
+    requests: list[Any] = []
+
     class GuardedStreamingModel:
         async def stream_with_result(self, request):  # noqa: ANN001
+            requests.append(request)
             yield ModelAttemptStreamEvent.delta("我在。")
             target = ProviderTarget("surface-guarded", "provider", "model")
             yield ModelAttemptStreamEvent.final(
@@ -375,6 +378,7 @@ async def test_governed_stream_uses_task_bound_sentence_receipts_not_life_writes
     assert commit["audit_refs"]["surface_main_chain"]["mode"] == (
         "governed_node_sentence_stream"
     )
+    assert requests[0].metadata["model_node_id"] == "node-stream"
 
 
 @pytest.mark.asyncio

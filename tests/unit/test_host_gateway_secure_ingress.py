@@ -191,6 +191,7 @@ def test_valid_exact_raw_body_is_allowed_and_restart_duplicate_is_stable(tmp_pat
 
     assert first.allowed is True
     assert first.request_id == "request.gateway.1"
+    assert first.tenant_id == "local"
     assert first.claim_ref
     assert first.body_sha256
     assert duplicate.allowed is False

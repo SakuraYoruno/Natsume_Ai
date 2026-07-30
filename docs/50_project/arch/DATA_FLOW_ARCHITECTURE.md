@@ -560,6 +560,23 @@ trace 标记无终态 usage。`0145_affective_turn_delivery.sql` 只投影 plan/
 predecessor 与 Host staging status，绝不复制文本、原始媒体或模型推理。该读模型的 “last accepted”
 是**最后一次 Host 暂存**，不是远端设备实际状态。
 
+受治理 Chat 的 scope 数据流现进一步固定为：
+
+```text
+Secure Ingress service principal
+  → HostCommand / TaskNode lease / node grant / Gateway authority audit
+RuntimeContext v1 relationship subject + workspace
+  → AffectiveTurnPlan / sentence receipt / ModelAttempt.model_node_id
+  → Task Acceptance
+  → conversation + Life + Memory + reply delivery projection
+```
+
+前一行的 service principal 不能落入后一行的 relationship state。原生句流从同一不可变
+`ModelBudgetGuard` 取得 `node_id`，以 `model_node_id` 写入 canonical ModelAttempt；route acceptance
+重新打开 audit 时会拒绝缺失或漂移的 node binding。受控 SQLite 集成已在两句 stream、Acceptance effect
+和 Gateway delivery 上验证该分离。普通 Chat、连接恢复、真实 provider、远端 Edge 和物理 Voice/Avatar
+receipt 仍不在这份局部数据流的证明范围内。
+
 0147 将 `companion_profile` 作为同一 relation aggregate 的 bounded head，而不是 Surface、TTS
 或 Avatar 各自缓存一个“偏好”。`CompanionProfileLifecycleService` 只重开 append-only
 `relational_aftereffect_recorded` 事件：五条独立 user-input ref、跨至少三 UTC 日、`HELPFUL`、

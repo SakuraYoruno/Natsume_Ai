@@ -64,6 +64,7 @@ class HostGatewayIngressOutcome:
     audit_ref: str | None = None
     existing_result_ref: str | None = None
     principal_id: str | None = None
+    tenant_id: str | None = None
     idempotency_key: str | None = None
     body_sha256: str | None = None
     request_id: str | None = None
@@ -332,6 +333,11 @@ def evaluate_host_gateway_ingress(
             audit_ref=decision.audit_ref,
             existing_result_ref=decision.existing_result_ref,
             principal_id=ingress_request.principal_id,
+            tenant_id=(
+                ingress_request.identity.principal.tenant_id
+                if ingress_request.identity is not None
+                else None
+            ),
             idempotency_key=ingress_request.idempotency_key,
             body_sha256=ingress_request.body_sha256,
             request_id=ingress_request.request_id,

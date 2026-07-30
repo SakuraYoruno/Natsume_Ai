@@ -8,6 +8,7 @@ import pytest
 
 from host_brain.app.governed_route_executors import (
     GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+    GOVERNED_ROUTE_INPUT_INVALID,
     GOVERNED_ROUTE_OUTPUT_INVALID,
     GOVERNED_ROUTE_ROUTE_DRIFT,
     FrozenChatRouteExecutor,
@@ -403,6 +404,90 @@ async def test_chat_executor_parses_split_sse_and_buffers_one_terminal_narrative
     assert guard["max_output_tokens"] == 60
     assert events[0]["budget_usage"]["measurements"]["token_count"] == 18
     assert events[0]["budget_usage"]["measurements"]["model_cost_micros"] == 27
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_uses_canonical_runtime_context_for_companion_scope() -> None:
+    """A transport principal must not replace the frozen relationship subject."""
+
+    captured: dict[str, Any] = {}
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": "TEST_TERMINAL",
+            "narrative": "本测试不会生成可见回复。",
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                input_pack={
+                    "user_message": "请使用冻结作用域。",
+                    "runtime_context_schema": "natsume.runtime-context.request.v1",
+                    "workspace_id": "workspace-secure-ingress",
+                    "subject_id": "relationship-subject-canonical",
+                    "relationship_subject_id": "caller-controlled-subject",
+                    "request_body": {
+                        "workspace_id": "caller-controlled-workspace",
+                        "relationship_subject_id": "caller-controlled-subject",
+                    },
+                },
+            )
+        )
+    ]
+
+    assert events[0]["decision"] == "REJECT"
+    request_body = captured["request_body"]
+    assert request_body.workspace_id == "workspace-secure-ingress"
+    assert request_body.relationship_subject_id == "relationship-subject-canonical"
+    assert captured["person_id"] == "relationship-subject-canonical"
+    assert captured["trace_stage_meta"]["governed_task_chat_delivery"] == {
+        "status": "BUFFERED_NO_TASK_DELIVERY_SCOPE",
+        "workspace_id": "workspace-secure-ingress",
+        "relationship_subject_id": "relationship-subject-canonical",
+        "scope_authority": "CANONICAL_RUNTIME_CONTEXT",
+    }
+
+
+@pytest.mark.asyncio
+async def test_chat_executor_rejects_incomplete_canonical_runtime_scope() -> None:
+    async def stream(**_kwargs):  # noqa: ANN003
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "narrative": "unreachable",
+        }
+
+    executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
+    with pytest.raises(GovernedRouteExecutorError) as raised:
+        _ = [
+            event
+            async for event in executor.execute_stream(
+                _frozen(
+                    route="chat",
+                    target_id="surface_reply",
+                    input_pack={
+                        "user_message": "不得回退到请求体作用域。",
+                        "runtime_context_schema": "natsume.runtime-context.request.v1",
+                        "workspace_id": "workspace-secure-ingress",
+                        "request_body": {
+                            "relationship_subject_id": "caller-controlled-subject",
+                        },
+                    },
+                )
+            )
+        ]
+
+    assert raised.value.reason_code == GOVERNED_ROUTE_INPUT_INVALID
 
 
 @pytest.mark.asyncio

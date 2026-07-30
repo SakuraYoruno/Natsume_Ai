@@ -1448,3 +1448,19 @@ coverage 合同为 `39 passed in 12.64s`；远程 CI 为
   `TASK_NODE_SENTENCE_STAGED` 在 Acceptance 前外显，并重复校验 request/self/relationship/workspace 与
   lease/fence/grant。Surface 的 governed 分支不在此时写 Life、Memory、TTS、Avatar 或通道 outbox。
 - 定向集合：`python -m pytest tests/unit/test_gr05_frozen_route_executors.py tests/unit/test_gr05_governed_frozen_workers.py tests/unit/test_dl04_task_chat_delivery_store.py tests/unit/test_dl04_native_affective_stream.py tests/unit/test_aw02_task_runtime_composition.py -q`，结果 `52 passed in 27.87s`。这只证明 frozen Chat vertical slice；普通 Chat、受认证 HTTP connection resume、真实 provider、远端 Edge 和 DL-07 服务栈仍未通过。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+### DL-04 主体分离与最终 Acceptance 回归
+
+- `RuntimeContext v1` 存在时，request body 的 `workspace_id`、`relationship_subject_id` 不可回退或覆盖；
+  缺 canonical subject/workspace、schema drift、lease/grant drift 一律在 Surface 或 Worker 失败关闭。
+- 流式 `ModelAttemptRequest.metadata.model_node_id` 必须等于 frozen `ModelBudgetGuard.node_id`；最终
+  `model_attempt_log` 的 audit metadata 由 route acceptance 重新读取，缺失字段稳定触发
+  `MODEL_ATTEMPT_AUDIT_DRIFT`，不得用输出 trace 补写。
+- Gateway `service.edge.gateway` 作为授权 principal 不得进入 `conversation_turn.person_id` 或
+  `life_command_receipt.person_id`；同一受治理 Chat 的 user/assistant turn、`foreground_completed`
+  必须都绑定 immutable relationship subject。delivery ledger 仍保留 service principal，证明两种 identity
+  没有被混为一层。
+- 本次本地定向结果：Scope/Ingress/Acceptance/stream 共 `84 passed`；真实 ASGI lifespan 的
+  Host Input HTTP 集成为 `5 passed`；受控 SQLite universal route integration 为
+  `1 passed`。这些使用受控本地 model/Gateway transport，不是外部模型、第三方平台或远端
+  Edge 通过证据；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
