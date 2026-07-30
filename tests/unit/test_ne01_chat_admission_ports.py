@@ -32,7 +32,7 @@ def test_chat_admission_uses_typed_input_runtime_ports_without_locator() -> None
     assert "InputRuntimeApplicationPorts" in source
     assert "HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED" in source
     assert "input_runtime_ports.require_thalamus_agent()" in source
-    assert "input_runtime_ports.require_ans_agent()" in source
+    assert "input_runtime_ports.require_ans_agent()" not in source
     assert "input_runtime_ports.get_intent_engine()" in source
     assert "input_runtime_ports.evaluate_governor_with_timing(" in source
     assert "input_runtime_ports.resolve_chat_emotion_context(" in source

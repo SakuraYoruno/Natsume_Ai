@@ -150,6 +150,12 @@
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
+- `test_chat_handler_streaming.py` 与 `test_ne01_chat_admission_ports.py` 断言正常
+  `/v1/chat` 只要求 Thalamus；`InputRuntimeApplicationPorts.get_ans_agent` 缺失时仍可完成
+  流式 `COMMIT`，源码中也不存在 `require_ans_agent()` 或 `emit_task_success()` 调用。
+  与 canonical ANS/fusion 回归的定向集合为 `41 passed in 63.04s`。这只证明本地热路径不再
+  打开旧 `TASK_SUCCESS` Affect 回路，不替代真实 Host、provider、Gateway、远端 Edge 或 DL-07。
+
 - `tests/integration/test_dl06_canonical_proactive_tick.py` 使用真实 SQLite migration、
   `LifeCommandService`、repository、outbox dispatcher 与重建后的 reader/service 验证一条完整 Host-side
   scheduler 链：实际 `submit_life_tick_command()` 必须先读取冻结 Runtime Context，registry 只将唯一已回执的

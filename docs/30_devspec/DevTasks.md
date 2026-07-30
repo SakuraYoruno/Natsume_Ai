@@ -68,6 +68,12 @@ Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不�
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。
 
+**DL-06 普通 Chat ANS 情感回路退役：** `/v1/chat` 只将 Thalamus 作为该入口的
+必要 Tribe preflight；正常 `COMMIT` 不再调用 `ANSAgent.emit_task_success()`。接受结果的
+relationship aftereffect 继续由 canonical Life/Acceptance owner 处理，不能用 legacy
+`TASK_SUCCESS` 回补 self-affect。此为本地热路径 authority 收口，不代表全局删除 ANS、
+真实模型、Gateway、远端 Edge 或 DL-07 验收完成。
+
 **DL-06 canonical 主动节律修订：** Scheduler 的发送 policy 现在先以 canonical
 `self-affect + relationship + regulation + profile + frozen Scene` 编译实际
 `AffectiveTurnPlanV1`，然后把 plan id、`synchronization_id`、content digest、scope 与 cadence

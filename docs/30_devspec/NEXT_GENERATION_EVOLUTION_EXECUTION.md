@@ -43,6 +43,8 @@ flowchart LR
 - `self_id=natsume_ai`、`relationship_subject_id`、`workspace_id`、`session_id` 必须分离。
 - 原始音频、图像、私密正文默认不进入情感 journal；只保存可撤销的派生摘要与 evidence ref。
 - 远端 Edge 位于另一台电脑。本合同不自行启动它；缺真实 Edge、硬件或模型凭据时只能得到 `ACCEPTANCE_PENDING_EXTERNAL`。
+- 普通 Chat 的成功提交不得重新发出 legacy `ANS TASK_SUCCESS` 作为情感输入；接受结果及
+  relationship aftereffect 必须留在 canonical Life/Acceptance authority 内。
 
 ## 2. 唯一 authority 与公共合同
 

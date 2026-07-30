@@ -23,6 +23,10 @@
 > BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪；production Bond writer/queue 已退役为只读 projection 与明确 no-write adapter。Host HTTP route ports 已删除 Bond writer provider，`POST /bond/event` 固定返回 `410`；Monitor 的人工补录表单、调用 API 与 registry 项同步删除。历史 score/stage 只可读取，不能成为亲密、主动许可或 self-affect 的输入。Surface
 > 仍有其它兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
 > episode 与旧 writer 清零仍待后续 DL 波。Input/Tribe composition 也已删除旧 runtime fallback：缺 Life authority 时拒绝，不能构造 `HostEmotionRuntime`。
+> 普通 `/v1/chat` 现在只以 Thalamus 作为入口 preflight，提交后不再调用
+> `ANSAgent.emit_task_success()`；该 legacy event 不能借聊天成功回流为第二份 Affect。
+> accepted outcome 的关系后效应仍属于 canonical Life/Acceptance，不代表全部 ANS
+> compatibility consumer 或 DL-07 已完成。
 > DL-04 已把 `AffectiveTurnPlanV1 → native sentence stream → durable sentence intent`
 > 接到 Surface 主链：普通低歧义文本在可见前逐句落 journal，model runtime 会优先使用
 > `typed delta → provider final result / conditional usage` 合同并在没有首句前明确不支持时才回退兼容流；Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/identity/latency，但真实 provider 尚未运行；模型输出不能回写

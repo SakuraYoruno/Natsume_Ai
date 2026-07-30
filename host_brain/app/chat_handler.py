@@ -543,7 +543,6 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     if not isinstance(input_runtime_ports, InputRuntimeApplicationPorts):
         raise RuntimeError("HOST_INPUT_RUNTIME_PORTS_NOT_INJECTED")
     input_runtime_ports.require_thalamus_agent()
-    input_runtime_ports.require_ans_agent()
 
     return StreamingResponse(
         _unified_chat_sse_generator(
@@ -857,7 +856,9 @@ async def _unified_chat_sse_generator(
             command_authority=dict(command_authority or {}),
         ):
             yield event
-            # T-94：检测 COMMIT done=True，对话完成后发布 TASK_SUCCESS 事件
+            # 传输与具身生命周期只属于当前回复。接受结果及其关系后效应由
+            # canonical Life 路径记录；普通 Chat 提交后不得重新打开已退役的
+            # ANS TASK_SUCCESS 情感回路。
             try:
                 _ev = json.loads(event[len("data: "):].strip()) if event.startswith("data: ") else {}
                 event_state = _infer_mateengine_state_from_event(_ev)
@@ -890,14 +891,6 @@ async def _unified_chat_sse_generator(
                             emotion_intensity=mate_performance.get("emotion_intensity"),
                             embodiment_runtime=embodiment_runtime,
                         )
-                    try:
-                        input_runtime_ports.require_ans_agent().emit_task_success(
-                            session_id=session_id,
-                            task_type="chat",
-                            intensity=0.35,
-                        )
-                    except Exception:
-                        pass
             except Exception:
                 pass
 

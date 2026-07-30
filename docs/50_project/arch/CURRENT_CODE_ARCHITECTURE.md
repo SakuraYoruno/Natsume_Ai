@@ -56,6 +56,12 @@
 > Bond queue/writer 已退役为 no-write adapter；Life projection 的 post-process 也不再发布旧 Tribe 对话结束事件或直接推 VTS/整段 TTS。production Host 也不会从旧 action log 预热 legacy emotion timeline：它返回显式 retired 空投影，且 Runtime snapshot 不会把 user profile 升格为 self-affect，canonical Limbic/Prefrontal 不会读取该投影；但 Surface 的其它兼容 state、Monitor 审核、canary 长期收益、真实模型和三模态物理服务仍未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
+> **DL-06 普通 Chat ANS 回路退役：** `chat_handler.handle_chat()` 只预检
+> `require_thalamus_agent()`；SSE `COMMIT` 不再解析 `get_ans_agent` 或调用
+> `emit_task_success()`。已接受回复的关系意义仍由 canonical Life/Acceptance effect
+> 处理，不能由 legacy task-success 事件补写 self-affect。该切片仅覆盖本地 Chat 热路径，
+> 不是全部 ANS 接口删除，也不证明真实 Host/provider/Gateway/Edge 或 DL-07。
+
 > **DL-06 canonical 主动节律修订：** `companion_proactive` 的 policy 不再直接 patch
 > scheduler state。它先冻结实际的 `AffectiveTurnPlanV1`、`ExpressionPlanV1.synchronization_id` 和
 > bounded content digest；reducer 随后在同一 Life UoW 重验 target/scope、self-affect/relationship
