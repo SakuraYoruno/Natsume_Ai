@@ -40,7 +40,7 @@
 
 **Limbic 事件回调收紧修订：** canonical Life authority 现会在任何 legacy `EmotionPersistence`
 restore/persist、silence mutation 或 registry touch 之前 short-circuit Bond、task success、humor landed、
-loneliness、immune block 与 interaction-recorded callback。它们不能把事件总线回调重新变成第二条 self-affect
+loneliness、immune block、interoception 与 interaction-recorded callback。它们不能把事件总线回调重新变成第二条 self-affect
 writer；该结论只覆盖 production canonical composition，仍不替代新 Life command、兼容 reader 审计或真实服务验收。
 
 **0148 修订：** 当前子波已改为 `DL-06_AUTOMATIC_PROFILE_CANARY_ACTIVATION_SLICE`。Host 的

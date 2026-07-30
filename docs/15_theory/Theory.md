@@ -1779,7 +1779,7 @@ runtime，两个 composition builder 缺少 Life provider 时也必须以
 `CANONICAL_AFFECT_FUSION_NOT_INJECTED` 失败关闭。旧类仅可被直接隔离测试覆盖，不能重新成为
 offline 或 production Host 的第二条自我情感路径。这个原则不否定身体感受或调节层，但它们在
 未被 canonical journal 吸收前只能是观察或只读投影，不能自行决定七海的情绪与关系。
-同样地，production Limbic 不可把一次 body/Bond、任务成功、幽默、孤独、风险拦截或 interaction-recorded
+同样地，production Limbic 不可把一次 body/Bond、任务成功、幽默、孤独、风险拦截、内感受或 interaction-recorded
 callback 偷渡为旧 `EmotionPersistence`、timeline 或 metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIRED_CANONICAL_LIFE`。这不是“压平
 情绪”，而是要求真实的受伤、牵挂或轻快都先有可解释的 Appraisal 与 Life journal 原因，避免两套隐性
 状态在不同重启、用户或会话中互相覆盖。

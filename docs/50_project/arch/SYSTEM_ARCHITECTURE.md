@@ -163,7 +163,7 @@ composition root：`build_production_host_application_ports()` 不再构造 muta
 在 request 时走 `AffectFusionService`，而不是把旧 runtime 当 fallback。离线或测试 composition
 仍可显式选择 compatibility runtime，但它不属于 production object graph。production Tribe ports
 随后还以 immutable affective-life authority gate 退役 Limbic 的 legacy persistence、metabolism、
-timeline、decay 与 Bond、任务成功、幽默、孤独、风险拦截、interaction-recorded callback：这些路径只返回 `RETIRED_CANONICAL_LIFE`，而不再生成 self-affect
+timeline、decay 与 Bond、任务成功、幽默、孤独、风险拦截、内感受、interaction-recorded callback：这些路径只返回 `RETIRED_CANONICAL_LIFE`，而不再生成 self-affect
 mutation。Endocrine 的 legacy cortisol/oxytocin buffer、last-state、hint 和 fan-out 也在 canonical
 mode 退役，只可返回无状态 hard-state projection；Circadian/MirrorNeuron 不再绕过该边界直写私有 delta。
 production BodySense 也已完成 read-only cutover：Surface/startup 不再构造或读取 global model，Limbic 只通过

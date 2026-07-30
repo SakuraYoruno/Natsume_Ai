@@ -728,7 +728,7 @@ authority 存在时均经 `AffectFusionService` 形成 scoped observation/apprai
 感受。旧 runtime 类不由任何 Input/Tribe composition 构造；缺 Life authority 的解析稳定拒绝。
 随后 canonical
 `TribeApplicationPorts` 也成为 Limbic compatibility writer 的 gate：旧 persistence/metabolism/
-timeline/decay 与 Bond、任务成功、幽默、孤独、风险拦截、interaction-recorded callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
+timeline/decay 与 Bond、任务成功、幽默、孤独、风险拦截、内感受、interaction-recorded callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
 回调追加为另一个 self-affect 事实。Endocrine 的 delta buffer/last-state/hint/fan-out 也由同一 gate
 拒绝；Circadian/MirrorNeuron 不再直写其私有字段。BodySense 生产读取现改为
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：

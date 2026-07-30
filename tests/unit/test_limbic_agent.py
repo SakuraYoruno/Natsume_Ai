@@ -130,6 +130,14 @@ def test_limbic_agent_retires_all_legacy_event_metabolism_callbacks() -> None:
             )
         )
     )
+    asyncio.run(
+        agent._on_interoception_updated(
+            SimpleNamespace(
+                payload={"interoceptive_index": 1.0, "body_budget": 0.0},
+                ts_ms=6,
+            )
+        )
+    )
 
     assert agent.state_registry.get_state("limbic") is None
 

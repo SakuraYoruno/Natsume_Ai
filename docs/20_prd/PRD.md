@@ -68,7 +68,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
 - 每轮外显前必须冻结同一份 self-affect、CompanionAct 与 ExpressionPlan；模型、请求
   hint、纯文本解析或任一单通道失败均不得回写或中性化七海自身情感。
-- legacy Limbic 的 Bond、任务成功、幽默、孤独、风险拦截和 interaction-recorded 回调在 production
+- legacy Limbic 的 Bond、任务成功、幽默、孤独、风险拦截、内感受和 interaction-recorded 回调在 production
   canonical mode 只能作为退役兼容入口，绝不能绕过 Life journal 修改七海的 self-affect。
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中

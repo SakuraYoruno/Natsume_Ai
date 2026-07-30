@@ -265,7 +265,7 @@ permission。`proactive_permission` 的 owner 是 companion Scheduler，不能�
 provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime；遗漏
 authority 的 composition 失败关闭，不能恢复 offline/test fallback。canonical
 Tribe ports 还会令 Limbic 的 legacy persistence、metabolism、timeline append、decay 与 Bond、任务成功、幽默、
-孤独、风险拦截、interaction-recorded callback 全部 no-op 并返回 `RETIRED_CANONICAL_LIFE`，避免 event callback 重建第二份 self-affect。这不是完整
+孤独、风险拦截、内感受、interaction-recorded callback 全部 no-op 并返回 `RETIRED_CANONICAL_LIFE`，避免 event callback 重建第二份 self-affect。这不是完整
 organ 退役：Endocrine 的 legacy delta/last-state/hint/fan-out 现同样 no-op；Circadian/MirrorNeuron
 只能调用它的受控 compatibility port，不再触碰私有字段。BodySense 的 legacy global model 也不再被
 production Surface/startup 读取，canonical Limbic 必须从 scoped Life snapshot 做纯投影，且 legacy tick/

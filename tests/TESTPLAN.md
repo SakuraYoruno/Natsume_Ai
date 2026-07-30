@@ -42,7 +42,7 @@
   `410 LEGACY_BOND_WRITE_RETIRED`，不得解析 writer、改变历史 score/stage、self-affect 或 relationship
   aggregate。Monitor 不得再包含人工 Bond 补录表单、调用 API 或 endpoint registry 项；历史投影只能只读。
 - T-DL01-09：production canonical Life authority 下，即使 Limbic 已持有旧 `EmotionPersistence` 对象，
-  task success、humor landed、loneliness、immune block 与 interaction-recorded callback 也必须在任何
+  task success、humor landed、loneliness、immune block、interoception 与 interaction-recorded callback 也必须在任何
   restore/persist、silence mutation 或 state-registry touch 前 short-circuit；只有显式 offline/test compatibility
   composition 可执行历史行为。
 

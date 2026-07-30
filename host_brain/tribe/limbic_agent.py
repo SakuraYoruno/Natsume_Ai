@@ -1312,6 +1312,8 @@ class LimbicAgent:
         - interoceptive_index >= 0.70：高负荷，情绪向低效价/低唤醒偏移
         - body_budget >= 0.75 且 interoceptive_index <= 0.30：体能充足，轻微正效价偏移
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             interoceptive_index = float(payload.get("interoceptive_index") or 0.0)
