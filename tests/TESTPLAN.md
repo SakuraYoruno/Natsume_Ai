@@ -94,6 +94,11 @@
   宣布完成的指令，外部伪造 marker 必须无效。
 - T-DL03-06：生产 `HostBondRuntime` 默认不得按 score 自动 stage transition；旧
   Bond 仅是 compatibility 描述，不能授予浪漫、排他或依赖同意。
+- T-DL03-07：canonical Life composition 下，`SocialBrainAgent` 对只携带裸
+  `person_id/user_id` 的历史 relation API 必须在调用 Bond engine、旧 registry、event bus、
+  narrative 或 milestone 前返回 `RETIRED_CANONICAL_LIFE` 的中性投影；它不得猜测
+  `workspace + relationship_subject`，也不得触发旧 Limbic/关系修复写入。离线 compatibility
+  composition 的历史行为不构成 production fallback。
 - 当前本地证据：关系 reducer、restart/reconcile、Surface compiler、旧 Surface
   回归和 Bond 边界为 `54 passed in 20.50s`。远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`；主动陪伴、真人体验、真实 provider、TTS/Avatar/Edge

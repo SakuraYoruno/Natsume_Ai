@@ -25,6 +25,8 @@ episode / aftereffect 链变化。此为公开 HTTP/UI 写入口收口，不等�
 
 关系后效应也开始真正影响七海自身：在用户明确接受修复的 accepted relationship aftereffect 后，Fusion 会以该 durable receipt 为证据形成 `RELIEF / CARE`，而不是把“修好了”写成机械 Bond 加分或永久承诺。`proactive_permission=DENIED` 仍严格阻止 Scheduler 主动联系，但不再把用户已经主动发起的当前聊天误判为必须沉默；当前回合仍由新输入、当前 Appraisal 与关系边界共同决定。该切片只证明本地 journal/plan 因果，不证明用户已经长期满意、允许主动联系或远端设备已表达。
 
+DL-03 进一步收回了 `SocialBrainAgent` 的历史关系旁路。该组件多数旧入口只拿到裸 `person_id`，无法安全恢复 `workspace + relationship_subject` 的 canonical aggregate；production canonical Life composition 因而不再查询 Bond engine、旧 registry、旧 narrative、milestone 或 event-bus callback，而是返回显式 `RETIRED_CANONICAL_LIFE` 的中性兼容投影。真实关系信息只可经带完整 scope 的 `AffectFusion → RelationshipStateV2` 内部 hand-off 进入当前回合。这是本地 authority 边界，不代表旧 compatibility 类被删除，也不代表真实陪伴体验、远端 Edge 或 DL-07 服务栈已验收。
+
 七海也不必把自己全部中性化：只有明确指向她、且不含“请停下”语义的贬损，才会在 canonical Life 中形成她自己的 `HURT / CAUTION → CONTAIN → SET_BOUNDARY`，并以稳住的文字、温和边界 Voice/Avatar plan 表达；普通挫败不会被臆测为攻击。相反，“闭嘴”“别来烦我”等明确停止请求优先成为 durable `BOUNDARY`、立刻停止主动联系和给空间，绝不反过来要求用户安抚七海。原话仍不进入 journal。
 
 本次 DL-04 修订把一条容易被掩盖的身份边界实际接通：Gateway 的 `principal_id` 仅保留为 HostCommand、lease/grant 和外发授权主体；`RuntimeContext v1` 中冻结的 relationship subject 才是七海陪伴的对象。已入场 frozen Chat 的 native sentence stream 会把同一 `model_node_id` 写入 canonical ModelAttempt audit，随后仅在 Task Acceptance 后以该 relationship subject 写 conversation、Life、Memory 与 delivery projection。SQLite 集成链已覆盖“服务主体授权 → TaskGraph → node-bound model attempt → 两句持久可见性 → Acceptance → Life/Gateway effect”，并明确断言服务主体不会进入用户关系记录。它仍只是受控本地 transport 的窄 vertical slice：普通 Chat 全量切流、受认证连接恢复、真实外部模型、远端 Edge/TTS/VTS 和 Docker 全栈验收均未执行，整体继续为 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。

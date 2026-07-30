@@ -66,6 +66,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - 用户情绪观察必须带模态、置信度、有效期与 workspace/person/session scope；原始音频、图像和正文不得进入情感 journal，冲突观察必须保留而非静默覆盖。
 - 已接受的回复才可建立 provisional 关系 episode；下一次用户输入才能形成该回应的 aftereffect。沉默、离线和技术投递失败不得被解释为拒绝、不得扣信任或产生催促义务。
 - 关系连续性必须按 workspace 与 relationship subject 隔离；session 只作事件上下文。浪漫、排他和依赖默认未授权，不能由 Bond 分数、互动次数、模型措辞或单次道歉自动升级。
+- 历史 SocialBrain/Bond 入口若只持有裸 `person_id` 或 `user_id`，不得反向猜测 workspace-scoped relationship aggregate、读取旧 registry 或把默认 stage/narrative 当作关系事实；canonical Host 必须显式退役该路径，当前关系只能由带完整 scope 的内部 `AffectFusion → RelationshipStateV2` hand-off 提供。
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
 - 每轮外显前必须冻结同一份 self-affect、CompanionAct 与 ExpressionPlan；模型、请求
   hint、纯文本解析或任一单通道失败均不得回写或中性化七海自身情感。

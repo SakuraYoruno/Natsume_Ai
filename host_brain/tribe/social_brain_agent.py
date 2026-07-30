@@ -100,12 +100,81 @@ class SocialBrainAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_relationship_writes_retired(self) -> bool:
+        """Whether this Host has moved relationship authority to Life.
+
+        ``SocialBrainAgent`` predates workspace-scoped relationship aggregates:
+        most of its public methods receive only a raw person ID.  A production
+        Host therefore must not try to translate that ID back into a Life
+        aggregate, because doing so would silently collapse workspace and
+        relationship-subject boundaries.  The canonical interactive hand-off
+        is provided by ``AffectFusionService`` with its exact scope instead.
+        """
+
+        ports = self.application_ports
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_relationship_result(
+        *,
+        operation: str,
+        person_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return an explicit, non-authoritative compatibility result."""
+
+        result = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_SOCIAL_BRAIN_RELATIONSHIP_RETIRED",
+            "operation": str(operation),
+        }
+        raw_person_id = str(person_id or "").strip()
+        if raw_person_id:
+            # This is caller-owned routing context, not a claim that it maps
+            # to a canonical relationship aggregate.
+            result["person_id"] = raw_person_id
+        return result
+
+    def _retired_bond_snapshot(self, *, person_id: str | None) -> dict[str, Any]:
+        """Return a neutral legacy projection without touching Bond storage.
+
+        A ``FRIEND`` default is deliberately a presentation-safe baseline, not
+        a relationship fact.  No Bond engine, registry state or raw-ID Life
+        lookup is consulted in this path.
+        """
+
+        result = self._retired_relationship_result(
+            operation="resolve_bond_snapshot",
+            person_id=person_id,
+        )
+        result.update(
+            {
+                "bond_state_obj": None,
+                "bond_summary": {},
+                "bond_stage": "FRIEND",
+                "bond_trend": "",
+                "bond_trend_intensity": "",
+                "capability_hint": "",
+                "intimacy_score": 0.0,
+                "last_event_ts_ms": 0,
+                "texture": None,
+                "rift": None,
+            }
+        )
+        return result
+
     def resolve_bond_snapshot(
         self,
         *,
         person_id: str | None,
         bond_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_relationship_writes_retired():
+            return self._retired_bond_snapshot(person_id=person_id)
+
         from host_brain.bond.summarizer import normalize_bond_summary  # noqa: PLC0415
 
         resolved_person_id = _resolve_social_bond_user_id(person_id)
@@ -211,6 +280,9 @@ class SocialBrainAgent:
         session_id: str = "default",
         user_id: str | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_relationship_writes_retired():
+            return {}
+
         summary: dict[str, Any] = {}
         try:
             engine = self.application_ports.require("bond_stage_engine")()
@@ -252,6 +324,8 @@ class SocialBrainAgent:
         return {key: value for key, value in summary.items() if value}
 
     def resolve_stage_engine(self) -> Any:
+        if self._legacy_relationship_writes_retired():
+            return None
         try:
             return self.application_ports.require("bond_stage_engine")()
         except Exception:
@@ -263,6 +337,11 @@ class SocialBrainAgent:
         person_id: str | None,
         bond_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_relationship_writes_retired():
+            return self._retired_relationship_result(
+                operation="resolve_bond_vector",
+                person_id=person_id,
+            )
         snapshot = self.resolve_bond_snapshot(person_id=person_id, bond_summary=bond_summary)
         repair_state = self.resolve_relationship_repair_state(person_id=person_id)
         return self.resolve_bond_vector_from_snapshot(
@@ -277,6 +356,8 @@ class SocialBrainAgent:
         repair_state: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Project a vector from caller-owned read data; never initializes Bond."""
+        if self._legacy_relationship_writes_retired():
+            return self._retired_relationship_result(operation="resolve_bond_vector_from_snapshot")
         return derive_social_bond_vector(
             bond_snapshot=bond_snapshot,
             repair_state=repair_state,
@@ -291,6 +372,11 @@ class SocialBrainAgent:
         now_ms: int | None = None,
     ) -> dict[str, Any]:
         """Build the canonical read-only Bond projection facade."""
+        if self._legacy_relationship_writes_retired():
+            return self._retired_relationship_result(
+                operation="resolve_bond_projection",
+                person_id=person_id,
+            )
         from host_brain.bond.bond_projection import build_bond_projection  # noqa: PLC0415
 
         return build_bond_projection(
@@ -308,6 +394,25 @@ class SocialBrainAgent:
         user_id: str = "",
     ) -> dict[str, Any]:
         resolved_user_id = str(user_id or "").strip() or None
+        if self._legacy_relationship_writes_retired():
+            result = self._retired_relationship_result(
+                operation="get_bond_context",
+                person_id=resolved_user_id,
+            )
+            result.update(
+                {
+                    "session_id": str(session_id or "default").strip() or "default",
+                    "user_id": resolved_user_id,
+                    "bond_stage": "friend",
+                    "bond_trend": "",
+                    "capability_hint": "",
+                    "intimacy_score": 0.0,
+                    "bond_vector": {},
+                    "bond_summary": {},
+                }
+            )
+            return result
+
         snapshot = self.resolve_bond_snapshot(person_id=resolved_user_id)
         vector = self.resolve_bond_vector(person_id=resolved_user_id, bond_summary=snapshot.get("bond_summary"))
         self._bond_stage = str(snapshot.get("bond_stage") or "FRIEND").strip().lower() or "friend"
@@ -335,6 +440,8 @@ class SocialBrainAgent:
         T-31：新增订阅 BOND_PROGRESS / BOND_REGRESS，
         将关系变化写入 TribeStateRegistry 快照，供 aggregate_vital_signs() 读取。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -370,6 +477,8 @@ class SocialBrainAgent:
         T-25：根据 bond_trend 发布 BOND_PROGRESS / BOND_REGRESS 事件，
         供 PainRewardAgent 接收并更新享乐状态。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
@@ -443,6 +552,8 @@ class SocialBrainAgent:
 
         同时记录最近一次关系进展的时间戳和强度，用于调试和上下文构建。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
@@ -504,6 +615,8 @@ class SocialBrainAgent:
             )
 
     async def _on_bond_stage_changed(self, event: Any) -> None:
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             to_stage = str(payload.get("to_stage") or "FRIEND").strip().lower() or "friend"
@@ -521,6 +634,8 @@ class SocialBrainAgent:
 
         同时记录最近一次关系退步的时间戳和强度，用于调试和上下文构建。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
@@ -593,6 +708,8 @@ class SocialBrainAgent:
         任务成功是关系进展的正向信号，但不直接触发 BOND_PROGRESS
         （避免与 _on_interaction_recorded 中的 bond_trend 逻辑重复）。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
@@ -635,6 +752,8 @@ class SocialBrainAgent:
         提示 SocialBrainAgent 当前关系存在退步风险，供路由决策参考。
         孤独感 > 0.8 时写入 high_loneliness 标记，触发更强的关系维护策略。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             from host_brain.core.ids import now_ms  # noqa: PLC0415
@@ -672,6 +791,8 @@ class SocialBrainAgent:
         供 CortexAgent.collect_tribe_context() 的 bond_trend_hint 字段使用。
         仅在 risk_level 为 medium/high/critical 时触发，低风险拦截不影响关系评估。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.social_brain_agent")
@@ -708,6 +829,8 @@ class SocialBrainAgent:
 
     def _touch_state(self, *, key: str, value: Any) -> None:
         """辅助方法：合并更新 social_brain_agent 命名空间快照中的单个字段。"""
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             prev = self.state_registry.get_state("social_brain_agent") or {}
             prev_state = dict(prev.get("state") or {})
@@ -717,6 +840,8 @@ class SocialBrainAgent:
             pass
 
     def _refresh_bond_vector(self, *, user_id: Any = None) -> None:
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             resolved_user = str(user_id or "").strip() or None
             vector = self.resolve_bond_vector(person_id=resolved_user)
@@ -734,6 +859,20 @@ class SocialBrainAgent:
             pass
 
     def resolve_relationship_repair_state(self, *, person_id: str | None = None) -> dict[str, Any]:
+        if self._legacy_relationship_writes_retired():
+            result = self._retired_relationship_result(
+                operation="resolve_relationship_repair_state",
+                person_id=person_id,
+            )
+            result.update(
+                {
+                    "rupture_load": 0.0,
+                    "repair_progress": 0.0,
+                    "last_rupture_ts_ms": 0,
+                    "last_repair_ts_ms": 0,
+                }
+            )
+            return result
         snap = self.state_registry.get_state("social_brain_agent") or {}
         state = dict(snap.get("state") or {})
         repair_state = dict(state.get("relationship_repair") or {})
@@ -746,6 +885,8 @@ class SocialBrainAgent:
         }
 
     async def _on_bond_rupture_signal(self, event: Any) -> None:
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             severity = max(0.0, min(1.0, float(payload.get("severity") or payload.get("intensity") or 0.4)))
@@ -772,6 +913,8 @@ class SocialBrainAgent:
             pass
 
     async def _on_bond_repair_action(self, event: Any) -> None:
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             effort = max(0.0, min(1.0, float(payload.get("effort") or payload.get("intensity") or 0.4)))
@@ -840,6 +983,8 @@ class SocialBrainAgent:
         T-91：幽默成功是关系升温的正向信号，
         将 bond_trend_hint 设为 progress，供上下文装配主链参考。
         """
+        if self._legacy_relationship_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             from host_brain.core.ids import now_ms  # noqa: PLC0415
@@ -892,6 +1037,13 @@ class SocialBrainAgent:
         Returns:
             BondNarrativeResult.to_prompt_slot() 字典，或空字典（降级）。
         """
+        if self._legacy_relationship_writes_retired():
+            result = self._retired_relationship_result(
+                operation="resolve_bond_narrative",
+                person_id=user_id,
+            )
+            result.update({"prompt_slot": {}, "narrative_count": 0})
+            return result
         try:
             from host_brain.bond.bond_narrative import BondNarrativeLayer  # noqa: PLC0415
             resolved_stage = str(bond_stage or self._bond_stage or "FRIEND").strip().upper() or "FRIEND"
@@ -971,6 +1123,10 @@ class SocialBrainAgent:
         Returns:
             SharedMemoryResult.to_prompt_slot() 字典，或空字典（降级）。
         """
+        if self._legacy_relationship_writes_retired():
+            result = self._retired_relationship_result(operation="resolve_shared_memory_index")
+            result.update({"entries": [], "entry_count": 0})
+            return result
         try:
             memory_index = self.application_ports.require("shared_memory_index")()
             if memory_index is None:
@@ -1030,6 +1186,20 @@ class SocialBrainAgent:
         Returns:
             {"status": "OK", "new_milestones": list, "achieved_count": int}
         """
+        if self._legacy_relationship_writes_retired():
+            result = self._retired_relationship_result(
+                operation="resolve_milestone_tracker",
+                person_id=user_id,
+            )
+            result.update(
+                {
+                    "new_milestones": [],
+                    "new_milestone_count": 0,
+                    "achieved_count": 0,
+                    "event_type": str(event_type or ""),
+                }
+            )
+            return result
         try:
             from host_brain.core.ids import now_ms as _now_ms  # noqa: PLC0415
 
@@ -1113,6 +1283,24 @@ class SocialBrainAgent:
         Returns:
             dict: 包含 bond_stage/bond_vector/repair_needed 等关键字段。
         """
+        if self._legacy_relationship_writes_retired():
+            result = self._retired_relationship_result(operation="export_runtime_state")
+            result.update(
+                {
+                    "bond_stage": "FRIEND",
+                    "bond_trend": "",
+                    "bond_vector_intimacy": 0.0,
+                    "bond_vector_trust": 0.0,
+                    "bond_vector_dependency": 0.0,
+                    "repair_needed": False,
+                    "repair_reason": "",
+                    "last_milestone_ids": [],
+                    "milestone_achieved_count": 0,
+                    "last_updated_ts_ms": 0,
+                }
+            )
+            return result
+
         snap = self.state_registry.get_state("social_brain_agent") or {}
         state = dict(snap.get("state") or {})
         bond_vector = dict(state.get("bond_vector") or {})

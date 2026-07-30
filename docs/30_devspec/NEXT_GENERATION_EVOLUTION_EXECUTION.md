@@ -177,6 +177,11 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
   compiler 仅在 Input runtime 加入的内部 provenance hand-off 存在时，读取关系状态并
   注入“尊重空间、不得情感索取、不得负罪施压、不得宣布修复完成”等写作约束；外部
   `emotion_context` 不能伪造这些约束或写入关系状态。
+- `SocialBrainAgent` 的历史 relation API 只持有裸 `person_id/user_id`，无法证明
+  `workspace + relationship_subject`。canonical Life composition 下它不得调用 Bond engine、读取
+  `TribeStateRegistry`、构建 narrative/milestone 或订阅/处理旧 Bond event；统一返回显式
+  `RETIRED_CANONICAL_LIFE` 中性兼容投影。真实关系仅由具备完整 scope 的
+  `AffectFusion → RelationshipStateV2` 内部 hand-off 供给，不能以 raw ID 猜测 aggregate。
 
 本地定向集合 `54 passed in 20.50s` 覆盖关系 reducer、duplicate/replay、真实
 file-backed SQLite restart、accepted foreground reconciliation、workspace/session

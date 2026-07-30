@@ -51,6 +51,17 @@
   AffectFusion、Limbic 与 Edge event whitelist。它是本机代码证据；没有启动远端 Edge、TTS 或 VTS，
   也没有运行真实声学 provider。
 
+## DL-03 SocialBrain 关系旁路退役
+
+- `test_social_brain_agent.py::test_canonical_life_retires_legacy_social_brain_relationship_reads_and_writes`
+  验证 canonical Life port 下的 legacy SocialBrain relation API 不会调用 Bond engine 或 event bus，不会写
+  `TribeStateRegistry`，也不会借 repair callback 调用 Limbic。返回的 `RETIRED_CANONICAL_LIFE` 只提供
+  中性兼容字段；裸用户 ID 不会被猜测为 workspace-scoped relationship aggregate。
+- 同一集合与 `test_dl03_relationship_lifecycle.py`、`test_dl03_bond_stage_compatibility.py`、
+  `test_dl06_runtime_snapshot_canonical_cutover.py` 为 `15 passed in 16.75s`。它只证明本地
+  production-authority 边界；未启动远端 Edge、真实 provider、
+  Docker/Host/Obs/Monitor/Gateway，也不构成体验或完整关系生命周期通过。
+
 ## DL-04 本机直连 Chat scope 切流
 
 - `test_chat_handler_streaming.py` 验证 `/v1/chat` 在 Thalamus、AffectFusion 和 Cortex 前，将 caller

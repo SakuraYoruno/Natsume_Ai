@@ -532,6 +532,11 @@ canonical Life composition 同时让 Limbic 的 event-bus compatibility consumer
 proactive permission。foreground Surface 不读取该 permission 作静默开关，Scheduler 才拥有其主动
 delivery 解释权。
 
+`SocialBrainAgent` 的历史关系支路不会补偿这条流：它只接收裸 `person_id/user_id`，没有权限把该值映射为
+`workspace + relationship_subject` 的 Life aggregate。canonical Life port 存在时，Bond snapshot/vector、旧 registry、
+event-bus callback、narrative、milestone 和 repair/Limbic 联动均在读取或写入前返回
+`RETIRED_CANONICAL_LIFE` 中性结果；正确的关系状态仍必须随上图的 scoped Fusion hand-off 进入。
+
 另一路只有在 transient 输入明确指向七海、且不包含 stop marker 时才成立：
 `directed_disrespect_toward_natsume → HURT / CAUTION → CONTAIN → SET_BOUNDARY → GENTLE_BOUNDARY`。
 其 Appraisal/episode 只保存 opaque event ref；普通用户挫败没有这条边。若输入含 `闭嘴`、`别来烦我`、
