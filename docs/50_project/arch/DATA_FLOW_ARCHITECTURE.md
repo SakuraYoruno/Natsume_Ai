@@ -824,6 +824,20 @@ status query → RETIRED + LEGACY_EMERGENT_GROWTH_RETIRED
 canonical 成长证据；正向低风险适应必须由 accepted、scope-bound aftereffect 驱动的 companion profile
 生命周期完成。
 
+legacy Prefrontal 自传记忆也在同一边界终止：
+
+```text
+raw narrative + global endocrine / immune / Bond state
+→ canonical Prefrontal authority preflight
+→ RETIRED_CANONICAL_LIFE + LEGACY_PREFRONTAL_GROWTH_RETIRED
+→ 不写 TribeStateRegistry / EventBus / legacy Hippocampus
+
+accepted aftereffect → proposal → Review → version activation
+→ 才是未来可审计的长期成长或记忆写入链
+```
+
+该退役结果不等于拒绝长期记忆，而是拒绝把一次未经接受、无 relationship scope 的文本直接固化为七海的经历。
+
 内在活动的 canonical 流则只读：
 
 ```text

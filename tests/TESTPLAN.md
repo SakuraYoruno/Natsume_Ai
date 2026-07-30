@@ -192,6 +192,12 @@ VTS/SSE/Surface 回归 `201 passed in 28.57s`；DL-01～DL-04 兼容回归 `11 p
   `DEFERRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED`，其 status 查询必须为
   `RETIRED / LEGACY_EMERGENT_GROWTH_RETIRED`；registry 不得允许自动调度。模型 budget 负测仅覆盖隔离
   legacy compatibility route，不能计为在线成长或 provider 证据。
+- T-DL06-06A：canonical Life authority 下的 legacy
+  `evaluate_autobiographical_memory_gate()` 与 `commit_autobiographical_memory()` 必须在读取全局
+  Endocrine/Immune/Bond、写 `TribeStateRegistry`、发布 EventBus 或调用 legacy Hippocampus 前返回
+  `RETIRED_CANONICAL_LIFE / LEGACY_PREFRONTAL_GROWTH_RETIRED`；原始 narrative 不得产生 Memory、Persona
+  或关系 mutation。正向长期成长仍须以 accepted aftereffect → proposal → Review → version activation
+  另行证明，本测试不得将退役行为记为体验或演化闭环通过。
 - T-DL06-07：canonical `inner_world_numeric_tick` / `inner_world_monologue_tick` 只能返回同一 Life head 的
   bounded projection，并必须抑制 Tribe/ANS EventBus、DefaultMode inline tick、无范围 evolution event 和 raw
   monologue background-memory 写入；registry 不得允许自动调度。`inner_world_session_end` 必须在读取 caller

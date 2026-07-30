@@ -655,6 +655,11 @@ canonical hand-off，历史 Bond 的显式距离、高 closeness、记忆中的�
 Persona proposal。可自动演化的仅是有界、低风险且可精确回滚的 companion profile；Soul 的核心价值与人格
 身份仍是稳定宪法，任何变更都需要独立的证据与 Review。
 
+这同样排除 legacy Prefrontal 自传记忆 gate：它若从全局 Endocrine、Immune 或 Bond 读取一次临时判断，
+再把原始叙事写给旧 Hippocampus，就绕过了关系 scope、用户反馈与可回滚版本。canonical Host 因而必须在
+这些读取和写入前返回 `RETIRED_CANONICAL_LIFE`；“不记录”比把一次未经接受的叙事伪装成七海已经拥有的
+共同经历更诚实。
+
 内在活动也要遵守同一边界。canonical Life head 可以提供七海当下的有界 self-affect、需要和关系纹理，
 让她在下一次互动中保有连续的在场感；但后台 tick 不能把私密独白原文、caller VAD 或临时 topic 直接写入
 Memory、EventBus、关系或 Persona。若没有一个专门、可回放且受到隐私规则约束的 inner-world journal，

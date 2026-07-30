@@ -87,6 +87,32 @@ class PrefrontalAgent:
 
         return self._uses_canonical_affective_life()
 
+    @staticmethod
+    def _retired_canonical_life_result(
+        *,
+        operation: str,
+        decision: str | None = None,
+    ) -> dict[str, Any]:
+        """Return a side-effect-free result for a retired legacy writer.
+
+        Canonical companion growth is driven by durable, scope-bound
+        aftereffects and the profile lifecycle.  The old Prefrontal
+        autobiographical path derives decisions from global organs and Bond,
+        so it must not even inspect those sources after canonical cutover.
+        """
+
+        result: dict[str, Any] = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_PREFRONTAL_GROWTH_RETIRED",
+            "operation": str(operation),
+            "applied": False,
+            "retired": True,
+        }
+        if decision is not None:
+            result["decision"] = str(decision).strip().upper()
+        return result
+
     def resolve_self_reflection_context(
         self,
         *,
@@ -1034,6 +1060,15 @@ class PrefrontalAgent:
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
 
+        if self._uses_canonical_affective_life():
+            # This legacy gate reads global endocrine/immune state and Bond,
+            # then writes a process-local trace. Neither is admissible
+            # relationship evidence after the canonical Life cutover.
+            return self._retired_canonical_life_result(
+                operation="evaluate_autobiographical_memory_gate",
+                decision="BLOCK",
+            )
+
         user_id = _resolve_prefrontal_persona_id(persona_user_id)
         narrative_text = str(narrative or "").strip()
         ctx = dict(context or {})
@@ -1109,6 +1144,18 @@ class PrefrontalAgent:
         context: Mapping[str, Any] | None = None,
         request_id: str = "",
     ) -> dict[str, Any]:
+
+        if self._uses_canonical_affective_life():
+            return {
+                **self._retired_canonical_life_result(
+                    operation="commit_autobiographical_memory",
+                    decision="BLOCK",
+                ),
+                "gate": self._retired_canonical_life_result(
+                    operation="evaluate_autobiographical_memory_gate",
+                    decision="BLOCK",
+                ),
+            }
 
         gate = self.evaluate_autobiographical_memory_gate(
             persona_user_id=persona_user_id,

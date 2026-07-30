@@ -181,6 +181,11 @@ Limbic/Interoception/PainReward/DefaultMode/ANS。run、tick、callback 和 expo
 `LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED / CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED` 的 no-candidate。
 这避免单次文本或 session 变成 Persona authority；低风险表达学习只能等待 durable、scope-bound aftereffect。
 
+同一 `PrefrontalAgent` 的 legacy 自传记忆 gate/commit 也不再是例外。canonical authority 下它们在任何
+global vital/Bond 读取、registry/EventBus 写入或 `HippocampusAgent.write_autobiographical_memory()` 调用前
+返回 `RETIRED_CANONICAL_LIFE / LEGACY_PREFRONTAL_GROWTH_RETIRED`；原始 narrative 不会成为新的长期记忆或
+人格版本。未来的正向写入必须走 accepted aftereffect → proposal → Review → version activation 的独立链。
+
 **Legacy Proactive Retirement 模块**由
 [`lifecycle_runtime/proactive_dispatch.py`](../../../host_brain/lifecycle_runtime/proactive_dispatch.py)、
 [`composition/scheduler.py`](../../../host_brain/composition/scheduler.py) 与

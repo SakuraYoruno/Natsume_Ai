@@ -105,6 +105,12 @@
 > Limbic/Endocrine/PainReward/Interoception 或发出 `HUMOR_LANDED`/`TASK_SUCCESS` 旧情绪事件。
 > 这不等于 Persona/Identity activation 或长期 canary 已完成。
 
+> **DL-06 Prefrontal 自传记忆 writer 退役修订：** canonical Life authority 下，
+> `evaluate_autobiographical_memory_gate()` 与 `commit_autobiographical_memory()` 现在会在读取全局
+> Endocrine/Immune/Bond、写 registry、发布 EventBus 或调用 legacy Hippocampus 前返回
+> `RETIRED_CANONICAL_LIFE / LEGACY_PREFRONTAL_GROWTH_RETIRED`。这只关闭了旧的无范围 writer；受
+> aftereffect、proposal、Review 与 version activation 约束的长期记忆/身份演化仍是后续能力，不能据此宣称完成。
+
 > **DL-06 无范围涌现成长退役修订：** `emergent_growth_weekly` 已从自动调度中撤出。canonical
 > `PrefrontalAgent` 在解析 model port 前检查 Life authority，并对无 exact workspace/relationship
 > subject 与 accepted-aftereffect 的旧入口返回

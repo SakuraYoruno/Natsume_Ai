@@ -1085,3 +1085,54 @@ def test_prefrontal_autobiographical_gate_and_commit(monkeypatch) -> None:
     assert gate["reason_code"] == "PASS"
     assert committed["status"] == "OK"
     assert committed["write_result"]["layer"] == "autobiographical"
+
+
+def test_prefrontal_canonical_life_retires_legacy_autobio_before_global_reads(
+    monkeypatch,
+) -> None:
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    def _unexpected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("canonical Life must not invoke legacy autobiographical dependencies")
+
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.get_social_brain_agent",
+        _unexpected,
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.get_hippocampus_agent",
+        _unexpected,
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.emit_tribe_event",
+        _unexpected,
+    )
+
+    gate = agent.evaluate_autobiographical_memory_gate(
+        persona_user_id="u-canonical",
+        narrative="未经 accepted aftereffect 证明的叙事不能直接写入。",
+        context={"session_id": "s-canonical"},
+    )
+    committed = agent.commit_autobiographical_memory(
+        persona_user_id="u-canonical",
+        narrative="未经 accepted aftereffect 证明的叙事不能直接写入。",
+        context={"session_id": "s-canonical"},
+        request_id="req-canonical",
+    )
+
+    assert gate == {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_PREFRONTAL_GROWTH_RETIRED",
+        "operation": "evaluate_autobiographical_memory_gate",
+        "applied": False,
+        "retired": True,
+        "decision": "BLOCK",
+    }
+    assert committed["status"] == "RETIRED_CANONICAL_LIFE"
+    assert committed["operation"] == "commit_autobiographical_memory"
+    assert committed["gate"] == gate

@@ -62,6 +62,13 @@ Fusion 仍会根据 canonical 观察、冲突、边界、修复和 distress 生�
 重试，接受后以 request-scoped command identity 固定，重启/重复请求只重开原 receipt。它仍不是 model-backed reappraisal
 或用户盲评证明。
 
+同一 DL-06 边界现在也覆盖 Prefrontal 的 legacy 自传记忆入口：canonical Life 已组成时，
+`evaluate_autobiographical_memory_gate()` 与 `commit_autobiographical_memory()` 会在读取全局
+Endocrine/Immune/Bond、写入 `TribeStateRegistry`、发布 EventBus 或调用旧 Hippocampus 前返回
+`RETIRED_CANONICAL_LIFE / LEGACY_PREFRONTAL_GROWTH_RETIRED`。它不删除未来的长期记忆能力；只是明确要求
+任何成长或记忆写入先经过 scope-bound accepted aftereffect、proposal、Review 与 version activation，而不是把
+一次原始叙事当成七海可直接固化的经历。
+
 DL-06 的 lifecycle runtime snapshot 现把这一条兼容读取边界进一步收紧：实际 Host
 composition 强制要求 `LifeSnapshotReader`，即使 provider 缺失也只能形成 degraded canonical
 projection，绝不复活旧 Bond、Limbic、Prefrontal 或 EmotionTimeline assembler。每个 app-local
