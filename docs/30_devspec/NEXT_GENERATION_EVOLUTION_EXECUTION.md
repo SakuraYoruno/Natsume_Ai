@@ -147,6 +147,10 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
   强度与置信度的声学 attestation，才会产生一条来源受限、TTL 为 5 秒的 typed ACOUSTIC observation。
   该切片在本机 Host 输入路径完成，远端 Edge 未启动，不能把它记作设备或声学模型验收。
 
+在 canonical Life composition 下，Limbic 的 EMOTION_INFERENCE_UPDATED callback 也固定退役：
+它既不写 process-local voice-emotion state，也不写 legacy timeline；离线 compatibility composition
+才保留历史观察行为，不能把它视为 production fallback。
+
 本地覆盖包含 9 项 DL-02 unit/restart 集成和 73 项受影响 Host/聊天/内核回归。它不
 证明真实 Host 部署、模型、语音、Avatar、关系后效应或旧 writer 已清零。
 

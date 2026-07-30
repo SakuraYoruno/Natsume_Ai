@@ -41,8 +41,11 @@
   `asr_text_bootstrap`、外带 emotion context 与伪造 observation list 必须在边界剥离，不能成为
   用户 self-report；只有显式可用、未降级的声学 attestation 才能生成带来源的 5 秒 typed ACOUSTIC
   observation，直接 Chat emotion 字段保持为空。
-- 本次联合定向集合为 `96 passed in 50.58s`，覆盖 Input routes、AffectFusion 与 Edge event
-  whitelist。它是本机代码证据；没有启动远端 Edge、TTS 或 VTS，也没有运行真实声学 provider。
+- canonical Life composition 下的 Limbic EMOTION_INFERENCE_UPDATED callback 也被定向约束为
+  no-write：不创建 TribeStateRegistry voice-emotion 项，亦不追加 legacy timeline；离线 compatibility
+  组合的历史测试不被当成 production authority。
+- 本次联合定向集合为 `126 passed in 51.62s`，覆盖 Input routes、AffectFusion、Limbic 与
+  Edge event whitelist。它是本机代码证据；没有启动远端 Edge、TTS 或 VTS，也没有运行真实声学 provider。
 
 ## DL-04 本机直连 Chat scope 切流
 

@@ -1481,6 +1481,19 @@ class LimbicAgent:
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.limbic_agent")
+            if self._legacy_self_affect_writes_retired():
+                # In a composed production Host, final ASR is admitted through
+                # the standard Input -> AffectFusion -> Life command chain.
+                # This legacy bus subscriber has neither a scope-bound
+                # observation command nor a durable receipt, so it must not
+                # recreate a process-local voice-emotion truth or append the
+                # retired timeline.  Offline compatibility composition keeps
+                # the historical behavior for isolated migration tests.
+                _log.debug(
+                    "LimbicAgent 忽略 EMOTION_INFERENCE_UPDATED："
+                    "canonical Life authority 已接管"
+                )
+                return
             payload = dict(event.payload or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"
             emotion_intensity = payload.get("emotion_intensity")

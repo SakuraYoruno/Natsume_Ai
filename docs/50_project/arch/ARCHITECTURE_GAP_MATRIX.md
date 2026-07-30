@@ -419,6 +419,8 @@ Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界�
 > 外带 emotion 字段、context 和伪造 observation list 会在该边界被清除，不能被当作用户自述或
 > 七海的 self-affect。仅有可用、未降级的声学 attestation 可生成短时 typed observation；它仍须
 > 经 Fusion/Appraisal，且本地证据不代表远端 Edge、声学 provider 或全栈验收。
+> canonical Life composition 还让 Limbic 的 EMOTION_INFERENCE_UPDATED legacy consumer 无副作用，
+> 因而不会把声学 event 存回 process-local registry 或 old timeline；离线兼容行为不是 production fallback。
 
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|

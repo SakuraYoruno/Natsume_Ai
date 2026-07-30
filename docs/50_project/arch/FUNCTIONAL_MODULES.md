@@ -456,6 +456,8 @@ Budget contention persistence 由 `TaskBudgetUsageStoreMixin` 唯一拥有：首
 ASR 的 final ingress 由 Input Runtime 先做语义降权：关键词 bootstrap、外带 emotion
 字段、context 与观察列表均是不可信 telemetry，不可成为用户自述或自我情绪写 authority；只有
 明确可用、未降级的声学 attestation 才可交给 AffectFusion 作为短时 typed observation。
+canonical Life composition 下的 Limbic event subscriber 也已 no-op，不能把同一 observation
+缓存为 TribeStateRegistry 或 legacy timeline 的并行 context。
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|

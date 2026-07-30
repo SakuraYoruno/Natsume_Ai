@@ -55,7 +55,7 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - Chat、Gateway、ASR、Scheduler、Internal Agent 和 Operator Command 必须进入统一 Secure Ingress。
 - 每次输入都必须绑定 principal、surface、scope、nonce/idempotency、correlation 和回复上下文。
 - 用户消息、设备事件、系统维护事件和调度任务必须显式分流，禁止互相冒充。
-- Edge 或 ASR 附带的情绪 tag、强度、context 与列表默认是不可信 transport telemetry，不得成为用户 self-report 或七海 self-affect；只有显式可用、未降级的声学证明可作为带来源和短 TTL 的用户观察进入融合。
+- Edge 或 ASR 附带的情绪 tag、强度、context 与列表默认是不可信 transport telemetry，不得成为用户 self-report 或七海 self-affect；只有显式可用、未降级的声学证明可作为带来源和短 TTL 的用户观察进入融合，且 legacy Limbic 回调不得另存 process-local 情绪真相或旧 timeline。
 
 验收：伪造身份、重复 nonce、越权 scope、重放请求和来源不明输入均 fail closed，并留下脱敏审计。
 

@@ -58,6 +58,11 @@
 > 完整的声学 attestation 才会生成一条 5 秒 TTL typed ACOUSTIC observation。它经过 Fusion/Appraisal
 > 后仍只是用户观察，不直接写七海 self-affect；本地定向测试通过，远端 Edge 未启动。
 
+> 同一 canonical composition 还退役了 Limbic 的 EMOTION_INFERENCE_UPDATED legacy consumer：
+> 即使收到完整的声学 event，它也不创建 TribeStateRegistry voice-emotion 项、更不追加旧 timeline。
+> final ASR 只能经标准 Host Input 产生 scoped user observation；离线 compatibility 测试保留的
+> 历史行为不属于 production authority。
+
 > **DL-06 旧主动路径退役：** `proactive_talk` 已不再注册为 Personality Skill、Tool Catalog、executor 或
 > Scheduler-add task type。Host scheduler composition 对升级前存在的 `proactive_talk_periodic` durable definition
 > 使用 CAS disable；若 occurrence 已在升级前被接纳，dispatch 仍会验证 immutable Scene identity，但随后仅返回

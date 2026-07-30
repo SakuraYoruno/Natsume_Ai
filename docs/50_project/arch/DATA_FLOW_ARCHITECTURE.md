@@ -522,6 +522,9 @@ final ASR 的输入适配再加一道语义门：Edge 的关键词 bootstrap、�
 在低置信下解释。只有显式可用、未降级的声学 attestation 可生成一条 source-bound、5 秒 TTL
 的 typed ACOUSTIC observation。该 observation 仍须走 Fusion/Appraisal，不能直写 self-affect、
 关系、Bond、TTS 或 Avatar；远端 Edge 尚未启动。
+canonical Life composition 同时让 Limbic 的 event-bus compatibility consumer no-op，因此它不会把
+同一声学 event 留在 process-local registry 或 legacy timeline，避免下一轮从旧 observation cache
+重新取得表达权。
 
 `RelationshipLifecycleService` 在当前输入前先重开关系 aggregate 的 accepted aftereffect。只有
 `REPAIR_ACCEPTED` 会作为 opaque `relationship-aftereffect://` evidence 进入 Fusion，继而生成

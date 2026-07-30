@@ -78,6 +78,10 @@ DL-02 还收口了 ASR 到 Host Input 的语义边界：Edge 的关键词推断�
 可用且未降级的声学 attestation 才会形成一条 5 秒 TTL 的 typed ACOUSTIC observation，且不回传
 raw audio、原始 context 或直接 Chat emotion 字段。本地定向证据不代表远端 Edge 已启动或声学模型已验收。
 
+在 canonical Life composition 中，Limbic 的 EMOTION_INFERENCE_UPDATED 订阅也不再写
+TribeStateRegistry 的运行期 voice-emotion 项或旧 emotion timeline；真正 final ASR 只能按上面的
+标准 Host Input 路径入场。离线兼容组合仍可保留原行为，但无 production authority。
+
 DL-02 当前又收口了三个直接影响陪伴体验的 canonical 因果：明确请求空间时，
 `user_boundary_or_space` appraisal 必须冻结 `GIVE_SPACE`，不能退化为通用确认；明确
 指向七海的受伤信号形成 `natsume_may_have_hurt_user → CARE / OPENNESS / CAUTION → REPAIR`，

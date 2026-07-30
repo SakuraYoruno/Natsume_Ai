@@ -119,6 +119,11 @@ ASR 的 final bridge 也不能把传输层情绪字段升级为关系事实：�
 source-bound、5 秒 TTL 的 typed acoustic observation。它仍只是用户观察，不能直接写 self-affect、Bond 或
 Avatar，且远端 Edge 尚未启动。
 
+同一 composition 标志也退役了 Limbic 的 EMOTION_INFERENCE_UPDATED legacy consumer：它不再把
+Edge/声学 event 缓存在 TribeStateRegistry 或写旧 timeline。final ASR 的唯一生产意义是经标准
+Host Input 形成 scope-bound observation；其它 telemetry 保持审计，不能成为下一轮情感 context 的
+备用 authority。
+
 公开旧 Bond 写口也已从系统层删除：Host route ports 不再携带 writer provider，`POST /bond/event`
 固定返回 `410 LEGACY_BOND_WRITE_RETIRED`；Monitor 已移除人工补录表单、调用 API 与 registry 项，
 历史 score/stage 只读且不能影响关系、主动许可或 self-affect。这只关闭公开写入边界，不代替
