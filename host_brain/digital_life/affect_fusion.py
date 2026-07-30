@@ -72,6 +72,19 @@ _POSITIVE_TAGS = frozenset({"HAPPY", "EXCITED", "GRATEFUL", "LOVING"})
 _SPACE_MARKERS = ("别说了", "给我一点空间", "想一个人待会", "不要再问", "别烦")
 _REPAIR_MARKERS = ("对不起", "抱歉", "误会", "不是那个意思", "我刚才说重了")
 _BOUNDARY_MARKERS = ("不要这样", "别这样", "不舒服", "越界", "停止")
+_NATSUME_HARM_MARKERS = (
+    "伤到我",
+    "伤害我",
+    "让我受伤",
+    "让我很受伤",
+    "让我难过",
+    "让我很难过",
+    "说得太伤人",
+    "hurt me",
+    "made me feel hurt",
+    "made me sad",
+    "what you said hurt",
+)
 
 
 def _digest(value: Any) -> str:
@@ -826,6 +839,60 @@ def _top_distribution_tag(distribution: Mapping[str, float]) -> str:
     return sorted(distribution.items(), key=lambda item: (-item[1], item[0]))[0][0]
 
 
+def _affect_support(
+    observations: Sequence[UserAffectObservationV1],
+    tags: frozenset[str],
+) -> float:
+    """Return confidence-weighted support without collapsing a mixed report.
+
+    A single SELF_REPORT can honestly contain both relief and grief.  It is
+    not a sensor conflict merely because those valences differ, so Appraisal
+    needs access to both supports before choosing Natsume's own response.
+    """
+
+    return max(
+        (
+            max(
+                (
+                    _clamp(item.emotion_distribution.get(tag)) * item.confidence
+                    for tag in tags
+                ),
+                default=0.0,
+            )
+            for item in observations
+        ),
+        default=0.0,
+    )
+
+
+def _has_mixed_user_affect(observations: Sequence[UserAffectObservationV1]) -> bool:
+    """Recognise coexisting positive and painful user affect, not disagreement.
+
+    The conflict branch still wins when modalities contradict each other.  This
+    branch only preserves sufficiently supported positive and distress signals
+    in the same trusted observation set.
+    """
+
+    positive = _affect_support(observations, _POSITIVE_TAGS)
+    distress = _affect_support(observations, _DISTRESS_TAGS)
+    return positive >= 0.32 and distress >= 0.32
+
+
+def _signals_natsume_may_have_hurt_user(message: str) -> bool:
+    """Detect a bounded, directed repair signal without persisting its words.
+
+    This is intentionally narrower than a general sadness classifier: the
+    message must explicitly address Natsume (``你``/``you``) and contain a
+    harm marker.  A user being hurt by a film, colleague, or unrelated event
+    remains a user-affect observation and must not make Natsume invent blame.
+    """
+
+    normalized = str(message or "").lower()
+    if "你" not in normalized and "you" not in normalized:
+        return False
+    return any(marker in normalized for marker in _NATSUME_HARM_MARKERS)
+
+
 def _build_appraisal_candidates(
     *,
     observations: Sequence[UserAffectObservationV1],
@@ -840,6 +907,7 @@ def _build_appraisal_candidates(
     has_space = any(marker in lower for marker in _SPACE_MARKERS)
     has_repair = any(marker in lower for marker in _REPAIR_MARKERS)
     has_boundary = any(marker in lower for marker in _BOUNDARY_MARKERS)
+    natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message)
     candidates: list[_AppraisalCandidate] = []
     if conflict:
         candidates.append(
@@ -862,7 +930,10 @@ def _build_appraisal_candidates(
         candidates.append(
             _candidate(
                 kind="user_boundary_or_space",
-                score=0.92,
+                # An explicit request for space is always stronger than a
+                # simultaneous repair cue.  Respecting distance comes before
+                # trying to explain, apologise, or seek reassurance.
+                score=0.98,
                 goal=-0.08,
                 significance=0.62,
                 boundary=0.85,
@@ -873,6 +944,26 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.3, -0.04, 0.25, "contain"),
                 ),
                 action="give_space",
+            )
+        )
+    if natsume_may_have_hurt_user:
+        candidates.append(
+            _candidate(
+                kind="natsume_may_have_hurt_user",
+                score=0.93,
+                goal=-0.18,
+                responsibility=0.78,
+                controllability=0.74,
+                significance=0.78,
+                boundary=0.62,
+                risk=0.3,
+                uncertainty=0.34,
+                components=(
+                    EmotionComponentV1("CARE", 0.52, 0.3, 0.26, "repair"),
+                    EmotionComponentV1("OPENNESS", 0.38, 0.14, 0.18, "listen"),
+                    EmotionComponentV1("CAUTION", 0.22, -0.06, 0.24, "slow_down"),
+                ),
+                action="repair_open",
             )
         )
     if has_repair:
@@ -890,6 +981,27 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("OPENNESS", 0.28, 0.22, 0.16, "listen"),
                 ),
                 action="repair_open",
+            )
+        )
+    if not conflict and _has_mixed_user_affect(observations):
+        candidates.append(
+            _candidate(
+                kind="user_mixed_affect",
+                score=0.84,
+                goal=0.08,
+                significance=0.68,
+                boundary=0.1,
+                risk=0.1,
+                uncertainty=0.3,
+                components=(
+                    # These are Natsume's own concurrent responses to the
+                    # user's mixed moment.  They deliberately do not copy
+                    # the user's HAPPY/SAD labels into self-affect.
+                    EmotionComponentV1("CARE", 0.42, 0.28, 0.24, "attend"),
+                    EmotionComponentV1("SHARED_JOY", 0.39, 0.66, 0.44, "share"),
+                    EmotionComponentV1("CAUTION", 0.26, -0.04, 0.22, "hold"),
+                ),
+                action="hold_complexity",
             )
         )
     # Keyword text is intentionally low confidence, but a clear distress
@@ -939,6 +1051,8 @@ def _candidate(
     kind: str,
     score: float,
     goal: float,
+    responsibility: float = 0.0,
+    controllability: float = 0.58,
     significance: float,
     boundary: float,
     risk: float,
@@ -950,8 +1064,8 @@ def _candidate(
         kind=kind,
         score=score,
         goal_congruence=goal,
-        responsibility=0.0,
-        controllability=0.58,
+        responsibility=responsibility,
+        controllability=controllability,
         relationship_significance=significance,
         boundary_relevance=boundary,
         risk=risk,

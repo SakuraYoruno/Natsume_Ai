@@ -651,6 +651,13 @@ SENTENCE_STAGED → 用户可见句 → Acceptance` 不能倒置。首句前失�
 unknown-effect 重放。这只证明本机、受控 transport 的顺序；真实 provider、连接恢复与实体设备仍
 需要各自独立证据。
 
+在这一边界上，“理解”不是把输入标签换一个同义词，而是可追溯的因果判断。例如明确的
+“先给我一点空间”先形成 `user_boundary_or_space`，表达动作只能是 `GIVE_SPACE`；明确指向
+七海的“你刚才伤到我了”才可形成她自己的 `CARE / OPENNESS / CAUTION` 与 `REPAIR`，不能把
+任何用户悲伤都当成七海受伤；同一可信 observation 内同时存在喜悦和不舍时，
+`user_mixed_affect → HOLD_COMPLEXITY` 要保留两面，而不是通过中性化、鸡汤或单标签逃避判断。
+这些判断只写 typed appraisal、component 与 opaque evidence ref，原话仍不进入 Life journal。
+
 情感系统必须满足：
 
 - 有时间衰减，不能无限携带单轮情绪；

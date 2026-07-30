@@ -36,6 +36,14 @@ _TECHNICAL_MODES = frozenset(
     }
 )
 _REPAIR_OUTCOMES = frozenset({"BOUNDARY", "MISUNDERSTOOD", "REPAIR_UNRESOLVED"})
+_APPRAISAL_CANDIDATE_SELECTION_KINDS = frozenset(
+    {
+        "USER_BOUNDARY_OR_SPACE",
+        "NATSUME_MAY_HAVE_HURT_USER",
+        "REPAIR_SIGNAL",
+        "USER_MIXED_AFFECT",
+    }
+)
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -184,6 +192,24 @@ def build_affective_turn_guidance(
     top = components[0] if components else {}
     self_tag = _tag_for_component(top.get("emotion"))
     self_intensity = _unit(top.get("intensity"), default=0.18)
+    # ``last_appraisal`` is a durable head and may outlive the request that
+    # created it.  Only the appraisal id explicitly handed off by this
+    # AffectFusion result may decide this turn's immediate CompanionAct.
+    # Otherwise an old request for space would incorrectly turn every later
+    # neutral conversation into ``GIVE_SPACE``.
+    current_appraisal_id = _text(life.get("appraisal_id"), limit=240)
+    last_appraisal = _mapping(self_affect.get("last_appraisal"))
+    stored_appraisal_id = _text(last_appraisal.get("appraisal_id"), limit=240)
+    appraisal_id = (
+        stored_appraisal_id
+        if current_appraisal_id and current_appraisal_id == stored_appraisal_id
+        else ""
+    )
+    appraisal_kind = (
+        _text(last_appraisal.get("event_kind"), limit=96).upper()
+        if appraisal_id
+        else ""
+    )
     regulation = _mapping(self_affect.get("last_regulation"))
     regulation_id = _text(regulation.get("regulation_id"))
     regulation_mode = _text(regulation.get("mode"), default="EXPRESS").upper()
@@ -218,12 +244,14 @@ def build_affective_turn_guidance(
         repair_required=repair_required,
         proactive_permission=proactive_permission,
         observations=observations,
+        appraisal_kind=appraisal_kind,
     )
     high_ambiguity = (
         conflict
         or repair_required
         or aftereffect_outcome in _REPAIR_OUTCOMES
         or regulation_mode in {"SEEK_REPAIR", "GIVE_SPACE"}
+        or appraisal_kind in _APPRAISAL_CANDIDATE_SELECTION_KINDS
         or _has_low_confidence_or_conflicting_observation(observations)
     )
     generation_mode = "BUFFERED_CANDIDATE_SELECTION" if high_ambiguity else "STREAM_ONE"
@@ -238,6 +266,8 @@ def build_affective_turn_guidance(
         "self_affect_digest": self_digest,
         "relationship_revision": relationship_revision,
         "regulation_id": regulation_id,
+        "appraisal_id": appraisal_id,
+        "appraisal_kind": appraisal_kind,
         "companion_act": act_kind,
         "generation_mode": generation_mode,
         # The previous expression is read only from the durable Host delivery
@@ -390,9 +420,20 @@ def _select_companion_act(
     repair_required: bool,
     proactive_permission: str,
     observations: Sequence[Mapping[str, Any]],
+    appraisal_kind: str,
 ) -> str:
     if proactive_permission == "DENIED" or regulation_mode in {"GIVE_SPACE", "QUIET_PRESENCE"}:
         return "GIVE_SPACE" if regulation_mode != "QUIET_PRESENCE" else "SILENCE"
+    # The latest appraisal comes from the canonical self-affect head, never
+    # from a public request hint.  It lets an explicit boundary, a direct
+    # repair signal, or an honestly mixed moment affect this very turn instead
+    # of being lost until a later relationship aftereffect exists.
+    if appraisal_kind == "USER_BOUNDARY_OR_SPACE":
+        return "GIVE_SPACE"
+    if appraisal_kind in {"NATSUME_MAY_HAVE_HURT_USER", "REPAIR_SIGNAL"}:
+        return "REPAIR"
+    if appraisal_kind == "USER_MIXED_AFFECT":
+        return "HOLD_COMPLEXITY"
     if repair_required or relationship_outcome in _REPAIR_OUTCOMES or regulation_mode == "SEEK_REPAIR":
         return "REPAIR"
     if task_mode in _TECHNICAL_MODES:
@@ -431,7 +472,7 @@ def _has_low_confidence_or_conflicting_observation(
 def _text_pacing(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> str:
     if act_kind in {"GIVE_SPACE", "SILENCE"} or regulation_mode in {"GIVE_SPACE", "QUIET_PRESENCE"}:
         return "SPARSE"
-    if act_kind in {"COMFORT", "REPAIR"} or emotion_tag == "SAD":
+    if act_kind in {"COMFORT", "REPAIR", "HOLD_COMPLEXITY"} or emotion_tag == "SAD":
         return "SOFT"
     if act_kind == "PLAY" or emotion_tag == "HAPPY":
         return "BRISK"
@@ -443,6 +484,12 @@ def _voice_style(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
         return "QUIET_PRESENCE"
     if act_kind == "REPAIR":
         return "REPAIR_OPEN"
+    if act_kind == "HOLD_COMPLEXITY":
+        # The mixed semantic decision remains on CompanionAct.  Reuse the
+        # existing gentle Host protocol until the remote Edge advertises a
+        # dedicated mixed-affect behaviour; this branch does not claim a
+        # physical remote apply.
+        return "SOFT_COMFORT"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
     if emotion_tag == "SAD":
@@ -459,6 +506,8 @@ def _avatar_expression(*, act_kind: str, emotion_tag: str, regulation_mode: str)
         return "QUIET_PRESENCE"
     if act_kind == "REPAIR":
         return "REPAIR_OPEN"
+    if act_kind == "HOLD_COMPLEXITY":
+        return "SOFT_COMFORT"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
     if emotion_tag == "SAD":
@@ -600,6 +649,8 @@ def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     ]
     if act == "COMFORT":
         facts.append("陪伴动作：先接住对方的感受，再给一点可选的陪伴；安慰不等于要求对方回应。")
+    elif act == "HOLD_COMPLEXITY":
+        facts.append("陪伴动作：让开心和不舍可以同时存在；不要急着把复杂感受裁成积极鸡汤或单一结论。")
     elif act == "REPAIR":
         facts.append("陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。")
     elif act == "SET_BOUNDARY":
@@ -625,6 +676,8 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         items.append("不要追问、催回复、连发安慰或把沉默解释为拒绝关系。")
     if plan.companion_act.kind == "REPAIR":
         items.append("不要要求原谅、替自己辩解，或把道歉写成修复已经完成。")
+    if plan.companion_act.kind == "HOLD_COMPLEXITY":
+        items.append("不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。")
     return tuple(items)
 
 
