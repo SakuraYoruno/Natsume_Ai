@@ -74,7 +74,8 @@
 - `test_aw02_host_input_cutover.py` 与
   `test_ne03_context_application.py::test_signed_gateway_scope_is_reused_exactly_by_affect_and_runtime_context`
   验证 authority 在 Governor 前完整，Fusion 与 frozen World/Scene 使用精确同一 workspace/subject，任何
-  principal/tenant/subject drift 均失败关闭。`test_input_routes_worker.py` 保留内部离线 helper 的回归，
+  principal/tenant/subject drift 均失败关闭；同一 governed test 还断言 Gateway source 不会再把 task-bound
+  ExpressionPlan 标为 TTS/VTS suppression。`test_input_routes_worker.py` 保留内部离线 helper 的回归，
   但不构成外部 Gateway ingress 证据。
 - 本波只运行本地定向 unit/contract/SQLite integration；远程 CI 为
   `NOT_RUN_ACCOUNT_QUOTA`。未启动真实 Gateway 平台、provider、远端 Edge 或 Docker 服务栈，不能提升为

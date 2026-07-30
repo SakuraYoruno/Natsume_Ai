@@ -74,6 +74,10 @@ opaque session，workspace 固定为 `tenant:<tenant>`；缺少 sender 会 durab
 Runtime Context，并在 Runtime Context 重验 ingress authority；服务 principal 仍只用于 HostCommand、grant 与
 delivery 授权。当前只完成本地 SQLite/合同边界，真实多用户平台、provider、远端 Edge 与 DL-07 未验收。
 
+受治理 Gateway Chat 的 ExpressionPlan 不再因 transport source 被无条件标为 TTS suppression。该旧
+flag 只留给未受治理兼容 fallback，以免它与 `_deliver_gateway_reply` 重复入队；真正的 Voice/Avatar
+仍必须通过 Task Acceptance 后的 Host-owned durable outbox，不能把 suppression 的移除解释为远端播放。
+
 DL-00 现补上了提示词层的唯一关系 authority：`Soul.md` 原文及其 digest 继续作为不可在线改写的
 人格源材料，但 `SoulCompiler` 不再把旧剧情、固定用户名、Bond/阶段或亲密例句送入 live prompt。
 Surface、Cortex 和 node generation 共同调用 runtime projection，并强制附带“关系只能由

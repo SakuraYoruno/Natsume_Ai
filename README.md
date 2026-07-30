@@ -53,6 +53,11 @@ authority 后传给 Runtime Context，因此服务 principal 不会进入七海�
 合并为同一份 self-affect。当前证据只覆盖本地签名 Host 输入与 SQLite/合同回归；真实多用户平台、
 远端 Edge、模型和 DL-07 服务栈仍未验收。
 
+同一条受治理 Gateway Chat 不再仅因来源为 Gateway 而把 TTS 标记为抑制：只有未受治理的旧兼容
+fallback 为避免重复的 `_deliver_gateway_reply` 才保留该保护。受治理路径保留冻结的
+`ExpressionPlanV1`，并且仍然只能在 Task Acceptance 后写入 Host-owned Voice/Avatar outbox；这不是
+远端播放或 Avatar 已执行的证据。
+
 本次 DL-04 又把这个本机入口接入受治理的**真实句子可见性顺序**：在显式配置支持 provider final
 usage 的模型路由时，`/v1/chat → HostCommand → TaskGraph` 会冻结同一 `AffectiveTurnPlanV1`，每个稳定句先写
 `0149` 的 task-bound delivery ledger，随后才产生 SSE `SENTENCE`，最后由 Task Acceptance 结算。首句前的

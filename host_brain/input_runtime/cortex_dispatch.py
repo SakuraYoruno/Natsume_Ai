@@ -255,8 +255,15 @@ async def _run_cortex_orchestrator_pipeline(
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,
-        # Gateway 入口的语音/口型由 _deliver_gateway_reply 统一下发，避免 SurfaceReply 在 COMMIT 后重复补播。
-        suppress_edge_tts=(source == "GATEWAY"),
+        # Only the ungoverned compatibility delivery keeps its old Gateway
+        # suppression to avoid duplicating ``_deliver_gateway_reply``. A
+        # governed Chat preserves the frozen ExpressionPlan through Task
+        # Acceptance, where the Host-owned outbox admits its Voice/Avatar pair;
+        # transport source alone is not a suppression authority.
+        suppress_edge_tts=(
+            source_upper == "GATEWAY"
+            and governed_command_application_provider is None
+        ),
         suppress_edge_vts=False,
         # 语言只由 response_form/render_profile 决定；Gateway/QQ/Web/API 只是传输来源。
         render_target_lang=render_target_lang,

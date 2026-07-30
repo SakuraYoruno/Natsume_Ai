@@ -245,6 +245,8 @@ def test_governed_cortex_binds_secure_ingress_principal_before_governor() -> Non
     assert fusion_request.person_id == scope.relationship_subject_id
     assert fusion_request.workspace_id == scope.workspace_id
     assert fusion_request.session_id == scope.session_id
+    assert fusion_request.suppress_edge_tts is False
+    assert fusion_request.suppress_edge_vts is False
 
 
 def test_governed_cortex_rejects_incomplete_authority_before_governor() -> None:

@@ -39,6 +39,11 @@ Secure Ingress(principal, tenant, claim, audit)
 不保留原始 sender/conversation，Secure Ingress principal 仍只作为 command/grant/delivery authority。没有
 signed scope 的内部离线 helper 不能算 Gateway 生产流，真实多用户平台、模型和远端 Edge 仍待 DL-07。
 
+对于已进入 governed TaskGraph 的 Gateway Chat，transport source 也不再把 `ExpressionPlanV1` 标成
+TTS suppression：worker 保留同一份冻结 plan，Acceptance 后才由 Host-owned embodiment outbox 追加
+Voice/Avatar protocol intent。仅未受治理的 legacy fallback 仍为避免与 `_deliver_gateway_reply` 重复而
+保持抑制；两者都不是远端设备已播放或已转场的 receipt。
+
 公开旧 Bond 写流现已被截断：`POST /bond/event` 不读取 writer provider，也不产生 score、stage、
 self-affect 或关系事件，而是返回 `410 LEGACY_BOND_WRITE_RETIRED`。Monitor 不再拥有人工补录 API/
 表单；其 Bond 页面只能读取历史 projection。因而实际关系流只能是
