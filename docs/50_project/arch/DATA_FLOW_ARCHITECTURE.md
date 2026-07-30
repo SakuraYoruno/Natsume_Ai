@@ -23,6 +23,12 @@
 > 因此不能把现有流写成完整生产闭环。Host-local runtime、Limbic 与 Surface 的旧情感
 > 上下文只可作为待替换的 compatibility 输入，不能被解释为 canonical self-affect writer。
 
+公开旧 Bond 写流现已被截断：`POST /bond/event` 不读取 writer provider，也不产生 score、stage、
+self-affect 或关系事件，而是返回 `410 LEGACY_BOND_WRITE_RETIRED`。Monitor 不再拥有人工补录 API/
+表单；其 Bond 页面只能读取历史 projection。因而实际关系流只能是
+`accepted reply → canonical relationship episode → next input aftereffect`，不能从 HTTP/UI 的积分
+补录旁路写回。
+
 NE-01 代码封口后的证据流固定为：
 
 ```text
@@ -722,7 +728,7 @@ authority 存在时均经 `AffectFusionService` 形成 scoped observation/apprai
 感受。旧 runtime 类不由任何 Input/Tribe composition 构造；缺 Life authority 的解析稳定拒绝。
 随后 canonical
 `TribeApplicationPorts` 也成为 Limbic compatibility writer 的 gate：旧 persistence/metabolism/
-timeline/decay 与 Bond callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
+timeline/decay 与 Bond、任务成功、幽默、孤独、风险拦截、内感受、interaction-recorded callback 在 production 只能返回 `RETIRED_CANONICAL_LIFE`，不会再把观察或
 回调追加为另一个 self-affect 事实。Endocrine 的 delta buffer/last-state/hint/fan-out 也由同一 gate
 拒绝；Circadian/MirrorNeuron 不再直写其私有字段。BodySense 生产读取现改为
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
@@ -902,9 +908,10 @@ flowchart LR
 
 Edge 入站与下行现在都明确分权：`EMOTION_DETECTED`、`USER_REACTION` 等入站 telemetry 只进入 Host 审计观察，不能直接调用 Bond writer、改变 self-affect 或驱动 VTS；只有 final ASR 文本可进入标准 Host Input，再经 Fusion/Appraisal/accepted plan 取得表达因果。Tribe 的平台/情绪事件同样只进入 Host-owned state observation，不再直接取得客户端；旧内部 POST 立即返回 authority-required。Obs `edge.command.push` 的首条窄链已成为正向 issuer：只允许 `edge.somatic + emotion_state_command`，经 Secure Ingress、risk-4 Review、TaskGraph、Acceptance Effect 与 terminal Preview 写入 durable outbox。低层网络发送仍由独立 `HostEmbodimentRuntime` worker 完成；真实 Edge/Gateway canary 尚未执行。
 
-同一规则覆盖普通回复的收尾阶段：`agent_runtime.postprocess` 不再调用 `apply_surface_emotion_bond_flow` 或
-`CortexAgent.post_process_bond_update`。它只能写 `RETIRED_CANONICAL_LIFE` trace；有效 relationship effect 必须由
-Task Acceptance 后的 canonical Life command 与下一次输入关联的 aftereffect 形成。
+同一规则覆盖普通回复的收尾阶段：`agent_runtime.postprocess` 不再调用 `apply_surface_emotion_bond_flow`、
+`CortexAgent.post_process_bond_update`、Tribe `CONVERSATION_ENDED`，也不直接推送 VTS/整段 TTS。它只能写
+`RETIRED_CANONICAL_LIFE` trace；有效 relationship effect 必须由 Task Acceptance 后的 canonical Life command 与
+下一次输入关联的 aftereffect 形成，Voice/Avatar 只能由冻结 `ExpressionPlanV1` 的 protocol effect 发起。
 
 ```mermaid
 flowchart LR
@@ -1817,7 +1824,7 @@ flowchart LR
 
 [acceptance_effect_handlers.py](../../../host_brain/app/acceptance_effect_handlers.py) 分别调用 durable conversation writer、提交 `LifeCommand` 和进入 Gateway delivery。Conversation/Life handler 都在返回后以独立 reader 重开 exact authority，writer 异常也只允许只读 reconcile；Surface response 必须携带 exact Gateway outbox identity，否则保持未知。[life_projection_handlers.py](../../../host_brain/app/life_projection_handlers.py) 再由 Life projection 触发 `_async_post_process`。
 
-[postprocess.py](../../../host_brain/agent_runtime/postprocess.py) 在 Life projection mode 下对 assistant turn 和 LifeMemory admission 使用 durable-required 语义；失败会向上抛出，不当作成功。它随后在该 mode 提前返回，避免重复执行 persona/tribe mutation 和 VTS/TTS。
+[postprocess.py](../../../host_brain/agent_runtime/postprocess.py) 在 Life projection mode 下对 assistant turn 和 LifeMemory admission 使用 durable-required 语义；失败会向上抛出，不当作成功。它明确退役旧 Tribe 对话结束、关系补写与 direct VTS/整段 TTS，不再以“回复收尾”为由重复执行已由 canonical Life/Task Acceptance 拥有的副作用。
 
 因此 canonical 对话的准确定级是 `POST_ACCEPTANCE_DURABLE_EVENTUAL`：
 

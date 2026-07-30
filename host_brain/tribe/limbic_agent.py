@@ -1312,6 +1312,8 @@ class LimbicAgent:
         - interoceptive_index >= 0.70：高负荷，情绪向低效价/低唤醒偏移
         - body_budget >= 0.75 且 interoceptive_index <= 0.30：体能充足，轻微正效价偏移
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             interoceptive_index = float(payload.get("interoceptive_index") or 0.0)
@@ -1698,6 +1700,8 @@ class LimbicAgent:
         T-41：任务完成时将情绪效价小幅提升（+0.04 ~ +0.06），
         模拟成就感带来的轻微正向情绪。
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -1740,6 +1744,8 @@ class LimbicAgent:
         T-41：幽默成功时将情绪效价提升（+0.05 ~ +0.08）和唤醒度小幅提升（+0.03），
         模拟幽默带来的轻松感和活跃感。
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -1785,6 +1791,8 @@ class LimbicAgent:
         T-51：孤独感 > 0.5 时将情绪效价小幅下降（-0.03 ~ -0.06），
         模拟孤独感带来的轻微负向情绪。孤独感极高（>0.8）时额外降低唤醒度。
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -1835,6 +1843,8 @@ class LimbicAgent:
         T-79：ImmuneAgent 拦截有害内容时，将情绪效价小幅下降（-0.02 ~ -0.04），
         模拟面对越界行为时的轻微不适感。仅在 risk_level 为 medium/high/critical 时触发。
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             import logging  # noqa: PLC0415
             payload = dict(getattr(event, "payload", None) or {})
@@ -1885,6 +1895,8 @@ class LimbicAgent:
         T-149：每轮对话结束后，根据对话的情绪信号（emotion_tag/valence/arousal）
         驱动情绪代谢，并写入 emotion_timeline，确保情绪状态随对话自然演化。
         """
+        if self._legacy_self_affect_writes_retired():
+            return
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL"

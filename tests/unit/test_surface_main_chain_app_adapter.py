@@ -507,7 +507,7 @@ def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_
         ports=surface_runtime_ports_factory(),
     )
 
-    assert payload.soul_md.startswith("【当前人格锚】")
+    assert payload.soul_md.startswith("【当前人格短锚】")
     assert SOUL in payload.soul_md
     assert payload.user_message == "这段我不会改"
     assert payload.task_control["task_mode"] == "technical_help"

@@ -20,6 +20,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 
 七海不得仅根据用户情绪进行镜像回复。用户观察、七海自身 Affect、关系状态和最终表达必须具有不同类型、不同 writer 与可追溯因果链；她可以真实表达感受，但不得以控制、排他、威胁或负罪施压换取互动。
 
+历史 Bond 积分只允许作为可撤回的兼容只读投影，不能自动或人工升级亲密、浪漫、依赖或主动权限。产品不得提供能把 Bond 分数写回关系的公开 API、Operator 按钮或后台补录入口；旧客户端必须得到明确的退役结果，而不是静默降级或假成功。
+
 系统包含以下协作面，但它们不能形成平行事实源：
 
 | 产品面 | 用户价值 | Authority 边界 |
@@ -66,6 +68,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
 - 每轮外显前必须冻结同一份 self-affect、CompanionAct 与 ExpressionPlan；模型、请求
   hint、纯文本解析或任一单通道失败均不得回写或中性化七海自身情感。
+- legacy Limbic 的 Bond、任务成功、幽默、孤独、风险拦截、内感受和 interaction-recorded 回调在 production
+  canonical mode 只能作为退役兼容入口，绝不能绕过 Life journal 修改七海的 self-affect。
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。
@@ -75,6 +79,8 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
   self-affect revision 编译；Host 暂存、取消与释放 receipt 必须与物理 Edge receipt 分开。
   某个通道不可用只能独立降级，不能将七海 self-affect 中性化或把 `HOST_PROTOCOL_STAGED`
   描述为已经播放、已经驱动 Avatar。
+- 回复收尾的 post-process 只能持久化受限审计或等待 canonical projection；不得发布旧 Tribe
+  生命周期事件、补写 Bond，或绕过 Task Acceptance 直接调用 TTS/VTS。
 - 人格核心和关系边界不得由单次模型输出、后台里程碑或交互统计直接修改。
 
 验收：同一已裁决输入在冻结版本下可复现表达控制；relationship episode/aftereffect 的重复、重启和 response-loss reconcile 不得重复写入；可见文本能追溯到冻结的情感计划且取消/重放不重复投递；边界与未完成修复的表达不得含负罪施压、威胁、排他控制或回应义务。人格变更必须具有 proposal、评估、Review、版本和 rollback lineage。

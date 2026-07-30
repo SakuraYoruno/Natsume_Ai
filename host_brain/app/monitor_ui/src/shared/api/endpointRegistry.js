@@ -158,7 +158,6 @@ export const ENDPOINT_REGISTRY = Object.freeze({
     bondUsers: { service: 'obs', path: '/bond/users', risk: 'low' },
     bondStage: { service: 'obs', path: '/bond/stage/:userId', risk: 'low' },
     bondSummary: { service: 'obs', path: '/bond/summary/:userId', risk: 'low' },
-    bondEvent: retiredCommand('bond.event.submit', 'FeedbackProposalV1 activation authority', 'NE-06'),
   },
   operations: {
     codexBioOps: SHARED_ENDPOINTS.codexBioOps,

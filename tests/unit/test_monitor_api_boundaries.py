@@ -4563,7 +4563,6 @@ def test_bond_view_model_lives_in_life_feature() -> None:
         "buildBondDetailRows",
         "buildBondDetailView",
         "buildBondDashboardViewModel",
-        "buildBondSubmitSuccessMessage",
     ]:
         assert f"export function {export_name}(" in bond_model
 
@@ -4574,13 +4573,14 @@ def test_bond_view_model_lives_in_life_feature() -> None:
     assert "buildBondDashboardViewModel({" in bond_controller
     assert "useBondOverviewQuery({" in bond_controller
     assert "useBondUserDetailQuery({" in bond_controller
-    assert "submitBondEvent(body)" in bond_controller
+    assert "submitBondEvent" not in bond_controller
     assert "useAppStore((state) => state.pollingEnabled)" in bond_controller
     bond_stage_distribution = (
         MONITOR_SRC / "features" / "life" / "components" / "bond" / "BondStageDistribution.jsx"
     ).read_text(encoding="utf-8")
     assert "buildBondStageDistribution(items)" in bond_stage_distribution
-    assert "buildBondSubmitSuccessMessage(submitResult.data)" in bond_surface
+    assert "关系写入边界" in bond_surface
+    assert "BondEventForm" not in bond_surface
     assert "sampleMeta.loadState" in bond_surface
     assert "noticeView.noSample" in bond_surface
     assert "noticeView.unavailable" in bond_surface
@@ -4590,13 +4590,11 @@ def test_bond_view_model_lives_in_life_feature() -> None:
     for page_forbidden in [
         "features/life/bondModel.js",
         "features/life/bondQueries.js",
-        "submitBondEvent",
         "useAppStore",
         "useBondOverviewQuery",
         "useBondUserDetailQuery",
         "buildBondDashboardViewModel",
         "buildBondStageDistribution",
-        "buildBondSubmitSuccessMessage",
         "metricCards.map",
         "detailView.rows.map",
     ]:

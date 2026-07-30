@@ -25,8 +25,15 @@
 - `test_edge_events_whitelist.py` 证明 `EMOTION_DETECTED` 仍可作为 Edge 审计事件被接收，但不会再触发
   Cortex Bond 更新或 VTS 驱动；同一文件还静态约束 `system_handler.py` 不保留这两个 fire-and-forget 调用。
 - `test_http_edge_events_acceptance.py` 继续覆盖真实 ASGI 中 final ASR → Host Input 的受控入站桥。
-  `test_gr06_durable_surface_projection.py` 同时约束通用 Agent post-process 不再调用 Surface/Cortex 的旧 Bond writer。
-  当前定向集合为 `17 passed`（本切片）及此前 Edge HTTP 集；没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
+  `test_gr06_durable_surface_projection.py` 同时约束通用 Agent post-process 不再调用 Surface/Cortex 的旧 Bond writer、
+  Tribe `CONVERSATION_ENDED`、direct VTS 或 bulk TTS；核心退役子集为 `14 passed in 1.13s`，连同相邻
+  Surface/Expression 协议回归为 `64 passed in 4.51s`。没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
+- `test_bond_routes_api.py`、`test_nle_appraisal_bond_contract.py` 与 Monitor 边界测试覆盖公开旧 Bond
+  写入口：Host route ports 不再暴露 writer provider，`POST /bond/event` 对任何兼容 payload 都返回
+  `410 LEGACY_BOND_WRITE_RETIRED`，且请求不能改变历史 projection；Monitor 不再包含
+  `submitBondEvent`、`BondEventForm` 或对应 endpoint registry 项。当前本地集合仅证明 API/UI 退役与
+  历史只读边界：Python 定向/ASGI 例为 `19 passed in 61.90s`，Monitor operator-client 为 `9 passed` 且
+  production Vite build 已通过；不证明远端 Edge、真实模型、真人体验或 DL-07。
 
 ## DL-04 本机直连 Chat scope 切流
 
@@ -115,7 +122,8 @@
   子集为 57 项）；
   这不是 Limbic、Endocrine、BodySense、Motive、Bond queue 清零或真实服务栈证据。
 - `test_limbic_agent.py` 现验证 production canonical Life authority 会让 Limbic 的 legacy
-  persistence、metabolism、timeline append、decay 以及 Bond progress/regress callback 返回
+  persistence、metabolism、timeline append、decay，以及 Bond、task success、humor、loneliness、immune block、interoception
+  和 interaction-recorded callback 返回
   `RETIRED_CANONICAL_LIFE`，且不会实例化 `EmotionPersistence` 或追加旧 timeline；未知 authority
   值失败关闭，Tribe canonical fusion wiring 也被直接断言。相关 Limbic、fusion 与 Host composition
   集合为 `77 passed in 31.20s`，与前项集合有重叠，不能相加；它不证明 BodySense、Endocrine、Motive、

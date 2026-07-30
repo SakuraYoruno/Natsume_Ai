@@ -96,7 +96,7 @@ def test_surface_projection_runs_durable_only_post_process_mode(monkeypatch) -> 
     assert trace["life_projection_mode"] is True
     assert trace["life_projection_intent_id"] == "intent-1"
     assert trace["skip_heavy_persona_postprocess"] is True
-    assert trace["skip_default_mode_on_conversation_end"] is True
+    assert "skip_default_mode_on_conversation_end" not in trace
 
 
 def test_journal_native_projection_targets_do_not_call_legacy_writers() -> None:

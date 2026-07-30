@@ -225,7 +225,8 @@ def test_t_nle_16_bond_runtime_and_static_boundaries_reject_ungoverned_writes() 
     assert scan_repo(ROOT) == []
     route_source = inspect.getsource(bond_routes.submit_bond_event)
     assert ".apply_event(" not in route_source
-    assert ".apply_update(" in route_source
+    assert ".apply_update(" not in route_source
+    assert "LEGACY_BOND_WRITE_RETIRED" in route_source
 
 
 def test_t_nle_16_projection_and_appraisal_facades_expose_no_mutation_methods() -> None:

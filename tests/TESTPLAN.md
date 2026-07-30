@@ -35,9 +35,17 @@
 - T-DL01-06：Edge `EMOTION_DETECTED`、`USER_REACTION` 等入站 telemetry 只能审计或经 final ASR
   进入标准 Host Input；不得直接调用 Bond writer、写七海 self-affect 或驱动 VTS。Voice/Avatar 只能从已接受的
   `AffectiveTurnPlanV1` / `ExpressionPlanV1` 发起，远端 Edge 未启动时不得声称设备实测。
-- T-DL01-07：通用 Agent reply post-process 不得调用旧 Surface Bond flow 或 Cortex Bond writer；trace 只能标记
+- T-DL01-07：通用 Agent reply post-process 不得调用旧 Surface/Cortex Bond writer、发布 Tribe
+  `CONVERSATION_ENDED`，或绕过 Task Acceptance 直接驱动 VTS/整段 TTS；trace 只能标记
   `RETIRED_CANONICAL_LIFE`。关系效果必须由 accepted reply 的 canonical Life acceptance/aftereffect 链产生，
-  不能退回进程内 queue。
+  表达必须由同一 `ExpressionPlanV1` protocol effect 发起，不能退回进程内 queue 或直接设备调用。
+- T-DL01-08：Host route ports 不得暴露 `bond_writer_provider`；`POST /bond/event` 对兼容 payload 只能返回
+  `410 LEGACY_BOND_WRITE_RETIRED`，不得解析 writer、改变历史 score/stage、self-affect 或 relationship
+  aggregate。Monitor 不得再包含人工 Bond 补录表单、调用 API 或 endpoint registry 项；历史投影只能只读。
+- T-DL01-09：production canonical Life authority 下，即使 Limbic 已持有旧 `EmotionPersistence` 对象，
+  task success、humor landed、loneliness、immune block、interoception 与 interaction-recorded callback 也必须在任何
+  restore/persist、silence mutation 或 state-registry touch 前 short-circuit；只有显式 offline/test compatibility
+  composition 可执行历史行为。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 

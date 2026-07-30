@@ -1,7 +1,7 @@
 import { BOND_STAGE_COLORS } from '../../shared/statusMeta.js'
 import { LOAD_STATES, resolveLoadState } from '../../models/loadState.js'
 import { buildBondOrganSystemModel } from '../../models/organSystemModel.js'
-import { formatDateTime, formatStage, formatTransitionStatus, formatTrend } from '../../utils/digitalLife.js'
+import { formatDateTime, formatStage, formatTrend } from '../../utils/digitalLife.js'
 
 export function formatBondHealthStatus(status) {
   if (!status) return '—'
@@ -84,8 +84,8 @@ export function buildBondHeroView({ selectedUser, health, users = [], stageSampl
   return {
     title: selectedUser || formatBondHealthStatus(health?.status),
     description: selectedUser
-      ? '当前正在查看该用户的关系阶段、趋势与能力提示。'
-      : '这里集中展示社交脑健康度、阶段分布与关系事件录入。',
+      ? '当前正在查看迁移窗口内的历史 Bond 投影；它不会决定亲密权限或主动频率。'
+      : '这里集中展示历史 Bond 投影。真实关系连续性由 Digital Life episode 与 aftereffect 生命周期维护。',
     metaItems: buildBondHeroMetaItems({ health, users, stageSampleCount, selectedUser }),
   }
 }
@@ -97,7 +97,7 @@ export function buildBondSampleMeta({ bondLoadState, bondUpdatedAt, stageSampleC
     sampleLabel: '关系样本',
     updatedAt: bondUpdatedAt,
     source: 'bond / stage',
-    definition: '社交脑页聚合关系健康、用户列表、阶段分布与当前用户详情；无样本、暂不可用与加载失败会明确区分。',
+    definition: '本页只读聚合历史 Bond 投影、用户列表、阶段分布与当前用户详情；它不是关系写 authority。',
   }
 }
 
@@ -151,7 +151,7 @@ export function buildBondMetricCards({ health, users = [], stageSampleCount = 0,
       tone: 'text-pink-600',
     },
     {
-      label: '累计积分',
+      label: '历史积分',
       value: userDetail?.total_score ?? '—',
       hint: `事件 ${userDetail?.event_count ?? 0} 次`,
       tone: 'text-purple-600',
@@ -236,10 +236,4 @@ export function buildBondDashboardViewModel({
     metricCards: buildBondMetricCards({ health, users, stageSampleCount, userDetail, labels }),
     detailView: buildBondDetailView({ detailError, detailUpdatedAt, userDetail }),
   }
-}
-
-export function buildBondSubmitSuccessMessage(data) {
-  if (!data) return ''
-  const scoreDelta = data.score_delta ?? 0
-  return `${formatStage(data.from_stage)} → ${formatStage(data.to_stage)}，${formatTransitionStatus(data.transition_status)}，积分变化 ${scoreDelta > 0 ? '+' : ''}${scoreDelta}`
 }

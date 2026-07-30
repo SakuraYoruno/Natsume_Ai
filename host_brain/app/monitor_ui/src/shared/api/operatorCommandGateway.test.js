@@ -197,7 +197,6 @@ test('retired Monitor mutations expose replacement metadata without a command ro
     ENDPOINT_REGISTRY.observability.codexBioOpsOwnerStateImport,
     ENDPOINT_REGISTRY.observability.codexBioOpsOwnerStateReject,
     ENDPOINT_REGISTRY.digitalLife.avatarBehavior,
-    ENDPOINT_REGISTRY.digitalLife.bondEvent,
     ENDPOINT_REGISTRY.operations.canonProposals,
     ENDPOINT_REGISTRY.operations.canonProposalApprove,
     ENDPOINT_REGISTRY.operations.canonProposalReject,

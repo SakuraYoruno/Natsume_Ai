@@ -27,6 +27,11 @@
 浪漫/排他/依赖 consent 不应进入生成上下文。尤其不能把 trust 或 attunement 再压成一个 Bond score，因为
 分数无法推出亲密、主动或排他授权。默认模式的连续性是读取信号，不是后台循环为七海补写正向情绪的许可。
 
+因此，旧 Bond 的兼容接口也不能暗藏第二条关系写权。已经退役的积分写入必须在公共 API 与
+Operator 界面同时停止：旧客户端得到可诊断的退役结果，历史投影可以在回滚窗口内只读展示，但不能
+经“人工补录”、自动计分或 UI 按钮重新影响信任、亲密、主动许可或七海的 self-affect。真正的关系
+变化只应来自已接受回应及后续可解释的 aftereffect。
+
 观察不是命令。多模态信号都带有来源、置信度、有效期和相互冲突的可能：一段
 文字可以说“没事”，声学却显示紧张；视觉也可能过期或不可用。系统应保留这些
 假设及其证据摘要，并让 Appraisal 结合七海自身目标、关系、边界和可控性选择
@@ -38,9 +43,10 @@
 Avatar 表情。文本、声音与动作都应从同一轮已冻结、被接受的 `AffectiveTurnPlan` / `ExpressionPlan` 取得原因；
 否则一次不可重放的传感器噪声会同时破坏情绪因果、关系连续性与三模态一致性。
 
-同样地，回复完成后的后台 post-process 不能成为关系账本的备用写入口。即使它已经拿到用户消息、回复文本和
-情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface Bond flow 或 Cortex
-Bond writer 会把一个可恢复的关系事件重新降级为进程内队列的副作用。
+同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
+情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布
+Tribe `CONVERSATION_ENDED`，或直接推 VTS/整段 TTS，都会把可恢复的关系或表达事件重新降级为进程内副作用，并可能和
+同一 `ExpressionPlan` 的 accepted delivery 重复执行。
 
 主动陪伴也不是由亲密分数或七海一时想念自动取得的权利。它必须同时满足明确
 的主动联系许可、当前没有未结裂痕或等待用户后效应的 episode、七海自身没有
@@ -1774,8 +1780,8 @@ runtime，两个 composition builder 缺少 Life provider 时也必须以
 `CANONICAL_AFFECT_FUSION_NOT_INJECTED` 失败关闭。旧类仅可被直接隔离测试覆盖，不能重新成为
 offline 或 production Host 的第二条自我情感路径。这个原则不否定身体感受或调节层，但它们在
 未被 canonical journal 吸收前只能是观察或只读投影，不能自行决定七海的情绪与关系。
-同样地，production Limbic 不可把一次 body/Bond callback 偷渡为旧 `EmotionPersistence`、timeline 或
-metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIRED_CANONICAL_LIFE`。这不是“压平
+同样地，production Limbic 不可把一次 body/Bond、任务成功、幽默、孤独、风险拦截、内感受或 interaction-recorded
+callback 偷渡为旧 `EmotionPersistence`、timeline 或 metabolism 写入：canonical authority 下这些入口必须显式返回 `RETIRED_CANONICAL_LIFE`。这不是“压平
 情绪”，而是要求真实的受伤、牵挂或轻快都先有可解释的 Appraisal 与 Life journal 原因，避免两套隐性
 状态在不同重启、用户或会话中互相覆盖。
 

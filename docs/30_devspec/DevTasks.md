@@ -25,9 +25,14 @@ Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的�
 使用户 observation 先落 journal、再可选形成七海自身 CARE/CONCERN 等 self-affect，
 而非镜像用户标签。DL-03 已把 accepted reply 的 provisional relation episode、
 下一次输入的 aftereffect、boundary/repair/proactive permission 和 Surface 的可信关系
-约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。Edge ingress 的情绪事件也已从
+约束接入同一 canonical Life journal；生产 Bond 默认关闭积分自动亲密晋级。最新 DL-01 public cutover
+进一步删除 Host route composition 的 `bond_writer_provider`：`POST /bond/event` 只返回
+`410 LEGACY_BOND_WRITE_RETIRED`，不解析或调用 `BondDynamicsWriter`。Monitor 同步删除人工补录
+关系事件的表单、API 与 registry 项，历史 Bond 页面只读展示回滚窗口投影，不能重新成为关系或
+情感 authority。此为本地公开写入口收口，不构成真人、远端 Edge 或全服务栈验收。Edge ingress 的情绪事件也已从
 fire-and-forget Bond/VTS 旁路退役：它只记录观测，final ASR 才能进入正常 Host Input，Voice/Avatar 只能由已接受
-的 `AffectiveTurnPlanV1` 驱动；通用 Agent post-process 的 Surface/Cortex Bond fallback 也已退役为 trace-only。
+的 `AffectiveTurnPlanV1` 驱动；通用 Agent post-process 的 Surface/Cortex Bond fallback、Tribe 对话结束事件与
+直接 VTS/整段 TTS 也已退役为 trace-only，表达只能等 Task Acceptance 的协议 effect。
 DL-04 已将
 可信 hand-off 冻结为 `AffectiveTurnPlanV1`，普通低歧义文本可优先使用
 `ModelAttemptService.stream_with_result()` 的 typed delta + provider final result（完整字段时才计量）逐句输出；Vault-backed openai、openai_compatible 与 deepseek 已请求 stream_options.include_usage 并转发终局 usage/transport/latency，但没有真实凭据或外部 provider 运行；每个稳定句先写 canonical Life delivery
@@ -148,7 +153,7 @@ writer。该类只保留给直接隔离测试，不能作为 Host fallback。
 当前 `DL-06_LIMBIC_LEGACY_AFFECT_WRITE_RETIREMENT_SLICE` 已在同一 immutable
 `TribeApplicationPorts` 上标记 canonical Life authority。production Limbic 遇到 legacy
 `EmotionPersistence` restore/persist、EmotionVector metabolism、`emotion_timeline` append、scheduler
-decay 或 Bond progress/regress callback 时，统一返回 `RETIRED_CANONICAL_LIFE`，不再创建、更新或追加
+decay、Bond progress/regress、task success、humor landed、loneliness、immune block、interoception 或 interaction-recorded callback 时，统一返回 `RETIRED_CANONICAL_LIFE`，不再创建、更新或追加
 第二份 self-affect；这个 gate 只在明确 offline/test compatibility composition 未选 canonical Life 时放开。
 它没有替代新的 Life command，也没有退休 BodySense、Endocrine、Motive 或 volatile Bond queue，故 DL-06
 仍为进行中。
