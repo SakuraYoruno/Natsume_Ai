@@ -52,6 +52,17 @@
 > Bond queue/writer 已退役为 no-write adapter；Life projection 的 post-process 也不再发布旧 Tribe 对话结束事件或直接推 VTS/整段 TTS。production Host 也不会从旧 action log 预热 legacy emotion timeline：它返回显式 retired 空投影，且 Runtime snapshot 不会把 user profile 升格为 self-affect，canonical Limbic/Prefrontal 不会读取该投影；但 Surface 的其它兼容 state、Monitor 审核、canary 长期收益、真实模型和三模态物理服务仍未闭环。因此状态仍为
 > `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，不得宣称生产验收完成。
 
+> **DL-02 ASR 情绪语义边界：** final ASR 仍可进入标准 Host Input，但 Edge 附带的关键词
+> emotion、intensity、context 或 observation list 不会被映射为 ChatRequest self-report 字段；
+> 不可信字段被清除，原文本仅走既有低置信 TEXT observer。只有显式可用、未降级、tag/强度/置信度
+> 完整的声学 attestation 才会生成一条 5 秒 TTL typed ACOUSTIC observation。它经过 Fusion/Appraisal
+> 后仍只是用户观察，不直接写七海 self-affect；本地定向测试通过，远端 Edge 未启动。
+
+> 同一 canonical composition 还退役了 Limbic 的 EMOTION_INFERENCE_UPDATED legacy consumer：
+> 即使收到完整的声学 event，它也不创建 TribeStateRegistry voice-emotion 项、更不追加旧 timeline。
+> final ASR 只能经标准 Host Input 产生 scoped user observation；离线 compatibility 测试保留的
+> 历史行为不属于 production authority。
+
 > **DL-06 旧主动路径退役：** `proactive_talk` 已不再注册为 Personality Skill、Tool Catalog、executor 或
 > Scheduler-add task type。Host scheduler composition 对升级前存在的 `proactive_talk_periodic` durable definition
 > 使用 CAS disable；若 occurrence 已在升级前被接纳，dispatch 仍会验证 immutable Scene identity，但随后仅返回

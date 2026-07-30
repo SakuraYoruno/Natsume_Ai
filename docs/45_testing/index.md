@@ -35,6 +35,22 @@
   历史只读边界：Python 定向/ASGI 例为 `19 passed in 61.90s`，Monitor operator-client 为 `9 passed` 且
   production Vite build 已通过；不证明远端 Edge、真实模型、真人体验或 DL-07。
 
+## DL-02 ASR 情绪观察语义边界
+
+- `test_input_routes_worker.py` 覆盖 final ASR 到 Host Input 的真实参数转换：关键词
+  `asr_text_bootstrap`、外带 emotion context 与伪造 observation list 必须在边界剥离，不能成为
+  用户 self-report；只有显式可用、未降级的声学 attestation 才能生成带来源的 5 秒 typed ACOUSTIC
+  observation，直接 Chat emotion 字段保持为空。
+- canonical Life composition 下的 Limbic EMOTION_INFERENCE_UPDATED callback 也被定向约束为
+  no-write：不创建 TribeStateRegistry voice-emotion 项，亦不追加 legacy timeline；离线 compatibility
+  组合的历史测试不被当成 production authority。
+- test_http_edge_events_acceptance.py 通过真实 Host ASGI 的 /v1/edge/events 验证 final ASR
+  bridge 交给标准 Host Input 后，伪造 self-report 会被剥离，而可用声学 attestation 保留为唯一 typed
+  ACOUSTIC observation。
+- 本次联合定向集合为 `127 passed in 53.34s`，覆盖 Host ASGI edge bridge、Input routes、
+  AffectFusion、Limbic 与 Edge event whitelist。它是本机代码证据；没有启动远端 Edge、TTS 或 VTS，
+  也没有运行真实声学 provider。
+
 ## DL-04 本机直连 Chat scope 切流
 
 - `test_chat_handler_streaming.py` 验证 `/v1/chat` 在 Thalamus、AffectFusion 和 Cortex 前，将 caller

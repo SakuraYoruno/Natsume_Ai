@@ -142,6 +142,15 @@ score/stage 标注为仅供回滚窗口读取的历史投影。该关闭不删�
   使七海形成 `HURT / CAUTION`、以 `CONTAIN` 调节并选择 `SET_BOUNDARY`；Surface 不得把它扩张为
   威胁、冷处理、索要道歉或情感债。`闭嘴/别来烦我/少管我/滚开` 等停止语义优先写 relationship
   `BOUNDARY`，因此绝不会先把用户变成需要安抚七海的人。
+- ASR final ingress 不把 Edge 附带的关键词 emotion、强度、context 或观察列表解释为用户自述；
+  `asr_text_bootstrap` 只回到既有低置信 TEXT observer。只有显式声明可用、未降级且具有效 tag、
+  强度与置信度的声学 attestation，才会产生一条来源受限、TTL 为 5 秒的 typed ACOUSTIC observation。
+  本机真实 Host ASGI 的 final ASR bridge 已定向重放到同一输入适配，远端 Edge 未启动，不能把它记作
+  设备或声学模型验收。
+
+在 canonical Life composition 下，Limbic 的 EMOTION_INFERENCE_UPDATED callback 也固定退役：
+它既不写 process-local voice-emotion state，也不写 legacy timeline；离线 compatibility composition
+才保留历史观察行为，不能把它视为 production fallback。
 
 本地覆盖包含 9 项 DL-02 unit/restart 集成和 73 项受影响 Host/聊天/内核回归。它不
 证明真实 Host 部署、模型、语音、Avatar、关系后效应或旧 writer 已清零。

@@ -1,6 +1,144 @@
 """Host input runtime responsibility extracted from the HTTP adapter."""
 
+from collections.abc import Mapping
+import math
+from typing import Any
+
+from host_brain.core.emotion_constants import (
+    VALID_EMOTION_TAGS,
+    normalize_emotion_tag,
+)
+
 from .contracts_and_normalization import *  # noqa: F403
+
+
+_ASR_UNTRUSTED_EMOTION_SOURCES = frozenset(
+    {
+        "",
+        "asr_text",
+        "asr_text_bootstrap",
+        "asr_text_unavailable",
+        "inferred",
+        "runtime_unknown",
+        "unknown",
+    }
+)
+_ASR_ACOUSTIC_MODALITIES = frozenset(
+    {"acoustic", "audio", "voice", "voice_acoustic"}
+)
+_AFFECT_OBSERVATION_KEYS = frozenset(
+    {"user_affect_observations", "affect_observations"}
+)
+
+
+def _finite_unit(value: Any) -> float | None:
+    """Return one finite unit scalar, or reject an untrusted edge value."""
+
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(resolved):
+        return None
+    return max(0.0, min(1.0, resolved))
+
+
+def _edge_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _trusted_asr_acoustic_observation(
+    *,
+    payload: Mapping[str, Any],
+    ts_ms: int,
+) -> dict[str, Any] | None:
+    """Translate one attested acoustic signal into a user observation.
+
+    An Edge ASR event is transport telemetry, not a user self-report.  The
+    former keyword-only ASR inference therefore must not be copied into
+    ``ChatRequest.emotion_tag``: Fusion interprets that field as an explicit
+    user observation.  Only an available, non-degraded acoustic model gets a
+    typed, short-lived ``ACOUSTIC`` observation.  Its raw source material is
+    intentionally absent from the returned mapping.
+    """
+
+    source = str(payload.get("emotion_source") or "").strip().lower()
+    modality = str(payload.get("emotion_modality") or "").strip().lower()
+    if (
+        source in _ASR_UNTRUSTED_EMOTION_SOURCES
+        or modality not in _ASR_ACOUSTIC_MODALITIES
+        or not _edge_flag(payload.get("acoustic_emotion_available"))
+        or _edge_flag(payload.get("emotion_inference_degraded"))
+    ):
+        return None
+
+    raw_tag = str(payload.get("emotion_tag") or "").strip()
+    tag = normalize_emotion_tag(raw_tag)
+    if not raw_tag or tag not in VALID_EMOTION_TAGS:
+        return None
+    intensity = _finite_unit(payload.get("emotion_intensity"))
+    confidence = _finite_unit(payload.get("emotion_confidence"))
+    if intensity is None or confidence is None or confidence <= 0.0:
+        return None
+
+    observed_at_ms = max(0, int(ts_ms))
+    # DL-02 fixes the acoustic TTL at five seconds.  The journal reducer and
+    # Fusion service enforce the same bound again; passing both timestamps
+    # prevents a delayed bridge job from making an old microphone result fresh.
+    return {
+        "modality": "ACOUSTIC",
+        "emotion_distribution": {tag: max(0.05, intensity)},
+        "confidence": confidence,
+        "observed_at_ms": observed_at_ms,
+        "expires_at_ms": observed_at_ms + 5_000,
+        "provider": f"edge-acoustic:{source[:64]}",
+    }
+
+
+def _prepare_input_affect_handoff(
+    *,
+    source: str,
+    payload: Mapping[str, Any],
+    ts_ms: int,
+) -> tuple[str | None, Any, dict[str, Any], dict[str, Any] | None]:
+    """Return request affect fields without upgrading Edge telemetry to self-report.
+
+    Non-ASR ingress retains the public ``ChatRequest`` compatibility fields.
+    ASR ingress is stricter: arbitrary Edge ``emotion_tag``, ``emotion_context``
+    and supplied affect lists are untrusted.  A valid acoustic attestation is
+    reintroduced only as one bounded multimodal user observation.
+    """
+
+    multimodal_raw = payload.get("multimodal_observations")
+    multimodal = (
+        dict(multimodal_raw) if isinstance(multimodal_raw, Mapping) else {}
+    )
+    if str(source or "").strip().upper() != "ASR":
+        emotion_context_raw = payload.get("emotion_context")
+        return (
+            str(payload.get("emotion_tag") or "").strip() or None,
+            payload.get("emotion_intensity"),
+            multimodal,
+            (
+                dict(emotion_context_raw)
+                if isinstance(emotion_context_raw, Mapping)
+                else None
+            ),
+        )
+
+    for key in _AFFECT_OBSERVATION_KEYS:
+        multimodal.pop(key, None)
+    observation = _trusted_asr_acoustic_observation(
+        payload=payload,
+        ts_ms=ts_ms,
+    )
+    if observation is not None:
+        multimodal["user_affect_observations"] = [observation]
+    # A sensor result is neither a self-report nor a trusted internal hand-off.
+    # Keeping no separate emotion_context here closes both spoofing paths.
+    return None, None, multimodal, None
 
 async def _run_cortex_orchestrator_pipeline(
     *,
@@ -33,7 +171,16 @@ async def _run_cortex_orchestrator_pipeline(
     reply_channel = str(payload.get("platform") or "").strip() or None
     reply_target = str(payload.get("conversation_id") or "").strip() or None
     attachments = list(payload.get("attachments") or [])
-    multimodal_observations = dict(payload.get("multimodal_observations") or {})
+    (
+        request_emotion_tag,
+        request_emotion_intensity,
+        multimodal_observations,
+        request_emotion_context,
+    ) = _prepare_input_affect_handoff(
+        source=source,
+        payload=payload,
+        ts_ms=ts_ms,
+    )
     message_text = str(text or "").strip()
     person_id = resolve_person_id(
         str(payload.get("person_id") or "").strip() or None,
@@ -56,13 +203,9 @@ async def _run_cortex_orchestrator_pipeline(
         workspace_id=str(payload.get("workspace_id") or "").strip() or None,
         person_id=person_id,
         session_id=session_id,
-        emotion_tag=str(payload.get("emotion_tag") or "").strip() or None,
-        emotion_intensity=payload.get("emotion_intensity"),
-        emotion_context=(
-            dict(payload.get("emotion_context") or {})
-            if isinstance(payload.get("emotion_context"), dict)
-            else None
-        ),
+        emotion_tag=request_emotion_tag,
+        emotion_intensity=request_emotion_intensity,
+        emotion_context=request_emotion_context,
         input_source=source,
         reply_channel=reply_channel,
         reply_target=reply_target,

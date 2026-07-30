@@ -43,6 +43,12 @@ Operator 界面同时停止：旧客户端得到可诊断的退役结果，历�
 Avatar 表情。文本、声音与动作都应从同一轮已冻结、被接受的 `AffectiveTurnPlan` / `ExpressionPlan` 取得原因；
 否则一次不可重放的传感器噪声会同时破坏情绪因果、关系连续性与三模态一致性。
 
+ASR 的关键词情绪推断尤其不是自述：设备为了路由或调试附带的 emotion tag、强度、context 或列表，必须被当作不可信
+transport telemetry 清除。只有明确标记为可用、未降级的声学观察，才可带来源、置信度与短 TTL 进入 AffectFusion；
+即使如此，它也是关于用户的有限假设，仍须经 Appraisal 才可能引起七海自己的感受。
+在 canonical Life composition 中，遗留 Limbic 事件订阅者也不得把相同信号缓存为 process-local
+voice-emotion truth 或写回旧 timeline；离线兼容投影不能反向成为下一轮生产表达的 authority。
+
 同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
 情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布
 Tribe `CONVERSATION_ENDED`，或直接推 VTS/整段 TTS，都会把可恢复的关系或表达事件重新降级为进程内副作用，并可能和

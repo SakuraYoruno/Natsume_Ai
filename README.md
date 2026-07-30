@@ -920,6 +920,8 @@ Task Acceptance 会原子登记 effect intent，随后由 durable dispatcher 分
 
 ## 功能能力
 
+数字生命当前仍为 PARTIAL：ASR 的关键词情绪推断只可回到普通低置信文本观察，不能伪装成用户自述或改写七海自身情绪；只有明确可用、未降级的声学证明才会作为短时 typed observation 进入 Host Input。canonical Life composition 也不再让 Limbic 事件回调缓存另一份运行期声学情绪或追加旧 timeline。远端 Edge 尚未启动，因此这些本地语义边界不等同语音、Avatar 或全栈实测。
+
 | 能力域 | 对用户提供什么 | 主要实现 |
 |---|---|---|
 | 对话与最终表达 | 流式对话、人格化表达、媒体/语音响应 | `host_brain/agent_runtime/`、`host_brain/persona/`、`host_brain/surface_runtime/` |

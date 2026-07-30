@@ -415,6 +415,13 @@ Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界�
 
 ## 4. 数字生命与长期演化
 
+> **DL-02 ASR ingress 当前事实：** final ASR 可使用标准 Host Input，但 Edge 的关键词情绪推断、
+> 外带 emotion 字段、context 和伪造 observation list 会在该边界被清除，不能被当作用户自述或
+> 七海的 self-affect。仅有可用、未降级的声学 attestation 可生成短时 typed observation；它仍须
+> 经 Fusion/Appraisal，且本地证据不代表远端 Edge、声学 provider 或全栈验收。
+> canonical Life composition 还让 Limbic 的 EMOTION_INFERENCE_UPDATED legacy consumer 无副作用，
+> 因而不会把声学 event 存回 process-local registry 或 old timeline；离线兼容行为不是 production fallback。
+
 | 目标 | 当前状态 | 代码/证据 | 实际缺口 | 执行波 |
 |---|---|---|---|---|
 | World Model | `PARTIAL_PRODUCTION_OBSERVATION_AND_GOAL_OWNER_WIRED_NOT_PREDICTIVE` | 0111、0137、`RuntimeWorldObservationApplication`、`SQLiteLongTermGoalAuthority`、`WorldResolver` | Host lifespan 中以 server-owned principal/Bond/Emotion/environment/active-goal 追加并重开 World，TTL 与 `SOURCE_REVOKED` 显式 expiry、competing refs 与 captured-head 封口已有；Bond 原始证据 owner、预测世界模型与部署 canary仍缺 | NE-03 |

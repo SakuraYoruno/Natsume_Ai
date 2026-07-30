@@ -62,6 +62,49 @@ def test_limbic_agent_retires_legacy_affect_writes_with_canonical_life() -> None
     assert timeline.append_calls == 0
 
 
+def test_limbic_agent_retires_runtime_emotion_callback_with_canonical_life() -> None:
+    class _Timeline:
+        def __init__(self) -> None:
+            self.append_calls = 0
+
+        def append(self, **_kwargs) -> None:  # noqa: ANN003
+            self.append_calls += 1
+            raise AssertionError("canonical Life must not append legacy timeline")
+
+    timeline = _Timeline()
+    registry = TribeStateRegistry(persist_throttle=999999)
+    agent = _build_limbic_agent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+            emotion_timeline=lambda: timeline,
+        ),
+    )
+    event = SimpleNamespace(
+        payload={
+            "emotion_tag": "SAD",
+            "emotion_intensity": 0.83,
+            "emotion_source": "acoustic_emotion_model",
+            "emotion_modality": "acoustic",
+            "emotion_confidence": 0.91,
+            "acoustic_emotion_available": True,
+            "emotion_inference_degraded": False,
+            "session_id": "session-canonical",
+        },
+        source_agent="somatic_agent",
+        ts_ms=456,
+    )
+
+    asyncio.run(agent._on_emotion_inference_updated(event))
+
+    assert timeline.append_calls == 0
+    limbic_state = dict((registry.get_state("limbic") or {}).get("state") or {})
+    assert "last_voice_emotion_inference" not in limbic_state
+    vitals = registry.aggregate_vital_signs()
+    assert vitals["voice_emotion_tag"] is None
+    assert vitals["voice_emotion_trusted"] is False
+
+
 def test_limbic_agent_retires_bond_callbacks_with_canonical_life() -> None:
     class _Persistence:
         def persist(self, **_kwargs) -> None:  # noqa: ANN003

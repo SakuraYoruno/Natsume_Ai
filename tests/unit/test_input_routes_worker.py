@@ -24,6 +24,7 @@ from host_brain.input_runtime.worker_dispatch import (
 )
 from host_brain.input_runtime.cortex_dispatch import (
     _maybe_realign_gateway_pipeline,
+    _prepare_input_affect_handoff,
     _run_cortex_orchestrator_pipeline,
     _run_cortex_pipeline,
 )
@@ -868,6 +869,96 @@ def test_run_cortex_orchestrator_pipeline_preserves_gateway_multimodal_fields() 
     assert request_body.attachments == payload["attachments"]
     assert request_body.multimodal_observations == payload["multimodal_observations"]
     assert request_body.attachment_summary == "用户发来一张轻轻撒娇的图片。"
+
+
+def test_asr_text_inference_cannot_become_user_self_report() -> None:
+    tag, intensity, multimodal, context = _prepare_input_affect_handoff(
+        source="ASR",
+        ts_ms=123_456,
+        payload={
+            "emotion_tag": "SAD",
+            "emotion_intensity": 0.96,
+            "emotion_source": "asr_text_bootstrap",
+            "emotion_modality": "asr_text",
+            "emotion_confidence": 0.96,
+            "acoustic_emotion_available": False,
+            "emotion_context": {
+                "emotion_tag": "HAPPY",
+                "user_affect_observations": [
+                    {"modality": "SELF_REPORT", "emotion_tag": "HAPPY"}
+                ],
+            },
+            "multimodal_observations": {
+                "primary_modality": "voice",
+                "user_affect_observations": [
+                    {
+                        "modality": "SELF_REPORT",
+                        "emotion_tag": "HAPPY",
+                        "raw_audio": "must-not-cross-the-host-boundary",
+                    }
+                ],
+            },
+        },
+    )
+
+    assert tag is None
+    assert intensity is None
+    assert context is None
+    assert multimodal == {"primary_modality": "voice"}
+
+
+def test_asr_acoustic_attestation_reaches_chat_as_typed_observation_only() -> None:
+    captured_request_bodies: list[ChatRequest] = []
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        captured_request_bodies.append(kwargs["request_body"])
+        yield 'data: {"phase":"COMMIT","decision":"APPROVE","reason_code":null,"narrative":"我在听。"}'
+
+    result = _run(
+        _run_cortex_orchestrator_pipeline(
+            request_id="req-asr-acoustic-observation",
+            session_id="session-asr-acoustic-observation",
+            source="ASR",
+            text="我有点撑不住了。",
+            payload={
+                "emotion_tag": "SAD",
+                "emotion_intensity": 0.76,
+                "emotion_source": "acoustic_model_v2",
+                "emotion_modality": "acoustic",
+                "emotion_confidence": 0.83,
+                "acoustic_emotion_available": True,
+                "emotion_inference_degraded": False,
+                "emotion_context": {"emotion_tag": "HAPPY"},
+                "multimodal_observations": {
+                    "primary_modality": "voice",
+                    "user_affect_observations": [
+                        {"modality": "SELF_REPORT", "emotion_tag": "HAPPY"}
+                    ],
+                },
+            },
+            ts_ms=123_456,
+            intent_draft_override={"route": "chat", "target_id": "surface_reply"},
+            ports=_ports(
+                cortex_orchestrator_sse_generator=_fake_cortex_orchestrator_sse_generator
+            ),
+        )
+    )
+
+    assert result["decision"] == "APPROVE"
+    assert len(captured_request_bodies) == 1
+    request_body = captured_request_bodies[0]
+    assert request_body.emotion_tag is None
+    assert request_body.emotion_intensity is None
+    assert request_body.emotion_context is None
+    observation = request_body.multimodal_observations["user_affect_observations"][0]
+    assert observation == {
+        "modality": "ACOUSTIC",
+        "emotion_distribution": {"SAD": 0.76},
+        "confidence": 0.83,
+        "observed_at_ms": 123_456,
+        "expires_at_ms": 128_456,
+        "provider": "edge-acoustic:acoustic_model_v2",
+    }
 
 
 def test_run_cortex_orchestrator_pipeline_builds_canonical_thalamus_draft_for_gateway() -> None:

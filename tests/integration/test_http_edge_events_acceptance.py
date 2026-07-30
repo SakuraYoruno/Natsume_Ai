@@ -11,6 +11,7 @@ from host_brain.app import canon_routes
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.composition.canon import build_process_canon_container
+from host_brain.input_runtime.cortex_dispatch import _prepare_input_affect_handoff
 
 
 class _LedgerStub:
@@ -173,6 +174,83 @@ def test_v1_edge_events_http_final_asr_event_bridges_into_host_input(monkeypatch
     assert kwargs["text"] == "请帮我看看这个界面"
     assert kwargs["payload"]["edge_event_type"] == "ASR_FINAL"
     assert kwargs["payload"]["edge_request_id"] == "req-edge-http-003"
+
+
+def test_v1_edge_events_http_asr_acoustic_attestation_is_not_self_report(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    ledger = _LedgerStub()
+    dispatch_mock = AsyncMock(return_value=None)
+    ts_ms = int(time.time() * 1000)
+    monkeypatch.setenv("HOST_INPUT_DISPATCH_IN_THREAD", "false")
+    monkeypatch.setattr("tests.fakes.host_app._dispatch_to_graph", dispatch_mock)
+
+    client = _build_client(monkeypatch, canonical_root=tmp_path, ledger=ledger)
+    try:
+        response = client.post(
+            "/v1/edge/events",
+            json={
+                "events": [
+                    {
+                        "event_type": "ASR_FINAL",
+                        "ts_ms": ts_ms,
+                        "request_id": "req-edge-http-asr-acoustic",
+                        "session_id": "sess-edge-http-asr-acoustic",
+                        "payload": {
+                            "text": "我有点撑不住了。",
+                            "confidence": 0.96,
+                            "final": True,
+                            "emotion_tag": "SAD",
+                            "emotion_intensity": 0.76,
+                            "emotion_source": "acoustic_model_v2",
+                            "emotion_modality": "acoustic",
+                            "emotion_confidence": 0.83,
+                            "acoustic_emotion_available": True,
+                            "emotion_inference_degraded": False,
+                            "emotion_context": {"emotion_tag": "HAPPY"},
+                            "multimodal_observations": {
+                                "primary_modality": "voice",
+                                "user_affect_observations": [
+                                    {
+                                        "modality": "SELF_REPORT",
+                                        "emotion_tag": "HAPPY",
+                                    }
+                                ],
+                            },
+                        },
+                    }
+                ]
+            },
+        )
+    finally:
+        _close_client(client)
+
+    assert response.status_code == 200
+    assert dispatch_mock.await_count == 1
+    dispatched = dispatch_mock.await_args.kwargs
+    assert dispatched["source"] == "ASR"
+    tag, intensity, multimodal, context = _prepare_input_affect_handoff(
+        source=dispatched["source"],
+        payload=dispatched["payload"],
+        ts_ms=dispatched["ts_ms"],
+    )
+    assert tag is None
+    assert intensity is None
+    assert context is None
+    assert multimodal == {
+        "primary_modality": "voice",
+        "user_affect_observations": [
+            {
+                "modality": "ACOUSTIC",
+                "emotion_distribution": {"SAD": 0.76},
+                "confidence": 0.83,
+                "observed_at_ms": ts_ms,
+                "expires_at_ms": ts_ms + 5_000,
+                "provider": "edge-acoustic:acoustic_model_v2",
+            }
+        ],
+    }
 
 
 def test_v1_edge_events_http_partial_batch_reports_partial_fail(monkeypatch, tmp_path: Path) -> None:
