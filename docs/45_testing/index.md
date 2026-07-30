@@ -158,6 +158,12 @@
   event，不读取旧 Bond 或 organ state、不写 decision registry、不生成模型 topic hint 或 fan-out；旧 gate 明确
   `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`，canonical relationship permission/aftereffect/outbox 主动链不依赖它。
   本次 Initiative/Mirror/Limbic/Endocrine/Motor/production-composition 邻接集合为 `93 passed in 6.21s`，不代表剩余 reader、真实模型、Edge 或 DL-07。
+- `test_prefrontal_agent.py::test_prefrontal_canonical_life_retires_legacy_growth_and_autobio_entrypoints`
+  验证 canonical `TribeApplicationPorts` 下 Prefrontal 不再订阅 scheduler evolution、interaction、Bond stage、
+  loneliness 或 immune event，也不以旧 Bond/孤独输入执行 growth feedback、stage/milestone/emergent growth 或直接
+  写 Hippocampus；所有旧入口在旧依赖前退役，自传 gate 明确 `BLOCK`。本次 Prefrontal 邻接集合为
+  `87 passed in 2.16s`；与 Mirror/Initiative 等相邻 authority 的最终合并定向集合为 `139 passed in 6.25s`。这些
+  都不代表 pure reader、真实 profile activation、真实模型、Edge 或 DL-07。
 - `test_limbic_agent.py` 现额外验证 canonical mode 下的 BodySense 只能从 exact
   relationship subject 的 Life snapshot 纯投影，不会解析 global `BodySenseModel`、写 Tribe state、
   调整 silence penalty 或把 legacy BODY_SENSE_UPDATED 再推进 self-affect；缺 subject 明确

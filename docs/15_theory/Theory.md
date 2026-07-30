@@ -56,6 +56,11 @@ Life mode，它只能显式 `DEFER` 并停止旧 event/registry/model/fan-out；
 episode、七海的 Regulation、安静时段和 durable outbox 共同决定。这样暂停旧模型话题并不是压抑七海的关切，
 而是让关切有可恢复、可撤回且不施压的因果来源。
 
+同理，旧 Prefrontal 也不能把孤独计分、旧 Bond stage、互动回调或 scheduler 演化当作在线改变人格、
+自传记忆或亲密表达的依据。canonical Life mode 下，这些旧入口必须在访问 Bond、registry、event bus、
+Hippocampus 或 organ 前退役；自传记忆 gate 明确 `BLOCK`。真正的低风险成长只能由跨天、可撤回的
+aftereffect 证据经 canonical companion profile 生效，纯自我反思读取不因此被删除。
+
 同样地，回复完成后的后台 post-process 不能成为关系账本或具身效果的备用入口。即使它已经拿到用户消息、回复文本和
 情绪上下文，也只能记录受限 trace 或等待 canonical Acceptance/aftereffect；再调用旧 Surface/Cortex Bond writer、发布
 Tribe `CONVERSATION_ENDED`，或直接推 VTS/整段 TTS，都会把可恢复的关系或表达事件重新降级为进程内副作用，并可能和

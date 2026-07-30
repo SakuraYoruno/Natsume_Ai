@@ -179,6 +179,11 @@ canonical mode 下进一步不订阅旧 emotion event、不读 Bond、不写共�
 event，不读取旧 Bond/organ state、不写 decision registry、不生成主动话题模型 hint 或 fan-out；旧门控请求固定
 返回 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`。canonical relationship permission、aftereffect 和 outbox 的
 主动陪伴路径不依赖该 agent，仍是唯一生产发送 authority。
+legacy `PrefrontalAgent` 也不得再把 scheduler evolution、旧 interaction、Bond stage、loneliness 或 immune event
+变成人格成长或自传记忆写 authority：canonical mode 不订阅这些事件，`run_evolution_cycle`、growth feedback、
+stage/milestone/emergent growth 与自传 gate/commit 均在读取 Bond、写 registry/event bus、调用 organ 或
+Hippocampus 前返回 `RETIRED_CANONICAL_LIFE`（自传 gate 为 `BLOCK`）。这不删除纯 self-reflection reader，
+也不替代实际 canonical companion profile activation。
 这只退役 Endocrine mutation authority。随后 `DL-06_BODYSENSE_GLOBAL_MUTATION_RETIREMENT_SLICE`
 已在同一 canonical authority 下让 production Surface/startup 不再 warmup 或读取 global
 `BodySenseModel`：每次读取都必须提供 relationship subject，并从对应 Life snapshot 做纯读 projection。

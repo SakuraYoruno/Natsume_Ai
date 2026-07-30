@@ -494,7 +494,13 @@ Endocrine 私有字段；MirrorNeuron 在 canonical Host 中进一步停用旧�
 `InitiativeGovernor` 也在该 authority 下停止订阅旧 Circadian/Proprioception/Bond/Glymphatic event、读取旧 Bond 或
 organ 状态、写 decision registry、生成主动话题模型 hint 及 downstream fan-out；旧 `initiative_request`/受门控 Motor
 调用固定得到 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`。这不会关闭 canonical Life 的 relationship permission、
-aftereffect 与 outbox 主动陪伴链，后者仍是唯一生产发送 authority。第四条切断进一步退役 production 全局
+aftereffect 与 outbox 主动陪伴链，后者仍是唯一生产发送 authority。
+`PrefrontalAgent` 的旧成长/自传记忆入口也在 canonical mode 退役：它不再订阅 evolution、interaction、stage、
+loneliness 或 immune event，不得以旧 Bond、孤独计分或 scheduler cycle 改写人格候选，更不能绕过
+Acceptance 直接向 Hippocampus 提交自传记忆；这些旧入口在触及 Bond、registry、event bus 或 organ 前显式
+`RETIRED_CANONICAL_LIFE`（记忆 gate 为 `BLOCK`）。纯自我反思读取及真实 canonical companion profile
+activation 没有被关闭；离线/测试兼容 root 仅保留一个可回滚窗口。
+第四条切断进一步退役 production 全局
 `BodySenseModel`：Surface 不再 warmup 或读取该单例，而是按当前 `relationship_subject_id` 从
 canonical Life snapshot 纯投影 fatigue、drowsiness 与 loneliness；缺 subject 会明确不可用，绝不回退到
 其他会话的 global state。legacy BodySense tick、loneliness 注入和会话开始/结束只返回

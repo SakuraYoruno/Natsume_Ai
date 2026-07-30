@@ -468,6 +468,10 @@ mode 下关闭旧 event subscription、Bond read、registry resonance write、em
 仅返回显式 retirement projection。`InitiativeGovernorAgent` 也不再把旧 Circadian/Proprioception/Bond/Glymphatic
 event、Bond/organ read、decision registry、模型 topic hint 或 fan-out 变成主动联系 authority；canonical gate 固定
 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`，实际主动陪伴仍只经 relationship permission、aftereffect 与 outbox。
+`PrefrontalAgent` 的旧 scheduler evolution、interaction、Bond stage、loneliness、immune event、growth feedback、
+stage/milestone/emergent growth 及直接自传记忆 gate/commit 也在同一 canonical mode 退役：它们在读取旧 Bond、
+写 registry/event bus、调用 organ 或 Hippocampus 前返回 `RETIRED_CANONICAL_LIFE`，记忆 gate 为 `BLOCK`。纯
+self-reflection reader 与真实 canonical companion profile activation 仍分别审计，不能把此切断写成完整成长闭环。
 production
 BodySense 同样不再被 Surface/startup warmup/read：`project_body_sense_from_life_snapshot()` 只读取当前
 relationship subject 的 canonical Life snapshot，Limbic canonical mode 的 tick/loneliness/conversation

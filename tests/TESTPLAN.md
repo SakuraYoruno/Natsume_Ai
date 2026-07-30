@@ -53,6 +53,10 @@
   Circadian/Proprioception/Bond/Glymphatic event、读取旧 Bond/organ state、写 decision registry、生成模型
   topic hint 或 fan-out；`initiative_request` 与受门控 Motor 调用必须明确 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`，
   且 canonical relationship permission、aftereffect、Regulation 与 outbox 主动链不得依赖该旧 agent。
+- T-DL01-12：production canonical Life authority 下，Prefrontal 不得订阅 scheduler evolution、interaction、
+  Bond stage、loneliness 或 immune event，也不得以旧 Bond/孤独输入执行 growth feedback、stage/milestone/emergent
+  growth 或直接写 Hippocampus；所有旧入口必须在旧依赖前返回 `RETIRED_CANONICAL_LIFE`/no-op，自传记忆 gate
+  必须明确 `BLOCK`。pure self-reflection reader 与 canonical companion profile activation 另行验收，不能由此测试冒充完成。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 

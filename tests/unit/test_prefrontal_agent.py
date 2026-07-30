@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
@@ -105,56 +106,32 @@ def test_prefrontal_run_evolution_cycle_success(monkeypatch) -> None:
     assert len(logger.info_calls) == 1
 
 
-def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
+def test_prefrontal_canonical_life_retires_legacy_evolution_cycle(
     monkeypatch,
 ) -> None:
-    captured: dict[str, object] = {}
+    def _unexpected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("canonical Life must not invoke legacy Prefrontal evolution dependencies")
 
-    class _ForbiddenTimeline:
-        def rebuild_summary(self, **_kwargs):
-            raise AssertionError("canonical Life must not read legacy timeline")
-
-        def build_daily_diary(self, **_kwargs):
-            raise AssertionError("canonical Life must not read legacy timeline")
-
-    class _FakeOrchestrator:
-        def run_evolution_cycle(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(
-                cycle_id="evo_canonical",
-                traits_changed=False,
-                growth_awareness={},
-                errors=[],
-            )
-
-    class _FakeSocial:
-        def resolve_bond_snapshot(self, *, person_id: str):
-            assert person_id == "user_x"
-            return {"bond_state_obj": None, "bond_summary": {}}
-
-        def resolve_scheduler_bond_summary(self, **_kwargs):
-            return {}
-
-    monkeypatch.setattr(
-        "host_brain.tribe.prefrontal_agent.get_social_brain_agent",
-        lambda: _FakeSocial(),
-    )
+    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_social_brain_agent", _unexpected)
     agent = _build_prefrontal_agent(
         application_ports=TribeApplicationPorts(
             affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
-            emotion_timeline=lambda: _ForbiddenTimeline(),
         ),
     )
-    agent._evolution_orchestrator = _FakeOrchestrator()
 
     result = agent.run_evolution_cycle(
         system_intent={"args": {"user_id": "user_x", "date": "2026-04-09"}},
         logger=_FakeLogger(),
     )
 
-    assert result["status"] == "OK"
-    assert captured["timeline_summary"] == {}
-    assert captured["timeline_diary"] == {}
+    assert result == {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_PREFRONTAL_GROWTH_RETIRED",
+        "operation": "run_evolution_cycle",
+        "applied": False,
+        "retired": True,
+    }
 
 
 def test_prefrontal_run_evolution_cycle_degraded_on_error(monkeypatch) -> None:
@@ -871,3 +848,98 @@ def test_prefrontal_autobiographical_gate_and_commit(monkeypatch) -> None:
     assert gate["reason_code"] == "PASS"
     assert committed["status"] == "OK"
     assert committed["write_result"]["layer"] == "autobiographical"
+
+
+def test_prefrontal_canonical_life_retires_legacy_growth_and_autobio_entrypoints(
+    monkeypatch,
+) -> None:
+    registry = TribeStateRegistry(persist_throttle=999999)
+    agent = _build_prefrontal_agent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    def _unexpected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("canonical Life must not invoke legacy Prefrontal growth dependencies")
+
+    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_social_brain_agent", _unexpected)
+    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_hippocampus_agent", _unexpected)
+    monkeypatch.setattr("host_brain.tribe.prefrontal_agent.emit_tribe_event", _unexpected)
+    monkeypatch.setattr("host_brain.tribe.event_bus.get_tribe_event_bus", _unexpected)
+
+    gate = agent.evaluate_autobiographical_memory_gate(
+        persona_user_id="u-canonical",
+        narrative="未经接受链路的历史叙事不能直接写入。",
+        context={"session_id": "s-canonical"},
+    )
+    committed = agent.commit_autobiographical_memory(
+        persona_user_id="u-canonical",
+        narrative="未经接受链路的历史叙事不能直接写入。",
+        context={"session_id": "s-canonical"},
+        request_id="req-canonical",
+    )
+    feedback = agent.run_growth_feedback_cycle(
+        session_id="s-canonical",
+        user_message="你可以更简短一点",
+        assistant_reply="好的。",
+    )
+    promoted = agent.apply_stage_promotion_growth(
+        user_id="u-canonical",
+        from_stage="FRIEND",
+        to_stage="SOULMATE",
+        ts_ms=123,
+    )
+    milestone = agent.apply_milestone_growth(
+        user_id="u-canonical",
+        milestone_key="deep_loneliness_experience",
+        ts_ms=124,
+    )
+    weekly = agent.run_emergent_growth_weekly(
+        user_id="u-canonical",
+        lookback_days=7,
+        episodic_store=object(),
+        llm_fn=lambda _prompt: "{}",
+    )
+    status = agent.resolve_emergent_growth_status(
+        user_id="u-canonical",
+    )
+
+    assert gate["decision"] == "BLOCK"
+    assert gate["status"] == "RETIRED_CANONICAL_LIFE"
+    assert committed["status"] == "RETIRED_CANONICAL_LIFE"
+    assert feedback["status"] == "RETIRED_CANONICAL_LIFE"
+    assert promoted["status"] == "RETIRED_CANONICAL_LIFE"
+    assert milestone["status"] == "RETIRED_CANONICAL_LIFE"
+    assert weekly["status"] == "RETIRED_CANONICAL_LIFE"
+    assert status["status"] == "RETIRED_CANONICAL_LIFE"
+
+    agent.register_subscriptions()
+    event = SimpleNamespace(
+        payload={
+            "user_id": "u-canonical",
+            "user_message": "你好",
+            "assistant_reply": "你好。",
+            "from_stage": "FRIEND",
+            "to_stage": "SOULMATE",
+            "loneliness": 0.95,
+            "risk_level": "critical",
+        },
+        ts_ms=125,
+    )
+    asyncio.run(agent._on_evolution_cycle_triggered(event))
+    asyncio.run(agent._run_evolution_cycle_async(user_id="u-canonical", reason="test"))
+    asyncio.run(agent._on_interaction_recorded(event))
+    asyncio.run(agent._on_bond_stage_changed_growth(event))
+    asyncio.run(agent._on_loneliness_signal(event))
+    asyncio.run(
+        agent._run_milestone_growth_async(
+            user_id="u-canonical",
+            milestone_key="test",
+            ts_ms=126,
+        )
+    )
+    asyncio.run(agent._on_immune_block_growth(event))
+
+    assert registry.get_state("prefrontal_agent") is None

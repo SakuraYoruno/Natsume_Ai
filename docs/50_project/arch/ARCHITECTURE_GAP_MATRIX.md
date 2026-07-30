@@ -102,6 +102,14 @@ Life journal 时，`InitiativeGovernorAgent` 不再订阅 Circadian、Propriocep
 agent，仍是唯一生产 authority。离线/test compatibility root 保留旧行为作为回滚窗口。`93 passed in 6.21s`
 仅证明这条 local authority 边界，不代表 Prefrontal 等 reader、真实 provider、远端 Edge 或服务栈验收已完成。
 
+**Prefrontal 旧成长 authority 退役修订：** composed production `TribeApplicationPorts` 选择 canonical Life journal
+时，`PrefrontalAgent` 不再订阅 scheduler evolution、interaction、Bond stage、loneliness 或 immune event；
+`run_evolution_cycle`、growth feedback、stage/milestone/emergent growth 与自传记忆 gate/commit 均在旧 Bond、
+registry/event bus、Hippocampus 或 organ effect 前返回 `RETIRED_CANONICAL_LIFE`，直接记忆 gate 为 `BLOCK`。
+这阻止旧积分把用户状态塑造成七海的人格或亲密关系，但不删除纯 self-reflection reader，也不替代真实 canonical
+companion profile activation。离线/test compatibility root 仍可作为回滚窗口。`87 passed in 2.16s` 只证明这条
+local authority 边界，不代表剩余 reader、真实 profile 版本生效、provider、远端 Edge 或服务栈验收已经完成。
+
 **Bond queue 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
 construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧
 writer/queue 请求返回 `RETIRED_CANONICAL_LIFE`，不创建 worker、backlog 或失败后 direct writer；canonical

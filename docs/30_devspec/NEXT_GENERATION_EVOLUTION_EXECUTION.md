@@ -337,7 +337,12 @@ cortisol/oxytocin buffer、`_last_state`、hormonal hint 和 downstream fan-out 
 或向任何 organ fan-out，只保留显式 retirement projection。legacy `InitiativeGovernorAgent` 也不再被当作主动联系 authority：
 canonical mode 停止其旧 event subscription、Bond/
 organ read、registry write、模型 topic hint 与 fan-out，并对旧 gate 只返回 `DEFER / LEGACY_INITIATIVE_GOVERNOR_RETIRED`；
-canonical relationship permission、aftereffect 和 outbox 主动陪伴仍不依赖它。production BodySense 随后也停止作为 global mutable authority：Surface/startup
+canonical relationship permission、aftereffect 和 outbox 主动陪伴仍不依赖它。
+同一 canonical authority 还使 legacy `PrefrontalAgent` 的 scheduler evolution、interaction、Bond stage、loneliness、
+immune event 订阅，以及 growth feedback、stage/milestone/emergent growth 和直接自传记忆 gate/commit 全部退役；
+它们在旧 Bond、registry、event bus、Hippocampus 或 organ effect 前返回 `RETIRED_CANONICAL_LIFE`（gate 为 `BLOCK`）。
+这保留纯 self-reflection 与真实 canonical companion profile activation，不允许以旧积分自动塑造七海。
+production BodySense 随后也停止作为 global mutable authority：Surface/startup
 不再创建或读取 `BodySenseModel`，Limbic 只可针对 exact relationship subject 从 canonical Life snapshot
 构造无写入 projection；无 subject 失败关闭。legacy tick、loneliness 与 conversation mutation 返回
 `RETIRED_CANONICAL_LIFE` 并且 retired tick 不发布 EventBus update。Motive 与 production volatile

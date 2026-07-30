@@ -271,7 +271,12 @@ compatibility port，不再触碰私有字段。MirrorNeuron 在 canonical mode 
 写共振 registry、生成共情模型 hint 或调用任何 organ fan-out，只返回退役兼容投影。
 `InitiativeGovernorAgent` 在 canonical mode 下同样不再订阅旧 Circadian/Proprioception/Bond/Glymphatic event、读取
 旧 Bond/organ state、写 decision registry、生成 topic hint 或 fan-out；遗留 gate 只能 `DEFER`，而 canonical relationship
-permission/aftereffect/outbox 是唯一主动发送 authority。BodySense 的 legacy global model 也不再被
+permission/aftereffect/outbox 是唯一主动发送 authority。
+`PrefrontalAgent` 的 legacy scheduler/event、Bond/loneliness/interaction 驱动成长与直接自传写入在 canonical
+mode 同样被 short-circuit；它们不订阅旧事件，不写 registry/event bus/Hippocampus，并以
+`RETIRED_CANONICAL_LIFE` / `BLOCK` 结束。纯 self-reflection 与真正的 companion profile activation 保持独立，
+不能由旧关系积分或一次孤独信号自动改变七海。
+BodySense 的 legacy global model 也不再被
 production Surface/startup 读取，canonical Limbic 必须从 scoped Life snapshot 做纯投影，且 legacy tick/
 loneliness/conversation mutation 不发布伪更新。Motive 与 production Bond queue/writer 已退役；production
 Host 也不再从旧 action log hydrate `EmotionTimeline`，而是以显式 retired 空投影失败关闭读取，不能用它重建

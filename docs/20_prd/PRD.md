@@ -75,6 +75,9 @@ Natsume AI 是本地优先、用户主权优先的个人数字生命系统。它
   organ fan-out；canonical mode 只能给出显式退役标记，陪伴动作必须来自 Appraisal 后冻结的计划。
 - legacy InitiativeGovernor 不得用旧 Bond、器官缓存、event bus、模型话题或 registry 取得主动发送 authority；
   canonical mode 只能 `DEFER`，真正的主动联系仍由 canonical relationship permission、aftereffect 与 outbox 决定。
+- legacy Prefrontal 不得用旧 Bond/stage、孤独、互动或 scheduler event 自动改变人格候选、关系亲密度或自传记忆；
+  canonical mode 必须在旧依赖前退役，直接自传记忆 gate 为 `BLOCK`。低风险偏好只可由 canonical aftereffect/profile
+  链激活，不能因一次情绪、沉默或单条互动自动升级。
 - 流式文本的每个可见稳定分句必须先形成可恢复的 delivery intent；用户打断后未可见
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。

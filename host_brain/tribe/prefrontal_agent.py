@@ -67,6 +67,40 @@ class PrefrontalAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_growth_authority_retired(self) -> bool:
+        """Whether canonical Life owns relationship-driven growth inputs.
+
+        The older Prefrontal flow derives personality growth and
+        autobiographical writes from volatile Bond, loneliness and Tribe event
+        signals.  Those signals are neither durable relationship aftereffects
+        nor a reviewed companion-profile proposal, so they cannot remain a
+        production authority once canonical Life is composed.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_growth_result(
+        *,
+        operation: str,
+        decision: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_PREFRONTAL_GROWTH_RETIRED",
+            "operation": str(operation),
+            "applied": False,
+            "retired": True,
+        }
+        if decision is not None:
+            payload["decision"] = str(decision).strip().upper()
+        return payload
+
     def resolve_self_reflection_context(
         self,
         *,
@@ -644,6 +678,8 @@ class PrefrontalAgent:
             }
 
     def run_evolution_cycle(self, *, system_intent: dict[str, Any], logger: Any | None = None) -> dict[str, Any]:
+        if self._legacy_growth_authority_retired():
+            return self._retired_growth_result(operation="run_evolution_cycle")
         runtime_logger = logger or _logger
         user_id = "natsume_ai"
         try:
@@ -905,6 +941,10 @@ class PrefrontalAgent:
         user_message: str,
         assistant_reply: str,
     ) -> dict[str, Any]:
+        if self._legacy_growth_authority_retired():
+            return self._retired_growth_result(
+                operation="run_growth_feedback_cycle"
+            )
         from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
         from host_brain.persona.growth_feedback_collector import GrowthFeedbackCollector  # noqa: PLC0415
 
@@ -963,6 +1003,12 @@ class PrefrontalAgent:
         source_agent: str = "default_mode_agent",
         context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+
+        if self._legacy_growth_authority_retired():
+            return self._retired_growth_result(
+                operation="evaluate_autobiographical_memory_gate",
+                decision="BLOCK",
+            )
 
         user_id = _resolve_prefrontal_persona_id(persona_user_id)
         narrative_text = str(narrative or "").strip()
@@ -1040,6 +1086,18 @@ class PrefrontalAgent:
         request_id: str = "",
     ) -> dict[str, Any]:
 
+        if self._legacy_growth_authority_retired():
+            return {
+                **self._retired_growth_result(
+                    operation="commit_autobiographical_memory",
+                    decision="BLOCK",
+                ),
+                "gate": self._retired_growth_result(
+                    operation="evaluate_autobiographical_memory_gate",
+                    decision="BLOCK",
+                ),
+            }
+
         gate = self.evaluate_autobiographical_memory_gate(
             persona_user_id=persona_user_id,
             narrative=narrative,
@@ -1064,6 +1122,10 @@ class PrefrontalAgent:
         to_stage: str,
         ts_ms: int,
     ) -> dict[str, Any]:
+        if self._legacy_growth_authority_retired():
+            return self._retired_growth_result(
+                operation="apply_stage_promotion_growth"
+            )
         tracker = self._get_persona_growth_tracker()
         if tracker is None:
             return {"applied": False, "reason": "tracker_unavailable"}
@@ -1105,6 +1167,10 @@ class PrefrontalAgent:
         milestone_key: str,
         ts_ms: int,
     ) -> dict[str, Any]:
+        if self._legacy_growth_authority_retired():
+            return self._retired_growth_result(
+                operation="apply_milestone_growth"
+            )
         tracker = self._get_persona_growth_tracker()
         if tracker is None:
             return {"applied": False, "reason": "tracker_unavailable"}
@@ -1161,6 +1227,10 @@ class PrefrontalAgent:
         episodic_store: Any,
         llm_fn: Any | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_growth_authority_retired():
+            return self._retired_growth_result(
+                operation="run_emergent_growth_weekly"
+            )
         from host_brain.persona.interaction_pattern_analyzer import InteractionPatternAnalyzer  # noqa: PLC0415
         from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
@@ -1216,6 +1286,10 @@ class PrefrontalAgent:
         }
 
     def resolve_emergent_growth_status(self, *, user_id: str, recent_limit: int = 5) -> dict[str, Any]:
+        if self._legacy_growth_authority_retired():
+            return self._retired_growth_result(
+                operation="resolve_emergent_growth_status"
+            )
         engine = self._get_emergent_growth_engine()
         recent = max(1, int(recent_limit or 5))
         resolved_user_id = _resolve_prefrontal_persona_id(user_id)
@@ -1279,6 +1353,8 @@ class PrefrontalAgent:
         T-34：新增订阅 BOND_STAGE_CHANGED，
         关系阶段跃迁时触发 apply_stage_promotion_growth，将关系进展转化为人格成长动力。
         """
+        if self._legacy_growth_authority_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -1438,6 +1514,8 @@ class PrefrontalAgent:
         由 ANSAgent（inner_world_skill）或 LimbicAgent 发布，
         PrefrontalAgent 订阅后异步执行 evolution_cycle。
         """
+        if self._legacy_growth_authority_retired():
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(event.payload or {})
@@ -1466,6 +1544,8 @@ class PrefrontalAgent:
 
     async def _run_evolution_cycle_async(self, *, user_id: str, reason: str, event_key: str | None = None) -> None:
         """在独立 task 中异步执行 evolution_cycle，避免阻塞事件分发循环。"""
+        if self._legacy_growth_authority_retired():
+            return
         try:
             import asyncio  # noqa: PLC0415
             result = await asyncio.to_thread(
@@ -1499,6 +1579,8 @@ class PrefrontalAgent:
         T-26：通过 assistant_reply 内容检测 humor/task 成功信号，
         发布 TASK_SUCCESS / HUMOR_LANDED 事件，供 PainRewardAgent 接收。
         """
+        if self._legacy_growth_authority_retired():
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(event.payload or {})
@@ -1692,6 +1774,8 @@ class PrefrontalAgent:
         将关系进展转化为人格成长动力（如开放度提升、信任感增强等）。
         降级跃迁不触发成长（但不会回滚已有成长）。
         """
+        if self._legacy_growth_authority_retired():
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(getattr(event, "payload", None) or {})
@@ -1737,6 +1821,8 @@ class PrefrontalAgent:
         触发 EVOLUTION_CYCLE_TRIGGERED 以加速人格成长（孤独感是成长催化剂）。
         孤独感极高时（>0.8）还会触发 milestone 成长节点。
         """
+        if self._legacy_growth_authority_retired():
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(getattr(event, "payload", None) or {})
@@ -1796,6 +1882,8 @@ class PrefrontalAgent:
         milestone_key: str,
         ts_ms: int,
     ) -> None:
+        if self._legacy_growth_authority_retired():
+            return
         try:
             import asyncio  # noqa: PLC0415
 
@@ -1827,6 +1915,8 @@ class PrefrontalAgent:
         仅在 block_rate > 0.1 或 risk_level 为 high/critical 时触发，
         避免低频拦截过度影响人格演化。
         """
+        if self._legacy_growth_authority_retired():
+            return
         user_id = "natsume_ai"
         try:
             payload = dict(getattr(event, "payload", None) or {})
