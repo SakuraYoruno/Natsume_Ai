@@ -989,6 +989,22 @@ handler 会优先选中其 maintenance target，并生成 source-bound `SILENCE`
 且保持 trust/safety/permission 与 `last_user_seen_ms` 不变。流程被真实 SQLite Scheduler command、outbox、receipt 和
 restart 重放测试覆盖；本地 transport handler 只用于 Host-side integration，不能当作真实 Gateway、平台或远端设备回执。
 
+主动文本的低风险偏好也在同一冻结边界内消费，而非由 Gateway 或模型重新解释：
+
+```mermaid
+flowchart LR
+    P["冻结 AffectiveTurnPlan + active profile digest"] --> C["确定性主动文案编译器"]
+    A["CompanionAct: PLAY / COMFORT / GIVE_SPACE / ACKNOWLEDGE"] --> C
+    C --> S["无回应压力文本 + content digest"]
+    S --> O["同一 Life UoW 的 proactive.gateway intent"]
+    C -. "不读取" .-> X["原文 / Memory / 音视频 / Bond / 模型调用"]
+```
+
+`COMPACT` 的编译结果保持单句；`NONE/QUIET_FIRST` 去除问题和建议；
+`PRACTICAL_GENTLE` 只在 `COMFORT` 追加可跳过的小步骤；`MEDIUM` 幽默只可用于 `PLAY`。这些字段
+只能改变措辞，不能改变发送 permission、self-affect、relationship、plan 或 outbox authority；相同冻结输入
+必须得到相同内容与 digest。
+
 历史 `proactive_talk` 不再属于这张发送图：它已从 production Skill、Tool、executor 和新 Scheduler
 definition 输入移除，Host composition 还会对升级前遗留的 `proactive_talk_periodic` head 执行 CAS disable。
 若已有 occurrence 跨升级存活，它只能验证原有的 immutable Scene identity 后结束为

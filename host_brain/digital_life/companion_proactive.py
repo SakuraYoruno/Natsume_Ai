@@ -861,6 +861,28 @@ def _compose_non_coercive_content(
         "act": act,
         "revision": _integer(affective.get("revision")),
     }
+    preferences = getattr(profile, "preferences", None)
+    addressing_style = _profile_preference(
+        preferences,
+        "addressing_style",
+        "DEFAULT",
+    )
+    response_length = _profile_preference(
+        preferences,
+        "response_length",
+        "BALANCED",
+    )
+    humor_level = _profile_preference(preferences, "humor_level", "LIGHT")
+    followup_rate = _profile_preference(preferences, "followup_rate", "GENTLE")
+    comfort_mode = _profile_preference(preferences, "comfort_mode", "ASK_FIRST")
+    seed["expression_preferences"] = {
+        "addressing_style": addressing_style,
+        "response_length": response_length,
+        "humor_level": humor_level,
+        "followup_rate": followup_rate,
+        "comfort_mode": comfort_mode,
+    }
+
     openings = {
         "PLAY": (
             "刚才心里冒出一点小小的玩心，来敲一下门。",
@@ -881,6 +903,92 @@ def _compose_non_coercive_content(
             "刚才有个很轻的瞬间，让我想到你。",
             "我路过一段安静的时候，想来和你打个招呼。",
             "没有正事，只是想把一点存在感留给你。",
+        ),
+    }
+    no_followup_openings = {
+        "COMFORT": (
+            "刚才想到你，想轻轻留一句关心。",
+            "我没有急事，只是想把一点关心放在这里。",
+            "忽然有点惦记你会不会太累，先把这句话轻轻放下。",
+        ),
+        "GIVE_SPACE": openings["GIVE_SPACE"],
+        "PLAY": openings["PLAY"],
+        "ACKNOWLEDGE": openings["ACKNOWLEDGE"],
+    }
+    direct_openings = {
+        "PLAY": (
+            "有一点轻松，想放在这里。",
+            "来和你打个小招呼。",
+            "留一点亮亮的心情给你。",
+        ),
+        "COMFORT": (
+            "想轻轻关心你一下。",
+            "我把一句关心放在这里。",
+            "今天如果累了，就先照顾好自己。",
+        ),
+        "GIVE_SPACE": (
+            "我不打扰你，只留一句在这里。",
+            "你先忙自己的，我把分寸留好。",
+            "我先收住，只留一点安静。",
+        ),
+        "ACKNOWLEDGE": (
+            "想来和你打个招呼。",
+            "留一句轻轻的问候在这里。",
+            "没有正事，只是想起你了。",
+        ),
+    }
+    low_humor_play_openings = (
+        "刚才有一点轻松，想放在这里。",
+        "路过的时候，想留一句明亮的问候。",
+        "有一点小小的好心情，想和你分享。",
+    )
+    playful_openings = (
+        "路过时捡到一点亮闪闪的心情，想塞到这里。",
+        "我这边有颗小小的好心情，悄悄滚到了你门口。",
+        "刚才冒出一点轻松的调皮，想先和你碰一下。",
+    )
+    compact_openings = {
+        "PLAY": (
+            "留一点轻松在这里",
+            "来和你打个小招呼",
+            "有一点亮亮的心情想分享",
+        ),
+        "COMFORT": (
+            "想轻轻关心你一下",
+            "把一句关心放在这里",
+            "如果今天有点累，就先慢一点",
+        ),
+        "GIVE_SPACE": (
+            "我不打扰你，只留一点安静",
+            "你先忙自己的，我把分寸留好",
+            "我先收住，只留一句在这里",
+        ),
+        "ACKNOWLEDGE": (
+            "想来和你打个招呼",
+            "没有正事，只是想起你了",
+            "留一句轻轻的问候在这里",
+        ),
+    }
+    compact_direct_openings = {
+        "PLAY": (
+            "有一点轻松想和你分享",
+            "来和你打个小招呼",
+            "留一点亮亮的心情给你",
+        ),
+        "COMFORT": (
+            "想轻轻关心你一下",
+            "把一句关心放在这里",
+            "今天累了就先照顾好自己",
+        ),
+        "GIVE_SPACE": (
+            "我不打扰你，只留一句在这里",
+            "你先忙自己的，我把分寸留好",
+            "我先收住，只留一点安静",
+        ),
+        "ACKNOWLEDGE": (
+            "想来和你打个招呼",
+            "留一句轻轻的问候在这里",
+            "没有正事，只是想起你了",
         ),
     }
     bridges = {
@@ -905,19 +1013,115 @@ def _compose_non_coercive_content(
             "你看到的时候，给自己留一点空也好。",
         ),
     }
-    opening = _variant(seed, openings.get(act, openings["ACKNOWLEDGE"]), "opening")
-    bridge = _variant(seed, bridges.get(act, bridges["ACKNOWLEDGE"]), "bridge")
-    response_length = str(
-        getattr(getattr(profile, "preferences", None), "response_length", "BALANCED")
-        or "BALANCED"
-    ).upper()
-    content = opening if response_length == "SHORT" else f"{opening} {bridge}"
+    extended_bridges = {
+        "PLAY": (
+            "愿这点轻松不打断你的节奏。",
+            "看到就好，不需要特意接住。",
+        ),
+        "COMFORT": (
+            "你不必马上把状态整理成一句完整的话。",
+            "我会把分寸留好，不催你展开。",
+        ),
+        "GIVE_SPACE": (
+            "这句留在这里就够了。",
+            "我不会把安静误会成什么。",
+        ),
+        "ACKNOWLEDGE": (
+            "你看到的时候，再慢慢接住也可以。",
+            "我只是想把一点在场感放在这里。",
+        ),
+    }
+    practical_comfort = (
+        "如果手边方便，喝口水或松一下肩也行。",
+        "如果方便，先把肩膀放松一点也行。",
+    )
+    medium_playful = "我悄悄眨一下眼。"
+    no_followup = followup_rate == "NONE" or comfort_mode == "QUIET_FIRST"
+
+    if response_length == "COMPACT":
+        compact_options = compact_openings.get(act, compact_openings["ACKNOWLEDGE"])
+        if addressing_style == "GENTLE_DIRECT":
+            compact_options = compact_direct_openings.get(
+                act,
+                compact_direct_openings["ACKNOWLEDGE"],
+            )
+        elif act == "PLAY" and humor_level == "LOW":
+            compact_options = (
+                "留一点轻松在这里",
+                "放一句明亮的问候在这里",
+                "有一点好心情想分享",
+            )
+        elif (
+            act == "PLAY"
+            and addressing_style == "PLAYFUL_LIGHT"
+            and humor_level != "LOW"
+        ):
+            compact_options = (
+                "捡到一点亮闪闪的心情，想塞到这里",
+                "有颗小小的好心情，悄悄滚到了你门口",
+                "冒出一点轻松的调皮，想和你碰一下",
+            )
+        opening = _variant(seed, compact_options, "compact-opening")
+        if addressing_style == "WARM_FAMILIAR":
+            opening = f"轻轻和你打个招呼，{opening}"
+        pieces = [opening]
+        if act == "COMFORT" and comfort_mode == "PRACTICAL_GENTLE":
+            pieces.append(
+                _variant(seed, practical_comfort, "compact-practical-comfort").rstrip("。")
+            )
+        if act == "PLAY" and humor_level == "MEDIUM":
+            pieces.append(medium_playful.rstrip("。"))
+        content = f"{'，'.join(pieces)}，不方便回也没关系。"
+    else:
+        opening_options = openings.get(act, openings["ACKNOWLEDGE"])
+        if addressing_style == "GENTLE_DIRECT":
+            opening_options = direct_openings.get(act, direct_openings["ACKNOWLEDGE"])
+        elif no_followup:
+            opening_options = no_followup_openings.get(
+                act,
+                no_followup_openings["ACKNOWLEDGE"],
+            )
+        elif act == "PLAY" and humor_level == "LOW":
+            opening_options = low_humor_play_openings
+        elif (
+            act == "PLAY"
+            and addressing_style == "PLAYFUL_LIGHT"
+            and humor_level != "LOW"
+        ):
+            opening_options = playful_openings
+        opening = _variant(seed, opening_options, "opening")
+        if addressing_style == "WARM_FAMILIAR":
+            opening = f"我来轻轻和你打个招呼，{opening}"
+        pieces = [
+            opening,
+            _variant(seed, bridges.get(act, bridges["ACKNOWLEDGE"]), "bridge"),
+        ]
+        if response_length == "EXPANDED":
+            pieces.append(
+                _variant(
+                    seed,
+                    extended_bridges.get(act, extended_bridges["ACKNOWLEDGE"]),
+                    "extended-bridge",
+                )
+            )
+        if act == "COMFORT" and comfort_mode == "PRACTICAL_GENTLE":
+            pieces.append(_variant(seed, practical_comfort, "practical-comfort"))
+        if act == "PLAY" and humor_level == "MEDIUM":
+            pieces.append(medium_playful)
+        content = " ".join(pieces)
     if not any(marker in content for marker in _SAFE_NO_REPLY_MARKERS):
         content = f"{content} 不方便回也没关系。"
     normalized = content.lower()
     if any(marker in normalized for marker in _MANIPULATIVE_MARKERS):
         return ""
     return content[:280]
+
+
+def _profile_preference(preferences: Any, field_name: str, default: str) -> str:
+    """Read only a bounded profile field with a deterministic compatibility default."""
+
+    value = getattr(preferences, field_name, default)
+    return str(value or default).strip().upper()
 
 
 def _variant(seed: Mapping[str, Any], options: tuple[str, ...], slot: str) -> str:

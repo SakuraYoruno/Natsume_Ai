@@ -769,6 +769,18 @@ authenticated Internal Agent
 
 Scheduler 的 worker 只生成 plan，不调用真实 handler；Review pending 时 handler=0，Effect commit 后只调用一次，duplicate 重放既有结果。handler 调用后的响应丢失或过期 claim 先只读查询 operation/result authority，无法归因时保持恢复状态而不盲调。Internal 只在 ingress 接受 `AgentWorkOrder`，剥离调用方 authority 后立即编译为 `WorkOrderV3 + BudgetPolicy`；child grant 验证后既有 executor 原生接收该 V3，不能再接收兼容投影。0096 已把两者的长时间 Review grant renewal 与 surface continuation 接入同一合同，但 Scheduler 其余 authority、一般恢复和七路线验收仍使 NE-01 保持 `IN_PROGRESS`。
 
+### 6.2.1 主动陪伴文案编译职责
+
+| 模块 | 当前职责 | 明确禁止 |
+|---|---|---|
+| `digital_life/companion_proactive.py` | 在 frozen `AffectiveTurnPlanV1`、`CompanionActV1` 与 active profile 的 digest 边界内，确定性编译无回应压力的主动文本；消费称呼、长度、幽默、追问与安慰等低风险偏好 | 读取用户原文、Memory、音视频、Bond/旧 affect、私密 note；调用模型；改变 permission、self-affect、relationship 或 outbox authority |
+| `digital_life/policy.py` / reducer | 重验 plan、scope、revision、content digest 和唯一 outbox intent 后原子提交 cadence head | 依据文案重新选择关系、情绪或主动权限 |
+| `natsume_contracts/life/companion_profile.py` | 约束 profile 枚举和值域；profile ID/digest 进入 plan | 携带 Soul、同意、用户正文或任意 prompt patch |
+
+`COMPACT` 产出单句；`NONE/QUIET_FIRST` 不追加问题/建议；`PRACTICAL_GENTLE` 仅在
+`COMFORT` 给可跳过的小步骤；`MEDIUM` 幽默仅在 `PLAY`。该模块只改善已授权主动消息的表达质地，
+不是模型化主动生成、平台投递或真实三模态验收。
+
 ### 6.3 数字生命与主动输出
 
 ```text

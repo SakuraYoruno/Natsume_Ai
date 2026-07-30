@@ -351,6 +351,20 @@ TRACE-EXEC-04 的 lifecycle 验收还要求：activation rollback 或 `aclose` q
 | TRACE-DL06-RUNTIME-SNAPSHOT-CANONICAL-READER-16 | FR-NLE-003、FR-CHAT、FR-ARCH-001、FR-PRIVACY | production OBS runtime snapshot 不得把用户观察、旧 Bond/timeline 或 agent cache 当作七海 self-affect；它必须读取同一条 canonical Life head，reader 故障不得复活旧 authority | `lifecycle_runtime/ports.py`、`app/lifecycle_runtime_composition.py`、`lifecycle_runtime/canonical_life_snapshot.py`、`lifecycle_runtime/runtime_snapshot.py`、`app/obs_routes_sysmode.py` | composed Host 的 typed `LifeSnapshotReader` 对当前 relationship subject 重开一条 canonical Life snapshot；独立的 canonical projection module 显式输出 `self_id=natsume_ai`、bounded self-affect、bounded user-affect observation、无分数关系 texture、body/motive/render projection。用户情绪不能覆盖 self-affect；reader 已组成后，读取失败、self-id 或 subject drift 只 degraded，不调用 SocialBrain/Bond、Limbic、Prefrontal 或 retired EmotionTimeline。legacy tests 未组成该 port 时才保留隔离兼容路径。 | `LOCAL_TARGETED_67_PASSED_10_65_SECONDS / LOCAL_OBS_ROUTE_INTEGRATION_3_PASSED_19_51_SECONDS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / EMOTIONAL_DIGITAL_LIFE_PARTIAL`；包含 typed composition、canonical/failure no-fallback、timeline、SocialBrain、HardState、lifecycle 邻接回归与 Obs route integration。未运行 Docker、真实 Host/Obs、Monitor、Gateway、真实 provider、远端 Edge 或 DL-07。 | DL-06 remaining reader audit、DL-07 |
 | TRACE-DL06-RETIRED-PROGRESS-REPLY-17 | FR-NLE-003、FR-CHAT、FR-ARCH-001 | 已退役的 Gateway progress helper 不得用 ingress payload、旧 Bond 或 SocialBrain 决定关系/情绪措辞 | `input_runtime/progress.py`、`input_runtime/multimodal_progress.py` | 主 fastpath 已返回 retired；rollback-window helper 固定输出 `FRIEND / CALM` 技术纹理，忽略伪造 `SOULMATE`/分数及用户 emotion，不导入 SocialBrain。无生产 caller 的 `app/input_service_ack.py` 已删除。 | `LOCAL_TARGETED_14_PASSED_1_92_SECONDS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / EMOTIONAL_DIGITAL_LIFE_PARTIAL`；不证明真实 Gateway、可见对话、模型、Edge 或 DL-07。 | DL-06 remaining reader audit、DL-07 |
 
+### TRACE-DL06-PROACTIVE-PROFILE-TEXT-18
+
+`FR-PROACTIVE / FR-NLE-003` 要求一个已经激活的低风险 `CompanionProfileVersionV1` 必须真实影响
+主动表达，但不得因此取得任何情感、关系或发送 authority。生产落点为
+`digital_life/companion_proactive.py`：文案编译器只读取 frozen plan、bounded self-affect revision、
+`CompanionActV1` 和 profile 的五个有界表达字段，并把它们放进 replay seed；它不读取原文、Memory、
+音视频、Bond、私密 note，也不调用模型。`COMPACT` 只能给单句留白；`NONE/QUIET_FIRST` 无问题与建议；
+`PRACTICAL_GENTLE` 仅在 `COMFORT` 提供可跳过的小步骤；`MEDIUM` 幽默仅在 `PLAY`。证据为
+`test_dl06_companion_proactive.py`、`test_dl06_companion_profile_lifecycle.py`、
+`test_dl06_canonical_proactive_tick.py` 与 `test_dl06_proactive_delivery_reconciliation.py` 的本地定向组合
+`16 passed in 26.12s`。状态为
+`LOCAL_PROFILE_TEXT_COMPILER_PASS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / EMOTIONAL_DIGITAL_LIFE_PARTIAL`；
+它不代表真实模型、Gateway 平台、TTS/VTS/Avatar、盲评或 DL-07 全栈体验通过。
+
 ## 4. Planning Search
 
 | Trace | FR | 合同 | 生产落点 | 证据 | 当前状态 | 下一波 |

@@ -343,6 +343,12 @@ foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL
   `canonical_life_companion` adapter：只向它提供 bounded `state.affective`、
   `relationship_v2` 和 scheduler-admitted timezone，绝不提供 Bond stage、旧 `affect`、
   private inner note 或 project title。固定早/晚/默认三句模板已从该 route 删除。
+- 已激活的 `CompanionProfileVersionV1` 现在也进入这条 scheduler 文案编译边界：冻结 plan 绑定的
+  profile 只可调整称呼、长度、轻松程度、追问与安慰方式，不能改变 impulse、permission、
+  self-affect 或关系状态。`COMPACT` 编译为一条有留白的句子；`NONE/QUIET_FIRST` 不追问也不建议；
+  `PRACTICAL_GENTLE` 仅在 `COMFORT` 加一个可跳过的小步骤；`MEDIUM` 幽默仅在 `PLAY`。编译器是
+  deterministic/replayable 的纯函数，不读原文、Memory、媒体或私密 note，也不调用模型；真实模型生成的
+  主动表达必须另建带 durable output receipt 的 effect 阶段，不能偷偷塞入 scheduler reducer。
 - 当前 scheduler tick 会先冻结实际的 `AffectiveTurnPlanV1` 与其
   `ExpressionPlanV1.synchronization_id`；纯 impulse/risk 算法只可提供有界 motive，不能再提供最终外发
   文本。delivery intent、scope/revision/content digest 与 cadence decision 由 reducer 在同一个 Life UoW

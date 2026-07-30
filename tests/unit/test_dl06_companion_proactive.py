@@ -1,17 +1,41 @@
 from __future__ import annotations
 
 from host_brain.digital_life.companion_proactive import decide_companion_proactive
-from natsume_contracts.life import CompanionProfileStateV1, baseline_companion_profile
+from natsume_contracts.life import (
+    CompanionProfilePreferencesV1,
+    CompanionProfileStateV1,
+    CompanionProfileVersionV1,
+    baseline_companion_profile,
+)
 
 
 NOW = 1_783_814_400_000
 
 
-def _state(*, permission: str = "ALLOWED") -> dict:
-    profile = baseline_companion_profile(
-        workspace_id="workspace-a",
-        relationship_subject_id="person-a",
-    )
+def _state(
+    *,
+    permission: str = "ALLOWED",
+    preferences: CompanionProfilePreferencesV1 | None = None,
+) -> dict:
+    if preferences is None:
+        profile = baseline_companion_profile(
+            workspace_id="workspace-a",
+            relationship_subject_id="person-a",
+        )
+    else:
+        profile = CompanionProfileVersionV1.create(
+            workspace_id="workspace-a",
+            relationship_subject_id="person-a",
+            version=0,
+            preferences=preferences,
+            source_aftereffect_refs=(),
+            evidence_days_utc=(),
+            confidence_lower_bound=0.0,
+            boundary_violation_count=0,
+            rollback_profile_id=None,
+            created_at_ms=0,
+            is_baseline=True,
+        )
     return {
         "proactive": {
             "last_target": {"platform": "qq", "conversation_id": "conversation-a"},
@@ -172,3 +196,101 @@ def test_same_frozen_state_and_timezone_produces_the_same_decision() -> None:
     )
 
     assert first == second
+
+
+def test_compact_profile_makes_proactive_text_one_sentence_and_replayable() -> None:
+    preferences = CompanionProfilePreferencesV1(response_length="COMPACT")
+    first = decide_companion_proactive(
+        _state(preferences=preferences),
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+    second = decide_companion_proactive(
+        _state(preferences=preferences),
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+
+    assert first.send_allowed is True
+    assert first == second
+    assert first.content.count("。") == 1
+    assert "？" not in first.content
+    assert "不方便回也没关系" in first.content
+
+
+def test_quiet_direct_profile_removes_followup_and_advice_without_losing_presence() -> None:
+    preferences = CompanionProfilePreferencesV1(
+        addressing_style="GENTLE_DIRECT",
+        humor_level="LOW",
+        followup_rate="NONE",
+        comfort_mode="QUIET_FIRST",
+    )
+    direct_state = _state(preferences=preferences)
+    direct_state["affective"]["components"] = [{"emotion": "CARE", "intensity": 0.7}]
+    baseline_state = _state()
+    baseline_state["affective"]["components"] = [{"emotion": "CARE", "intensity": 0.7}]
+
+    direct = decide_companion_proactive(
+        direct_state,
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+    baseline = decide_companion_proactive(
+        baseline_state,
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+
+    assert direct.send_allowed is True
+    assert direct.affective_turn_plan["companion_act"]["kind"] == "COMFORT"
+    assert direct.content != baseline.content
+    assert "？" not in direct.content
+    assert "喝口水" not in direct.content
+    assert "松一下肩" not in direct.content
+    assert "不方便回也没关系" in direct.content
+
+
+def test_practical_gentle_comfort_adds_only_an_optional_bounded_micro_step() -> None:
+    preferences = CompanionProfilePreferencesV1(comfort_mode="PRACTICAL_GENTLE")
+    state = _state(preferences=preferences)
+    state["affective"]["components"] = [{"emotion": "CARE", "intensity": 0.7}]
+
+    decision = decide_companion_proactive(
+        state,
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+
+    assert decision.send_allowed is True
+    assert decision.affective_turn_plan["companion_act"]["kind"] == "COMFORT"
+    assert "如果手边方便" in decision.content or "如果方便" in decision.content
+    assert "也行" in decision.content
+    assert "不方便回也没关系" in decision.content
+
+
+def test_medium_humor_is_limited_to_play_not_comfort() -> None:
+    preferences = CompanionProfilePreferencesV1(humor_level="MEDIUM")
+    play_state = _state(preferences=preferences)
+    play_state["affective"]["components"] = [
+        {"emotion": "SHARED_JOY", "intensity": 0.7}
+    ]
+    comfort_state = _state(preferences=preferences)
+    comfort_state["affective"]["components"] = [{"emotion": "CARE", "intensity": 0.7}]
+
+    play = decide_companion_proactive(
+        play_state,
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+    comfort = decide_companion_proactive(
+        comfort_state,
+        now_ms=NOW,
+        timezone_name="Asia/Shanghai",
+    )
+
+    assert play.send_allowed is True
+    assert play.affective_turn_plan["companion_act"]["kind"] == "PLAY"
+    assert "我悄悄眨一下眼" in play.content
+    assert comfort.send_allowed is True
+    assert comfort.affective_turn_plan["companion_act"]["kind"] == "COMFORT"
+    assert "我悄悄眨一下眼" not in comfort.content

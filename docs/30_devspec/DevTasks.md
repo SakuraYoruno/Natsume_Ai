@@ -276,6 +276,14 @@ Limbic 或模板，也不能创建 outbox/delivery intent。唯一发送路径�
 `life_tick → companion_proactive → Life outbox`。此切片只完成本地旧 authority 退役，剩余 compatibility
 reader、Monitor/Review、真实 provider/Gateway/Edge 与 DL-07 仍未验收。
 
+当前追加 `DL-06_PROACTIVE_PROFILE_TEXT_COMPILER_CUTOVER`：canonical scheduler 不再让 active
+`CompanionProfileVersionV1` 只影响 foreground 的 prompt/Voice/Avatar。`companion_proactive` 在已冻结的
+plan 与 profile digest 边界内，确定性编译称呼、长度、幽默、追问和安慰偏好；`COMPACT` 必须是一句、
+`NONE/QUIET_FIRST` 禁止问题与建议、`PRACTICAL_GENTLE` 仅对 `COMFORT` 增加可跳过的微小照顾步骤，
+`MEDIUM` 幽默只允许 `PLAY`。该纯函数只读有界 profile 和 canonical decision seed，不读用户原文、
+Memory、音视频或旧 Bond，不发模型请求；相同冻结输入 exact replay。当前定向主动/生命周期/SQLite
+delivery 集合为本地证据，尚不代表真实模型、Gateway、远端 Edge 或体验评分通过。
+
 当前追加 `DL-06_RUNTIME_SNAPSHOT_CANONICAL_READER_CUTOVER`：production
 `LifecycleRuntimeApplicationPorts` 现在显式接收 `LifeSnapshotReader`。OBS snapshot 对同一个
 relationship subject 读取一条 canonical Life head，再纯投影 `self_id=natsume_ai` 的 mixed self-affect、

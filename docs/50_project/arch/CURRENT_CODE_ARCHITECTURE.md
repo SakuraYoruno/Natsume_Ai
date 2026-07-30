@@ -74,6 +74,14 @@
 > 或伪造 user presence。真实 SQLite `submit_life_tick_command()`/command/outbox/receipt/restart 集成已验证
 > Host-side chain；受控本地 transport 不代表 Gateway、平台送达、远端 Edge 或 DL-07 完成。
 
+> **DL-06 主动表达偏好编译修订：** `companion_proactive._compose_non_coercive_content()` 现在从已绑定
+> profile 的 bounded preferences 读取 `addressing_style`、`response_length`、`humor_level`、
+> `followup_rate` 与 `comfort_mode`。它把这些值纳入 deterministic seed，并只在已经冻结的
+> `CompanionActV1` 内调整表达：`COMPACT` 恒为单句，`NONE/QUIET_FIRST` 没有问题或建议，
+> `PRACTICAL_GENTLE` 只在 `COMFORT` 给出可跳过的小步骤，`MEDIUM` 幽默只在 `PLAY`。它不读取
+> user text、Memory、音视频、Bond 或私密 note，也不调用模型；profile 不拥有发送许可、self-affect、
+> relationship 或 Soul 的写权。当前是本地 deterministic/replayable 文案边界，并非真实模型或平台体验验收。
+
 > **DL-06 legacy affect port fence：** `AffectFusionService` 成功组成时，Tribe 不再携带旧
 > `bond_update_queue`、mutable `silence_engine`、`emotion_timeline` 或 `bond_stage_engine` provider；它们在
 > composition resolver 直接失败为 `LEGACY_AFFECT_PORT_RETIRED:<port>`。这比只在 Limbic/Cortex/SocialBrain/

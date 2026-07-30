@@ -353,6 +353,12 @@
   `ALLOWED` 才能发送；`UNKNOWN/DENIED`、repair、未结 episode 与 `GIVE_SPACE`
   regulation 均只会 hold。测试故意提供极端 legacy `state.affect`，证明该字段
   不再拥有主动消息发送权。
+- 同文件还验证 active companion profile 确实改变主动文本而不改发送 authority：`COMPACT` 输出单句且
+  exact replay；`GENTLE_DIRECT + LOW + NONE + QUIET_FIRST` 不追问、不塞建议；
+  `PRACTICAL_GENTLE` 只在 `COMFORT` 给可跳过的小步骤；`MEDIUM` 幽默只在 `PLAY` 出现。
+  `test_dl06_companion_profile_lifecycle.py`、`test_dl06_canonical_proactive_tick.py` 与
+  `test_dl06_proactive_delivery_reconciliation.py` 共同覆盖 profile lifecycle、真实 SQLite scheduler/outbox
+  和 receipt reconciliation。该组为本地确定性/持久化证据，不是模型、平台、TTS/VTS 或 Edge 实测。
 - `test_aw04_life_tick_policy.py` 验证同一 frozen snapshot 的 deterministic outbox、
   content-digest trace、scene/grant fail-closed 和 explicit permission。旧早/晚/默认
   三句模板不再是当前 Scheduler 输出合同。

@@ -142,6 +142,10 @@ relationship aftereffect 解释其后续关系意义；Chat 路由不得以 `TAS
 - 用户可暂停、限制、解释或撤销主动能力。
 - 主动消息必须先冻结七海自身的 AffectiveTurnPlan/ExpressionPlan；已送达但未回应只能在宽限期后降低下一次联系频率，不能扣信任、撤销许可、伪造用户出现或施加回应义务。
 - 主动行为和后台演化不得直接修改 Persona trait；成长只能形成 proposal。
+- 已激活的低风险 companion profile 必须同时约束主动文案：`COMPACT` 为单句留白，`NONE` 或
+  `QUIET_FIRST` 不追加追问/建议，`PRACTICAL_GENTLE` 仅可在 `COMFORT` 给一个可跳过的小步骤，
+  `MEDIUM` 幽默仅限 `PLAY`。scheduler 文案编译器必须可重放、无原文输入、无模型副作用，且不能覆盖
+  AffectiveTurnPlan、Soul、关系许可或 self-affect。
 
 ## 3. 统一执行与规划
 
