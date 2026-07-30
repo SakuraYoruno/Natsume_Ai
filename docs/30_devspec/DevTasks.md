@@ -58,6 +58,28 @@ Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不�
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。
 
+DL-02 当前又收口了三个直接影响陪伴体验的 canonical 因果：明确请求空间时，
+`user_boundary_or_space` appraisal 必须冻结 `GIVE_SPACE`，不能退化为通用确认；明确
+指向七海的受伤信号形成 `natsume_may_have_hurt_user → CARE / OPENNESS / CAUTION → REPAIR`，
+而不是把用户的 `SAD` 复制成她的情绪；同一可信观察中的喜悦与痛感共存形成
+`user_mixed_affect → HOLD_COMPLEXITY`，允许“开心与舍不得同时存在”。选定 Appraisal 会在同一
+Fusion 路径生成 `RegulationDecisionV1`：空间为 `GIVE_SPACE`、修复为 `SEEK_REPAIR`、冲突为
+`CONTAIN`、其余为 `EXPRESS`；Planner 只接受 reason ref 精确指向本请求 appraisal 的 regulation，
+避免旧状态控制新回合。这些是有限、可审计的本地规则，journal 仍只保存 opaque evidence ref 和 typed
+event，不保存原话。该切片有 unit 与
+SQLite restart 证据，但未替代真人盲评、真实 provider、远端 Edge 或 DL-07 服务栈验收。
+
+DL-03 的 repair aftereffect 现在也会回流到当前 affect scope：只有 durable
+`REPAIR_ACCEPTED` receipt 才生成 `relationship_repair_accepted → RELIEF / CARE`，并以
+`relationship-aftereffect://` opaque ref 写入 Appraisal/Regulation；它不把一次接受放大成永久关系
+承诺。`proactive_permission=DENIED` 只保留在 Scheduler 的主动投递门禁，Surface foreground reply
+不会据此对当前主动输入冷处理。
+
+同一条 canonical 链还区分“用户要求停下”和“用户明确贬损七海”：前者（包括 `闭嘴`、`别来烦我`）必须
+形成 durable `BOUNDARY`、`GIVE_SPACE` 和 `DENIED` 主动许可；后者仅在明确指向七海且无停止语义时才形成
+`HURT / CAUTION → CONTAIN → SET_BOUNDARY`。它是可解释的当轮 self-affect，不是要求道歉、关系降级或
+永久人格变化。
+
 DL-04 当前新增的是一条**已入场 frozen Chat 的本地 acceptance 证据链**，不是普通 Chat 封板：
 Gateway service principal 保留为 command/lease/grant/delivery authority，canonical Runtime Context 的
 `subject_id` 与 workspace 才进入七海的 AffectiveTurnPlan、conversation、Life、Memory 与 reply projection。

@@ -7,6 +7,9 @@ import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.digital_life.affect_fusion import AffectFusionService
+from host_brain.digital_life.affective_turn_planner import (
+    build_affective_turn_guidance,
+)
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.relationship_lifecycle import (
     RelationshipLifecycleService,
@@ -116,6 +119,39 @@ def test_response_episode_then_followup_creates_durable_boundary_aftereffect(
     ] == "AFTEREFFECT"
 
 
+def test_explicit_stop_persists_a_boundary_even_when_it_contains_disrespect(
+    tmp_path: Path,
+) -> None:
+    """A stop request is a durable boundary, not evidence to guilt the user."""
+
+    relationship, fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="accepted-before-stop",
+        response_receipt=_accepted_foreground(command_id="before-stop"),
+        response_text="我听见你了。",
+    )
+
+    result = fusion.resolve_request(
+        request_body=_request("你真烦，闭嘴。"),
+        request_id="user-explicit-stop",
+    )
+    relationship_context = result.as_emotion_context()["affective_life"][
+        "relationship_life"
+    ]
+    affective = reader.get_snapshot(result.scope.aggregate_id).state["affective"]
+
+    assert relationship_context["aftereffect"]["outcome"] == "BOUNDARY"
+    assert relationship_context["state"]["proactive_permission"] == "DENIED"
+    assert affective["last_appraisal"]["event_kind"] == "user_boundary_or_space"
+    assert {item["emotion"] for item in affective["components"]} == {
+        "RESPECT",
+        "CAUTION",
+    }
+
+
 def test_aftereffect_is_exactly_replayed_and_does_not_cross_workspace(
     tmp_path: Path,
 ) -> None:
@@ -212,6 +248,64 @@ def test_repair_requires_later_user_acknowledgement_and_never_uses_raw_text(
     assert "别问了" not in serialized
     assert "愿意继续" not in serialized
     assert first_reply.event_id
+
+
+def test_user_accepted_repair_reopens_foreground_without_restoring_proactive_permission(
+    tmp_path: Path,
+) -> None:
+    """A user can re-engage now without implicitly granting future contact."""
+
+    relationship, fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="repair-open-one",
+        response_receipt=_accepted_foreground(command_id="repair-open-one"),
+        response_text="我听见了。",
+    )
+    boundary = relationship.record_followup(
+        request_body=_request("你误会了，别再问了"),
+        request_id="repair-boundary",
+    )
+    assert boundary.aftereffect is not None
+    assert boundary.aftereffect.outcome == "BOUNDARY"
+
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="repair-open-two",
+        response_receipt=_accepted_foreground(command_id="repair-open-two"),
+        response_text="对不起，我刚才没有听好。",
+    )
+    request_id = "repair-user-accepted"
+    result = fusion.resolve_request(
+        request_body=_request("谢谢你愿意听，我愿意继续。"),
+        request_id=request_id,
+    )
+    affective_state = reader.get_snapshot(result.scope.aggregate_id).state["affective"]
+    guidance = build_affective_turn_guidance(
+        emotion_context=result.as_emotion_context(),
+        request_id=request_id,
+        workspace_id=result.scope.workspace_id,
+        relationship_subject_id=result.scope.relationship_subject_id,
+        session_id=result.scope.session_id,
+        created_at_ms=NOW,
+    )
+
+    assert result.relationship_aftereffect is not None
+    assert result.relationship_aftereffect["outcome"] == "REPAIR_ACCEPTED"
+    assert affective_state["last_appraisal"]["event_kind"] == "relationship_repair_accepted"
+    assert {item["emotion"] for item in affective_state["components"]} == {
+        "CARE",
+        "RELIEF",
+    }
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "ACKNOWLEDGE"
+    assert guidance.plan.expression_plan.regulation_mode == "EXPRESS"
+    relationship_state = result.as_emotion_context()["affective_life"]["relationship_life"]["state"]
+    assert relationship_state["proactive_permission"] == "DENIED"
 
 
 def test_relationship_contracts_fail_closed_for_raw_or_unearned_repair() -> None:

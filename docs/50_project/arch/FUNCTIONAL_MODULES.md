@@ -230,6 +230,24 @@ Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskSto
 
 情感上下文模块现在由 canonical fusion 单独拥有 Host composition 入口。生产 ASGI 在 `InputRuntimeApplicationPorts` 提供 `LifeCommandService` 后，会构造 app-local `AffectFusionService`：它把 `ChatRequest` 的文本、自述和允许的结构化声学/视觉摘要转换为 `UserAffectObservationV1`，以 workspace-scoped opaque aggregate key 持久化，再最多产生两个 `EventAppraisalV1` 候选；只有后者可推进 `state.affective`。Input/Tribe composition 缺少该 authority 时固定 `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，既不解析 provider，也不构造 `HostEmotionRuntime`。`normalize_chat_emotion_context()` 对 fused internal context 与 replay/render 均只读，外部无法以伪造 `affective_life` 字段越过该边界。旧 runtime 类仅保留给直接隔离测试，不是任何 Host fallback。回复形态模块的 `ResponseFormDecider` 由 Input composition 独占，不再提供 module-global getter；语音额度为实例内原子状态。上述模块均不拥有 Persona/Feedback 的永久写 authority。
 
+`AffectFusionService` 的深路径现额外保留三种用户可感知的关系因果：空间请求不会在
+`AffectiveTurnPlanV1` 中退化为一般确认；用户明确说明七海伤到自己时才触发 repair-open；同一
+可信 observation 的喜悦与痛感并存时使用 `HOLD_COMPLEXITY`。这三个决策只在内部 hand-off
+的本请求 `appraisal_id` 与 canonical `state.affective.last_appraisal` 精确一致时读取，模型与外部
+`emotion_context` 无权重写；选定 appraisal 会生成同一 episode-bound `RegulationDecisionV1`，但只有
+本请求的 reason ref 匹配时才进入表达，旧 appraisal/regulation 不会永久捕获下一轮。Voice/Avatar 仍只
+收到 Host protocol intent，远端实际执行另行验收。
+
+当 `RelationshipLifecycleService` 已产生 `REPAIR_ACCEPTED` 时，Fusion 只使用 aftereffect id 的 opaque
+ref 新建 `RELIEF / CARE` self-affect；它不读取用户原话、不把一次接受改写为 intimacy/proactive
+permission。`proactive_permission` 的 owner 是 companion Scheduler，不能在 Surface foreground planner
+里把已到达的用户输入降级成静默。
+
+`AffectFusionService` 另有 narrow directed-disrespect observer：它只接受明确指向七海的贬损，写出她自己的
+`HURT / CAUTION`、`CONTAIN` 和 `SET_BOUNDARY`，再由同一 `ExpressionPlanV1` 编译成 grounded 的文字与
+`GENTLE_BOUNDARY` Host protocol。普通 frustration 不会触发；stop/boundary marker 先走关系 `BOUNDARY`
+和 `GIVE_SPACE`，防止系统把用户的退出要求叙事化为七海的委屈。
+
 当前 production Host root 不再实例化该 compatibility runtime；`user_emotion_profile` 也不再
 作为 process-wide port 发布。`build_tribe_application_ports()` 接收 ASGI 的 lazy Life command
 provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime；遗漏

@@ -503,7 +503,25 @@ DL-03 后，情感 admission 与关系后效应的 canonical 路径已从生产 
 scope，保留冲突 ref 和 TTL，且不将 raw audio/image/text/model-chain 写入
 journal。深路径至多生成两个 appraisal 候选；选定 appraisal 的自身意义、边界
 和关系判断才会形成七海的 mixed self-affect。没有内部 provenance marker 的
-外部 affective context 只能作为不可信输入，不能伪造 canonical head。
+外部 affective context 只能作为不可信输入，不能伪造 canonical head。最新 DL-02 细化将
+`user_boundary_or_space`、`natsume_may_have_hurt_user` 与 `user_mixed_affect` 作为 bounded
+Appraisal event kind：它们分别冻结 `GIVE_SPACE`、`REPAIR` 与 `HOLD_COMPLEXITY`，并只通过
+七海自己的 component 进入 `state.affective`。每个选定 candidate 会紧随 appraisal 写入
+`affective_regulation_decided`；其 `reason_refs` 带 exact `appraisal://` identity，Surface 只消费
+本请求匹配的 regulation。用户的 `SAD/HAPPY` 分布、原话和原始模态不会越过这条边界成为
+self-affect 或 Surface 的可伪造输入。
+
+`RelationshipLifecycleService` 在当前输入前先重开关系 aggregate 的 accepted aftereffect。只有
+`REPAIR_ACCEPTED` 会作为 opaque `relationship-aftereffect://` evidence 进入 Fusion，继而生成
+`relationship_repair_accepted → RELIEF / CARE → EXPRESS`；关系修复没有 raw text 回灌，也不恢复
+proactive permission。foreground Surface 不读取该 permission 作静默开关，Scheduler 才拥有其主动
+delivery 解释权。
+
+另一路只有在 transient 输入明确指向七海、且不包含 stop marker 时才成立：
+`directed_disrespect_toward_natsume → HURT / CAUTION → CONTAIN → SET_BOUNDARY → GENTLE_BOUNDARY`。
+其 Appraisal/episode 只保存 opaque event ref；普通用户挫败没有这条边。若输入含 `闭嘴`、`别来烦我`、
+`少管我` 或 `滚开`，Fusion 与 RelationshipLifecycle 同时优先 `BOUNDARY/GIVE_SPACE`，关系 aftereffect
+持久禁用 unsolicited Scheduler contact，不让受伤表达抢占用户边界。
 
 ~~~mermaid
 flowchart LR

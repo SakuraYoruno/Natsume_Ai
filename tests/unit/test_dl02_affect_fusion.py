@@ -15,10 +15,19 @@ from host_brain.app.input_runtime_composition import (
 )
 from host_brain.app.tribe_composition import build_tribe_application_ports
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.digital_life.affect_fusion import AffectFusionService
+from host_brain.digital_life.affect_fusion import (
+    AffectiveScope,
+    AffectFusionService,
+    _AppraisalCandidate,
+    _build_appraisal_candidates,
+)
+from host_brain.digital_life.affective_turn_planner import (
+    build_affective_turn_guidance,
+)
 from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.digital_life.service import LifeCommandService
 from host_brain.persistence.life_command_repository import LifeCommandRepository
+from natsume_contracts.life import EmotionComponentV1, UserAffectObservationV1
 
 
 NOW = 1_900_000_000_000
@@ -70,6 +79,19 @@ def _request(
     )
 
 
+def _guidance_from(result, *, request_id: str):
+    """Build the same trusted hand-off consumed by the live Surface path."""
+
+    return build_affective_turn_guidance(
+        emotion_context=result.as_emotion_context(),
+        request_id=request_id,
+        workspace_id=result.scope.workspace_id,
+        relationship_subject_id=result.scope.relationship_subject_id,
+        session_id=result.scope.session_id,
+        created_at_ms=NOW,
+    )
+
+
 def test_text_distress_is_observed_then_appraised_not_mirrored_into_self(
     tmp_path: Path,
 ) -> None:
@@ -93,6 +115,319 @@ def test_text_distress_is_observed_then_appraised_not_mirrored_into_self(
         "self_id": "natsume_ai",
         "relationship_subject_id": "person-a",
     }
+
+
+def test_direct_space_request_becomes_canonical_give_space_not_generic_acknowledgement(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-space"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="先别问了，我现在想一个人待会儿。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "user_boundary_or_space"
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "CAUTION",
+        "RESPECT",
+    }
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "GIVE_SPACE"
+    assert state["affective"]["last_regulation"]["mode"] == "GIVE_SPACE"
+    assert guidance.plan.expression_plan.regulation_mode == "GIVE_SPACE"
+    assert guidance.plan.regulation_ref
+    assert guidance.plan.expression_plan.voice_style == "QUIET_PRESENCE"
+    assert any("不要追问" in item for item in guidance.must_not_do)
+
+
+def test_prior_space_appraisal_does_not_capture_a_later_neutral_turn(
+    tmp_path: Path,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    fusion.resolve_request(
+        request_body=_request(message="先别问了，我想一个人待会儿。"),
+        request_id="request-space-first",
+    )
+    request_id = "request-neutral-after-space"
+    later = fusion.resolve_request(
+        request_body=_request(message="好，我现在可以聊聊今天发生的事。"),
+        request_id=request_id,
+    )
+    guidance = _guidance_from(later, request_id=request_id)
+
+    # The prior event remains in the durable affect head for traceability, but
+    # it is not the current request's appraisal and may not control this turn.
+    assert later.appraisal_id is None
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "ACKNOWLEDGE"
+    assert guidance.plan.regulation_ref is None
+    assert guidance.plan.expression_plan.regulation_mode == "EXPRESS"
+
+
+def test_user_signal_that_natsume_hurt_them_freezes_repair_without_mirroring_sadness(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-natsume-hurt-user"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="你刚刚那样说让我很受伤。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "natsume_may_have_hurt_user"
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "CARE",
+        "CAUTION",
+        "OPENNESS",
+    }
+    assert "SAD" not in {item["emotion"] for item in state["affective"]["components"]}
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "REPAIR"
+    assert state["affective"]["last_regulation"]["mode"] == "SEEK_REPAIR"
+    assert guidance.plan.expression_plan.regulation_mode == "SEEK_REPAIR"
+    assert guidance.plan.regulation_ref
+    assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
+    assert any("不要要求原谅" in item for item in guidance.must_not_do)
+
+
+def test_clear_disrespect_toward_natsume_forms_contained_hurt_and_a_gentle_boundary(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-directed-disrespect"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="你真烦。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    events = reader.list_events(result.scope.aggregate_id, limit=20)
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "directed_disrespect_toward_natsume"
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "HURT",
+        "CAUTION",
+    }
+    assert state["affective"]["last_regulation"]["mode"] == "CONTAIN"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "SET_BOUNDARY"
+    assert guidance.plan.expression_plan.text_pacing == "STEADY"
+    assert guidance.plan.expression_plan.voice_style == "GENTLE_BOUNDARY"
+    assert guidance.plan.expression_plan.avatar_expression == "GENTLE_BOUNDARY"
+    assert any("被刺到" in item for item in guidance.facts)
+    assert any("情感债" in item for item in guidance.must_not_do)
+    assert "你真烦" not in str([event.payload for event in events])
+
+
+def test_clear_stop_request_wins_over_disrespect_and_never_writes_natsume_hurt(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-directed-stop"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="你真烦，闭嘴。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "user_boundary_or_space"
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "RESPECT",
+        "CAUTION",
+    }
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "GIVE_SPACE"
+    assert guidance.plan.expression_plan.voice_style == "QUIET_PRESENCE"
+
+
+def test_general_user_frustration_does_not_invent_disrespect_toward_natsume() -> None:
+    observation = UserAffectObservationV1(
+        observation_id="observation-general-frustration",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        modality="TEXT",
+        emotion_distribution={"FRUSTRATED": 0.7},
+        valence=-0.45,
+        arousal=0.4,
+        confidence=0.38,
+        observed_at_ms=NOW,
+        expires_at_ms=NOW + 30_000,
+    )
+
+    candidates = _build_appraisal_candidates(
+        observations=(observation,),
+        conflict=False,
+        message="今天的事情真烦。",
+    )
+
+    assert all(item.kind != "directed_disrespect_toward_natsume" for item in candidates)
+
+
+def test_mixed_user_affect_is_preserved_as_a_complex_companion_act(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-mixed-affect"
+
+    result = fusion.resolve_request(
+        request_body=_request(
+            message="终于拿到 offer 了，可是要离开熟悉的团队。",
+            emotion_context={
+                "user_affect_observations": [
+                    {
+                        "modality": "SELF_REPORT",
+                        "emotion_distribution": {"HAPPY": 0.86, "SAD": 0.74},
+                        "confidence": 0.94,
+                    }
+                ]
+            },
+        ),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "user_mixed_affect"
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "CARE",
+        "CAUTION",
+        "SHARED_JOY",
+    }
+    assert {item["emotion"] for item in state["affective"]["components"]}.isdisjoint(
+        {"HAPPY", "SAD"}
+    )
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert state["affective"]["last_regulation"]["mode"] == "EXPRESS"
+    assert guidance.plan.expression_plan.regulation_mode == "EXPRESS"
+    assert guidance.plan.regulation_ref
+    assert guidance.plan.expression_plan.voice_style == "SOFT_COMFORT"
+    assert any("复杂感受" in item for item in guidance.must_not_do)
+
+
+def test_regulation_stays_appraisal_bound_when_episode_head_is_full(
+    tmp_path: Path,
+) -> None:
+    """A bounded episode head must not make the fifth turn partially commit."""
+
+    fusion, reader, _ = _runtime(tmp_path)
+    for index in range(4):
+        fusion.resolve_request(
+            request_body=_request(message="先别问了，我想一个人待会儿。"),
+            request_id=f"request-space-{index}",
+        )
+
+    result = fusion.resolve_request(
+        request_body=_request(
+            message="今天真的很开心。",
+            emotion_tag="HAPPY",
+            emotion_intensity=0.8,
+        ),
+        request_id="request-after-full-episode-head",
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    regulation = state["affective"]["last_regulation"]
+
+    assert result.path == "DEEP"
+    assert state["affective"]["last_appraisal"]["event_kind"] == "shared_positive_moment"
+    assert len(state["affective"]["active_episodes"]) == 4
+    assert regulation["mode"] == "EXPRESS"
+    assert regulation["episode_id"] is None
+    assert f"appraisal://{result.appraisal_id}" in regulation["reason_refs"]
+    assert any(
+        receipt.command_id.startswith("affect_") for receipt in result.receipts
+    )
+
+
+def test_rich_candidate_evidence_cannot_overflow_the_bounded_episode_contract(
+    tmp_path: Path,
+) -> None:
+    """Future richer causal receipts must preserve a valid atomic Life write."""
+
+    fusion, reader, command_service = _runtime(tmp_path)
+    scope = AffectiveScope.from_request(_request(message="测试"))
+    observations = tuple(
+        UserAffectObservationV1(
+            observation_id=f"observation-{index}",
+            workspace_id=scope.workspace_id,
+            relationship_subject_id=scope.relationship_subject_id,
+            session_id=scope.session_id,
+            modality="TEXT",
+            emotion_distribution={"SAD": 0.5},
+            valence=-0.3,
+            arousal=0.2,
+            confidence=0.3,
+            observed_at_ms=NOW,
+            expires_at_ms=NOW + 30_000,
+        )
+        for index in range(8)
+    )
+    candidate = _AppraisalCandidate(
+        kind="bounded_evidence_test",
+        score=0.9,
+        goal_congruence=0.1,
+        responsibility=0.2,
+        controllability=0.3,
+        relationship_significance=0.4,
+        boundary_relevance=0.0,
+        risk=0.0,
+        uncertainty=0.1,
+        components=(EmotionComponentV1("CARE", 0.4, 0.2, 0.2, "attend"),),
+        action="attend",
+        evidence_refs=tuple(f"relationship-aftereffect://receipt-{index}" for index in range(8)),
+    )
+
+    fusion._submit_appraisal(
+        service=command_service,
+        scope=scope,
+        request_id="request-bounded-evidence",
+        candidate=candidate,
+        observations=observations,
+        created_at_ms=NOW,
+    )
+    state = reader.get_snapshot(scope.aggregate_id).state
+
+    assert len(state["affective"]["active_episodes"][0]["evidence_refs"]) == 16
+    assert len(state["affective"]["last_regulation"]["reason_refs"]) == 10
+
+
+def test_fresh_directed_harm_outranks_a_preceding_repair_acceptance() -> None:
+    observation = UserAffectObservationV1(
+        observation_id="observation-directed-harm",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        modality="TEXT",
+        emotion_distribution={"SAD": 0.72},
+        valence=-0.5,
+        arousal=0.3,
+        confidence=0.38,
+        observed_at_ms=NOW,
+        expires_at_ms=NOW + 30_000,
+    )
+
+    candidates = _build_appraisal_candidates(
+        observations=(observation,),
+        conflict=False,
+        message="谢谢你愿意听，但你刚才还是伤到我了。",
+        relationship_aftereffect={
+            "outcome": "REPAIR_ACCEPTED",
+            "aftereffect_id": "aftereffect-accepted",
+        },
+    )
+
+    assert candidates[0].kind == "natsume_may_have_hurt_user"
 
 
 def test_fused_context_does_not_advance_legacy_host_emotion_runtime(tmp_path: Path) -> None:
