@@ -7,6 +7,18 @@
 维护日期：2026-07-28
 状态：当前证据
 
+## DL-04 本机直连 Chat scope 切流
+
+- `test_chat_handler_streaming.py` 验证 `/v1/chat` 在 Thalamus、AffectFusion 和 Cortex 前，将 caller
+  `person_id/workspace_id` 覆盖为 Host 配置的本机个人 scope，并且只传递
+  `LOCAL_PERSONAL_UNATTESTED` provenance，不伪造 tenant、claim 或 audit。
+- `test_ne03_context_application.py::test_direct_chat_scope_cannot_select_life_or_runtime_context_identity`
+  使用真实 SQLite migration、World/Scene journal 和 Runtime Context，验证 caller identity 不会进入
+  frozen self/relationship scope；AffectFusion 和 Runtime Context 都只看到同一 `personal:<subject>`。
+- 本次定向验证为 Chat/Scope/Runtime Context 邻接 `45 passed`，另有真实 SQLite Context `1 passed`。
+  这些是本机单用户边界证据；不代表 Gateway 多用户认证、连接恢复、真实 provider、远端 Edge 或
+  DL-07 全栈验收。
+
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 
 - `test_dl06_legacy_proactive_scheduler_retirement.py`、`test_ne03_proactive_context_cutover.py`、

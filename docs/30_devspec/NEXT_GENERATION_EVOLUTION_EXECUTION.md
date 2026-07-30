@@ -174,6 +174,11 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   conversation、Life、Memory 与可见 reply projection 的 relationship subject。native stream 与 buffered
   path 一样把 frozen `ModelBudgetGuard.node_id` 写入 `ModelAttempt` audit，Acceptance 会拒绝任何 node
   drift。该结论来自受控本地 model/Gateway transport 的集成验证，不可替代真实 provider、平台或 Edge 验收。
+- `POST /v1/chat` 已补齐进入上述链之前的本机个人 scope：Host 覆盖 caller 的
+  `person_id/workspace_id`，以配置的本地 subject 和 `personal:<subject>` 供 AffectFusion、Cortex
+  prefetch 与 Runtime Context 共同消费。它没有伪造 Secure Ingress claim，也不开放多用户 scope；
+  签名 Gateway 输入继续唯一走 `/v1/host/input`。对应 Handler 回归和真实 SQLite Runtime Context
+  测试只证明该本地身份边界，尚不证明 generic Chat connection resume 或外部认证完成。
 
 退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
 Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。

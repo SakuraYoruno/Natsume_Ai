@@ -137,6 +137,15 @@ assistant turn、Life `foreground_completed` 和 reply delivery projection 均�
 `service.edge.gateway` 写进关系历史。此链有本地 SQLite production-handler integration evidence；它不代表
 generic Chat、connection resume、真实 provider 或远端 Edge 完成。
 
+### DL-04 直连个人 Chat scope 修订
+
+`POST /v1/chat` 是本机个人 UI surface，不是 Gateway 的无签名替代入口。`direct_chat_scope.py`
+在 AffectFusion、retrieval prefetch 与 Runtime Context 前用 `HOST_DEFAULT_USER_ID` 绑定唯一
+relationship subject/principal，并写入 `personal:<subject>` workspace；请求体的 `person_id`、
+`workspace_id` 和 nested emotion context 中的 workspace 都会失去 scope authority。该标记为
+`LOCAL_PERSONAL_UNATTESTED`，不含 Secure Ingress claim/audit/tenant，不能外推为多用户认证；
+Gateway 和多用户关系始终由 `/v1/host/input` 的签名身份建立。
+
 ## 1. 结论
 
 NE-01 当前代码波次为

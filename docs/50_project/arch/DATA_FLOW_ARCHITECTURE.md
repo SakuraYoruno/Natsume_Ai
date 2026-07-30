@@ -563,6 +563,17 @@ predecessor 与 Host staging status，绝不复制文本、原始媒体或模型
 受治理 Chat 的 scope 数据流现进一步固定为：
 
 ```text
+POST /v1/chat（本机个人 UI）
+  → HostDefaultUserId 派生 subject/principal + personal workspace
+  → 覆盖 caller person/workspace（含 nested emotion-context workspace）
+  → AffectFusion / Cortex prefetch / RuntimeContext v1
+  → governed Chat
+```
+
+上图是 `LOCAL_PERSONAL_UNATTESTED` scope，不含 Secure Ingress claim、audit 或 tenant；它不能承载
+Gateway 或多用户身份。那些输入必须走下列签名数据流：
+
+```text
 Secure Ingress service principal
   → HostCommand / TaskNode lease / node grant / Gateway authority audit
 RuntimeContext v1 relationship subject + workspace
