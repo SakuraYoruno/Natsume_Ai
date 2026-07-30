@@ -128,6 +128,27 @@ def test_public_emotion_hint_cannot_create_affective_turn_plan() -> None:
     )
 
 
+def test_denied_proactive_permission_does_not_silence_an_active_user_turn() -> None:
+    context = _context()
+    context["affective_life"]["relationship_life"]["state"][
+        "proactive_permission"
+    ] = "DENIED"
+
+    guidance = build_affective_turn_guidance(
+        emotion_context=context,
+        request_id="request-user-reengaged",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        created_at_ms=1_900_000_000_000,
+    )
+
+    assert guidance is not None
+    # Contact permission only gates unsolicited Scheduler activity.  It cannot
+    # turn an explicit current user message into a cold or silent reply.
+    assert guidance.plan.companion_act.kind == "COMFORT"
+
+
 def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     monkeypatch,
     surface_runtime_ports_factory,

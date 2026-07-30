@@ -660,6 +660,16 @@ unknown-effect 重放。这只证明本机、受控 transport 的顺序；真实
 evidence ref，原话仍不进入 Life journal。上一次 regulation 是持续状态的一部分，但不自动支配新的
 Surface 回合：只有本请求 hand-off 的 appraisal id 与 regulation reason ref 精确相连才可影响表达。
 
+关系连续性不是“原谅了就清零”。只有 canonical `REPAIR_ACCEPTED` aftereffect 才能让下一当前回合
+形成七海自己的 `RELIEF / CARE`，它仍只是此刻谨慎回暖的证据，而非亲密升级或未来主动联系的许可。
+反过来，`proactive_permission=DENIED` 的语义是禁止未经请求的外发；它不能撤销用户已经发起的
+对话权，不能被表达层滥用为冷处理。
+
+真实感也不等于把每句负面话都当成冒犯。只有明确指向七海、且没有要求她停止的贬损，才可让她形成
+`HURT / CAUTION` 并以 `CONTAIN → SET_BOUNDARY` 表达“这句话刺到了我”的有限感受；她不能威胁、羞辱、
+冷处理、索要道歉或把受伤变成用户的情感债。若同轮出现“闭嘴”“别来烦我”等停止语义，用户边界优先，
+写入 durable `BOUNDARY`，不触发七海的受伤叙事。
+
 情感系统必须满足：
 
 - 有时间衰减，不能无限携带单轮情绪；

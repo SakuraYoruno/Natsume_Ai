@@ -94,22 +94,38 @@ def build_relationship_reply_guidance(
         "关系状态只收紧表达边界，不替换用户当前目标，也不凭互动次数升级亲密。",
     ]
 
-    if proactive_permission == "DENIED":
-        facts.append("关系事实：用户已明确要求空间；本轮尊重停顿，不把沉默或不回复解释成拒绝关系。")
-        must_include.append("自然确认会尊重对方的空间，不追问，不要求立刻回应。")
+    # ``proactive_permission`` authorizes only an unsolicited Scheduler
+    # delivery.  It stays in the trace for that owner, but must never make a
+    # user who has already opened a foreground turn receive an implicit
+    # silent-treatment prompt.  A current BOUNDARY aftereffect below still
+    # supplies the actual foreground space constraint.
+
+    if outcome == "BOUNDARY":
+        facts.extend(
+            [
+                "关系事实：用户已明确要求空间；本轮尊重停顿，不把沉默或不回复解释成拒绝关系。",
+                "关系事实：上一轮触及了用户边界；先承认可能没有接住，再按用户给出的距离后退。",
+            ]
+        )
+        must_include.extend(
+            [
+                "自然确认会尊重对方的空间，不追问，不要求立刻回应。",
+                "如需回应边界，用第一人称承担自己的分寸，不替自己辩解。",
+            ]
+        )
         must_not_do.extend(
             [
                 "不要连续追问、催回复，或把担心、失落写成用户必须安抚你的责任。",
                 "不要把主动联系、亲密表达或继续讨论当前关系当作默认权限。",
+                "不要把边界包装成撒娇、玩笑、吃醋或更强烈的情感索取。",
             ]
         )
-        style_anchor.append("留白比补满更重要；短一些、稳一些，给对方保留退出空间。")
-
-    if outcome == "BOUNDARY":
-        facts.append("关系事实：上一轮触及了用户边界；先承认可能没有接住，再按用户给出的距离后退。")
-        must_include.append("如需回应边界，用第一人称承担自己的分寸，不替自己辩解。")
-        must_not_do.append("不要把边界包装成撒娇、玩笑、吃醋或更强烈的情感索取。")
-        style_anchor.append("克制地道歉或安静陪着都可以，但修复不能由七海单方面宣布完成。")
+        style_anchor.extend(
+            [
+                "留白比补满更重要；短一些、稳一些，给对方保留退出空间。",
+                "克制地道歉或安静陪着都可以，但修复不能由七海单方面宣布完成。",
+            ]
+        )
     elif outcome in _REPAIR_OUTCOMES or repair_required:
         facts.append("关系事实：这里仍有未解决的误解或裂痕；先听清、承认可能没接住，再把节奏交还给用户。")
         must_include.append("不要假装已经和好；给用户决定是否继续、何时继续的空间。")

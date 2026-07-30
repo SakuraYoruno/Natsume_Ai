@@ -40,6 +40,7 @@ _APPRAISAL_CANDIDATE_SELECTION_KINDS = frozenset(
     {
         "USER_BOUNDARY_OR_SPACE",
         "NATSUME_MAY_HAVE_HURT_USER",
+        "DIRECTED_DISRESPECT_TOWARD_NATSUME",
         "REPAIR_SIGNAL",
         "USER_MIXED_AFFECT",
     }
@@ -92,6 +93,7 @@ def _tag_for_component(value: Any) -> str:
         "RESPECT": "CALM",
         "OPENNESS": "CALM",
         "SHARED_JOY": "HAPPY",
+        "RELIEF": "CALM",
         "HURT": "SAD",
         "ANGER": "ANGRY",
     }.get(component, "CALM")
@@ -235,7 +237,6 @@ def build_affective_turn_guidance(
     aftereffect = _mapping(relationship_life.get("aftereffect"))
     aftereffect_outcome = _text(aftereffect.get("outcome")).upper()
     repair_required = bool(relationship_state.get("repair_required"))
-    proactive_permission = _text(relationship_state.get("proactive_permission"), default="UNKNOWN").upper()
     profile, profile_revision, profile_stage = _companion_profile_for_plan(
         relationship_life=relationship_life,
         workspace_id=expected_workspace,
@@ -254,7 +255,6 @@ def build_affective_turn_guidance(
         top_component=_text(top.get("emotion")).upper(),
         relationship_outcome=aftereffect_outcome,
         repair_required=repair_required,
-        proactive_permission=proactive_permission,
         observations=observations,
         appraisal_kind=appraisal_kind,
     )
@@ -430,11 +430,10 @@ def _select_companion_act(
     top_component: str,
     relationship_outcome: str,
     repair_required: bool,
-    proactive_permission: str,
     observations: Sequence[Mapping[str, Any]],
     appraisal_kind: str,
 ) -> str:
-    if proactive_permission == "DENIED" or regulation_mode in {"GIVE_SPACE", "QUIET_PRESENCE"}:
+    if regulation_mode in {"GIVE_SPACE", "QUIET_PRESENCE"}:
         return "GIVE_SPACE" if regulation_mode != "QUIET_PRESENCE" else "SILENCE"
     # The latest appraisal comes from the canonical self-affect head, never
     # from a public request hint.  It lets an explicit boundary, a direct
@@ -444,6 +443,8 @@ def _select_companion_act(
         return "GIVE_SPACE"
     if appraisal_kind in {"NATSUME_MAY_HAVE_HURT_USER", "REPAIR_SIGNAL"}:
         return "REPAIR"
+    if appraisal_kind == "DIRECTED_DISRESPECT_TOWARD_NATSUME":
+        return "SET_BOUNDARY"
     if appraisal_kind == "USER_MIXED_AFFECT":
         return "HOLD_COMPLEXITY"
     if repair_required or relationship_outcome in _REPAIR_OUTCOMES or regulation_mode == "SEEK_REPAIR":
@@ -484,6 +485,11 @@ def _has_low_confidence_or_conflicting_observation(
 def _text_pacing(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> str:
     if act_kind in {"GIVE_SPACE", "SILENCE"} or regulation_mode in {"GIVE_SPACE", "QUIET_PRESENCE"}:
         return "SPARSE"
+    if act_kind == "SET_BOUNDARY":
+        # A contained boundary should stay clear and grounded.  It may carry
+        # hurt, but must not become a breathless plea for the user to repair
+        # Natsume's feelings.
+        return "STEADY"
     if act_kind in {"COMFORT", "REPAIR", "HOLD_COMPLEXITY"} or emotion_tag == "SAD":
         return "SOFT"
     if act_kind == "PLAY" or emotion_tag == "HAPPY":
@@ -666,7 +672,7 @@ def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     elif act == "REPAIR":
         facts.append("陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。")
     elif act == "SET_BOUNDARY":
-        facts.append("陪伴动作：把界限说清楚但不伤人，不把自己的委屈变成对方的义务。")
+        facts.append("陪伴动作：可以诚实承认被刺到，但把界限说清楚且不伤人，不把自己的委屈变成对方的义务。")
     elif act in {"GIVE_SPACE", "SILENCE"}:
         facts.append("陪伴动作：尊重留白，短一点，不催促、不追问，也不把失落变成对方要安抚的责任。")
     elif act == "SOLVE":
@@ -688,6 +694,8 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         items.append("不要追问、催回复、连发安慰或把沉默解释为拒绝关系。")
     if plan.companion_act.kind == "REPAIR":
         items.append("不要要求原谅、替自己辩解，或把道歉写成修复已经完成。")
+    if plan.companion_act.kind == "SET_BOUNDARY":
+        items.append("不要威胁、羞辱、冷处理、索要道歉，或把自己的受伤变成对方必须负责的情感债。")
     if plan.companion_act.kind == "HOLD_COMPLEXITY":
         items.append("不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。")
     return tuple(items)

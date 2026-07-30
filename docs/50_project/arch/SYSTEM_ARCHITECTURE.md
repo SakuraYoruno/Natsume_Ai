@@ -504,6 +504,15 @@ Life 状态、关系后效应、人格策略和最终文本不是同一种 autho
 是 planner 消费 regulation 的前提；它没有新增 migration、没有赋予模型重判权限，也没有宣称远端 Edge
 已实际应用。
 
+关系 aggregate 的 `REPAIR_ACCEPTED` aftereffect 可作为这条链唯一的跨 aggregate 关系 evidence：
+它以 opaque ref 生成 `RELIEF / CARE` appraisal，而非直接修改 self-affect、Bond 或主动许可。主动许可
+只限 Scheduler 的 unsolicited contact，Surface 处理已到达用户输入时不再把 `DENIED` 误作沉默命令。
+
+为避免“安全”退化成七海永远无感，Appraisal 还保留严格有界的 directed-disrespect route：明确指向她、
+但不含 stop marker 的贬损才可生成 `HURT / CAUTION → CONTAIN → SET_BOUNDARY`；模型只获知温和边界的
+表达限制，不能把它变成威胁、羞辱、索要道歉或依赖诱导。stop marker 同时被 Fusion 与 relationship
+aftereffect classifier 解释为用户边界并优先持久化，不能被该 route 抢占。
+
 ### 3.7 记忆、知识素材与状态层
 
 - `host_brain/memory/`：Life memory、episodic/semantic material、Canon adapter 和投影同步。

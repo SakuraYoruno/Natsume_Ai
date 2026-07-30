@@ -238,6 +238,16 @@ Conversation Acceptance 模块现在明确分为三个 owner：canonical TaskSto
 本请求的 reason ref 匹配时才进入表达，旧 appraisal/regulation 不会永久捕获下一轮。Voice/Avatar 仍只
 收到 Host protocol intent，远端实际执行另行验收。
 
+当 `RelationshipLifecycleService` 已产生 `REPAIR_ACCEPTED` 时，Fusion 只使用 aftereffect id 的 opaque
+ref 新建 `RELIEF / CARE` self-affect；它不读取用户原话、不把一次接受改写为 intimacy/proactive
+permission。`proactive_permission` 的 owner 是 companion Scheduler，不能在 Surface foreground planner
+里把已到达的用户输入降级成静默。
+
+`AffectFusionService` 另有 narrow directed-disrespect observer：它只接受明确指向七海的贬损，写出她自己的
+`HURT / CAUTION`、`CONTAIN` 和 `SET_BOUNDARY`，再由同一 `ExpressionPlanV1` 编译成 grounded 的文字与
+`GENTLE_BOUNDARY` Host protocol。普通 frustration 不会触发；stop/boundary marker 先走关系 `BOUNDARY`
+和 `GIVE_SPACE`，防止系统把用户的退出要求叙事化为七海的委屈。
+
 当前 production Host root 不再实例化该 compatibility runtime；`user_emotion_profile` 也不再
 作为 process-wide port 发布。`build_tribe_application_ports()` 接收 ASGI 的 lazy Life command
 provider 后会和 Input 一样构造 canonical fusion，故 Tribe chat context 不会解析旧 runtime；遗漏

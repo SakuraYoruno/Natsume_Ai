@@ -64,11 +64,29 @@
   `CANONICAL_AFFECT_FUSION_NOT_INJECTED`，不会构造任何 compatibility runtime。
 - 同文件现覆盖三个可见因果：首次明确空间请求必须得到 canonical `GIVE_SPACE`，明确说明
   七海伤到用户必须得到 `REPAIR` 而非用户情绪镜像，可信喜忧并存必须得到
-  `HOLD_COMPLEXITY`，并断言对应 `RegulationDecisionV1` 使用正确 mode。`test_dl02_affect_fusion_restart.py`
+  `HOLD_COMPLEXITY`，明确指向七海的贬损才得到 `HURT / CAUTION → SET_BOUNDARY`；带 `闭嘴` 等
+  stop marker 的同一句则必须优先得到 `GIVE_SPACE`，并断言对应 `RegulationDecisionV1` 使用正确 mode。
+  `test_dl02_affect_fusion_restart.py`
   进一步以真实 SQLite 重开相同 request，断言 space Appraisal、regulation、snapshot digest 与 frozen
   plan identity 完全一致；测试中不使用 mock transport、raw media 或内存关系队列。当前受影响的
-  DL-01/DL-02/DL-04/DL-05/DL-06 定向集合为
-  `43 passed in 62.76s`；它不包含真实 provider、远端 Edge 或 DL-07 服务栈。
+  DL-01～DL-06 的受影响定向集合为
+  `63 passed in 100.54s`；它不包含真实 provider、远端 Edge 或 DL-07 服务栈。
+- `test_dl03_relationship_lifecycle.py::test_user_accepted_repair_reopens_foreground_without_restoring_proactive_permission`
+  验证 real SQLite relationship aftereffect 只以 opaque receipt 触发 `RELIEF / CARE`，并确认
+  `DENIED` 仍不恢复主动许可、却不会使当前用户输入静默。该验证不把一次 repair acceptance 升级为
+  长期满意度或真实外发证据。
+- `test_dl02_affect_fusion.py::test_rich_candidate_evidence_cannot_overflow_the_bounded_episode_contract`
+  使用八条 observation 与八条候选因果 receipt 验证 episode 仍严格限制为 16 条 evidence ref，
+  因果信息增加不能让原子 Life journal 写入失败。
+- `test_dl02_affect_fusion.py::test_fresh_directed_harm_outranks_a_preceding_repair_acceptance`
+  验证新的、明确指向七海的伤害反馈优先于较早的修复接受；只有同轮明确要求空间可以进一步压过修复，
+  避免把“曾修复过”误解成用户不能再表达受伤。
+- `test_dl03_relationship_surface_guidance.py::test_surface_compiler_does_not_inject_stale_space_constraints_after_repair_acceptance`
+  验证 `proactive_permission=DENIED` 仍留在 Scheduler trace，却不会把用户已经重新发起的 foreground
+  Chat 注入“给空间/不要求回应”的旧约束；当前 `BOUNDARY` aftereffect 则仍会保留这些约束。
+- `test_dl03_relationship_lifecycle.py::test_explicit_stop_persists_a_boundary_even_when_it_contains_disrespect`
+  与 restart 回归验证 `闭嘴` 等明确停止语义会优先形成 durable `BOUNDARY` 与 `DENIED` 主动权限，
+  即使同一句含有对七海的贬损也不会反向写入她的 `HURT` episode。
 - `test_ne01_host_lifecycle_composition.py` 与 `test_dl02_affect_fusion.py` 现额外验证
   production Host root 不再构造或发布 mutable `HostEmotionRuntime` / global user profile，
   ASGI Tribe 具备 Life authority 时会和 Input 一样走 canonical fusion，且不会解析旧 runtime。

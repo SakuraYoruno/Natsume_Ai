@@ -178,6 +178,57 @@ def test_relationship_projection_is_immutable_and_restarts_with_exact_digest(
     assert replayed.as_dict() == durable.as_dict()
 
 
+def test_explicit_stop_marker_remains_a_durable_boundary_after_restart(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dl03-stop-boundary-restart.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=database).apply_migrations(
+        request_id="dl03-stop-boundary-restart",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    repository = LifeCommandRepository(database)
+    service = LifeCommandService(repository, clock=lambda: NOW)
+    reader = LifeSnapshotReader(repository)
+    lifecycle = RelationshipLifecycleService(
+        command_service_provider=lambda: service,
+        snapshot_reader_provider=lambda: reader,
+        clock_ms=lambda: NOW,
+    )
+    lifecycle.provision_accepted_response(
+        workspace_id="workspace-restart",
+        relationship_subject_id="person-restart",
+        session_id="session-origin",
+        request_id="accepted-before-explicit-stop",
+        response_receipt={
+            "status": "APPLIED",
+            "event_id": "event-before-explicit-stop",
+            "command_id": "command-before-explicit-stop",
+            "created_at_ms": NOW,
+        },
+        response_text="我听着。",
+    )
+
+    aftereffect = lifecycle.record_followup(
+        request_body=_request("闭嘴。"),
+        request_id="followup-explicit-stop",
+    )
+    scope = RelationshipScope.from_request(_request(""))
+    before = reader.get_snapshot(scope.aggregate_id)
+
+    assert aftereffect.aftereffect is not None
+    assert aftereffect.aftereffect.outcome == "BOUNDARY"
+    assert before.state["relationship_v2"]["proactive_permission"] == "DENIED"
+
+    restarted_repository = LifeCommandRepository(database)
+    restarted_reader = LifeSnapshotReader(restarted_repository)
+    restarted_service = LifeCommandService(restarted_repository, clock=lambda: NOW)
+    replayed = restarted_service.replay(scope.aggregate_id)
+
+    assert replayed.state_digest == before.state_digest
+    assert restarted_reader.get_snapshot(scope.aggregate_id).as_dict() == before.as_dict()
+
+
 @pytest.mark.asyncio
 async def test_accepted_foreground_provisions_and_reconciles_relationship_episode(
     tmp_path: Path,

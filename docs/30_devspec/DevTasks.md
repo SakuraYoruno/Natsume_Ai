@@ -69,6 +69,17 @@ Fusion 路径生成 `RegulationDecisionV1`：空间为 `GIVE_SPACE`、修复为 
 event，不保存原话。该切片有 unit 与
 SQLite restart 证据，但未替代真人盲评、真实 provider、远端 Edge 或 DL-07 服务栈验收。
 
+DL-03 的 repair aftereffect 现在也会回流到当前 affect scope：只有 durable
+`REPAIR_ACCEPTED` receipt 才生成 `relationship_repair_accepted → RELIEF / CARE`，并以
+`relationship-aftereffect://` opaque ref 写入 Appraisal/Regulation；它不把一次接受放大成永久关系
+承诺。`proactive_permission=DENIED` 只保留在 Scheduler 的主动投递门禁，Surface foreground reply
+不会据此对当前主动输入冷处理。
+
+同一条 canonical 链还区分“用户要求停下”和“用户明确贬损七海”：前者（包括 `闭嘴`、`别来烦我`）必须
+形成 durable `BOUNDARY`、`GIVE_SPACE` 和 `DENIED` 主动许可；后者仅在明确指向七海且无停止语义时才形成
+`HURT / CAUTION → CONTAIN → SET_BOUNDARY`。它是可解释的当轮 self-affect，不是要求道歉、关系降级或
+永久人格变化。
+
 DL-04 当前新增的是一条**已入场 frozen Chat 的本地 acceptance 证据链**，不是普通 Chat 封板：
 Gateway service principal 保留为 command/lease/grant/delivery authority，canonical Runtime Context 的
 `subject_id` 与 workspace 才进入七海的 AffectiveTurnPlan、conversation、Life、Memory 与 reply projection。

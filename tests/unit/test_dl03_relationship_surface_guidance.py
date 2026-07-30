@@ -48,6 +48,17 @@ def _trusted_boundary_context() -> dict[str, object]:
     }
 
 
+def _trusted_repair_acceptance_context() -> dict[str, object]:
+    context = _trusted_boundary_context()
+    relationship_life = context["affective_life"]["relationship_life"]
+    relationship_life["state"]["repair_required"] = False
+    relationship_life["aftereffect"] = {
+        "outcome": "REPAIR_ACCEPTED",
+        "user_input_ref": "relationship-user-input://sha256/opaque",
+    }
+    return context
+
+
 def _agent_input(*, emotion_context: dict[str, object]) -> SimpleNamespace:
     return SimpleNamespace(
         request_id="dl03-boundary-turn",
@@ -94,6 +105,16 @@ def test_boundary_guidance_never_converts_space_into_relational_debt() -> None:
     assert "relationship-user-input://" not in str(guidance.trace())
 
 
+def test_denied_proactive_permission_does_not_constrain_a_reengaged_foreground_turn() -> None:
+    guidance = build_relationship_reply_guidance(_trusted_repair_acceptance_context())
+
+    assert guidance.proactive_permission == "DENIED"
+    assert guidance.aftereffect_outcome == "REPAIR_ACCEPTED"
+    assert any("可以自然回暖" in item for item in guidance.facts)
+    assert not any("明确要求空间" in item for item in guidance.facts)
+    assert not any("不要求立刻回应" in item for item in guidance.must_include)
+
+
 def test_surface_compiler_injects_canonical_boundary_constraints(
     monkeypatch,
     surface_runtime_ports_factory,
@@ -114,3 +135,25 @@ def test_surface_compiler_injects_canonical_boundary_constraints(
     assert any("不要求立刻回应" in item for item in payload.task_control["must_include"])
     assert any("负罪施压" in item for item in payload.task_control["must_not_do"])
     assert trace["relationship_life_guidance"]["aftereffect_outcome"] == "BOUNDARY"
+
+
+def test_surface_compiler_does_not_inject_stale_space_constraints_after_repair_acceptance(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    trace: dict[str, object] = {}
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        _agent_input(emotion_context=_trusted_repair_acceptance_context()),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert any("可以自然回暖" in item for item in payload.task_control["facts"])
+    assert not any("明确要求空间" in item for item in payload.task_control["facts"])
+    assert not any("不要求立刻回应" in item for item in payload.task_control["must_include"])
+    assert trace["relationship_life_guidance"]["proactive_permission"] == "DENIED"

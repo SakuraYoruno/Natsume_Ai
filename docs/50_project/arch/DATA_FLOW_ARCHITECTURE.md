@@ -511,6 +511,18 @@ Appraisal event kind：它们分别冻结 `GIVE_SPACE`、`REPAIR` 与 `HOLD_COMP
 本请求匹配的 regulation。用户的 `SAD/HAPPY` 分布、原话和原始模态不会越过这条边界成为
 self-affect 或 Surface 的可伪造输入。
 
+`RelationshipLifecycleService` 在当前输入前先重开关系 aggregate 的 accepted aftereffect。只有
+`REPAIR_ACCEPTED` 会作为 opaque `relationship-aftereffect://` evidence 进入 Fusion，继而生成
+`relationship_repair_accepted → RELIEF / CARE → EXPRESS`；关系修复没有 raw text 回灌，也不恢复
+proactive permission。foreground Surface 不读取该 permission 作静默开关，Scheduler 才拥有其主动
+delivery 解释权。
+
+另一路只有在 transient 输入明确指向七海、且不包含 stop marker 时才成立：
+`directed_disrespect_toward_natsume → HURT / CAUTION → CONTAIN → SET_BOUNDARY → GENTLE_BOUNDARY`。
+其 Appraisal/episode 只保存 opaque event ref；普通用户挫败没有这条边。若输入含 `闭嘴`、`别来烦我`、
+`少管我` 或 `滚开`，Fusion 与 RelationshipLifecycle 同时优先 `BOUNDARY/GIVE_SPACE`，关系 aftereffect
+持久禁用 unsolicited Scheduler contact，不让受伤表达抢占用户边界。
+
 ~~~mermaid
 flowchart LR
     I["Secure Input / Chat / Gateway"] --> P["InputRuntimeApplicationPorts"]

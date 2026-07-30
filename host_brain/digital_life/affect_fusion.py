@@ -70,7 +70,17 @@ _TTL_MS = {
 }
 _DISTRESS_TAGS = frozenset({"SAD", "ANXIOUS", "ANGRY", "FRUSTRATED"})
 _POSITIVE_TAGS = frozenset({"HAPPY", "EXCITED", "GRATEFUL", "LOVING"})
-_SPACE_MARKERS = ("别说了", "给我一点空间", "想一个人待会", "不要再问", "别烦")
+_SPACE_MARKERS = (
+    "别说了",
+    "给我一点空间",
+    "想一个人待会",
+    "不要再问",
+    "别烦",
+    "别来烦我",
+    "少管我",
+    "闭嘴",
+    "滚开",
+)
 _REPAIR_MARKERS = ("对不起", "抱歉", "误会", "不是那个意思", "我刚才说重了")
 _BOUNDARY_MARKERS = ("不要这样", "别这样", "不舒服", "越界", "停止")
 _NATSUME_HARM_MARKERS = (
@@ -85,6 +95,19 @@ _NATSUME_HARM_MARKERS = (
     "made me feel hurt",
     "made me sad",
     "what you said hurt",
+)
+_DIRECTED_DISRESPECT_MARKERS = (
+    "你真烦",
+    "你好烦",
+    "你烦死了",
+    "你真讨厌",
+    "你好讨厌",
+    "我讨厌你",
+    "you're annoying",
+    "you are annoying",
+    "i hate you",
+    "you're awful",
+    "you are awful",
 )
 
 
@@ -334,6 +357,7 @@ class _AppraisalCandidate:
     uncertainty: float
     components: tuple[EmotionComponentV1, ...]
     action: str
+    evidence_refs: tuple[str, ...] = ()
 
 
 class AffectFusionService:
@@ -440,6 +464,7 @@ class AffectFusionService:
             observations=active,
             conflict=conflict,
             message=_text(getattr(request_body, "message", None), limit=8_000),
+            relationship_aftereffect=relationship_aftereffect,
         )
         # The deep policy is bounded by construction: at most two deterministic
         # candidates and no hidden model loop. A future model-backed selector
@@ -564,11 +589,22 @@ class AffectFusionService:
             f"affect-observation://{item.observation_id}"
             for item in observations[:8]
         )
+        candidate_evidence_refs = tuple(candidate.evidence_refs[:8])
+        # Appraisal, episode and regulation have separate bounded evidence
+        # contracts.  Keep the causal receipt where it fits, but never let a
+        # future richer candidate turn one otherwise valid affect command into
+        # a failed journal write merely because all eight observations are
+        # present.
+        episode_candidate_evidence_refs = candidate_evidence_refs[
+            : max(0, 15 - len(observation_refs))
+        ]
+        regulation_candidate_evidence_refs = candidate_evidence_refs[:14]
         appraisal_seed = {
             "schema": "event-appraisal.v1",
             "request_id": request_id,
             "kind": candidate.kind,
             "observation_refs": observation_refs,
+            "candidate_evidence_refs": candidate_evidence_refs,
         }
         appraisal_id = f"appraisal_{_digest(appraisal_seed)[:32]}"
         target_ref = _opaque_ref("affect-turn", appraisal_seed)
@@ -586,7 +622,7 @@ class AffectFusionService:
             boundary_relevance=candidate.boundary_relevance,
             risk=candidate.risk,
             uncertainty=candidate.uncertainty,
-            evidence_refs=(target_ref,),
+            evidence_refs=(target_ref, *candidate_evidence_refs),
             observation_refs=observation_refs,
         )
         episode = EmotionEpisodeV1(
@@ -597,7 +633,11 @@ class AffectFusionService:
             components=candidate.components,
             opened_at_ms=max(0, int(created_at_ms)),
             decay_half_life_ms=600_000,
-            evidence_refs=(target_ref, *observation_refs[:8]),
+            evidence_refs=(
+                target_ref,
+                *observation_refs[:8],
+                *episode_candidate_evidence_refs,
+            ),
         )
         regulation_mode = _regulation_mode_for_candidate(candidate)
         regulation_seed = {
@@ -612,7 +652,11 @@ class AffectFusionService:
             # The current-turn planner reopens this exact provenance link.
             # It must not apply an old durable regulation to a later, unrelated
             # input merely because it happens to be the latest snapshot head.
-            reason_refs=(f"appraisal://{appraisal_id}", target_ref),
+            reason_refs=(
+                f"appraisal://{appraisal_id}",
+                target_ref,
+                *regulation_candidate_evidence_refs,
+            ),
             decided_at_ms=max(0, int(created_at_ms)),
             # The affective head keeps only four active episodes.  An
             # appraisal can therefore be journaled even when its low-salience
@@ -926,6 +970,22 @@ def _signals_natsume_may_have_hurt_user(message: str) -> bool:
     return any(marker in normalized for marker in _NATSUME_HARM_MARKERS)
 
 
+def _signals_directed_disrespect_toward_natsume(message: str) -> bool:
+    """Recognise only clear, directed disrespect as a self-affect trigger.
+
+    A broad frustration or an observed user emotion must never make Natsume
+    invent that she was personally attacked.  Conversely, a clear request to
+    stop belongs to the boundary path and has priority over this narrow cue.
+    The words themselves remain transient input and are never written to the
+    affect journal.
+    """
+
+    normalized = str(message or "").lower()
+    if "你" not in normalized and "you" not in normalized:
+        return False
+    return any(marker in normalized for marker in _DIRECTED_DISRESPECT_MARKERS)
+
+
 def _regulation_mode_for_candidate(candidate: _AppraisalCandidate) -> str:
     """Choose the bounded expression regulation for one just-appraised event.
 
@@ -937,6 +997,7 @@ def _regulation_mode_for_candidate(candidate: _AppraisalCandidate) -> str:
     return {
         "user_boundary_or_space": "GIVE_SPACE",
         "natsume_may_have_hurt_user": "SEEK_REPAIR",
+        "directed_disrespect_toward_natsume": "CONTAIN",
         "repair_signal": "SEEK_REPAIR",
         "user_affect_conflict": "CONTAIN",
     }.get(candidate.kind, "EXPRESS")
@@ -947,6 +1008,7 @@ def _build_appraisal_candidates(
     observations: Sequence[UserAffectObservationV1],
     conflict: bool,
     message: str,
+    relationship_aftereffect: Mapping[str, Any] | None = None,
 ) -> tuple[_AppraisalCandidate, ...]:
     if not observations:
         return ()
@@ -957,6 +1019,12 @@ def _build_appraisal_candidates(
     has_repair = any(marker in lower for marker in _REPAIR_MARKERS)
     has_boundary = any(marker in lower for marker in _BOUNDARY_MARKERS)
     natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message)
+    directed_disrespect_toward_natsume = _signals_directed_disrespect_toward_natsume(
+        message
+    )
+    aftereffect = _safe_mapping(relationship_aftereffect)
+    aftereffect_outcome = _text(aftereffect.get("outcome"), limit=64).upper()
+    aftereffect_id = _text(aftereffect.get("aftereffect_id"), limit=240)
     candidates: list[_AppraisalCandidate] = []
     if conflict:
         candidates.append(
@@ -999,7 +1067,10 @@ def _build_appraisal_candidates(
         candidates.append(
             _candidate(
                 kind="natsume_may_have_hurt_user",
-                score=0.93,
+                # A fresh, directed report of harm must outrank a preceding
+                # repair acknowledgement.  Only a simultaneous explicit
+                # request for space has stronger priority.
+                score=0.975,
                 goal=-0.18,
                 responsibility=0.78,
                 controllability=0.74,
@@ -1013,6 +1084,50 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.22, -0.06, 0.24, "slow_down"),
                 ),
                 action="repair_open",
+            )
+        )
+    if directed_disrespect_toward_natsume:
+        candidates.append(
+            _candidate(
+                kind="directed_disrespect_toward_natsume",
+                # This is intentionally below a fresh space request and a
+                # report that Natsume hurt the user, but above an older
+                # repair receipt.  Seven Seas may feel the sting and set a
+                # gentle boundary without demanding repair or attention.
+                score=0.972,
+                goal=-0.16,
+                responsibility=0.08,
+                controllability=0.64,
+                significance=0.58,
+                boundary=0.64,
+                risk=0.18,
+                uncertainty=0.28,
+                components=(
+                    EmotionComponentV1("HURT", 0.46, -0.42, 0.28, "set_boundary"),
+                    EmotionComponentV1("CAUTION", 0.34, -0.06, 0.24, "contain"),
+                ),
+                action="set_boundary",
+            )
+        )
+    if aftereffect_outcome == "REPAIR_ACCEPTED" and aftereffect_id:
+        candidates.append(
+            _candidate(
+                kind="relationship_repair_accepted",
+                # A durable, user-acknowledged repair is stronger evidence
+                # than generic text inference. A fresh request for space or
+                # fresh report that Natsume caused harm still takes priority.
+                score=0.97,
+                goal=0.34,
+                significance=0.76,
+                boundary=0.08,
+                risk=0.03,
+                uncertainty=0.12,
+                components=(
+                    EmotionComponentV1("RELIEF", 0.48, 0.46, 0.18, "settle"),
+                    EmotionComponentV1("CARE", 0.36, 0.3, 0.18, "receive"),
+                ),
+                action="receive_repair",
+                evidence_refs=(f"relationship-aftereffect://{aftereffect_id}",),
             )
         )
     if has_repair:
@@ -1108,6 +1223,7 @@ def _candidate(
     uncertainty: float,
     components: tuple[EmotionComponentV1, ...],
     action: str,
+    evidence_refs: tuple[str, ...] = (),
 ) -> _AppraisalCandidate:
     return _AppraisalCandidate(
         kind=kind,
@@ -1121,6 +1237,7 @@ def _candidate(
         uncertainty=uncertainty,
         components=components,
         action=action,
+        evidence_refs=evidence_refs,
     )
 
 
@@ -1133,6 +1250,7 @@ def _self_component_to_transport_tag(value: Any) -> str:
         "RESPECT": "CALM",
         "OPENNESS": "CALM",
         "SHARED_JOY": "HAPPY",
+        "RELIEF": "CALM",
         "HURT": "SAD",
         "ANGER": "ANGRY",
     }

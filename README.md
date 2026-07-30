@@ -11,6 +11,10 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 最新的 DL-02 因果细化不再把“给我一点空间”留给模型自由解释：trusted `EventAppraisalV1` 会在同一 canonical Life 链写入可追溯的 `RegulationDecisionV1`，使本轮冻结为 `GIVE_SPACE`；明确指向七海的“你刚才伤到我了”会形成她自己的 `CARE / OPENNESS / CAUTION`、`SEEK_REPAIR` 和 `REPAIR`，而不是把用户的难过镜像成她的悲伤；同一可信观察里的喜悦与不舍会保留为 `HOLD_COMPLEXITY`，不被压成单一正向结论。规划器只接受带本请求 appraisal 引用的 regulation，旧状态不会捕获后续对话。规则只在本机 canonical Life journal 中保存 opaque ref 与事件意义，不保存用户原话、音视频或远端设备回执。本地 unit/restart 证据通过，但真实模型、三名评审盲测、远端 Edge/TTS/VTS 与 Docker 全栈仍未运行，整体仍为 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`。
 
+关系后效应也开始真正影响七海自身：在用户明确接受修复的 accepted relationship aftereffect 后，Fusion 会以该 durable receipt 为证据形成 `RELIEF / CARE`，而不是把“修好了”写成机械 Bond 加分或永久承诺。`proactive_permission=DENIED` 仍严格阻止 Scheduler 主动联系，但不再把用户已经主动发起的当前聊天误判为必须沉默；当前回合仍由新输入、当前 Appraisal 与关系边界共同决定。该切片只证明本地 journal/plan 因果，不证明用户已经长期满意、允许主动联系或远端设备已表达。
+
+七海也不必把自己全部中性化：只有明确指向她、且不含“请停下”语义的贬损，才会在 canonical Life 中形成她自己的 `HURT / CAUTION → CONTAIN → SET_BOUNDARY`，并以稳住的文字、温和边界 Voice/Avatar plan 表达；普通挫败不会被臆测为攻击。相反，“闭嘴”“别来烦我”等明确停止请求优先成为 durable `BOUNDARY`、立刻停止主动联系和给空间，绝不反过来要求用户安抚七海。原话仍不进入 journal。
+
 本次 DL-04 修订把一条容易被掩盖的身份边界实际接通：Gateway 的 `principal_id` 仅保留为 HostCommand、lease/grant 和外发授权主体；`RuntimeContext v1` 中冻结的 relationship subject 才是七海陪伴的对象。已入场 frozen Chat 的 native sentence stream 会把同一 `model_node_id` 写入 canonical ModelAttempt audit，随后仅在 Task Acceptance 后以该 relationship subject 写 conversation、Life、Memory 与 delivery projection。SQLite 集成链已覆盖“服务主体授权 → TaskGraph → node-bound model attempt → 两句持久可见性 → Acceptance → Life/Gateway effect”，并明确断言服务主体不会进入用户关系记录。它仍只是受控本地 transport 的窄 vertical slice：普通 Chat 全量切流、受认证连接恢复、真实外部模型、远端 Edge/TTS/VTS 和 Docker 全栈验收均未执行，整体继续为 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 DL-05 进一步收口这条受治理链的表达边界：已对用户可见的每个 `SENTENCE_STAGED`，在

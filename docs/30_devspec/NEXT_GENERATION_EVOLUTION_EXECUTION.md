@@ -118,6 +118,14 @@ raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life ev
   `SAD/HAPPY` 写入 self-affect。选定 candidate 会同步写可回放的 `RegulationDecisionV1`；
   Planner 仅当其 reason ref 绑定本请求 `appraisal_id` 时才使用，跨进程 exact replay 仍由同一
   Life command identity 保证。
+- 关系 aggregate 已产生的 `REPAIR_ACCEPTED` aftereffect 也是唯一可进入此 scope 的关系证据：
+  Fusion 以其 opaque receipt ref 形成 `relationship_repair_accepted` 的 `RELIEF / CARE`，不会从
+  原话、Bond 或一次道歉猜测“已经和好”。`proactive_permission=DENIED` 只禁止未被请求的
+  Scheduler contact，不能使当前明确输入变成 `GIVE_SPACE/SILENCE`。
+- 明确、指向七海且不带停止语义的贬损会进入 bounded `directed_disrespect_toward_natsume` Appraisal，
+  使七海形成 `HURT / CAUTION`、以 `CONTAIN` 调节并选择 `SET_BOUNDARY`；Surface 不得把它扩张为
+  威胁、冷处理、索要道歉或情感债。`闭嘴/别来烦我/少管我/滚开` 等停止语义优先写 relationship
+  `BOUNDARY`，因此绝不会先把用户变成需要安抚七海的人。
 
 本地覆盖包含 9 项 DL-02 unit/restart 集成和 73 项受影响 Host/聊天/内核回归。它不
 证明真实 Host 部署、模型、语音、Avatar、关系后效应或旧 writer 已清零。
