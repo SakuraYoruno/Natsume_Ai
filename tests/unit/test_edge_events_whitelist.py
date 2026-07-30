@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -401,7 +402,9 @@ def test_schedule_edge_asr_bridge_dedups_same_text_same_seq(
     assert len(scheduled) == 1
 
 
-def test_edge_events_emotion_triggers_cortex_bond_update(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_edge_events_emotion_is_logged_without_legacy_bond_or_avatar_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     ledger = _LedgerStub()
 
     class _CortexAgent:
@@ -456,9 +459,9 @@ def test_edge_events_emotion_triggers_cortex_bond_update(monkeypatch: pytest.Mon
     )
 
     assert response.accepted == 1
-    assert len(fake_cortex.calls) == 1
-    call = fake_cortex.calls[0]
-    assert call["request_id"] == "req-edge-emotion-1"
-    assert call["session_id"] == "sess-edge-emotion-1"
-    assert call["user_message"] == "今天真的很开心"
-    assert call["emotion_context"]["emotion_tag"] == "JOY"
+    assert ledger.rows[0]["event_type"] == "EMOTION_DETECTED"
+    assert fake_cortex.calls == []
+
+    source = Path(system_handler.__file__).read_text(encoding="utf-8")
+    assert "post_process_bond_update(" not in source
+    assert "_drive_stream_vts_emotion(" not in source

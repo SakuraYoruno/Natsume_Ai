@@ -95,6 +95,11 @@ snapshot 最多保留 4 个 active episode、8 个 component 和 16 个 evidence
 raw text/audio/image/model-chain 键会被拒绝。1002 个真实 SQLite Life event
 的 restart/replay digest 已在本地测试中一致。
 
+本次补充的 DL-01 cutover 关闭 Edge 入站的旧双写：`EMOTION_DETECTED`、`USER_REACTION` 和类似 telemetry
+只写入审计观测，不能后台调用 Cortex Bond writer 或 VTS driver。最终 ASR 文本仍可进入标准 Host Input，随后才可能
+经 scope、Fusion、Appraisal 和 accepted `AffectiveTurnPlanV1` 形成七海的表达；远端 Edge 未启动，也没有将此定为
+设备实测。
+
 这只证明内核和持久化 UoW 已完成本地验证；Host ingress、实际 Fusion/Appraisal
 服务和旧 compatibility writer 的清零分别属于 DL-02 与 DL-06，不能据此称为
 完整情感生命或生产切流。

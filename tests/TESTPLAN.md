@@ -32,6 +32,9 @@
 - T-DL01-05：1002 个真实 file-backed SQLite Life event 的 duplicate、replay、
   restart 必须得到同一 snapshot digest；这只证明 kernel local evidence，
   不能提升为 Host ingress、真实模型、语音/Avatar 或体验验收 PASS。
+- T-DL01-06：Edge `EMOTION_DETECTED`、`USER_REACTION` 等入站 telemetry 只能审计或经 final ASR
+  进入标准 Host Input；不得直接调用 Bond writer、写七海 self-affect 或驱动 VTS。Voice/Avatar 只能从已接受的
+  `AffectiveTurnPlanV1` / `ExpressionPlanV1` 发起，远端 Edge 未启动时不得声称设备实测。
 
 ## T-DL02-AFFECT-FUSION-APPRAISAL
 
