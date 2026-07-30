@@ -2,6 +2,10 @@
 
 from .contracts_and_normalization import *  # noqa: F403
 from .worker_dispatch import _dispatch_to_graph
+from host_brain.runtime.conversation_scope import (
+    GatewayConversationScopeError,
+    SecureGatewayConversationScopeV1,
+)
 
 async def receive_input(
     body: InputPayload,
@@ -132,6 +136,7 @@ async def receive_input(
         "claim_ref": gateway_ingress.claim_ref,
         "audit_ref": gateway_ingress.audit_ref,
         "principal_id": gateway_ingress.principal_id,
+        "tenant_id": gateway_ingress.tenant_id,
         "idempotency_key": gateway_ingress.idempotency_key,
         "body_sha256": gateway_ingress.body_sha256,
     }
@@ -151,6 +156,65 @@ async def receive_input(
                 payload["content"] = placeholder_text
                 payload["content_is_multimodal_placeholder"] = True
                 text = placeholder_text
+
+    gateway_scope: SecureGatewayConversationScopeV1 | None = None
+    if source == "GATEWAY":
+        try:
+            gateway_scope = SecureGatewayConversationScopeV1.derive(
+                principal_id=gateway_ingress.principal_id,
+                tenant_id=gateway_ingress.tenant_id,
+                platform=payload.get("platform"),
+                from_id=payload.get("from_id"),
+                person_id=payload.get("person_id"),
+                conversation_id=payload.get("conversation_id"),
+            )
+        except GatewayConversationScopeError as exc:
+            reason_code = str(exc) or "GATEWAY_CONVERSATION_SCOPE_INVALID"
+            _log_input_event(
+                ledger=_get_ledger_safe(ports=ports),
+                request_id=request_id,
+                session_id=session_id,
+                source=source,
+                input_payload=payload,
+                phase="REJECTED",
+                status="REJECTED",
+                reason_code=reason_code,
+                detail="signed Gateway input has no safe relationship subject",
+                ts_ms=ts_ms,
+            )
+            if not _persist_gateway_ingress_result(
+                gateway_ingress,
+                request_id=request_id,
+                status="REJECTED",
+                at_ms=ts_ms,
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="gateway durable rejection result unavailable",
+                )
+            return InputResponse(
+                success=False,
+                request_id=request_id,
+                source=source,
+                status="REJECTED",
+                detail=reason_code,
+                ts_ms=ts_ms,
+                **_host_input_receipt_fields(
+                    gateway_ingress,
+                    receipt_ref=_host_input_result_ref(
+                        request_id=request_id,
+                        status="REJECTED",
+                    ),
+                ),
+            )
+        payload["secure_gateway_conversation_scope_v1"] = gateway_scope.to_dict()
+        # All downstream consumers receive the same scope.  In particular,
+        # AffectFusion must never see a caller-selected person/workspace or
+        # collapse multiple signed Gateway users into the legacy ``default``.
+        payload["person_id"] = gateway_scope.relationship_subject_id
+        payload["workspace_id"] = gateway_scope.workspace_id
+        payload["session_id"] = gateway_scope.session_id
+        session_id = gateway_scope.session_id
     if source == "ASR":
         allow_asr, reject_reason = _evaluate_asr_noise_gate(text=text, payload=payload)
         if not allow_asr:
@@ -251,15 +315,16 @@ async def receive_input(
         )
 
     try:
-        from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
+        if source != "GATEWAY":
+            from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
 
-        payload["person_id"] = resolve_person_id(
-            str(body.person_id or "").strip() or None,
-            session_id=session_id,
-            platform=str(body.platform or "").strip() or None,
-            from_id=str(body.from_id or "").strip() or None,
-            conversation_id=str(body.conversation_id or "").strip() or None,
-        )
+            payload["person_id"] = resolve_person_id(
+                str(body.person_id or "").strip() or None,
+                session_id=session_id,
+                platform=str(body.platform or "").strip() or None,
+                from_id=str(body.from_id or "").strip() or None,
+                conversation_id=str(body.conversation_id or "").strip() or None,
+            )
         ports.notify_user_interaction()
     except Exception:
         pass
@@ -302,8 +367,15 @@ async def receive_input(
             proposal_status = "NOT_CONFIGURED"
             proposal_id = ""
             if callable(ports.get_evolution_activation_service):
-                workspace_id, _owner_id = (
+                configured_workspace_id, _owner_id = (
                     ports.require_evolution_scope()
+                )
+                # Signed Gateway feedback belongs to the exact tenant scope
+                # that produced the response; a process-wide Evolution owner
+                # is only the local/legacy fallback and must not merge users.
+                workspace_id = (
+                    str(payload.get("workspace_id") or "").strip()
+                    or str(configured_workspace_id or "").strip()
                 )
                 proposal_result = dict(
                     ports.require_evolution_activation_service()
@@ -423,6 +495,11 @@ async def receive_input(
                     "claim_ref": gateway_ingress.claim_ref,
                     "audit_ref": gateway_ingress.audit_ref,
                     "body_sha256": gateway_ingress.body_sha256,
+                    **(
+                        gateway_scope.as_command_authority()
+                        if gateway_scope is not None
+                        else {}
+                    ),
                 },
                 ports=ports,
             )

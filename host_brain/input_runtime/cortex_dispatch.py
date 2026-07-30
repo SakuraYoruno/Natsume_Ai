@@ -161,12 +161,25 @@ async def _run_cortex_orchestrator_pipeline(
     build_chat_governance_snapshot = ports.build_chat_governance_snapshot
     resolve_chat_emotion_context = ports.resolve_chat_emotion_context
     from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
+    from host_brain.runtime.conversation_scope import (  # noqa: PLC0415
+        GatewayConversationScopeError,
+        SecureGatewayConversationScopeV1,
+    )
     ChatRequest = ports.chat_request_factory
     cortex_orchestrator_sse_generator = ports.cortex_orchestrator_sse_generator
     from host_brain.governor.route_token import (  # noqa: PLC0415
         RouteTokenDisposition,
         validate_governor_route_token,
     )
+
+    # Verify the Secure Ingress envelope *before* any affect or relationship
+    # consumer can open a scope.  The old ordering admitted user observations
+    # under a legacy default identity before checking the governed principal.
+    governed_authority: dict[str, Any] | None = None
+    if governed_command_application_provider is not None:
+        governed_authority = _require_governed_command_authority(
+            command_authority,
+        )
 
     reply_channel = str(payload.get("platform") or "").strip() or None
     reply_target = str(payload.get("conversation_id") or "").strip() or None
@@ -182,13 +195,46 @@ async def _run_cortex_orchestrator_pipeline(
         ts_ms=ts_ms,
     )
     message_text = str(text or "").strip()
-    person_id = resolve_person_id(
-        str(payload.get("person_id") or "").strip() or None,
-        session_id=session_id,
-        platform=reply_channel,
-        from_id=str(payload.get("from_id") or "").strip() or None,
-        conversation_id=reply_target,
+    source_upper = str(source or "").strip().upper()
+    workspace_id: str | None
+    gateway_scope_required = bool(
+        governed_command_application_provider is not None
+        or command_authority
+        or payload.get("secure_gateway_conversation_scope_v1") is not None
     )
+    if source_upper == "GATEWAY" and gateway_scope_required:
+        try:
+            raw_scope = payload.get("secure_gateway_conversation_scope_v1")
+            if not isinstance(raw_scope, dict):
+                raise GatewayConversationScopeError(
+                    "GATEWAY_CONVERSATION_SCOPE_PAYLOAD_REQUIRED"
+                )
+            gateway_scope = SecureGatewayConversationScopeV1.from_dict(raw_scope)
+            gateway_scope.assert_bound_to_authority(
+                governed_authority or command_authority
+            )
+        except GatewayConversationScopeError as exc:
+            # This occurs before AffectFusion/Appraisal.  A signed external
+            # sender must never fall back to the single-user Bond default.
+            raise RuntimeError(str(exc) or "GATEWAY_CONVERSATION_SCOPE_INVALID") from exc
+        if session_id != gateway_scope.session_id:
+            raise RuntimeError("GATEWAY_CONVERSATION_SCOPE_SESSION_DRIFT")
+        person_id = gateway_scope.relationship_subject_id
+        workspace_id = gateway_scope.workspace_id
+    else:
+        # The only production Gateway entrypoint is ``receive_input``, which
+        # always supplies the signed scope above.  This branch preserves old
+        # isolated/offline unit adapters that call this internal helper
+        # directly without a Secure Ingress envelope; it is never a substitute
+        # for the authenticated transport boundary.
+        person_id = resolve_person_id(
+            str(payload.get("person_id") or "").strip() or None,
+            session_id=session_id,
+            platform=reply_channel,
+            from_id=str(payload.get("from_id") or "").strip() or None,
+            conversation_id=reply_target,
+        )
+        workspace_id = str(payload.get("workspace_id") or "").strip() or None
     response_form = str(payload.get("response_form") or payload.get("planned_response_form") or "").strip() or None
     resolved_render_profile = derive_render_profile_for_response_form(response_form)
     if resolved_render_profile == "ja_voice":
@@ -200,7 +246,7 @@ async def _run_cortex_orchestrator_pipeline(
 
     request_body = ChatRequest(
         message=message_text,
-        workspace_id=str(payload.get("workspace_id") or "").strip() or None,
+        workspace_id=workspace_id,
         person_id=person_id,
         session_id=session_id,
         emotion_tag=request_emotion_tag,
@@ -244,14 +290,9 @@ async def _run_cortex_orchestrator_pipeline(
 
     # A governed Host Input is owned by the authenticated ingress principal,
     # not by the conversational person projection.  The latter remains in the
-    # request/person context, while the former must be frozen into the
-    # Governor decision so its durable grant can later derive node grants for
-    # the exact HostCommand principal.
-    governed_authority: dict[str, Any] | None = None
-    if governed_command_application_provider is not None:
-        governed_authority = _require_governed_command_authority(
-            command_authority,
-        )
+    # request/person context, while the former is already verified above and
+    # is now frozen into the Governor decision for exact node grant derivation.
+    if governed_authority is not None:
         intent_draft = dict(intent_draft or {})
         intent_draft["principal_id"] = governed_authority["principal_id"]
 
@@ -386,11 +427,12 @@ async def _run_cortex_orchestrator_pipeline(
 
 def _require_governed_command_authority(
     command_authority: dict[str, Any] | None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """Validate the exact Secure Ingress identity before Governor admission."""
 
-    authority = {
-        key: str(dict(command_authority or {}).get(key) or "").strip()
+    raw_authority = dict(command_authority or {})
+    authority: dict[str, Any] = {
+        key: str(raw_authority.get(key) or "").strip()
         for key in (
             "principal_id",
             "tenant_id",
@@ -404,6 +446,23 @@ def _require_governed_command_authority(
         raise RuntimeError(
             "governed_command_authority_incomplete:" + ",".join(missing)
         )
+    raw_scope = raw_authority.get("secure_gateway_conversation_scope_v1")
+    if raw_scope is not None:
+        from host_brain.runtime.conversation_scope import (  # noqa: PLC0415
+            GatewayConversationScopeError,
+            SecureGatewayConversationScopeV1,
+        )
+
+        try:
+            if not isinstance(raw_scope, dict):
+                raise GatewayConversationScopeError(
+                    "GATEWAY_CONVERSATION_SCOPE_AUTHORITY_INVALID"
+                )
+            scope = SecureGatewayConversationScopeV1.from_dict(raw_scope)
+            scope.assert_bound_to_authority(authority)
+        except GatewayConversationScopeError as exc:
+            raise RuntimeError(str(exc) or "GATEWAY_CONVERSATION_SCOPE_INVALID") from exc
+        authority["secure_gateway_conversation_scope_v1"] = scope.to_dict()
     return authority
 
 

@@ -25,14 +25,14 @@ sequenceDiagram
     S->>D: accept inbox with idempotency key
     D-->>S: accepted/duplicate receipt
     D->>H: authenticated Host input
-    H->>H: verify HMAC, normalize identity and attachments
+    H->>H: verify HMAC; bind principal/tenant + sender/conversation scope
     H->>T: submit canonical request
     T-->>H: authenticated Host receipt
     H-->>D: completion receipt
     D-->>P: platform-specific acknowledgement
 ```
 
-Gateway durable inbox 负责重复消息、claim、retry 和 uncertain/DLQ 状态。Host 业务是否允许执行仍由 Secure Ingress、Governor 和 Task Runtime 决定，Gateway receipt 不能替代 Host Acceptance。
+Gateway durable inbox 负责重复消息、claim、retry 和 uncertain/DLQ 状态。Host 业务是否允许执行仍由 Secure Ingress、Governor 和 Task Runtime 决定，Gateway receipt 不能替代 Host Acceptance。允许后的 Host Input 会在 AffectFusion/Appraisal 前，把可信 principal/tenant 与签名 `from_id`、`conversation_id` 编译为 `SecureGatewayConversationScopeV1`：sender 只决定 opaque relationship subject，conversation 只决定 opaque session，workspace 只能来自 tenant；缺 sender 直接 durable reject，不能回落到 `default` 或用群会话代替关系对象。Runtime Context 会重新校验同一 scope，因此服务 principal 不会进入七海的关系记录。
 
 ## 平台出站
 

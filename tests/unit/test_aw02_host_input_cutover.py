@@ -15,6 +15,7 @@ import host_brain.input_runtime.cortex_dispatch as cortex_dispatch
 from host_brain.input_runtime.contracts_and_normalization import InputPayload, InputResponse
 from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
+from host_brain.runtime.conversation_scope import SecureGatewayConversationScopeV1
 
 
 def _run(coro):
@@ -41,6 +42,7 @@ def _gateway_body() -> InputPayload:
         source="GATEWAY",
         platform="qq",
         conversation_id="conversation-aw02",
+        from_id="gateway-user-aw02",
         content="请执行这个任务",
     )
 
@@ -151,12 +153,20 @@ def test_dispatch_is_awaited_and_carries_authority(
 
 
 def test_governed_cortex_binds_secure_ingress_principal_before_governor() -> None:
+    scope = SecureGatewayConversationScopeV1.derive(
+        principal_id="service.edge.gateway",
+        tenant_id="workspace-aw02",
+        platform="qq",
+        from_id="gateway-user-aw02",
+        conversation_id="conversation-aw02",
+    )
     authority = {
         "principal_id": "service.edge.gateway",
         "tenant_id": "workspace-aw02",
         "claim_ref": "secure-ingress-claim://aw02/principal-bind",
         "audit_ref": "secure-ingress-audit://aw02/principal-bind",
         "body_sha256": "c" * 64,
+        **scope.as_command_authority(),
     }
     captured: dict[str, object] = {}
 
@@ -183,12 +193,16 @@ def test_governed_cortex_binds_secure_ingress_principal_before_governor() -> Non
             }
         ) + "\n\n"
 
+    def resolve_chat_emotion_context(**kwargs):  # noqa: ANN003
+        captured["fusion_request"] = kwargs["request_body"]
+        return {}
+
     ports = SimpleNamespace(
         evaluate_governor_with_timing=evaluate_governor_with_timing,
         get_intent_engine=lambda: object(),
         build_chat_emotion_snapshot=lambda **_kwargs: {},
         build_chat_governance_snapshot=lambda **_kwargs: {},
-        resolve_chat_emotion_context=lambda **_kwargs: {},
+        resolve_chat_emotion_context=resolve_chat_emotion_context,
         chat_request_factory=lambda **kwargs: SimpleNamespace(**kwargs),
         cortex_orchestrator_sse_generator=cortex_orchestrator_sse_generator,
     )
@@ -196,10 +210,14 @@ def test_governed_cortex_binds_secure_ingress_principal_before_governor() -> Non
     result = _run(
         cortex_dispatch._run_cortex_orchestrator_pipeline(
             request_id="request.gateway.aw02.principal-bind",
-            session_id="conversation-aw02",
+            session_id=scope.session_id,
             source="GATEWAY",
             text="执行",
-            payload={"platform": "qq", "conversation_id": "conversation-aw02"},
+            payload={
+                "platform": "qq",
+                "conversation_id": "conversation-aw02",
+                "secure_gateway_conversation_scope_v1": scope.to_dict(),
+            },
             ts_ms=1,
             intent_draft_override={
                 "route": "plan",
@@ -223,6 +241,10 @@ def test_governed_cortex_binds_secure_ingress_principal_before_governor() -> Non
         "principal_id": "service.edge.gateway",
     }
     assert captured["generator_authority"] == authority
+    fusion_request = captured["fusion_request"]
+    assert fusion_request.person_id == scope.relationship_subject_id
+    assert fusion_request.workspace_id == scope.workspace_id
+    assert fusion_request.session_id == scope.session_id
 
 
 def test_governed_cortex_rejects_incomplete_authority_before_governor() -> None:
@@ -296,13 +318,23 @@ def test_receive_input_returns_durable_command_receipt_without_legacy_overwrite(
     assert response.status == "COMPLETED"
     assert response.receipt_ref == "command::aw02::durable"
     legacy_complete.assert_not_called()
-    assert dispatch.await_args.kwargs["command_authority"] == {
+    authority = dispatch.await_args.kwargs["command_authority"]
+    assert {key: authority[key] for key in (
+        "principal_id",
+        "tenant_id",
+        "claim_ref",
+        "audit_ref",
+        "body_sha256",
+    )} == {
         "principal_id": "service.edge.gateway",
         "tenant_id": "workspace-aw02",
         "claim_ref": "secure-ingress-claim://aw02/input",
         "audit_ref": "secure-ingress-audit://aw02/input",
         "body_sha256": "a" * 64,
     }
+    scope = authority["secure_gateway_conversation_scope_v1"]
+    assert scope["workspace_id"] == "tenant:workspace-aw02"
+    assert scope["relationship_subject_id"].startswith("subject-")
 
 
 def test_direct_skill_missing_receipt_fails_without_legacy_fallback(

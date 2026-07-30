@@ -232,6 +232,18 @@ relationship subject/principal，并写入 `personal:<subject>` workspace；请�
 `LOCAL_PERSONAL_UNATTESTED`，不含 Secure Ingress claim/audit/tenant，不能外推为多用户认证；
 Gateway 和多用户关系始终由 `/v1/host/input` 的签名身份建立。
 
+### DL-06 签名 Gateway conversation scope 修订
+
+`runtime/conversation_scope.py` 现在是 `/v1/host/input` 与 Runtime Context 共用的 scope contract。
+Secure Ingress 允许后，`input_runtime/ingress.py` 用 authority principal/tenant 与签名 `from_id`、
+`conversation_id` 生成 `SecureGatewayConversationScopeV1`：workspace 只能是 `tenant:<tenant>`，
+relationship subject 与 session 是不同的 opaque digest，原始 sender/conversation 不写入该 contract。
+缺 sender 的外部消息会 durable reject，conversation 绝不能代替 sender；随后 `cortex_dispatch.py` 在
+AffectFusion/Appraisal 前复核 scope 与 ingress authority，并把同一值送入 `ChatRequest`、thalamus、
+feedback proposal 和 Governed Runtime。`RuntimeContextApplicationService` 再次核对 principal/tenant/subject，
+使 World/Scene 与 Life/relationship 使用精确同一 scope。无 Secure Ingress envelope 的内部离线 helper
+仍只保留测试兼容分支，不能成为外部 Gateway 入口；真实多用户平台与 connection recovery 尚未验收。
+
 直连 Host 的 perception-evidence gate 与安全 sub-agent fallback 也不能再从 Surface 直接发一个
 裸文本：它们先重建并持久化同一 `AffectiveTurnPlanV1`，每个本地稳定分句都先写
 `surface_sentence_delivery_intent`（含同一 ExpressionPlan 的 Voice/Avatar intent），随后才 SSE 可见，

@@ -23,6 +23,22 @@
 > 因此不能把现有流写成完整生产闭环。Host-local runtime、Limbic 与 Surface 的旧情感
 > 上下文只可作为待替换的 compatibility 输入，不能被解释为 canonical self-affect writer。
 
+签名 Gateway 的实际身份流已补上一条前置绑定，而不是先以 `default` 写情感再补 authority：
+
+```text
+Secure Ingress(principal, tenant, claim, audit)
+  + signed Gateway body(from_id, conversation_id)
+  → SecureGatewayConversationScopeV1
+  → opaque relationship_subject + opaque session + tenant workspace
+  → AffectFusion / Appraisal / aftereffect / preference proposal
+  → Governed Runtime → Runtime Context re-validates the same scope
+  → World / Scene / AffectiveTurnPlan
+```
+
+`from_id` 缺失时该外部输入被持久拒绝；conversation 不能替代 relationship subject。scope contract 本身
+不保留原始 sender/conversation，Secure Ingress principal 仍只作为 command/grant/delivery authority。没有
+signed scope 的内部离线 helper 不能算 Gateway 生产流，真实多用户平台、模型和远端 Edge 仍待 DL-07。
+
 公开旧 Bond 写流现已被截断：`POST /bond/event` 不读取 writer provider，也不产生 score、stage、
 self-affect 或关系事件，而是返回 `410 LEGACY_BOND_WRITE_RETIRED`。Monitor 不再拥有人工补录 API/
 表单；其 Bond 页面只能读取历史 projection。因而实际关系流只能是

@@ -244,6 +244,12 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   prefetch 与 Runtime Context 共同消费。它没有伪造 Secure Ingress claim，也不开放多用户 scope；
   签名 Gateway 输入继续唯一走 `/v1/host/input`。对应 Handler 回归和真实 SQLite Runtime Context
   测试只证明该本地身份边界，尚不证明 generic Chat connection resume 或外部认证完成。
+- 签名 Gateway 现在同样拥有独立的生产 scope：允许后的 Secure Ingress authority 与签名 sender/
+  conversation 在 Fusion 前编译为 `SecureGatewayConversationScopeV1`。workspace 来自 tenant，关系对象
+  来自 sender 的 opaque digest，session 来自 conversation 的 opaque digest；不允许 `conversation_id` 充当
+  sender，也不允许缺 sender 时落到单用户 `default`。该 scope 必须同时出现在 `ChatRequest`、aftereffect/
+  feedback proposal 与 frozen Runtime Context，并由后者重新核对 principal/tenant。该收口仅有本地
+  SQLite/合同证据，真实 Gateway 平台、多用户 connection recovery 与外部验收仍未完成。
 
 退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
 Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。

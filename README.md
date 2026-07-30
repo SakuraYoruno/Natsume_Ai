@@ -43,6 +43,16 @@ aggregate。该 scope 会同样传给 Cortex 和 Runtime Context；它不生成 
 外部认证或多用户隔离。已签名的 Gateway/多用户输入仍必须走 `/v1/host/input`，而不是把
 `/v1/chat` 当作替代入口。
 
+DL-06 同时补齐了签名 Gateway 的真实关系 scope：Secure Ingress 取得的
+`principal_id + tenant_id` 与签名消息内的 `from_id`、`conversation_id` 会在任何 AffectFusion、
+关系 aftereffect、记忆预取或 Scene 写入**之前**编译为同一份
+`SecureGatewayConversationScopeV1`。它以 `tenant:<tenant>` 作为 workspace，并把关系对象和
+会话转换为不含平台原始 ID 的稳定 opaque identifier；`conversation_id` 不能替代发送者身份，缺少
+发送者时请求会持久拒绝而不是回落到历史单用户 `default`。这一 scope 还会重新校验 Secure Ingress
+authority 后传给 Runtime Context，因此服务 principal 不会进入七海的关系记录，也不会把不同用户
+合并为同一份 self-affect。当前证据只覆盖本地签名 Host 输入与 SQLite/合同回归；真实多用户平台、
+远端 Edge、模型和 DL-07 服务栈仍未验收。
+
 本次 DL-04 又把这个本机入口接入受治理的**真实句子可见性顺序**：在显式配置支持 provider final
 usage 的模型路由时，`/v1/chat → HostCommand → TaskGraph` 会冻结同一 `AffectiveTurnPlanV1`，每个稳定句先写
 `0149` 的 task-bound delivery ledger，随后才产生 SSE `SENTENCE`，最后由 Task Acceptance 结算。首句前的

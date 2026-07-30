@@ -232,6 +232,7 @@ def test_receive_input_gateway_progress_fastpath_is_retired() -> None:
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_dm_fp_001",
+        from_id="progress-user-001",
         content="现在进度怎么样了？",
     )
     dispatch_mock = AsyncMock(return_value=None)
@@ -249,6 +250,7 @@ def test_receive_input_gateway_progress_fastpath_fallbacks_to_dispatch() -> None
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_dm_fp_002",
+        from_id="progress-user-002",
         content="现在进度怎么样了？",
     )
     dispatch_mock = AsyncMock(return_value=None)
@@ -265,6 +267,7 @@ def test_receive_input_stages_explicit_feedback_as_version_proposal() -> None:
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_feedback_001",
+        from_id="feedback-user",
         person_id="person-feedback",
         content="这句话太模板了，不像她",
     )
@@ -316,8 +319,9 @@ def test_receive_input_stages_explicit_feedback_as_version_proposal() -> None:
     assert response.status == "ACCEPTED"
     assert dispatch_mock.await_count == 1
     assert len(staged) == 1
-    assert staged[0]["workspace_id"] == "workspace-feedback"
-    assert staged[0]["subject_id"] == "person-feedback"
+    assert staged[0]["workspace_id"] == "tenant:workspace-unit-dispatch"
+    assert str(staged[0]["subject_id"]).startswith("subject-")
+    assert staged[0]["subject_id"] != "person-feedback"
     proposal_events = [
         call.kwargs
         for call in audit.call_args_list
@@ -333,6 +337,7 @@ def test_receive_input_records_feedback_failure_without_blocking_command() -> No
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_feedback_failure",
+        from_id="feedback-failure-user",
         person_id="person-feedback",
         content="不要使用这种表达",
     )
@@ -407,8 +412,9 @@ def test_receive_input_gateway_durable_duplicate_is_ignored() -> None:
             reason_code="SECURE_INGRESS_ALLOWED",
             claim_ref="secure-ingress-claim://unit-duplicate",
             audit_ref="secure-ingress-audit://unit-duplicate-first",
-            principal_id="service.edge.input.unit",
-            idempotency_key="unit-dispatch-duplicate",
+                principal_id="service.edge.input.unit",
+                tenant_id="workspace-unit-dispatch",
+                idempotency_key="unit-dispatch-duplicate",
             body_sha256="1" * 64,
             request_id="request.unit.duplicate",
         ),
@@ -439,11 +445,63 @@ def test_receive_input_gateway_durable_duplicate_is_ignored() -> None:
     assert dispatch_mock.await_count == 1
 
 
+def test_receive_input_gateway_binds_signed_sender_scope_before_any_dispatch() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="qq-dm-scope-001",
+        from_id="signed-sender-001",
+        # A gateway adapter may carry this for display compatibility, but it
+        # cannot nominate the Life/relationship aggregate.
+        person_id="caller-selected-person",
+        content="我今天有点难过。",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock), patch(
+        "host_brain.composition.process_services.notify_user_interaction",
+        return_value=None,
+    ):
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
+
+    assert response.status == "ACCEPTED"
+    dispatched = dispatch_mock.await_args.kwargs
+    scope = dispatched["payload"]["secure_gateway_conversation_scope_v1"]
+    assert dispatched["payload"]["person_id"] == scope["relationship_subject_id"]
+    assert dispatched["payload"]["workspace_id"] == scope["workspace_id"]
+    assert dispatched["session_id"] == scope["session_id"]
+    assert scope["workspace_id"] == "tenant:workspace-unit-dispatch"
+    assert scope["relationship_subject_id"] != "caller-selected-person"
+    assert "signed-sender-001" not in scope["relationship_subject_id"]
+    assert (
+        dispatched["command_authority"]["secure_gateway_conversation_scope_v1"]
+        == scope
+    )
+
+
+def test_receive_input_gateway_rejects_missing_sender_before_dispatch() -> None:
+    body = InputPayload(
+        source="GATEWAY",
+        platform="qq",
+        conversation_id="group-conversation-without-sender",
+        content="我今天有点难过。",
+    )
+    dispatch_mock = AsyncMock(return_value=None)
+
+    with patch("host_brain.input_runtime.ingress._dispatch_to_graph", new=dispatch_mock):
+        response = _run(receive_input(body, SimpleNamespace(), ports=_ports()))
+
+    assert response.status == "REJECTED"
+    assert response.detail == "GATEWAY_CONVERSATION_SCOPE_TRANSPORT_SUBJECT_REQUIRED"
+    assert dispatch_mock.await_count == 0
+
+
 def test_receive_input_gateway_attachment_only_sync_dispatches_to_graph() -> None:
     body = InputPayload(
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_dm_mm_sync_001",
+        from_id="multimodal-sync-user",
         msg_type="image",
         attachments=[
             {
@@ -503,6 +561,7 @@ def test_receive_input_gateway_voice_attachment_only_accepts_empty_content() -> 
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_dm_mm_voice_001",
+        from_id="multimodal-voice-user",
         content="",
         msg_type="voice",
         attachments=[
@@ -562,6 +621,7 @@ def test_receive_input_gateway_attachment_async_short_circuits_dispatch() -> Non
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_dm_mm_async_001",
+        from_id="multimodal-async-user",
         msg_type="video",
         attachments=[
             {
@@ -618,6 +678,7 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_dm_mm_followup_001",
+        from_id="multimodal-followup-user",
         msg_type="emoji",
         attachments=[
             {
@@ -631,6 +692,7 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
         source="GATEWAY",
         platform="qq",
         conversation_id="qq_dm_mm_followup_001",
+        from_id="multimodal-followup-user",
         content="这个表情包什么意思",
     )
     dispatch_mock = AsyncMock(return_value=None)
@@ -659,7 +721,7 @@ def test_receive_input_gateway_followup_restores_recent_multimodal_context() -> 
         _run(
             input_routes_module._ensure_gateway_multimodal_observed_for_dispatch(
                 request_id="req_mm_followup_first",
-                session_id="qq_dm_mm_followup_001",
+                session_id=str(first_payload["session_id"]),
                 source="GATEWAY",
                 text="",
                 payload=first_payload,

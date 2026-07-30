@@ -648,6 +648,11 @@ canonical hand-off，历史 Bond 的显式距离、高 closeness、记忆中的�
 - 浪漫、排他和依赖不是“高 Bond”的奖励，默认未授权，必须有明确双向信号与独立 Review；
 - `workspace + relationship_subject` 是长期关系 scope，`session` 只说明事件发生在哪一次会话，不能成为跨用户合并捷径。
 
+对外平台还必须先经过可信身份绑定：Secure Ingress 的 principal/tenant 决定命令 authority 与
+workspace，签名 transport sender 决定 relationship subject，签名 conversation 只决定 session。三个
+对象不得从同一个 `default`、平台会话或请求体任选字段派生；原始平台 ID 也不应进入情感 journal。
+缺少发送者时应拒绝该条外部输入，而不是把群会话误当成一个人或复用本机单用户 fallback。
+
 同样，原始 episodic 文本的定期模型归纳不能成为人格演化的捷径。没有精确
 `workspace + relationship_subject`、已接受回应和 durable aftereffect 的输入，无法说明一项偏好变化属于谁、
 是否被真正接住，也无法区分一次偶发措辞和长期关系事实。因此 canonical Host 必须在模型调用前退役

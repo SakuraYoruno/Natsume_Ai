@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-01_AFFECTIVE_LIFE_KERNEL_LEGACY_EDGE_MUTATION_RETIREMENT`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_SIGNED_GATEWAY_CONVERSATION_SCOPE_BINDING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -65,6 +65,14 @@ exact duplicate/restart replay。0147 已将低风险表达 profile 接入 canon
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。
+
+**DL-06 签名 Gateway 关系 scope 修订：** `/v1/host/input` 在 Secure Ingress 允许后、任何
+Fusion/Appraisal 前，使用可信 `principal_id + tenant_id` 与签名 `from_id + conversation_id` 编译
+`SecureGatewayConversationScopeV1`。`from_id` 决定 opaque relationship subject，conversation 只决定
+opaque session，workspace 固定为 `tenant:<tenant>`；缺少 sender 会 durable reject，不能将 group/conversation
+当作人或回落到 `default`。这份 scope 同时进入 `ChatRequest`、thalamus、aftereffect、偏好 proposal 和
+Runtime Context，并在 Runtime Context 重验 ingress authority；服务 principal 仍只用于 HostCommand、grant 与
+delivery 授权。当前只完成本地 SQLite/合同边界，真实多用户平台、provider、远端 Edge 与 DL-07 未验收。
 
 DL-00 现补上了提示词层的唯一关系 authority：`Soul.md` 原文及其 digest 继续作为不可在线改写的
 人格源材料，但 `SoulCompiler` 不再把旧剧情、固定用户名、Bond/阶段或亲密例句送入 live prompt。

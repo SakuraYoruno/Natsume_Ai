@@ -63,6 +63,23 @@
   这些是本机单用户边界证据；不代表 Gateway 多用户认证、连接恢复、真实 provider、远端 Edge 或
   DL-07 全栈验收。
 
+## DL-06 签名 Gateway relationship scope
+
+- `test_dl00_gateway_conversation_scope.py` 验证同一签名 sender 跨 conversation 保持同一关系对象、
+  不同 sender 永不共享 affect/relationship aggregate；workspace、relationship subject 与 session
+  不保存原始平台 ID。该测试还拒绝把 conversation 当作 sender。
+- `test_input_routes_dispatch.py` 验证 `/v1/host/input` 在 dispatch 前覆写 caller-shaped
+  `person_id/workspace_id`，并将同一 scope 同时装入 payload 与 Secure Ingress command authority；缺 sender
+  会 durable reject，不能创建 Task 或 Fusion side effect。
+- `test_aw02_host_input_cutover.py` 与
+  `test_ne03_context_application.py::test_signed_gateway_scope_is_reused_exactly_by_affect_and_runtime_context`
+  验证 authority 在 Governor 前完整，Fusion 与 frozen World/Scene 使用精确同一 workspace/subject，任何
+  principal/tenant/subject drift 均失败关闭。`test_input_routes_worker.py` 保留内部离线 helper 的回归，
+  但不构成外部 Gateway ingress 证据。
+- 本波只运行本地定向 unit/contract/SQLite integration；远程 CI 为
+  `NOT_RUN_ACCOUNT_QUOTA`。未启动真实 Gateway 平台、provider、远端 Edge 或 Docker 服务栈，不能提升为
+  多用户或 DL-07 验收通过。
+
 ## DL-04 本机 Chat 的受治理句流顺序
 
 - `tests/integration/test_host_integration.py::TestChatEndpoint` 通过真实 ASGI lifespan 验证本机

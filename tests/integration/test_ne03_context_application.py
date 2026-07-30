@@ -41,6 +41,7 @@ from host_brain.runtime.context_application import (
     RuntimeContextApplicationError,
     RuntimeContextApplicationService,
 )
+from host_brain.runtime.conversation_scope import SecureGatewayConversationScopeV1
 from host_brain.runtime.environment_state import build_environment_snapshot
 from host_brain.runtime.intent_authority import IntentPolicyIdentityV1
 from host_brain.runtime.intent_admission import DurableIntentAdmissionVerifier
@@ -260,6 +261,57 @@ def test_direct_chat_scope_cannot_select_life_or_runtime_context_identity(
     assert frozen.payload["subject_id"] == "local-context-owner"
     assert "caller-selected-person" not in frozen.payload.values()
     assert "caller-selected-workspace" not in frozen.payload.values()
+
+
+def test_signed_gateway_scope_is_reused_exactly_by_affect_and_runtime_context(
+    tmp_path: Path,
+) -> None:
+    harness = _build_harness(tmp_path, name="gateway-conversation-scope")
+    scope = SecureGatewayConversationScopeV1.derive(
+        principal_id="service.edge.gateway",
+        tenant_id="tenant-emotion-scope",
+        platform="qq",
+        from_id="transport-user-private-id",
+        conversation_id="transport-conversation-private-id",
+    )
+    request = ChatRequest(
+        message="我今天有些低落。",
+        workspace_id=scope.workspace_id,
+        person_id=scope.relationship_subject_id,
+        session_id=scope.session_id,
+    )
+
+    affect_scope = AffectiveScope.from_request(request)
+    frozen = _freeze(
+        harness.service,
+        person_id=scope.relationship_subject_id,
+        request_body=request,
+        command_authority={
+            "principal_id": "service.edge.gateway",
+            "tenant_id": "tenant-emotion-scope",
+            **scope.as_command_authority(),
+        },
+    )
+
+    assert affect_scope.workspace_id == scope.workspace_id
+    assert affect_scope.relationship_subject_id == scope.relationship_subject_id
+    assert frozen.payload["runtime_context_principal_id"] == scope.principal_id
+    assert frozen.payload["workspace_id"] == affect_scope.workspace_id
+    assert frozen.payload["subject_id"] == affect_scope.relationship_subject_id
+    assert "transport-user-private-id" not in repr(frozen.to_dict())
+    assert "transport-conversation-private-id" not in repr(frozen.to_dict())
+
+    with pytest.raises(RuntimeContextApplicationError, match="subject drifted"):
+        _freeze(
+            harness.service,
+            person_id="caller-selected-other-subject",
+            request_body=request,
+            command_authority={
+                "principal_id": "service.edge.gateway",
+                "tenant_id": "tenant-emotion-scope",
+                **scope.as_command_authority(),
+            },
+        )
 
 
 def test_freeze_writes_real_world_source_and_does_not_append_same_semantics(
