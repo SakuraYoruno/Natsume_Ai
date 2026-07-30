@@ -120,6 +120,17 @@ def test_durable_projection_has_no_legacy_conversation_experience_writer() -> No
     assert "update_assistant_reply" not in source
 
 
+def test_post_process_has_no_legacy_bond_writer_path() -> None:
+    import inspect
+
+    from host_brain.agent_runtime import postprocess
+
+    source = inspect.getsource(postprocess._async_post_process)
+    assert "apply_surface_emotion_bond_flow(" not in source
+    assert "post_process_bond_update(" not in source
+    assert "LEGACY_SURFACE_BOND_FLOW_RETIRED" in source
+
+
 def test_life_acceptance_handler_requires_applied_receipt(monkeypatch) -> None:
     monkeypatch.setattr(
         PROCESS_LIFE_PROVIDER,

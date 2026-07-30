@@ -156,32 +156,18 @@ async def _async_post_process(
         pass
 
     if surface_main_chain_used:
-        try:
-            surface_bond_result = application_ports.apply_surface_emotion_bond_flow(
-                request_id=request_id,
-                person_id=person_id,
-                session_id=session_id,
-                user_message=user_message,
-                assistant_reply=narrative,
-                emotion_context=emotion_context,
-                bond_summary=bond_summary,
-                reply_plan=reply_plan,
-                retrieval_evidence_items=retrieval_evidence_items,
-                ts_ms=ts_ms,
-            )
-            normalized_trace_stage_meta = {
-                **normalized_trace_stage_meta,
-                "surface_emotion_bond_flow": surface_bond_result,
-            }
-        except Exception as exc:
-            _logger.debug("[%s] surface emotion-bond flow failed: %s", request_id, exc)
-            normalized_trace_stage_meta = {
-                **normalized_trace_stage_meta,
-                "surface_emotion_bond_flow": {
-                    "status": "DEGRADED",
-                    "reason_code": "SURFACE_EMOTION_BOND_FLOW_FAILED",
-                },
-            }
+        # Relationship outcomes are committed by the canonical Life
+        # acceptance/aftereffect chain.  Calling the historical Surface flow
+        # after a reply would recreate an unbounded Bond writer that cannot
+        # participate in replay or recovery.
+        normalized_trace_stage_meta = {
+            **normalized_trace_stage_meta,
+            "surface_emotion_bond_flow": {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "LEGACY_SURFACE_BOND_FLOW_RETIRED",
+            },
+        }
 
     try:
         await application_ports.persist_post_process_audit(
@@ -389,21 +375,11 @@ async def _async_post_process(
         except Exception as exc:
             _logger.debug("[%s] cortex_orchestrator post_process persona session_end failed: %s", request_id, exc)
 
-    if surface_main_chain_used:
-        _logger.debug("[%s] cortex_orchestrator skipped legacy bond update: surface flow handled it", request_id)
-    else:
-        try:
-            from host_brain.tribe.cortex_agent import get_cortex_agent  # noqa: PLC0415
-
-            await get_cortex_agent().post_process_bond_update(
-                request_id=request_id,
-                session_id=session_id,
-                user_message=user_message,
-                emotion_context=emotion_context,
-                ts_ms=ts_ms,
-            )
-        except Exception as exc:
-            _logger.debug("[%s] cortex_orchestrator post_process bond failed: %s", request_id, exc)
+    _logger.debug(
+        "[%s] cortex_orchestrator legacy Bond post-process is retired; "
+        "canonical Life acceptance owns relationship effects",
+        request_id,
+    )
 
     try:
         from host_brain.tribe.cortex_agent import get_cortex_agent as _get_cortex  # noqa: PLC0415

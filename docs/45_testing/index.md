@@ -25,7 +25,8 @@
 - `test_edge_events_whitelist.py` 证明 `EMOTION_DETECTED` 仍可作为 Edge 审计事件被接收，但不会再触发
   Cortex Bond 更新或 VTS 驱动；同一文件还静态约束 `system_handler.py` 不保留这两个 fire-and-forget 调用。
 - `test_http_edge_events_acceptance.py` 继续覆盖真实 ASGI 中 final ASR → Host Input 的受控入站桥。
-  当前定向集合为 `18 passed`；没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
+  `test_gr06_durable_surface_projection.py` 同时约束通用 Agent post-process 不再调用 Surface/Cortex 的旧 Bond writer。
+  当前定向集合为 `17 passed`（本切片）及此前 Edge HTTP 集；没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
 
 ## DL-04 本机直连 Chat scope 切流
 
