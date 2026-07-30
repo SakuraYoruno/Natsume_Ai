@@ -11,6 +11,13 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 本次 DL-04 修订把一条容易被掩盖的身份边界实际接通：Gateway 的 `principal_id` 仅保留为 HostCommand、lease/grant 和外发授权主体；`RuntimeContext v1` 中冻结的 relationship subject 才是七海陪伴的对象。已入场 frozen Chat 的 native sentence stream 会把同一 `model_node_id` 写入 canonical ModelAttempt audit，随后仅在 Task Acceptance 后以该 relationship subject 写 conversation、Life、Memory 与 delivery projection。SQLite 集成链已覆盖“服务主体授权 → TaskGraph → node-bound model attempt → 两句持久可见性 → Acceptance → Life/Gateway effect”，并明确断言服务主体不会进入用户关系记录。它仍只是受控本地 transport 的窄 vertical slice：普通 Chat 全量切流、受认证连接恢复、真实外部模型、远端 Edge/TTS/VTS 和 Docker 全栈验收均未执行，整体继续为 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+`POST /v1/chat` 现在也在 AffectFusion 之前收口为**本机单用户** scope：Host 从
+`HOST_DEFAULT_USER_ID` 派生 relationship subject、principal 与 `personal:<subject>` workspace，
+请求体中的 `person_id`、`workspace_id`（包括嵌套 emotion context）不能选择七海的关系或 Life
+aggregate。该 scope 会同样传给 Cortex 和 Runtime Context；它不生成 Secure Ingress claim、不能证明
+外部认证或多用户隔离。已签名的 Gateway/多用户输入仍必须走 `/v1/host/input`，而不是把
+`/v1/chat` 当作替代入口。
+
 0148 已补上“受认证的直接偏好控制”这一窄入口：`POST /v1/digital-life/relationship/companion-profile` 只接受完整、严格的低风险偏好 JSON，要求 `companion:profile:write`、`user principal == relationship_subject_id` 与 `tenant == workspace_id`。它不会从聊天文字推断偏好，也不能立即激活 profile；Host 只会从 canonical 强 aftereffect 历史选取证据、创建五次互动的 CANARY，并把 Secure Ingress audit ref 一并固化。该接口不是 Monitor 的用户反馈/审核界面，仍不改变 Soul、关系许可或 self-affect；CANARY 证据收集、长期收益、旧 writer 清零和真实服务栈验收仍未完成。
 
 本次又接入 `POST /v1/digital-life/relationship/response-feedback`：用户只能对一条仍处于 provisional 状态、已有 canonical receipt 的回复提交 `HELPFUL`、`NEUTRAL`、`MISUNDERSTOOD` 或 `BOUNDARY`。它要求独立的 `companion:feedback:write`、精确 user/subject 与 tenant/workspace 绑定；`HELPFUL` 才会成为 `0.95` 的 receipt-scoped 强 aftereffect，且只能推进一个已经存在的 profile CANARY；第五条合格后效应才会由 lifecycle 自动激活它，外部请求不能创建或指定激活 profile。自然语言关键词识别仍是保守的 `0.72`，只用于普通关系理解；它不能伪装为学习证据。

@@ -12,11 +12,14 @@ import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.app.governed_task_adapter import _build_contracts
+from host_brain.app.direct_chat_scope import bind_direct_chat_scope
 from host_brain.app.emotion_context import (
     HostEmotionRuntime,
     build_chat_emotion_snapshot,
     resolve_chat_emotion_context,
 )
+from host_brain.app.schemas import ChatRequest
+from host_brain.digital_life.affect_fusion import AffectiveScope
 from host_brain.app.host_runtime_context_wiring import (
     runtime_environment_observation_provider,
 )
@@ -220,6 +223,43 @@ def _freeze(
         emotion_snapshot=emotion_snapshot,
         bond_summary=bond_summary,
     )
+
+
+def test_direct_chat_scope_cannot_select_life_or_runtime_context_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The local UI path shares one server-derived scope before any Life write."""
+
+    monkeypatch.setenv("HOST_DEFAULT_USER_ID", "local-context-owner")
+    harness = _build_harness(tmp_path, name="direct-chat-local-scope")
+    request = ChatRequest(
+        message="我今天有点低落。",
+        person_id="caller-selected-person",
+        workspace_id="caller-selected-workspace",
+        session_id="direct-chat-session",
+        emotion_context={"workspace_id": "nested-caller-workspace"},
+    )
+    scope = bind_direct_chat_scope(
+        request,
+        session_id=str(request.session_id or ""),
+    )
+
+    affect_scope = AffectiveScope.from_request(request)
+    frozen = _freeze(
+        harness.service,
+        person_id=str(request.person_id),
+        request_body=request,
+        command_authority=scope.as_command_authority(),
+    )
+
+    assert affect_scope.workspace_id == "personal:local-context-owner"
+    assert affect_scope.relationship_subject_id == "local-context-owner"
+    assert frozen.payload["runtime_context_principal_id"] == "local-context-owner"
+    assert frozen.payload["workspace_id"] == "personal:local-context-owner"
+    assert frozen.payload["subject_id"] == "local-context-owner"
+    assert "caller-selected-person" not in frozen.payload.values()
+    assert "caller-selected-workspace" not in frozen.payload.values()
 
 
 def test_freeze_writes_real_world_source_and_does_not_append_same_semantics(

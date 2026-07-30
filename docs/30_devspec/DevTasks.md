@@ -66,6 +66,13 @@ acceptance 对 node drift fail-closed。受控 SQLite integration 已验证两�
 delivery 的端到端窄链；真实 provider、远端 Edge、authenticated connection resume 与 generic Chat cutover
 仍未完成，状态必须保持 `PARTIAL / REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
+`POST /v1/chat` 的本机个人入口现于 AffectFusion、检索预取和 Runtime Context 之前绑定
+`natsume.direct-chat-scope.v1`：由 `HOST_DEFAULT_USER_ID` 派生唯一 subject/principal 和
+`personal:<subject>` workspace，调用方的 `person_id`、`workspace_id` 及 nested emotion-context
+workspace 均不能选择关系或 Life aggregate。该 provenance 明确是
+`LOCAL_PERSONAL_UNATTESTED`，没有 claim/audit/tenant，不能作为 Secure Ingress 或多用户认证结论；
+Gateway/多用户仍只允许经 `/v1/host/input` 的签名身份进入。
+
 本切片同时新增 receipt-scoped `CompanionResponseFeedbackRequestV1`：
 `POST /v1/digital-life/relationship/response-feedback` 只允许 `HELPFUL/NEUTRAL/MISUNDERSTOOD/BOUNDARY`，
 必须持有 `companion:feedback:write`、exact user/relationship subject 与 tenant/workspace 绑定，并且

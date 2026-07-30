@@ -23,7 +23,7 @@ from typing import Any, AsyncGenerator, Callable, Dict
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
-from host_brain.bond.user_identity import resolve_person_id
+from host_brain.app.direct_chat_scope import bind_direct_chat_scope
 from host_brain.app.graph_config_builder import (
     ALLOWED_EXPLICIT_SCENE_TYPES,
     SCENE_CHAT,
@@ -551,17 +551,15 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
     ts_ms = int(time.time() * 1000)
     request_started_ms = int(getattr(request.state, "request_started_ms", ts_ms) or ts_ms)
     session_id = request_body.session_id or f"session::{request_id}"
+    direct_chat_scope = bind_direct_chat_scope(
+        request_body,
+        session_id=session_id,
+    )
+    session_id = direct_chat_scope.session_id
     input_source = str(getattr(request_body, "input_source", None) or "").strip().upper()
     render_target_lang = str(getattr(request_body, "render_target_lang", None) or "").strip().lower() or "zh"
     if input_source == "GATEWAY":
         render_target_lang = "zh"
-    request_body.person_id = resolve_person_id(
-        getattr(request_body, "person_id", None),
-        session_id=session_id,
-        platform=getattr(request_body, "reply_channel", None),
-        conversation_id=getattr(request_body, "reply_target", None),
-    )
-
     # ── sys_mode 门控：locked / maintenance 模式下拦截 chat 请求 ──
     _current_sys_mode, _sys_mode_owner_error = _resolve_injected_sys_mode(
         hard_state_provider
@@ -602,6 +600,7 @@ Governor 鉴权后由 thalamus_agent 统一收口 canonical intent（Phase XV+�
             cortex_orchestrator_sse_generator=(
                 cortex_orchestrator_sse_generator
             ),
+            command_authority=direct_chat_scope.as_command_authority(),
         ),
         media_type="text/event-stream",
         headers={
@@ -624,6 +623,7 @@ async def _unified_chat_sse_generator(
     input_runtime_ports: InputRuntimeApplicationPorts | None = None,
     embodiment_runtime: Any | None = None,
     cortex_orchestrator_sse_generator: Callable[..., Any] | None = None,
+    command_authority: Dict[str, Any] | None = None,
     _pre_recall_evidence: list[dict] | None = None,
     _pre_approved_governor_result: Dict[str, Any] | None = None,
 ) -> AsyncGenerator[str, None]:
@@ -894,7 +894,7 @@ async def _unified_chat_sse_generator(
             intent_id=intent_id,
             metrics=metrics,
             governed_command_application=governed_command_application,
-            command_authority={},
+            command_authority=dict(command_authority or {}),
         ):
             yield event
             # T-94：检测 COMMIT done=True，对话完成后发布 TASK_SUCCESS 事件

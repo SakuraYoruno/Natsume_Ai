@@ -238,7 +238,57 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
 
     assert any(event.get("phase") == "COMMIT" for event in remaining)
     assert cortex_kwargs["governed_command_application"] is governed_command_application
-    assert cortex_kwargs["command_authority"] == {}
+    assert cortex_kwargs["command_authority"] == {
+        "direct_chat_scope_schema": "natsume.direct-chat-scope.v1",
+        "direct_chat_scope_kind": "LOCAL_PERSONAL_UNATTESTED",
+        "principal_id": "default",
+    }
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_derives_local_personal_scope_before_affect_and_cortex(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_DEFAULT_USER_ID", "local-companion-owner")
+    fake_thalamus = _FakeThalamusAgent()
+    cortex_kwargs: dict[str, Any] = {}
+    request_body = ChatRequest(
+        message="我今天其实有点难过。",
+        person_id="caller-selected-other-person",
+        workspace_id="caller-selected-other-workspace",
+        session_id="browser-session-17",
+        emotion_context={"workspace_id": "nested-caller-workspace"},
+    )
+
+    async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
+        cortex_kwargs.update(kwargs)
+        yield f'data: {json.dumps({"phase": "COMMIT", "done": True, "decision": "APPROVE", "request_id": kwargs["request_id"]}, ensure_ascii=False)}\n\n'
+
+    response = await handle_chat(
+        request_body=request_body,
+        request=_build_request(),
+        metrics=_DummyMetrics(),
+        hard_state_provider=lambda: {"sys_mode": "normal"},
+        input_runtime_ports=_input_runtime_ports(
+            _FakeIntentEngine(),
+            thalamus_agent=fake_thalamus,
+        ),
+        cortex_orchestrator_sse_generator=_fake_cortex_orchestrator_sse_generator,
+    )
+    async for _chunk in response.body_iterator:
+        pass
+
+    assert request_body.person_id == "local-companion-owner"
+    assert request_body.workspace_id == "personal:local-companion-owner"
+    assert request_body.session_id == "browser-session-17"
+    assert fake_thalamus.last_kwargs["person_id"] == "local-companion-owner"
+    assert cortex_kwargs["command_authority"] == {
+        "direct_chat_scope_schema": "natsume.direct-chat-scope.v1",
+        "direct_chat_scope_kind": "LOCAL_PERSONAL_UNATTESTED",
+        "principal_id": "local-companion-owner",
+    }
+    assert "tenant_id" not in cortex_kwargs["command_authority"]
+    assert "claim_ref" not in cortex_kwargs["command_authority"]
 
 
 @pytest.mark.asyncio
