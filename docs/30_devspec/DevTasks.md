@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-05_GOVERNED_CHAT_ACCEPTANCE_EXPRESSION_PROTOCOL_BOUNDARY`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-00_SOUL_RUNTIME_RELATIONSHIP_AUTHORITY_AND_EXPERIENCE_BASELINE`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -57,6 +57,13 @@ exact duplicate/restart replay。0147 已将低风险表达 profile 接入 canon
 Lab、Skill、Knowledge 和服务栈工作仅保留为基础资产；它们不能证明七海具有独立
 情感因果、长期关系修复或文本/语音/Avatar 同轮表达。后文关于 NE-01～NE-07
 的段落是历史范围说明，不再决定当前执行顺序。
+
+DL-00 现补上了提示词层的唯一关系 authority：`Soul.md` 原文及其 digest 继续作为不可在线改写的
+人格源材料，但 `SoulCompiler` 不再把旧剧情、固定用户名、Bond/阶段或亲密例句送入 live prompt。
+Surface、Cortex 和 node generation 共同调用 runtime projection，并强制附带“关系只能由
+`RelationshipStateV2 + AffectiveTurnPlanV1` 决定”的边界。72 条体验场景也已从仅检查数量的 fixture
+升级为测量合同：必须覆盖误解、自我边界、未接受修复、混合感受、空间、ASR/TTS/Avatar 与打断；在真实
+provider 轨迹和至少三名独立评审盲测出现前，状态只能是 `MEASUREMENT_PENDING`，不能写作体验 PASS。
 
 DL-02 当前又收口了三个直接影响陪伴体验的 canonical 因果：明确请求空间时，
 `user_boundary_or_space` appraisal 必须冻结 `GIVE_SPACE`，不能退化为通用确认；明确

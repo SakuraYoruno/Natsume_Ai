@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
-from host_brain.persona.context.soul_runtime import CompiledSoul, load_compiled_soul
+from host_brain.persona.context.soul_runtime import (
+    CompiledSoul,
+    load_compiled_soul,
+    render_runtime_soul_prompt,
+)
+from host_brain.surface_runtime.input_compiler import _surface_soul_chat_anchor
 
 
 def test_load_compiled_soul_reads_markdown_and_derives_runtime_texts(
@@ -64,13 +70,16 @@ def test_load_compiled_soul_reads_markdown_and_derives_runtime_texts(
     assert "一、基本角色档案" in compiled.section_map
     assert "新海 天" in compiled.identity_core
     assert "天然活泼" in compiled.temperament_core
-    assert "尼尼" in compiled.runtime_compact_text
+    assert "灵魂伴侣" in compiled.source_text
+    assert "尼尼" not in compiled.runtime_compact_text
     assert any("病娇控制欲" in item for item in compiled.taboo_rules)
     assert any("先打断再接话" in item for item in compiled.signature_lines)
-    assert "新海天是一个外向活泼" in compiled.runtime_compact_text
+    assert "新海天是一个外向活泼" not in compiled.runtime_compact_text
     assert "AI 伴侣" not in compiled.runtime_compact_text
     assert "哥哥的话" not in compiled.runtime_compact_text
-    assert "尼尼" in compiled.runtime_compact_text
+    assert "亲密的恋人" not in compiled.runtime_compact_text
+    assert "灵魂伴侣" not in compiled.runtime_compact_text
+    assert "【关系授权边界】" in compiled.runtime_compact_text
     assert "【身份核心】" in compiled.runtime_full_text
 
 
@@ -114,7 +123,7 @@ def test_load_compiled_soul_reads_minimal_identity_core_bullets(
     assert "运行关系：重组家庭中的义妹" in compiled.identity_core
     assert "白泉学园" not in compiled.runtime_compact_text
     assert "存在感消除" not in compiled.runtime_compact_text
-    assert "二次元熟人兄妹感私聊台词" in compiled.zh_text_style_anchor
+    assert "有熟悉感的私聊台词" in compiled.zh_text_style_anchor
     assert "不追求完全真人腔" in compiled.zh_text_style_anchor
 
 
@@ -154,10 +163,36 @@ def test_compiled_soul_prefers_dedicated_ja_voice_anchor(
 
     compiled = load_compiled_soul(force=True)
 
-    assert "Voice Soul" in compiled.ja_voice_style_anchor
-    assert "あたしは新海天" in compiled.ja_voice_style_anchor
-    assert "中文性格" not in compiled.ja_voice_style_anchor
+    assert "语音输出的中文风格锚" in compiled.ja_voice_style_anchor
+    assert "あたしは新海天" not in compiled.ja_voice_style_anchor
+    assert "中文性格" in compiled.ja_voice_style_anchor
     assert "中文文字输出" not in compiled.ja_voice_style_anchor
+
+
+def test_runtime_soul_prompt_cannot_reintroduce_legacy_relationship_scripts() -> None:
+    unsafe = SimpleNamespace(
+        display_name="七海",
+        runtime_compact_text=(
+            "你是七海。关系阶段会随 Bond 自动调整：CONFIDANT 后可以主动亲密，"
+            "SOULMATE 后彼此是归宿。"
+        ),
+        runtime_full_text=(
+            "【关系默认】\n用户是阿晓。进入亲密恋人后可以说爱你、自然身体亲密。"
+        ),
+        source_text="这段 archive 绝不能作为 prompt fallback。",
+    )
+
+    compact = render_runtime_soul_prompt(unsafe, compact=True)
+    full = render_runtime_soul_prompt(unsafe)
+    surface = _surface_soul_chat_anchor(unsafe)
+
+    for rendered in (compact, full, surface):
+        assert "CONFIDANT" not in rendered
+        assert "SOULMATE" not in rendered
+        assert "亲密恋人" not in rendered
+        assert "阿晓" not in rendered
+        assert "【关系授权边界】" in rendered
+    assert "archive" not in full
 
 
 def test_context_assembler_keeps_state_blocks_without_soul() -> None:

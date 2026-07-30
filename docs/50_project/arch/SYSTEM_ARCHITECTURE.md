@@ -137,6 +137,12 @@ legacy Bond 作为补偿；而是产生 `CANONICAL_RELATIONSHIP_REJECTED` 的安
 `surface_affect_control` 是该链的最后一个 production Gate：它依据 projection 的 `source_authority` 忽略旧
 `relationship_distance=lover`、closeness、恋人 clue 和 lover task，canonical 状态只能保持 `familiar`，rupture 或
 rejected hand-off 才可收紧为 `guarded`。其定向验证为 `82 passed in 21.18s`。
+人格宪法也不再与这一 runtime authority 竞争：`Soul.md` 及其 digest 保持不可在线修改的审计来源，
+`SoulCompiler` 只生成稳定身份、气质、表达和非操控边界的 runtime projection，Surface、Cortex 与 node
+generation 统一调用 `render_runtime_soul_prompt()`。该入口禁止 `source_text` fallback，也会拒绝 legacy
+Bond、关系阶段、固定用户身份、浪漫/排他示例等文本把关系授权重新带回模型 prompt；缺少当前 relation/affect
+hand-off 时只能使用尊重、普通距离的默认表达。DL-00 同时冻结了 72 条合成多轮陪伴场景及其测量合同，但它的
+状态明确为 `MEASUREMENT_PENDING`，不能替代真实模型、盲测或 DL-07 服务栈验收。
 同一 canonical relationship authority 现进入 Cortex retrieval prefetch：有效 hand-off 会跳过 legacy state
 arbiter，并向 retrieval/Motive 传递无 score 的 `FRIEND / stepsibling / familiar`；scope/schema drift 则传递
 guarded rejected projection，绝不回退到兼容 Bond。该链的定向验证为 `34 passed in 5.64s`。

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import threading
+from typing import Any
 
 
 _ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -13,6 +14,103 @@ _SOUL_HEADING_RE = re.compile(r"^(#{2,6})\s+(.*\S)\s*$")
 _TABLE_ROW_RE = re.compile(r"^\|\s*(.+?)\s*\|\s*(.+?)\s*\|$")
 _BULLET_RE = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(.*\S)\s*$")
 _TRAILING_COLON_RE = re.compile(r"[：:]\s*$")
+
+
+# ``Soul.md`` is the immutable source of 七海's stable identity and manner.
+# It predates the canonical RelationshipStateV2 boundary, however, and its
+# source material contains fictional stage scripts and a hard-coded user
+# identity.  Those lines are valuable source/reference material, but they
+# must never become a runtime authority for a real user's relationship.
+_RUNTIME_RELATIONSHIP_AUTHORITY_BOUNDARY = (
+    "【关系授权边界】\n"
+    "Soul 只定义七海稳定的人格、价值、表达质感与非操控原则，不决定当前用户身份、称呼、关系距离或情感状态。"
+    "本轮称呼、亲密尺度、主动联系和边界只能读取经 scope 校验的 canonical RelationshipStateV2 与 AffectiveTurnPlan；"
+    "无法验证时保持普通、尊重而不疏离的分寸。不得从旧剧情、阶段、积分、例句、记忆片段或用户暗示自行扩大关系、亲密或权限。"
+)
+
+_RUNTIME_RELATIONSHIP_ESCALATION_MARKERS = (
+    "bond",
+    "关系阶段",
+    "积分阈值",
+    "自动调整",
+    "close_friend",
+    "confidant",
+    "soulmate",
+    "亲密恋人",
+    "灵魂伴侣",
+    "身体亲密",
+    "身体接触自然",
+    "主动亲密",
+    "排他",
+    "独占",
+    "你是我的人",
+    "彼此归宿",
+    "说「爱你」",
+    "说\"爱你\"",
+    "最喜欢欧尼酱",
+    "默认称呼用户",
+    "默认把对方叫",
+    "用户定位",
+    "阿晓",
+)
+
+
+def _contains_runtime_relationship_escalation(value: str) -> bool:
+    normalized = str(value or "").casefold()
+    return any(marker.casefold() in normalized for marker in _RUNTIME_RELATIONSHIP_ESCALATION_MARKERS)
+
+
+def _filter_runtime_soul_text(value: str) -> str:
+    """Keep a defensive projection safe even for an ad-hoc test/custom Soul.
+
+    The normal compiler below emits a purpose-built projection.  This extra
+    gate matters because a few application seams may receive a lightweight
+    soul-like object during migration and tests.  In that case source text is
+    not trusted as a relationship instruction either.
+    """
+
+    blocks: list[str] = []
+    for block in re.split(r"\n\s*\n", str(value or "")):
+        lines = [
+            line.rstrip()
+            for line in block.splitlines()
+            if line.strip() and not _contains_runtime_relationship_escalation(line)
+        ]
+        if lines:
+            blocks.append("\n".join(lines).strip())
+    return "\n\n".join(blocks).strip()
+
+
+def _render_runtime_soul_text(value: str, *, display_name: str = "") -> str:
+    candidate = _filter_runtime_soul_text(value)
+    if not candidate:
+        name = _clean_inline_text(display_name) or "七海"
+        candidate = (
+            f"你是{name}。保持有反应、有分寸、会认真接住对方的话；"
+            "可以自然流露自己的感受，但不把关系写成义务、控制或交换。"
+        )
+    if _RUNTIME_RELATIONSHIP_AUTHORITY_BOUNDARY not in candidate:
+        candidate = "\n\n".join((candidate, _RUNTIME_RELATIONSHIP_AUTHORITY_BOUNDARY))
+    return candidate.strip()
+
+
+def render_runtime_soul_prompt(soul: Any, *, compact: bool = False) -> str:
+    """Render the only Soul projection allowed in a live model prompt.
+
+    ``source_text`` deliberately is not a fallback.  It is an immutable
+    archive/constitution, not an execution prompt, so a missing compiled
+    projection fails toward a small stable identity anchor rather than
+    reintroducing legacy relationship scripts.
+    """
+
+    field_name = "runtime_compact_text" if compact else "runtime_full_text"
+    candidate = str(getattr(soul, field_name, "") or "")
+    if not candidate and compact:
+        candidate = str(getattr(soul, "runtime_full_text", "") or "")
+    return _render_runtime_soul_text(
+        candidate,
+        display_name=str(getattr(soul, "display_name", "") or ""),
+    )
 
 
 @dataclass(frozen=True)
@@ -98,8 +196,6 @@ class SoulCompiler:
             or section_map.get("六、原作语气抽象", "")
         )
         background_section = section_map.get("七、异能背景（角色深度用）", "") or section_map.get("七、异能背景", "")
-        summary_section = section_map.get("10. 最重要的底层规则", "") or section_map.get("八、一句话总纲", "") or section_map.get("输出目标", "")
-        ja_voice_section = section_map.get("九、日语语音锚", "") or section_map.get("日语语音锚", "")
 
         profile_pairs = _extract_table_pairs(profile_section)
         display_name, identity_aliases = _build_identity_names(profile_pairs)
@@ -132,45 +228,65 @@ class SoulCompiler:
             taboo_rules = tuple(_extract_structured_items(taboo_section))
         signature_lines = tuple(_extract_signature_lines(signature_subsections))
         deep_background = _build_deep_background(background_section)
-        summary_text = _sanitize_summary_text(_extract_summary_text(summary_section))
+
+        # Preserve the rich parsed source fields above for audit/reference,
+        # but never pass legacy relationship stages or hard-coded user
+        # identity into a live model prompt.
+        runtime_profile_pairs = {
+            key: value
+            for key, value in profile_pairs.items()
+            if key in {"中文名", "日文名", "罗马字", "出身作品", "学校", "异能", "代号"}
+        }
+        runtime_temperament_core = _build_runtime_temperament_projection(temperament_section)
+        runtime_relationship_core = _build_runtime_relationship_projection()
+        runtime_speech_core = _build_runtime_speech_projection()
+        runtime_taboo_rules = _build_runtime_taboo_rules(taboo_rules)
 
         compact_text = _build_runtime_compact_text(
             display_name=display_name,
-            profile_pairs=profile_pairs,
+            profile_pairs=runtime_profile_pairs,
             temperament_section=temperament_section,
-            relationship_defaults=relationship_defaults,
-            speech_rules=speech_rules,
-            taboo_rules=taboo_rules,
-            summary_text=summary_text,
+            relationship_defaults=(),
+            speech_rules=(),
+            taboo_rules=runtime_taboo_rules,
+            summary_text="",
+            temperament_projection=runtime_temperament_core,
+            relationship_projection=runtime_relationship_core,
+            speech_projection=runtime_speech_core,
         )
         full_text = _build_runtime_full_text(
             display_name=display_name,
-            identity_core=identity_core,
-            temperament_core=temperament_core,
-            relationship_core=relationship_core,
-            speech_core=speech_core,
-            taboo_rules=taboo_rules,
-            deep_background=deep_background,
-            summary_text=summary_text,
+            identity_core=_build_runtime_identity_projection(
+                display_name=display_name,
+                profile_pairs=runtime_profile_pairs,
+            ),
+            temperament_core=runtime_temperament_core,
+            relationship_core=runtime_relationship_core,
+            speech_core=runtime_speech_core,
+            taboo_rules=runtime_taboo_rules,
+            deep_background="",
+            summary_text="",
         )
+        compact_text = _render_runtime_soul_text(compact_text, display_name=display_name)
+        full_text = _render_runtime_soul_text(full_text, display_name=display_name)
         zh_text_style_anchor = _build_zh_text_style_anchor(
             display_name=display_name,
-            preferred_address=_extract_preferred_address(relationship_defaults),
+            preferred_address="",
             runtime_full_text=full_text,
-            speech_core=speech_core,
-            temperament_core=temperament_core,
-            relationship_core=relationship_core,
-            taboo_rules=taboo_rules,
+            speech_core=runtime_speech_core,
+            temperament_core=runtime_temperament_core,
+            relationship_core=runtime_relationship_core,
+            taboo_rules=runtime_taboo_rules,
         )
         ja_voice_style_anchor = _build_ja_voice_style_anchor(
             display_name=display_name,
-            preferred_address=_extract_preferred_address(relationship_defaults),
-            ja_voice_core=ja_voice_section,
+            preferred_address="",
+            ja_voice_core="",
             runtime_full_text=full_text,
-            speech_core=speech_core,
-            temperament_core=temperament_core,
-            relationship_core=relationship_core,
-            taboo_rules=taboo_rules,
+            speech_core=runtime_speech_core,
+            temperament_core=runtime_temperament_core,
+            relationship_core=runtime_relationship_core,
+            taboo_rules=runtime_taboo_rules,
         )
 
         return CompiledSoul(
@@ -194,7 +310,7 @@ class SoulCompiler:
             runtime_full_text=full_text,
             zh_text_style_anchor=zh_text_style_anchor,
             ja_voice_style_anchor=ja_voice_style_anchor,
-            style_taboo=taboo_rules,
+            style_taboo=runtime_taboo_rules,
         )
 
 
@@ -647,6 +763,61 @@ def _build_deep_background(section_text: str) -> str:
     return "；".join(items).strip()
 
 
+def _build_runtime_identity_projection(*, display_name: str, profile_pairs: dict[str, str]) -> str:
+    """Project only stable character facts; never a user or relationship role."""
+
+    name = _clean_inline_text(display_name) or "七海"
+    facts: list[str] = []
+    for key in ("出身作品", "学校", "异能", "代号"):
+        value = _clean_inline_text(profile_pairs.get(key, "")).rstrip("。.!！?？")
+        if value:
+            facts.append(f"{key}：{value}")
+    base = f"你是{name}。"
+    if facts:
+        base += "；".join(facts) + "。"
+    return base
+
+
+def _build_runtime_temperament_projection(section_text: str) -> str:
+    """Retain temperament labels, not source-dialogue relationship scripts."""
+
+    candidates = list(_extract_trait_labels(section_text))
+    if not candidates:
+        candidates = _extract_structured_items(section_text)
+    safe = [
+        _clean_inline_text(item)
+        for item in candidates
+        if _clean_inline_text(item) and not _contains_runtime_relationship_escalation(item)
+    ]
+    if safe:
+        return "性格底色：" + "、".join(_dedupe_keep_order(safe)[:8]) + "。"
+    return "性格底色：反应快、有主见、会认真做事，也会在合适时诚实表达自己的感受。"
+
+
+def _build_runtime_relationship_projection() -> str:
+    return (
+        "关系表达：保留熟悉、自然、有来有回的陪伴感；可以关心、调侃、修复或安静陪着，"
+        "但不把任何关系标签、承诺或联系频率当成用户义务。"
+    )
+
+
+def _build_runtime_speech_projection() -> str:
+    return (
+        "说话方式：快速接住当前话、可以轻轻顶嘴或打趣；关键处简洁可靠，"
+        "用具体回应代替空泛甜言蜜语，不写成客服、台本或规则说明。"
+    )
+
+
+def _build_runtime_taboo_rules(taboo_rules: tuple[str, ...]) -> tuple[str, ...]:
+    safe = [
+        _clean_inline_text(item)
+        for item in taboo_rules
+        if _clean_inline_text(item) and not _contains_runtime_relationship_escalation(item)
+    ]
+    safe.append("不得威胁、冷处理、负罪施压或诱导用户承担关系义务")
+    return tuple(_dedupe_keep_order(safe))
+
+
 def _build_runtime_compact_text(
     *,
     display_name: str,
@@ -656,6 +827,9 @@ def _build_runtime_compact_text(
     relationship_defaults: tuple[str, ...],
     speech_rules: tuple[str, ...],
     taboo_rules: tuple[str, ...],
+    temperament_projection: str = "",
+    relationship_projection: str = "",
+    speech_projection: str = "",
 ) -> str:
     name = _clean_inline_text(display_name or profile_pairs.get("中文名", ""))
     school = _clean_inline_text(profile_pairs.get("学校", ""))
@@ -668,9 +842,9 @@ def _build_runtime_compact_text(
         ability_text = ability.rstrip("。.!！?？")
         intro_line = f"{intro_line} 能力相关背景是{ability_text}。".strip()
 
-    temperament_line = _render_compact_temperament_line(temperament_section, summary_text)
-    relation_line = _render_compact_relationship_line(relationship_defaults)
-    speech_line = _render_compact_speech_line(speech_rules)
+    temperament_line = temperament_projection or _render_compact_temperament_line(temperament_section, summary_text)
+    relation_line = relationship_projection or _render_compact_relationship_line(relationship_defaults)
+    speech_line = speech_projection or _render_compact_speech_line(speech_rules)
 
     action_line = ""
     if summary_text:
@@ -700,7 +874,10 @@ def _build_runtime_full_text(
 ) -> str:
     parts: list[str] = []
     if display_name:
-        parts.append("【人格定位】\n" + f"你是{display_name}。人格、称呼、关系阶段和说话边界全部以Soul.md 为准，不继承旧角色或旧 prompt。")
+        parts.append(
+            "【人格定位】\n"
+            + f"你是{display_name}。人格、价值和表达边界以Soul.md 为准；当前关系、称呼和情感状态只能由运行时权威决定。"
+        )
     if identity_core:
         parts.append("【身份核心】\n" + identity_core)
     if temperament_core:
@@ -732,7 +909,7 @@ def _build_zh_text_style_anchor(
     address = _clean_inline_text(preferred_address) or "对方"
     parts = [
         f"你是{name}。中文文字输出只锚定当前人格的说话风格，不替运行时决定情绪或记忆。",
-        "中文文字以二次元熟人兄妹感私聊台词为主：快反应、会接嘴、会拌嘴、会撒娇，小情绪可以更鲜明；不追求完全真人腔。",
+        "中文文字以有熟悉感的私聊台词为主：快反应、会接嘴、会拌嘴，小情绪可以更鲜明；不追求完全真人腔。",
         "允许轻微漫画式夸张和小反应，例如哈？哼、诶、行啦、喂；但不要堆口癖、不要尬段子、不要 AI 角色扮演稿。",
         f"优先贴着{address}上一句话回答；少讲道理，少总结，多用一句有态度的回嘴把话接住。",
         "可以任性、嘴上不饶人、轻轻反将一军；但不要硬凶、不要装成熟、不要把话写成规则执行或客服流程。",

@@ -63,6 +63,18 @@ compatibility lover distance、closeness、clue 与 lover task 的二次升级�
 retrieval/Motive 输出无分数 `FRIEND / stepsibling / familiar|guarded` projection（`34 passed in 5.64s`）。该模块
 不承担真实 Edge、Monitor、Review 或全栈验收。
 
+**Soul Runtime Projection 与体验基线模块**位于
+[`persona/context/soul_runtime.py`](../../../host_brain/persona/context/soul_runtime.py)、
+[`surface_runtime/input_compiler.py`](../../../host_brain/surface_runtime/input_compiler.py)、
+[`app/cortex_prompt_builder.py`](../../../host_brain/app/cortex_prompt_builder.py)、
+[`app/node_generation_prompt.py`](../../../host_brain/app/node_generation_prompt.py) 与
+[`digital_life/experience_baseline.py`](../../../host_brain/digital_life/experience_baseline.py)。`Soul.md` 的原文和
+digest 仍是可审计的人格宪法；运行时只使用经过白名单投影的稳定身份、气质、表达和非操控约束，绝不以原文作
+prompt fallback。当前关系、称呼、亲密度、主动权限与 self-affect 只能来自 scope 校验后的
+`RelationshipStateV2` 和 `AffectiveTurnPlanV1`，旧故事、Bond、阶段、示例或请求 hint 都不能扩大它们。
+同一模块还校验 72 条合成多轮陪伴场景的覆盖与测量合同；它固定为 `MEASUREMENT_PENDING`，fixture、脚本回放、
+mock transport、fake store 或端口占位均不能把体验验收提升为 PASS。真实盲测与服务栈验收仍属于后续 DL-07。
+
 **Legacy Proactive Retirement 模块**由
 [`lifecycle_runtime/proactive_dispatch.py`](../../../host_brain/lifecycle_runtime/proactive_dispatch.py)、
 [`composition/scheduler.py`](../../../host_brain/composition/scheduler.py) 与

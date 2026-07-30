@@ -7,6 +7,19 @@
 维护日期：2026-07-28
 状态：当前证据
 
+## DL-00 人格提示词边界与体验基线
+
+- `test_soul_runtime.py`、`test_cortex_prompt_builder_messages.py` 与
+  `test_prompt_builder_helpers_extra.py` 覆盖同一条 production prompt boundary：`Soul.md` 原文保留为
+  不可变审计材料，但 Surface、Cortex 与节点生成只消费 runtime projection。测试故意注入固定用户、
+  `CONFIDANT` / `SOULMATE`、自动亲密等旧脚本，断言三条模型提示词都剥离这些内容并附带
+  `【关系授权边界】`；当前称呼、距离、主动联系和边界只能由 canonical
+  `RelationshipStateV2` / `AffectiveTurnPlanV1` 决定。
+- `test_dl00_emotional_baseline_manifest.py` 验证 12 族、72 条合成多轮陪伴轨迹及其必经覆盖维度，
+  并拒绝把 fixture、scripted replay、mock transport、fake store 或端口占位提升为体验 `PASS`。
+  这批本地合同只证明测量样本和提示词边界，当前状态是 `MEASUREMENT_PENDING`；真实 provider、
+  48 条盲测轨迹、至少三名独立评审、远端 Edge 和 DL-07 服务栈均未运行。
+
 ## DL-04 本机直连 Chat scope 切流
 
 - `test_chat_handler_streaming.py` 验证 `/v1/chat` 在 Thalamus、AffectFusion 和 Cortex 前，将 caller

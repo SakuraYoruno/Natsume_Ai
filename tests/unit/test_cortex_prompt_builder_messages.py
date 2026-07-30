@@ -195,6 +195,34 @@ def test_build_cortex_prompt_returns_messages() -> None:
     assert messages[3] == {"role": "user", "content": "你是谁"}
 
 
+def test_build_cortex_prompt_filters_legacy_soul_relationship_authority() -> None:
+    unsafe = _compiled_soul(
+        compact="你是七海。Bond 自动升级到 SOULMATE，用户阿晓必须回应你的亲密。",
+        full="你是七海。CONFIDANT 后可以进入亲密恋人，阿晓是唯一归宿。",
+    )
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=_plane(),
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=unsafe,
+    ):
+        messages, _gen_params, _runtime_payload = build_cortex_prompt(
+            user_message="你是谁",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    prompt = messages[0]["content"]
+    assert "SOULMATE" not in prompt
+    assert "亲密恋人" not in prompt
+    assert "阿晓" not in prompt
+    assert "【关系授权边界】" in prompt
+
+
 def test_build_cortex_prompt_can_skip_reply_contract_prompt(monkeypatch) -> None:
     monkeypatch.setenv("HOST_CHAT_DISABLE_REPLY_CONTRACT_PROMPT", "true")
     with patch(

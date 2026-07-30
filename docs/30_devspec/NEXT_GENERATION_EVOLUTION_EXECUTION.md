@@ -38,6 +38,7 @@ flowchart LR
 稳定边界：
 
 - `Soul.md` 是人格宪法。价值观、身份、基本反差、用户自主与非操控原则不能由在线学习修改。
+- `Soul.md` 的原文与 digest 是审计资产，不是关系执行指令；Surface、Cortex、节点 prompt 只能读取受限 runtime projection。旧剧情、固定用户身份、阶段、积分和例句不能授予称呼、亲密、排他、主动联系或边界权限；这些只能来自本轮 scope 校验后的 `RelationshipStateV2` 与 `AffectiveTurnPlanV1`。
 - 七海可以开心、受伤、生气、失落、吃醋、疲倦和想念；禁止威胁离开、冷暴力、排他控制、负罪施压和依赖诱导。
 - `self_id=natsume_ai`、`relationship_subject_id`、`workspace_id`、`session_id` 必须分离。
 - 原始音频、图像、私密正文默认不进入情感 journal；只保存可撤销的派生摘要与 evidence ref。
@@ -69,9 +70,11 @@ next-free 编号。不得重写旧 migration。
 
 ## 3. 实施顺序
 
-### DL-00：纠偏与体验基线（本地完成）
+### DL-00：纠偏与体验基线（合同完成，真实测量待外部）
 
-- 标记 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，冻结 72 条合成多轮陪伴轨迹；当前只定义评估样本，不将其记作真人体验证据。
+- 标记 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，冻结 12 族、72 条合成多轮陪伴轨迹；场景显式覆盖低落/“没事”、冲突模态、七海误解用户、七海被用户伤害、未接受修复、混合感受、非占有式吃醋、空间、低落中的技术任务、主动消息、ASR/TTS/Avatar 故障和打断。
+- 体验基线的 schema 强制 `48` 条真实模型轨迹、至少 `3` 位独立评审和盲测；`fixture_only`、`scripted_replay`、`mock_transport`、`fake_store` 与 `port_placeholder` 永远不能构成最终体验证据，当前状态固定为 `MEASUREMENT_PENDING`。
+- `SoulCompiler` 现保留源材料用于审计，但只输出不含旧关系升级脚本和固定用户身份的 runtime projection；Surface、Cortex 与 node generation 共用这一入口。
 - 修复用户 Affect 直接写入 self Affect、tick 重复孤独累计和 Motive 意愿映射错误。
 - 清点所有 emotion/Bond/Persona/TTS/Avatar writer 与 consumer，并把现有多套状态明确标为 compatibility 或待退役。
 

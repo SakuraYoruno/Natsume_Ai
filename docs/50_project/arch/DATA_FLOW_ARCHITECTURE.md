@@ -760,6 +760,22 @@ context 与 `RelationshipStateV2` 三层 schema 一致。成功时 legacy prompt
 旧显式 lover distance、closeness、恋人 clue 和 lover task，仅保留 `familiar` 或因 rupture/rejected 而收紧的
 `guarded`。该最终 Gate 定向回归为 `82 passed in 21.18s`。
 
+`Soul.md` 的运行时数据流与关系流严格分离：
+
+```text
+immutable Soul.md + digest
+  → SoulCompiler allowlisted runtime projection
+  → Surface / Cortex / node generation prompt
+
+scope-verified RelationshipStateV2 + frozen AffectiveTurnPlanV1
+  → current address / distance / self-affect / expression constraints
+```
+
+前一条只给出稳定人格、措辞质感与非操控底线，后一条才给出当前关系事实；三个 prompt consumer 都调用同一
+`render_runtime_soul_prompt()`，因此既不会回退原始 Soul 文本，也不能从旧 Bond、阶段阈值、恋人示例、记忆或
+请求内 `emotion_tag` 推导出称呼、亲密或七海的自我感受。DL-00 的 72 条场景清单只作为冻结测量合同：它要求
+48 条真实多轮轨迹与至少 3 位独立评审的盲测，未取得这些真实证据时状态始终为 `MEASUREMENT_PENDING`。
+
 Cortex 的检索分支使用同一 authority：
 
 ```text
