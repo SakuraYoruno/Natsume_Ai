@@ -188,7 +188,6 @@ def create_app(
     life_snapshot_reader_provider = host_services.require_provider(
         "life_snapshot_reader"
     )
-    bond_engine_provider = host_services.require_provider("bond_stage_engine")
     agent_runtime_scope = AgentRuntimeApplicationScope(host_services=host_services)
     tribe_runtime = build_production_tribe_runtime_scope()
 
@@ -423,7 +422,6 @@ def create_app(
         tool_broker_provider=tool_composition.provide_tool_broker,
         tool_catalog_provider=host_services.tool_catalog,
         governed_tool_application_provider=tool_composition.provide_tool_application,
-        bond_engine_provider=bond_engine_provider,
         mode_transition_service_provider=(
             host_lifecycle.get_mode_transition_service
         ),
@@ -622,8 +620,6 @@ def create_app(
             skill_registry_provider=host_services.skill_registry,
             begin_authority_runtime=application_ports.begin_authority_runtime,
             close_authority_runtime=application_ports.close_authority_runtime,
-            begin_bond_runtime=application_ports.begin_bond_runtime,
-            close_bond_runtime=application_ports.close_bond_runtime,
             begin_governance_runtime=application_ports.begin_governance_runtime,
             close_governance_runtime=application_ports.close_governance_runtime,
             defer_activity_monitor=True,
@@ -1465,7 +1461,6 @@ def create_app(
                     embodiment_authority_task=embodiment_authority_task,
                     reset_life_command_authority=_reset_life_command_authority,
                     embodiment_runtime=embodiment_runtime,
-                    close_bond_runtime=application_ports.close_bond_runtime,
                     close_governance_runtime=application_ports.close_governance_runtime,
                     close_authority_runtime=application_ports.close_authority_runtime,
                     withdraw_memory_service_container=(
@@ -1484,7 +1479,6 @@ def create_app(
         get_ledger=ledger_provider,
         get_tool_broker=tool_composition.provide_tool_broker,
         get_tool_catalog=host_services.tool_catalog,
-        get_bond_engine=bond_engine_provider,
         chat_endpoint=chat_endpoint_with_runtime,
         edge_events_endpoint=edge_events_endpoint_with_runtime,
         root_endpoint=root_endpoint,

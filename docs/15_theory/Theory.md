@@ -39,6 +39,11 @@ projection ID 的计数；计数器不得携带人、workspace、session、原�
 不是 Life、关系或人格 authority。零计数只能说明这一条已观测路径未使用旧 reader，不能
 替代对其他 consumer 的清点、真实服务验收或体验评估。
 
+只读回滚窗口也不应为了返回“退役”而实例化旧 runtime。只要构造过程会打开队列、创建
+默认关系行、注册生命周期回调或暴露 mutable engine，系统就仍握有第二写 authority。
+正确边界是生产对象图完全不拥有该 runtime，旧 URI 在解析 engine 前返回稳定退役结果；
+需要历史迁移验证时，由隔离 fixture 显式持有历史实现，且不能被 Host fallback 发现。
+
 同一原则也约束私密活动和默认模式：它们可以阅读同一 canonical snapshot 的有界投影，却不能先拿到
 七海的 self-affect 后又从旧时间线或 Bond 积分“补一份感觉”。投影只传递当前 mixed components、mood、need、
 调节模式、裂痕/修复和主动权限等必要纹理；episode 的 trigger/evidence、用户与 workspace identity、以及

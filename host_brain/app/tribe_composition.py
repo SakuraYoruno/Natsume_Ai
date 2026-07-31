@@ -249,7 +249,6 @@ def build_tribe_application_ports(
     return TribeApplicationPorts(
         activity_monitor=resolved_activity_monitor_provider,
         mode_transition_service=resolve_process_mode_transition_service,
-        bond_update_queue=resolve_legacy_affect_port("bond_update_queue"),
         ledger=ledger_provider,
         life_snapshot_reader=_host_provider(host_services, "life_snapshot_reader"),
         silence_engine=resolve_legacy_affect_port("silence_engine"),
@@ -257,7 +256,6 @@ def build_tribe_application_ports(
         emotion_timeline=resolve_legacy_affect_port("emotion_timeline"),
         hard_state=hard_state_provider or _missing_host_hard_state_owner,
         resource_manager=resolved_resource_manager_provider,
-        bond_stage_engine=resolve_legacy_affect_port("bond_stage_engine"),
         shared_memory_index=_host_provider(host_services, "shared_memory_index"),
         milestone_tracker=_host_provider(host_services, "milestone_tracker"),
         model_attempt_service=_host_provider(host_services, "model_attempt_service"),

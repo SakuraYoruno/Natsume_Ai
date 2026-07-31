@@ -39,7 +39,6 @@ class HostLifecycleApplicationPorts:
     routing_matrix: ServiceProvider | None = None
     ledger: ServiceProvider | None = None
     life_memory_store: ServiceProvider | None = None
-    bond_update_queue: ServiceProvider | None = None
     life_snapshot_reader: ServiceProvider | None = None
     silence_engine: ServiceProvider | None = None
     state_write_arbiter: ServiceProvider | None = None
@@ -48,7 +47,6 @@ class HostLifecycleApplicationPorts:
     # production Host must leave this unset and route affect through the
     # canonical Digital Life journal instead of constructing HostEmotionRuntime.
     emotion_context_runtime: ServiceProvider | None = None
-    bond_stage_engine: ServiceProvider | None = None
     bond_neo4j_client: ServiceProvider | None = None
     shared_memory_index: ServiceProvider | None = None
     milestone_tracker: ServiceProvider | None = None

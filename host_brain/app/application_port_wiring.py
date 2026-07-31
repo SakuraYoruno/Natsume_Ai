@@ -49,7 +49,6 @@ def build_process_application_ports(
         resolve_model_provider_credential,
     )
     from host_brain.app.multimodal_observer import MultimodalObserver
-    from host_brain.bond.bond_stage_engine import BondStageEngine
     from host_brain.bond.shared_memory_index import SharedMemoryIndex
     from host_brain.app.recall.semantic_recall import SemanticRecaller
     from host_brain.app.settings import get_persistence_settings
@@ -98,7 +97,6 @@ def build_process_application_ports(
         model_transport=invoke_model_provider_transport,
         graph_handler_bindings=graph_handler_bindings,
         graph_runtime_factory=GraphRuntimeContract,
-        bond_stage_engine_factory=BondStageEngine,
         shared_memory_index_factory=SharedMemoryIndex,
         multimodal_observer_factory=MultimodalObserver,
         conversation_turn_store_factory=conversation_turn_store_factory,

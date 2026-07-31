@@ -39,9 +39,7 @@ def _host_services(**overrides: object) -> HostLifecycleApplicationPorts:
         "conversation_history": provider,
         "conversation_turn_store": provider,
         "prompt_registry": provider,
-        "bond_update_queue": provider,
         "model_route_catalog": provider,
-        "bond_stage_engine": provider,
         "session_topic_ledger_store": provider,
         "session_tactic_ledger_store": provider,
         "tts_context_router": provider,
@@ -151,7 +149,6 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
     topic_store = object()
     tactic_store = object()
     catalog = RouteCatalog()
-    legacy_bond_provider_calls: list[str] = []
     captured: dict[str, object] = {}
 
     def fake_record_assistant_turn(**kwargs):  # noqa: ANN003, ANN202
@@ -164,14 +161,9 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
         fake_record_assistant_turn,
     )
 
-    def forbidden_legacy_bond_provider() -> object:
-        legacy_bond_provider_calls.append("resolved")
-        raise AssertionError("canonical Agent Runtime must not resolve legacy Bond")
-
     host_services = _host_services(
         ledger=lambda: ledger,
         model_route_catalog=lambda: catalog,
-        bond_stage_engine=forbidden_legacy_bond_provider,
         session_topic_ledger_store=lambda: topic_store,
         session_tactic_ledger_store=lambda: tactic_store,
     )
@@ -204,7 +196,6 @@ def test_agent_runtime_scope_resolves_nested_dependencies_from_host_bundle(
     )
     assert runtime["chat_provider_name"] == "host-scoped-provider"
     assert [call["scene_type"] for call in catalog.calls] == ["CHAT", "MULTIMODAL"]
-    assert legacy_bond_provider_calls == []
 
 
 def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(

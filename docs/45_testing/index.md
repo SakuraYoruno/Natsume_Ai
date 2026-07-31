@@ -458,12 +458,13 @@
   无状态规则对象，同一冻结输入仍得到相同动机投影；配合 Motive/Limbic 定向集合为
   `37 passed in 1.55s`。这只证明模块级缓存已退役，不证明 volatile Bond queue、关系后效应、
   真实 Edge/provider 或 DL-07 服务栈完成。
-- `test_ne01_host_bond_runtime.py`、`test_ne01_host_lifecycle_composition.py`、
-  `test_ne01_agent_runtime_composition.py`、`test_cortex_agent.py`、`test_bond_async_queue.py` 与
-  `test_bond_routes_api.py` 现验证 production Host 不再
-  构造真实 Bond writer/worker queue，canonical Cortex 不解析 queue，Surface hook 不回退写分数，
-  legacy `/bond/event` 返回 `410`。该定向集合为 `84 passed in 12.82s`；这是本地退役边界证据，
-  不证明其它 compatibility reader、真实模型、远端 Edge/provider 或 DL-07 服务栈完成。
+- `test_fastapi_app_bond_provider_social_brain.py`、`test_ne01_host_lifecycle_composition.py`、
+  `test_aw01_runtime_lifespan_shutdown.py`、`test_ne01_host_runtime_shutdown.py`、`test_cortex_agent.py` 与
+  `test_social_brain_agent.py` 现验证 production Host 的 ASGI、lifecycle、shutdown、typed ports 和 Tribe composition
+  都不再持有 `HostBondRuntimeOwner`、writer、worker queue 或 stage engine；Cortex 不保留 queue 失败后的 direct
+  writer，缺失旧 provider 的 `/bond/*` 在解析 engine 前稳定返回 `410`。当前单一受影响集合为
+  `167 passed in 92.86s`；这是本地退役边界证据，不证明其它 organ compatibility、真实模型、远端 Edge/provider
+  或 DL-07 服务栈完成。
 - `test_dl06_legacy_emotion_timeline_cutover.py`、`test_ne01_host_memory_runtime.py`、
   `test_ne01_host_lifecycle_composition.py`、`test_limbic_agent.py` 与 `test_prefrontal_agent.py`
   验证 production Host 不会打开旧 action log 预热 `EmotionTimeline`，而是返回显式 retired 空投影；

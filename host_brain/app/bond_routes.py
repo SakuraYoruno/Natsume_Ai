@@ -36,9 +36,14 @@ _LEGACY_BOND_READ_RETIRED = "LEGACY_BOND_READ_RETIRED"
 
 def _get_engine(route_ports: HostRoutePorts) -> BondStageEngine:
     provider = route_ports.bond_engine_provider
-    engine = provider() if provider is not None else None
+    # Canonical Hosts deliberately omit this rollback-only provider.  Missing
+    # authority is therefore the stable retired state, not a transient 503
+    # that might encourage callers to retry or reintroduce a legacy engine.
+    if provider is None:
+        raise RuntimeError(_LEGACY_BOND_READ_RETIRED)
+    engine = provider()
     if engine is None:
-        raise RuntimeError("BondStageEngine provider not configured")
+        raise RuntimeError(_LEGACY_BOND_READ_RETIRED)
     if str(getattr(engine, "reason_code", "")).strip() == _LEGACY_BOND_READ_RETIRED:
         raise RuntimeError(_LEGACY_BOND_READ_RETIRED)
     return engine
@@ -297,7 +302,7 @@ async def submit_bond_event(
 
 
 def create_bond_router(route_ports: HostRoutePorts) -> APIRouter:
-    """Create Bond routes with app-local engine and writer providers."""
+    """Create fail-closed legacy Bond routes for the rollback window."""
 
     router = APIRouter(prefix="/bond", tags=["bond"])
 

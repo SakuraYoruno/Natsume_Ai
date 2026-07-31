@@ -70,7 +70,6 @@ def _host_app(tool_id: str) -> tuple[object, dict[str, int], HostRoutePorts]:
         get_ledger=lambda: None,
         get_tool_broker=lambda: broker,
         get_tool_catalog=get_catalog,
-        get_bond_engine=lambda: None,
         chat_endpoint=chat,
         edge_events_endpoint=edge,
         root_endpoint=root,

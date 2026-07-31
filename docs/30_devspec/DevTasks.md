@@ -245,9 +245,8 @@ writer。该类只保留给直接隔离测试，不能作为 Host fallback。
 `TribeApplicationPorts` 上标记 canonical Life authority。production Limbic 遇到 legacy
 `EmotionPersistence` restore/persist、EmotionVector metabolism、`emotion_timeline` append、scheduler
 decay、Bond progress/regress、task success、humor landed、loneliness、immune block、interoception 或 interaction-recorded callback 时，统一返回 `RETIRED_CANONICAL_LIFE`，不再创建、更新或追加
-第二份 self-affect；这个 gate 只在明确 offline/test compatibility composition 未选 canonical Life 时放开。
-它没有替代新的 Life command，也没有退休 BodySense、Endocrine、Motive 或 volatile Bond queue，故 DL-06
-仍为进行中。
+第二份 self-affect；新的 Life command 仍是唯一正向入口。后续切片已分别退役 BodySense、Endocrine、
+Motive 与 production volatile Bond queue；DL-06 仍因其它 organ 兼容写回退、Monitor/Review 与真实体验验收而进行中。
 
 当前 `DL-06_ENDOCRINE_LEGACY_MUTATION_RETIREMENT_SLICE` 继续复用该 production authority：
 Endocrine 只能返回输入 hard-state 的无状态 compatibility projection，不能消费或累加旧
@@ -261,9 +260,10 @@ legacy conversation/tick/loneliness mutation 统一返回 `RETIRED_CANONICAL_LIF
 `BODY_SENSE_UPDATED`，因此不能重新驱动 silence 或 legacy metabolism。随后 Motive 已去除模块级
 `_engine`：兼容工厂每次创建无状态规则对象，所有动机只能由本次传入的快照纯投影，不能作为跨用户或跨
 turn 的情感 authority。production Host 随后删除 `ProcessApplicationPorts` 对 real
-`BondDynamicsWriter`/`BondUpdateQueue` 的 construction factory；Host runtime、Surface hook 与
-Cortex canonical mode 都只返回 explicit retired adapter，`/bond/event` legacy write 为 `410`，没有 worker、
-backlog 或失败后直写 fallback。production Host 现在也不再从旧 action log 预热 mutable
+`BondDynamicsWriter`/`BondUpdateQueue` 的 construction factory，并从 ASGI、lifecycle、shutdown、typed ports 与
+Tribe composition 中移除 `HostBondRuntimeOwner` 及 queue/stage provider。Cortex post-response fallback 在所有
+composition 下固定退役，不再保留 queue→direct-writer 分支；`/bond/*` 在解析旧 engine 前稳定返回 `410`，没有 worker、
+backlog、默认 INIT 行或失败后直写 fallback。production Host 现在也不再从旧 action log 预热 mutable
 `EmotionTimeline`：retired empty projection 不含伪造的 `NEUTRAL`，Lifecycle/proactive 会忽略它，canonical
 Limbic/Prefrontal 不会读取或缓存它，user profile 也不能覆盖七海 self-affect。其它 compatibility projection
 的生产读取审计、Monitor/Review 与真实服务验收仍待处理；这一事实不是 DL-06 或真实陪伴验收完成。

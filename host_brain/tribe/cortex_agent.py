@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -56,60 +55,21 @@ class CortexAgent:
         emotion_context: dict[str, Any] | None,
         ts_ms: int,
     ) -> dict[str, Any]:
-        if self._legacy_event_writes_retired():
-            return {
-                "status": "RETIRED_CANONICAL_LIFE",
-                "authority": "CANONICAL_LIFE_JOURNAL",
-                "reason_code": "LEGACY_BOND_WRITE_RETIRED",
-            }
+        """Reject the historical post-response Bond writer in every composition.
 
-        from host_brain.bond.bond_dynamics import BondDynamicsWriter  # noqa: PLC0415
-        from host_brain.bond.user_identity import resolve_bond_user_id  # noqa: PLC0415
+        Offline/test roots used to keep a live queue-and-writer fallback here.
+        That was still a second relationship authority even when production
+        happened to return early.  Relationship effects now require the
+        canonical Life episode/aftereffect command path; compatibility is
+        read-only and cannot opt back into mutation.
+        """
 
-        payload_emotion = dict(emotion_context or {})
-        emotion_tag = str(payload_emotion.get("emotion_tag") or "NEUTRAL").strip().upper()
-        emotion_intensity = float(payload_emotion.get("emotion_intensity") or 0.5)
-        update_kind = BondDynamicsWriter.classify_interaction(
-            text=user_message,
-            emotion_intensity=emotion_intensity,
-        )
-        bond_payload = {
-            "request_id": request_id,
-            "intent_id": request_id,
-            "session_id": session_id,
-            "seq": 1,
-            "user_id": resolve_bond_user_id(session_id=session_id),
-            "topic_id": str(user_message or "")[:64],
-            "capability_hint": "bond_memory",
-            "update_kind": update_kind,
-            "evidence_refs": [request_id],
-            "emotion_tag": emotion_tag,
-            "emotion_intensity": emotion_intensity,
-            "ts_ms": int(ts_ms),
+        del request_id, session_id, user_message, emotion_context, ts_ms
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_BOND_WRITE_RETIRED",
         }
-
-        queue = self.application_ports.require("bond_update_queue")()
-        queue_result = dict(queue.enqueue(bond_payload) or {})
-        if str(queue_result.get("status") or "") == "QUEUED":
-            return {"status": "QUEUED", "update_kind": update_kind}
-        if str(queue_result.get("status") or "") == "RETIRED_CANONICAL_LIFE":
-            return {
-                "status": "RETIRED_CANONICAL_LIFE",
-                "authority": "CANONICAL_LIFE_JOURNAL",
-                "reason_code": str(
-                    queue_result.get("reason_code")
-                    or "LEGACY_BOND_QUEUE_RETIRED"
-                ),
-                "update_kind": update_kind,
-            }
-
-        stage_engine = get_social_brain_agent().resolve_stage_engine()
-        writer = BondDynamicsWriter(
-            ledger=self.application_ports.require("ledger")(),
-            stage_engine=stage_engine,
-        )
-        await asyncio.to_thread(writer.apply_update, **bond_payload)
-        return {"status": "WRITTEN", "update_kind": update_kind}
 
     # ── Supervisor：统一上下文收口 + 意图路由（T-11）────────────────────────
 

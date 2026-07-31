@@ -22,9 +22,9 @@
 > DL-03 再将 accepted reply 的 provisional relationship episode 与下一次用户输入的
 > aftereffect 写入相同 journal；Surface 只从内部 provenance hand-off 获取关系边界，
 > 不接受请求伪造。HostEmotionRuntime、Limbic、Endocrine 与 global BodySense 的 production mutation 已逐项切断；
-> BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪；production Bond writer/queue 已退役为只读 projection 与明确 no-write adapter。Host HTTP route ports 已删除 Bond writer provider，`POST /bond/event` 固定返回 `410`；Monitor 的人工补录表单、调用 API 与 registry 项同步删除。历史 score/stage 只可读取，不能成为亲密、主动许可或 self-affect 的输入。Surface
+> BodySense 只可按当前 relationship subject 从 canonical Life snapshot 做纯读投影；Motive 已是每次新建的纯规则投影，不能缓存关系或情绪；production Bond owner/writer/queue/stage 已从 ASGI、lifecycle、shutdown、typed ports 与 Tribe composition 物理移除，旧 URI 在解析 engine 前固定返回 `410`。Host HTTP route ports 没有 Bond writer provider，Monitor 的人工补录表单、调用 API 与 registry 项同步删除。历史 score/stage 只可由隔离 fixture 验证，不能成为亲密、主动许可或 self-affect 的输入。Surface
 > 仍有其它兼容态或易失 state，不能描述为七海的长期情感 authority。relationship
-> episode 与旧 writer 清零仍待后续 DL 波。Input/Tribe composition 也已删除旧 runtime fallback：缺 Life authority 时拒绝，不能构造 `HostEmotionRuntime`。
+> episode 已由 canonical Life 管理；其它 organ 兼容 writer 与真实体验验收仍待后续 DL 波。Input/Tribe composition 也已删除旧 runtime fallback：缺 Life authority 时拒绝，不能构造 `HostEmotionRuntime`。
 > 普通 `/v1/chat` 现在只以 Thalamus 作为入口 preflight，提交后不再调用
 > `ANSAgent.emit_task_success()`；该 legacy event 不能借聊天成功回流为第二份 Affect。
 > `InputRuntimeApplicationPorts` 不再携带 ANS provider，Host startup 也不注册其 event loop；

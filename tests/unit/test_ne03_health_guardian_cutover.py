@@ -163,7 +163,6 @@ def test_app_factory_forwards_app_local_degradation_provider(monkeypatch) -> Non
         get_ledger=ledger_provider,
         get_tool_broker=lambda: None,
         get_tool_catalog=lambda: None,
-        get_bond_engine=lambda: None,
         chat_endpoint=lambda _body, _request: Response(),
         edge_events_endpoint=lambda _body: None,
         root_endpoint=lambda: Response(),

@@ -808,7 +808,9 @@ timeline/decay 与 Bond、任务成功、幽默、孤独、风险拦截、内感
 `relationship_subject_id → LifeSnapshotReader → project_body_sense_from_life_snapshot → Surface/Motive`：
 没有 subject 时 fail closed，绝不解析 global singleton；legacy tick/loneliness/conversation mutation 返回
 `RETIRED_CANONICAL_LIFE`，retired tick 不发布 `BODY_SENSE_UPDATED`。Motive 每次只对当前输入快照新建
-无状态投影，已不再保存模块级 engine；production volatile Bond queue 已无 worker/backlog。production
+无状态投影，已不再保存模块级 engine；production volatile Bond runtime 已从 ASGI/lifecycle/shutdown/typed ports
+对象图移除，不构造 owner、worker、queue 或 stage engine。Cortex 的旧 post-response 入口在所有 composition 下
+固定退役，不存在 queue→direct-writer fallback。production
 `HostMemoryRuntimeOwner` 不再从旧 action log hydrate mutable `EmotionTimeline`，而是返回不含 emotion tag 的
 `RetiredEmotionTimelineProjection`；Lifecycle snapshot/proactive dispatch 忽略该 marker，canonical Limbic/
 Prefrontal 也不会读取它。user profile 仅保留为用户 observation，不能覆盖七海 self-affect；其它 compatibility
@@ -973,9 +975,9 @@ payload/authorization digest 及 target/scope，才追加 `relationship_proactiv
 惩罚用户。
 
 在 production canonical Life 组成中，Tribe graph 不再把旧 Bond queue、mutable silence、EmotionTimeline
-或 BondStageEngine 放入可解析的 provider 集。Limbic、Cortex、SocialBrain 和 Prefrontal 本身已有 canonical
-authority guard；port fence 再保证任何遗漏路径会在解析时得到 `LEGACY_AFFECT_PORT_RETIRED:<port>`，而不是写入
-或读取第二份情感、关系和主动节律状态。
+或 BondStageEngine 放入可解析的 provider 集。Bond owner 的 lifecycle hook 也已删除，所以 Host 启停不会打开
+任何旧关系 runtime；历史 `/bond/*` 在解析 engine 前即返回稳定 410。Limbic、Cortex、SocialBrain 和 Prefrontal
+的 canonical guard 与 port fence 继续保证遗漏调用失败关闭，而不是写入或读取第二份情感、关系和主动节律状态。
 
 对系统 gate 的兼容 Endocrine 投影也遵循相同边界：Host hard-state 可以在需要时请求 immutable projection，
 但 canonical `EndocrineAgent` 不向 EventBus 注册 legacy handler。因此 `BOND_PROGRESS`、`LONELINESS_SIGNAL`、

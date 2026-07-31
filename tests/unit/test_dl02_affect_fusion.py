@@ -836,11 +836,9 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
     providers = {
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: reader,
-        "bond_update_queue": lambda: object(),
         "silence_engine": lambda: object(),
         "state_write_arbiter": lambda: object(),
         "emotion_timeline": lambda: object(),
-        "bond_stage_engine": lambda: object(),
         "shared_memory_index": lambda: object(),
         "milestone_tracker": lambda: object(),
         "model_attempt_service": lambda: object(),
@@ -867,10 +865,8 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
     assert ports.uses_canonical_affective_life() is True
 
     for port_name in (
-        "bond_update_queue",
         "silence_engine",
         "emotion_timeline",
-        "bond_stage_engine",
     ):
         with pytest.raises(
             RuntimeError,
@@ -912,11 +908,9 @@ def test_tribe_composition_fails_closed_when_life_authority_is_missing() -> None
     providers = {
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: object(),
-        "bond_update_queue": lambda: object(),
         "silence_engine": lambda: object(),
         "state_write_arbiter": lambda: object(),
         "emotion_timeline": lambda: object(),
-        "bond_stage_engine": lambda: object(),
         "shared_memory_index": lambda: object(),
         "milestone_tracker": lambda: object(),
         "model_attempt_service": lambda: object(),

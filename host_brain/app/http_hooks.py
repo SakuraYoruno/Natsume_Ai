@@ -179,8 +179,6 @@ def runtime_lifespan(
     skill_registry_provider: Callable[[], Any] | None = None,
     begin_authority_runtime: Callable[[], Any] | None = None,
     close_authority_runtime: Callable[[], Any] | None = None,
-    begin_bond_runtime: Callable[[], Any] | None = None,
-    close_bond_runtime: Callable[[], Any] | None = None,
     begin_governance_runtime: Callable[[], Any] | None = None,
     close_governance_runtime: Callable[[], Any] | None = None,
     defer_activity_monitor: bool = False,
@@ -192,12 +190,10 @@ def runtime_lifespan(
         logger.info("Natsume AI Host Brain starting up ...")
         authority_runtime_started = False
         governance_runtime_started = False
-        bond_runtime_started = False
 
         def close_started_runtime_owners() -> None:
             first_error: BaseException | None = None
             for started, close_runtime in (
-                (bond_runtime_started, close_bond_runtime),
                 (governance_runtime_started, close_governance_runtime),
                 (authority_runtime_started, close_authority_runtime),
             ):
@@ -217,9 +213,6 @@ def runtime_lifespan(
             if begin_governance_runtime is not None:
                 begin_governance_runtime()
                 governance_runtime_started = True
-            if begin_bond_runtime is not None:
-                begin_bond_runtime()
-                bond_runtime_started = True
             host_lifecycle.begin()
         except Exception:
             close_started_runtime_owners()

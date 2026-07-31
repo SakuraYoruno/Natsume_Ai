@@ -87,15 +87,13 @@ MirrorNeuron 已不再写 `_bond_*` 私有字段，只能提交受控 compatibil
 同样拒写。这个本地收口不包含 BodySense、Motive、volatile Bond queue、Monitor/Review、真实 provider、
 远端 Edge 或服务栈验收。
 
-**Bond queue 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
-construction factory，`HostBondRuntimeOwner` 仅为历史 score/stage 读取保留 app-local projection。它对旧
-writer/queue 请求返回 `RETIRED_CANONICAL_LIFE`，不创建 worker、backlog 或失败后 direct writer；canonical
-Cortex 在解析 queue 前即拒绝旧 mutation，Surface post-process 也只记录 retired result，且不再发布旧 Tribe
-对话结束事件或直接推 VTS/整段 TTS。历史 `POST /bond/event` 不再解析任何 writer，Host route ports 的
-`bond_writer_provider` 已删除并稳定返回 `410 LEGACY_BOND_WRITE_RETIRED`；Monitor 也删除了人工补录表单、
-API 与 endpoint registry 项，仅保留 score/stage 的历史只读展示。因而公开 HTTP/UI 不能重新激活旧关系 authority；
-volatile Bond queue 不再是生产关系 authority。其余 legacy reader、Review、受治理 Budget、真实 provider/Edge
-与服务栈验收仍未完成。
+**Bond runtime 退役修订：** 当前 production Host 已删除 `BondDynamicsWriter` 与 `BondUpdateQueue`
+construction factory，并从 ASGI、lifecycle、shutdown、typed ports 和 Tribe composition 中物理移除
+`HostBondRuntimeOwner`、queue/stage provider 及 begin/close hook。Cortex post-response fallback 在所有
+composition 下固定返回 `RETIRED_CANONICAL_LIFE`，不存在 queue 失败后的 direct writer。历史 `/bond/*`
+读写在解析旧 engine 前稳定返回 `410`；Monitor 也没有人工补录表单、API 或 endpoint registry 项。
+隔离 fixture 可显式导入历史模块验证回滚，但生产对象图无法发现它。因而 volatile Bond queue 与 stage engine
+不再是生产关系 authority；其余 organ compatibility、Review、真实 provider/Edge 与服务栈验收仍未完成。
 
 **Edge 原始情绪直驱退役修订：** `/v1/edge/events` 保留原始事件的 evidence ledger 与最终 ASR 的受控 Input bridge，
 但不再将 `EMOTION_DETECTED`、`USER_REACTION` 或 ASR metadata 送往 Cortex Bond update，也不再按用户 emotion tag

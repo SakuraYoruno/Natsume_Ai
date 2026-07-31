@@ -661,14 +661,13 @@ lover task 的二次升级，canonical 为 `familiar`、rupture/rejected 为 `gu
 retrieval prefetch 也在 canonical hand-off 存在时跳过 legacy state arbiter，向 retrieval/Motive 只传
 `FRIEND / stepsibling / familiar|guarded` 的无分数 projection；scope drift 固定 guarded（定向 `34 passed in 5.64s`）。
 
-**Bond queue 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
-`BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 不再解析 stage/graph read
-compatibility，也没有 worker、backlog、Neo4j client 或 direct writer fallback；canonical Cortex 会在解析 queue 前拒绝
-旧 Bond mutation。`/bond/event` 已不再解析或调用 writer，所有历史 `/bond/*` GET 也会在旧 engine 之前稳定返回
-`410 LEGACY_BOND_READ_RETIRED`：Host route ports 物理删除 `bond_writer_provider`，Monitor 同步删除人工补录
-关系事件的表单、API 和 endpoint registry 项。显式 offline fixture 才能保留旧 score/stage 用于回滚验证；它们不能影响
-亲密、主动许可或七海 self-affect。旧 timeline 现在是显式 retired 空投影，而不是 canonical projection；该公开入口
-退役不证明其它 compatibility reader 已清零。
+**Bond runtime 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
+`BondUpdateQueue` construction factory；ASGI、lifecycle、shutdown、typed ports 和 Tribe composition 进一步不再
+构造、启动、关闭或发布 `HostBondRuntimeOwner`、queue/stage provider。Cortex post-response 入口在任何 composition
+下固定返回 retired receipt，不存在 worker、backlog、Neo4j client 或 direct writer fallback。`/bond/event` 与所有
+历史 `/bond/*` GET 都会在旧 engine 之前稳定返回 `410`；Host route ports 没有 writer provider，Monitor 没有人工
+补录关系事件的表单、API 或 endpoint registry 项。显式 offline fixture 才能导入历史模块用于回滚验证，生产 Host
+无法将其当 fallback。旧 timeline 是显式 retired 空投影；该切片不证明其它 organ compatibility 已清零。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

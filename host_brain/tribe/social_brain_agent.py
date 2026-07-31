@@ -261,67 +261,12 @@ class SocialBrainAgent:
             if isinstance(bond_summary, Mapping) and bond_summary
             else {}
         )
-        state_obj: Any = None
-        stage = "FRIEND"
+        # The rollback window may display an already materialized, caller-owned
+        # summary, but it may not reopen BondStageEngine: its ``get_state``
+        # creates an INIT row and silently becomes a relationship writer.
+        stage = str(resolved_summary.get("stage") or "FRIEND").strip() or "FRIEND"
         trend = str(resolved_summary.get("trend") or "").strip()
-        trend_intensity = ""
         capability_hint = str(resolved_summary.get("capability_hint") or "").strip()
-        intimacy_score = 0.0
-        last_event_ts_ms = 0
-
-        try:
-            engine = self.application_ports.require("bond_stage_engine")()
-            if engine is not None:
-                if resolved_person_id and hasattr(engine, "get_state"):
-                    state_obj = engine.get_state(resolved_person_id)
-                elif hasattr(engine, "get_bond_state"):
-                    try:
-                        state_obj = engine.get_bond_state(session_id="default", user_id=resolved_person_id or None)
-                    except TypeError:
-                        state_obj = engine.get_bond_state(session_id="default")
-        except Exception:
-            state_obj = None
-
-        if state_obj is not None and not resolved_summary:
-            try:
-                raw_summary = state_obj.to_summary() if hasattr(state_obj, "to_summary") else {}
-                if isinstance(raw_summary, Mapping) and raw_summary:
-                    resolved_summary = normalize_bond_summary(dict(raw_summary))
-            except Exception:
-                pass
-
-        if state_obj is not None:
-            stage = str(
-                getattr(state_obj, "current_stage", None)
-                or getattr(state_obj, "stage", None)
-                or resolved_summary.get("stage")
-                or "FRIEND"
-            ).strip() or "FRIEND"
-            trend = str(
-                (
-                    state_obj.trend() if callable(getattr(state_obj, "trend", None)) else getattr(state_obj, "trend", "")
-                )
-                or resolved_summary.get("trend")
-                or trend
-            ).strip()
-            trend_intensity = str(
-                state_obj.trend_intensity()
-                if callable(getattr(state_obj, "trend_intensity", None))
-                else ""
-            ).strip()
-            capability_hint = str(
-                (
-                    state_obj.capability_hint()
-                    if callable(getattr(state_obj, "capability_hint", None))
-                    else getattr(state_obj, "label", "")
-                )
-                or resolved_summary.get("capability_hint")
-                or capability_hint
-            ).strip()
-            intimacy_score = float(getattr(state_obj, "intimacy_score", 0.0) or 0.0)
-            last_event_ts_ms = int(getattr(state_obj, "last_event_ts_ms", 0) or 0)
-        else:
-            stage = str(resolved_summary.get("stage") or stage).strip() or "FRIEND"
 
         if not resolved_summary:
             resolved_summary = {
@@ -332,16 +277,16 @@ class SocialBrainAgent:
 
         return {
             "person_id": resolved_person_id or None,
-            "bond_state_obj": state_obj,
+            "bond_state_obj": None,
             "bond_summary": resolved_summary,
             "bond_stage": stage,
             "bond_trend": trend,
-            "bond_trend_intensity": trend_intensity,
+            "bond_trend_intensity": "",
             "capability_hint": capability_hint,
-            "intimacy_score": intimacy_score,
-            "last_event_ts_ms": last_event_ts_ms,
-            "texture": getattr(state_obj, "texture", None) if state_obj is not None else None,
-            "rift": getattr(state_obj, "rift", None) if state_obj is not None else None,
+            "intimacy_score": 0.0,
+            "last_event_ts_ms": 0,
+            "texture": None,
+            "rift": None,
         }
 
     def resolve_bond_stage(self, *, person_id: str | None, default: str = "FRIEND") -> str:
@@ -363,56 +308,13 @@ class SocialBrainAgent:
                 self._canonical_bond_snapshot(person_id=user_id).get("bond_summary")
                 or {}
             )
-        summary: dict[str, Any] = {}
-        try:
-            engine = self.application_ports.require("bond_stage_engine")()
-            if engine is None:
-                return {}
-            state = None
-            if user_id and hasattr(engine, "get_state"):
-                state = engine.get_state(str(user_id))
-            elif hasattr(engine, "get_bond_state"):
-                try:
-                    state = engine.get_bond_state(session_id=session_id, user_id=user_id)
-                except TypeError:
-                    state = engine.get_bond_state(session_id=session_id)
-            if state is None:
-                return {}
-            summary = {
-                "stage": str(
-                    getattr(state, "stage", None)
-                    or getattr(state, "current_stage", None)
-                    or ""
-                ).strip(),
-                "trend": str(
-                    getattr(state, "trend", "")
-                    or (
-                        state.trend() if callable(getattr(state, "trend", None)) else ""
-                    )
-                ).strip(),
-                "capability_hint": str(
-                    getattr(state, "capability_hint", "")
-                    or (
-                        state.capability_hint()
-                        if callable(getattr(state, "capability_hint", None))
-                        else getattr(state, "label", "")
-                    )
-                ).strip(),
-            }
-        except Exception:
-            return {}
-        return {key: value for key, value in summary.items() if value}
+        del session_id, user_id
+        return {}
 
     def resolve_stage_engine(self) -> Any:
-        if self._legacy_relationship_writes_retired():
-            # A stage engine can create or promote a legacy Bond state on
-            # read.  Canonical callers receive the bounded Life projection
-            # instead of a mutable engine handle.
-            return None
-        try:
-            return self.application_ports.require("bond_stage_engine")()
-        except Exception:
-            return None
+        """Never expose the retired mutable relationship engine handle."""
+
+        return None
 
     def resolve_bond_vector(
         self,

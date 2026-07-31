@@ -22,7 +22,6 @@ CANONICAL_AFFECT_LIFE_JOURNAL = "CANONICAL_LIFE_JOURNAL_V1"
 class TribeApplicationPorts:
     activity_monitor: ServiceProvider | None = None
     mode_transition_service: ServiceProvider | None = None
-    bond_update_queue: ServiceProvider | None = None
     ledger: ServiceProvider | None = None
     life_snapshot_reader: ServiceProvider | None = None
     silence_engine: ServiceProvider | None = None
@@ -30,7 +29,6 @@ class TribeApplicationPorts:
     emotion_timeline: ServiceProvider | None = None
     hard_state: ServiceProvider | None = None
     resource_manager: ServiceProvider | None = None
-    bond_stage_engine: ServiceProvider | None = None
     shared_memory_index: ServiceProvider | None = None
     milestone_tracker: ServiceProvider | None = None
     model_attempt_service: ServiceProvider | None = None

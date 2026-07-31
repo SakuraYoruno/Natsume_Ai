@@ -92,7 +92,7 @@ def test_canonical_life_retires_social_brain_event_writers_and_reads_bounded_pro
     class _ForbiddenStageEngine:
         def __getattr__(self, name: str) -> object:
             raise AssertionError(
-                f"canonical SocialBrain projection must not read BondStageEngine:{name}"
+                f"canonical projection must not read BondStageEngine:{name}"
             )
 
     reader = _Reader()
@@ -101,9 +101,6 @@ def test_canonical_life_retires_social_brain_event_writers_and_reads_bounded_pro
     agent = SocialBrainAgent(
         application_ports=TribeApplicationPorts(
             life_snapshot_reader=lambda: reader,
-            bond_stage_engine=lambda: (_ for _ in ()).throw(
-                AssertionError("canonical SocialBrain must not read BondStageEngine")
-            ),
             affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
         ),
         state_registry=registry,

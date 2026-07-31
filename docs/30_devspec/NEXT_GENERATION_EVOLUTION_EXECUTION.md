@@ -511,12 +511,13 @@ subject/workspace 和稳定分句重建 Host Voice/Avatar protocol，禁止 serv
 定向 unit/contract/邻接 SQLite integration 为 `82 passed in 50.52s`；这不证明 Monitor/Review、其他 compatibility
 reader、真实 provider/Gateway/Edge 或 DL-07。
 
-**legacy Bond read 全面收口：** canonical Host 的 Agent Runtime 不再解析 `bond_neo4j_client`，memory-recall
-route inventory 因而没有 `surface_bond / neo4j_bond`。production `HostBondRuntimeOwner` 也不再给 route 层真实
-`BondStageEngine`：其旧 GET 会为未知对象写入 `INIT`，故 `/bond/health`、`/users`、`/stage/*`、`/summary/*` 均在
-解析 engine 前返回 `410 LEGACY_BOND_READ_RETIRED`。离线/legacy fixture 仍能显式注入旧 engine 进行回滚验证，不能作为
-Host fallback。route/runtime 定向集合 `62 passed in 11.26s`，相邻 production composition `39 passed in 5.65s`（有重叠），
-仅是本地 authority evidence。
+**legacy Bond runtime 全面收口：** canonical Host 的 Agent Runtime 不再解析 `bond_neo4j_client`，memory-recall
+route inventory 因而没有 `surface_bond / neo4j_bond`。ASGI、lifecycle、shutdown、typed ports 与 Tribe composition
+现已物理移除 `HostBondRuntimeOwner`、queue/stage provider 和 begin/close hook；生产 Host 不再为了返回退役结果而
+实例化旧 runtime。`/bond/health`、`/users`、`/stage/*`、`/summary/*` 均在解析 engine 前返回
+`410 LEGACY_BOND_READ_RETIRED`，Cortex post-response fallback 也在任何 composition 下固定拒写。离线/legacy fixture
+只能显式导入历史模块进行回滚验证，不能作为 Host fallback。当前 production-object-graph 定向回归为
+`167 passed in 92.86s`；这只是本地 authority evidence，不替代其它 organ、真实 provider、远端 Edge 或体验验收。
 
 **DL-00～DL-06 集中本地波次：** 已执行全部 50 个 `test_dl00_*` 至 `test_dl06_*` 专用
 unit/contract/SQLite integration 文件，最终结果为 `200 passed in 256.73s`。这是一次集中回归，不与此前

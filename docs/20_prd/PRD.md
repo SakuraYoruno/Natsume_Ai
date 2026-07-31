@@ -27,6 +27,10 @@ relationship aftereffect 解释其后续关系意义；Chat 路由不得以 `TAS
 
 历史 Bond 积分只允许作为可撤回的兼容只读投影，不能自动或人工升级亲密、浪漫、依赖或主动权限。产品不得提供能把 Bond 分数写回关系的公开 API、Operator 按钮或后台补录入口；旧客户端必须得到明确的退役结果，而不是静默降级或假成功。
 
+生产 Host 也不得构造旧 Bond runtime、worker queue 或 stage engine 后再依赖调用者“不去使用”。
+生命周期、typed ports、shutdown 和 Tribe composition 都不得持有这些对象；兼容读写必须在解析旧
+engine 前稳定退役。隔离 fixture 可以验证历史数据回滚，但不能成为生产 fallback。
+
 系统包含以下协作面，但它们不能形成平行事实源：
 
 | 产品面 | 用户价值 | Authority 边界 |

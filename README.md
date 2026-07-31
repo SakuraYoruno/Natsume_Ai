@@ -706,9 +706,11 @@ canonical Life snapshot 纯投影 fatigue、drowsiness 与 loneliness；缺 subj
 `RETIRED_CANONICAL_LIFE`，也不会再向 EventBus 发布伪更新。随后 `MotiveEngine` 的兼容工厂也不再
 缓存模块级实例：每次计算只读取调用方提供的快照并产生新的纯规则对象，不能保存、恢复或串接任一用户的
 情感/关系上下文。随后 production Host 也不再构造真正的 `BondDynamicsWriter` 或进程内
-`BondUpdateQueue`：旧 Surface hook、Cortex fallback 和 `/bond/event` 均返回明确的
-`RETIRED_CANONICAL_LIFE`/`410`，旧 stage/graph 只保留读取投影。它仍不代表 legacy emotion timeline、
-Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成；下段记录随后完成的 timeline read cutover。
+`BondUpdateQueue`，并进一步从 ASGI、lifecycle、typed ports 与 shutdown 对象图中物理移除
+`HostBondRuntimeOwner`：Host 不再构造、启动或关闭旧 Bond runtime，也不再向 Tribe 注入 queue/stage
+provider。Cortex post-response fallback 在任何 composition 下都固定返回 retired receipt，不存在
+queue 失败后的 direct writer；所有 `/bond/*` 兼容读写在解析旧 engine 前稳定返回 `410`。它仍不代表
+其它 organ compatibility、Monitor/Review、真实多 Host canary 或 DL-07 全栈验收已完成。
 
 最新的 `DL-06_LEGACY_EMOTION_TIMELINE_PROJECTION_CUTOVER` 也已完成：production
 `HostMemoryRuntimeOwner` 不再打开旧 SQLite action log 来预热 mutable `EmotionTimeline`，而是返回带

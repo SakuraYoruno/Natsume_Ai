@@ -28,8 +28,6 @@ from host_brain.composition.host_application import (
 from host_brain.app.application_port_wiring import (
     build_process_application_ports,
 )
-from host_brain.bond.bond_dynamics import RetiredBondDynamicsWriter
-from host_brain.bond.async_queue import RetiredBondUpdateQueue
 from host_brain.app.emotion_context import HostEmotionRuntime
 from host_brain.app.input_runtime_composition import (
     build_input_runtime_application_ports,
@@ -274,12 +272,9 @@ def test_startup_ports_preserve_exact_host_provider_identity_and_fail_closed() -
 
 
 def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ledger = object()
     authority = _AuthorityRuntime(ledger)
-    bond_client = object()
-    bond_client_calls: list[str] = []
     edge_probe = lambda: object()
     edge_status_builder = lambda _probe: {}
     construction_ports = replace(
@@ -287,11 +282,6 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
         persistence_db_path=lambda: ":memory:",
         probe_edge_rpc_health=edge_probe,
         build_edge_dependency_probe_statuses=edge_status_builder,
-    )
-    monkeypatch.setattr(
-        host_application_module,
-        "build_host_bond_client",
-        lambda: bond_client_calls.append("resolved") or bond_client,
     )
     ports = build_production_host_application_ports(
         process_application_ports=construction_ports,
@@ -310,33 +300,25 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
         match="HOST_GOVERNANCE_RUNTIME_NOT_ACTIVE",
     ):
         ports.token_service()
-    with pytest.raises(RuntimeError, match="HOST_BOND_RUNTIME_NOT_ACTIVE"):
-        ports.bond_dynamics_writer()
     ports.begin_authority_runtime()
     ports.begin_governance_runtime()
-    ports.begin_bond_runtime()
     token_service = ports.token_service()
     assert ports.token_service() is token_service
-    bond_writer = ports.bond_dynamics_writer()
-    assert ports.bond_dynamics_writer() is bond_writer
-    assert isinstance(bond_writer, RetiredBondDynamicsWriter)
-    retired_result = bond_writer.apply_update(request_id="legacy-bond-write")
-    assert retired_result.success is False
-    assert retired_result.reason_code == "LEGACY_BOND_WRITE_RETIRED"
-    assert isinstance(ports.lifecycle.bond_update_queue(), RetiredBondUpdateQueue)
-    assert ports.lifecycle.bond_update_queue().enqueue({"request_id": "legacy-bond-queue"})[
-        "status"
-    ] == "RETIRED_CANONICAL_LIFE"
-    retired_stage = ports.lifecycle.bond_stage_engine()
-    assert getattr(retired_stage, "reason_code", "") == "LEGACY_BOND_READ_RETIRED"
-    with pytest.raises(RuntimeError, match="LEGACY_BOND_READ_RETIRED"):
-        retired_stage.get_state("legacy-read-must-not-create")
+    with pytest.raises(
+        HostLifecycleScopeError,
+        match="HOST_SERVICE_PROVIDER_NOT_INJECTED:bond_update_queue",
+    ):
+        ports.lifecycle.require_provider("bond_update_queue")
+    with pytest.raises(
+        HostLifecycleScopeError,
+        match="HOST_SERVICE_PROVIDER_NOT_INJECTED:bond_stage_engine",
+    ):
+        ports.lifecycle.require_provider("bond_stage_engine")
     with pytest.raises(
         HostLifecycleScopeError,
         match="HOST_SERVICE_PROVIDER_NOT_INJECTED:bond_neo4j_client",
     ):
         ports.lifecycle.require_provider("bond_neo4j_client")
-    assert bond_client_calls == []
     assert ports.lifecycle.probe_edge_rpc_health is edge_probe
     assert (
         ports.lifecycle.build_edge_dependency_probe_statuses
@@ -376,7 +358,6 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     with pytest.raises(FrozenInstanceError):
         ports.token_service = object  # type: ignore[misc]
     assert not hasattr(ports, "__dict__")
-    ports.close_bond_runtime()
     ports.close_governance_runtime()
     ports.close_authority_runtime()
 
@@ -418,11 +399,6 @@ def test_production_host_port_root_owns_selected_state_per_app(
         "build_host_routing_matrix",
         lambda **_kwargs: object(),
     )
-    monkeypatch.setattr(
-        host_application_module,
-        "build_host_bond_client",
-        lambda: object(),
-    )
     first = build_production_host_application_ports(
         process_application_ports=construction_ports,
         authority_runtime_owner=first_authority,  # type: ignore[arg-type]
@@ -435,8 +411,6 @@ def test_production_host_port_root_owns_selected_state_per_app(
     second.begin_authority_runtime()
     first.begin_governance_runtime()
     second.begin_governance_runtime()
-    first.begin_bond_runtime()
-    second.begin_bond_runtime()
     provider_pairs = (
         (
             first.lifecycle.silence_engine,
@@ -505,10 +479,6 @@ def test_production_host_port_root_owns_selected_state_per_app(
         (
             first.lifecycle.routing_matrix,
             second.lifecycle.routing_matrix,
-        ),
-        (
-            first.bond_dynamics_writer,
-            second.bond_dynamics_writer,
         ),
         (
             first.lifecycle.memory_guard,
@@ -617,8 +587,6 @@ def test_production_host_port_root_owns_selected_state_per_app(
         ._model_backend._model_attempt_service_provider()
         is second_model_attempt_service
     )
-    first.close_bond_runtime()
-    second.close_bond_runtime()
     first.close_governance_runtime()
     second.close_governance_runtime()
     first.close_authority_runtime()
@@ -677,13 +645,11 @@ def test_typed_host_bundle_supplies_lifecycle_and_tribe_without_locator(
         _ports([]),
         ledger=provider,
         life_memory_store=provider,
-        bond_update_queue=provider,
         life_snapshot_reader=provider,
         silence_engine=provider,
         state_write_arbiter=provider,
         emotion_timeline=lambda: timeline,
         emotion_context_runtime=lambda: emotion_runtime,
-        bond_stage_engine=provider,
         shared_memory_index=provider,
         milestone_tracker=provider,
         prompt_registry=provider,
