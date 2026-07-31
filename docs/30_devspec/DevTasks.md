@@ -85,6 +85,12 @@ authority 收口，不代表全局删除 ANS、真实模型、Gateway、远端 E
 为 `82 passed in 50.52s`；Gateway transport 为受控本地 handler，仍不代表真实 provider、第三方 Gateway、远端 Edge
 或 DL-07 服务栈已完成。
 
+**DL-00～DL-06 本地波次证据：** `2026-07-30` 已对全部 50 个 `test_dl00_*` 至
+`test_dl06_*` 文件运行一次集中单测、合同与 SQLite 集成，结果为 `200 passed in 256.73s`。
+该结果确认当前各数字生命切片可以共同回归，但不替代真人盲测、真实 provider、平台 Gateway、Docker/Host/Obs/Monitor
+服务栈或远端 Edge。DL-07 的首个非破坏性 Docker 前检为 `DOCKER_DAEMON_UNAVAILABLE`；尚未启动 Docker Desktop、容器或
+远端 Edge，必须先完成隔离运行根和真实服务启动后才可作 DL-07 判定。
+
 **DL-06 canonical 主动节律修订：** Scheduler 的发送 policy 现在先以 canonical
 `self-affect + relationship + regulation + profile + frozen Scene` 编译实际
 `AffectiveTurnPlanV1`，然后把 plan id、`synchronization_id`、content digest、scope 与 cadence

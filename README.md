@@ -39,6 +39,13 @@ scope 校验完整的 canonical Life hand-off 才能提供无分数的朋友关�
 没有生产 consumer 的私有 `state_arbiter` Bond prompt helper 也已删除，避免它在未来被重新接入为旁路。
 这是生产读取边界的一条本地收口，不表示所有兼容 reader、真实模型、Gateway、远端 Edge 或 DL-07 已通过。
 
+`2026-07-30` 已对全部 50 个 `test_dl00_*` 至 `test_dl06_*` 专用单测、合同与 SQLite 集成文件做一次
+不重叠的本地波次复核，结果为 `200 passed in 256.73s`。这证明当前 canonical Life、用户/自我 affect
+隔离、关系后效应、冻结表达计划、Host 侧 Voice/Avatar protocol、主动权限与 profile 回滚、以及已收口的
+legacy authority 能在本地共同回归；它不含 Docker、真实 provider、第三方 Gateway、真人盲测或远端 Edge。
+Docker daemon 的 DL-07 前检目前为 `DOCKER_DAEMON_UNAVAILABLE`，尚未启动 Docker Desktop、容器或远端设备，
+因此整体仍是 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，绝不把本地 200 项通过写成最终体验或全栈通过。
+
 同一条受治理 Chat 链现在还会把 Gateway 的服务 principal 与真实 relationship subject、workspace 分开校验：
 Acceptance 只接收与冻结 `AffectiveTurnPlanV1` 完全相符的关系 scope，并以**已持久化的稳定分句**重建
 Voice/Avatar 协议，绝不在接受时重新分句或拿空的兼容 plan 伪造多模态效果。本地 SQLite/受控 Gateway 集成已经

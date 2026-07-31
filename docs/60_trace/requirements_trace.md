@@ -389,6 +389,17 @@ handler 和受控 Gateway transport 中确认 6 个 Host-staged protocol effect�
 `LOCAL_HOST_PROTOCOL_PASS / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / REMOTE_EDGE_NOT_STARTED`，不得解释为物理 TTS/VTS/Avatar
 播放或 DL-07。
 
+### TRACE-DL00-DL06-LOCAL-WAVE-21
+
+`FR-NLE-001 / FR-NLE-002 / FR-NLE-003 / FR-CHAT / FR-SURFACE / FR-VOICE / FR-EMBODIMENT / FR-PROACTIVE`
+的当前统一本地回归，执行了全部 50 个 `test_dl00_*` 至 `test_dl06_*` 专用单测、合同与 SQLite integration
+文件，结果为 `200 passed in 256.73s`。该集合覆盖 canonical Life replay/restart、用户观察与七海 self-affect
+隔离、关系 episode/aftereffect、冻结 AffectiveTurnPlan/ExpressionPlan、Host-staged Voice/Avatar protocol、主动
+许可、profile canary/rollback 以及已退役 legacy authority。它是一个单独的集中波次结果，不与以前的 188 项或
+切片集合相加。状态为 `LOCAL_WAVE_PASS / EMOTIONAL_DIGITAL_LIFE_PARTIAL / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA`：
+Docker、真实 provider、第三方 Gateway、真人盲测与远端 Edge 均没有运行。DL-07 的非破坏性 Docker 前检返回
+`DOCKER_DAEMON_UNAVAILABLE`，未启动 Docker Desktop、容器或远端 Edge，不能得出全栈 PASS/FAIL。
+
 ## 4. Planning Search
 
 | Trace | FR | 合同 | 生产落点 | 证据 | 当前状态 | 下一波 |

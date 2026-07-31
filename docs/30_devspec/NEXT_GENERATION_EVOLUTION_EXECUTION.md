@@ -3,13 +3,13 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.0
-日期：2026-07-28
-状态：`NE-08_IN_PROGRESS / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+版本：v5.1
+日期：2026-07-30
+状态：`NE-08_IN_PROGRESS / DL-06_LOCAL_WAVE_EVIDENCE_COMPLETE_AND_COMPATIBILITY_AUDIT / DL-07_DOCKER_PREFLIGHT_DAEMON_UNAVAILABLE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
-已经拥有持续情感生命”推导为完成。本合同以当前 `dev@fcb8997fa` 为基线，
+已经拥有持续情感生命”推导为完成。本合同以当前 `origin/dev@001c2f5d7` 为基线，
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。
 
 ## 1. 产品结果
@@ -504,6 +504,12 @@ subject/workspace 和稳定分句重建 Host Voice/Avatar protocol，禁止 serv
 没有生产 caller 的私有 StateArbiter Bond helper 已删除，不保留可被重新接线的 score/stage prompt evidence。
 定向 unit/contract/邻接 SQLite integration 为 `82 passed in 50.52s`；这不证明 Monitor/Review、其他 compatibility
 reader、真实 provider/Gateway/Edge 或 DL-07。
+
+**DL-00～DL-06 集中本地波次：** 已执行全部 50 个 `test_dl00_*` 至 `test_dl06_*` 专用
+unit/contract/SQLite integration 文件，最终结果为 `200 passed in 256.73s`。这是一次集中回归，不与此前
+188 项或各切片结果相加；它仅说明当前已接线的数字生命主链在本地共同稳定，不能替代真实模型、平台投递、真人盲测、
+Docker/Host/Obs/Monitor/Gateway 全服务栈或远端 Edge。DL-07 的非破坏性 Docker 前检目前返回
+`DOCKER_DAEMON_UNAVAILABLE`，没有启动 Docker Desktop、任何容器或远端 Edge；状态仍为 `PARTIAL`。
 
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。

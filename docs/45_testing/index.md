@@ -112,14 +112,16 @@
 
 ## DL-00～DL-06 本地波次回归
 
-- `2026-07-30` 的完整本地波次集合执行了全部 48 个 `test_dl00_*` 至 `test_dl06_*` 单测、
-  集成与合同文件，结果为 `188 passed in 254.76s`。它覆盖 canonical Life 的 replay/restart、
+- `2026-07-30` 的完整本地波次集合执行了全部 50 个 `test_dl00_*` 至 `test_dl06_*` 单测、
+  集成与合同文件，结果为 `200 passed in 256.73s`。它覆盖 canonical Life 的 replay/restart、
   用户与七海 self-affect 隔离、关系 aftereffect、冻结表达计划、Voice/Avatar Host protocol、
   主动权限、profile 生命周期与 legacy writer 退役。
 - 该集合额外断言：用户明确接受修复后的 `REPAIR_ACCEPTED` 只能令当前 Plan 选择 `ACKNOWLEDGE` 的
   自然回暖，不能继续 `REPAIR` 形成反复道歉或索求安抚的循环。
 - 这是本地代码与 SQLite 证据，不是 DL-07 真实验收：Docker、真实 provider、远端 Edge/TTS/VTS、
-  真人盲测与平台投递均未运行；`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+  真人盲测与平台投递均未运行。随后进行的非破坏性 Docker 前检得到
+  `DOCKER_DAEMON_UNAVAILABLE`，未启动 Docker Desktop、任何容器或远端 Edge；
+  `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-04 确定性表达不绕过情感协议切片
 
