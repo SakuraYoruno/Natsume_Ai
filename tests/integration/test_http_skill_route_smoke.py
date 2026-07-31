@@ -427,7 +427,10 @@ def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch, tmp
         _close_client(client, ledger)
 
 
-def test_http_chat_route_routes_affective_reflection_to_governed_chat(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_streams_affective_reflection_without_taskgraph(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         response = client.post(
@@ -441,16 +444,16 @@ def test_http_chat_route_routes_affective_reflection_to_governed_chat(monkeypatc
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        commit_event = _governed_commit(events)
+        commit_event = [
+            event for event in events if event.get("phase") == "COMMIT"
+        ][-1]
 
-        assert commit_event["route_type"] == "chat"
         assert commit_event["decision"] == "APPROVE"
-
-        model_attempt = commit_event["audit_refs"]["trace_stage_meta"][
-            "surface_model_attempt"
-        ]
-        assert model_attempt["success"] is True
-        assert model_attempt["budget_measurement"]["token_count"] == 18
+        assert commit_event.get("governed") is not True
+        assert "execution_receipt" not in commit_event
+        trace_stage_meta = commit_event["audit_refs"]["trace_stage_meta"]
+        assert trace_stage_meta["runtime_path"] == "realtime_companion"
+        assert "governed_model_budget" not in trace_stage_meta
     finally:
         _close_client(client, ledger)
 

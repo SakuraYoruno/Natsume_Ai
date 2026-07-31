@@ -3,10 +3,17 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.49
-核对日期：2026-07-31
+版本：v3.50
+核对日期：2026-08-01
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+> **普通 Chat 轻量化修订：** 当前 `chat` 与 Gateway 文本已经从默认 Governed Runtime 拆出，
+> 通过 app-local `RealtimeCompanion → affective Surface stream` 运行，不创建 TaskGraph、Attempt、Lease、
+> Graph Budget、Verification 或 Acceptance。`skill/delegate/plan`、工具及外部动作保持原治理链。原生流式
+> prompt 也已与 buffered 两候选 prompt 分离，真实 provider 不再同时收到 JSON 多候选和纯文本单回复合同。
+> 0149/0150 资产未删除，继续约束任务图内部 frozen Chat。当前仅有本地路由/提示词/HTTP 定向证据，真实
+> provider 首 Token、完整 Gateway 往返与真人体验仍待复测，整体仍为 `INCOMPLETE`。
 
 > **最新执行焦点：** 当前已进入 `DL-07_EXTERNAL_NOT_TESTED_STATUS_PROJECTION_AND_LOCAL_CORE_STACK_ACCEPTANCE`。
 > 下段保留的是 Motive 子切片结束时的完整背景；其中“volatile Bond queue 未完成”和“legacy emotion

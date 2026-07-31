@@ -30,7 +30,10 @@ from host_brain.surface_runtime.delivery_audit import (
     _surface_timings_ms,
 )
 from host_brain.app.sentence_splitter import SentenceSplitter
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_messages
+from host_brain.persona.isolated_surface_harness import (
+    build_isolated_surface_messages,
+    build_native_stream_surface_messages,
+)
 from host_brain.surface_runtime.fact_compiler import (
     _coerce_int,
     _safe_mapping,
@@ -53,7 +56,6 @@ from host_brain.surface_runtime.quality_guards import (
 from host_brain.surface_runtime.affective_streaming import (
     affective_turn_plan_from_trace,
     gate_stream_sentence,
-    native_stream_messages,
     should_use_native_sentence_stream,
 )
 from host_brain.surface_runtime.subagent_context import (
@@ -453,7 +455,7 @@ async def _native_affective_sentence_stream(
         ),
     }
 
-    messages = native_stream_messages(build_isolated_surface_messages(compiled_request))
+    messages = build_native_stream_surface_messages(compiled_request)
     stream_started = time.perf_counter()
     first_token_ms: int | None = None
     splitter = SentenceSplitter()

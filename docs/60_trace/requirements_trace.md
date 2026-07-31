@@ -3,10 +3,10 @@
 
 # 当前需求可追溯矩阵
 
-> 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain Pack 与其它 Skill write 仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待 NE-07 验收。
+> 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.18
-核对日期：2026-07-31
+版本：v5.19
+核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
@@ -425,6 +425,7 @@ offline/legacy fixture 仍可测试回滚，Docker、真实 provider、平台 Ga
 
 | Trace | FR | 合同 | 生产落点 | 证据 | 当前状态 | 下一波 |
 |---|---|---|---|---|---|---|
+| TRACE-DL04-REALTIME-COMPANION-03 | FR-CHAT、FR-SURFACE | 普通 Chat/Gateway 文本必须优先实时陪伴，不承担 TaskGraph 全链开销；工具与任务权限不得进入轻量端口 | `agent_runtime/cortex_runtime.py`、`application_ports.py`、`app/agent_runtime_composition.py`、`app/route_execution_ports.py`、`persona/surface/prompt_construction.py`、`surface_main_chain_adapter.py` | Chat 调用 RealtimeCompanion 且 Governed Runtime 零调用；三类任务路线保持 governed；单回复 prompt 无 JSON 多候选冲突；HTTP commit 标记 realtime path。定向 `27 passed`，composition `10 passed`，HTTP `1 passed`，不相加 | `LOCAL_TARGETED_PASS / REAL_PROVIDER_PERFORMANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA` | 真实 provider 首 Token/整轮复测；DL-07 |
 | TRACE-PLAN-01 | FR-PLANNING、FR-ARCH-003、FR-ARCH-010 | 公共无副作用搜索内核与 immutable compile boundary | `planning_search/`、`goal_planning.py`、`planning_graph_compiler.py`、`planning_execution.py` | GR-01、D14、D16 unit；state/context/grant lineage | `WIRED_FOUNDATION / DOMAIN_CUTOVER_INCOMPLETE` | NE-02 |
 | TRACE-DL04-GOVERNED-VISIBILITY-02 | FR-CHAT、FR-SURFACE、FR-NLE-002 | 已入场 frozen Chat 的稳定句在 Acceptance 前可以可见，但只能来自可重开、不可变且精确绑定当前任务的 receipt；旧 worker 不能把文本混入新 lease/grant，也不能以替代 attempt 盲目重跑模型 | `0149_task_runtime_chat_delivery.sql`、`0150_task_runtime_chat_delivery_recovery.sql`、`persistence/task_chat_delivery_store.py`、`task_runtime/chat_delivery_authority.py`、`app/governed_route_executors.py`、`task_runtime/governed_workers.py`、`app/surface_main_chain_adapter.py` | `TaskBoundChatDeliveryAuthority` 在 model 调用前持久化 plan；每句在 SSE 前写入 Task ledger，并绑定 graph/revision/node/attempt/lease owner/fence/node grant、request/self/relationship/workspace、sync 与 affect revision。SQLite trigger 禁止 update/delete、无 exact attempt fence 的 insert；payload/lease/grant drift 失败关闭。0150 在替代 attempt 写 `PLAN_FROZEN` 的同一事务中查验前序 delivery evidence；替代 attempt 或同 attempt 重入都返回 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`。Frozen executor 与 Worker 只转发 `TASK_NODE_SENTENCE_STAGED` 并二次校验同一 identity。取消/中断写 immutable control；pre-Acceptance 不写 Life、Memory、TTS、Avatar 或 channel outbox。定向集合 `52 passed in 27.87s` | `DL04_NARROW_GOVERNED_CHAT_VISIBILITY_FOUNDATION / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA / PROGRAM_INCOMPLETE`；尚未完成普通 Chat 切流、受认证 HTTP connection resume、跨进程完整 recovery、真实 provider、Edge 或全服务栈验收 | DL-04 closeout、DL-05、DL-07 |
 | TRACE-PLAN-02 | FR-PLANNING、FR-ARCH-003 | Host 从受约束目标生成竞争计划，并只允许显式 durable failure replan | `capability_plan_search.py`、`capability_domain.py`、`governed_task_adapter.py`、`planning_recovery.py` | T-NE02-HOST-CAPABILITY-SEARCH-01、T-NE02-OBJECTIVE-PLANNING-ADMISSION-01、T-NE02-CAPABILITY-FAILURE-REPLAN-01；真实收益仍由 T-PLAN-PROD-01 验收 | `PARTIAL_RULED_OBJECTIVE_CAPABILITY_SEARCH_V1 / EXPLICIT_DURABLE_REPLAN_ONLY`：仅 Research/Frontend rule-derived capability catalog；冻结目录中的两项不同能力在虚拟态中选成 `skill → skill → chat`，`FAILED` predecessor 才可 revision `+1`；普通目标、自动/failure-adaptive replan、跨域收益均未完成 | NE-02 |

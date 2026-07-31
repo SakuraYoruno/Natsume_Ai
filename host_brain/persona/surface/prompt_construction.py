@@ -432,6 +432,110 @@ def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_sce
     return _SURFACE_QUOTE_SCENE_ALIASES.get(scene, scene)
 
 
+def build_native_stream_surface_messages(
+    request: IsolatedSurfaceInput,
+) -> list[dict[str, str]]:
+    """Build the single-response prompt used by ordinary realtime chat.
+
+    The buffered generator below intentionally asks the model for several
+    structured alternatives.  Reusing that prompt and appending a later
+    plain-text instruction made real providers follow both contracts at once.
+    This prompt is independent: one affective plan, one natural reply.
+    """
+
+    control = request.control
+    axes = relationship_control_axes_for_distance(
+        control.relationship_distance
+    ).as_dict()
+    facts = surface_prompt_facts(request)
+    must_not_do = merged_must_not_do(request)
+    system_prompt = "\n".join(
+        (
+            "你是七海的最终表层表达，不是分析器、客服或任务回执生成器。",
+            "Soul.md 定义稳定人格；本轮运行信息只决定此刻如何自然表达，不能改写人格、关系身份、边界或权限。",
+            "只输出一条可直接发送的自然中文回复，可按语义分成少量短句。不要输出 JSON、字段、列表、分析、评分、标签或内部状态。",
+            "先像真实的人一样对眼前这句话产生反应，再按需要安慰、玩闹、认真回答、设边界或给空间；不要把所有情绪抹成中性。",
+            "用户情绪只是观察，不是七海自己的情绪；七海的感受以内在状态为准，并通过措辞、节奏和停顿自然流露，不要照抄状态描述。",
+            "事实不足时承认不确定，不补写未提供的历史、地点、动作、设备状态或现实陪同。技术问题要保留准确性和可执行性，同时保留七海的说话质感。",
+            "不得威胁、排他、冷暴力、负罪施压或诱导依赖；用户要求空间时收住，不暗示用户有义务回复。",
+            f"本轮最多 {max(0, int(control.question_budget))} 个真正问句。",
+            "must_include 必须自然出现，must_not_do 必须遵守；两者都不能被风格要求覆盖。",
+            "",
+            "## Soul.md",
+            request.soul_md.strip(),
+        )
+    )
+
+    inner_state_lines: list[str] = []
+    if request.inner_weather:
+        inner_state_lines.append(f"- 内在天气：{request.inner_weather}")
+    if request.body_state_hint:
+        inner_state_lines.append(f"- 身体感知：{request.body_state_hint}")
+    if request.tension_hint:
+        inner_state_lines.append(f"- 内在张力：{request.tension_hint}")
+    inner_state_lines.extend(
+        (
+            f"- 关怀驱动：{request.care_signal:.0%}",
+            f"- 连续性驱动：{request.continuity_signal:.0%}",
+            f"- 活力：{request.liveliness:.0%}",
+        )
+    )
+    if request.active_loops:
+        inner_state_lines.append(f"- 仍挂念的线索数：{request.active_loops}")
+
+    user_parts = [
+        "## 当前用户输入",
+        request.user_message,
+        "",
+        "## 本轮表达方向",
+        f"- 动作：{control.response_move}",
+        f"- 场景：{control.task_mode}",
+        f"- 情感色调：{control.emotional_tone}",
+        f"- 关系距离：{control.relationship_distance}",
+        f"- 回复长度：{control.information_budget}",
+        f"- 关系表达强度：{json.dumps(axes, ensure_ascii=False, sort_keys=True)}",
+        "",
+        "## 七海此刻的内在状态（只用于自然表达）",
+        *(inner_state_lines or ["- 平稳，按当前话题自然回应"]),
+        "",
+        "## 当前必要事实",
+        *(f"- {item}" for item in facts),
+    ]
+    if not facts:
+        user_parts.append("- 无额外事实")
+    user_parts.extend(
+        [
+            "",
+            "## 语言锚点（只学节奏，不逐字照抄）",
+            *(f"- {item}" for item in control.style_anchor),
+        ]
+    )
+    if not control.style_anchor:
+        user_parts.append("- 像熟悉的人随手发来的私聊")
+    user_parts.extend(
+        [
+            "",
+            "## 必须自然包含",
+            *(f"- {item}" for item in control.must_include),
+        ]
+    )
+    if not control.must_include:
+        user_parts.append("- 无")
+    user_parts.extend(
+        [
+            "",
+            "## 本轮不要做",
+            *(f"- {item}" for item in must_not_do),
+        ]
+    )
+    if not must_not_do:
+        user_parts.append("- 无")
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "\n".join(user_parts)},
+    ]
+
+
 
 
 def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
@@ -675,4 +779,3 @@ def build_minimal_repair_messages(
         )
     )
     return messages
-

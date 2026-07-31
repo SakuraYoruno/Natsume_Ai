@@ -3,11 +3,27 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.48
-核对日期：2026-07-28
+版本：v2.49
+核对日期：2026-08-01
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+当前对话执行采用双路径，而不是把所有输入压进同一任务状态机：
+
+```mermaid
+flowchart LR
+    I["Chat / Gateway 文本"] --> R{"已选择的 route"}
+    R -->|"chat"| C["RealtimeCompanion\nAffective Surface stream"]
+    C --> L["Life / Relationship continuity"]
+    R -->|"skill / delegate / plan"| G["Governed Runtime\nTaskGraph / Lease / Budget / Acceptance"]
+    G --> E["Tool / external effect receipts"]
+```
+
+`AgentRuntimeApplicationPorts.stream_realtime_chat` 由 Host lifespan 绑定同一 `SurfaceRuntimePorts` 与
+canonical Life authority。轻量 Chat 没有工具、Delegate、TaskGraph、Grant 或外部 effect 端口；路由若选择
+这些能力，必须进入 Governed Runtime。0149/0150 frozen Chat ledger 继续服务任务图内部 Chat 节点，不再是
+普通陪伴对话的默认开销。
 
 DL-06 的 canonical Tribe composition 也不再把旧 `MotorCortexAgent/CerebellumAgent` 当作执行或情感 authority：两者
 在 canonical Life ports 下不注册 `MOTOR_*`/platform EventBus，不持久局部 plan/correction、不做自动 retry，也不把

@@ -148,8 +148,10 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
     workspace_id = str(getattr(request_body, "workspace_id", "") or "").strip()
     canonical_route = str((intent_draft or {}).get("route") or "").strip().lower()
-    canonical_governed_route = canonical_route in {"chat", "skill", "delegate", "plan"}
+    canonical_realtime_route = canonical_route == "chat"
+    canonical_governed_route = canonical_route in {"skill", "delegate", "plan"}
     canonical_read_route = canonical_route in {"task_progress", "recent_turn"}
+    realtime_chat_port = getattr(application_ports, "stream_realtime_chat", None)
     governed_supported = bool(
         governed_command_application is not None
         and callable(getattr(governed_command_application, "supports", None))
@@ -200,6 +202,18 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
+    if canonical_realtime_route and not callable(realtime_chat_port):
+        yield _emit_sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "REALTIME_COMPANION_RUNTIME_UNAVAILABLE",
+                "request_id": request_id,
+            }
+        )
+        return
+
     if canonical_governed_route and not governed_supported:
         yield _emit_sse(
             {
@@ -216,7 +230,11 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    if not canonical_governed_route and not canonical_read_route:
+    if (
+        not canonical_realtime_route
+        and not canonical_governed_route
+        and not canonical_read_route
+    ):
         yield _emit_sse(
             {
                 "phase": "COMMIT",
@@ -301,10 +319,9 @@ async def _cortex_orchestrator_sse_generator_impl(
         )
         return
 
-    # Canonical routes have already been rejected above unless the app-local
-    # Governed Runtime supports them.  Cortex may enrich a frozen command, but
-    # it must never short-circuit with a conversational reply or post-process
-    # write outside TaskGraph Acceptance.
+    # All write routes are selected before this point.  Ordinary conversation
+    # is enriched and sent to the app-local affective Surface stream; Skill,
+    # Delegate and Plan continue into the durable governed runtime below.
     bond_summary: dict[str, Any] = {}
 
     has_multimodal_input = bool(getattr(request_body, "attachments", None)) or bool(
@@ -515,6 +532,41 @@ async def _cortex_orchestrator_sse_generator_impl(
         scene_type="CHAT",
     )
     llm_runtime_resolve_ms = max(0, int(time.time() * 1000) - llm_runtime_started_ms)
+
+    if canonical_realtime_route:
+        stream_realtime_chat = realtime_chat_port
+        if not callable(stream_realtime_chat):  # defensive; checked above
+            raise RuntimeError("REALTIME_COMPANION_RUNTIME_INVARIANT_BROKEN")
+        trace_stage_meta = {
+            "runtime_path": "realtime_companion",
+            "orchestrator_started_ms": orchestrator_started_ms,
+            "context_ready_ms": int(time.time() * 1000),
+            "prefetch_persona_inputs_ms": prefetch_persona_inputs_ms,
+            "retrieval_wait_ms": retrieval_wait_ms,
+            "prompt_filter_ms": prompt_filter_ms,
+            "llm_runtime_resolve_ms": llm_runtime_resolve_ms,
+            "pii_ingress": dict(_pii_ingress_stats),
+        }
+        async for realtime_event in stream_realtime_chat(
+            request_body=request_body,
+            route_reason=route_reason,
+            request_id=request_id,
+            session_id=session_id,
+            person_id=person_id,
+            sanitized_message=sanitized_message,
+            emotion_context=emotion_context,
+            emotion_snapshot=emotion_snapshot,
+            bond_summary=bond_summary,
+            retrieval_evidence_items=retrieval_evidence_items,
+            retrieval_summary=retrieval_summary,
+            render_target_lang=render_target_lang,
+            llm_runtime=llm_runtime,
+            ts_ms=ts_ms,
+            intent_draft=intent_draft,
+            trace_stage_meta=trace_stage_meta,
+        ):
+            yield realtime_event
+        return
 
     if governed_command_application is None:
         raise RuntimeError("GOVERNED_RUNTIME_INVARIANT_BROKEN")

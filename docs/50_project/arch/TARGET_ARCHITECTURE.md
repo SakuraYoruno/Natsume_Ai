@@ -33,6 +33,7 @@ Natsume AI 的下一代目标不是继续增加互不相连的“高级能力模
 9. 用户 Affect observation 不是七海 self-affect；任何模型输出或传感器信号都不得直接越过 Appraisal 改写七海自身情绪。
 10. 七海可自然表达负面感受，但不得将其转换为用户回应义务、排他要求、威胁或负罪压力。
 11. Host、Obs、Edge、Gateway 和 Worker 只通过版本化合同协作，不共享实现包或全局服务容器。
+12. 普通陪伴对话使用轻量实时路径，只持有情感、关系、记忆读取和表达端口；Skill、Delegate、Plan、工具和外部动作才进入 TaskGraph。不能为了工程对账牺牲日常对话首 Token，也不能让轻量路径暗藏执行权限。
 12. 运行数据进入 `runtime/`，验收产物进入 `artifacts/`；不恢复顶层 `data/skills/flows/integrations` 杂物目录。
 13. 生产 manifest 只公布已可执行且受治理的能力；尚未接线的旧命令必须从
     active contract 退役并单独记录 replacement authority，禁止用长期

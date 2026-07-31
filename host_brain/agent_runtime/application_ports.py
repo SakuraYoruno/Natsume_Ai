@@ -26,6 +26,11 @@ class AgentRuntimeApplicationPorts:
     context_read_ports: ConversationContextReadPorts
     task_status_projection: Callable[[], Any]
     persist_post_process_audit: Callable[..., Awaitable[None]]
+    # Ordinary companion chat stays in the app-local Surface runtime instead
+    # of paying the durable TaskGraph/Attempt/Lease/Budget lifecycle.  The
+    # callable is optional so isolated read/worker fixtures remain small;
+    # production composition always binds it.
+    stream_realtime_chat: Callable[..., Any] | None = None
 
 
 __all__ = [

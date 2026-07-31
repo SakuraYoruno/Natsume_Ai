@@ -3,8 +3,8 @@
 
 # 图 06：Gateway 与 Edge 输入输出
 
-版本：v2.3
-核对日期：2026-07-30
+版本：v2.4
+核对日期：2026-08-01
 
 Gateway 处理“平台消息”，Edge RPC 处理“本机感知与动作”。两者可以在同一 Edge lifecycle 中运行，但 transport authority 和 effect authority 不应混为一体。
 
@@ -17,6 +17,8 @@ sequenceDiagram
     participant S as Gateway Server
     participant D as Durable Gateway Inbox
     participant H as Host Input Runtime
+    participant R as Host Route Selection
+    participant C as RealtimeCompanion
     participant T as Governed Host Runtime
 
     P->>A: webhook/event
@@ -26,26 +28,32 @@ sequenceDiagram
     D-->>S: accepted/duplicate receipt
     D->>H: authenticated Host input
     H->>H: verify HMAC; bind principal/tenant + sender/conversation scope
-    H->>T: submit canonical request
-    T-->>H: authenticated Host receipt
+    H->>R: authenticated canonical input
+    alt route = chat
+        R->>C: affective context + text
+        C-->>H: streamed reply + turn commit
+    else route = skill / delegate / plan
+        R->>T: submit governed command
+        T-->>H: authenticated execution receipt
+    end
     H-->>D: completion receipt
     D-->>P: platform-specific acknowledgement
 ```
 
-Gateway durable inbox 负责重复消息、claim、retry 和 uncertain/DLQ 状态。Host 业务是否允许执行仍由 Secure Ingress、Governor 和 Task Runtime 决定，Gateway receipt 不能替代 Host Acceptance。允许后的 Host Input 会在 AffectFusion/Appraisal 前，把可信 principal/tenant 与签名 `from_id`、`conversation_id` 编译为 `SecureGatewayConversationScopeV1`：sender 只决定 opaque relationship subject，conversation 只决定 opaque session，workspace 只能来自 tenant；缺 sender 直接 durable reject，不能回落到 `default` 或用群会话代替关系对象。Runtime Context 会重新校验同一 scope，因此服务 principal 不会进入七海的关系记录。
+Gateway durable inbox 负责重复消息、claim、retry 和 uncertain/DLQ 状态。Host 先经 Secure Ingress 与 Governor 选择 route：普通文本 Chat 进入轻量 RealtimeCompanion；需要 Skill/Delegate/Plan 或外部动作时才进入 Task Runtime。Gateway receipt 不能替代任务路线的 Host Acceptance，也不能把普通聊天升级为任务。允许后的 Host Input 会在 AffectFusion/Appraisal 前，把可信 principal/tenant 与签名 `from_id`、`conversation_id` 编译为 `SecureGatewayConversationScopeV1`：sender 只决定 opaque relationship subject，conversation 只决定 opaque session，workspace 只能来自 tenant；缺 sender 直接 durable reject。
 
 ## 平台出站
 
 ```mermaid
 sequenceDiagram
-    participant T as Accepted TaskGraph
+    participant T as Accepted reply owner
     participant E as Acceptance Effect Dispatcher
     participant H as Host Gateway Delivery
     participant O as Durable Gateway Outbox
     participant A as Platform Adapter
     participant P as Message Platform
 
-    T->>E: surface.reply_delivery effect intent
+    T->>E: realtime turn commit or Task acceptance effect
     E->>H: accepted reply payload + lineage
     H->>O: enqueue idempotent outbox
     O->>A: claim immutable delivery plan
@@ -56,7 +64,7 @@ sequenceDiagram
     H-->>E: effect receipt
 ```
 
-平台 API 返回不明确时，Gateway 把状态保留为 retryable 或 uncertain，而不是盲目重发并宣称成功。出站 adapter 只能执行已经验收的 delivery plan，不能重写回复内容或重新决定目标用户。
+平台 API 返回不明确时，Gateway 把状态保留为 retryable 或 uncertain，而不是盲目重发并宣称成功。出站 adapter 只能执行已经提交的幂等 delivery plan，不能重写回复内容或重新决定目标用户。任务路线的计划来自 Acceptance effect；普通 Chat 的计划来自 affective turn commit，两者在 Gateway outbox 汇合但不混用执行 receipt。
 
 该不确定性也进入 Graph cancellation fence：Acceptance Effect handler/transport 返回 `FAILED` 不能证明平台未收到消息，因此 cancellation 必须继续 `RECONCILIATION_REQUIRED`；只有 `COMMITTED` 且存在 durable receipt 才可自动收口，不能用错误码猜测 `NO_SIDE_EFFECT`。0098 已把签名 Effect 对账接成默认关闭的 append-only sidecar：PENDING proof exact 绑定 case/intent/effect/fence/Attempt/resolution/actor/Outbox/`graph_revision`，只进入之后的新 decision evidence；已有 FINALIZED decision 的 correction 仅作 trusted-read overlay，旧 decision、fence 和 evidence 均不改写。生产 gate 只阻断目标数据库中实际存在且未修复/未隔离的 legacy inventory；部署密钥/凭据、完整 key lifecycle 与真实 canary仍未完成。
 

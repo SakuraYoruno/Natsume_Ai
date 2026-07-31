@@ -74,6 +74,7 @@ def test_agent_runtime_scope_owns_one_lifespan_bundle_and_injects_life_authority
         life_authority_provider=lambda: (life_service, life_reader),
     )
     assert scope.provider() is ports
+    assert callable(ports.stream_realtime_chat)
     assert ports.record_user_turn(
         request_id="request-ne01-agent-runtime-ports",
         session_id="session-ne01-agent-runtime-ports",

@@ -3,9 +3,11 @@
 
 # Natsume AI
 
-Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。它把对话、人格表达、长期记忆、关系状态、主动行为、工具执行、设备能力和多平台消息接入放在同一套可审计运行时中，并要求所有真实动作都能回答四个问题：谁批准、执行了什么、依据什么验收、产生了什么副作用。
+Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统。普通陪伴对话优先低延迟、自然表达与情感连续性；只有工具、Delegate、Plan、Scheduler、Operator 和真实外部副作用进入完整受治理执行链。
 
 > 当前唯一产品主线是“实时情感陪伴数字生命”（`NE-08 / DL-00～DL-07`）。工程治理、任务、模型、Gateway、Edge 和观测是支撑七海连续情感、关系与自然表达的底座，不是产品完成的替代品。现有 NE-01～NE-07 记录均为范围受限的历史基础证据；它们不能证明七海已拥有自身情感因果、长期修复或文本/语音/Avatar 同轮一致性。
+
+> 当前 Chat 运行策略：`chat` 经 app-local `RealtimeCompanion` 直接进入 canonical affective Surface，流式输出并在回合结束提交 Life/关系连续性；它不创建 TaskGraph、Attempt、Lease、Graph Budget、Verification 或 Acceptance。`skill / delegate / plan` 以及工具和外部动作仍走 Governed Runtime。0149/0150 的 frozen Chat ledger 保留给任务图内部的 Chat 节点和历史恢复，不再是普通聊天默认路径。后文旧提交中“普通 Chat 全量受治理”的描述只代表历史治理切片，不代表当前产品策略。
 
 > `2026-07-31` 验收状态纠偏：当远端 Edge 按用户要求保持关闭时，Host 不再把 ASR、TTS、VTS、音频播放或 Edge RPC 默认成健康。真实 Host `/health` 现返回 `ACCEPTANCE_PENDING_EXTERNAL`（`required_unavailable=0`、`required_not_tested=5`），`/ready` 返回 `ready=false`；独立 Obs 从 canonical SQLite `service_health_log` 重建五项 `NOT_TESTED`，Monitor Nginx 页面显示“未验收”而不是“健康”或含混的“未知”。这证明状态传播诚实，不证明远端设备、真实模型、Gateway 平台或真人体验已经验收。
 

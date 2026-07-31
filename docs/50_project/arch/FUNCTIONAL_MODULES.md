@@ -3,8 +3,8 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.56
-核对日期：2026-07-31
+版本：v2.57
+核对日期：2026-08-01
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
@@ -685,7 +685,7 @@ Bond/孤独/任务/免疫事件不能再写 cortisol/oxytocin delta 或驱动 Li
 
 Tribe 的偏好与对话经历 state helper 只接受 Host lifespan ledger；其 `3/15/6、Container48/2/45` 库存只作历史，现行生产 locator 已全部清零，ResourceManager status 也已迁至 0123 journal。Host-root owner 与底层 Authority identity 隔离仍不表示外部 namespace、其它外部资源恢复、正式 activation、Tribe、Chat Acceptance 或完整 Composition 已完成。
 
-受治理 Chat 的 Surface 主链由 `SurfaceRuntimePorts` 承接：Host lifespan 一次绑定 AgentRuntime/Life authority，Internal/Tool Runtime 只传递 frozen bundle；普通 Chat、Gateway 与 ASR 则由 ASGI 接收同一 `InputRuntimeApplicationPorts`，再经 `TribeRuntimeAgentPorts` 取得 Thalamus/ANS/Immune。聊天免疫门禁只接收 `TribeRuntimeAgentPorts.require_immune_agent()`，输入归一化只接收 `InputRuntimeApplicationPorts.require_immune_agent()`；缺失 provider 分别拒绝为 `HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED`、`HOST_INPUT_IMMUNE_AGENT_NOT_INJECTED`，不重新读取 singleton。普通检查器故障仍记录 `IMMUNE_EVALUATE_DEGRADED`。补充边界集合 `141 passed in 9.66s` 与既有 `131 passed in 7.25s`、旧免疫 `43 passed in 7.75s`、#103+#104 的 `196 passed in 21.08s` 均重叠，均仅证明依赖收口，不能升级为 Chat acceptance、Tribe app-local 化、generic Delegate、七路线或 NE-01 完成。
+Surface 主链由 `SurfaceRuntimePorts` 承接，Host lifespan 一次绑定 AgentRuntime/Life authority。普通 Chat、Gateway 与 ASR 经 `InputRuntimeApplicationPorts` 和 `TribeRuntimeAgentPorts` 完成输入与上下文处理后，由 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入轻量 affective stream；不创建 TaskGraph 或 Graph Budget。Internal/Tool Runtime 的 frozen Chat 节点仍显式注入同一 Surface ports，并保留 task-bound delivery authority。两条路径共享情感与人格表达实现，但不共享执行开销或权限：轻量 Chat 无工具/effect port，Skill/Delegate/Plan 必须走 governed admission。
 
 | 模块 | 当前责任 | 主入口/代码证据 | 允许依赖 | 不应拥有 | 状态/缺口 |
 |---|---|---|---|---|---|

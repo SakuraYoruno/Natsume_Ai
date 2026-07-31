@@ -3,8 +3,8 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.7
-日期：2026-07-31
+版本：v4.8
+日期：2026-08-01
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
 本文只定义产品必须提供什么、禁止什么以及如何验收，不记录代码完成度、文件数量、端口默认值或阶段状态。
@@ -88,7 +88,8 @@ engine 前稳定退役。隔离 fixture 可以验证历史数据回滚，但不�
   分句不得继续发送，已可见分句不得重复。高歧义、边界和修复回合只能在受限候选中
   选择，不能把内部计划或操控性措辞暴露给用户。
 
-  - 已入场的冻结 Chat 必须使用 immutable Task delivery ledger，而非将 speculative 文本写入 Life、Memory 或通道 outbox；回执同时绑定 self、relationship subject、workspace 与同步/affect revision。lease 或 grant 漂移必须失败关闭。该窄路径尚不代表普通 Chat 已完成连接恢复。
+  - 普通低风险 Chat/Gateway 文本使用轻量实时陪伴路径：不创建 TaskGraph、Attempt、Lease、Graph Budget、Verification 或 Acceptance；仍须冻结 self-affect/CompanionAct/ExpressionPlan，并只提交对长期连续性有意义的 Life、关系、可见对话与 delivery intent。硬崩溃时允许丢失尚未完成的最后一轮，禁止为避免这一点把整轮改成同步企业审计事务。
+  - 已由 Skill/Plan/Delegate 任务图生成的 frozen Chat 节点仍使用 immutable Task delivery ledger；回执绑定 self、relationship subject、workspace 与同步/affect revision，lease 或 grant 漂移必须失败关闭。它是任务执行边界，不是普通陪伴对话的默认实现。
 - Voice `SPEAK`、Avatar `TRANSITION` 与文本必须从同一 `ExpressionPlan`、同步编号和
   self-affect revision 编译；Host 暂存、取消与释放 receipt 必须与物理 Edge receipt 分开。
   某个通道不可用只能独立降级，不能将七海 self-affect 中性化或把 `HOST_PROTOCOL_STAGED`
@@ -160,7 +161,7 @@ engine 前稳定退役。隔离 fixture 可以验证历史数据回滚，但不�
 ### FR-AGENT-RUNTIME：受治理 Agent 执行
 
 - 所有生产 admission 必须转换为版本化 `WorkOrderV3`，显式携带目标、workspace、允许/禁止动作、审批策略和 `BudgetPolicy`。
-- Chat、Gateway、Scheduler、Internal Agent、Operator 和 Domain Pack 必须共享 HostCommand → TaskGraph → Attempt → Grant → Verification → Acceptance → Receipt lineage。
+- Skill、Delegate、Plan、Scheduler、Internal Agent、Operator、Domain Pack 和任何工具/外部副作用必须共享 HostCommand → TaskGraph → Attempt → Grant → Verification → Acceptance → Receipt lineage。普通 Chat/Gateway 文本明确排除在该要求之外；路由一旦选择工具或任务能力，就必须先切入受治理路径，轻量 Chat 不能持有这些端口。
 - 每个节点使用 node-bound grant；worker 不得扩大 scope、预算或自行二次规划。
 - 写任务必须绑定受控 workspace；秘密文件、主分支和任务外路径默认不可写。
 

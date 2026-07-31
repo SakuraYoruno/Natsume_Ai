@@ -3,12 +3,22 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.79
-核对日期：2026-07-31
+版本：v5.81
+核对日期：2026-08-01
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
+
+> `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
+> Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local
+> RealtimeCompanion/Surface，使用 canonical affective Life 与逐句流式表达，但不创建 HostCommand、
+> TaskGraph、Attempt、Lease、Graph Budget、Verification 或 Acceptance。三条任务路线及工具/外部 effect
+> 保持 Governed Runtime。原生流式 prompt 现为独立单回复合同；buffered 高歧义/修复回合仍是两候选择优。
+> 0149/0150 未删除，只服务任务图内部 frozen Chat。定向代码/HTTP 已通过；本机真实
+> `production.deepseek / deepseek-v4-pro` 普通陪伴回合首个可见分句 `12296ms`、完整三句
+> `12834ms`，前后 Task admission/execution 十类关键表零增长。切流已成立，但延迟仍未达到体验目标，
+> 后续优化应集中在模型与上下文预取，而不是把普通聊天重新送回 TaskGraph。
 
 > `2026-07-31` 最新运行事实：远端 Edge 由用户明确保持关闭。`probe_edge_rpc_health()` 在该配置下不发网络请求，而是生成五条 canonical `NOT_TESTED / ACCEPTANCE_PENDING_EXTERNAL`；Host startup、health、readiness、node deployment 与 release identity 均保留该状态，本地真实错误仍优先成为失败。`ServiceHealthReporter` 将结果写入 `service_health_log`，独立 Obs 的 passive projection 从 SQLite 重建，不读取 Host heartbeat cache；旧 Monitor service id 经显式映射得到 ASR、TTS、VTS、Audio、Edge RPC 五项 `NOT_TESTED`。真实隔离栈重启结果为 Host `required_unavailable=0 / required_not_tested=5 / ready=false`，Obs read model `not_tested=5 / unknown=0`，Nginx Monitor 的无拦截浏览器检查显示五项“未验收”。Unified Gateway、真实 provider 和远端物理链未运行，没有 `FullStackAcceptanceReceiptV1`。
 

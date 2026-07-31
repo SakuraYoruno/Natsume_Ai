@@ -3,15 +3,20 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.41
+版本：v3.42
 
-核对日期：2026-07-31
+核对日期：2026-08-01
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+普通对话当前是轻量数据流：`Chat/Gateway text → Cortex context → RealtimeCompanion →
+AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、
+Attempt、Lease、Graph Budget、Verification 或 Acceptance。只有 `skill/delegate/plan`、工具和外部动作继续进入
+下文的 durable execution flow；任务图内部的 frozen Chat 仍可使用 0149/0150 receipt。
 
 DL-07 新增的 Gateway-only 数据流不经过远端 Edge：`start_gateway_side.ps1 →
 run_gateway_side.py → SQLiteMigrationRunner / SQLiteGatewayTransportStore →
@@ -1163,12 +1168,13 @@ flowchart TD
     Ingress --> Cortex
 
     Cortex --> Route{"route"}
-    Route -->|chat| Chat["Frozen Chat node"]
+    Route -->|chat| Chat["Realtime companion Surface"]
     Route -->|skill| Skill["Frozen Skill node"]
     Route -->|delegate| Delegate["Frozen Delegate node\n仅 pentest_agent 有内层授权"]
     Route -->|plan| Plan["已批准 steps 的拓扑合法化"]
 
-    Chat --> Compile["HostCommand + WorkOrderV3 + TaskGraph"]
+    Chat --> Affective["AffectiveTurnPlan + sentence stream"]
+    Affective --> ChatContinuity["Life / relationship continuity"]
     Skill --> Compile
     Delegate --> Compile
     Plan --> Compile
@@ -1259,7 +1265,7 @@ flowchart TD
 
     classDef wired fill:#dff5e1,stroke:#1b7f3a,color:#102a17;
     classDef partial fill:#fff3cd,stroke:#a87500,color:#332400;
-    class UI,GW,Ingress,Cortex,Route,Chat,Skill,Compile,Admission,GraphHook,Schema,Worker,HB,Checkpoint,VA,Receipt,EffectHook,Effects,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
+    class UI,GW,Ingress,Cortex,Route,Chat,Affective,ChatContinuity,Skill,Compile,Admission,GraphHook,Schema,Worker,HB,Checkpoint,VA,Receipt,EffectHook,Effects,Internal,InternalWO,RevisionedOutbox,RuntimeEvent wired;
     class Delegate,Plan,PolicyGate,Runtime,ShadowFanOut,NodeLocal,DurableOutcome,AtomicSuccess,SuccessUow,Reentry,Idle,InProgress,OuterSettle,Window,Conflict,Recovery,Conversation,Delivery,CancelCaller,CancelVerify,ControlGraph,ControlReview,ControlPreview,ControlEffect,CancelIntent,LocalRegistry,LocalJoin,CancelScan,CancelClaim,CancelAdmission,CancelReconcile,CancelDefer,CancelFinal,CancelComplete,StartupRecover,TerminalInventory,TerminalState,NoSilentRepair,ExactAuto,SignedRepair,Quarantine,Scheduler,SchedulerWO,SchedulerPlan,SchedulerEffect,SchedulerDispatcher,SchedulerHandler,SchedulerResult,SchedulerClaim,ProtectedStage,InternalEffect,WorkspacePromotion partial;
 ```
 
@@ -1276,7 +1282,7 @@ flowchart LR
     Input --> Chat["普通 Chat handler"]
     Input --> Gateway["Gateway / ASR input normalization"]
     Tribe --> Startup["startup / lifespan warmup"]
-    Chat --> Cortex["Governor → Cortex → governed runtime"]
+    Chat --> Cortex["Governor → Cortex → RealtimeCompanion"]
     Gateway --> Cortex
 ```
 
@@ -1286,8 +1292,8 @@ flowchart LR
 
 上图的核心结论是：
 
-- Host `chat` / `skill` / `delegate` / `plan` 四路已经进入共用 Governed Runtime，不再允许失败后退回 Executive 执行。D10 已让 `pentest_agent` Delegate 带着冻结的 command/graph/node/attempt/lease/fence/parent+node grant invocation 执行；真正调用前重验 node grant，Attempt/Lease/Fence 仍由外层 durable worker 保持。该 handler 仅生成无副作用的 Domain Pack/SecureRun handoff，且不写 legacy `skill_exec_log`。`intent_agent`、`translate_agent`、`vision_agent`、`repair_agent` 与未注册 target 均在 HostCommand/TaskGraph admission 前拒绝，因此 Delegate 通用平台仍未完成。
-- Cortex 已不再保留 contextual-session/style、clarification、LLM unavailable 或异步 post-process 的 direct-reply compatibility branch，Surface 的 `schedule_async_post_process()` fire-and-forget 入口也已删除。canonical route 未通过 Governed Runtime `supports()` 时会在任何可见对话写入前返回拒绝；通过后 Cortex 仅生成冻结上下文，TaskGraph 的 Verification/Acceptance 才决定可见结果和后续 effect，提交后的 Life/Conversation 投影经 durable `surface.post_process` outbox 处理。
+- Host `skill` / `delegate` / `plan` 三路进入共用 Governed Runtime；`chat` 明确进入 app-local RealtimeCompanion。D10 的 `pentest_agent` Delegate 仍带冻结的 command/graph/node/attempt/lease/fence/parent+node grant 执行，未注册 target 在 admission 前拒绝。普通 Chat 端口不含这些能力，因此不能借轻量路径执行工具。
+- Cortex 不再保留旧 contextual direct-answer 分支，但会为普通 Chat 装配关系、检索、情感与模型上下文后直接调用 `stream_realtime_chat`。Surface 自己冻结 AffectiveTurnPlan 并提交有限连续性；只有三条任务路线由 TaskGraph Verification/Acceptance 决定结果和 effect。
 - `app/intelligent_runtime.py` 已物理删除，不能再产生任何 planning outline、SkillDag hint 或执行 authority；`SkillComposer` 也不再暴露 SkillDag 执行方法。旧 Executive 的 `route_planning`、`conversation_execution`、application `composition`、application port wiring 与 legacy diagnostic direct-skill matrix 已物理删除；`executive_runtime/runtime.py` 和 stale app wrapper 均只能拒绝 canonical route。Executive 内的 Forge override call 已移除，纯 SkillDag adapter 零生产调用；但独立 Forge `runtime-match` 尚未退役，不能把这次删除表述为全局 authority 清零。任何后续动作仍必须从 Governed admission 生成新的 immutable TaskGraph。
 - direct `skill` 与 selected `plan` 中的登记 production target 都会在 admission 内把 `codex_production` adapter payload（含 profile/default 展开）冻结到 `WorkOrderV3.input_pack.frozen_node_executor_payloads[node_id]`。Plan 只从 immutable node binding 对应的 approved candidate input 生成该 payload；任意 caller-supplied frozen payload、candidate route/target/objective/args 漂移都会在 admission 前拒绝，replan 则按新 graph revision 生成新的 node-bound payload。payload digest、V2 adapter work-order identity 与 root/graph/node/revision/scope/fingerprint/Review/approval lineage 都在 Frozen Skill Worker 中重验；通过后才可进入 Broker，且一律同步执行，不能恢复旧 background daemon。replay comparison 只将该嵌套载荷中的轮换 Review/approval ref 和派生 digest 归一化，runtime 仍只消费 durable 首次准入载荷，其他任一字段漂移均拒绝。此切片不把 legacy adapter 形状提升为第二份 TaskGraph authority；signed multi-node node failure 已有独立恢复证据，但其它恢复类别和全路线 acceptance 仍未完成。
 

@@ -179,8 +179,12 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
 
     assert requests
     messages = requests[0].prompt.variables["messages"]
-    assert messages[-1]["role"] == "system"
-    assert "只输出一条最终可发送的中文正文" in messages[-1]["content"]
+    assert [message["role"] for message in messages] == ["system", "user"]
+    rendered_prompt = "\n".join(message["content"] for message in messages)
+    assert "只输出一条可直接发送的自然中文回复" in rendered_prompt
+    assert '"candidates"' not in rendered_prompt
+    assert "输出必须是 JSON" not in rendered_prompt
+    assert "用户情绪只是观察，不是七海自己的情绪" in rendered_prompt
     assert command_types == [
         "affective_turn_planned",
         "surface_sentence_delivery_intent",

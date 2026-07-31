@@ -3,9 +3,29 @@
 
 # 测试与验收目录
 
-版本：v2.67
-维护日期：2026-07-31
+版本：v2.69
+维护日期：2026-08-01
 状态：当前证据
+
+## DL-04 普通 Chat 轻量实时路径
+
+- `test_gr05_cortex_governed_cutover.py` 现在分别断言：`chat` 只调用 app-local
+  `stream_realtime_chat` 且不触发注入的 Governed Runtime；`skill/delegate/plan` 仍各调用一次 governed
+  execution；缺少 RealtimeCompanion 时 Chat 稳定拒绝。
+- `test_gr05_route_execution_ports.py` 证明轻量端口只构造 `SurfaceReplyInput` 并保留
+  `defer_effects_to_task_runtime=false / governed_delivery_authority=None`，不取得 Task/Grant/工具 authority。
+- `test_dl04_native_affective_stream.py` 证明普通流式 prompt 只有 system+user 的单回复合同，不含
+  `candidates` 或 JSON 输出要求；原逐句 Life intent、ExpressionPlan 和非操控 Gate 保持。
+- HTTP 定向用例证明 `/v1/chat` 返回 `runtime_path=realtime_companion` 且没有 governed execution receipt。
+  当前不重叠的受影响单元集合为 `57 passed in 6.52s`，另有真实 ASGI HTTP 用例
+  `1 passed in 13.68s`；文档 authority/freshness 为 `19 passed in 10.23s`，各组不相加。
+- `2026-08-01` 本机进程复测使用 `production.deepseek / deepseek-v4-pro` 的真实外部 transport：普通陪伴回合
+  首个可见分句为 `12296ms`，三句完整 `COMMIT=APPROVE` 为 `12834ms`；provider ledger 记录
+  `prompt_tokens=1791 / completion_tokens=194 / provider_latency_ms=11297` 和非空 transport identity digest。
+  请求前后 `host_command_journal`、Graph、Node、Attempt、Lease、两级 Budget、Verification、Acceptance 与
+  Task Outbox 行数完全不变，且 COMMIT 没有 execution receipt。这证明轻量切流真实生效，不代表当前首句延迟
+  已达到 DL-04 目标；主要剩余瓶颈仍是模型与前置上下文。Host/Obs/Nginx、现有 Docker Neo4j/Chroma/Redis
+  均真实运行，远端 Edge 保持关闭；远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-07 独立 Unified Gateway 入口
 
@@ -97,12 +117,13 @@
   `NOT_RUN_ACCOUNT_QUOTA`。未启动真实 Gateway 平台、provider、远端 Edge 或 Docker 服务栈，不能提升为
   多用户或 DL-07 验收通过。
 
-## DL-04 本机 Chat 的受治理句流顺序
+## DL-04 任务图内部 frozen Chat 的受治理句流顺序（历史窄证据）
 
-- `tests/integration/test_host_integration.py::TestChatEndpoint` 通过真实 ASGI lifespan 验证本机
-  `POST /v1/chat`：冻结后的 canonical affect context 会进入 TaskGraph；在受控、显式 OpenAI-compatible
-  final-usage transport 上，`SENTENCE` 必须携带 task-bound delivery、graph/node/attempt 和
-  self-affect revision，并严格先于 accepted `COMMIT`。
+- `tests/integration/test_host_integration.py::TestChatEndpoint` 曾通过真实 ASGI lifespan 验证任务图内部
+  frozen Chat 的句流合同：在受控、显式 OpenAI-compatible final-usage transport 上，`SENTENCE` 必须携带
+  task-bound delivery、graph/node/attempt 和 self-affect revision，并严格先于 accepted `COMMIT`。
+  自 `2026-08-01` 起该证据只约束 Skill/Plan/Delegate 等受治理任务内生成，不再描述普通 `/v1/chat`；普通
+  Chat 以本页顶部 RealtimeCompanion 证据为准。
 - `tests/unit/test_dl04_native_affective_stream.py::test_governed_unseen_stream_failure_is_a_durable_clean_reject`
   验证模型在首句前失败时只追加 `PLAN_FROZEN → STREAM_INTERRUPTED`，以稳定 `REJECT` 收口，不产生
   Life/Memory/Voice/Avatar effect，也不把未展示调用误判为可重跑的未知副作用。
@@ -274,8 +295,9 @@
   用户情绪分析不得误路由为七海自身反思。连同 policy/catalog/scheduler、Thalamus、frozen-route budget contract 与
   executor-broker 邻接用例为 `197 passed in 38.99s`。`test_http_skill_route_smoke.py` 的三个受影响 HTTP 用例另有
   `3 passed in 32.95s`：它验证
-  canonical chat 的 accepted TaskGraph fixture、caller-supplied Skill plan 的拒绝和完整 model-budget measurement
-  形状。两者都是本地、model-free fixture 证据，不是 canonical 情感读取的真实 provider、远端 Edge 或 DL-07 验收。
+  当时任务图内部 frozen Chat 的 accepted TaskGraph fixture、caller-supplied Skill plan 的拒绝和完整
+  model-budget measurement 形状。两者都是历史本地、model-free fixture 证据，不再定义普通 Chat 的当前路线，
+  也不是 canonical 情感读取的真实 provider、远端 Edge 或 DL-07 验收。
 
 - `emotion_agent` 生产图退役后，`test_dl06_legacy_emotion_skill_retirement.py` 验证它不在 allowlist、Graph handler
   map 或 Agent metadata 中，旧 delegate 只能成为 `surface_reply` 的 canonical chat，历史深度字段为

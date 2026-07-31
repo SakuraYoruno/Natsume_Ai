@@ -24,6 +24,12 @@ from host_brain.app.route_catalog_runtime import (
     resolve_host_llm_runtime_async_from_catalog,
     resolve_surface_reply_llm_runtime,
 )
+from host_brain.app.route_execution_ports import (
+    RealtimeCompanionExecutionPorts,
+    build_realtime_companion_execution_ports,
+    stream_realtime_chat_with_context,
+)
+from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.observability.runtime_audit import _persist_post_process_audit
 
@@ -98,6 +104,7 @@ def build_agent_runtime_application_ports(
     session_tactic_ledger_store = host_services.require_provider(
         "session_tactic_ledger_store"
     )
+    realtime_companion_ports: RealtimeCompanionExecutionPorts | None = None
 
     def resolve_life_authority() -> tuple[Any, Any]:
         try:
@@ -190,7 +197,18 @@ def build_agent_runtime_application_ports(
 
         return build_conversation_experience_read_pack(ledger=ledger(), **kwargs)
 
-    return AgentRuntimeApplicationPorts(
+    async def stream_realtime_chat(**kwargs: Any):
+        if realtime_companion_ports is None:
+            raise AgentRuntimeCompositionError(
+                "HOST_REALTIME_COMPANION_RUNTIME_UNAVAILABLE"
+            )
+        async for event in stream_realtime_chat_with_context(
+            ports=realtime_companion_ports,
+            **kwargs,
+        ):
+            yield event
+
+    application_ports = AgentRuntimeApplicationPorts(
         record_user_turn=record_user_turn_with_life_authority,
         record_assistant_turn=record_assistant_turn_with_life_authority,
         run_retrieval=run_retrieval_with_life_authority,
@@ -219,7 +237,16 @@ def build_agent_runtime_application_ports(
             _persist_post_process_audit,
             audit_ledger=ledger,
         ),
+        stream_realtime_chat=stream_realtime_chat,
     )
+    surface_runtime_ports = build_surface_runtime_ports(
+        agent_runtime_ports=application_ports,
+        life_authority_provider=life_authority_provider,
+    )
+    realtime_companion_ports = build_realtime_companion_execution_ports(
+        surface_runtime_ports=surface_runtime_ports,
+    )
+    return application_ports
 
 
 __all__ = [

@@ -3,8 +3,8 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.3
-日期：2026-07-31
+版本：v5.4
+日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
@@ -219,6 +219,21 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
 
 ### DL-04：流式文本陪伴（本地切片已接线，未封板）
 
+当前生产策略已从“普通聊天全量受治理”纠偏为双路径：
+
+```text
+chat / Gateway text
+  → RealtimeCompanion → canonical affective Surface → SSE → 回合结束提交连续性
+
+skill / delegate / plan / tool / external effect
+  → HostCommand → TaskGraph → Attempt / Lease / Budget → Verification / Acceptance
+```
+
+普通 Chat 不再创建 TaskGraph、Graph Budget 或 Acceptance；0149/0150 只保留给任务图内部的
+frozen Chat 节点及其恢复。Cortex 仍完成身份、情感、关系和检索上下文装配，但只取得 app-local
+`stream_realtime_chat` 端口，无法在这条轻量路径调用工具或 Delegate。硬崩溃时允许丢失尚未完成的
+最后一轮，已经稳定外显的句子仍按现有 Life delivery intent 去重。
+
 - `AffectiveTurnPlanV1`、`CompanionActV1` 与 `ExpressionPlanV1` 已在可信
   Affect Fusion hand-off 后、模型调用前冻结；模型只负责措辞，Surface completion
   不再把 `natsume_emotion_tag` 或纯文本 fallback 写回七海 self-affect。
@@ -228,12 +243,10 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   `surface_sentence_delivery_intent`，再发 SSE；计划、
   句子 digest、sync id 与最终 foreground receipt 由 migration
   `0145_affective_turn_delivery.sql` 从 immutable Life event 派生只读 projection。
-- `POST /v1/chat` 的本机个人 text 路线现会实际进入 `HostCommand → TaskGraph → frozen Chat`
-  竖切片。对于支持 final-usage stream 的显式 provider 路由，计划和每个稳定句先写
-  `0149` task-bound visibility ledger，再对 SSE 可见，随后才进入 Acceptance；集成测试以受控
-  OpenAI-compatible transport 覆盖这一顺序。首句前的预算、模型协议或运行时失败会写
-  `STREAM_INTERRUPTED` 并以稳定原因码 `REJECT` 收口，而不是被错误标成 unknown-effect recovery；
-  已可见前缀仍必须走 `0150` reconciliation，不能重跑模型。
+- `POST /v1/chat` 与 Gateway 的普通 text 路线现在直接调用既有 affective Surface sentence stream；
+  原生流式提示词使用独立的单回复合同，不再先要求 JSON 多候选、随后又要求纯文本。普通回合不产生
+  governed execution receipt；高歧义、边界和修复回合仍保留两候选择优。0149/0150 的顺序保证继续
+  适用于已经进入 Skill/Plan/Delegate TaskGraph 的 frozen Chat 节点。
 - 高歧义、边界或修复回合冻结为恰好两候的 buffered selection；本地 scorer 必须选择
   一条后再经非操控 Gate 才可进入既有 buffered renderer。Gate 会在可见前拦截威胁、
   排他、负罪施压和内部计划泄漏。取消会记录 sent count，不发送未
@@ -262,8 +275,8 @@ file-backed SQLite restart、accepted foreground reconciliation、workspace/sess
   feedback proposal 与 frozen Runtime Context，并由后者重新核对 principal/tenant。该收口仅有本地
   SQLite/合同证据，真实 Gateway 平台、多用户 connection recovery 与外部验收仍未完成。
 
-退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；所有
-Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/服务栈证据。
+退出：每条可见回复均可追溯到 self-affect、CompanionAct 和 ExpressionPlan；普通 Chat 达到实时首
+Token 目标，任务内 Chat 保持受治理恢复，并完成真实 provider/服务栈证据。
 
 ### DL-05：语音与 Avatar 同轮表达（Host 协议本地切片已接线，未封板）
 
