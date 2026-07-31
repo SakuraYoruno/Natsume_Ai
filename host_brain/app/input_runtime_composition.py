@@ -114,15 +114,10 @@ def build_input_runtime_application_ports(
         return build_durable_task_status_projection(ledger=get_ledger())
 
     async def trigger_reply_performance_with_runtime(**kwargs: Any) -> Any:
-        runtime = (
-            embodiment_runtime_provider()
-            if embodiment_runtime_provider is not None
-            else None
-        )
-        return await trigger_reply_performance(
-            **kwargs,
-            embodiment_runtime=runtime,
-        )
+        # The compatibility adapter is intentionally side-effect free.  Do not
+        # resolve the embodiment runtime here: accepted ExpressionPlan effects
+        # obtain it later through LifeDeliveryTransport.
+        return await trigger_reply_performance(**kwargs)
 
     async def cortex_orchestrator_with_app_ports(**kwargs: Any):  # noqa: ANN202
         application_ports = (

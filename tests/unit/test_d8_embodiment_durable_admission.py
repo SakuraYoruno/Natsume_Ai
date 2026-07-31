@@ -33,7 +33,7 @@ def _reply() -> ReplyEnvelope:
     )
 
 
-def test_reply_performance_without_preview_fails_before_durable_admission() -> None:
+def test_legacy_reply_performance_is_retired_without_durable_admission() -> None:
     runtime = _Runtime()
 
     result = asyncio.run(
@@ -45,12 +45,14 @@ def test_reply_performance_without_preview_fails_before_durable_admission() -> N
     )
 
     assert runtime.commands == []
-    assert result["status"] == "FAILED"
-    assert result["reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["status"] == "RETIRED"
+    assert result["reason_code"] == "LEGACY_REPLY_PERFORMANCE_RETIRED"
+    assert result["delivery_state"] == "RETIRED"
+    assert result["replacement_authority"] == "accepted_expression_plan_life_delivery_transport"
     assert result["affected_output"] is False
 
 
-def test_reply_performance_has_no_process_global_runtime_fallback() -> None:
+def test_retired_reply_performance_has_no_process_global_runtime_fallback() -> None:
     result = asyncio.run(
         trigger_reply_performance(
             request_id="req-d8-no-runtime",
@@ -59,6 +61,6 @@ def test_reply_performance_has_no_process_global_runtime_fallback() -> None:
         )
     )
 
-    assert result["status"] == "FAILED"
-    assert result["reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
+    assert result["status"] == "RETIRED"
+    assert result["reason_code"] == "LEGACY_REPLY_PERFORMANCE_RETIRED"
     assert result["affected_output"] is False

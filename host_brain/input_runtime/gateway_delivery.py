@@ -140,7 +140,6 @@ async def _deliver_gateway_reply(
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
-                        embodiment_runtime=_embodiment_runtime(ports),
                     )
                 )
                 # ``voice_sent`` is a compatibility field for a voice command
@@ -160,7 +159,6 @@ async def _deliver_gateway_reply(
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
-                        embodiment_runtime=_embodiment_runtime(ports),
                     )
                 )
                 voice_result["voice_sent"] = bool(
@@ -495,7 +493,6 @@ async def _deliver_gateway_reply(
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 send_gateway_voice_message=bool(voice_options["send_gateway_voice_message"]),
-                embodiment_runtime=_embodiment_runtime(ports),
             )
         )
         # This means durable admission, not physical playback.  Playback is
@@ -591,201 +588,42 @@ async def _send_gateway_voice_reply(
     send_gateway_voice_message: bool = False,
     embodiment_runtime: Any | None = None,
 ) -> dict[str, Any]:
-    """Durably admit a voice effect without claiming that Edge played it.
+    """Return an explicit no-effect result for the retired Gateway voice path.
 
-    The synchronous Gateway reply path owns neither an Edge receipt nor the
-    exported audio file.  It therefore commits the command to the app-owned
-    Host outbox.  Physical playback and optional platform voice delivery
-    require separate receipt-driven follow-up work.
+    This adapter used to build an Edge ``speak`` command from a synchronous
+    Gateway reply.  That bypassed the accepted Task/ExpressionPlan boundary.
+    Voice delivery now requires ``ExpressionPlanV1 -> LifeDeliveryTransport``
+    after terminal Preview, Acceptance and durable receipt ownership.  Retain
+    the return shape while migration callers are removed, but never create an
+    outbox entry, call TTS, contact Edge or send a platform voice message.
     """
-    import logging as _logging  # noqa: PLC0415
-    _vlogger = _logging.getLogger("Natsume.gateway_voice")
-    if embodiment_runtime is None:
-        return {
-            "voice_success": False,
-            "voice_status": "FAILED",
-            "voice_reason_code": "EMBODIMENT_RUNTIME_REQUIRED",
-            "voice_detail": "gateway voice durable admission failed: app-owned embodiment runtime unavailable",
-            "voice_latency_ms": 0,
-            "voice_started": False,
-            "voice_vts_started": False,
-            "voice_vts_expression_success": False,
-            "voice_audio_path": "",
-            "voice_gateway_sent": False,
-            "voice_gateway_status": None,
-            "voice_gateway_detail": "platform voice message not sent: no durable embodiment admission",
-            "voice_gateway_latency_ms": None,
-            "voice_event": {},
-            "voice_delivery_state": "FAILED",
-            "voice_durable_admitted": False,
-            "voice_physical_effect_verified": False,
-        }
-    try:
-        from host_brain.channels.embodiment import (  # noqa: PLC0415
-            build_host_embodiment_command,
-            queue_embodiment_command,
-        )
-        from host_brain.channels.tts_context_router import TtsContextRouter  # noqa: PLC0415
-        from natsume_contracts.edge.embodiment_v1 import EMBODIMENT_KIND_VOICE  # noqa: PLC0415
-
-        _tts_text_normalized = str(tts_text or "").strip()
-        if not _tts_text_normalized:
-            return {
-                "voice_success": False,
-                "voice_status": "SKIPPED",
-                "voice_reason_code": "GATEWAY_VOICE_TEXT_EMPTY",
-                "voice_detail": "gateway voice reply skipped: empty text",
-                "voice_latency_ms": 0,
-                "voice_started": False,
-                "voice_vts_started": False,
-                "voice_vts_expression_success": False,
-                "voice_audio_path": "",
-                "voice_gateway_sent": False,
-                "voice_gateway_status": None,
-                "voice_gateway_detail": None,
-                "voice_gateway_latency_ms": None,
-                "voice_event": {},
-                "voice_delivery_state": "SKIPPED",
-                "voice_durable_admitted": False,
-                "voice_physical_effect_verified": False,
-            }
-
-        tts_params = TtsContextRouter().route(
-            text=_tts_text_normalized,
-            emotion_tag=emotion_tag,
-        )
-        effective_emotion_tag = _resolve_gateway_voice_emotion_tag(emotion_tag)
-        command = build_host_embodiment_command(
-            kind=EMBODIMENT_KIND_VOICE,
-            action="speak",
-            payload={
-                "text": _tts_text_normalized,
-                "emotion_tag": effective_emotion_tag,
-                "emotion_intensity": emotion_intensity,
-                "lang_hint": str(tts_params.lang_hint or "zh"),
-                "export_audio": bool(send_gateway_voice_message),
-            },
-            request_id=request_id,
-            idempotency_key=f"{request_id}:gateway-voice",
-        )
-        ack = queue_embodiment_command(command, runtime=embodiment_runtime)
-        ack_status = str(getattr(ack, "status", "PENDING") or "PENDING").strip().upper()
-        # The concrete v1 acknowledgement exposes ``durable_admitted``.  The
-        # status fallback keeps an older test/adaptor acknowledgement from
-        # misreporting a replayed APPLIED/DISPATCHING row as a new failure.
-        durable_admitted = (
-            ack_status in {"PENDING", "DISPATCHING", "IN_DOUBT", "APPLIED"}
-            or bool(getattr(ack, "durable_admitted", getattr(ack, "success", False)))
-        ) and ack_status not in {"REJECTED", "FAILED", "ERROR"}
-        physical_effect_verified = bool(
-            getattr(ack, "effect_verified", False)
-        ) or ack_status == "APPLIED"
-        if ack_status in {"PENDING", "QUEUED", "ACCEPTED"}:
-            delivery_state = "DURABLY_QUEUED"
-        elif ack_status == "DISPATCHING":
-            delivery_state = "DISPATCHING"
-        elif ack_status == "APPLIED":
-            delivery_state = "APPLIED"
-        elif ack_status == "IN_DOUBT":
-            delivery_state = "IN_DOUBT"
-        elif ack_status == "REJECTED":
-            delivery_state = "REJECTED"
-        else:
-            delivery_state = "FAILED"
-        if physical_effect_verified:
-            voice_success: bool | None = True
-        elif durable_admitted:
-            voice_success = None
-        else:
-            voice_success = False
-
-        if send_gateway_voice_message:
-            gateway_delivery_status = (
-                "RECEIPT_AVAILABLE_PENDING_DELIVERY"
-                if physical_effect_verified
-                else "WAITING_RECEIPT"
-                if durable_admitted
-                else "NOT_QUEUED"
-            )
-            gateway_delivery_detail = (
-                "platform voice message not sent: receipt is available but receipt-driven delivery has not run"
-                if physical_effect_verified
-                else "platform voice message not sent: waiting for a later Edge receipt and exported audio path"
-                if durable_admitted
-                else "platform voice message not sent: Host did not durably admit the voice command"
-            )
-        else:
-            gateway_delivery_status = "DISABLED"
-            gateway_delivery_detail = (
-                "Gateway voice message disabled; physical voice command is durably queued"
-                if durable_admitted
-                else "Gateway voice message disabled; physical voice command was not durably admitted"
-            )
-
-        voice_result = {
-            # ``voice_success`` means physical voice success in this response
-            # contract.  Admission alone cannot establish it.
-            "voice_success": voice_success,
-            "voice_status": ack_status,
-            "voice_reason_code": getattr(ack, "reason_code", None),
-            "voice_detail": str(getattr(ack, "detail", "") or "voice command committed to durable Host outbox"),
-            "voice_latency_ms": int(getattr(ack, "latency_ms", 0) or 0),
-            "voice_started": False,
-            "voice_vts_started": False,
-            "voice_vts_expression_success": False,
-            "voice_audio_path": "",
-            "voice_gateway_sent": False,
-            "voice_gateway_status": gateway_delivery_status,
-            "voice_gateway_detail": gateway_delivery_detail,
-            "voice_gateway_latency_ms": None,
-            "voice_event": {
-                "event_type": (
-                    "HOST_EMBODIMENT_DURABLY_QUEUED"
-                    if delivery_state == "DURABLY_QUEUED"
-                    else "HOST_EMBODIMENT_DURABLE_STATUS_REPLAYED"
-                ),
-                **(ack.as_dict() if hasattr(ack, "as_dict") else {}),
-            },
-            "voice_delivery_state": delivery_state,
-            "voice_durable_admitted": durable_admitted,
-            "voice_physical_effect_verified": physical_effect_verified,
-        }
-        _vlogger.debug(
-            "gateway_voice admitted platform=%s conversation=%s status=%s durable=%s platform_voice=%s len=%d",
-            platform,
-            conversation_id,
-            voice_result["voice_status"],
-            voice_result["voice_durable_admitted"],
-            voice_result.get("voice_gateway_sent"),
-            len(_tts_text_normalized),
-        )
-        return voice_result
-    except Exception as exc:
-        _vlogger.debug("gateway_voice send failed (non-critical): %s", exc)
-        failure_reason = str(exc).strip().split(":", 1)[0]
-        if not failure_reason.startswith("ACTION_PREVIEW_"):
-            failure_reason = "GATEWAY_VOICE_EXCEPTION"
-        return {
-            "voice_success": False,
-            "voice_status": "FAILED",
-            "voice_reason_code": failure_reason,
-            "voice_detail": f"{type(exc).__name__}: {str(exc)[:180]}",
-            "voice_latency_ms": 0,
-            "voice_started": False,
-            "voice_vts_started": False,
-            "voice_vts_expression_success": False,
-            "voice_audio_path": "",
-            "voice_gateway_sent": False,
-            "voice_gateway_status": None,
-            "voice_gateway_detail": None,
-            "voice_gateway_latency_ms": None,
-            "voice_event": {},
-            "voice_delivery_state": "FAILED",
-            "voice_durable_admitted": False,
-            "voice_physical_effect_verified": False,
-        }
-
-
-def _embodiment_runtime(ports: InputRuntimeApplicationPorts) -> Any | None:
-    provider = getattr(ports, "get_embodiment_runtime", None)
-    return provider() if callable(provider) else None
+    _ = (
+        platform,
+        conversation_id,
+        tts_text,
+        request_id,
+        emotion_tag,
+        emotion_intensity,
+        send_gateway_voice_message,
+        embodiment_runtime,
+    )
+    return {
+        "voice_success": False,
+        "voice_status": "RETIRED",
+        "voice_reason_code": "LEGACY_GATEWAY_VOICE_RETIRED",
+        "voice_detail": "legacy Gateway voice delivery is retired; accepted ExpressionPlan is required",
+        "voice_latency_ms": 0,
+        "voice_started": False,
+        "voice_vts_started": False,
+        "voice_vts_expression_success": False,
+        "voice_audio_path": "",
+        "voice_gateway_sent": False,
+        "voice_gateway_status": "RETIRED",
+        "voice_gateway_detail": "platform voice delivery is retired pending accepted ExpressionPlan receipt",
+        "voice_gateway_latency_ms": None,
+        "voice_event": {},
+        "voice_delivery_state": "RETIRED",
+        "voice_durable_admitted": False,
+        "voice_physical_effect_verified": False,
+        "replacement_authority": "accepted_expression_plan_life_delivery_transport",
+    }

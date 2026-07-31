@@ -15,6 +15,8 @@ Host 的边界如下：
   Edge receipt 时明确返回 `REMOTE_EDGE_UNVERIFIED` 和 `physical_effect_verified=false`。
 - `POST /v1/mateengine/action`、`/signal`、`/say`：统一返回
   `410 MATEENGINE_DIRECT_COMMAND_RETIRED`，不解析为设备 command。
+- Input Runtime 的 `ReplyEnvelope.performance` callback 与 Gateway 同步 voice adapter：统一返回
+  `RETIRED`，不解析 embodiment runtime、不创建 command/outbox、不调用 TTS、不联系 Edge、也不发送平台语音。
 - 唯一可写路径是已接受的 `ExpressionPlanV1` 经受治理的 TaskGraph、Action Preview 与 Host durable outbox，随后由
   Edge 独占执行并返回可核验 receipt；Host 入队从不等于实体设备完成。
 
@@ -212,6 +214,10 @@ Host remains responsible for deciding when and why an event happens. MateEngine 
 直接驱动 MateEngine。那类 callback 没有冻结的 `ExpressionPlanV1`、同步编号或 Acceptance Preview，且缺失
 标签时曾可能伪造 `NEUTRAL`；它已被硬退役。遗留 `HOST_MATEENGINE_*` 配置键仅为回滚窗口保持可解析，不能
 重新打开 Chat→MateEngine 写 authority。
+
+Gateway 的同步语音与 Input Runtime 的 ReplyEnvelope 表演 adapter 也不能把文字回包当作 Voice/Avatar 的写授权。
+它们不再“先尝试入队、再由 Preview 拒绝”，而是以 `RETIRED` 无副作用结果结束；真正的声音、表情和动作必须从同轮
+accepted `ExpressionPlanV1` 的 `LifeDeliveryTransport` receipt 链启动。
 
 面向陪伴的桌宠/Avatar 表达必须由同轮 accepted `ExpressionPlanV1` 经 Task Acceptance 写入 Host durable
 outbox；Host admission 仍不等于设备播放或动作完成。设备调试也必须经受治理的 Operator/TaskGraph command，

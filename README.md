@@ -21,6 +21,8 @@ episode / aftereffect 链变化。此为公开 HTTP/UI 写入口收口，不等�
 
 DL-05 现已硬退役 `/v1/chat` 的 MateEngine 气泡/状态旁路：即使保留环境兼容键，也不能再从最终文本、路由标签或缺失标签推断 `NEUTRAL` 并直接入队 Avatar；具身输出只能由 accepted `ExpressionPlanV1` 经过 Task Acceptance 的 Host outbox 发起。
 
+同一具身边界还覆盖了 Input Runtime 的旧 `ReplyEnvelope.performance` callback 与 Gateway 同步语音 adapter：两者现在稳定返回 `RETIRED`，不会解析 runtime、构造设备 command、写 Host outbox、调用 TTS、接触 Edge 或向平台发送语音。它们保留兼容返回形状，唯一替代 authority 是 accepted `ExpressionPlanV1 → LifeDeliveryTransport` 的 Preview、Acceptance 与 receipt 链；这不是禁用 Voice/Avatar，而是禁止未接受的聊天回调抢占七海本轮表达。
+
 DL-06 进一步移除了普通 `/v1/chat` 热路径对旧 `ANSAgent` 的依赖：入口只预检 Thalamus，
 回复 `COMMIT` 后不再发送 legacy `TASK_SUCCESS`；Input Runtime 不再注入 ANS provider，Host
 lifespan 也不再把主事件循环交给 ANS。已接受结果及其关系后效应仍由 canonical Life/Acceptance
@@ -54,7 +56,8 @@ DL-07 的隔离本机栈现已真实启动 Docker Neo4j、Chroma、Redis，并�
 Host、Obs 与 Nginx Monitor 随后使用同一隔离数据根完成一次停止后的真实重启。Monitor 生产构建与运行中 Nginx
 页面的无拦截路由回归已经通过。此次重启还发现并修复了历史 MateEngine `GET /health` 会错误入队设备命令的问题：
 它现在只返回 Host outbox 的只读投影，明确标记 `REMOTE_EDGE_UNVERIFIED`；`POST /v1/mateengine/action`、`/signal`、
-`/say` 则稳定返回 `410 MATEENGINE_DIRECT_COMMAND_RETIRED`，不再留下无 Task Preview 的旧设备写 authority。
+`/say` 则稳定返回 `410 MATEENGINE_DIRECT_COMMAND_RETIRED`，不再留下无 Task Preview 的旧设备写 authority。旧 ReplyEnvelope
+表演与 Gateway 语音 adapter 也已改为无副作用 `RETIRED`，而非先尝试入队再由 Preview 拒绝。
 远端 Edge、真实模型 provider、认证 Gateway/第三方投递、物理 TTS/VTS/VRM、真人盲测与故障矩阵尚未完成；整体仍是
 `EMOTIONAL_DIGITAL_LIFE=PARTIAL / ACCEPTANCE_PENDING_EXTERNAL`，绝不把本机服务恢复写成最终体验或全栈通过。
 

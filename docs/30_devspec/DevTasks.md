@@ -42,7 +42,9 @@ intent，只有在首个 delta 前明确不支持终态合同才回退兼容 str
 `RELEASE`/`CANCEL`；0146 只投影 Host staging，远端 Edge 尚未启动，因此不能声称播放或
 Avatar 已执行。`/v1/chat` 旧 MateEngine 气泡/状态 callback 已硬退役：它不再从 final reply、route state
 或缺失标签猜测 `NEUTRAL` 并尝试直接入队；保留环境键仅为回滚窗口解析配置，不能越过
-Task Acceptance/ExpressionPlan。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_permission=ALLOWED`、
+Task Acceptance/ExpressionPlan。Input Runtime 的 legacy `ReplyEnvelope.performance` 与 Gateway 同步 voice
+adapter 也已固定为无副作用 `RETIRED`：不解析 runtime、不创建 command/outbox、不调用 TTS/Edge/平台投递；真实
+声音与 Avatar 只能从 accepted `ExpressionPlanV1 → LifeDeliveryTransport` receipt 链发起。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_permission=ALLOWED`、
 无 repair/未结 episode 且 self regulation 未要求克制时，才以 bounded canonical
 self-affect 生成无回应压力的主动消息；旧 Bond、legacy `affect` 与固定模板均无发送权。
 已接受 foreground reply 现在会把 scope-bound `CompanionProactiveTargetV1` 与 provisional
@@ -98,7 +100,8 @@ explicit offline/legacy fixture 可单独带入 engine 做回滚测试，不能�
 该结果确认当前各数字生命切片可以共同回归，但不替代真人盲测、真实 provider、平台 Gateway 或远端 Edge。DL-07 已使用
 隔离运行根启动真实 Docker Neo4j/Chroma/Redis，并完成真实写读、重启持久化与清理；Host/Obs/Nginx Monitor 已完成停止后
 重启。重启暴露的旧 MateEngine health 设备入队旁路已退役为只读远端未验证投影，直接写 API 统一 `410`。远端 Edge 没有启动，
-真实 provider、认证 Gateway、设备播放、故障矩阵和体验判定仍待完成，不能提升为 DL-07 PASS。
+旧 ReplyEnvelope 表演与 Gateway voice 也已从“尝试入队后 fail-closed”收口为零副作用 `RETIRED`；真实 provider、认证
+Gateway、设备播放、故障矩阵和体验判定仍待完成，不能提升为 DL-07 PASS。
 
 **DL-06 canonical 主动节律修订：** Scheduler 的发送 policy 现在先以 canonical
 `self-affect + relationship + regulation + profile + frozen Scene` 编译实际

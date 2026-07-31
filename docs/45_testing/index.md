@@ -166,6 +166,10 @@
   环境键可以被解析，但不能重新启用 direct Chat→MateEngine enqueue，也不能由 final text/route state
   或缺失标签伪造 `NEUTRAL`。与 Chat 主链、DL-04/DL-05 protocol/restart 和具身 authority 合计
   `38 passed in 7.11s`；它只证明 Host 侧 writer 退役，未启动任何远端设备。
+- `test_d8_embodiment_durable_admission.py`、`test_d8_outbox_delivery_semantics.py` 与 Input Runtime
+  worker/dispatch 邻接回归覆盖旧 ReplyEnvelope 表演和 Gateway voice adapter。两者必须返回
+  `RETIRED`，并且不解析 runtime、不创建 command/outbox、不调用 TTS/Edge/平台 delivery；定向集合为
+  `159 passed in 20.80s`。这证明旧旁路已无副作用，不是远端 Voice/Avatar 通过。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 

@@ -1344,7 +1344,7 @@ def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkey
     assert call["raw_extra"]["reply_envelope"]["reaction_id"] == "awkward-1"
 
 
-def test_deliver_gateway_reply_blocks_voice_without_task_preview_when_auto_reply_disabled(monkeypatch) -> None:
+def test_deliver_gateway_reply_marks_legacy_voice_retired_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     result = _run(
@@ -1374,9 +1374,9 @@ def test_deliver_gateway_reply_blocks_voice_without_task_preview_when_auto_reply
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
     assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_durable_admitted"] is False
     assert result["voice_success"] is False
     assert result["voice_started"] is False
@@ -1384,7 +1384,7 @@ def test_deliver_gateway_reply_blocks_voice_without_task_preview_when_auto_reply
     assert result["voice_vts_expression_success"] is False
 
 
-def test_deliver_gateway_reply_force_dual_voice_keeps_text_but_blocks_unpreviewed_voice(monkeypatch) -> None:
+def test_deliver_gateway_reply_force_dual_voice_keeps_text_and_retires_legacy_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock(
@@ -1429,19 +1429,19 @@ def test_deliver_gateway_reply_force_dual_voice_keeps_text_but_blocks_unpreviewe
     assert result["reply_form_reason"] == "force_dual_voice_reply"
     assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_vts_expression_success"] is False
     assert result["voice_audio_path"] == ""
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] is None
+    assert result["voice_gateway_status"] == "RETIRED"
 
 
-def test_deliver_gateway_reply_smart_mode_blocks_unpreviewed_legacy_force_voice(monkeypatch) -> None:
+def test_deliver_gateway_reply_smart_mode_retires_legacy_force_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     monkeypatch.setenv("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", "true")
     monkeypatch.setenv("HOST_GATEWAY_VOICE_SELECTION_MODE", "smart")
@@ -1488,17 +1488,17 @@ def test_deliver_gateway_reply_smart_mode_blocks_unpreviewed_legacy_force_voice(
     assert result["reply_form_reason"] == "embodied_presence_voice"
     assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_detail"] is None
+    assert "retired" in result["voice_gateway_detail"]
 
 
-def test_deliver_gateway_reply_primary_failure_does_not_bypass_voice_preview(monkeypatch) -> None:
+def test_deliver_gateway_reply_primary_failure_does_not_restore_legacy_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     with patch(
@@ -1539,9 +1539,9 @@ def test_deliver_gateway_reply_primary_failure_does_not_bypass_voice_preview(mon
     assert result["success"] is False
     assert result["reason_code"] == "WECHAT_SEND_FAILED"
     assert result["voice_sent"] is False
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False

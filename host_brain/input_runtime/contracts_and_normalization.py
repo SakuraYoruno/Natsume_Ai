@@ -927,14 +927,6 @@ def _extract_voice_audio_path(event_map: dict[str, Any]) -> str:
     return ""
 
 
-def _resolve_gateway_voice_emotion_tag(emotion_tag: str | None) -> str | None:
-    normalized = str(emotion_tag or "").strip().upper()
-    if normalized and normalized != "NEUTRAL":
-        return normalized
-    configured = str(get_input_settings().gateway_default_voice_emotion_tag or "").strip().upper()
-    return configured or None
-
-
 def _gateway_ingress_rejection_http_status(reason_code: str) -> int:
     reason = str(reason_code or "").strip().upper()
     if any(marker in reason for marker in ("UNAVAILABLE", "DISABLED", "BACKEND", "INTERNAL_ERROR")):

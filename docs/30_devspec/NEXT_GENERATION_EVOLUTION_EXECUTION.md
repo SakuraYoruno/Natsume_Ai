@@ -284,6 +284,10 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
   缺失 performance tag 猜测 `NEUTRAL` 并直写 Host embodiment outbox；即使遗留环境键被设置，也只能
   解析配置，不能恢复这条 direct authority。桌宠/Avatar 的陪伴表达只能由 accepted
   `ExpressionPlanV1` 的 Task Acceptance effect 发起。
+- Input Runtime 的旧 `ReplyEnvelope.performance` callback 与 Gateway 同步 voice adapter 同样已退役为
+  无副作用 `RETIRED`：它们不会解析 embodiment runtime、构造 command、写 Host outbox、调用 TTS、联系 Edge
+  或发送平台语音。保留的 compatibility result 明确指向 accepted `ExpressionPlanV1 → LifeDeliveryTransport`
+  的 terminal Preview、Acceptance 与 receipt 链，不能把“先尝试、再被 Preview 拒绝”当作正常 delivery 策略。
 
 本地生产等价 SQLite Runtime 已覆盖两句 `SENTENCE_STAGED → SSE → Acceptance →
 foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL_STAGED` intent 与两条
@@ -517,8 +521,9 @@ unit/contract/SQLite integration 文件，最终结果为 `200 passed in 256.73s
 188 项或各切片结果相加；它仅说明当前已接线的数字生命主链在本地共同稳定，不能替代真实模型、平台投递、真人盲测或远端
 Edge。DL-07 已在独立数据根真实拉起 Docker Neo4j/Chroma/Redis，并对每项完成写入、读取、重启持久化与清理；
 Host、Obs、Nginx Monitor 也已在同一隔离栈中完成一次停止后的重启。此次恢复修复了旧 MateEngine `GET /health`
-错误入队命令的边界：它现为只读 `REMOTE_EDGE_UNVERIFIED` 投影，三条历史直接写路由统一 `410`。这仍不含真实
-provider、认证 Gateway/平台投递、远端 Edge/TTS/VTS/VRM、真人盲测、全路线故障矩阵或性能验收，状态继续为 `PARTIAL`。
+错误入队命令的边界：它现为只读 `REMOTE_EDGE_UNVERIFIED` 投影，三条历史直接写路由统一 `410`。本轮还将旧
+ReplyEnvelope 表演与 Gateway voice 旁路改成零副作用 `RETIRED`，不会再先构造设备 command 后依赖 Preview 拒绝。
+这仍不含真实 provider、认证 Gateway/平台投递、远端 Edge/TTS/VTS/VRM、真人盲测、全路线故障矩阵或性能验收，状态继续为 `PARTIAL`。
 
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。

@@ -759,7 +759,7 @@ def test_gateway_reply_text_and_voice_summary_use_chinese() -> None:
     assert voice_text == "我在呢，你慢慢说。"
 
 
-def test_send_gateway_voice_reply_without_task_preview_fails_closed() -> None:
+def test_send_legacy_gateway_voice_reply_is_explicitly_retired() -> None:
     embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock()
 
@@ -779,9 +779,9 @@ def test_send_gateway_voice_reply_without_task_preview_fails_closed() -> None:
 
     assert embodiment_runtime.commands == []
     post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_durable_admitted"] is False
     assert result["voice_success"] is False
     assert result["voice_started"] is False
@@ -789,10 +789,10 @@ def test_send_gateway_voice_reply_without_task_preview_fails_closed() -> None:
     assert result["voice_audio_path"] == ""
     assert result["voice_physical_effect_verified"] is False
     assert result["voice_gateway_sent"] is False
-    assert "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED" in result["voice_detail"]
+    assert "retired" in result["voice_detail"]
 
 
-def test_send_gateway_platform_voice_without_task_preview_fails_before_delivery() -> None:
+def test_send_legacy_gateway_platform_voice_is_retired_before_delivery() -> None:
     embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock()
 
@@ -813,18 +813,18 @@ def test_send_gateway_platform_voice_without_task_preview_fails_before_delivery(
 
     assert embodiment_runtime.commands == []
     post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_audio_path"] == ""
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] is None
-    assert result["voice_gateway_detail"] is None
+    assert result["voice_gateway_status"] == "RETIRED"
+    assert "retired" in result["voice_gateway_detail"]
 
 
-def test_send_gateway_voice_reply_without_app_runtime_fails_closed() -> None:
+def test_retired_gateway_voice_reply_does_not_require_app_runtime() -> None:
     post_gateway_reply_mock = AsyncMock()
 
     with patch(
@@ -841,8 +841,8 @@ def test_send_gateway_voice_reply_without_app_runtime_fails_closed() -> None:
         )
 
     post_gateway_reply_mock.assert_not_awaited()
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "EMBODIMENT_RUNTIME_REQUIRED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
     assert result["voice_durable_admitted"] is False
     assert result["voice_success"] is False
     assert result["voice_started"] is False
