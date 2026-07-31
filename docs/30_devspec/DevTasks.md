@@ -44,7 +44,8 @@ Avatar 已执行。`/v1/chat` 旧 MateEngine 气泡/状态 callback 已硬退役
 或缺失标签猜测 `NEUTRAL` 并尝试直接入队；保留环境键仅为回滚窗口解析配置，不能越过
 Task Acceptance/ExpressionPlan。Input Runtime 的 legacy `ReplyEnvelope.performance` 与 Gateway 同步 voice
 adapter 也已固定为无副作用 `RETIRED`：不解析 runtime、不创建 command/outbox、不调用 TTS/Edge/平台投递；真实
-声音与 Avatar 只能从 accepted `ExpressionPlanV1 → LifeDeliveryTransport` receipt 链发起。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_permission=ALLOWED`、
+声音与 Avatar 只能从 accepted `ExpressionPlanV1 → LifeDeliveryTransport` receipt 链发起。Gateway “route started 即播语音”的
+scheduler、资格 gate 与模板也已删除，不再调度空转任务或留下伪失败事件。DL-06 的首个 Scheduler 切片仅在 canonical `proactive_permission=ALLOWED`、
 无 repair/未结 episode 且 self regulation 未要求克制时，才以 bounded canonical
 self-affect 生成无回应压力的主动消息；旧 Bond、legacy `affect` 与固定模板均无发送权。
 已接受 foreground reply 现在会把 scope-bound `CompanionProactiveTargetV1` 与 provisional

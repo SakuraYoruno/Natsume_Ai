@@ -21,7 +21,7 @@ episode / aftereffect 链变化。此为公开 HTTP/UI 写入口收口，不等�
 
 DL-05 现已硬退役 `/v1/chat` 的 MateEngine 气泡/状态旁路：即使保留环境兼容键，也不能再从最终文本、路由标签或缺失标签推断 `NEUTRAL` 并直接入队 Avatar；具身输出只能由 accepted `ExpressionPlanV1` 经过 Task Acceptance 的 Host outbox 发起。
 
-同一具身边界还覆盖了 Input Runtime 的旧 `ReplyEnvelope.performance` callback 与 Gateway 同步语音 adapter：两者现在稳定返回 `RETIRED`，不会解析 runtime、构造设备 command、写 Host outbox、调用 TTS、接触 Edge 或向平台发送语音。它们保留兼容返回形状，唯一替代 authority 是 accepted `ExpressionPlanV1 → LifeDeliveryTransport` 的 Preview、Acceptance 与 receipt 链；这不是禁用 Voice/Avatar，而是禁止未接受的聊天回调抢占七海本轮表达。
+同一具身边界还覆盖了 Input Runtime 的旧 `ReplyEnvelope.performance` callback 与 Gateway 同步语音 adapter：两者现在稳定返回 `RETIRED`，不会解析 runtime、构造设备 command、写 Host outbox、调用 TTS、接触 Edge 或向平台发送语音；“路由开始即播语音”的 scheduler、资格判定和模板也已删除。它们保留兼容返回形状，唯一替代 authority 是 accepted `ExpressionPlanV1 → LifeDeliveryTransport` 的 Preview、Acceptance 与 receipt 链；这不是禁用 Voice/Avatar，而是禁止未接受的聊天回调抢占七海本轮表达。
 
 DL-06 进一步移除了普通 `/v1/chat` 热路径对旧 `ANSAgent` 的依赖：入口只预检 Thalamus，
 回复 `COMMIT` 后不再发送 legacy `TASK_SUCCESS`；Input Runtime 不再注入 ANS provider，Host

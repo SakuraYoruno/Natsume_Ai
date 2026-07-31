@@ -287,7 +287,8 @@ Chat 路由获得带 canonical usage 的流式协议，并完成真实 provider/
 - Input Runtime 的旧 `ReplyEnvelope.performance` callback 与 Gateway 同步 voice adapter 同样已退役为
   无副作用 `RETIRED`：它们不会解析 embodiment runtime、构造 command、写 Host outbox、调用 TTS、联系 Edge
   或发送平台语音。保留的 compatibility result 明确指向 accepted `ExpressionPlanV1 → LifeDeliveryTransport`
-  的 terminal Preview、Acceptance 与 receipt 链，不能把“先尝试、再被 Preview 拒绝”当作正常 delivery 策略。
+  的 terminal Preview、Acceptance 与 receipt 链，不能把“先尝试、再被 Preview 拒绝”当作正常 delivery 策略；
+  Gateway “route started 即播语音”的 scheduler、资格 gate 与模板已物理删除，不再制造无效果的失败事件。
 
 本地生产等价 SQLite Runtime 已覆盖两句 `SENTENCE_STAGED → SSE → Acceptance →
 foreground_completed`，并重新读取 `0146` 投影确认四条 `HOST_PROTOCOL_STAGED` intent 与两条

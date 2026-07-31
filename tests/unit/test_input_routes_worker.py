@@ -10,12 +10,10 @@ import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.channels.embodiment import EmbodimentOutboxAck
 from host_brain.input_runtime.contracts_and_normalization import (
-    _build_gateway_route_started_voice_ack_text,
     _build_gateway_reply_text,
     _build_gateway_voice_text,
     _detect_gateway_execution_deviation,
     _should_send_gateway_immediate_ack,
-    _should_send_gateway_route_started_voice_ack,
 )
 from host_brain.input_runtime.gateway_delivery import _deliver_gateway_reply
 from host_brain.input_runtime.worker_dispatch import (
@@ -1075,9 +1073,7 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
         ) as pipeline_mock, patch(
             "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 5}),
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_route_started_voice_ack",
-        ) as route_ack_mock:
+        ):
             _run(
                 _dispatch_to_graph_worker(
                     request_id="req_gateway_worker_canonical",
@@ -1096,9 +1092,6 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
         fake_agent.classify_and_compile_intent_draft.assert_awaited_once()
         pipeline_mock.assert_awaited_once()
         assert pipeline_mock.await_args.kwargs["intent_draft_override"] == canonical_intent
-        route_ack_mock.assert_called_once()
-        assert route_ack_mock.call_args.kwargs["route_type"] == "skill"
-        assert route_ack_mock.call_args.kwargs["target_id"] == "agent_worker"
     finally:
         ledger.close()
 
@@ -1213,15 +1206,6 @@ def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> 
         narrative="",
         reason_code=None,
     ) == ""
-
-
-def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_override(monkeypatch) -> None:
-    _ = monkeypatch
-    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="translate_agent") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="intent_agent") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="agent_worker") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="plan", target_id="") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="chat", target_id="") == ""
 
 
 def test_build_gateway_voice_text_uses_prompt_template_override(monkeypatch) -> None:
@@ -1860,18 +1844,6 @@ def test_should_skip_gateway_immediate_ack_for_chat_route_even_if_help_words_pre
     assert reason == "ACK_NON_EXECUTION_ROUTE"
 
 
-def test_should_send_gateway_route_started_voice_ack_for_translate_delegate() -> None:
-    should_send, reason = _should_send_gateway_route_started_voice_ack(
-        source="GATEWAY",
-        payload={"platform": "qq", "conversation_id": "qq_dm_route_ack"},
-        route_type="delegate",
-        target_id="translate_agent",
-    )
-
-    assert should_send is True
-    assert reason == "ROUTE_ACK_TRANSLATE_AGENT"
-
-
 def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
@@ -1907,8 +1879,11 @@ def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
         ledger.close()
 
 
-def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(monkeypatch) -> None:
+def test_dispatch_worker_keeps_delegate_reply_on_normal_delivery_path() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    delivery_mock = AsyncMock(
+        return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 12}
+    )
 
     try:
         with patch(
@@ -1934,10 +1909,8 @@ def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(mon
             ),
         ), patch(
             "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
-            new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 12}),
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_route_started_voice_ack",
-        ) as route_ack_mock:
+            new=delivery_mock,
+        ):
             _run(
                 _dispatch_to_graph_worker(
                     request_id="req_worker_route_ack",
@@ -1950,16 +1923,13 @@ def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(mon
                     },
                     ts_ms=123456,
                     ledger=ledger,
-                        dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
-                        ports=_ports(),
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                    ports=_ports(),
                 )
             )
 
-        route_ack_mock.assert_called_once()
-        kwargs = route_ack_mock.call_args.kwargs
-        assert kwargs["route_type"] == "delegate"
-        assert kwargs["target_id"] == "translate_agent"
+        delivery_mock.assert_awaited_once()
     finally:
         ledger.close()
 

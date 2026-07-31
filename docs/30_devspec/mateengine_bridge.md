@@ -17,6 +17,8 @@ Host 的边界如下：
   `410 MATEENGINE_DIRECT_COMMAND_RETIRED`，不解析为设备 command。
 - Input Runtime 的 `ReplyEnvelope.performance` callback 与 Gateway 同步 voice adapter：统一返回
   `RETIRED`，不解析 embodiment runtime、不创建 command/outbox、不调用 TTS、不联系 Edge、也不发送平台语音。
+- Gateway 的 “route started 即播语音” scheduler、资格 gate 与模板已删除，不会再产生一个无 Preview、无 receipt 的
+  后台 voice task。
 - 唯一可写路径是已接受的 `ExpressionPlanV1` 经受治理的 TaskGraph、Action Preview 与 Host durable outbox，随后由
   Edge 独占执行并返回可核验 receipt；Host 入队从不等于实体设备完成。
 

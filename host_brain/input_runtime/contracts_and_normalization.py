@@ -38,8 +38,6 @@ from host_brain.persona.response_form_contract import (
     is_pure_media_response_form,
     normalize_response_form,
 )
-from host_brain.agent_runtime.skill_ids import is_agent_runtime_skill
-
 # ── service 层 import ──────────────────────────────────────────────────────
 from host_brain.input_runtime.audit import (
     get_ledger_safe as _get_ledger_safe,
@@ -489,34 +487,8 @@ def _should_send_gateway_immediate_ack(
     )
 
 
-def _should_send_gateway_route_started_voice_ack(
-    *,
-    source: str,
-    payload: dict[str, Any],
-    route_type: str,
-    target_id: str,
-) -> tuple[bool, str]:
-    if str(source or "").strip().upper() != "GATEWAY":
-        return False, "ROUTE_ACK_SOURCE_NOT_GATEWAY"
-    if not get_input_settings().gateway_route_ack_voice_enabled:
-        return False, "ROUTE_ACK_DISABLED"
-    if not str(payload.get("platform") or "").strip() or not str(payload.get("conversation_id") or "").strip():
-        return False, "ROUTE_ACK_TARGET_MISSING"
-
-    normalized_route = str(route_type or "").strip().lower()
-    normalized_target = str(target_id or "").strip().lower()
-    if normalized_route == "plan":
-        return True, "ROUTE_ACK_PLAN"
-    if normalized_route == "delegate" and normalized_target in {"translate_agent", "intent_agent"}:
-        return True, f"ROUTE_ACK_{normalized_target.upper()}"
-    if normalized_route == "skill" and is_agent_runtime_skill(normalized_target):
-        return True, "ROUTE_ACK_codex_runtime"
-    return False, "ROUTE_ACK_FAST_ROUTE"
-
-
 def _load_gateway_fallback_texts() -> dict[str, Any]:
     return {
-        "route_started_voice_ack": {},
         "voice_summary": {},
     }
 
@@ -660,26 +632,6 @@ def _build_gateway_multimodal_async_ack_text(*, attachments: list[dict[str, Any]
         return str(templates.get("async_accept_file") or "")
     return str(templates.get("async_accept_generic") or "")
 
-
-def _build_gateway_route_started_voice_ack_text(
-    *,
-    route_type: str,
-    target_id: str,
-    render_target_lang: str = "ja",
-) -> str:
-    normalized_route = str(route_type or "").strip().lower()
-    normalized_target = str(target_id or "").strip().lower()
-    templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
-    route_templates = dict(templates.get("route_started_voice_ack") or {})
-    if normalized_route == "delegate" and normalized_target == "translate_agent":
-        return str(route_templates.get("translate_agent") or "")
-    if normalized_route == "delegate" and normalized_target == "intent_agent":
-        return str(route_templates.get("intent_agent") or "")
-    if normalized_route == "skill" and is_agent_runtime_skill(normalized_target):
-        return str(route_templates.get("agent_worker") or "")
-    if normalized_route == "plan":
-        return str(route_templates.get("plan") or "")
-    return str(route_templates.get("default") or "")
 
 def _detect_gateway_execution_deviation(
     *,

@@ -2,7 +2,7 @@
 
 from .contracts_and_normalization import *  # noqa: F403
 from .cortex_dispatch import _run_cortex_orchestrator_pipeline
-from .gateway_delivery import _deliver_gateway_reply, _send_gateway_voice_reply
+from .gateway_delivery import _deliver_gateway_reply
 
 async def _try_handle_gateway_progress_fastpath(
     *,
@@ -439,135 +439,6 @@ async def _stop_progress_push_task(
         task.cancel()
     except Exception:
         return
-
-
-def _maybe_schedule_gateway_route_started_voice_ack(
-    *,
-    request_id: str,
-    session_id: str,
-    source: str,
-    payload: dict[str, Any],
-    route_type: str,
-    target_id: str,
-    ledger: Any,
-) -> None:
-    should_send, reason = _should_send_gateway_route_started_voice_ack(
-        source=source,
-        payload=payload,
-        route_type=route_type,
-        target_id=target_id,
-    )
-    now_ms = int(time.time() * 1000)
-    if not should_send:
-        if reason not in {"ROUTE_ACK_FAST_ROUTE", "ROUTE_ACK_NON_EXECUTION_ROUTE"}:
-            _log_input_event(
-                ledger=ledger,
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                input_payload={
-                    **dict(payload or {}),
-                    "route_ack_reason": reason,
-                    "route_type": route_type,
-                    "route_target": target_id,
-                },
-                phase="ROUTE_ACK_SKIPPED",
-                status="IGNORED",
-                reason_code=reason,
-                detail=f"gateway route-started voice ack skipped: {reason}",
-                ts_ms=now_ms,
-            )
-        return
-
-    ack_text = _build_gateway_route_started_voice_ack_text(
-        route_type=route_type,
-        target_id=target_id,
-        render_target_lang="ja",
-    )
-    _log_input_event(
-        ledger=ledger,
-        request_id=request_id,
-        session_id=session_id,
-        source=source,
-        input_payload={
-            **dict(payload or {}),
-            "route_type": route_type,
-            "route_target": target_id,
-            "route_ack_preview": _build_reply_preview(ack_text, limit=60),
-        },
-        phase="ROUTE_ACK_PENDING",
-        status="ACCEPTED",
-        detail="gateway route-started voice ack scheduled",
-        ts_ms=now_ms,
-    )
-    _logger.info(
-        "[%s] gateway route-started voice ack scheduled route=%s target=%s",
-        request_id,
-        route_type,
-        target_id,
-    )
-
-    async def _runner() -> None:
-        start_ms = int(time.time() * 1000)
-        try:
-            voice_result = await _send_gateway_voice_reply(
-                platform=str(payload.get("platform") or "").strip().lower(),
-                conversation_id=str(payload.get("conversation_id") or "").strip(),
-                tts_text=ack_text,
-                request_id=f"{request_id}::route_ack",
-                emotion_tag=str(payload.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
-            )
-        except Exception as exc:
-            finish_ms = int(time.time() * 1000)
-            _log_input_event(
-                ledger=ledger,
-                request_id=request_id,
-                session_id=session_id,
-                source=source,
-                input_payload={
-                    **dict(payload or {}),
-                    "route_type": route_type,
-                    "route_target": target_id,
-                },
-                phase="ROUTE_ACK_FAILED",
-                status="FAILED",
-                reason_code="ROUTE_ACK_EXCEPTION",
-                detail=f"{type(exc).__name__}: {str(exc)[:200]}",
-                latency_ms=max(0, finish_ms - start_ms),
-                ts_ms=finish_ms,
-            )
-            return
-
-        finish_ms = int(time.time() * 1000)
-        success = bool(voice_result.get("voice_success"))
-        _logger.info(
-            "[%s] gateway route-started voice ack completed success=%s status=%s",
-            request_id,
-            success,
-            voice_result.get("voice_status"),
-        )
-        _log_input_event(
-            ledger=ledger,
-            request_id=request_id,
-            session_id=session_id,
-            source=source,
-            input_payload={
-                **dict(payload or {}),
-                "route_type": route_type,
-                "route_target": target_id,
-                "route_ack_preview": _build_reply_preview(ack_text, limit=60),
-                "route_ack_voice_status": voice_result.get("voice_status"),
-                "route_ack_voice_reason_code": voice_result.get("voice_reason_code"),
-            },
-            phase=("ROUTE_ACKED" if success else "ROUTE_ACK_FAILED"),
-            status=("OK" if success else "FAILED"),
-            reason_code=(str(voice_result.get("voice_reason_code") or "") or None),
-            detail=f"gateway route-started voice ack success={success} status={voice_result.get('voice_status')}",
-            latency_ms=max(0, finish_ms - start_ms),
-            ts_ms=finish_ms,
-        )
-
-    asyncio.create_task(_runner()).add_done_callback(_log_gateway_ack_task_exception)
 
 
 def _maybe_schedule_gateway_immediate_ack(

@@ -170,6 +170,9 @@
   worker/dispatch 邻接回归覆盖旧 ReplyEnvelope 表演和 Gateway voice adapter。两者必须返回
   `RETIRED`，并且不解析 runtime、不创建 command/outbox、不调用 TTS/Edge/平台 delivery；定向集合为
   `159 passed in 20.80s`。这证明旧旁路已无副作用，不是远端 Voice/Avatar 通过。
+- 随后的 route-started voice scheduler、资格 gate 与模板已物理删除；Input Runtime worker/dispatch 与
+  旧具身旁路回归为 `157 passed in 21.30s`。它证明 Gateway 不会再为未接受的 route 生成空转 voice task，
+  不是远端声音或 Avatar 成功证据。
 
 ## DL-06 主动陪伴、可逆偏好与关系后效应切片
 

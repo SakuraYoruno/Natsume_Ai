@@ -4,6 +4,7 @@ from collections.abc import Mapping
 import math
 from typing import Any
 
+from host_brain.agent_runtime.skill_ids import is_agent_runtime_skill
 from host_brain.core.emotion_constants import (
     VALID_EMOTION_TAGS,
     normalize_emotion_tag,
