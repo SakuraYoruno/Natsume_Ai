@@ -3,12 +3,14 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.54
-核对日期：2026-07-28
+版本：v2.55
+核对日期：2026-07-31
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+> DL-07 状态投影切片把远端 Edge 的“明确未验收”从故障和未知中分离出来。Host startup/health/readiness 负责形成 canonical `NOT_TESTED`，`ServiceHealthReporter` 负责 durable journal，独立 Obs 只读重建，Monitor 只负责显示。任一层都不能把未启动服务推断成 `UP`，Monitor/GET 也不能触发探针；Guardian 只处理真实故障，不把外部验收状态写成七海自身的退化。
 
 > `NE-08 / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING` 已把实时情感陪伴设为当前产品主线。
 > Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
@@ -497,8 +499,8 @@ Agent Skill Workspace 模块由 route-bound 窄 owner 组成：`governed_skill_w
 | 运行面 | 实际入口 | 主要责任 | 边界和当前状态 |
 |---|---|---|---|
 | Host Main | [`host_brain/__main__.py`](../../../host_brain/__main__.py) → [`host_brain/app/asgi.py`](../../../host_brain/app/asgi.py) | Chat、Host Input、治理执行、Task/Agent Runtime、Life、Memory、Pentest 和业务 API | `WIRED / COMPOSITION PARTIAL`；ASGI 仍拥有 lifespan/后台任务，Internal/Workspace/Operator/runtime-group compose/activate 与 Runtime Context/Action Preview/Guardian/Catalog 接线已拆入 focused wiring。`ServiceHealthHeartbeat` 由每个 lifespan 单独拥有 task/observer/probe cache/HTTP transport；无 observer 的 compatibility probe 不可写全局 degradation reducer，独立 Obs 只读 durable health projection，兼容顶层 helper 不是 Host authority，其他兼容责任仍待清零 |
-| Observability | [`host_brain/obs_main.py`](../../../host_brain/obs_main.py) → [`host_brain/app/obs_fastapi_app.py`](../../../host_brain/app/obs_fastapi_app.py) | 读模型、健康、Trace、回放、Operator Query/BFF | `WIRED / PARTIAL ISOLATION`；有独立进程，仍复用部分全局对象图 |
-| Monitor UI | [`host_brain/app/monitor_ui/src/App.jsx`](../../../host_brain/app/monitor_ui/src/App.jsx) | 数字生命驾驶舱、观测、运维、执行审查、安全与设备控制 | `WIRED`；路由以 [`routeManifest.jsx`](../../../host_brain/app/monitor_ui/src/app/routeManifest.jsx) 为准 |
+| Observability | [`host_brain/obs_main.py`](../../../host_brain/obs_main.py) → [`host_brain/app/obs_fastapi_app.py`](../../../host_brain/app/obs_fastapi_app.py) | 读模型、健康、Trace、回放、Operator Query/BFF | `WIRED / PARTIAL ISOLATION`；service health 从 canonical SQLite 被动重建并单独统计 `NOT_TESTED`，不读取 Host cache 或在 GET 中启动探针；其它读面仍有 partial source |
+| Monitor UI | [`host_brain/app/monitor_ui/src/App.jsx`](../../../host_brain/app/monitor_ui/src/App.jsx) | 数字生命驾驶舱、观测、运维、执行审查、安全与设备控制 | `WIRED`；服务卡显式显示“未验收”，与“未知/离线/降级”分开；路由以 [`routeManifest.jsx`](../../../host_brain/app/monitor_ui/src/app/routeManifest.jsx) 为准 |
 | Edge RPC | [`edge_client/__main__.py`](../../../edge_client/__main__.py) → [`edge_client/app/fastapi_app.py`](../../../edge_client/app/fastapi_app.py) | ASR、TTS、Avatar、Desktop、截图、自动化和本地设备 actuator | `WIRED / ENVIRONMENT_DEPENDENT` |
 | Unified Gateway | [`edge_client/gateway/bootstrap.py`](../../../edge_client/gateway/bootstrap.py) | QQ、微信、飞书、企微、Telegram、LINE 等平台的验签、归一化、Host 回流和耐久投递 | `WIRED / PLATFORM_DEPENDENT` |
 | Desktop Pet | [`desktop_pet/main.cjs`](../../../desktop_pet/main.cjs) → [`desktop_pet/renderer/pet.js`](../../../desktop_pet/renderer/pet.js) | Electron 窗口、Live2D 动作/表情、安全本地 bridge | `WIRED / DEVICE_DEPENDENT` |

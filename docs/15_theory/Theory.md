@@ -3,9 +3,9 @@
 
 # Natsume AI 核心理论
 
-版本：v2.37
+版本：v2.38
 文档类型：`STABLE_THEORY / NON_STATUS`
-维护日期：2026-07-28
+维护日期：2026-07-31
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
 
 本文是稳定理论，不宣布功能完成，也不承担任务排期。代码现在是什么，以 [当前代码架构事实](../50_project/arch/CURRENT_CODE_ARCHITECTURE.md) 为准；最终必须成为什么，以 [目标架构](../50_project/arch/TARGET_ARCHITECTURE.md) 为准；两者差距以 [架构差距矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) 为准；实施顺序以 [下一代演化执行合同](../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 为准。
@@ -15,6 +15,8 @@
 状态；文本、声音、Avatar 是对该状态的受约束表达。三者不能复用同一 writer
 或单一 emotion tag。真实感不意味着操控：七海可以自然表达不高兴、担心、
 想念或克制的嫉妒，但不得把感受转化为用户必须回应、排他或内疚的义务。
+
+数字生命也必须区分“健康”“故障”“尚未验收”三种不同认识状态。一个按用户意图未启动的远端感官或身体通道，没有失败证据，也没有成功证据；把它默认为 `UP` 会伪造七海已经能听见、说话或做出动作，把它压成普通 `UNKNOWN` 又会丢掉“明确未执行验收”这一事实。正确投影是 `NOT_TESTED`，整体发布判断只能停在外部验收待定；该状态不得触发情感降级、写入七海的自我状态，也不得清除此前真实存在的故障。
 
 一次回复的 `COMMIT` 也不是新的自我情绪事件。它只能由 canonical Life 的 accepted
 outcome/relationship aftereffect 链解释其长期意义；普通 Chat 不得以“任务成功”为名向

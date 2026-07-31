@@ -24,6 +24,9 @@ class ServiceHealthItem(BaseModel):
     p95_ms: Optional[int] = None
     last_call_ts: Optional[int] = None
     call_count: Optional[int] = None
+    reason_code: Optional[str] = None
+    detail: Optional[str] = None
+    public_summary: Optional[str] = None
 
 
 class ServicesHealthResponse(BaseModel):
@@ -31,6 +34,7 @@ class ServicesHealthResponse(BaseModel):
     up: int
     degraded: int
     down: int
+    not_tested: int = 0
     unknown: int
     services: List[ServiceHealthItem]
     timestamp: int

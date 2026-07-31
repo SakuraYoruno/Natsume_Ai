@@ -580,8 +580,11 @@ async def _probe_llm_nodes(
 # Edge / Host 探测
 # ---------------------------------------------------------------------------
 
-def _edge_available_to_status(available: bool) -> str:
-    return "UP" if bool(available) else "DEGRADED"
+def _edge_probe_row_status(row: Mapping[str, Any]) -> str:
+    explicit = str(row.get("status") or "").strip().upper()
+    if bool(row.get("not_tested")) or explicit == "NOT_TESTED":
+        return "NOT_TESTED"
+    return "UP" if bool(row.get("available")) else "DEGRADED"
 
 
 def _resolve_edge_vts_sub_service(
@@ -616,6 +619,15 @@ def _resolve_edge_vts_sub_service(
     service_detail = str(service_probe.get("detail") or "").strip()
     component_detail = str(component_probe.get("detail") or "").strip()
 
+    if service_probe and _edge_probe_row_status(service_probe) == "NOT_TESTED":
+        return {
+            "status": "NOT_TESTED",
+            "detail": service_detail
+            or component_detail
+            or gateway_detail
+            or "edge vts not tested",
+        }
+
     if service_probe and not bool(service_probe.get("available", False)):
         return {
             "status": "DEGRADED",
@@ -640,7 +652,7 @@ def _resolve_edge_vts_sub_service(
 
     detail_parts = [part for part in (service_detail, gateway_detail) if part]
     return {
-        "status": _edge_available_to_status(bool(service_probe.get("available", False))),
+        "status": _edge_probe_row_status(service_probe),
         "detail": "; ".join(detail_parts),
     }
 
@@ -664,10 +676,14 @@ def _collect_edge_sub_services(
         row = dependency_rows.get(edge_sid)
         if not isinstance(row, Mapping):
             continue
-        sub_services[heartbeat_sid] = {
-            "status": _edge_available_to_status(bool(row.get("available", False))),
+        sub_service = {
+            "status": _edge_probe_row_status(row),
             "detail": row.get("detail"),
         }
+        reason_code = str(row.get("reason_code") or "").strip()
+        if reason_code:
+            sub_service["reason_code"] = reason_code
+        sub_services[heartbeat_sid] = sub_service
 
     gateway_detail = str(probe.get("detail") or "").strip()
     vts_status = _resolve_edge_vts_sub_service(probe=probe, gateway_detail=gateway_detail)
@@ -697,11 +713,20 @@ async def _probe_edge(
     try:
         out = await edge_probe()
         st = (out.get("status") or "").strip().upper()
+        not_tested = bool(out.get("not_tested")) or st == "NOT_TESTED"
         ok = out.get("available") and st in ("OK", "UP", "ACCEPTED")
         sub_services = _collect_edge_sub_services(
             out,
             dependency_status_builder=dependency_status_builder,
         )
+        if not_tested:
+            return {
+                "status": "NOT_TESTED",
+                "latency_ms": out.get("latency_ms"),
+                "sub_services": sub_services,
+                "reason_code": out.get("reason_code"),
+                "detail": out.get("detail"),
+            }
         return {
             "status": "UP" if ok else "DEGRADED",
             "latency_ms": out.get("latency_ms"),
@@ -744,6 +769,10 @@ async def _probe_host(
                 sub_services: Dict[str, Dict[str, Any]] = {}
                 for svc in services_list:
                     health_sid = svc.get("service_id", "")
+                    if str(health_sid).startswith("edge."):
+                        # Edge health has its own composition-injected probe.
+                        # A Host-only /health read cannot own or override it.
+                        continue
                     heartbeat_sid = _HEALTH_SID_TO_HEARTBEAT_SID.get(health_sid)
                     if not heartbeat_sid:
                         continue
@@ -797,8 +826,18 @@ def _write_core_service_cache(
                 status = str(sub.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
                 detail = sub.get("detail")
             elif sid == "vts":
-                status = "UNKNOWN"
-                detail = "no dedicated VTS probe signal"
+                edge_status = str(
+                    edge_result.get("status") or "UNKNOWN"
+                ).strip().upper() or "UNKNOWN"
+                if edge_status == "NOT_TESTED":
+                    status = "NOT_TESTED"
+                    detail = (
+                        edge_result.get("detail")
+                        or "remote Edge VTS was not tested"
+                    )
+                else:
+                    status = "UNKNOWN"
+                    detail = "no dedicated VTS probe signal"
             else:
                 status = str(edge_result.get("status") or "UNKNOWN").strip().upper() or "UNKNOWN"
                 detail = None

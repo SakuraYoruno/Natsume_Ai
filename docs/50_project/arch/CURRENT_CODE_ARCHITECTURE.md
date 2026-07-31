@@ -3,12 +3,14 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.78
-核对日期：2026-07-30
-合并基线：`origin/dev@fcb8997fa`；当前事实以本文所在提交的工作树为准
+版本：v5.79
+核对日期：2026-07-31
+合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
+
+> `2026-07-31` 最新运行事实：远端 Edge 由用户明确保持关闭。`probe_edge_rpc_health()` 在该配置下不发网络请求，而是生成五条 canonical `NOT_TESTED / ACCEPTANCE_PENDING_EXTERNAL`；Host startup、health、readiness、node deployment 与 release identity 均保留该状态，本地真实错误仍优先成为失败。`ServiceHealthReporter` 将结果写入 `service_health_log`，独立 Obs 的 passive projection 从 SQLite 重建，不读取 Host heartbeat cache；旧 Monitor service id 经显式映射得到 ASR、TTS、VTS、Audio、Edge RPC 五项 `NOT_TESTED`。真实隔离栈重启结果为 Host `required_unavailable=0 / required_not_tested=5 / ready=false`，Obs read model `not_tested=5 / unknown=0`，Nginx Monitor 的无拦截浏览器检查显示五项“未验收”。Unified Gateway、真实 provider 和远端物理链未运行，没有 `FullStackAcceptanceReceiptV1`。
 
 > 2026-07-30 口径纠偏：当前活动波为 `NE-08 / DL-06_CANONICAL_PROACTIVE_CADENCE_AND_PLAN_COMMIT`。
 > 0143 Life kernel 已将 typed observation、appraisal、mixed self-affect、

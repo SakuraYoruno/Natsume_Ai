@@ -3,14 +3,15 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.1
-日期：2026-07-30
-状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_ISOLATED_DOCKER_HOST_OBS_MONITOR_RESTART_PASS / EMOTIONAL_DIGITAL_LIFE_PARTIAL / ACCEPTANCE_PENDING_EXTERNAL`
+版本：v5.2
+日期：2026-07-31
+状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
 已经拥有持续情感生命”推导为完成。本合同以当前 `origin/dev@001c2f5d7` 为基线，
-只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。
+只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。当前实现分支基于
+`origin/dev@001c2f5d7`；分支上的 DL-00～DL-06 提交尚未以本文件冒充 `dev` 已完成。
 
 ## 1. 产品结果
 
@@ -540,6 +541,13 @@ ReplyEnvelope 表演与 Gateway voice 旁路改成零副作用 `RETIRED`，不�
 - 当前局部真实证据：隔离 Docker 三服务的真实持久化测试通过；Host/Obs/Nginx Monitor 已成功启动并在停止后重启，
   Monitor 生产构建和运行中页面无拦截路由检查均已完成。远端 Edge 被显式禁用，未建立远端连接；这只能作为
   `ACCEPTANCE_PENDING_EXTERNAL` 的本机基础，不是三模态或最终 PASS。
+- `2026-07-31` 状态纠偏后，未启动的远端 Edge 不再被 readiness 和 Monitor 推断为 `UP`：Host
+  `/health=ACCEPTANCE_PENDING_EXTERNAL`、`required_not_tested=5`、`required_unavailable=0`，`/ready=false`；
+  独立 Obs 从 durable `service_health_log` 重建 ASR/TTS/VTS/Audio/Edge RPC 五项 `NOT_TESTED`，Nginx Monitor
+  真实页面显示五项“未验收”。`NOT_TESTED` 不触发或清除 Guardian 故障 latch；本地真实故障仍有更高优先级。
+- 本轮重启复用既有真实 Docker 容器并重新探测 Neo4j/Chroma/Redis；`ExternalServicesBackend=none` 仅关闭容器
+  重建 ownership，不是内存 fallback。Unified Gateway、真实 provider、远端 Edge 和真人体验尚未执行，因此没有
+  `FullStackAcceptanceReceiptV1`，当前状态仍是 `IN_PROGRESS`。
 - 在隔离 runtime root 启动 Docker Neo4j/Chroma/Redis、Host、Obs、Monitor、Gateway，执行真实读写、重启、恢复与故障注入。
 - 至少使用一个真实非 mock model provider；只有用户允许且远端设备可用时才连接真实 Edge、ASR、TTS、VTS/VRM。
 - mock、scripted replay、端口占位和 fixture 都不能成为最终 PASS 证据。

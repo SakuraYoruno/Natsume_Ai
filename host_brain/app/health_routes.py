@@ -14,7 +14,10 @@ from pathlib import Path
 from typing import Any, Dict, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from natsume_contracts.edge.service_catalog_v1 import build_edge_transport_probe_statuses
+from natsume_contracts.edge.service_catalog_v1 import (
+    build_edge_transport_probe_statuses,
+    edge_required_services,
+)
 
 from host_brain.agent_runtime.immune import build_immune_proposal_from_report
 from host_brain.app.main import (
@@ -27,6 +30,7 @@ from host_brain.app.schemas import (
     ReadinessResponse,
 )
 from host_brain.core.errors import (
+    ACCEPTANCE_PENDING_EXTERNAL,
     SERVICE_UNAVAILABLE_COLD_START,
     STARTUP_MCP_DEGRADED,
 )
@@ -284,6 +288,8 @@ def _apply_host_health_status(
     summary = dict(health_report.get("summary") or {})
     required_unavailable = int(summary.get("required_unavailable") or 0)
     optional_unavailable = int(summary.get("optional_unavailable") or 0)
+    required_not_tested = int(summary.get("required_not_tested") or 0)
+    optional_not_tested = int(summary.get("optional_not_tested") or 0)
     runtime_component_unavailable = int(
         summary.get("runtime_component_unavailable") or 0
     )
@@ -292,7 +298,7 @@ def _apply_host_health_status(
         for row in health_report.get("services") or ()
         if isinstance(row, Mapping)
         and bool(row.get("required"))
-        and str(row.get("status") or "").upper() != "UP"
+        and str(row.get("status") or "").upper() not in {"UP", "NOT_TESTED"}
     )
     cold_start_only = bool(
         allow_cold_start_degradation
@@ -303,17 +309,20 @@ def _apply_host_health_status(
             for row in required_failures
         )
     )
-    public_status = "FAILED" if required_unavailable and not cold_start_only else (
-        "DEGRADED"
-        if required_unavailable
-        or optional_unavailable
-        or runtime_component_unavailable
-        else "OK"
-    )
+    if required_unavailable and not cold_start_only:
+        public_status = "FAILED"
+    elif required_unavailable or optional_unavailable or runtime_component_unavailable:
+        public_status = "DEGRADED"
+    elif required_not_tested or optional_not_tested:
+        public_status = ACCEPTANCE_PENDING_EXTERNAL
+    else:
+        public_status = "OK"
     if required_unavailable and not cold_start_only:
         summary["overall_status"] = "DOWN"
     elif required_unavailable or optional_unavailable or runtime_component_unavailable:
         summary["overall_status"] = "DEGRADED"
+    elif required_not_tested or optional_not_tested:
+        summary["overall_status"] = ACCEPTANCE_PENDING_EXTERNAL
     else:
         summary["overall_status"] = "UP"
 
@@ -324,7 +333,7 @@ def _apply_host_health_status(
         if durability_status == "FAILED":
             public_status = "FAILED"
             summary["overall_status"] = "DOWN"
-        elif public_status == "OK":
+        elif public_status in {"OK", ACCEPTANCE_PENDING_EXTERNAL}:
             public_status = "DEGRADED"
             summary["overall_status"] = "DEGRADED"
         if not health_report.get("reason_code"):
@@ -335,6 +344,41 @@ def _apply_host_health_status(
 
     health_report["summary"] = summary
     health_report["status"] = public_status
+
+
+def _build_edge_not_tested_statuses(*, detail: str) -> dict[str, dict[str, Any]]:
+    """Project an intentionally untested remote Edge without probing it."""
+
+    return {
+        descriptor.service_id: {
+            "available": False,
+            "status": "NOT_TESTED",
+            "not_tested": True,
+            "unavailable_kind": "external_pending",
+            "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
+            "detail": detail,
+        }
+        for descriptor in edge_required_services()
+    }
+
+
+def _project_edge_transport_statuses(
+    gateway_probe: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Keep the public transport helper while preserving NOT_TESTED truth."""
+
+    detail = str(gateway_probe.get("detail") or "").strip() or None
+    statuses = build_edge_transport_probe_statuses(
+        available=bool(gateway_probe.get("available", False)),
+        detail=detail,
+    )
+    if bool(gateway_probe.get("not_tested")) or str(
+        gateway_probe.get("status") or ""
+    ).strip().upper() == "NOT_TESTED":
+        return _build_edge_not_tested_statuses(
+            detail=detail or "remote Edge was not tested in this acceptance run"
+        )
+    return statuses
 
 
 def _resolve_node_inventory_payload() -> tuple[list[dict[str, Any]], int | None, str | None]:
@@ -407,7 +451,13 @@ async def build_live_health_report(
     if _host_result.success and _host_result.config is not None:
         _runtime_statuses = build_host_runtime_statuses(_host_result.config)
 
-    if not skip_dependency_probes:
+    if skip_dependency_probes:
+        _runtime_statuses.update(
+            _build_edge_not_tested_statuses(
+                detail="remote Edge dependency probes were skipped by this Host-only request"
+            )
+        )
+    else:
         try:
             _dep_probes = await _read_dependency_probes(
                 dependency_probe_provider=dependency_probe_provider,
@@ -415,12 +465,7 @@ async def build_live_health_report(
             )
             _runtime_statuses.update(_dep_probes)
             _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
-            _runtime_statuses.update(
-                build_edge_transport_probe_statuses(
-                    available=bool(_edge_gateway.get("available", False)),
-                    detail=str(_edge_gateway.get("detail") or "").strip() or None,
-                )
-            )
+            _runtime_statuses.update(_project_edge_transport_statuses(_edge_gateway))
         except HealthRuntimeDependencyUnavailable:
             raise
         except Exception as _edge_exc:

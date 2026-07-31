@@ -297,6 +297,7 @@ export const SERVICE_STATUS_LABELS = {
   down: '离线',
   error: '故障',
   running: '运行中',
+  not_tested: '未验收',
   unknown: '未知',
 }
 

@@ -124,6 +124,112 @@ def test_health_source_is_passive_durable_ledger_only(monkeypatch) -> None:
     assert cursor == 1_000
 
 
+def test_health_projection_rebuilds_remote_edge_not_tested_after_restart(
+    tmp_path,
+) -> None:
+    from natsume_contracts.edge.service_catalog_v1 import edge_required_services
+
+    from host_brain.audit.sqlite_ledger import SQLiteLedger
+    from host_brain.app.observability_runtime.health_device_projection import (
+        load_health_projection_sources,
+    )
+    from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
+    from host_brain.core.services import (
+        ServiceHealthReporter,
+        build_default_service_registry,
+    )
+
+    database = tmp_path / "canonical.sqlite3"
+    observed_at = 1_800_000_300_000
+    runtime_statuses = {
+        descriptor.service_id: {
+            "available": False,
+            "status": "NOT_TESTED",
+            "not_tested": True,
+            "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
+            "detail": "remote Edge disabled by Host configuration",
+        }
+        for descriptor in edge_required_services()
+    }
+
+    writer = SQLiteLedger(database)
+    ServiceHealthReporter(
+        registry=build_default_service_registry(),
+        ledger=writer,
+    ).build_report(
+        request_id="dl07-edge-disabled",
+        runtime_statuses=runtime_statuses,
+        ts_ms=observed_at,
+    )
+    writer.close()
+
+    # Reopen the canonical database to model a standalone Obs restart.  No
+    # Host process cache or network probe is available on this path.
+    reader = SQLiteLedger(database, initialize_schema=False)
+    try:
+        services, _nodes, _cursor = load_health_projection_sources(
+            reader,
+            now_ms=observed_at + 1,
+        )
+    finally:
+        reader.close()
+
+    edge_rows = {
+        row["service_id"]: row
+        for row in services["services"]
+        if row["service_type"] == "edge"
+    }
+    assert services["not_tested"] == 5
+    assert services["unknown"] >= 0
+    assert set(edge_rows) == {"asr", "tts", "vts", "audio_playback", "edge_rpc"}
+    assert {row["status"] for row in edge_rows.values()} == {"NOT_TESTED"}
+    assert {
+        row["reason_code"] for row in edge_rows.values()
+    } == {ACCEPTANCE_PENDING_EXTERNAL}
+    assert edge_rows["vts"]["public_summary"] == (
+        "remote Edge disabled by Host configuration"
+    )
+
+
+def test_newer_voice_receipt_is_not_hidden_by_older_health_snapshot() -> None:
+    from host_brain.app.observability_runtime.health_device_projection import (
+        load_health_projection_sources,
+    )
+
+    class Ledger:
+        def fetch_by_time_range(self, table, **_kwargs):  # noqa: ANN001
+            if table == "voice_event_log":
+                return [
+                    {
+                        "event_type": "TTS_SENT",
+                        "status": "OK",
+                        "latency_ms": 8,
+                        "ts_ms": 900,
+                    }
+                ]
+            if table == "service_health_log":
+                return [
+                    {
+                        "request_id": "older-disabled-report",
+                        "service_id": "edge.rpc.tts",
+                        "status": "NOT_TESTED",
+                        "reason_code": "ACCEPTANCE_PENDING_EXTERNAL",
+                        "detail": "older status",
+                        "ts_ms": 800,
+                    }
+                ]
+            return []
+
+    services, _nodes, _cursor = load_health_projection_sources(
+        Ledger(),
+        now_ms=1_000,
+    )
+
+    tts = next(row for row in services["services"] if row["service_id"] == "tts")
+    assert tts["status"] == "UP"
+    assert tts["last_call_ts"] == 900
+
+
 def test_obs_probe_registry_does_not_read_process_heartbeat_cache(
     monkeypatch,
 ) -> None:

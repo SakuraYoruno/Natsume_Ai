@@ -3,8 +3,8 @@
 
 # Natsume AI 产品需求文档
 
-版本：v4.6
-日期：2026-07-28
+版本：v4.7
+日期：2026-07-31
 文档类型：`STABLE_PRODUCT_REQUIREMENTS / NO_EXECUTION_STATUS`
 
 本文只定义产品必须提供什么、禁止什么以及如何验收，不记录代码完成度、文件数量、端口默认值或阶段状态。
@@ -127,6 +127,7 @@ relationship aftereffect 解释其后续关系意义；Chat 路由不得以 `TAS
 
 - 提供服务健康、任务图、Attempt、Budget、Review、Trace、World/Scene、Capability、Experiment、Identity 和 delivery 投影。
 - 每个 read model 必须带 schema version、freshness/source cursor 和 degraded state。
+- 明确禁用或环境中不可用、且本轮未执行验收的外部服务必须单独标为 `NOT_TESTED`；不能默认成 `UP`，也不能与没有任何来源事实的 `UNKNOWN` 混合。只要强制外部链仍为 `NOT_TESTED`，readiness 必须为 false，最终结论不得超过 `ACCEPTANCE_PENDING_EXTERNAL`。
 - Operator 的审批、恢复、取消、回滚等写动作必须重新进入 Secure Ingress 和 Governed Command Plane。
 
 ### FR-PENTEST：授权安全实验室

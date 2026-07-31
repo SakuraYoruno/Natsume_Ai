@@ -12,7 +12,9 @@ _FAILURE_STATUSES = frozenset(
     {"DOWN", "DEGRADED", "FAILED", "ERROR", "UNAVAILABLE", "UNHEALTHY"}
 )
 _HEALTHY_STATUSES = frozenset({"UP", "OK", "READY", "HEALTHY", "ACCEPTED"})
-_IGNORED_STATUSES = frozenset({"", "UNKNOWN", "SKIPPED", "DEFERRED", "DISABLED"})
+_IGNORED_STATUSES = frozenset(
+    {"", "UNKNOWN", "SKIPPED", "DEFERRED", "DISABLED", "NOT_TESTED"}
+)
 _NON_HEALTHY_SUCCESS_MARKERS = (
     "disabled by config",
     "=false",

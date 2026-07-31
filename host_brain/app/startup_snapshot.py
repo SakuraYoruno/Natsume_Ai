@@ -31,7 +31,7 @@ class StartupHealthSnapshot:
     Attributes:
         request_id: 启动请求 ID
         ts_ms: 快照创建时间戳（毫秒）
-        boot_status: 启动状态（READY / DEGRADED）
+        boot_status: 启动状态（READY / DEGRADED / ACCEPTANCE_PENDING_EXTERNAL）
         service_summary: 服务状态摘要（来自 startup_report["summary"]）
         migration_guard_report: SQLite 迁移版本守卫报告（可选）
         bond_migration_summary: Bond 迁移摘要（可选）

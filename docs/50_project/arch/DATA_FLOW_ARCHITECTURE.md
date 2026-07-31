@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.39
+版本：v3.40
 
-核对日期：2026-07-28
+核对日期：2026-07-31
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -2203,6 +2203,22 @@ Host 请求经 [context_application.py](../../../host_brain/runtime/context_appl
 `IntentArbiter` 不能裸信 `IntentFrameV1` 的 digest；生产 [production_intent_authority.py](../../../host_brain/runtime/production_intent_authority.py) 重开 canonical HostCommand、WorkOrder、TaskGraph/node、ContextPack、Scene、action、Grant、composition-owned policy 和 0137 current goal identity。[Intent admission](../../../host_brain/runtime/intent_admission.py) 在 TaskGraph 已持久化、worker/child grant 执行前先仲裁所有节点，写入 node preparation、graph prepared marker、最终节点 receipt 与 graph complete marker；中途崩溃只能按 exact identity 修复。goal refs 或 typed constraint 在 Context freeze 后漂移时旧图失败关闭。`BLOCK` 与无效 evidence 失败关闭，`REVIEW` 经 Task Runtime durable ReviewStore 和一次性 continuation 恢复；输出固定 `permission_effect=RESTRICT_ONLY`、`execution_authorized=false`。
 
 `RuntimeGuardian` 由 Host ASGI lifespan 中的 [runtime/production_composition.py](../../../host_brain/runtime/production_composition.py) 构造，并绑定同一 runtime scope/owner/lease/fence。Health/heartbeat 与已审计高风险前门通过 typed degradation port 消费 Guardian；每个 lifespan 的 [`ServiceHealthHeartbeat`](../../../host_brain/app/observability_runtime/service_health_heartbeat.py) 独占并关闭自身 heartbeat/keepalive task、observer、probe cache 与 HTTP transport，禁止跨 Host scope 改绑、读取、取消或关闭。没有 observer 的 compatibility probe 只能刷新自己的兼容 cache，不能回退写入全局 degradation reducer；独立 Obs health projection 和 probe registry 只读 durable ledger/projection，不能读任何跨进程不可见 cache。兼容顶层 helper 不是 Host production authority；Host lifespan 不再构造、绑定或在 shutdown 解绑 process-owned MCP broker。legacy global degradation 只能通过显式 compatibility adapter 使用。Guardian 先得到不可变 next-state、再持久化并替换本地投影，重放校验 RuntimeEvent envelope、revision/digest chain 和 from/to identity。
+
+远端 Edge 被明确禁用时，健康状态按以下持久流传播；查询端不会因此启动远端探针：
+
+```mermaid
+flowchart LR
+    C["Host 配置：Edge disabled"] --> P["本地 probe result\nNOT_TESTED"]
+    P --> R["ServiceHealthReporter"]
+    R --> H["Host /health\nACCEPTANCE_PENDING_EXTERNAL"]
+    R --> D["SQLite service_health_log"]
+    H --> Q["Host /ready=false"]
+    D --> O["独立 Obs passive projection"]
+    O --> M["Monitor 五项 NOT_TESTED"]
+    P -. "不发起网络连接" .-> X["远端 Edge 保持停止"]
+```
+
+`NOT_TESTED` 与 `UNKNOWN`、`DOWN` 不可互换：前者是明确“本轮未验收”的 durable fact；`UNKNOWN` 是没有来源证据；`DOWN/DEGRADED` 是实际失败。Guardian reducer 忽略 `NOT_TESTED`，既不开新故障 latch，也不借它恢复已有故障。若同一服务出现更新的真实 voice/effect receipt，则按证据时间覆盖较旧的健康快照；Remote Edge gateway 的 `NOT_TESTED` 只可补齐同属远端节点但不在五服务 admission catalog 内的 VTS，不得从普通 TTS 失败泛化 VTS 状态。
 
 [action_preview_resolver.py](../../../host_brain/runtime/action_preview_resolver.py) 不接受 caller 自报的 `verified_node_grant` 或 action authority。它在签发和执行两个时点重开 immutable HostCommand/WorkOrder/TaskGraph、Attempt/Lease、parent/node Grant、ContextPack、Scene、Guardian，以及 Acceptance Effect claim/artifact；derived terminal 还按 event ID 递归重开 origin Attempt/Lease，而不是把中间 receipt 当继续权限；receipt 固定 `authority_granted=false`。Scheduler 下游、Proactive 和 Life delivery 使用 typed EffectDescriptor 限制 exact scope/args。Acceptance surface Gateway 只允许 effect 精确绑定的最小文本，任意 `raw_extra`、媒体、二次回复或内容漂移在网络前拒绝；公开具身 submit/enqueue 同样必须重开 exact proof，只有已 claim durable outbox 的私有 submitter 可继续。终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine，以及 Operator sys-mode、长期目标、terminal、Edge、Operation/Effect reconciliation、`task.operator_control` 与 `operator.state_control`。旧 WorkOrder/effect、reply-performance/Gateway voice/Avatar 直通失败关闭；这证明局部安全执行链，不代表 Operator 平面或其它具身功能已全部迁移。
 

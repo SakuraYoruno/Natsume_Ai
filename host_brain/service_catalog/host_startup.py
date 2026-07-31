@@ -39,6 +39,7 @@ from host_brain.service_catalog.rollout_runtime import (
     IdentityCapturingHealthProbe,
 )
 from host_brain.service_catalog.socket_reservation import OwnedSocketReservationProbe
+from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
 
 
 HOST_MAIN_ENDPOINT_ID = "host.main.http"
@@ -139,7 +140,12 @@ class HostHttpHealthProbe:
             endpoint_id=endpoint.endpoint_id,
             healthy=(
                 200 <= status_code < 300
-                and str(document.get("status") or "").upper() in {"OK", "DEGRADED"}
+                # External acceptance can remain pending while this exact
+                # local Host candidate is alive and identity-valid.  Treating
+                # that state as a dead candidate prevents the Host from
+                # exposing the truthful NOT_TESTED readiness payload at all.
+                and str(document.get("status") or "").upper()
+                in {"OK", "DEGRADED", ACCEPTANCE_PENDING_EXTERNAL}
             ),
             status_code=status_code,
             owner_id=str(health_identity.get("owner_id") or ""),

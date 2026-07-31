@@ -421,9 +421,15 @@ def runtime_lifespan(
                 _edge_health = await probe_edge_rpc_health()
                 _edge_available = bool(_edge_health.get("available", False))
                 _edge_status = str(_edge_health.get("status") or "").strip().upper()
-                if _edge_status == "SKIPPED":
-                    new_module_statuses["edge_rpc"] = f"SKIPPED: {_edge_health.get('detail', 'gateway-only mode')}"
-                    logger.info("Edge RPC 启动探针已跳过: %s", _edge_health.get("detail", ""))
+                if _edge_status in {"SKIPPED", "NOT_TESTED"}:
+                    new_module_statuses["edge_rpc"] = (
+                        "NOT_TESTED: "
+                        f"{_edge_health.get('detail', 'remote Edge not tested')}"
+                    )
+                    logger.info(
+                        "Edge RPC 启动探针未执行（外部验收待定）: %s",
+                        _edge_health.get("detail", ""),
+                    )
                 elif _edge_available:
                     new_module_statuses["edge_rpc"] = f"OK (latency={_edge_health.get('latency_ms', 0)}ms)"
                     logger.info(

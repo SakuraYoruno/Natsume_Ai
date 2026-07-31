@@ -3,8 +3,8 @@
 
 # 测试与验收目录
 
-版本：v2.65
-维护日期：2026-07-28
+版本：v2.66
+维护日期：2026-07-31
 状态：当前证据
 
 ## DL-00 人格提示词边界与体验基线
@@ -139,6 +139,20 @@
   返回 `410 MATEENGINE_DIRECT_COMMAND_RETIRED`。相关 unit/contract/lifecycle 集合为 `49 passed in 9.85s`。
 - 远端 Edge 位于另一台电脑，本轮显式不启动、不连接；真实模型、Gateway、ASR/TTS/VTS/VRM、平台投递、故障矩阵、性能和盲评均未完成。
   本证据的结论仅为 `LOCAL_STACK_RESTART_PASS / ACCEPTANCE_PENDING_EXTERNAL`，绝不是 DL-07 PASS。
+- 随后的状态纠偏专门覆盖“远端未启动却被默认成健康”的验收缺陷。`test_dl07_external_acceptance_status.py`、
+  `test_aw07_health_device_projection.py`、`test_aw07_obs_get_side_effects.py` 与 startup/readiness/Guardian/Catalog
+  邻接集合共 `175 passed in 45.72s`；Monitor 读模型为 `16 passed`。持久化测试关闭并重开 SQLite 后仍得到
+  ASR/TTS/VTS/Audio/Edge RPC 五项 `NOT_TESTED`，且 GET 查询不会 prime cache、启动探针或写账本。
+- 真实服务重启时，首次 Docker ownership 路径因隔离 Neo4j auth ref 无法解析而在 Host 启动前失败关闭，没有重建或删除
+  已运行容器。恢复 acceptance 环境的 Redis 端口绑定后，使用 `ExternalServicesBackend=none` 复用既有 Docker project；
+  启动器仍对 Chroma `28000`、Neo4j `27687`、Redis `26379` 完成真实 readiness probe，并成功启动 Host `28080`、
+  Obs `28082`、Nginx Monitor `28180`。这里的 `none` 不是 fake store 或内存 fallback。
+- 运行中实测得到 Host `/health=ACCEPTANCE_PENDING_EXTERNAL`、`required_unavailable=0`、`required_not_tested=5`，
+  `/ready=false`、`node_not_tested=2`；Obs 与 Monitor proxy 的 Edge read model 为 `not_tested=5`、`unknown=0`。
+  无网络拦截的真实 Nginx Playwright 检查为 `1 passed`，页面可见五枚“未验收”。Obs 自身 `/health=DEGRADED`，但
+  projection daemon 为 `RUNNING`、最近波次 failed count 为 0；该差异按实记录，未伪装为整体健康。
+- 远端 Edge 仍未探测，Unified Gateway 与真实非 mock provider 仍未启动；没有生成
+  `FullStackAcceptanceReceiptV1`。`REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
 
 ## DL-04 确定性表达不绕过情感协议切片
 

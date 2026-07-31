@@ -9,6 +9,7 @@ export default memo(function ServiceCard({ name, status = 'unknown', latency, de
     degraded: 'border-l-orange-400',
     down: 'border-l-red-500',
     error: 'border-l-red-500',
+    not_tested: 'border-l-blue-400',
     unknown: 'border-l-gray-300',
   }[normalizedStatus] ?? 'border-l-gray-300'
 

@@ -3,14 +3,16 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.47
-核对日期：2026-07-30
+版本：v3.48
+核对日期：2026-07-31
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
 
-> **最新执行焦点：** 当前已进入 `DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING`。
+> **最新执行焦点：** 当前已进入 `DL-07_EXTERNAL_NOT_TESTED_STATUS_PROJECTION_AND_LOCAL_CORE_STACK_ACCEPTANCE`。
 > 下段保留的是 Motive 子切片结束时的完整背景；其中“volatile Bond queue 未完成”和“legacy emotion
 > timeline 待切断”的描述均已由本页后文的退役修订取代，不能再作为当前结论。
+
+> **DL-07 外部状态纠偏：** 明确关闭的远端 Edge 现沿 Host startup/health/readiness → canonical `service_health_log` → 独立 Obs → Monitor 传播为五项 `NOT_TESTED`，不会默认 `UP` 或混入 `UNKNOWN`。真实本机重启得到 `required_unavailable=0 / required_not_tested=5 / ready=false`，Monitor 无拦截浏览器可见五项“未验收”。这关闭“未测即健康”的缺口，但 Unified Gateway、真实 provider、远端 Edge、故障/性能矩阵和真人盲评仍未运行，因此 DL-07 与整体产品继续 `INCOMPLETE`。
 
 > **0149/0150 受治理文本修订：** `DL04_TASK_BOUND_GOVERNED_CHAT_SENTENCE_VISIBILITY_FOUNDATION` 已将已经入场的 frozen Chat plan、稳定句和 stream control 写入 Task Runtime 的 file-backed immutable ledger。每个可见句同时绑定 graph/revision/node/attempt、lease owner/fence、node grant、request/self/relationship subject/workspace 与 plan/sync/self-affect revision；Surface 在 receipt 成功前不得外显，Frozen executor 与 Worker 都会重验。`0150` 在替代 attempt 写 plan 的同一事务中检出前序 delivery evidence，使替代 attempt 或同 attempt 重入进入 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，不能重新调用模型。它不写 Life、Memory、TTS、Avatar 或 transport，且普通 Chat、受认证 connection resume、跨进程完整 recovery、真实 provider/Edge 和 DL-07 仍是缺口，状态仍为 `PARTIAL`。
 
@@ -499,7 +501,7 @@ Gate 6 的证据仍按原始重叠批次记录，Gate 6 owner/lifecycle 边界�
 | Scene Engine | `PARTIAL_THREE_CONSUMERS_PRODUCTION_WIRED_LOCAL_ACCEPTANCE_PASSED` | 0112、`RuntimeContextApplicationService`、`SceneResolver` | caller 不能指定最终 scene/constraints，Surface、Proactive、Task admission 冻结同一 revision/digest；八类场景 commit-bound Gate 已通过，多实例 canary 待收口 | NE-03 |
 | Intent Arbiter | `PARTIAL_PRODUCTION_ADMISSION_AND_GOAL_OWNER_WIRED_RESTRICT_ONLY_LOCAL_WAVE_PASS` | `ProductionIntentAuthorityPort`、`DurableIntentAdmissionVerifier`、`IntentArbitrationV1`、0137 | graph/context/action/grant/policy/current goal identity 由重开 authority 证明，节点/graph receipt set 与 durable Review continuation 已接 Task Runtime；冻结后 goal 漂移失败关闭。部署 canary仍缺 | NE-03 |
 | Action Preview / Shadow | `PARTIAL_PRODUCTION_AUTHORITY_WIRED_LOCAL_ACCEPTANCE_PASSED` | `runtime/action_preview_authority.py`、`runtime/action_preview_resolver.py`、Task/Acceptance/Life/terminal transport gates | lifespan-owned resolver 重开 Command/Task/Attempt/Lease/Grant/Context/Scene/Guardian，derived scope/args 受 descriptor 约束；终端正向覆盖 Acceptance surface Gateway、Scheduler-derived Life Edge/Gateway/VTS/MateEngine 以及 Operator sys-mode、terminal、Edge、Operation/Effect reconciliation、`task.operator_control` 与 `operator.state_control` 的 typed terminal proof。旧任务/effect、剩余 `23/37` 个直写 Operator、reply-performance/Gateway voice/Avatar 直通失败关闭；后者和 Operator 其余功能正向迁移属于 NE-01 | NE-03→NE-01 |
-| Runtime Guardian / Service Catalog | `PARTIAL_HOST_LIFESPAN_PROBE_STATE_AND_ENFORCE_TARGET_WIRED` | 0112、0113、`runtime/runtime_guardian.py`、`service_health_heartbeat.py`、`service_catalog/host_startup.py` | ASGI Guardian 绑定 Host lease/fence；`ServiceHealthHeartbeat` 按 Host lifespan 独占 task/keepalive/observer/probe cache/HTTP transport，scope close 不得影响其他 Host；未注入 observer 的 compatibility probe 只写自己的兼容 cache，不能回退到全局 degradation reducer。独立 Obs health projection/probe registry 已停止读取任何跨进程不可见 cache，改为 durable ledger/projection；兼容顶层 helper 不属于 Host production authority。Catalog fresh DB 逐级真实启动五阶段且默认目标 ENFORCE，operation/receipt/head、crash takeover 可恢复并由 SQLite 状态机保护；Windows graceful stop 与部署多实例 canary 仍缺 | NE-03→NE-07 |
+| Runtime Guardian / Service Catalog | `PARTIAL_HOST_LIFESPAN_PROBE_STATE_AND_ENFORCE_TARGET_WIRED_EXTERNAL_NOT_TESTED_TRUTHFUL` | 0112、0113、`runtime/runtime_guardian.py`、`service_health_heartbeat.py`、`health_device_projection.py`、`service_catalog/host_startup.py` | ASGI Guardian 绑定 Host lease/fence；`ServiceHealthHeartbeat` 按 Host lifespan 独占 task/keepalive/observer/probe cache/HTTP transport。远端 Edge disabled 时不发网络请求，五项服务持久为 `NOT_TESTED`，Host readiness false；独立 Obs 从 `service_health_log` 重建并由 Monitor 单独展示。`NOT_TESTED` 不开/清 Guardian latch，真实失败优先。Catalog fresh DB 逐级真实启动五阶段且默认目标 ENFORCE；Unified Gateway、真实 provider、Windows graceful stop 与部署多实例 canary 仍缺 | DL-07 |
 
 0137 当前定向证据分开记录，不伪加总：长期目标 repository/World revocation
 为 `9 passed in 7.55s`，Production Intent/Context 为

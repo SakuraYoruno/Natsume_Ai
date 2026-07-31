@@ -93,7 +93,10 @@ def build_services_health_response(
             for row in rows
             if str(row.get("service_type") or "") == side_filter
         ]
-    counts = {key: 0 for key in ("UP", "DEGRADED", "DOWN", "UNKNOWN")}
+    counts = {
+        key: 0
+        for key in ("UP", "DEGRADED", "DOWN", "NOT_TESTED", "UNKNOWN")
+    }
     services: list[ServiceHealthItem] = []
     for row in rows:
         status = str(row.get("status") or "UNKNOWN").upper()
@@ -104,6 +107,7 @@ def build_services_health_response(
         up=counts["UP"],
         degraded=counts["DEGRADED"],
         down=counts["DOWN"],
+        not_tested=counts["NOT_TESTED"],
         unknown=counts["UNKNOWN"],
         services=services,
         timestamp=int((payload or {}).get("timestamp") or _now_ms()),

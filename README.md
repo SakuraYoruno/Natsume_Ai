@@ -7,6 +7,8 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 > 当前唯一产品主线是“实时情感陪伴数字生命”（`NE-08 / DL-00～DL-07`）。工程治理、任务、模型、Gateway、Edge 和观测是支撑七海连续情感、关系与自然表达的底座，不是产品完成的替代品。现有 NE-01～NE-07 记录均为范围受限的历史基础证据；它们不能证明七海已拥有自身情感因果、长期修复或文本/语音/Avatar 同轮一致性。
 
+> `2026-07-31` 验收状态纠偏：当远端 Edge 按用户要求保持关闭时，Host 不再把 ASR、TTS、VTS、音频播放或 Edge RPC 默认成健康。真实 Host `/health` 现返回 `ACCEPTANCE_PENDING_EXTERNAL`（`required_unavailable=0`、`required_not_tested=5`），`/ready` 返回 `ready=false`；独立 Obs 从 canonical SQLite `service_health_log` 重建五项 `NOT_TESTED`，Monitor Nginx 页面显示“未验收”而不是“健康”或含混的“未知”。这证明状态传播诚实，不证明远端设备、真实模型、Gateway 平台或真人体验已经验收。
+
 DL-00 已修正一个会直接破坏陪伴关系的提示词边界：根目录 `Soul.md` 仍是不可在线改写的人格源材料和 digest 来源，但不再把其中的旧剧情、固定用户名或自动关系阶段原样送入模型。Surface、Cortex 与节点生成现在只消费受限的 runtime projection；本轮称呼、关系距离、主动联系和边界必须来自 scope 校验后的 `RelationshipStateV2` 与 `AffectiveTurnPlanV1`。同时，72 条合成多轮陪伴场景已明确覆盖低落、“没事”、误解、七海被伤害、裂痕/未接受修复、混合喜忧、非占有式吃醋、空间、技术任务、主动消息、ASR/TTS/Avatar 故障和打断；它们只是 `MEASUREMENT_PENDING` 的盲评样本，fixture、scripted replay、mock 或端口占位绝不能被写成体验通过。
 
 DL-01 继续清除了真实的旧 authority 旁路：Edge 上报的 `EMOTION_DETECTED`、`USER_REACTION` 等事件现在仅作为审计观测保存；它们不能 fire-and-forget 改 Bond、写七海 self-affect 或直接驱动 VTS。通用 Agent post-process 也不再调用旧 Surface/Cortex Bond writer、发布 Tribe `CONVERSATION_ENDED`，或直接推送 VTS 与整段 TTS；它只留下可审计的 `RETIRED_CANONICAL_LIFE` trace。只有 final ASR 文本可通过既有 Host 输入桥进入正常的 scope、Fusion、Appraisal 与 `AffectiveTurnPlanV1` 链；Voice/Avatar 必须由 Task Acceptance 后、同一表达计划的协议 effect 发起。远端 Edge 未启动，此处不构成设备实测。
@@ -60,6 +62,8 @@ Host、Obs 与 Nginx Monitor 随后使用同一隔离数据根完成一次停止
 表演与 Gateway 语音 adapter 也已改为无副作用 `RETIRED`，而非先尝试入队再由 Preview 拒绝。
 远端 Edge、真实模型 provider、认证 Gateway/第三方投递、物理 TTS/VTS/VRM、真人盲测与故障矩阵尚未完成；整体仍是
 `EMOTIONAL_DIGITAL_LIFE=PARTIAL / ACCEPTANCE_PENDING_EXTERNAL`，绝不把本机服务恢复写成最终体验或全栈通过。
+
+本机栈的最新重启使用既有隔离 Docker project，不删除或改写 volume：Neo4j、Chroma、Redis 的真实容器继续健康，Host 启动器对三者完成真实 readiness probe 后拉起 Host、Obs 与 Nginx Monitor。`ExternalServicesBackend=none` 在这次重启中只表示“不重复创建已运行容器”，不是内存 fallback。当前 Obs 自身 `/health=DEGRADED`，但 projection daemon 正常运行、最近波次无失败；Unified Gateway、真实非 mock provider 和远端 Edge 尚未启动，所以没有生成 `FullStackAcceptanceReceiptV1`，DL-07 仍在进行中。当前定向后端集合为 `175 passed`，Monitor 读模型为 `16 passed`，运行中 Nginx 页面无网络拦截的 `NOT_TESTED` 展示为 `1 passed`；远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 同一条受治理 Chat 链现在还会把 Gateway 的服务 principal 与真实 relationship subject、workspace 分开校验：
 Acceptance 只接收与冻结 `AffectiveTurnPlanV1` 完全相符的关系 scope，并以**已持久化的稳定分句**重建

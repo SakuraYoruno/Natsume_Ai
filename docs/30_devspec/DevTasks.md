@@ -3,8 +3,8 @@
 
 # 当前架构程序注册表
 
-版本：v4.8
-维护日期：2026-07-30
+版本：v4.9
+维护日期：2026-07-31
 状态：`ONE_ACTIVE_PROGRAM`
 
 ## 唯一活动程序
@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_ISOLATED_LOCAL_STACK_RECOVERY`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -103,6 +103,8 @@ explicit offline/legacy fixture 可单独带入 engine 做回滚测试，不能�
 重启。重启暴露的旧 MateEngine health 设备入队旁路已退役为只读远端未验证投影，直接写 API 统一 `410`。远端 Edge 没有启动，
 旧 ReplyEnvelope 表演与 Gateway voice 也已从“尝试入队后 fail-closed”收口为零副作用 `RETIRED`；真实 provider、认证
 Gateway、设备播放、故障矩阵和体验判定仍待完成，不能提升为 DL-07 PASS。
+
+**DL-07 远端未验收状态传播纠偏：** Host 在 `HOST_ENABLE_EDGE_RPC=false` 时不再生成五条伪 `UP`；startup、`/health`、`/ready`、node deployment 与 Release identity 统一接受并传播 `ACCEPTANCE_PENDING_EXTERNAL / NOT_TESTED`，同时让真实本地错误继续优先成为 `DEGRADED/FAILED`。`service_health_log` 是跨进程证据，独立 Obs 不读取 Host cache，也不启动网络探针；它将 canonical Edge service id 显式映射为 Monitor 的 ASR/TTS/VTS/Audio/Edge RPC 五项，并单独统计 `not_tested=5`。Guardian 对 `NOT_TESTED` 不开故障 latch，也不借此清除既有真实故障。真实隔离栈重启后，Host `/health` 为 external pending、`required_unavailable=0`、`required_not_tested=5`，`/ready=false`；Obs read model 与 Nginx proxy 均为五项 `NOT_TESTED`、`unknown=0`，真实浏览器显示五枚“未验收”状态。远端 Edge 没有被连接。定向 Python 集为 `175 passed in 45.72s`，Monitor 读模型 `16 passed`，运行中无拦截 Playwright `1 passed`；这仍不是 Unified Gateway、真实 provider、远端设备或真人盲评完成。
 
 **DL-06 canonical 主动节律修订：** Scheduler 的发送 policy 现在先以 canonical
 `self-affect + relationship + regulation + profile + frozen Scene` 编译实际

@@ -11,6 +11,7 @@ from natsume_contracts.edge.service_catalog_v1 import (
     EdgeHealthQuery,
     build_edge_service_catalog_snapshot,
     build_edge_transport_probe_statuses,
+    edge_required_services,
 )
 from host_brain.app.config import build_host_runtime_statuses, load_host_config
 from host_brain.app.main_helpers import (
@@ -38,6 +39,7 @@ from host_brain.app.webui_aggregation import (
 )
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.core.ids import new_request_id
+from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
 from host_brain.core.key_profiles import normalize_key_profiles
 from host_brain.core.services import (
     KIND_DEPENDENCY,
@@ -134,6 +136,16 @@ def build_startup_report(
                     detail=f"edge health query failed: {type(edge_health_exc).__name__}",
                 )
             )
+    else:
+        for descriptor in edge_required_services():
+            statuses[descriptor.service_id] = {
+                "available": False,
+                "status": "NOT_TESTED",
+                "not_tested": True,
+                "unavailable_kind": "external_pending",
+                "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
+                "detail": "remote Edge health query was not composed for this run",
+            }
 
     if runtime_statuses:
         statuses.update(runtime_statuses)

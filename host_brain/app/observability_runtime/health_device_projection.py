@@ -38,6 +38,30 @@ DEVICE_MAX_AGE_MS = 300_000
 ORGAN_TRIBE_MAX_AGE_MS = 120_000
 
 
+# ``service_health_log`` uses canonical runtime service ids while the public
+# Monitor contract predates that registry.  Keep this translation explicit:
+# an unregistered canonical service must never overwrite an unrelated card.
+_DURABLE_SERVICE_HEALTH_PUBLIC_IDS: Mapping[str, tuple[str, ...]] = {
+    "host.audit.sqlite_ledger": ("sqlite_ledger",),
+    "host.integrations.llm_gateway": ("llm_gateway",),
+    "edge.rpc.gateway": ("edge_rpc",),
+    "edge.rpc.asr": ("asr",),
+    "edge.rpc.tts": ("tts",),
+    "edge.rpc.barge_in": ("audio_playback",),
+    "edge.rpc.resource_gate": ("audio_playback",),
+}
+_EXPLICIT_HEALTH_STATUSES = frozenset(
+    {"UP", "DEGRADED", "DOWN", "NOT_TESTED", "UNKNOWN"}
+)
+_SAME_MOMENT_HEALTH_PRECEDENCE = {
+    "UNKNOWN": 0,
+    "UP": 1,
+    "NOT_TESTED": 2,
+    "DEGRADED": 3,
+    "DOWN": 4,
+}
+
+
 ORGAN_AGENT_REGISTRY: tuple[tuple[str, str], ...] = (
     ("limbic_agent", "limbic"),
     ("social_brain_agent", "social_brain"),
@@ -144,6 +168,83 @@ def _ledger_rows(
     return [row for row in rows if isinstance(row, Mapping)]
 
 
+def _explicit_health_overrides(
+    rows: list[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Project the latest durable runtime report into public service ids.
+
+    Several canonical Edge services intentionally collapse into the older
+    ``audio_playback`` card.  For rows written in the same report millisecond,
+    the least healthy result wins deterministically.  A newer report always
+    supersedes an older one.
+    """
+
+    selected: dict[str, tuple[tuple[int, int, int, str], Mapping[str, Any]]] = {}
+    gateway_not_tested: tuple[tuple[int, int, int, str], Mapping[str, Any]] | None = None
+    for row in rows:
+        canonical_id = str(row.get("service_id") or "").strip()
+        status = str(row.get("status") or "UNKNOWN").strip().upper()
+        public_ids = _DURABLE_SERVICE_HEALTH_PUBLIC_IDS.get(canonical_id, ())
+        if not public_ids or status not in _EXPLICIT_HEALTH_STATUSES:
+            continue
+        ts_ms = _safe_int(row.get("ts_ms"))
+        identity = str(row.get("request_id") or row.get("id") or canonical_id)
+        rank = (
+            ts_ms,
+            _SAME_MOMENT_HEALTH_PRECEDENCE.get(status, 0),
+            _safe_int(row.get("id")),
+            identity,
+        )
+        for public_id in public_ids:
+            previous = selected.get(public_id)
+            if previous is None or rank > previous[0]:
+                selected[public_id] = (rank, row)
+        if canonical_id == "edge.rpc.gateway" and status == "NOT_TESTED":
+            if gateway_not_tested is None or rank > gateway_not_tested[0]:
+                gateway_not_tested = (rank, row)
+
+    # VTS is owned by the remote Edge but is not a member of the five-service
+    # RPC admission contract.  Only the explicit whole-Edge NOT_TESTED fact may
+    # fill this gap; an ordinary TTS/ASR failure must never be generalized to
+    # VTS.
+    if gateway_not_tested is not None:
+        previous = selected.get("vts")
+        if previous is None or gateway_not_tested[0] > previous[0]:
+            selected["vts"] = gateway_not_tested
+
+    projected: dict[str, dict[str, Any]] = {}
+    for public_id, (rank, row) in selected.items():
+        status = str(row.get("status") or "UNKNOWN").strip().upper()
+        detail = _public_detail(row.get("detail"))
+        projected[public_id] = {
+            "status": status,
+            "success_rate": None,
+            "p95_ms": None,
+            "last_call_ts": rank[0] or None,
+            "call_count": 0,
+            "reason_code": str(row.get("reason_code") or "").strip() or None,
+            # ``detail`` is retained for in-process callers; ``public_summary``
+            # is the reviewed field that survives the public projection
+            # serializer into the standalone Obs process.
+            "detail": detail or None,
+            "public_summary": detail or None,
+        }
+    return projected
+
+
+def _newer_explicit_health(
+    computed: Mapping[str, Any],
+    explicit: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not explicit:
+        return dict(computed)
+    computed_ts = _safe_int(computed.get("last_call_ts"))
+    explicit_ts = _safe_int(explicit.get("last_call_ts"))
+    if str(computed.get("status") or "UNKNOWN").upper() == "UNKNOWN" or explicit_ts >= computed_ts:
+        return dict(explicit)
+    return dict(computed)
+
+
 def load_health_projection_sources(
     ledger: Any,
     *,
@@ -164,6 +265,13 @@ def load_health_projection_sources(
     now = max(0, int(now_ms if now_ms is not None else _now_ms()))
     since = now - max(1, int(window_minutes)) * 60_000
     voice_rows = _ledger_rows(ledger, "voice_event_log", start_ms=since, end_ms=now)
+    service_health_rows = _ledger_rows(
+        ledger,
+        "service_health_log",
+        start_ms=since,
+        end_ms=now,
+    )
+    explicit_health = _explicit_health_overrides(service_health_rows)
     model_attempt_rows = latest_terminal_model_attempts(
         _ledger_rows(ledger, "model_attempt_log", start_ms=since, end_ms=now)
     )
@@ -221,6 +329,7 @@ def load_health_projection_sources(
             }
         else:
             health = _compute_health([])
+        health = _newer_explicit_health(health, explicit_health.get(service_id))
         services.append(
             {
                 "service_id": service_id,
@@ -240,7 +349,10 @@ def load_health_projection_sources(
         health = _compute_health(matching)
         nodes.append({"node_id": node_id, **meta, **health})
 
-    counts = {key: 0 for key in ("UP", "DEGRADED", "DOWN", "UNKNOWN")}
+    counts = {
+        key: 0
+        for key in ("UP", "DEGRADED", "DOWN", "NOT_TESTED", "UNKNOWN")
+    }
     for service in services:
         status = str(service.get("status") or "UNKNOWN").upper()
         counts[status if status in counts else "UNKNOWN"] += 1
@@ -254,6 +366,7 @@ def load_health_projection_sources(
         "up": counts["UP"],
         "degraded": counts["DEGRADED"],
         "down": counts["DOWN"],
+        "not_tested": counts["NOT_TESTED"],
         "unknown": counts["UNKNOWN"],
         "services": services,
         "timestamp": now,

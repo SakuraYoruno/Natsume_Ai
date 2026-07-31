@@ -48,7 +48,13 @@ export function buildOverviewPulseNodes({
 }) {
   return [
     { label: '中枢稳态', value: wsConnected ? '实时观测' : '轮询观测', tone: 'primary', active: true },
-    { label: '外周器官', value: data?.up != null ? `${data.up}/${data.total ?? '—'}` : '—', tone: 'teal', active: true },
+    {
+      label: '外周器官',
+      value: data?.up != null ? `${data.up}/${data.total ?? '—'}` : '—',
+      tone: 'teal',
+      active: true,
+      detail: Number(data?.not_tested ?? 0) > 0 ? `${data.not_tested} 项未验收` : undefined,
+    },
     { label: '节律推进', value: runningCount > 0 ? `${runningCount} 个节律在动` : '静息', tone: 'violet', active: runningCount > 0 },
     { label: '执行护栏', value: uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—', tone: 'amber', active: uiAssertionData?.block_rate != null },
   ]
@@ -59,6 +65,7 @@ export function buildOverviewHeroMetaItems({ data, activeSubsystemCount }) {
     `服务总数：${data?.total ?? '—'}`,
     `降级：${data?.degraded ?? '—'}`,
     `离线：${data?.down ?? '—'}`,
+    `未验收：${data?.not_tested ?? '—'}`,
     `未知：${data?.unknown ?? '—'}`,
     `活跃子系统：${activeSubsystemCount}`,
   ]
@@ -112,6 +119,7 @@ function normalizeServiceStatus(service) {
   if (status === 'UP' || status === 'OK' || status === 'HEALTHY') return 'up'
   if (status === 'DEGRADED' || status === 'WARN' || status === 'WARNING') return 'degraded'
   if (status === 'DOWN' || status === 'FAIL' || status === 'FAILED' || status === 'ERROR') return 'down'
+  if (status === 'NOT_TESTED') return 'not_tested'
   return 'unknown'
 }
 
@@ -127,6 +135,7 @@ function buildOverviewHandoffEvidence({ data, activeSubsystems, agentLoopData, u
   const serviceCount = Number(data?.total ?? 0)
   const degradedServices = Number(data?.degraded ?? 0)
   const downServices = Number(data?.down ?? 0)
+  const notTestedServices = Number(data?.not_tested ?? 0)
   const activeSubsystemCount = activeSubsystems.length
   const failedLoops = Number(agentLoopData?.failed ?? 0)
   const blockRate = Number(uiAssertionData?.block_rate ?? 0)
@@ -137,7 +146,7 @@ function buildOverviewHandoffEvidence({ data, activeSubsystems, agentLoopData, u
       key: 'health',
       label: 'Health',
       value: `${degradedServices + downServices} issue`,
-      detail: `${serviceCount || '—'} services · ${degradedServices} degraded · ${downServices} down`,
+      detail: `${serviceCount || '—'} services · ${degradedServices} degraded · ${downServices} down · ${notTestedServices} not tested`,
       tone: downServices > 0 ? 'red' : degradedServices > 0 ? 'orange' : serviceCount > 0 ? 'green' : 'slate',
     },
     {

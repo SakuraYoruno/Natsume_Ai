@@ -3,8 +3,8 @@
 
 # Natsume AI Monitor UI 当前架构
 
-版本：v1.1
-维护日期：2026-07-26
+版本：v1.2
+维护日期：2026-07-31
 事实基线：当前仓库的 production source、Vite 配置、Nginx 启动脚本与测试
 文档职责：解释 Monitor UI 现在如何启动、导航、查询、发送 Operator 命令和展示 Task Runtime，不承诺尚未接线的能力。
 
@@ -29,6 +29,7 @@ Monitor UI 是 Natsume AI 的浏览器端 Operator 界面，不是业务权威�
 | Review resume | `TRANSPORT WIRED / UI FLOW BROKEN` | 底层可消费绑定 token，但当前 approve/reject 在浏览器侧先失败，正常 UI 流程拿不到一次性 token |
 | Review approve/reject | `BROKEN / FAIL-CLOSED` | 当前 UI 传入服务端保留的 `actor_id`，生成合同会在发网络请求前拒绝 |
 | 路由级依赖与风险门禁 | `DECLARED ONLY` | `serviceDeps` 和 `riskLevel` 已声明，暂无生产消费者 |
+| 外部服务未验收状态 | `WIRED` | `/obs/services/health` 单独返回 `not_tested`，服务卡显示“未验收”；不把远端 Edge 缺席画成健康或普通未知 |
 
 与全局系统边界的关系见 [SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)，状态、副作用和 receipt 流见 [DATA_FLOW_ARCHITECTURE.md](DATA_FLOW_ARCHITECTURE.md)。
 
@@ -180,6 +181,10 @@ Page 可以组装 feature，但新的 schema normalization、command payload 和
 [`obs_routes_sysmode.py`](../../../host_brain/app/obs_routes_sysmode.py) 只通过注入的 `LifecycleRuntimeApplicationPorts` 读取当前 mode、历史 transition 和数字生命 runtime snapshot。它不会在 Obs 进程中懒构造 writer-capable mode service；读取不可用时返回 `unknown/degraded` 以及 secret-free slot 状态，而不是伪造健康。
 
 runtime snapshot 会以有界超时向 Host 查询 `/scheduler/health`，成功时把真实 Scheduler 状态叠加到后台运行投影；Host 不可达或 overlay 失败只降级对应 slot，其余读模型继续可用。Monitor UI 因而展示的是跨进程只读组合结果，不是浏览器、Nginx 或 Obs 自己维护的 Scheduler/System Mode 真相。真正的 enable/disable、mode switch 和 policy 更新仍必须走 Operator Command → Governed Task Runtime → durable domain authority。
+
+### 5.5 服务健康的未验收状态
+
+服务总览接受 `UP / DEGRADED / DOWN / NOT_TESTED / UNKNOWN` 五类状态。`NOT_TESTED` 使用独立计数、蓝色边界和“未验收”标签，不进入故障告警列表；`UNKNOWN` 继续表示没有 durable 来源证据。卡片展示来自 Obs public projection 的 `public_summary`，不读取原始 audit detail。生产 E2E `dl07-external-status-live.spec.js` 只在显式 live 开关下运行，并直接访问 Nginx 后的真实 Obs API，不安装 route interception 或 fixture。
 
 ### 5.3 Query cache
 
