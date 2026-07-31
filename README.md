@@ -49,9 +49,14 @@ scope 校验完整的 canonical Life hand-off 才能提供无分数的朋友关�
 `2026-07-30` 已对全部 50 个 `test_dl00_*` 至 `test_dl06_*` 专用单测、合同与 SQLite 集成文件做一次
 不重叠的本地波次复核，结果为 `200 passed in 256.73s`。这证明当前 canonical Life、用户/自我 affect
 隔离、关系后效应、冻结表达计划、Host 侧 Voice/Avatar protocol、主动权限与 profile 回滚、以及已收口的
-legacy authority 能在本地共同回归；它不含 Docker、真实 provider、第三方 Gateway、真人盲测或远端 Edge。
-Docker daemon 的 DL-07 前检目前为 `DOCKER_DAEMON_UNAVAILABLE`，尚未启动 Docker Desktop、容器或远端设备，
-因此整体仍是 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`，绝不把本地 200 项通过写成最终体验或全栈通过。
+legacy authority 能在本地共同回归；它不含真实 provider、第三方 Gateway、真人盲测或远端 Edge。
+DL-07 的隔离本机栈现已真实启动 Docker Neo4j、Chroma、Redis，并完成每项服务的写入、读取、重启持久化和清理；
+Host、Obs 与 Nginx Monitor 随后使用同一隔离数据根完成一次停止后的真实重启。Monitor 生产构建与运行中 Nginx
+页面的无拦截路由回归已经通过。此次重启还发现并修复了历史 MateEngine `GET /health` 会错误入队设备命令的问题：
+它现在只返回 Host outbox 的只读投影，明确标记 `REMOTE_EDGE_UNVERIFIED`；`POST /v1/mateengine/action`、`/signal`、
+`/say` 则稳定返回 `410 MATEENGINE_DIRECT_COMMAND_RETIRED`，不再留下无 Task Preview 的旧设备写 authority。
+远端 Edge、真实模型 provider、认证 Gateway/第三方投递、物理 TTS/VTS/VRM、真人盲测与故障矩阵尚未完成；整体仍是
+`EMOTIONAL_DIGITAL_LIFE=PARTIAL / ACCEPTANCE_PENDING_EXTERNAL`，绝不把本机服务恢复写成最终体验或全栈通过。
 
 同一条受治理 Chat 链现在还会把 Gateway 的服务 principal 与真实 relationship subject、workspace 分开校验：
 Acceptance 只接收与冻结 `AffectiveTurnPlanV1` 完全相符的关系 scope，并以**已持久化的稳定分句**重建

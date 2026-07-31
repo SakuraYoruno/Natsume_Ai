@@ -121,10 +121,24 @@
   主动权限、profile 生命周期与 legacy writer 退役。
 - 该集合额外断言：用户明确接受修复后的 `REPAIR_ACCEPTED` 只能令当前 Plan 选择 `ACKNOWLEDGE` 的
   自然回暖，不能继续 `REPAIR` 形成反复道歉或索求安抚的循环。
-- 这是本地代码与 SQLite 证据，不是 DL-07 真实验收：Docker、真实 provider、远端 Edge/TTS/VTS、
-  真人盲测与平台投递均未运行。随后进行的非破坏性 Docker 前检得到
-  `DOCKER_DAEMON_UNAVAILABLE`，未启动 Docker Desktop、任何容器或远端 Edge；
+- 这是本地代码与 SQLite 证据，不是 DL-07 最终体验验收。其后已在隔离数据根真实启动 Docker Neo4j、
+  Chroma、Redis，并对每项完成写入、读取、重启持久化和清理；Host/Obs/Nginx Monitor 也已完成停止后的真实重启。
+  远端 Edge/TTS/VTS、真实 provider、认证 Gateway/平台投递和真人盲测仍未运行；
   `REMOTE_CI=NOT_RUN_ACCOUNT_QUOTA`。
+
+## DL-07 隔离本机服务栈恢复与 MateEngine 写边界
+
+- `scripts/runtime/run_ne07_external_services_acceptance.py` 在独立 Docker project、独立 Neo4j graph namespace、
+  Chroma collection 与 Redis key prefix 上执行真实服务写入、读取、重启持久化和清理，receipt 为
+  `sha256:effb372ae66586062a2d803fbaeb989d5fd76877ad2d756ad511cd8c79aeec2a`。它不是端口探针，也不写入用户数据根。
+- `start_host_side.ps1` 使用同一隔离环境成功拉起 Host `28080`、Obs `28082`、Nginx Monitor `28180`；停止后再次启动通过。
+  Host `/health`、`/ready`、Obs `/health`、Monitor `/monitor/index.html` 与真实 Obs read-model 都可读。Monitor 生产构建和
+  运行中的 Nginx 页面路由回归已通过；本次仅验证本机服务，不拦截网络请求伪造后端。
+- 本次重启发现历史 `GET /v1/mateengine/health` 会错误创建设备 outbox command，现改为纯只读投影：`ok=false`、
+  `REMOTE_EDGE_UNVERIFIED`、`physical_effect_verified=false`。`POST /v1/mateengine/action`、`/signal`、`/say` 均在入队前
+  返回 `410 MATEENGINE_DIRECT_COMMAND_RETIRED`。相关 unit/contract/lifecycle 集合为 `49 passed in 9.85s`。
+- 远端 Edge 位于另一台电脑，本轮显式不启动、不连接；真实模型、Gateway、ASR/TTS/VTS/VRM、平台投递、故障矩阵、性能和盲评均未完成。
+  本证据的结论仅为 `LOCAL_STACK_RESTART_PASS / ACCEPTANCE_PENDING_EXTERNAL`，绝不是 DL-07 PASS。
 
 ## DL-04 确定性表达不绕过情感协议切片
 

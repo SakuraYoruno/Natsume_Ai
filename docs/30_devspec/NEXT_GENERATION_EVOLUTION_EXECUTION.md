@@ -5,7 +5,7 @@
 
 版本：v5.1
 日期：2026-07-30
-状态：`NE-08_IN_PROGRESS / DL-06_LOCAL_WAVE_EVIDENCE_COMPLETE_AND_COMPATIBILITY_AUDIT / DL-07_DOCKER_PREFLIGHT_DAEMON_UNAVAILABLE / EMOTIONAL_DIGITAL_LIFE_PARTIAL / PROGRAM_INCOMPLETE`
+状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_ISOLATED_DOCKER_HOST_OBS_MONITOR_RESTART_PASS / EMOTIONAL_DIGITAL_LIFE_PARTIAL / ACCEPTANCE_PENDING_EXTERNAL`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
 Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它们不能把“七海
@@ -514,9 +514,11 @@ Host fallback。route/runtime 定向集合 `62 passed in 11.26s`，相邻 produc
 
 **DL-00～DL-06 集中本地波次：** 已执行全部 50 个 `test_dl00_*` 至 `test_dl06_*` 专用
 unit/contract/SQLite integration 文件，最终结果为 `200 passed in 256.73s`。这是一次集中回归，不与此前
-188 项或各切片结果相加；它仅说明当前已接线的数字生命主链在本地共同稳定，不能替代真实模型、平台投递、真人盲测、
-Docker/Host/Obs/Monitor/Gateway 全服务栈或远端 Edge。DL-07 的非破坏性 Docker 前检目前返回
-`DOCKER_DAEMON_UNAVAILABLE`，没有启动 Docker Desktop、任何容器或远端 Edge；状态仍为 `PARTIAL`。
+188 项或各切片结果相加；它仅说明当前已接线的数字生命主链在本地共同稳定，不能替代真实模型、平台投递、真人盲测或远端
+Edge。DL-07 已在独立数据根真实拉起 Docker Neo4j/Chroma/Redis，并对每项完成写入、读取、重启持久化与清理；
+Host、Obs、Nginx Monitor 也已在同一隔离栈中完成一次停止后的重启。此次恢复修复了旧 MateEngine `GET /health`
+错误入队命令的边界：它现为只读 `REMOTE_EDGE_UNVERIFIED` 投影，三条历史直接写路由统一 `410`。这仍不含真实
+provider、认证 Gateway/平台投递、远端 Edge/TTS/VTS/VRM、真人盲测、全路线故障矩阵或性能验收，状态继续为 `PARTIAL`。
 
 **本轮 composition fail-closed 修订：** `build_input_runtime_application_ports()` 与
 `build_tribe_application_ports()` 已删除对 `HostEmotionRuntime` 的构造、provider 解析与隐式 fallback。
@@ -529,6 +531,9 @@ Docker/Host/Obs/Monitor/Gateway 全服务栈或远端 Edge。DL-07 的非破坏�
 
 ### DL-07：真实陪伴验收
 
+- 当前局部真实证据：隔离 Docker 三服务的真实持久化测试通过；Host/Obs/Nginx Monitor 已成功启动并在停止后重启，
+  Monitor 生产构建和运行中页面无拦截路由检查均已完成。远端 Edge 被显式禁用，未建立远端连接；这只能作为
+  `ACCEPTANCE_PENDING_EXTERNAL` 的本机基础，不是三模态或最终 PASS。
 - 在隔离 runtime root 启动 Docker Neo4j/Chroma/Redis、Host、Obs、Monitor、Gateway，执行真实读写、重启、恢复与故障注入。
 - 至少使用一个真实非 mock model provider；只有用户允许且远端设备可用时才连接真实 Edge、ASR、TTS、VTS/VRM。
 - mock、scripted replay、端口占位和 fixture 都不能成为最终 PASS 证据。

@@ -18,7 +18,7 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_CANONICAL_PROACTIVE_CADENCE_AND_PLAN_COMMIT`：以实时
+当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_ISOLATED_LOCAL_STACK_RECOVERY`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical
 Affective Life Kernel、0143 迁移和 1002 个真实 SQLite journal event 的重放/重启
 确定性验证；DL-02 已把 workspace-scoped AffectFusion/Appraisal 接入 Host Input，
@@ -95,9 +95,10 @@ explicit offline/legacy fixture 可单独带入 engine 做回滚测试，不能�
 
 **DL-00～DL-06 本地波次证据：** `2026-07-30` 已对全部 50 个 `test_dl00_*` 至
 `test_dl06_*` 文件运行一次集中单测、合同与 SQLite 集成，结果为 `200 passed in 256.73s`。
-该结果确认当前各数字生命切片可以共同回归，但不替代真人盲测、真实 provider、平台 Gateway、Docker/Host/Obs/Monitor
-服务栈或远端 Edge。DL-07 的首个非破坏性 Docker 前检为 `DOCKER_DAEMON_UNAVAILABLE`；尚未启动 Docker Desktop、容器或
-远端 Edge，必须先完成隔离运行根和真实服务启动后才可作 DL-07 判定。
+该结果确认当前各数字生命切片可以共同回归，但不替代真人盲测、真实 provider、平台 Gateway 或远端 Edge。DL-07 已使用
+隔离运行根启动真实 Docker Neo4j/Chroma/Redis，并完成真实写读、重启持久化与清理；Host/Obs/Nginx Monitor 已完成停止后
+重启。重启暴露的旧 MateEngine health 设备入队旁路已退役为只读远端未验证投影，直接写 API 统一 `410`。远端 Edge 没有启动，
+真实 provider、认证 Gateway、设备播放、故障矩阵和体验判定仍待完成，不能提升为 DL-07 PASS。
 
 **DL-06 canonical 主动节律修订：** Scheduler 的发送 policy 现在先以 canonical
 `self-affect + relationship + regulation + profile + frozen Scene` 编译实际

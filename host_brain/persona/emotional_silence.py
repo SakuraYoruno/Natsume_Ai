@@ -170,6 +170,12 @@ class RetiredEmotionalSilenceEngine:
     status = "RETIRED_CANONICAL_LIFE"
     authority = "CANONICAL_LIFE_JOURNAL"
     reason_code = "LEGACY_SILENCE_ENGINE_RETIRED"
+    # The governed ToolBroker fingerprints captured adapter state while it
+    # registers lifecycle-bound handlers.  This is a read-only identity for
+    # that fingerprinting path, not a compatibility implementation of the
+    # retired engine.  All behavioral reads and mutations still fail closed
+    # through ``__getattr__`` below.
+    __natsume_adapter_version__ = "retired-emotional-silence-adapter.v1"
 
     def __getattr__(self, name: str) -> Any:
         raise RuntimeError(f"{self.reason_code}:{str(name or '').strip() or 'operation'}")
