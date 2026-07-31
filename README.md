@@ -65,6 +65,9 @@ Host、Obs 与 Nginx Monitor 随后使用同一隔离数据根完成一次停止
 
 本机栈的最新重启使用既有隔离 Docker project，不删除或改写 volume：Neo4j、Chroma、Redis 的真实容器继续健康，Host 启动器对三者完成真实 readiness probe 后拉起 Host、Obs 与 Nginx Monitor。`ExternalServicesBackend=none` 在这次重启中只表示“不重复创建已运行容器”，不是内存 fallback。当前 Obs 自身 `/health=DEGRADED`，但 projection daemon 正常运行、最近波次无失败；Unified Gateway、真实非 mock provider 和远端 Edge 尚未启动，所以没有生成 `FullStackAcceptanceReceiptV1`，DL-07 仍在进行中。当前定向后端集合为 `175 passed`，Monitor 读模型为 `16 passed`，运行中 Nginx 页面无网络拦截的 `NOT_TESTED` 展示为 `1 passed`；远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
 
+DL-07 现补齐了独立的本机 Unified Gateway composition：
+[`start_gateway_side.ps1`](scripts/runtime/start_gateway_side.ps1) 只启动 Gateway 的真实 Uvicorn、durable SQLite worker 与平台 adapter，不会调用 `start_edge_side.ps1`、ASR、TTS、VTS/VRM 或远端 Edge。入口在开放监听前应用 canonical migration、注入真实 `SQLiteGatewayTransportStore`，并要求 Host ingress 与 reply 两把隔离 HMAC；缺少任一 authority 会 fail-closed。当前这只是可执行入口与定向测试，尚未把 Gateway 记为实测通过；真实进程、签名 webhook、Host 往返、重复抑制和重启恢复仍在本波继续验收。
+
 同一条受治理 Chat 链现在还会把 Gateway 的服务 principal 与真实 relationship subject、workspace 分开校验：
 Acceptance 只接收与冻结 `AffectiveTurnPlanV1` 完全相符的关系 scope，并以**已持久化的稳定分句**重建
 Voice/Avatar 协议，绝不在接受时重新分句或拿空的兼容 plan 伪造多模态效果。本地 SQLite/受控 Gateway 集成已经

@@ -3,9 +3,22 @@
 
 # 测试与验收目录
 
-版本：v2.66
+版本：v2.67
 维护日期：2026-07-31
 状态：当前证据
+
+## DL-07 独立 Unified Gateway 入口
+
+- `test_gateway_side_runtime.py` 验证 Gateway-only composition 的 loopback bind、显式平台集合、
+  file-backed SQLite 约束与远端 Edge 分离；未知平台和 `:memory:` 均失败关闭。
+- `test_gateway_bootstrap_wechat_bridge_mode.py` 进一步断言真实 bootstrap 将配置的
+  `bind_host` 交给受管 Uvicorn server，而不是无条件暴露 `0.0.0.0`。
+- Gateway bootstrap、transport store、HTTP contract 与 Edge/Host import guard 的受影响集合为
+  `138 passed in 19.23s`；PowerShell AST、Python compile、JSON、文档 freshness/authority/audience
+  与 `git diff --check` 同时通过。
+- 这些是入口级 unit 证据。只有后续启动真实进程，完成签名 webhook、durable inbox、Host
+  receipt、reply outbox、duplicate/restart/retry 后，才能把本机 Gateway 提升为实测通过；
+  QQ/微信/Telegram 等真实平台与远端 Edge 仍分别记为 `NOT_TESTED`。
 
 ## DL-00 人格提示词边界与体验基线
 

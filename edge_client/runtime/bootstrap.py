@@ -710,6 +710,7 @@ def bootstrap(
             gw_config = GatewayConfig(
                 host_url=gateway_host_url,
                 hmac_key=config.hmac_shared_key,
+                bind_host=config.rpc_host,
                 enabled_platforms=config.gateway_platforms,
                 wx_db_storage_dir=config.wx_db_storage_dir or "",
                 wx_decrypt_output_dir=config.wx_decrypt_output_dir or "",

@@ -5,11 +5,20 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。Scheduler create/update/delete/enable/disable 管理 HTTP 已作为独立 `SCHEDULER` surface 进入 governed TaskGraph，双前缀路由的直接 writer 为 0。Governed Internal write 已能密封 frozen-base delta、生成 deterministic accepted HEAD 并经 0116 晋升，源分支保持不变；Domain Pack 与其它 Skill write 仍未接通。Chat 本地 projection barrier 与七路线 commit-bound 收据已闭合；真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待 NE-07 验收。
 
-版本：v5.17
-核对日期：2026-07-28
+版本：v5.18
+核对日期：2026-07-31
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
+
+TRACE-DL07-GATEWAY-ENTRY（本机 Gateway 与远端 Edge 分离）：
+`scripts/runtime/run_gateway_side.py` 是允许同时依赖 Edge runtime 与 Host persistence 的外层
+composition root；它应用 canonical migration，注入真实
+`SQLiteGatewayTransportStore`，再启动受管 Uvicorn 与 durable worker。
+`start_gateway_side.ps1` / `stop_gateway_side.ps1` 只管理该进程和 file-backed DB，默认
+loopback bind，不调用完整 Edge 启动器。schema、Host-write HMAC、reply HMAC 或 worker
+readiness 缺失均失败关闭。当前状态为 `CODE_WIRED_LOCAL_TARGETED`；真实 webhook/Host 往返、
+重复抑制、重启恢复和平台 delivery 尚待运行，远端 Edge 保持 `NOT_TESTED`。
 
 TRACE-DL00（用户观察与 self-affect 分离）：`foreground_completed` 可以写入
 脱敏 `user_affect_observation.v0`，但不得把用户 VAD 直接混入 canonical Life

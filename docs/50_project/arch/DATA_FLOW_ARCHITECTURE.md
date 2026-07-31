@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.40
+版本：v3.41
 
 核对日期：2026-07-31
 
@@ -12,6 +12,13 @@
 总体状态：`FULL_ARCHITECTURE_INCOMPLETE`
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+
+DL-07 新增的 Gateway-only 数据流不经过远端 Edge：`start_gateway_side.ps1 →
+run_gateway_side.py → SQLiteMigrationRunner / SQLiteGatewayTransportStore →
+start_gateway()`。Gateway Uvicorn 与 durable delivery worker 必须同时健康才算启动；
+平台 webhook 仍须验签，Gateway→Host 使用独立 Host-write HMAC，Host→Gateway reply
+使用另一把 HMAC。stop-file 先关闭 intake/server，再等待 worker 停止。当前只完成该
+可执行 composition，尚未把后续真实 webhook、Host receipt 或平台送达标为 PASS。
 
 > 情感链路当前为 PARTIAL。0143 已提供一个真实、可重放的 canonical
 > LifeCommand → life_event_journal → state.affective 内核：typed observation

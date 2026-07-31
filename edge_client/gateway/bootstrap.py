@@ -150,6 +150,7 @@ class GatewayConfig:
 
     host_url: str = "http://127.0.0.1:8000"
     hmac_key: str | None = None
+    bind_host: str = "127.0.0.1"
     gateway_port: int = 19000
     enabled_platforms: tuple[str, ...] = ("qq",)
 
@@ -1058,7 +1059,7 @@ def start_gateway(
         # claim an old record.
         server = _ManagedUvicornServer(
             app,
-            host="0.0.0.0",
+            host=str(config.bind_host or "127.0.0.1").strip() or "127.0.0.1",
             port=config.gateway_port,
         )
         instance.server = server
@@ -1122,7 +1123,8 @@ def start_gateway(
         instance.stop()
         raise
     logger.info(
-        "Gateway: 已启动 port=%d platforms=%s transport=%s intake=%s",
+        "Gateway: 已启动 bind=%s port=%d platforms=%s transport=%s intake=%s",
+        str(config.bind_host or "127.0.0.1").strip() or "127.0.0.1",
         config.gateway_port,
         ",".join(sorted(enabled_platforms)),
         transport_mode.value,

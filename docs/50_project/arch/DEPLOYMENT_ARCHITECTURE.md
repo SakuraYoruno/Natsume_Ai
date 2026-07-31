@@ -3,7 +3,7 @@
 
 # Natsume AI 部署架构与运行验收
 
-> 基线日期：2026-07-28
+> 基线日期：2026-07-31
 >
 > 事实来源：当前仓库的 Python 入口、PowerShell 运行脚本、类型化设置与外部服务 Compose。
 >
@@ -232,7 +232,36 @@ powershell -ExecutionPolicy Bypass -File scripts/runtime/start_host_side.ps1 `
 
 此模式不会证明 Neo4j、Chroma、Redis 已由别处正确提供，必须单独验收。
 
-### 6.2 Edge 侧真实顺序
+### 6.2 仅启动本机 Unified Gateway
+
+当远端 Edge 位于另一台电脑且明确保持关闭时，使用独立入口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/runtime/start_gateway_side.ps1 `
+  -RuntimeRoot runtime/acceptance/<run-id>/gateway `
+  -DatabasePath runtime/acceptance/<run-id>/host/audit.sqlite3 `
+  -HostUrl http://127.0.0.1:28080 `
+  -BindHost 127.0.0.1 `
+  -Port 19000 `
+  -Platforms qq
+```
+
+入口先应用 canonical SQLite migration，再由外层 composition 注入
+`SQLiteGatewayTransportStore`，最后启动真实 Gateway Uvicorn 与 durable worker。
+`EDGE_GATEWAY_HOST_HMAC_SECRET(_REF)` 与
+`EDGE_GATEWAY_REPLY_HMAC_SECRET(_REF)` 必须分别可解析；平台 adapter 还必须具有对应验签
+材料。启动结果固定报告 `remote_edge_started=false`。停止使用：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/runtime/stop_gateway_side.ps1 `
+  -RuntimeRoot runtime/acceptance/<run-id>/gateway `
+  -Port 19000
+```
+
+stop-file 会先触发 Gateway 自身关闭 intake/server/worker；超时后才强制回收进程。该模式
+不启动 ASR、TTS、VTS/VRM、Edge RPC 或远端设备，也不把平台凭据缺失转换为 PASS。
+
+### 6.3 Edge 侧真实顺序
 
 本地 Side Profile 使用 [start_edge_side.ps1](../../../scripts/runtime/start_edge_side.ps1)，内部委托 [start_edge.ps1](../../../scripts/runtime/start_edge.ps1)：
 
@@ -241,6 +270,10 @@ powershell -ExecutionPolicy Bypass -File scripts/runtime/start_host_side.ps1 `
 3. Edge bootstrap 在同一进程中尝试启动 Unified Gateway；Gateway 失败只记录警告；
 4. 脚本确认 Edge 主端口稳定；
 5. 再分别探测 ASR、TTS、VTS、微信桥等外围能力。
+
+完整 Edge 模式下 Gateway 的 bind host 明确继承 `EDGE_RPC_HOST`；Gateway-only 入口则独立
+默认为 `127.0.0.1`。外网 webhook 部署若把前者设为 `0.0.0.0`，必须另行配置防火墙、
+反向代理/TLS 与平台验签，不能把开放监听本身当作可用或安全证明。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/runtime/start_edge_side.ps1
@@ -270,7 +303,7 @@ powershell -ExecutionPolicy Bypass -File scripts/runtime/start_edge_main_service
 
 当前 Edge core 仍会构造 avatar driver；该 profile 将其唯一启动/健康探测指向临时的未监听 loopback 端口，因此不会启动或连接 VTS/VRM 外部进程。这个受控失败探测不是硬件验证，也不替代后续对 Edge core 的显式 peripheral lifecycle 收口。
 
-### 6.3 一键分布式启动
+### 6.4 一键分布式启动
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/runtime/start_distributed_services.ps1

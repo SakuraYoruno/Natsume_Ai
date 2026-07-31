@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.55
+版本：v2.56
 核对日期：2026-07-31
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -11,6 +11,8 @@
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
 > DL-07 状态投影切片把远端 Edge 的“明确未验收”从故障和未知中分离出来。Host startup/health/readiness 负责形成 canonical `NOT_TESTED`，`ServiceHealthReporter` 负责 durable journal，独立 Obs 只读重建，Monitor 只负责显示。任一层都不能把未启动服务推断成 `UP`，Monitor/GET 也不能触发探针；Guardian 只处理真实故障，不把外部验收状态写成七海自身的退化。
+
+> Unified Gateway 现在有独立 Host-side composition：`run_gateway_side.py` 同时依赖 Edge 合同/实现与 Host SQLite adapter，在进程外层注入 repository，避免 `edge_client` 反向导入 `host_brain`；PowerShell 启停器只管理该 Uvicorn/worker 进程。Gateway 可在远端 Edge 保持关闭时独立运行，但缺少 durable schema、Host ingress HMAC 或 reply HMAC 时不会开放可用 intake。该接线仍待真实本机 HTTP/SQLite/Host 往返证明。
 
 > `NE-08 / DL-06_REMAINING_COMPATIBILITY_PROJECTION_AUDIT_AND_RUNTIME_USE_METERING` 已把实时情感陪伴设为当前产品主线。
 > Digital Life reducer 拥有一个 typed、可重放的 canonical `state.affective`
