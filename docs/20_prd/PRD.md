@@ -73,6 +73,7 @@ relationship aftereffect 解释其后续关系意义；Chat 路由不得以 `TAS
 - 已接受的回复才可建立 provisional 关系 episode；下一次用户输入才能形成该回应的 aftereffect。沉默、离线和技术投递失败不得被解释为拒绝、不得扣信任或产生催促义务。
 - 关系连续性必须按 workspace 与 relationship subject 隔离；session 只作事件上下文。浪漫、排他和依赖默认未授权，不能由 Bond 分数、互动次数、模型措辞或单次道歉自动升级。
 - Agent Runtime 的检索与动机预取只能消费已校验的 canonical relationship hand-off；缺失或失效时必须使用无分数的 `FRIEND / guarded` 安全投影，禁止打开旧 Bond engine、读取 score/stage 或以互动次数补全关系语气。
+- canonical Host 不得把旧 `BondStageEngine` 或 Neo4j Bond graph 暴露为“只读”关系来源：未知对象的旧 GET 会创建 `INIT`，因此 `/bond/*` 历史 GET 与 `surface_bond` retrieval route 必须在 production fail closed 为 `LEGACY_BOND_READ_RETIRED`；只有显式 offline/legacy fixture 可验证回滚兼容。
 - Gateway service principal 仅是执行与审计主体，不得代替 `relationship_subject_id`；Acceptance 必须以冻结 subject/workspace/session 校验 `AffectiveTurnPlanV1`，并按已持久化稳定分句重建文本、Voice 与 Avatar 协议。空兼容 plan 不得生成 TTS/Avatar effect，远端通道失败也不得把七海重置为中性。
 - Scene、Affect、Bond 只能收紧表达、主动性或要求 Review，不得覆盖用户明确目标或放宽安全门禁。
 - 每轮外显前必须冻结同一份 self-affect、CompanionAct 与 ExpressionPlan；模型、请求

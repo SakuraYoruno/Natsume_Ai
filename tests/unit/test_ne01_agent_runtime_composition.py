@@ -38,7 +38,6 @@ def _host_services(**overrides: object) -> HostLifecycleApplicationPorts:
         "life_memory_service": provider,
         "conversation_history": provider,
         "conversation_turn_store": provider,
-        "bond_neo4j_client": provider,
         "prompt_registry": provider,
         "bond_update_queue": provider,
         "model_route_catalog": provider,
@@ -214,9 +213,9 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
     ledger = object()
     life_memory_store = object()
     conversation_history = object()
-    bond_neo4j_client = object()
     recall_service = object()
     captured: dict[str, object] = {}
+    legacy_bond_client_calls: list[str] = []
 
     async def fake_run_retrieval(**kwargs):  # noqa: ANN003, ANN202
         captured["retrieval"] = kwargs
@@ -246,7 +245,7 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
             ledger=lambda: ledger,
             life_memory_store=lambda: life_memory_store,
             conversation_history=lambda: conversation_history,
-            bond_neo4j_client=lambda: bond_neo4j_client,
+            bond_neo4j_client=lambda: legacy_bond_client_calls.append("resolved"),
         ),
         life_authority_provider=lambda: (object(), object()),
     )
@@ -277,8 +276,8 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
     assert dict(captured["recall_service"]) == {
         "ledger": ledger,
         "life_memory_store": life_memory_store,
-        "bond_neo4j_client": bond_neo4j_client,
     }
+    assert legacy_bond_client_calls == []
 
 
 def test_agent_runtime_scope_fails_closed_when_nested_host_provider_is_missing() -> None:

@@ -400,6 +400,18 @@ handler 和受控 Gateway transport 中确认 6 个 Host-staged protocol effect�
 Docker、真实 provider、第三方 Gateway、真人盲测与远端 Edge 均没有运行。DL-07 的非破坏性 Docker 前检返回
 `DOCKER_DAEMON_UNAVAILABLE`，未启动 Docker Desktop、容器或远端 Edge，不能得出全栈 PASS/FAIL。
 
+### TRACE-DL06-LEGACY-BOND-READ-22
+
+`FR-NLE-003 / FR-CHAT / FR-PRIVACY` 要求 canonical Host 不得以旧 Bond 图作为“只读”补充关系事实。
+`composition/host_bond_runtime.py` 的 production owner 关闭 legacy read authority，返回
+`RetiredBondReadProjection`；`app/bond_routes.py` 因而让 `/bond/health`、`/users`、`/stage/*`、`/summary/*`
+在解析真实 engine 前稳定返回 `410 LEGACY_BOND_READ_RETIRED`。这是因为旧 `get_state/get_summary`
+会为未知对象创建并记录 `INIT`，故 GET 本身可成为隐藏 writer。`app/agent_runtime_composition.py` 不再解析
+`bond_neo4j_client`，`chat_retrieval_helpers.py` 只在显式 legacy client 存在时才登记 `surface_bond / neo4j_bond`。
+证据为 route/runtime 定向 `62 passed in 11.26s` 与相邻 production composition `39 passed in 5.65s`（集合有重叠）。
+状态为 `LOCAL_LEGACY_BOND_READ_RETIRED / EMOTIONAL_DIGITAL_LIFE_PARTIAL / REMOTE_CI_NOT_RUN_ACCOUNT_QUOTA`；显式
+offline/legacy fixture 仍可测试回滚，Docker、真实 provider、平台 Gateway 与远端 Edge 均未运行。
+
 ## 4. Planning Search
 
 | Trace | FR | 合同 | 生产落点 | 证据 | 当前状态 | 下一波 |

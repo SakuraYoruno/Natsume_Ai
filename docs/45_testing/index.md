@@ -29,11 +29,14 @@
   Tribe `CONVERSATION_ENDED`、direct VTS 或 bulk TTS；核心退役子集为 `14 passed in 1.13s`，连同相邻
   Surface/Expression 协议回归为 `64 passed in 4.51s`。没有启动远端 Edge、TTS 或 VTS，不能宣称设备或三模态实测通过。
 - `test_bond_routes_api.py`、`test_nle_appraisal_bond_contract.py` 与 Monitor 边界测试覆盖公开旧 Bond
-  写入口：Host route ports 不再暴露 writer provider，`POST /bond/event` 对任何兼容 payload 都返回
-  `410 LEGACY_BOND_WRITE_RETIRED`，且请求不能改变历史 projection；Monitor 不再包含
-  `submitBondEvent`、`BondEventForm` 或对应 endpoint registry 项。当前本地集合仅证明 API/UI 退役与
-  历史只读边界：Python 定向/ASGI 例为 `19 passed in 61.90s`，Monitor operator-client 为 `9 passed` 且
-  production Vite build 已通过；不证明远端 Edge、真实模型、真人体验或 DL-07。
+  入口：Host route ports 不再暴露 writer provider，`POST /bond/event` 对任何兼容 payload 都返回
+  `410 LEGACY_BOND_WRITE_RETIRED`。canonical `RetiredBondReadProjection` 还使 `/bond/health`、`/users`、
+  `/stage/*`、`/summary/*` 在真实 engine 解析前返回 `410 LEGACY_BOND_READ_RETIRED`，避免旧 GET 为未知用户
+  写出 `INIT`；`test_ne01_agent_runtime_composition.py` 断言 Agent Runtime 不解析 Neo4j Bond client 或注册
+  `surface_bond`。显式 legacy fixture 仍单独覆盖历史 read compatibility。当前这轮 route/composition 定向集合为
+  `62 passed in 11.26s`，相邻 production composition 集合为 `39 passed in 5.65s`（有重叠、不得相加）；
+  Monitor 不再包含 `submitBondEvent`、`BondEventForm` 或对应 endpoint registry 项。它们不证明远端 Edge、真实模型、
+  真人体验或 DL-07。
 
 ## DL-02 ASR 情绪观察语义边界
 

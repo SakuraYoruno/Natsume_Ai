@@ -279,6 +279,7 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     ledger = object()
     authority = _AuthorityRuntime(ledger)
     bond_client = object()
+    bond_client_calls: list[str] = []
     edge_probe = lambda: object()
     edge_status_builder = lambda _probe: {}
     construction_ports = replace(
@@ -290,7 +291,7 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     monkeypatch.setattr(
         host_application_module,
         "build_host_bond_client",
-        lambda: bond_client,
+        lambda: bond_client_calls.append("resolved") or bond_client,
     )
     ports = build_production_host_application_ports(
         process_application_ports=construction_ports,
@@ -326,6 +327,16 @@ def test_production_host_port_root_is_frozen_and_isolates_legacy_mapping(
     assert ports.lifecycle.bond_update_queue().enqueue({"request_id": "legacy-bond-queue"})[
         "status"
     ] == "RETIRED_CANONICAL_LIFE"
+    retired_stage = ports.lifecycle.bond_stage_engine()
+    assert getattr(retired_stage, "reason_code", "") == "LEGACY_BOND_READ_RETIRED"
+    with pytest.raises(RuntimeError, match="LEGACY_BOND_READ_RETIRED"):
+        retired_stage.get_state("legacy-read-must-not-create")
+    with pytest.raises(
+        HostLifecycleScopeError,
+        match="HOST_SERVICE_PROVIDER_NOT_INJECTED:bond_neo4j_client",
+    ):
+        ports.lifecycle.require_provider("bond_neo4j_client")
+    assert bond_client_calls == []
     assert ports.lifecycle.probe_edge_rpc_health is edge_probe
     assert (
         ports.lifecycle.build_edge_dependency_probe_statuses

@@ -1445,15 +1445,20 @@ def _build_surface_memory_recall_service(
             score_weight=0.85,
             node_selector=node_id,
         ),
-        "surface_bond": RecallRouteConfig(
+    }
+    # The canonical Host no longer supplies a Bond graph.  Leaving this route
+    # registered with a ``None`` client would still advertise legacy score/
+    # stage evidence to downstream planners.  Explicit offline compatibility
+    # roots may pass a client during the rollback window.
+    if bond_neo4j_client is not None:
+        routes["surface_bond"] = RecallRouteConfig(
             route_id="surface_bond",
             store_id="neo4j_bond",
             collection="neo4j_bond",
             top_k=4,
             score_weight=0.95,
             node_selector=node_id,
-        ),
-    }
+        )
     return RecallFusionServiceContract(
         ledger=ledger,
         life_memory_store=life_memory_store,

@@ -50,11 +50,12 @@ TTS suppression：worker 保留同一份冻结 plan，Acceptance 后才由 Host-
 Voice/Avatar protocol intent。仅未受治理的 legacy fallback 仍为避免与 `_deliver_gateway_reply` 重复而
 保持抑制；两者都不是远端设备已播放或已转场的 receipt。
 
-公开旧 Bond 写流现已被截断：`POST /bond/event` 不读取 writer provider，也不产生 score、stage、
-self-affect 或关系事件，而是返回 `410 LEGACY_BOND_WRITE_RETIRED`。Monitor 不再拥有人工补录 API/
-表单；其 Bond 页面只能读取历史 projection。因而实际关系流只能是
-`accepted reply → canonical relationship episode → next input aftereffect`，不能从 HTTP/UI 的积分
-补录旁路写回。
+公开旧 Bond 流现已整体被截断：`POST /bond/event` 不读取 writer provider，也不产生 score、stage、
+self-affect 或关系事件，而是返回 `410 LEGACY_BOND_WRITE_RETIRED`；`GET /bond/health`、`/users`、
+`/stage/*`、`/summary/*` 在 canonical Host 则于解析旧 engine 前返回 `410 LEGACY_BOND_READ_RETIRED`。后者同样必要：
+历史 engine 的未知用户 GET 会创建 `INIT` 行，不能伪装成只读。Agent Runtime 的 recall routes 不再登记
+`surface_bond / neo4j_bond`，Monitor 也不再拥有人工补录 API/表单。因而实际关系流只能是
+`accepted reply → canonical relationship episode → next input aftereffect`，不能从 HTTP/UI 或旧图谱召回旁路写回。
 
 NE-01 代码封口后的证据流固定为：
 

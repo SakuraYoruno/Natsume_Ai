@@ -222,8 +222,10 @@ def build_production_host_application_ports(
         update_queue_factory=None,
         client_factory=build_host_bond_client,
         # Digital Life owns production relationship mutation.  This Host owner
-        # keeps only legacy read projections alive during the rollback window.
+        # does not resolve mutable legacy readers either: a Bond GET can create
+        # an INIT row, so even a read projection would reopen a second writer.
         legacy_write_authority_enabled=False,
+        legacy_read_authority_enabled=False,
     )
     evolution_runtime_owner = HostEvolutionRuntimeOwner(
         persistence_db_path_provider=(
@@ -305,7 +307,9 @@ def build_production_host_application_ports(
                 memory_runtime_owner.require_emotion_timeline
             ),
             bond_stage_engine=bond_runtime_owner.require_stage_engine,
-            bond_neo4j_client=bond_runtime_owner.require_client,
+            # Agent Runtime recall and Host routes must not re-open the legacy
+            # Neo4j Bond graph in a canonical Digital Life Host.
+            bond_neo4j_client=None,
             shared_memory_index=shared_memory_index,
             milestone_tracker=_app_local_provider(milestone_tracker),
             prompt_registry=authority_runtime_owner.require_prompt_registry,

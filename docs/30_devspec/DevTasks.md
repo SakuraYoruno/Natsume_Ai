@@ -85,6 +85,14 @@ authority 收口，不代表全局删除 ANS、真实模型、Gateway、远端 E
 为 `82 passed in 50.52s`；Gateway transport 为受控本地 handler，仍不代表真实 provider、第三方 Gateway、远端 Edge
 或 DL-07 服务栈已完成。
 
+**DL-06 legacy Bond read 全面收口：** canonical Host 不再向 Agent Runtime 提供 `bond_neo4j_client`，因此
+memory recall 不注册 `surface_bond / neo4j_bond`；`HostBondRuntimeOwner` 的生产 read authority 也关闭。旧
+`BondStageEngine.get_state/get_summary` 会对未知对象写 `INIT`，所以 `/bond/health`、`/users`、`/stage/*`、
+`/summary/*` 不再把 HTTP GET 当作安全投影，而是在解析 engine 前稳定返回 `410 LEGACY_BOND_READ_RETIRED`。
+explicit offline/legacy fixture 可单独带入 engine 做回滚测试，不能作为 canonical Host fallback。当前 route/runtime
+定向集为 `62 passed in 11.26s`，相邻 production composition 集为 `39 passed in 5.65s`，二者有重叠且仍不代表
+真实 provider、Gateway、远端 Edge 或 DL-07。
+
 **DL-00～DL-06 本地波次证据：** `2026-07-30` 已对全部 50 个 `test_dl00_*` 至
 `test_dl06_*` 文件运行一次集中单测、合同与 SQLite 集成，结果为 `200 passed in 256.73s`。
 该结果确认当前各数字生命切片可以共同回归，但不替代真人盲测、真实 provider、平台 Gateway、Docker/Host/Obs/Monitor

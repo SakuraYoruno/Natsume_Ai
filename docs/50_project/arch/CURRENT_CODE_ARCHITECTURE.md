@@ -278,6 +278,14 @@ canonical `RelationshipStateV2` 投影；hand-off 缺失时采用 `CANONICAL_REL
 Agent Runtime 的生产读取边界；旧 `state_arbiter_queries` 私有 Bond prompt helper 已删除，rollback-window Bond read API、
 其它 compatibility reader 和真实服务栈证据仍独立。
 
+**DL-06 legacy Bond graph/GET 读取退役：** `agent_runtime_composition.py` 不再解析
+`bond_neo4j_client`，`_build_surface_memory_recall_service()` 在没有显式 legacy client 时不会注册
+`surface_bond / neo4j_bond`。production `HostBondRuntimeOwner` 也关闭 legacy read authority，交付只会
+抛出 `LEGACY_BOND_READ_RETIRED` 的 `RetiredBondReadProjection`；`/bond/health`、`/users`、`/stage/*` 与
+`/summary/*` 因而稳定返回 `410`，并在解析真实 engine 前结束。旧 engine 的 `get_state/get_summary` 会在未知用户
+落一条 `INIT`，所以这一点不是单纯 API 整理，而是移除隐藏 relationship writer。显式 offline/legacy fixture 仍可
+自带 engine 测试回滚，但 canonical Host 不解析它或 Neo4j Bond client。
+
 ### DL-05/06 受治理表达 Acceptance scope
 
 `task_runtime/acceptance_effects.py` 从 Runtime Context 冻结 relationship subject 与 workspace，服务 principal 仍只
@@ -652,13 +660,13 @@ retrieval prefetch 也在 canonical hand-off 存在时跳过 legacy state arbite
 `FRIEND / stepsibling / familiar|guarded` 的无分数 projection；scope drift 固定 guarded（定向 `34 passed in 5.64s`）。
 
 **Bond queue 修订：** production `ProcessApplicationPorts` 已删除 `BondDynamicsWriter` 与
-`BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 只保留 stage/graph 的
-read compatibility，并返回没有 worker、backlog 或直接 writer fallback 的 retired adapter；canonical
-Cortex 也会在解析 queue 前拒绝旧 Bond mutation。`/bond/event` 已不再解析或调用 writer：Host
-route ports 物理删除 `bond_writer_provider`，端点稳定返回 `410 LEGACY_BOND_WRITE_RETIRED`。Monitor
-同步删除人工补录关系事件的表单、API 和 endpoint registry 项，历史 score/stage 仅在回滚窗口内只读；
-它们不能影响亲密、主动许可或七海 self-affect。旧 timeline 现在是显式 retired 空投影，而不是 canonical
-projection；该公开入口退役不证明其它 compatibility reader 已清零。
+`BondUpdateQueue` construction factory。production `HostBondRuntimeOwner` 不再解析 stage/graph read
+compatibility，也没有 worker、backlog、Neo4j client 或 direct writer fallback；canonical Cortex 会在解析 queue 前拒绝
+旧 Bond mutation。`/bond/event` 已不再解析或调用 writer，所有历史 `/bond/*` GET 也会在旧 engine 之前稳定返回
+`410 LEGACY_BOND_READ_RETIRED`：Host route ports 物理删除 `bond_writer_provider`，Monitor 同步删除人工补录
+关系事件的表单、API 和 endpoint registry 项。显式 offline fixture 才能保留旧 score/stage 用于回滚验证；它们不能影响
+亲密、主动许可或七海 self-affect。旧 timeline 现在是显式 retired 空投影，而不是 canonical projection；该公开入口
+退役不证明其它 compatibility reader 已清零。
 
 Host→Edge 的旧进程 singleton 不再存在，且首条正向受治理 issuer 已接入 production composition。Obs `edge.command.push` 只接受 `edge.somatic + emotion_state_command`，由 Secure Ingress、typed Governor、风险 4 Review 和 immutable TaskGraph 生成确定性的 `edge.embodiment_enqueue` Acceptance Effect；terminal Preview 重开 Graph/Attempt/Lease/Grant/Scene/Guardian 后，Accepted handler 才把 `set_expression` 写入 app-local durable outbox。状态因此是 `FIRST_GOVERNED_SLICE_WIRED / REAL_EDGE_CANARY_MISSING`：SQLite 入队、exact replay 与只读 receipt reconciliation 已测，但真实 Edge/Gateway 网络、设备和其余 command type 未验收。
 

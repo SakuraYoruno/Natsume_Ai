@@ -98,7 +98,6 @@ def build_agent_runtime_application_ports(
     session_tactic_ledger_store = host_services.require_provider(
         "session_tactic_ledger_store"
     )
-    bond_neo4j_client = host_services.require_provider("bond_neo4j_client")
 
     def resolve_life_authority() -> tuple[Any, Any]:
         try:
@@ -120,7 +119,6 @@ def build_agent_runtime_application_ports(
             return _build_surface_memory_recall_service(
                 ledger=ledger(),
                 life_memory_store=life_memory_store(),
-                bond_neo4j_client=bond_neo4j_client(),
             )
 
         return await _run_retrieval(

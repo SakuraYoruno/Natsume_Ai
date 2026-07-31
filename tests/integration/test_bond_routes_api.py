@@ -10,6 +10,7 @@ from host_brain.app.bond_routes import create_bond_router
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.bond.bond_stage_engine import STAGE_FRIEND, BondStageEngine
 from host_brain.bond.user_identity import get_canonical_bond_user_id
+from host_brain.composition.host_bond_runtime import RetiredBondReadProjection
 
 
 @pytest.fixture
@@ -56,6 +57,25 @@ class TestHistoricalBondReadProjection:
         data = response.json()
         assert {"stage", "trend", "capability_hint"} <= set(data)
         assert "total_score" not in data
+
+
+def test_canonical_host_retires_legacy_bond_reads_before_init_mutation() -> None:
+    app = FastAPI()
+    retired = RetiredBondReadProjection()
+    app.include_router(
+        create_bond_router(
+            HostRoutePorts(bond_engine_provider=lambda: retired),
+        ),
+    )
+
+    with TestClient(app) as client:
+        for path in ("/bond/health", "/bond/users", "/bond/stage/alice", "/bond/summary/alice"):
+            response = client.get(path)
+            assert response.status_code == 410
+            assert response.headers["x-reason-code"] == "LEGACY_BOND_READ_RETIRED"
+            assert response.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
+
+    assert retired.__dict__ == {}
 
 
 class TestRetiredBondWriteRoute:

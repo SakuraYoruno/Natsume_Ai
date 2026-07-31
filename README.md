@@ -39,6 +39,13 @@ scope 校验完整的 canonical Life hand-off 才能提供无分数的朋友关�
 没有生产 consumer 的私有 `state_arbiter` Bond prompt helper 也已删除，避免它在未来被重新接入为旁路。
 这是生产读取边界的一条本地收口，不表示所有兼容 reader、真实模型、Gateway、远端 Edge 或 DL-07 已通过。
 
+同一审计又关闭了两条更隐蔽的 Bond read authority：canonical Host 的 `AgentRuntime` 不再解析
+`bond_neo4j_client`，因此 `surface_bond / neo4j_bond` 不会出现在生产 memory-recall routes；而 `/bond/health`、
+`/bond/users`、`/bond/stage/*`、`/bond/summary/*` 在 canonical Host 中统一返回
+`410 LEGACY_BOND_READ_RETIRED`。这是必要的，因为旧 `BondStageEngine` 的 `get_state/get_summary` 会为未知用户
+创建并记录 `INIT` 状态，表面 GET 实际会重开第二条关系写链。显式 offline/legacy fixture 仍可独立传入旧 engine
+验证回滚窗口，但 production Host 不解析它或 Neo4j Bond client。
+
 `2026-07-30` 已对全部 50 个 `test_dl00_*` 至 `test_dl06_*` 专用单测、合同与 SQLite 集成文件做一次
 不重叠的本地波次复核，结果为 `200 passed in 256.73s`。这证明当前 canonical Life、用户/自我 affect
 隔离、关系后效应、冻结表达计划、Host 侧 Voice/Avatar protocol、主动权限与 profile 回滚、以及已收口的

@@ -399,6 +399,13 @@ payload 前返回 `LEGACY_SOCIAL_BRAIN_RELATIONSHIP_WRITE_RETIRED`。保留的 c
 dependency 的非升级投影，不会创建/读取 `BondStageEngine`，也不会写 registry、发 Bond vector 或回灌旧 Limbic。
 这是一条 rollback-window 读取边界，不是 SocialBrain/Bond 全部历史模块或数字生命验收的完成宣言。
 
+**Host Bond compatibility module** 位于 [`composition/host_bond_runtime.py`](../../../host_brain/composition/host_bond_runtime.py)
+与 [`app/bond_routes.py`](../../../host_brain/app/bond_routes.py)。production Host 的 read authority 现同样关闭：
+`RetiredBondReadProjection` 会在旧 stage/summary/users 调用前给出 `LEGACY_BOND_READ_RETIRED`，四个 `/bond/*` GET
+稳定返回 `410`。这避免旧 engine 在未知对象的“读取”中创建 `INIT` 账本行；Agent Runtime memory-recall 也不再解析
+Neo4j Bond client 或注册 `surface_bond`。独立 legacy fixture 可显式传入旧 engine 做回滚测试，但不能作为 Host 模块的
+生产依赖。
+
 `MirrorNeuronAgent` 在 canonical Host 也只保留无状态 compatibility 形状：它不注册
 `EMOTION_INFERENCE_UPDATED`、`INTERACTION_RECORDED`、`EMOTION_STATE_CHANGED` 订阅，`apply_resonance()`、
 三类 callback 和模型化 empathy hint 都在任何旧 global cache、EventBus 或器官调用前退役。用户情绪的生产输入

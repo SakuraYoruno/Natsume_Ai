@@ -48,6 +48,11 @@ Operator 界面同时停止：旧客户端得到可诊断的退役结果，历�
 经“人工补录”、自动计分或 UI 按钮重新影响信任、亲密、主动许可或七海的 self-affect。真正的关系
 变化只应来自已接受回应及后续可解释的 aftereffect。
 
+“只读”也要按实现而不是 HTTP 方法判断。旧 `BondStageEngine` 会在 `get_state` 与 `get_summary` 遇到未知
+对象时创建并写入 `INIT`，所以 canonical Host 不能继续把它放在 `/bond/*` GET 或 memory-recall 的
+Neo4j route 后面；这些入口必须在解析 engine/client 前返回可诊断的 `LEGACY_BOND_READ_RETIRED`。只有显式的
+offline/legacy fixture 才能注入历史 engine 做回滚验证，不能让生产读取以“兼容”名义重新制造关系事实。
+
 同一因果规则适用于“用户夸奖了我”这一类原始交互：文本信号和 session 标识既不是 relationship
 aftereffect，也不能安全地推出关系 subject。它们可以参与当回合的语言理解，却不能通过旧 session→Bond
 映射生成七海的人格 proposal。低风险表达适配应只消费已接受回应之后、可重放且 scope-bound 的 aftereffect；
@@ -656,6 +661,10 @@ guarded 状态，而非向 state arbiter 借回历史 stage。这既保留关系
 输入，却不会把迁移窗口内的积分、阶段或互动次数重新带入七海的注意和措辞。
 原先唯一会把 stage/score 拼成 prompt evidence 的私有 StateArbiter Bond helper 已删除；这不是一种可供未来
 compatibility caller 重新启用的“备用读法”。
+
+相同原则也覆盖 retrieval store inventory：canonical Agent Runtime 只把 Life、episode、semantic、episodic 与
+SQLite 记忆列为可召回来源，绝不将 `neo4j_bond` 注册为候选 route。关系的连续性由 exact scoped
+`RelationshipStateV2` 和 aftereffect 保留，不靠读一张旧图谱补写温度。
 
 同样，安全传输主体不是关系对象。Gateway 可以以服务 principal 承担 HostCommand、lease 与 grant 的审计，而
 `relationship_subject_id + workspace_id + session_id` 仍必须精确绑定七海本轮的自我状态与关系记忆。接受阶段只能
