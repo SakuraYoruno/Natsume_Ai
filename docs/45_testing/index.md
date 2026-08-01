@@ -3,9 +3,20 @@
 
 # 测试与验收目录
 
-版本：v2.69
+版本：v2.70
 维护日期：2026-08-01
 状态：当前证据
+
+## DL-07 Gateway 恢复与 Host 密钥边界
+
+- `0151_gateway_inbox_reconciliation.sql` 与 `SQLiteGatewayTransportStore.reconcile_inbox_pre_effect_denial()`
+  要求 uncertain Gateway→Host attempt 只能凭 exact canonical Secure Ingress no-effect denial 进入重试，
+  并留下不可更新、不可删除的 reconciliation receipt；operator label 不能作为 replay authority。
+- `host_brain.runtime_env` 与 `start_host_side.ps1 -SecretEnvFile` 把公开运行快照和密钥文件分开；密钥路径由
+  launcher 预先固定，同路径或缺失文件 fail-closed，公开 snapshot 不写入密钥正文。
+- 受影响 unit 集合 `51 passed in 5.57s`，真实 SQLite Universal Host Runtime 集成
+  `1 passed in 57.64s`；compileall、JSON 和 `git diff --check` 通过。它们没有证明签名 webhook、平台 delivery
+  或远端 Edge。当前本机 Gateway/Host/Obs/Monitor health 可访问，真实 DeepSeek 请求已运行，但实时首句延迟仍失败。
 
 ## DL-04 普通 Chat 轻量实时路径
 

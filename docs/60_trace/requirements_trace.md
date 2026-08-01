@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.19
+版本：v5.20
 核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -17,8 +17,17 @@ composition root；它应用 canonical migration，注入真实
 `SQLiteGatewayTransportStore`，再启动受管 Uvicorn 与 durable worker。
 `start_gateway_side.ps1` / `stop_gateway_side.ps1` 只管理该进程和 file-backed DB，默认
 loopback bind，不调用完整 Edge 启动器。schema、Host-write HMAC、reply HMAC 或 worker
-readiness 缺失均失败关闭。当前状态为 `CODE_WIRED_LOCAL_TARGETED`；真实 webhook/Host 往返、
+readiness 缺失均失败关闭。本机 Gateway 进程与 HTTP health 已运行；真实签名 webhook/Host 往返、
 重复抑制、重启恢复和平台 delivery 尚待运行，远端 Edge 保持 `NOT_TESTED`。
+
+TRACE-DL07-GATEWAY-RECONCILIATION（不确定第二跳恢复）：
+`0151_gateway_inbox_reconciliation.sql` 与
+`SQLiteGatewayTransportStore.reconcile_inbox_pre_effect_denial()` 只允许 exact
+Secure Ingress no-effect denial 解锁 uncertain Gateway→Host attempt；evidence 必须重新绑定
+inbox/replay/attempt、body、principal、tenant、timestamp/nonce 与 reason，reconciliation receipt
+不可更新或删除。`secure_ingress_surface("gateway")` 改绑第二跳 `host.input`。
+`host_brain.runtime_env` 与 Host launcher 又把公开 runtime env、secret env 分离，并阻止公开文件重定向 secret path。
+定向 unit `51 passed`、真实 SQLite runtime integration `1 passed`；签名全往返仍为 `NOT_RUN`。
 
 TRACE-DL00（用户观察与 self-affect 分离）：`foreground_completed` 可以写入
 脱敏 `user_affect_observation.v0`，但不得把用户 VAD 直接混入 canonical Life

@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.49
+版本：v2.50
 核对日期：2026-08-01
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -24,6 +24,11 @@ flowchart LR
 canonical Life authority。轻量 Chat 没有工具、Delegate、TaskGraph、Grant 或外部 effect 端口；路由若选择
 这些能力，必须进入 Governed Runtime。0149/0150 frozen Chat ledger 继续服务任务图内部 Chat 节点，不再是
 普通陪伴对话的默认开销。
+
+Host/Gateway 的恢复边界采用“证据先于重放”。Gateway→Host attempt 进入结果未知后，0151 reconciliation
+ledger 只接受与该 inbox/attempt/scope/body 精确绑定的 Secure Ingress no-effect denial；人工备注不能直接
+重新派发。Host 的长期进程则从公开 runtime snapshot 与独立 secret env 两条输入装载配置，公开快照可以持久化，
+secret env 只能由 launcher 指定且不进入快照。两者都是支撑本机真实 Gateway 的恢复边界，不属于普通聊天热路径。
 
 DL-06 的 canonical Tribe composition 也不再把旧 `MotorCortexAgent/CerebellumAgent` 当作执行或情感 authority：两者
 在 canonical Life ports 下不注册 `MOTOR_*`/platform EventBus，不持久局部 plan/correction、不做自动 retry，也不把

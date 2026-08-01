@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.42
+版本：v3.43
 
 核对日期：2026-08-01
 
@@ -24,6 +24,12 @@ start_gateway()`。Gateway Uvicorn 与 durable delivery worker 必须同时健�
 平台 webhook 仍须验签，Gateway→Host 使用独立 Host-write HMAC，Host→Gateway reply
 使用另一把 HMAC。stop-file 先关闭 intake/server，再等待 worker 停止。当前只完成该
 可执行 composition，尚未把后续真实 webhook、Host receipt 或平台送达标为 PASS。
+
+结果未知的 Gateway→Host 投递不能按 operator 标记直接重发。0151 的 append-only reconciliation
+flow 会重新打开 canonical Secure Ingress audit，只在 exact inbox/attempt、请求 body、principal、tenant、
+时间窗口和 `NO_SIDE_EFFECT` reason 全部一致时，写入 `NO_SIDE_EFFECT_SAFE_RETRY` receipt 并推进 replay；
+否则保持 reconciliation-required。Host HMAC/provider 凭据由独立 secret env 注入，公开 runtime snapshot
+仅保存非敏感运行配置。
 
 > 情感链路当前为 PARTIAL。0143 已提供一个真实、可重放的 canonical
 > LifeCommand → life_event_journal → state.affective 内核：typed observation

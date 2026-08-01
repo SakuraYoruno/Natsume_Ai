@@ -19,6 +19,12 @@ from host_brain.persistence.gateway_transport_repository import (
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "host_brain/audit/migrations/0059_gateway_transport.sql"
+SECURE_INGRESS_MIGRATION = (
+    ROOT / "host_brain/audit/migrations/0058_secure_ingress.sql"
+)
+RECONCILIATION_MIGRATION = (
+    ROOT / "host_brain/audit/migrations/0151_gateway_inbox_reconciliation.sql"
+)
 
 
 class FrozenClock:
@@ -103,6 +109,66 @@ def _enqueue(store: SQLiteGatewayTransportStore, **kwargs: object):
     kwargs.setdefault("tenant_id", "tenant.test")
     kwargs.setdefault("principal_id", "service.gateway.test")
     return store.enqueue_outbox(**kwargs)
+
+
+def _add_reconciliation_schema(db_path: Path) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(SECURE_INGRESS_MIGRATION.read_text(encoding="utf-8"))
+        conn.executescript(RECONCILIATION_MIGRATION.read_text(encoding="utf-8"))
+
+
+def _record_no_effect_denial(
+    db_path: Path,
+    *,
+    inbox_id: str,
+    audit_ref: str,
+    reason_code: str = "SECURE_INGRESS_CREDENTIAL_INVALID",
+    body_sha256: str | None = None,
+    tenant_id: str = "tenant.test",
+) -> None:
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        inbox = conn.execute(
+            "SELECT * FROM gateway_transport_inbox WHERE inbox_id = ?",
+            (inbox_id,),
+        ).fetchone()
+        attempt = conn.execute(
+            """
+            SELECT * FROM gateway_transport_attempt
+            WHERE direction = 'INBOX' AND message_id = ?
+            ORDER BY replay_no DESC, attempt_no DESC LIMIT 1
+            """,
+            (inbox_id,),
+        ).fetchone()
+        assert inbox is not None and attempt is not None
+        host_key = "edge-host:" + hashlib.sha256(inbox_id.encode()).hexdigest()
+        conn.execute(
+            """
+            INSERT INTO secure_ingress_audit(
+                audit_ref, request_id, correlation_id, surface, action, method,
+                normalized_path, principal_id, tenant_id, key_id,
+                credential_kind, credential_ref_digest, requested_scopes_json,
+                required_scopes_json, body_sha256, idempotency_digest,
+                nonce_digest, transport_key_digest, decision, reason_code,
+                stage, claim_ref, rate_snapshot_json, side_effects_executed, ts_ms
+            ) VALUES (?, ?, ?, 'host.input', 'host:input', 'POST',
+                '/v1/host/input', 'service.edge.gateway', ?,
+                'edge.gateway.hmac.v1', 'HMAC_SHA256', NULL,
+                '["host:write"]', '["host:write"]', ?, ?, NULL, NULL,
+                'DENY', ?, 'CREDENTIAL', NULL, NULL, 0, ?)
+            """,
+            (
+                audit_ref,
+                f"request:{audit_ref}",
+                f"request:{audit_ref}",
+                tenant_id,
+                body_sha256
+                or str(inbox["normalized_payload_digest"])[7:],
+                "sha256:" + hashlib.sha256(host_key.encode()).hexdigest(),
+                reason_code,
+                int(attempt["completed_at_ms"]),
+            ),
+        )
 
 
 def test_schema_is_catalog_checksum_bound_and_runtime_has_no_ddl(tmp_path: Path) -> None:
@@ -722,6 +788,167 @@ def test_retry_after_dispatch_started_is_immediately_quarantined(
                 outbox_id=record_id,
                 operator_ref="operator://must-reconcile",
             )
+
+
+def test_uncertain_inbox_reopens_only_after_canonical_no_effect_denial(
+    tmp_path: Path,
+) -> None:
+    clock = FrozenClock()
+    db_path = _migrated_db(tmp_path)
+    _add_reconciliation_schema(db_path)
+    store = SQLiteGatewayTransportStore(db_path, clock=clock)
+    _accept(store, max_attempts=3)
+    claim = store.claim_inbox(worker_id="worker", lease_ms=100)
+    assert claim is not None
+    store.mark_inbox_dispatch_started(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+    )
+    uncertain = store.retry_inbox(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+        reason_code="HOST_REJECTED",
+    )
+    assert uncertain["status"] == "DLQ"
+
+    audit_ref = "secure-ingress-audit://credential-denied"
+    _record_no_effect_denial(
+        db_path,
+        inbox_id="inbox-1",
+        audit_ref=audit_ref,
+    )
+    reopened = store.reconcile_inbox_pre_effect_denial(
+        inbox_id="inbox-1",
+        secure_ingress_audit_ref=audit_ref,
+        operator_ref="operator://dl07/local-acceptance",
+    )
+
+    assert reopened["status"] == "READY"
+    assert reopened["attempt_count"] == 0
+    assert reopened["replay_count"] == 1
+    assert reopened["reconciliation_outcome"] == "NO_SIDE_EFFECT_SAFE_RETRY"
+    assert reopened["reconciliation_ref"].startswith(
+        "gateway-inbox-reconciliation://"
+    )
+    replay_claim = store.claim_inbox(worker_id="worker-after-reconcile")
+    assert replay_claim is not None
+    assert replay_claim["inbox_id"] == "inbox-1"
+    store.mark_inbox_dispatch_started(
+        inbox_id="inbox-1",
+        claim_token=replay_claim["claim_token"],
+        fencing_token=replay_claim["fencing_token"],
+    )
+    delivered = store.complete_inbox(
+        inbox_id="inbox-1",
+        claim_token=replay_claim["claim_token"],
+        fencing_token=replay_claim["fencing_token"],
+        receipt_ref="host-input-result://accepted",
+    )
+    assert delivered["status"] == "DELIVERED"
+
+    exact_reopen = store.reconcile_inbox_pre_effect_denial(
+        inbox_id="inbox-1",
+        secure_ingress_audit_ref=audit_ref,
+        operator_ref="operator://dl07/local-acceptance",
+    )
+    assert exact_reopen["status"] == "DELIVERED"
+    assert exact_reopen["reconciliation_ref"] == reopened["reconciliation_ref"]
+    assert exact_reopen["replay_count"] == 1
+
+    with sqlite3.connect(str(db_path)) as conn:
+        evidence_count = conn.execute(
+            "SELECT COUNT(*) FROM gateway_transport_inbox_reconciliation"
+        ).fetchone()[0]
+        with pytest.raises(sqlite3.IntegrityError, match="IMMUTABLE"):
+            conn.execute(
+                "UPDATE gateway_transport_inbox_reconciliation "
+                "SET operator_ref = 'operator://tampered'"
+            )
+    assert evidence_count == 1
+
+
+@pytest.mark.parametrize(
+    ("override", "expected_reason"),
+    (
+        ({"body_sha256": "0" * 64}, "EVIDENCE_INVALID"),
+        ({"tenant_id": "tenant.other"}, "EVIDENCE_INVALID"),
+        (
+            {"reason_code": "SECURE_INGRESS_IDEMPOTENCY_DUPLICATE"},
+            "EVIDENCE_INVALID",
+        ),
+    ),
+)
+def test_uncertain_inbox_reconciliation_rejects_unbound_or_unsafe_evidence(
+    tmp_path: Path,
+    override: dict[str, str],
+    expected_reason: str,
+) -> None:
+    clock = FrozenClock()
+    db_path = _migrated_db(tmp_path)
+    _add_reconciliation_schema(db_path)
+    store = SQLiteGatewayTransportStore(db_path, clock=clock)
+    _accept(store, max_attempts=3)
+    claim = store.claim_inbox(worker_id="worker", lease_ms=100)
+    assert claim is not None
+    store.mark_inbox_dispatch_started(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+    )
+    store.retry_inbox(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+        reason_code="HOST_REJECTED",
+    )
+    audit_ref = "secure-ingress-audit://unsafe"
+    _record_no_effect_denial(
+        db_path,
+        inbox_id="inbox-1",
+        audit_ref=audit_ref,
+        **override,
+    )
+
+    with pytest.raises(GatewayTransportStoreError, match=expected_reason):
+        store.reconcile_inbox_pre_effect_denial(
+            inbox_id="inbox-1",
+            secure_ingress_audit_ref=audit_ref,
+            operator_ref="operator://dl07/local-acceptance",
+        )
+    assert store.get_inbox(inbox_id="inbox-1")["status"] == "DLQ"
+
+
+def test_uncertain_inbox_reconciliation_requires_migration_0151(
+    tmp_path: Path,
+) -> None:
+    clock = FrozenClock()
+    store = SQLiteGatewayTransportStore(_migrated_db(tmp_path), clock=clock)
+    _accept(store, max_attempts=3)
+    claim = store.claim_inbox(worker_id="worker", lease_ms=100)
+    assert claim is not None
+    store.mark_inbox_dispatch_started(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+    )
+    store.retry_inbox(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+        reason_code="HOST_REJECTED",
+    )
+
+    with pytest.raises(
+        GatewayTransportStoreError,
+        match="RECONCILIATION_SCHEMA_UNAVAILABLE",
+    ):
+        store.reconcile_inbox_pre_effect_denial(
+            inbox_id="inbox-1",
+            secure_ingress_audit_ref="secure-ingress-audit://missing-schema",
+            operator_ref="operator://dl07/local-acceptance",
+        )
 
 
 def test_restart_recovers_expired_lease_and_rejects_stale_fence(tmp_path: Path) -> None:

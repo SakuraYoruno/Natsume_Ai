@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.50
+版本：v3.51
 核对日期：2026-08-01
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -19,9 +19,9 @@
 > 下段保留的是 Motive 子切片结束时的完整背景；其中“volatile Bond queue 未完成”和“legacy emotion
 > timeline 待切断”的描述均已由本页后文的退役修订取代，不能再作为当前结论。
 
-> **DL-07 外部状态纠偏：** 明确关闭的远端 Edge 现沿 Host startup/health/readiness → canonical `service_health_log` → 独立 Obs → Monitor 传播为五项 `NOT_TESTED`，不会默认 `UP` 或混入 `UNKNOWN`。真实本机重启得到 `required_unavailable=0 / required_not_tested=5 / ready=false`，Monitor 无拦截浏览器可见五项“未验收”。这关闭“未测即健康”的缺口，但 Unified Gateway、真实 provider、远端 Edge、故障/性能矩阵和真人盲评仍未运行，因此 DL-07 与整体产品继续 `INCOMPLETE`。
+> **DL-07 外部状态纠偏：** 明确关闭的远端 Edge 现沿 Host startup/health/readiness → canonical `service_health_log` → 独立 Obs → Monitor 传播为五项 `NOT_TESTED`，不会默认 `UP` 或混入 `UNKNOWN`。真实本机重启得到 `required_unavailable=0 / required_not_tested=5 / ready=false`，Monitor 无拦截浏览器可见五项“未验收”。本机 Unified Gateway 与真实 DeepSeek provider 已分别启动/调用，但签名 Gateway 全往返、远端 Edge、故障/性能矩阵和真人盲评仍未完成；`deepseek-v4-pro` 首句 `12296ms` 也未过实时门槛，因此 DL-07 与整体产品继续 `INCOMPLETE`。
 
-> **DL-07 Gateway-only 入口：** 仓库现有 Gateway bootstrap 原先只能由完整 Edge 间接调用，且没有注入具体 durable store 的独立生产入口。现由 `scripts/runtime/run_gateway_side.py` 在外层完成迁移与 `SQLiteGatewayTransportStore` composition，专用 PowerShell 启停器只拉起本机 Gateway，显式保持 `remote_edge_started=false`。监听默认收紧到 loopback，worker/schema/两把隔离 HMAC 任一缺失即失败。该缺口已在代码层关闭，但真实进程、签名 webhook、Host receipt、重复抑制、断网恢复和平台送达仍未验收，不能更改总体 `INCOMPLETE`。
+> **DL-07 Gateway-only 入口：** 仓库现有 Gateway bootstrap 原先只能由完整 Edge 间接调用，且没有注入具体 durable store 的独立生产入口。现由 `scripts/runtime/run_gateway_side.py` 在外层完成迁移与 `SQLiteGatewayTransportStore` composition，专用 PowerShell 启停器只拉起本机 Gateway，显式保持 `remote_edge_started=false`。监听默认收紧到 loopback，worker/schema/两把隔离 HMAC 任一缺失即失败。本机进程与 health 已运行；0151 又要求 uncertain Host dispatch 只能凭 canonical no-effect denial 安全重试。签名 webhook、Host receipt、重复抑制、断网恢复和平台送达仍未验收，不能更改总体 `INCOMPLETE`。
 
 > **0149/0150 受治理文本修订：** `DL04_TASK_BOUND_GOVERNED_CHAT_SENTENCE_VISIBILITY_FOUNDATION` 已将已经入场的 frozen Chat plan、稳定句和 stream control 写入 Task Runtime 的 file-backed immutable ledger。每个可见句同时绑定 graph/revision/node/attempt、lease owner/fence、node grant、request/self/relationship subject/workspace 与 plan/sync/self-affect revision；Surface 在 receipt 成功前不得外显，Frozen executor 与 Worker 都会重验。`0150` 在替代 attempt 写 plan 的同一事务中检出前序 delivery evidence，使替代 attempt 或同 attempt 重入进入 `TASK_CHAT_DELIVERY_RECOVERY_REQUIRED`，不能重新调用模型。它不写 Life、Memory、TTS、Avatar 或 transport，且普通 Chat、受认证 connection resume、跨进程完整 recovery、真实 provider/Edge 和 DL-07 仍是缺口，状态仍为 `PARTIAL`。
 

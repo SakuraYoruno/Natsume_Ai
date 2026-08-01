@@ -65,10 +65,12 @@ Host、Obs 与 Nginx Monitor 随后使用同一隔离数据根完成一次停止
 远端 Edge、真实模型 provider、认证 Gateway/第三方投递、物理 TTS/VTS/VRM、真人盲测与故障矩阵尚未完成；整体仍是
 `EMOTIONAL_DIGITAL_LIFE=PARTIAL / ACCEPTANCE_PENDING_EXTERNAL`，绝不把本机服务恢复写成最终体验或全栈通过。
 
-本机栈的最新重启使用既有隔离 Docker project，不删除或改写 volume：Neo4j、Chroma、Redis 的真实容器继续健康，Host 启动器对三者完成真实 readiness probe 后拉起 Host、Obs 与 Nginx Monitor。`ExternalServicesBackend=none` 在这次重启中只表示“不重复创建已运行容器”，不是内存 fallback。当前 Obs 自身 `/health=DEGRADED`，但 projection daemon 正常运行、最近波次无失败；Unified Gateway、真实非 mock provider 和远端 Edge 尚未启动，所以没有生成 `FullStackAcceptanceReceiptV1`，DL-07 仍在进行中。当前定向后端集合为 `175 passed`，Monitor 读模型为 `16 passed`，运行中 Nginx 页面无网络拦截的 `NOT_TESTED` 展示为 `1 passed`；远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
+本机栈的最新重启使用既有隔离 Docker project，不删除或改写 volume：Neo4j、Chroma、Redis 的真实容器继续健康，Host 启动器对三者完成真实 readiness probe 后拉起 Host、Obs 与 Nginx Monitor。`ExternalServicesBackend=none` 在这次重启中只表示“不重复创建已运行容器”，不是内存 fallback。当前 Obs 自身 `/health=DEGRADED`，但 projection daemon 正常运行、最近波次无失败；Unified Gateway 已在本机 `127.0.0.1:19000` 启动并通过 HTTP health，真实 DeepSeek provider 也已完成一次普通陪伴回合，但签名 webhook → Host → durable reply 的完整往返、平台外发与远端 Edge 仍未验收，因此没有生成 `FullStackAcceptanceReceiptV1`，DL-07 仍在进行中。真实 `deepseek-v4-pro` 首个可见分句为 `12296ms`，未达到实时体验目标；远程 CI 仍为 `NOT_RUN_ACCOUNT_QUOTA`。
 
 DL-07 现补齐了独立的本机 Unified Gateway composition：
-[`start_gateway_side.ps1`](scripts/runtime/start_gateway_side.ps1) 只启动 Gateway 的真实 Uvicorn、durable SQLite worker 与平台 adapter，不会调用 `start_edge_side.ps1`、ASR、TTS、VTS/VRM 或远端 Edge。入口在开放监听前应用 canonical migration、注入真实 `SQLiteGatewayTransportStore`，并要求 Host ingress 与 reply 两把隔离 HMAC；缺少任一 authority 会 fail-closed。当前这只是可执行入口与定向测试，尚未把 Gateway 记为实测通过；真实进程、签名 webhook、Host 往返、重复抑制和重启恢复仍在本波继续验收。
+[`start_gateway_side.ps1`](scripts/runtime/start_gateway_side.ps1) 只启动 Gateway 的真实 Uvicorn、durable SQLite worker 与平台 adapter，不会调用 `start_edge_side.ps1`、ASR、TTS、VTS/VRM 或远端 Edge。入口在开放监听前应用 canonical migration、注入真实 `SQLiteGatewayTransportStore`，并要求 Host ingress 与 reply 两把隔离 HMAC；缺少任一 authority 会 fail-closed。本机真实进程及 health 已通过，但签名 webhook、Host 完整往返、重复抑制、重启恢复和平台 delivery 仍待验收。
+
+`0151_gateway_inbox_reconciliation.sql` 又封住了一条恢复风险：Gateway→Host attempt 一旦进入 dispatch-started/结果未知，只有重新打开与该 inbox、attempt、body、principal、tenant 和时间窗口精确绑定的 canonical Secure Ingress **无副作用拒绝**证据，才允许追加 immutable reconciliation receipt 并重试；operator 标签本身不再能授权盲目重放。Host 启动器同时把公开 runtime snapshot 与独立 `HOST_RUNTIME_SECRET_ENV_FILE` 分开加载，避免把 HMAC、provider key 等密钥写入公开运行快照。相关代码与 SQLite/启动器定向测试通过，但不替代真实签名往返证据。
 
 同一条受治理 Chat 链现在还会把 Gateway 的服务 principal 与真实 relationship subject、workspace 分开校验：
 Acceptance 只接收与冻结 `AffectiveTurnPlanV1` 完全相符的关系 scope，并以**已持久化的稳定分句**重建

@@ -393,10 +393,18 @@ def digest(serialized: str) -> str:
 
 
 def secure_ingress_surface(command_surface: str) -> str:
+    """Map a business command surface to the ingress authority that admitted it.
+
+    ``HostCommandSurface.GATEWAY`` identifies the business origin after the
+    durable Gateway has already accepted a platform webhook.  The command is
+    nevertheless admitted through the second-hop Host endpoint, so its claim
+    must bind ``host.input`` rather than the first-hop ``gateway.webhook``.
+    """
+
     return {
         "host_input": "host.input",
         "tool": "host.tool",
-        "gateway": "gateway.webhook",
+        "gateway": "host.input",
         "internal": "internal.agent",
         "scheduler": "scheduler.admin",
         "operator": "obs.command",

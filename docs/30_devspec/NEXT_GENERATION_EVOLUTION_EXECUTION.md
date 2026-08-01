@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.4
+版本：v5.5
 日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -16,8 +16,15 @@ Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它�
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，
 `start_gateway_side.ps1` / `stop_gateway_side.ps1` 只管理本机 Gateway 进程。
-它不会启动或探测另一台电脑上的 Edge。入口代码完成不等于真实往返通过；只有后续
+它不会启动或探测另一台电脑上的 Edge。本机 Gateway 进程与 HTTP health 已运行；这仍不等于真实往返通过，只有后续
 签名 webhook → durable inbox → Host → reply outbox 的运行证据才能更新 DL-07 状态。
+
+Gateway inbox 若在外呼 Host 后失去结果，只能依据 exact Secure Ingress no-effect denial
+进入安全重试；`0151_gateway_inbox_reconciliation.sql` 保存不可变 reconciliation evidence，
+operator 备注不能单独授权 replay。Host 的公开 runtime snapshot 与运行密钥也必须分文件装载：
+`HOST_RUNTIME_SECRET_ENV_FILE` 只能由 launcher 在公开 env 读取前选定，且不得与 `.env` 或 runtime snapshot
+同路径。真实 DeepSeek 已执行一次普通陪伴回合，但 `deepseek-v4-pro` 首句 `12296ms` 不达标；下一代码切片
+应拆分 RealtimeCompanion 专用低延迟模型角色，而不是把日常 Chat 重新送回任务审计链。
 
 ## 1. 产品结果
 

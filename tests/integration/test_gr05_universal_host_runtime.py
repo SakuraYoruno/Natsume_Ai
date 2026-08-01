@@ -291,7 +291,7 @@ def _gateway_ingress_authority(
     store = SQLiteSecureIngressStore(db_path, rate_limit=100)
     claim = store.try_claim(
         principal_id="service.edge.gateway",
-        surface="gateway.webhook",
+        surface="host.input",
         action="host:input",
         required_scopes=("host:input",),
         idempotency_key=f"gr05-universal:{suffix}:idempotency",
@@ -308,7 +308,7 @@ def _gateway_ingress_authority(
         event=IngressAuditEvent(
             request_id=request_id,
             correlation_id=f"gr05-universal:{suffix}:correlation",
-            surface="gateway.webhook",
+            surface="host.input",
             action="host:input",
             method="POST",
             normalized_path="/v1/host/input",
