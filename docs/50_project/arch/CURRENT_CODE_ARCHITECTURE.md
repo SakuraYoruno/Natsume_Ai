@@ -3,24 +3,19 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.89
+版本：v5.90
 核对日期：2026-08-01
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> `2026-08-01` 最新 Voice 事实：首轮昔涟 reference bank 与完整韵律 A/B 仍显得舞台化，未提升默认。
-> `ExpressionPlanV1.voice_style` 现作为独立 `voice_profile` 经 Host Voice intent、Edge RPC、
-> `SoVITSModelManager`、fresh/persistent adapter 进入 standalone Worker；`emotion_tag` 继续只表达 canonical
-> self-affect 的兼容标签，二者不互相覆盖。acoustic miner 现可加载项目风格配置，并将《RIDDLE JOKER》
-> 七海 `2465` 条原声先收紧为 `811` 条日常关系候选，再执行 corpus-mean speaker centering、emotion2vec+
-> 与 prosody 近邻。派生训练资产使用硬链接而非重复复制，日语源允许空 `3-bert`；新日常模型已完成
-> `S2=8 / S1=5` 训练。GPT-SoVITS 返回整数 PCM，而旧直连/常驻后处理未缩放便施加硬削波，因此旧 A/B、
-> CER 和检查点排序全部无效。两个入口现在先归一化 PCM、再施加 pitch/energy，超峰时整体缩放而非截平；
-> 五句修复后真实 CUDA 输出无削波。干净网格中现成 e5/s8 micro CER 为 `0.0455`，日常训练 e5/s8
-> 为 `0.0568`；二者已生成同输入、响度匹配 A/B，但只有人工听审能判断日常情感自然度。默认 voice bank、
-> 远端 Edge 与播放/Avatar 物理执行仍未切换。
+> `2026-08-01` 最新 Voice 事实：`ExpressionPlanV1.voice_style` 仍可作为独立 `voice_profile` 经 Host、
+> Edge RPC、`SoVITSModelManager` 和 standalone Worker 传递；整数 PCM 归一化、pitch/energy 和峰值保护
+> 已修复。昔涟中文 reference 因舞台化未提升。随后训练的日语角色模型虽然能输出可识别中文，却因中文
+> 音系、咬字和停顿失真被判定为 `REJECTED_CROSS_LANGUAGE_VOICE`；活动 profile 已删除，acoustic miner
+> 会拒绝显式源语言与目标语言不一致的配置，中文训练脚本也重新要求 `3-bert` 特征。当前没有已批准的
+> 中文七海主模型；默认 voice bank、远端 Edge 与播放/Avatar 物理执行均未切换。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

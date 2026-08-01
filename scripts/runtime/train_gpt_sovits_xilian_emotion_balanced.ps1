@@ -126,20 +126,11 @@ Copy-SelectedTabRows `
     -SourcePath (Join-Path $SourceLogRoot "6-name2semantic.tsv") `
     -TargetPath (Join-Path $ProjectLogRoot "6-name2semantic.tsv") `
     -NameSet $nameSet
-$sourceBertDir = Join-Path $SourceLogRoot "3-bert"
-$sourceBertFiles = @(
-    Get-ChildItem -LiteralPath $sourceBertDir -File -ErrorAction SilentlyContinue
-)
-if ($sourceBertFiles.Count -gt 0) {
-    Copy-SelectedFiles `
-        -SourceDir $sourceBertDir `
-        -TargetDir (Join-Path $ProjectLogRoot "3-bert") `
-        -Names $names `
-        -Suffix ".pt"
-} else {
-    New-Item -ItemType Directory -Force -Path (Join-Path $ProjectLogRoot "3-bert") | Out-Null
-    Write-Host "Source project has no BERT feature files; keeping 3-bert empty (valid for Japanese-only corpora)."
-}
+Copy-SelectedFiles `
+    -SourceDir (Join-Path $SourceLogRoot "3-bert") `
+    -TargetDir (Join-Path $ProjectLogRoot "3-bert") `
+    -Names $names `
+    -Suffix ".pt"
 Copy-SelectedFiles `
     -SourceDir (Join-Path $SourceLogRoot "4-cnhubert") `
     -TargetDir (Join-Path $ProjectLogRoot "4-cnhubert") `

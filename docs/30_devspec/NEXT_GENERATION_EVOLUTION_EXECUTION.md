@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.12
+版本：v5.13
 日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -13,18 +13,15 @@ Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它�
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。当前实现分支基于
 `origin/dev@001c2f5d7`；分支上的 DL-00～DL-06 提交尚未以本文件冒充 `dev` 已完成。
 
-DL-05 已否决昔涟作为主语料：即使修通 reference、速度、能量和音高，它的剧情演出分布仍不符合
-日常陪伴。新路线使用本机《RIDDLE JOKER》七海日语原声 `2465` 条/`3.288h`。风格配置先要求
-日常/关系语境，再排除战斗、犯罪、任务、成人场景、截断句和夸张喊叫，形成 `811` 条/`1.1909h`
-候选；`emotion2vec+ base` 与 prosody 只在该池中寻找五类声学近邻，结果仍为人工试听队列。
-日常子集通过 NTFS 硬链接复用原特征，已完成 `SoVITS 8 epoch + GPT 5 epoch` 本机训练。
-旧四组检查点比较现已作废：GPT-SoVITS `run()` 返回 `int16 PCM`，而 Edge/Worker 旧后处理直接将其
-转为 `float32` 后硬截到 ±0.98，污染了试听与 Whisper CER。常驻 Worker 和备用直连路径均已改为
-先按 PCM 数值域归一化、再应用韵律，并在必要时整体峰值缩放；五句修复后输出削波率与大跳变率均为 0。
-干净音频重评结果为现成 `e5/s4=0.1250、e5/s8=0.0455、e10/s4=0.2386、e10/s8=0.2045`，
-日常新训练 `e5/s8=0.0568`；因此现成 e5/s8 是当前参考基线，新模型不自动提升。二者已经按
-相同五句、参考和韵律生成响度匹配 A/B，情感自然度仍须人工听审。来源授权为用户声明、机器未验证、
-仅本地研究；默认 manifest、远端 Edge、真实播放、打断和 Avatar 动作均未切换或验收。
+DL-05 语音路线已纠偏：日语角色音频不得承担中文陪伴语音的声学模型或 reference bank，既有候选
+统一标记为 `REJECTED_CROSS_LANGUAGE_VOICE`，不再调参、提升或部署。跨语言“能合成”和小样本 CER
+不能替代中文母语听感；活动配置已删除，离线风格管线会直接拒绝显式语言不一致的 profile。
+GPT-SoVITS 整数 PCM 归一化、整体峰值保护、Voice RPC 的 speed/energy/pitch 透传和通用声学近邻工具
+仍是有效修复。当前本机中文库存为昔涟 `1408` 条/约 `127.98` 分钟（舞台化，只作对照）和爱弥斯
+`334` 条/约 `23.64` 分钟（自动转写错误较多，不能直接训练）。下一步只允许原生中文 TTS 或同一中文
+说话人的授权、人工校正语料：先用固定中文日常/恋爱/安慰句做人耳模型筛选，身份稳定性不足时再采集或
+训练。Galgame 只提供中文表达风格目标，不进入跨语言声学链。默认 manifest、远端 Edge、真实播放、
+打断和 Avatar 动作仍未切换或验收。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，

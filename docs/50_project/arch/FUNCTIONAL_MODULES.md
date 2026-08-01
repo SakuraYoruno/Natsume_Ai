@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.65
+版本：v2.66
 核对日期：2026-08-01
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -13,12 +13,10 @@
 > 语音模块现分成两个清晰责任：Edge 父进程负责 `TtsConfig`、ExpressionPlan、RPC、请求与播放；
 > 独立 GPT-SoVITS Worker 只在模型 Python 中加载 project-bound 权重和 reference bank 并返回音频。
 > `voice_profile` 优先选择表达风格，`emotion_tag` 只作兼容回退，因而羞涩、调情、想念、安静亲密和
-> 温柔恋爱不会被压成同一个 `LOVING`，也不会反向创建 self-emotion。Voice RPC 与 Worker 现实际消费
-> speed/energy/pitch；离线 corpus 模块则加载项目风格配置，把 `2465` 条 Galgame 七海原声收紧成
-> `811` 条日常关系候选，再生成五类声学近邻。训练模块以硬链接复用源特征，并已完成 `S2=8/S1=5`。
-> renderer 现负责识别 GPT-SoVITS 的整数 PCM 数值域，在韵律处理前归一化，并以峰值缩放避免硬削波；
-> 旧模型排序已撤销并从头重跑；现成 e5/s8 的五句 micro CER 为 `0.0455`，日常训练 e5/s8
-> 为 `0.0568`。二者已进入干净、响度匹配的人工 A/B，默认模型与远端 Edge 均未改动。
+> 温柔恋爱不会反向创建 self-emotion。Voice RPC 与 Worker 现实际消费 speed/energy/pitch；renderer
+> 已识别整数 PCM 数值域并以峰值缩放避免硬削波。离线 corpus 模块保留通用声学近邻和硬链接复用，
+> 但新增同语言门槛：显式源语言与目标语言不同的 profile 不能进入生产候选。日语中文模型已拒绝，
+> 当前没有提升默认模型；下一轮仅允许原生中文模型或经授权、转写合格的中文语料。
 
 > RealtimeCompanion 模块现拥有自己的 catalog scene、provider/model/timeout lane 和紧凑 native prompt；
 > `chat_retrieval_helpers` 只给可选语义 embedding 350ms 默认等待预算，并把冷加载移出 ASGI event loop。

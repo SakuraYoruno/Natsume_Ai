@@ -96,36 +96,49 @@ def test_rank_style_candidates_rejects_unknown_seed() -> None:
         )
 
 
-def test_style_config_replaces_xilian_defaults_and_filters_stage_lines(tmp_path: Path) -> None:
+def test_style_config_replaces_defaults_and_filters_stage_lines(tmp_path: Path) -> None:
     config = tmp_path / "style.json"
     config.write_text(
-        '{"profile_id":"nanami","style_seeds":{"QUIET":["nanami_1"]},'
+        '{"profile_id":"native_zh","source_language":"zh","target_language":"zh",'
+        '"style_seeds":{"QUIET":["voice_1"]},'
         '"candidate_policy":{"max_exclamation_marks":1,"reject_truncated_lines":true,'
-        '"require_text_patterns":["今日|一緒"],"exclude_text_patterns":["戦闘|犯人"]}}',
+        '"require_text_patterns":["今天|一起"],"exclude_text_patterns":["战斗|犯人"]}}',
         encoding="utf-8",
     )
 
     loaded = _load_style_config(config)
     eligible = _eligible_clip_ids(
         [
-            SourceEntry("daily", "daily.wav", "nanami", "ja", "今日はゆっくりしようね"),
-            SourceEntry("battle", "battle.wav", "nanami", "ja", "戦闘を開始する！"),
-            SourceEntry("shout", "shout.wav", "nanami", "ja", "待って！！"),
-            SourceEntry("cut", "cut.wav", "nanami", "ja", "今日は――"),
-            SourceEntry("unrelated", "unrelated.wav", "nanami", "ja", "確認します"),
+            SourceEntry("daily", "daily.wav", "voice", "zh", "今天一起慢慢聊吧"),
+            SourceEntry("battle", "battle.wav", "voice", "zh", "开始战斗！"),
+            SourceEntry("shout", "shout.wav", "voice", "zh", "等等！！"),
+            SourceEntry("cut", "cut.wav", "voice", "zh", "今天——"),
+            SourceEntry("unrelated", "unrelated.wav", "voice", "zh", "收到"),
         ],
         loaded["candidate_policy"],
     )
 
-    assert loaded["style_seeds"] == {"QUIET": ["nanami_1"]}
+    assert loaded["style_seeds"] == {"QUIET": ["voice_1"]}
     assert eligible == {"daily"}
+
+
+def test_style_config_rejects_cross_language_voice_profile(tmp_path: Path) -> None:
+    config = tmp_path / "cross-language.json"
+    config.write_text(
+        '{"profile_id":"invalid","source_language":"ja","target_language":"zh",'
+        '"style_seeds":{"QUIET":["voice_1"]}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="cross-language voice profiles"):
+        _load_style_config(config)
 
 
 def test_rank_style_candidates_honours_eligible_pool() -> None:
     entries = [
-        SourceEntry("seed", "seed.wav", "nanami", "ja", "seed"),
-        SourceEntry("daily", "daily.wav", "nanami", "ja", "daily"),
-        SourceEntry("stage", "stage.wav", "nanami", "ja", "stage"),
+        SourceEntry("seed", "seed.wav", "voice", "zh", "seed"),
+        SourceEntry("daily", "daily.wav", "voice", "zh", "daily"),
+        SourceEntry("stage", "stage.wav", "voice", "zh", "stage"),
     ]
     embeddings = {
         "seed": np.asarray([1.0, 0.0]),

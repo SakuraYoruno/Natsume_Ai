@@ -521,6 +521,12 @@ def _load_style_config(path: Path | None) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict):
         raise ValueError("style config must be a JSON object")
+    source_language = str(payload.get("source_language") or "").strip().lower()
+    target_language = str(payload.get("target_language") or "").strip().lower()
+    if source_language and target_language and source_language != target_language:
+        raise ValueError(
+            "cross-language voice profiles are not eligible for the production voice candidate pipeline"
+        )
     raw_seeds = payload.get("style_seeds")
     if not isinstance(raw_seeds, dict) or not raw_seeds:
         raise ValueError("style config must define non-empty style_seeds")

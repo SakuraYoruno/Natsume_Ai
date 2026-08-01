@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.50
+版本：v3.51
 
 核对日期：2026-08-01
 
@@ -21,11 +21,10 @@ Host/Life/Relationship，也不导入应用合同；五种恋爱风格只改变�
 七海 self-affect。人工 reference 已在本机真实 CUDA 上完成五组 A/B，但尚未写入远端 Edge、播放设备或
 Avatar，所以这不是三模态 delivery receipt。
 
-当前语料替换流为：`2465 条 Galgame 七海日语 WAV → 日常/关系语境门槛 → 剧情/成人/喊叫排除 →
-811 条/1.1909h → emotion2vec+ utterance embedding + 同说话人均值中心化 + prosody → 五组人工 seed
-近邻 → HUMAN_REVIEW_REQUIRED queue → NTFS hardlink 训练子集 → S2=8 / S1=5 → 干净音频重评 →
-响度匹配人工 A/B`。台词只用于排除不适合日常陪伴的上下文，不参与声学相似度得分；训练已完成，
-干净 ASR 网格暂以现成 e5/s8 为参考基线，日常训练 e5/s8 进入人工听审。默认模型在听审前不切换。
+当前中文语音候选流改为：`原生中文模型或中文授权语料 → 中文日常/近讲门槛 → 声学近邻与人工听审 →
+固定中文句 A/B → 身份/发音/情感/延迟判定 → 默认提升提案`。源语言与目标语言显式不一致时，候选管线
+在读取配置阶段失败，不再进入训练或 reference bank。昔涟只保留舞台化中文对照；爱弥斯需人工校正
+转写后才可成为候选。Galgame 原声只用于人类描述目标风格，不能进入中文声学数据流。
 
 普通对话当前是轻量数据流：`Chat/Gateway text → Cortex context → RealtimeCompanion →
 AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、

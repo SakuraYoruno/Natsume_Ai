@@ -29,25 +29,19 @@
   embedding 与 pitch/energy/rate/pause 特征。检索先做同说话人 corpus-mean centering，再按
   `0.8 embedding + 0.2 prosody + 0.0 transcript keyword` 排名；五类各输出 8 条试听候选和连播文件，
   状态固定为 `HUMAN_REVIEW_REQUIRED`。模型分类或近邻排名都不能自动成为训练标签。
-- 用户否决昔涟的舞台化语料分布后，新增《RIDDLE JOKER》七海 profile：原始 `2465` 条/`3.288h`，
-  日常/关系候选 `811` 条/`1.1909h`，剧情、成人、截断和夸张喊叫片段不进入候选池。五类各 8 条
-  连播位于 `artifacts/voice_corpus/riddlejoker_nanami_daily_v1/`。
-- 现成七海 `GPT e5/e10 × SoVITS e4/e8` 的旧 20 段中文音频和全部 Whisper CER 已撤销：
-  GPT-SoVITS 返回 `int16 PCM`，旧后处理把其幅值当归一化浮点后硬截到 ±0.98，约半数采样进入
-  饱和平台；该批音频既不能用于试听，也不能用于 ASR 选权重。
-- 新日常子集的 `4-cnhubert / 5-wav32k / 7-sv_cn` 各 `811` 项均以硬链接复用；日语源无
-  `3-bert` 属正常结构。`S2=8 / S1=5` 训练已完成，产出 GPT e5 与 SoVITS e1～e8；完成训练
-  不代表候选已通过。
+- 日语角色模型合成中文的整条候选路线经人耳判定为 `REJECTED_CROSS_LANGUAGE_VOICE`：日语音系、
+  咬字和停顿不适合中文日常陪伴，小样本 Whisper CER 不具有提升资格。活动 profile 已删除，相关
+  训练权重和试听只保留在本机实验资产中，不作为默认模型、reference bank 或远端部署证据。
+- 离线候选管线新增同语言失败关闭测试；中文训练子集恢复要求 `3-bert` 特征。固定中文试听句和
+  `voice_style` 合同继续用于后续原生中文模型 A/B。
+- 旧 20 段音频和全部旧 Whisper CER 还因另一独立缺陷失效：GPT-SoVITS 返回 `int16 PCM`，旧后处理
+  把其幅值当归一化浮点后硬截到 ±0.98，约半数采样进入饱和平台；该批音频不能用于试听或选权重。
 - 常驻 Worker 与备用直连 adapter 都已在 pitch/gain 前归一化整数 PCM，并以整体峰值缩放替代
   硬削波。真实 Python 3.9 Worker + CUDA 重生成五句后，峰值 `0.3298～0.7970`、RMS
   `0.0373～0.0994`、`abs(sample) >= 0.98` 与相邻大跳变比例均为 `0`。该结果只证明信号缺陷
   已修复；旧检查点结果不得复用。
-- 修复后从头重跑相同五句。经 NFKC、繁转简和标点空白归一化，本地
-  faster-whisper-large-v3-turbo micro CER 为：现成 `e5/s4=0.1250、e5/s8=0.0455、
-  e10/s4=0.2386、e10/s8=0.2045`，日常训练 `e5/s8=0.0568`。因此新模型接近但未超过最佳
-  现成基线；结果只衡量小样本可懂度，不替代情感自然度听审。
-- 最佳现成 e5/s8 与日常训练 e5/s8 已用相同五句、reference、speed/energy/pitch 生成 A/B，
-  试听副本只做整段响度匹配，不改节奏或情感动态；当前仍为 `HUMAN_REVIEW_REQUIRED`。
+- 修复后曾从头重跑相同五句，但这些 CER 只证明 ASR 可识别，不再用于跨语言模型排序。后续原生
+  中文模型 A/B 必须以人耳的中文自然度、身份稳定性、情感区分和延迟共同裁决。
 - PCM、韵律、Worker/直连 adapter、Voice RPC/合同和文档 Gate 的本切片定向回归为
   `100 passed in 16.82s`；Python 3.9 Worker 与当前 Python 编译、JSON 和 `git diff --check` 同步通过。
 - 本切片语料检索、Voice RPC、TTS manager、fresh/persistent Worker、ExpressionPlan、发布工具及相邻
