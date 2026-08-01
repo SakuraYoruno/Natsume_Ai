@@ -85,10 +85,17 @@ def resolve_surface_reply_llm_runtime(
     catalog: Any,
     base_runtime: dict,
 ) -> dict[str, Any]:
-    del base_runtime
+    runtime_path = str(
+        dict(base_runtime or {}).get("runtime_path") or ""
+    ).strip().lower()
+    scene_type = (
+        "CHAT_SURFACE_REALTIME"
+        if runtime_path == "realtime_companion"
+        else "CHAT_SURFACE"
+    )
     route = _resolve_catalog_route(
         catalog=catalog,
-        scene_type="CHAT_SURFACE",
+        scene_type=scene_type,
         cognitive_tier="B",
         prompt_id="surface.main_chain.live.text",
     )

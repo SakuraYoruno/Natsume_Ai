@@ -101,12 +101,20 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
             "available": True,
         }),
     )
+    def _surface_runtime(*, catalog, base_runtime):  # noqa: ANN001, ARG001
+        runtime_path = str(base_runtime.get("runtime_path") or "")
+        return {
+            **base_runtime,
+            "model_id": (
+                "chat::realtime"
+                if runtime_path == "realtime_companion"
+                else "chat::default"
+            ),
+        }
+
     monkeypatch.setattr(
         "host_brain.app.route_catalog_runtime.resolve_surface_reply_llm_runtime",
-        lambda *, catalog, base_runtime: {
-            **base_runtime,
-            "model_id": "chat::default",
-        },
+        _surface_runtime,
     )
     monkeypatch.setattr(
         "host_brain.app.route_catalog_runtime.resolve_executive_router_llm_runtime",
@@ -128,6 +136,7 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
     assert status.startswith("OK")
     assert "base=gemini:gemini-2.5-flash-lite" in status
     assert "default=chat::default" in status
+    assert "realtime=chat::realtime" in status
     assert "router=router::ready" in status
     assert "subagent=subagent::ready" in status
 

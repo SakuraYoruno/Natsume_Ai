@@ -1188,6 +1188,18 @@ if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
 
+$configuredAuditDbPath = Get-EnvSetting `
+  -Values $envValues `
+  -Name "NATSUME_AUDIT_DB" `
+  -DefaultValue (Join-Path $RuntimeRoot "audit.sqlite3")
+if (-not [System.IO.Path]::IsPathRooted($configuredAuditDbPath)) {
+  $configuredAuditDbPath = Join-Path $repoRoot $configuredAuditDbPath
+}
+$auditDbPath = [System.IO.Path]::GetFullPath($configuredAuditDbPath)
+Ensure-Directory -Path ([System.IO.Path]::GetDirectoryName($auditDbPath))
+$env:NATSUME_AUDIT_DB = $auditDbPath
+$envValues["NATSUME_AUDIT_DB"] = $auditDbPath
+
 $configuredAgentWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceRoot)) {
   [string]$AgentWorkspaceRoot
 } else {
@@ -1530,7 +1542,13 @@ $mateengineBridgeResult = Start-MateEngineBridgeRuntime `
   -ShowWindow:$ShowConsoleWindow.IsPresent `
   -Breakaway:$BreakawayFromConsole
 
-$hostArgs = @("-m", "host_brain", "--host", $BindHost, "--port", ([string]$Port), "--log-level", "INFO")
+$hostArgs = @(
+  "-m", "host_brain",
+  "--host", $BindHost,
+  "--port", ([string]$Port),
+  "--db-path", $auditDbPath,
+  "--log-level", "INFO"
+)
 if ($StartupCheck.IsPresent) {
   $hostArgs += "--startup-check"
 }

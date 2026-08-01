@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.82
+版本：v5.83
 核对日期：2026-08-01
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -15,10 +15,17 @@
 > RealtimeCompanion/Surface，使用 canonical affective Life 与逐句流式表达，但不创建 HostCommand、
 > TaskGraph、Attempt、Lease、Graph Budget、Verification 或 Acceptance。三条任务路线及工具/外部 effect
 > 保持 Governed Runtime。原生流式 prompt 现为独立单回复合同；buffered 高歧义/修复回合仍是两候选择优。
-> 0149/0150 未删除，只服务任务图内部 frozen Chat。定向代码/HTTP 已通过；本机真实
-> `production.deepseek / deepseek-v4-pro` 普通陪伴回合首个可见分句 `12296ms`、完整三句
-> `12834ms`，前后 Task admission/execution 十类关键表零增长。切流已成立，但延迟仍未达到体验目标，
-> 后续优化应集中在模型与上下文预取，而不是把普通聊天重新送回 TaskGraph。
+> 0149/0150 未删除，只服务任务图内部 frozen Chat。native stream 现于实际 ModelAttempt 边界选择
+> `CHAT_SURFACE_REALTIME / B / realtime_companion`，拥有独立 provider/model/timeout 配置；常规最大输出
+> 192 Token。MAY_RECALL 的 semantic embedding 进入 worker thread，普通回合仅等待默认 350ms，超时后
+> 以 `SURFACE_OPTIONAL_SEMANTIC_WARMING` 降级。真实 `deepseek-v4-flash` prompt 1250、completion 172，
+> provider 首 Token `7766ms`、首个可见分句约 `9983ms`、总耗时约 `10681ms`；切流成立但实时门槛
+> 仍失败。MiniMax 实测为 402 余额不足。后续应继续优化/选择真实 provider，而不是恢复 TaskGraph 开销。
+
+> `2026-08-01` 最新启动事实：Host launcher 现在把 audit DB 明确绑定到隔离 RuntimeRoot 并传入 CLI，
+> runtime 与 Obs env loader 同时接受 Windows PowerShell UTF-8 BOM；Service Catalog 协调租约默认 60s，
+> 合法的运行配置摘要变化可把当前目标 stage 作为新 operation 重开，旧 operation 保留为 rollback ref。
+> 真实 Host、Obs、Nginx Monitor 已在隔离根启动。远端 Edge 被显式关闭，未探测、未验收。
 
 > `2026-08-01` 最新运行事实：远端 Edge 由用户明确保持关闭。`probe_edge_rpc_health()` 在该配置下不发网络请求，而是生成五条 canonical `NOT_TESTED / ACCEPTANCE_PENDING_EXTERNAL`；Host startup、health、readiness、node deployment 与 release identity 均保留该状态，本地真实错误仍优先成为失败。`ServiceHealthReporter` 将结果写入 `service_health_log`，独立 Obs 的 passive projection 从 SQLite 重建，不读取 Host heartbeat cache；旧 Monitor service id 经显式映射得到 ASR、TTS、VTS、Audio、Edge RPC 五项 `NOT_TESTED`。真实隔离栈重启结果为 Host `required_unavailable=0 / required_not_tested=5 / ready=false`，Obs read model `not_tested=5 / unknown=0`，Nginx Monitor 的无拦截浏览器检查显示五项“未验收”。本机 Unified Gateway health 与真实 DeepSeek provider 调用已运行，但签名 webhook 全往返、平台投递和远端物理链未运行，没有 `FullStackAcceptanceReceiptV1`。
 

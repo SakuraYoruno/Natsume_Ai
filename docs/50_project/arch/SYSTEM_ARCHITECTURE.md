@@ -3,7 +3,7 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.50
+版本：v2.51
 核对日期：2026-08-01
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
@@ -24,6 +24,11 @@ flowchart LR
 canonical Life authority。轻量 Chat 没有工具、Delegate、TaskGraph、Grant 或外部 effect 端口；路由若选择
 这些能力，必须进入 Governed Runtime。0149/0150 frozen Chat ledger 继续服务任务图内部 Chat 节点，不再是
 普通陪伴对话的默认开销。
+
+RealtimeCompanion 的低延迟决策落在 canonical ModelAttempt 边界：scene 为
+`CHAT_SURFACE_REALTIME`、tier 为 `B`、lane 为 `realtime_companion`，不会被 Surface Pro 模型或全局短超时
+意外覆盖。常规输出上限 192 Token，可选 semantic cold-load 默认最多阻塞 350ms。真实 provider 调用仍约
+10 秒才出现首句，说明当前主要剩余瓶颈是模型端首 Token，而不是 TaskGraph 或本地 embedding 冷启动。
 
 Host/Gateway 的恢复边界采用“证据先于重放”。Gateway→Host attempt 进入结果未知后，0151 reconciliation
 ledger 只接受与该 inbox/attempt/scope/body 精确绑定的 Secure Ingress no-effect denial；人工备注不能直接

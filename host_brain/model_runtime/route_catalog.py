@@ -178,11 +178,23 @@ class ServerRouteCatalog:
             and _bool_env("HOST_CHAT_LOCAL_LLM_ENABLED")
             and not _bool_env("HOST_CHAT_FORCE_CLOUD")
         )
-        provider = (
-            _first_env("HOST_CHAT_LOCAL_LLM_PROVIDER", "HOST_CHAT_HOST_14B_PROVIDER")
-            if local_chat
-            else _first_env(f"HOST_MODEL_ROUTE_SCENE_{scene_token}_PROVIDER", "HOST_LLM_PROVIDER")
-        ).lower() or ("openai" if local_chat else "gemini")
+        if local_chat:
+            provider = _first_env(
+                "HOST_CHAT_LOCAL_LLM_PROVIDER",
+                "HOST_CHAT_HOST_14B_PROVIDER",
+            )
+        elif scene == "CHAT_SURFACE_REALTIME":
+            provider = _first_env(
+                f"HOST_MODEL_ROUTE_SCENE_{scene_token}_PROVIDER",
+                "HOST_REALTIME_COMPANION_PROVIDER",
+                "HOST_LLM_PROVIDER",
+            )
+        else:
+            provider = _first_env(
+                f"HOST_MODEL_ROUTE_SCENE_{scene_token}_PROVIDER",
+                "HOST_LLM_PROVIDER",
+            )
+        provider = provider.lower() or ("openai" if local_chat else "gemini")
         if provider not in _SUPPORTED_PROVIDERS:
             raise ValueError(f"unsupported route catalog provider: {provider}")
 
@@ -207,7 +219,21 @@ class ServerRouteCatalog:
             default_timeout = 15_000
             lane = "default"
             route_target = "cloud"
-            if scene.startswith("CHAT_SURFACE"):
+            if scene == "CHAT_SURFACE_REALTIME":
+                role_model_names = (
+                    "HOST_REALTIME_COMPANION_MODEL_ID",
+                    "HOST_CHAT_AGENT_MODEL_ID",
+                )
+                provider_role_model_name = (
+                    f"HOST_{_env_token(provider)}_REALTIME_COMPANION_MODEL_ID"
+                )
+                role_timeout_names = (
+                    "HOST_REALTIME_COMPANION_TIMEOUT_MS",
+                    "HOST_CHAT_AGENT_TIMEOUT_MS",
+                )
+                default_timeout = 15_000
+                lane = "realtime_companion"
+            elif scene.startswith("CHAT_SURFACE"):
                 role_model_names = ("HOST_SURFACE_REPLY_MODEL_ID", "HOST_CHAT_AGENT_MODEL_ID")
                 provider_role_model_name = (
                     f"HOST_{_env_token(provider)}_SURFACE_REPLY_MODEL_ID"
@@ -239,6 +265,7 @@ class ServerRouteCatalog:
             tier_default = _TIER_MODEL_DEFAULTS.get(provider, {}).get(tier, "")
             tier_driven_scene = (
                 scene in {"NATSUME_AGENT", "CHAT", "TRIBE_INTERNAL"}
+                or scene == "CHAT_SURFACE_REALTIME"
                 or scene.startswith("GRAPH_")
             )
             provider_fallback = (
@@ -268,10 +295,20 @@ class ServerRouteCatalog:
                 raise ValueError(
                     f"no provider-compatible model configured for provider={provider} scene={scene}"
                 )
-            timeout_ms = _timeout_env(
+            timeout_env_names = (
                 f"HOST_MODEL_ROUTE_SCENE_{scene_token}_TIMEOUT_MS",
                 *role_timeout_names,
-                "HOST_LLM_TIMEOUT_MS",
+            )
+            # Ordinary companion chat is an explicit latency lane.  A global
+            # provider timeout is commonly tuned for router/tool calls and may
+            # be shorter than one real streamed answer; inheriting it here
+            # silently turns a healthy provider response into ``NO_REPLY``.
+            # The lane therefore owns its deadline, while every other route
+            # retains the legacy global fallback for compatibility.
+            if scene != "CHAT_SURFACE_REALTIME":
+                timeout_env_names = (*timeout_env_names, "HOST_LLM_TIMEOUT_MS")
+            timeout_ms = _timeout_env(
+                *timeout_env_names,
                 default=default_timeout,
             )
 

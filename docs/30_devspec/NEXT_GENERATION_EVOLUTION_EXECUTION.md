@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.5
+版本：v5.6
 日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -23,8 +23,12 @@ Gateway inbox 若在外呼 Host 后失去结果，只能依据 exact Secure Ingr
 进入安全重试；`0151_gateway_inbox_reconciliation.sql` 保存不可变 reconciliation evidence，
 operator 备注不能单独授权 replay。Host 的公开 runtime snapshot 与运行密钥也必须分文件装载：
 `HOST_RUNTIME_SECRET_ENV_FILE` 只能由 launcher 在公开 env 读取前选定，且不得与 `.env` 或 runtime snapshot
-同路径。真实 DeepSeek 已执行一次普通陪伴回合，但 `deepseek-v4-pro` 首句 `12296ms` 不达标；下一代码切片
-应拆分 RealtimeCompanion 专用低延迟模型角色，而不是把日常 Chat 重新送回任务审计链。
+同路径。RealtimeCompanion 现拥有独立 provider/model/timeout lane，原生 prompt 输入从 1791 降至
+1250 Token，可选语义 embedding 冷加载最多占用 350ms 的普通回合预算。真实
+`deepseek-v4-flash` 首 Token `7766ms`、首个可见分句约 `9983ms`、整轮约 `10681ms`，仍未达到
+实时门槛，瓶颈主要位于外部 provider；MiniMax 实测返回 402 余额不足。该结果只能证明路径和真实调用，
+不能升级为体验 PASS。Host/Obs/Nginx 的隔离启动已修正显式 DB 绑定、Windows BOM env 与 Catalog
+配置重开边界；远端 Edge 继续保持关闭。下一步先完成本地语音数据/训练/试听，再由用户授权连接 Edge。
 
 ## 1. 产品结果
 

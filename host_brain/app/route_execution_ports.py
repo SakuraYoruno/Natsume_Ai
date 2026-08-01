@@ -145,11 +145,19 @@ def build_realtime_companion_execution_ports(
     def surface_reply_sse_generator(value: Any) -> AsyncIterator[str]:
         return _surface_reply_sse_generator(value, ports=surface_runtime_ports)
 
+    def resolve_realtime_surface_reply_llm_runtime(
+        *,
+        base_runtime: dict,
+    ) -> dict[str, Any]:
+        runtime = dict(base_runtime or {})
+        runtime["runtime_path"] = "realtime_companion"
+        return surface_runtime_ports.resolve_surface_reply_llm_runtime(
+            base_runtime=runtime,
+        )
+
     return RealtimeCompanionExecutionPorts(
         surface_reply_input_factory=SurfaceReplyInput,
-        resolve_surface_reply_llm_runtime=(
-            surface_runtime_ports.resolve_surface_reply_llm_runtime
-        ),
+        resolve_surface_reply_llm_runtime=resolve_realtime_surface_reply_llm_runtime,
         surface_reply_sse_generator=surface_reply_sse_generator,
     )
 

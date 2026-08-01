@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import ast
 from pathlib import Path
 from types import SimpleNamespace
+import time
 
 import pytest
 
@@ -18,6 +20,90 @@ _LIFE_SNAPSHOT_READER = SimpleNamespace(
     }
 )
 _LIFE_MEMORY_STORE = SimpleNamespace()
+
+
+@pytest.mark.asyncio
+async def test_semantic_embedding_load_does_not_block_conversation_event_loop(
+    monkeypatch,
+) -> None:
+    class _RecallService:
+        def recall(self, **_kwargs):  # noqa: ANN003
+            return {
+                "output": {
+                    "status": "OK",
+                    "stage": "recall_fusion",
+                    "candidate_count": 0,
+                    "routes": [],
+                    "candidates": [],
+                }
+            }
+
+    def _slow_embed(_query):  # noqa: ANN001
+        time.sleep(0.2)
+        return [0.2] * 16, "slow-test-embedding"
+
+    monkeypatch.setattr(
+        helpers,
+        "_build_surface_memory_recall_service",
+        lambda: _RecallService(),
+    )
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", _slow_embed)
+
+    started = time.perf_counter()
+    task = asyncio.create_task(
+        helpers._run_retrieval(
+            life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+            life_memory_store=_LIFE_MEMORY_STORE,
+            request_id="req-nonblocking-embedding",
+            message="下一步怎么处理这个文本质量问题",
+            person_id="person-1",
+            session_id="sess-1",
+            ts_ms=123,
+            emotion_tag="NEUTRAL",
+            render_target_lang="zh",
+            bond_summary={"relationship_distance": "familiar"},
+            intent_draft={"route": "technical_help", "intent_id": "intent-1"},
+        )
+    )
+    await asyncio.sleep(0.02)
+    assert time.perf_counter() - started < 0.12
+    summary, evidence_items = await task
+
+    assert evidence_items == []
+    assert summary["embedding_model_id"] == "slow-test-embedding"
+
+
+@pytest.mark.asyncio
+async def test_optional_semantic_embedding_cold_load_does_not_delay_turn(
+    monkeypatch,
+) -> None:
+    def _slow_embed(_query):  # noqa: ANN001
+        time.sleep(0.2)
+        return [0.2] * 16, "slow-test-embedding"
+
+    monkeypatch.setenv("HOST_SURFACE_OPTIONAL_SEMANTIC_BUDGET_MS", "25")
+    monkeypatch.setattr(helpers, "_embed_surface_memory_query", _slow_embed)
+
+    started = time.perf_counter()
+    summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
+        request_id="req-optional-cold-embedding",
+        message="今天工作有点累，想和你说说话。",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        emotion_tag="TIRED",
+        render_target_lang="zh",
+        bond_summary={"relationship_distance": "familiar"},
+        intent_draft={"route": "tired", "intent_id": "intent-1"},
+    )
+
+    assert time.perf_counter() - started < 0.12
+    assert evidence_items == []
+    assert summary["status"] == "DEGRADED"
+    assert summary["reason_code"] == "SURFACE_OPTIONAL_SEMANTIC_WARMING"
+    assert summary["query_plan"]["recall_policy"] == "MAY_RECALL"
 
 
 @pytest.mark.asyncio

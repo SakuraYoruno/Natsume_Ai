@@ -167,9 +167,11 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
         model_attempt_service=lambda: StreamingModel(),
     )
 
+    agent_input = _agent_input()
+    agent_input.trace_stage_meta = {"runtime_path": "realtime_companion"}
     events = [
         _parse_sse(raw)
-        async for raw in surface_main_chain_sse_generator(_agent_input(), ports=ports)
+        async for raw in surface_main_chain_sse_generator(agent_input, ports=ports)
     ]
 
     sentences = [event for event in events if event.get("phase") == "SENTENCE"]
@@ -178,10 +180,13 @@ async def test_native_stream_stages_plan_and_each_sentence_before_visibility(
     command_types = [str(item["command_type"]) for item in submitted]
 
     assert requests
+    assert requests[0].scene_type == "CHAT_SURFACE_REALTIME"
+    assert requests[0].cognitive_tier == "B"
+    assert requests[0].metadata["route_lane"] == "realtime_companion"
     messages = requests[0].prompt.variables["messages"]
     assert [message["role"] for message in messages] == ["system", "user"]
     rendered_prompt = "\n".join(message["content"] for message in messages)
-    assert "只输出一条可直接发送的自然中文回复" in rendered_prompt
+    assert "只输出一条可发送的自然中文私聊" in rendered_prompt
     assert '"candidates"' not in rendered_prompt
     assert "输出必须是 JSON" not in rendered_prompt
     assert "用户情绪只是观察，不是七海自己的情绪" in rendered_prompt

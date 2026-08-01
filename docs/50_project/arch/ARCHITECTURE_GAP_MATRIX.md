@@ -3,10 +3,17 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.51
+版本：v3.52
 核对日期：2026-08-01
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+> **实时陪伴性能修订：** 普通 native stream 已在实际 ModelAttempt 边界进入独立
+> `CHAT_SURFACE_REALTIME / B / realtime_companion` lane，常规输出上限 192 Token；MAY_RECALL 的本地
+> embedding 冷加载最多阻塞 350ms。真实 `deepseek-v4-flash` 输入已从 1791 降到 1250 Token，首 Token
+> `7766ms`、首可见分句约 `9983ms`、总耗时约 `10681ms`，仍未达到实时门槛。MiniMax 因余额不足
+> 返回 402，不能作为 fallback 证据。代码路径已收紧，但外部 provider 延迟、语音训练、远端 Edge 与真人
+> 体验仍是明确缺口。
 
 > **普通 Chat 轻量化修订：** 当前 `chat` 与 Gateway 文本已经从默认 Governed Runtime 拆出，
 > 通过 app-local `RealtimeCompanion → affective Surface stream` 运行，不创建 TaskGraph、Attempt、Lease、

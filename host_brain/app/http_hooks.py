@@ -569,7 +569,7 @@ def runtime_lifespan(
             degraded_modules = [k for k, v in new_module_statuses.items() if _startup_status_is_degraded(v)]
             if degraded_modules:
                 logger.warning(
-                    "⚠️ 以下新模块启动时处于降级状态，请检查配置: %s",
+                    "以下新模块启动时处于降级状态，请检查配置: %s",
                     degraded_modules,
                     extra={"degraded_modules": degraded_modules},
                 )

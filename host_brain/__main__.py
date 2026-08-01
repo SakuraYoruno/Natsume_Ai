@@ -297,7 +297,7 @@ def main() -> int:
         logger.info("Server shutdown requested by user")
         return 0
     except Exception as exc:
-        logger.error("Server startup failed", extra={"error": str(exc)})
+        logger.error("Server startup failed: %s", exc)
         return 1
     finally:
         if runtime is not None:

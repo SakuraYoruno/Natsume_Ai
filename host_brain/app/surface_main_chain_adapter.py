@@ -90,6 +90,27 @@ def _surface_model_deadline_ms(governed_model_budget: Any | None) -> int:
     return min(int(governed_model_budget.deadline_ms), configured)
 
 
+def _surface_model_request_profile(
+    trace_stage_meta: Mapping[str, Any] | None,
+    *,
+    realtime_eligible: bool,
+) -> tuple[str, str, str]:
+    """Select the server-owned model lane at the actual ModelAttempt boundary.
+
+    Route projection alone is insufficient because the Surface main chain
+    creates the canonical ModelAttemptRequest itself.  Only the ordinary
+    native sentence stream may use the low-latency companion lane; buffered
+    repair/ambiguity and governed nodes retain the quality-first Surface lane.
+    """
+
+    runtime_path = str(
+        _safe_mapping(trace_stage_meta).get("runtime_path") or ""
+    ).strip().lower()
+    if realtime_eligible and runtime_path == "realtime_companion":
+        return "CHAT_SURFACE_REALTIME", "B", "realtime_companion"
+    return "CHAT_SURFACE", "A", "surface_reply"
+
+
 def _final_stream_usage_is_attested(result: Any) -> bool:
     """Return whether a final stream result carries all canonical budget facts.
 
@@ -462,10 +483,18 @@ async def _native_affective_sentence_stream(
     narrative_parts: list[str] = []
     sent_sentence_count = 0
     sentence_receipts: list[dict[str, Any]] = []
+    model_scene_type, model_cognitive_tier, model_route_lane = (
+        _surface_model_request_profile(trace, realtime_eligible=True)
+    )
+    trace["surface_model_route"] = {
+        "scene_type": model_scene_type,
+        "cognitive_tier": model_cognitive_tier,
+        "route_lane": model_route_lane,
+    }
     model_request = ModelAttemptRequest(
         request_id=request_id or "surface-main-chain",
-        scene_type="CHAT_SURFACE",
-        cognitive_tier="A",
+        scene_type=model_scene_type,
+        cognitive_tier=model_cognitive_tier,
         prompt=PromptRef(SURFACE_MAIN_TEXT_PROMPT_ID, {"messages": messages}),
         deadline_ms=_surface_model_deadline_ms(governed_model_budget),
         foreground=True,
@@ -473,6 +502,8 @@ async def _native_affective_sentence_stream(
         metadata={
             "chain": "surface_main_native_sentence_stream",
             "affective_turn_plan_id": plan_id,
+            "runtime_path": str(trace.get("runtime_path") or ""),
+            "route_lane": model_route_lane,
             **(
                 # The durable attempt journal must be tied to the immutable
                 # TaskNode that owns this stream.  The buffered Surface path

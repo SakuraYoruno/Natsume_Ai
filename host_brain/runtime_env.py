@@ -40,7 +40,10 @@ def load_env_file(
                 f"HOST_RUNTIME_ENV_FILE_NOT_FOUND: {env_path}"
             )
         return
-    with env_path.open(encoding="utf-8") as handle:
+    # Windows PowerShell 5.1 writes ``-Encoding UTF8`` with a BOM.  ``utf-8``
+    # would retain that marker in the first variable name and silently ignore
+    # the setting; ``utf-8-sig`` accepts both BOM and BOM-less snapshots.
+    with env_path.open(encoding="utf-8-sig") as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line or line.startswith("#") or "=" not in line:

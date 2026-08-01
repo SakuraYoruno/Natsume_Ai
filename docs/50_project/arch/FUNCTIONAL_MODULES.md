@@ -3,12 +3,17 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.58
+版本：v2.59
 核对日期：2026-08-01
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
+
+> RealtimeCompanion 模块现拥有自己的 catalog scene、provider/model/timeout lane 和紧凑 native prompt；
+> `chat_retrieval_helpers` 只给可选语义 embedding 350ms 默认等待预算，并把冷加载移出 ASGI event loop。
+> Service Catalog 模块同时修复隔离 DB、Windows BOM env 和配置摘要重开问题。真实 DeepSeek 路径已运行，
+> 但约 10 秒首可见延迟仍失败；MiniMax 余额不足、语音模型和远端 Edge 均未验收。
 
 > DL-07 状态投影切片把远端 Edge 的“明确未验收”从故障和未知中分离出来。Host startup/health/readiness 负责形成 canonical `NOT_TESTED`，`ServiceHealthReporter` 负责 durable journal，独立 Obs 只读重建，Monitor 只负责显示。任一层都不能把未启动服务推断成 `UP`，Monitor/GET 也不能触发探针；Guardian 只处理真实故障，不把外部验收状态写成七海自身的退化。
 

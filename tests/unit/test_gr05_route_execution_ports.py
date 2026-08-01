@@ -211,7 +211,19 @@ async def test_realtime_companion_port_streams_without_task_authority(
     monkeypatch: pytest.MonkeyPatch,
     surface_runtime_ports_factory,
 ) -> None:  # noqa: ANN001
-    surface_ports = surface_runtime_ports_factory()
+    resolved_bases: list[dict[str, object]] = []
+
+    def resolve_surface_runtime(*, base_runtime):  # noqa: ANN001
+        resolved_bases.append(dict(base_runtime or {}))
+        return {
+            **dict(base_runtime or {}),
+            "agent_role": "surface_reply",
+            "route_lane": "realtime_companion",
+        }
+
+    surface_ports = surface_runtime_ports_factory(
+        resolve_surface_reply_llm_runtime=resolve_surface_runtime,
+    )
     captured: list[object] = []
 
     async def fake_surface_reply(value, *, ports):  # noqa: ANN001
@@ -257,7 +269,7 @@ async def test_realtime_companion_port_streams_without_task_authority(
             retrieval_evidence_items=[],
             retrieval_summary={"status": "SKIPPED"},
             render_target_lang="zh",
-            llm_runtime={"agent_role": "surface_reply"},
+            llm_runtime={"provider_name": "deepseek", "model_id": "base-chat"},
             ts_ms=123,
             intent_draft={"route": "chat", "target_id": "surface_reply"},
             trace_stage_meta={"runtime_path": "realtime_companion"},
@@ -270,6 +282,14 @@ async def test_realtime_companion_port_streams_without_task_authority(
     assert chat_input.thread_id == "thread-realtime"
     assert chat_input.defer_effects_to_task_runtime is False
     assert chat_input.governed_delivery_authority is None
+    assert resolved_bases == [
+        {
+            "provider_name": "deepseek",
+            "model_id": "base-chat",
+            "runtime_path": "realtime_companion",
+        }
+    ]
+    assert chat_input.llm_runtime["route_lane"] == "realtime_companion"
 
 
 @pytest.mark.asyncio

@@ -640,6 +640,10 @@ def warmup_chat_llm_runtime_profiles(
             catalog=catalog,
             base_runtime=base_runtime,
         )
+        realtime_runtime = resolve_surface_reply_llm_runtime(
+            catalog=catalog,
+            base_runtime={**base_runtime, "runtime_path": "realtime_companion"},
+        )
         router_runtime = resolve_executive_router_llm_runtime(
             catalog=catalog,
             base_runtime=base_runtime,
@@ -652,6 +656,7 @@ def warmup_chat_llm_runtime_profiles(
         warmed_parts = [
             f"base={str(base_runtime.get('provider_name') or 'unknown')}:{str(base_runtime.get('model_id') or 'unknown')}",
             f"default={str(default_runtime.get('model_id') or 'unknown')}",
+            f"realtime={str(realtime_runtime.get('model_id') or 'unknown')}",
             f"router={str(router_runtime.get('model_id') or 'unknown')}",
             f"subagent={str(subagent_runtime.get('model_id') or 'unknown')}",
         ]

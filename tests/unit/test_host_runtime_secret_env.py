@@ -42,6 +42,23 @@ def test_detached_host_loads_separate_secret_file_last(
     assert os.environ[HOST_RUNTIME_SECRET_ENV_FILE] == str(secret.resolve())
 
 
+def test_windows_utf8_bom_does_not_corrupt_first_runtime_setting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    public = tmp_path / "host.runtime.env"
+    public.write_text(
+        "EDGE_AVATAR_BACKEND=vts\nHOST_APP_PORT=28080\n",
+        encoding="utf-8-sig",
+    )
+    monkeypatch.setenv(HOST_RUNTIME_ENV_FILE, str(public))
+
+    load_host_runtime_environment(repo_root=tmp_path)
+
+    assert os.environ["EDGE_AVATAR_BACKEND"] == "vts"
+    assert "\ufeffEDGE_AVATAR_BACKEND" not in os.environ
+
+
 def test_public_runtime_file_cannot_redirect_secret_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

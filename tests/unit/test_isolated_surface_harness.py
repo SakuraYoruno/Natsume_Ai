@@ -11,6 +11,7 @@ from host_brain.persona.isolated_surface_harness import (
     ReplyControlPacket,
     build_isolated_surface_input,
     build_isolated_surface_messages,
+    build_native_stream_surface_messages,
     build_minimal_repair_messages,
     build_surface_original_quote_query,
     find_forbidden_input_paths,
@@ -87,6 +88,28 @@ def test_reply_control_packet_defaults_are_minimal() -> None:
     assert packet.task_mode == "daily_chat"
     assert packet.must_include == []
     assert packet.facts == []
+
+
+def test_native_realtime_prompt_is_compact_and_keeps_persona_boundary() -> None:
+    request = _request(
+        soul_md=(
+            "你是七海。说话反应快、会轻轻顶嘴，关键时可靠。\n"
+            "【关系授权边界】称呼、亲密尺度和主动权限只读当前关系状态。"
+        ),
+        user_message="今天工作有点累，想和你说说话。",
+    )
+
+    messages = build_native_stream_surface_messages(request)
+    rendered = "\n".join(item["content"] for item in messages)
+
+    assert len(messages) == 2
+    assert len(rendered) < 1_600
+    assert "【稳定人格投影】" in rendered
+    assert "【关系授权边界】" in rendered
+    assert "用户情绪只是观察，不是七海自己的情绪" in rendered
+    assert "关系尺度：" in rendered
+    assert '"affection_visibility"' not in rendered
+    assert "## 必须自然包含\n- 无" not in rendered
 
 
 def test_forbidden_raw_context_keys_are_rejected() -> None:

@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.43
+版本：v3.44
 
 核对日期：2026-08-01
 
@@ -17,6 +17,12 @@
 AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、
 Attempt、Lease、Graph Budget、Verification 或 Acceptance。只有 `skill/delegate/plan`、工具和外部动作继续进入
 下文的 durable execution flow；任务图内部的 frozen Chat 仍可使用 0149/0150 receipt。
+
+普通回合在 `Surface ModelAttempt` 处选择独立的实时 lane，而不是只在上游挂一个路由标签：
+`AffectiveTurnPlan → compact native prompt → CHAT_SURFACE_REALTIME/B → typed delta/final`。可选语义召回若
+遇到本地 embedding 冷加载，会在线程中继续预热，本轮最多等待 350ms 后带明确 degradation 继续；需要
+事实保证的 MUST_RECALL 不走该捷径。provider 的 typed final 仍携带 usage/transport identity，但不会为普通
+对话创建任务审计链。真实 DeepSeek 证明此流可运行，延迟门槛尚未通过。
 
 DL-07 新增的 Gateway-only 数据流不经过远端 Edge：`start_gateway_side.ps1 →
 run_gateway_side.py → SQLiteMigrationRunner / SQLiteGatewayTransportStore →

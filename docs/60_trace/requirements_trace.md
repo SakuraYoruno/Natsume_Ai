@@ -5,11 +5,19 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.20
+版本：v5.21
 核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
+
+TRACE-DL04-REALTIME-LANE（普通陪伴低延迟链）：
+`route_catalog_runtime.py`、`route_execution_ports.py` 与 `surface_main_chain_adapter.py` 把普通 native stream
+在真实 ModelAttempt 边界绑定到 `CHAT_SURFACE_REALTIME / B / realtime_companion`；buffered 修复和 governed
+Chat 不共享该捷径。`chat_retrieval_helpers.py` 将 MAY_RECALL embedding 冷加载移入线程并限制在线等待，
+`prompt_construction.py` 保留 Soul/关系/非操控边界但删除重复政策与冗长 JSON。真实
+`deepseek-v4-flash` usage/transport 可验证，首可见约 `9983ms`，门槛失败；MiniMax 402 余额不足。
+因此需求状态为 `PRODUCTION_PATH_WIRED / REAL_PROVIDER_LATENCY_FAIL / VOICE_AND_EDGE_PENDING`。
 
 TRACE-DL07-GATEWAY-ENTRY（本机 Gateway 与远端 Edge 分离）：
 `scripts/runtime/run_gateway_side.py` 是允许同时依赖 Edge runtime 与 Host persistence 的外层

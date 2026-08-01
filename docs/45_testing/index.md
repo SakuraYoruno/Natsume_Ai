@@ -3,9 +3,25 @@
 
 # 测试与验收目录
 
-版本：v2.70
+版本：v2.71
 维护日期：2026-08-01
 状态：当前证据
+
+## DL-04 实时陪伴与隔离启动复测
+
+- `CHAT_SURFACE_REALTIME / B / realtime_companion` 是普通 native stream 在真实 ModelAttempt 边界使用的
+  独立 lane；buffered 修复与任务图 Chat 继续使用质量优先 lane。provider、model 和 timeout 均可单独配置。
+- MAY_RECALL 的本地 embedding 冷加载移出 ASGI event loop，并以默认 350ms 预算 fail-soft；MUST_RECALL
+  仍等待完整结果。Prompt 合同删去重复政策与冗长 JSON，输出上限为 192 Token。
+- 真实 `deepseek-v4-flash`：prompt 1250、completion 172、provider 首 Token 7766ms、首可见分句约
+  9983ms、总耗时约 10681ms，transport digest 与 usage 均存在；延迟门槛失败。MiniMax 请求在约 5.2s
+  后返回 402 余额不足，记为外部账户不可用，不是代码 PASS 或可用 fallback。
+- 隔离启动修复覆盖：launcher 将 `NATSUME_AUDIT_DB` 固定到 RuntimeRoot 并显式传入 CLI；runtime/Obs
+  env 接受 Windows UTF-8 BOM；Catalog 租约默认 60s，合法配置摘要变化重新激活目标 stage。真实
+  Host、Obs、Nginx 已重启并通过 health，warmup 显示 realtime lane 为 `deepseek-v4-flash`；三个既有 Docker
+  服务经真实探针为 ready。受影响回归 `317 passed in 70.73s`。既有 `natsume-ext_default` network 的旧
+  Compose label 与当前 network key 不一致，故本次复用健康容器而未删除/重建网络或 volume；这不等于
+  Docker 重建、远端 Edge、语音/Avatar 或 DL-07 全栈通过。
 
 ## DL-07 Gateway 恢复与 Host 密钥边界
 

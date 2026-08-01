@@ -548,6 +548,30 @@ def test_fresh_host_rollout_reaches_default_enforce_and_restart_reactivates_head
     finally:
         restarted.close()
 
+    changed_env = dict(env)
+    changed_env["HOST_OBS_APP_PORT"] = str(_free_port())
+    changed = start_host_through_service_catalog(
+        db_path=str(db_path),
+        host="127.0.0.1",
+        port=port,
+        log_level="ERROR",
+        access_log=False,
+        env=changed_env,
+        operation_id="host-full-rollout-config-change",
+        app=app,
+    )
+    try:
+        assert [item.stage for item in changed.stage_outcomes] == [CatalogMode.ENFORCE]
+        changed_head = changed.store.rollout_head(
+            runtime_scope_id=runtime_scope,
+            candidate_owner_id="host.main",
+        )
+        assert changed_head is not None
+        assert changed_head["catalog_snapshot_digest"] != head["catalog_snapshot_digest"]
+        assert changed_head["activation_operation_id"] == changed.outcome.operation_id
+    finally:
+        changed.close()
+
 
 def test_target_boundary_stops_at_preflight_then_resumes_without_stage_skip(
     tmp_path: Path,
