@@ -8,10 +8,14 @@
   "usage_boundary": "LOCAL_RESEARCH_ONLY",
   "authorization_status": "USER_ASSERTED_NOT_MACHINE_VERIFIED",
   "candidate_weights": {
-    "t2s": "GPT_weights_v2ProPlus/RiddleJoker_Nanami_ja_raw-e5.ckpt",
-    "vits": "SoVITS_weights_v2ProPlus/RiddleJoker_Nanami_ja_raw_e8_s9864.pth",
-    "selection": "LOCAL_ASR_GRID_BEST",
-    "five_case_micro_cer": 0.2955
+    "status": "UNSELECTED",
+    "selection": "PENDING_CLEAN_AUDIO_RERUN",
+    "invalidated_previous_evidence": "PCM_INT16_WAS_CLIPPED_BEFORE_ASR_AND_LISTENING"
+  },
+  "trained_candidate": {
+    "t2s": "GPT_weights_v2ProPlus/RiddleJoker_Nanami_ja_daily_v1-e5.ckpt",
+    "vits": "SoVITS_weights_v2ProPlus/RiddleJoker_Nanami_ja_daily_v1_e8_s3248.pth",
+    "status": "TRAINED_HUMAN_REVIEW_REQUIRED"
   },
   "style_seeds": {
     "ROMANTIC_TENDER": [

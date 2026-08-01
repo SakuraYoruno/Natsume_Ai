@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.75
+版本：v2.76
 维护日期：2026-08-01
 状态：当前证据
 
@@ -32,11 +32,18 @@
 - 用户否决昔涟的舞台化语料分布后，新增《RIDDLE JOKER》七海 profile：原始 `2465` 条/`3.288h`，
   日常/关系候选 `811` 条/`1.1909h`，剧情、成人、截断和夸张喊叫片段不进入候选池。五类各 8 条
   连播位于 `artifacts/voice_corpus/riddlejoker_nanami_daily_v1/`。
-- 现成七海 `GPT e5/e10 × SoVITS e4/e8` 四组检查点已生成 20 段同文案中文音频；本地
-  faster-whisper-large-v3-turbo 结果分别为 micro CER `0.3636 / 0.2955 / 0.4659 / 0.3409`，
-  因而选择 `GPT e5 + SoVITS e8` 为回退基线。它不证明主观自然度，仍需人耳试听。
+- 现成七海 `GPT e5/e10 × SoVITS e4/e8` 的旧 20 段中文音频和全部 Whisper CER 已撤销：
+  GPT-SoVITS 返回 `int16 PCM`，旧后处理把其幅值当归一化浮点后硬截到 ±0.98，约半数采样进入
+  饱和平台；该批音频既不能用于试听，也不能用于 ASR 选权重。
 - 新日常子集的 `4-cnhubert / 5-wav32k / 7-sv_cn` 各 `811` 项均以硬链接复用；日语源无
-  `3-bert` 属正常结构。`S2=8 / S1=5` 训练已启动，训练完成前不得写成新模型通过。
+  `3-bert` 属正常结构。`S2=8 / S1=5` 训练已完成，产出 GPT e5 与 SoVITS e1～e8；完成训练
+  不代表候选已通过。
+- 常驻 Worker 与备用直连 adapter 都已在 pitch/gain 前归一化整数 PCM，并以整体峰值缩放替代
+  硬削波。真实 Python 3.9 Worker + CUDA 重生成五句后，峰值 `0.3298～0.7970`、RMS
+  `0.0373～0.0994`、`abs(sample) >= 0.98` 与相邻大跳变比例均为 `0`。该结果只证明信号缺陷
+  已修复；检查点网格、新训练模型 A/B、Whisper 与人工听审必须从头重跑。
+- PCM、韵律、Worker/直连 adapter、Voice RPC/合同和文档 Gate 的本切片定向回归为
+  `100 passed in 16.82s`；Python 3.9 Worker 与当前 Python 编译、JSON 和 `git diff --check` 同步通过。
 - 本切片语料检索、Voice RPC、TTS manager、fresh/persistent Worker、ExpressionPlan、发布工具及相邻
   voice pipeline 的定向回归为 `172 passed in 7.88s`；编译、JSON、文档 authority/freshness/audience 与
   `git diff --check` 通过。该结果不替代人耳试听、重训或远端 Edge 验收。

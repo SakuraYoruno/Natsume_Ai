@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.25
+版本：v5.26
 核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -15,9 +15,10 @@ TRACE-DL05-LOCAL-VOICE-CANDIDATE（Galgame 七海语料与本地推理）：
 `gpt_sovits_acoustic_style_miner.py` 加载 `configs/voice/riddlejoker_nanami_daily_v1.json`，从
 `2465` 条/`3.288h` 原声得到 `811` 条/`1.1909h` 日常关系候选；结果摘要 SHA-256 为
 `517b5585b4cfb81208a109571762c4d08cbe4e867cd34aefad09805bfed3a740`。
-四组现成检查点中文 micro CER 为 `0.3636/0.2955/0.4659/0.3409`，选中 `GPT e5 + SoVITS e8`
-作为回退基线。训练脚本现以硬链接复用特征、允许日语源为空的 `3-bert`，并启动日常子集
-`S2=8/S1=5`。状态为 `GALGAME_DAILY_CORPUS_TRAINING / HUMAN_LISTENING_AND_REMOTE_EDGE_PENDING`。
+训练脚本以硬链接复用特征、允许日语源为空的 `3-bert`，并已完成日常子集 `S2=8/S1=5`。
+旧四组检查点 CER 与排序因 `int16 PCM → 未缩放 float → 硬削波` 缺陷失效；
+`tts_engine.py` 与 `tts_persistent_worker.py` 已修复，五句真实 CUDA 输出削波率为 0。
+状态为 `GALGAME_DAILY_MODEL_REEVALUATION / HUMAN_LISTENING_AND_REMOTE_EDGE_PENDING`。
 
 TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 reference A/B 因听感区分不足不予
 提升；用户逐段确认的 `xilian_00025/00003/01292/01162/00048/01101` 被确定性打包为
@@ -29,7 +30,8 @@ TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 r
 Host payload，而由 Voice RPC、manager、fresh/persistent adapter 和 standalone Worker 消费；第二轮完整
 参数 A/B 热态单句 `0.9977～1.8023s`。新 Galgame profile 仍生成五类各 8 条声学试听候选，
 但只从 811 条日常关系池中检索；排名状态为 `HUMAN_REVIEW_REQUIRED`，不能自动提升默认。
-状态为 `GALGAME_DAILY_MODEL_TRAINING / SYNTHESIZED_AB_HUMAN_REVIEW_PENDING / REMOTE_EDGE_NOT_RUN`。
+旧合成 A/B 因同一 PCM 缩放缺陷失效，状态为
+`GALGAME_DAILY_MODEL_REEVALUATION / CLEAN_SYNTHESIZED_AB_HUMAN_REVIEW_PENDING / REMOTE_EDGE_NOT_RUN`。
 
 TRACE-DL04-REALTIME-LANE（普通陪伴低延迟链）：
 `route_catalog_runtime.py`、`route_execution_ports.py` 与 `surface_main_chain_adapter.py` 把普通 native stream

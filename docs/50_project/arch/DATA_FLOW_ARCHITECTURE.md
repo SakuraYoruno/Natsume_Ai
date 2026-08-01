@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.48
+版本：v3.49
 
 核对日期：2026-08-01
 
@@ -15,15 +15,17 @@
 
 本地 TTS 推理边界现为：`ExpressionPlan.voice_style → Host voice_profile（同时保留 self emotion_tag）→
 Edge Voice RPC → Python 3.11 parent adapter → JSON-line IPC → Python 3.9 standalone GPT-SoVITS Worker →
-voice_profile 优先 / emotion_tag 回退的 project-bound reference + speed → energy/pitch post-render → NPZ audio → parent`。模型进程不读取
+voice_profile 优先 / emotion_tag 回退的 project-bound reference + speed → int16 PCM 归一化 →
+energy/pitch post-render → 必要时整体峰值缩放 → NPZ audio → parent`。模型进程不读取
 Host/Life/Relationship，也不导入应用合同；五种恋爱风格只改变表达 reference 与有界韵律，不创建或回写
 七海 self-affect。人工 reference 已在本机真实 CUDA 上完成五组 A/B，但尚未写入远端 Edge、播放设备或
 Avatar，所以这不是三模态 delivery receipt。
 
 当前语料替换流为：`2465 条 Galgame 七海日语 WAV → 日常/关系语境门槛 → 剧情/成人/喊叫排除 →
 811 条/1.1909h → emotion2vec+ utterance embedding + 同说话人均值中心化 + prosody → 五组人工 seed
-近邻 → HUMAN_REVIEW_REQUIRED queue → NTFS hardlink 训练子集 → S2=8 / S1=5`。台词只用于排除
-不适合日常陪伴的上下文，不参与声学相似度得分；默认模型在训练与听审完成前不切换。
+近邻 → HUMAN_REVIEW_REQUIRED queue → NTFS hardlink 训练子集 → S2=8 / S1=5 → 干净音频重评`。
+台词只用于排除不适合日常陪伴的上下文，不参与声学相似度得分；训练已完成，但旧 A/B 与 CER
+因 PCM 缩放缺陷失效，默认模型在重评与听审完成前不切换。
 
 普通对话当前是轻量数据流：`Chat/Gateway text → Cortex context → RealtimeCompanion →
 AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、

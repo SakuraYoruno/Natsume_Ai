@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.10
+版本：v5.11
 日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -17,10 +17,12 @@ DL-05 已否决昔涟作为主语料：即使修通 reference、速度、能量�
 日常陪伴。新路线使用本机《RIDDLE JOKER》七海日语原声 `2465` 条/`3.288h`。风格配置先要求
 日常/关系语境，再排除战斗、犯罪、任务、成人场景、截断句和夸张喊叫，形成 `811` 条/`1.1909h`
 候选；`emotion2vec+ base` 与 prosody 只在该池中寻找五类声学近邻，结果仍为人工试听队列。
-四组现成检查点已用相同五句中文和本地 Whisper 比较，`GPT e5 + SoVITS e8` 的 micro CER
-`0.2955` 最佳，与当前昔涟样本相同，故作为训练失败时的七海回退基线。日常子集通过 NTFS 硬链接
-复用原特征，已启动 `SoVITS 8 epoch + GPT 5 epoch` 本机训练。来源授权为用户声明、机器未验证、
-仅本地研究；默认 manifest、远端 Edge、真实播放、打断和 Avatar 动作均未切换或验收。
+日常子集通过 NTFS 硬链接复用原特征，已完成 `SoVITS 8 epoch + GPT 5 epoch` 本机训练。
+旧四组检查点比较现已作废：GPT-SoVITS `run()` 返回 `int16 PCM`，而 Edge/Worker 旧后处理直接将其
+转为 `float32` 后硬截到 ±0.98，污染了试听与 Whisper CER。常驻 Worker 和备用直连路径均已改为
+先按 PCM 数值域归一化、再应用韵律，并在必要时整体峰值缩放；五句修复后输出削波率与大跳变率均为 0。
+新训练权重与现成权重仍须用干净音频重评。来源授权为用户声明、机器未验证、仅本地研究；默认
+manifest、远端 Edge、真实播放、打断和 Avatar 动作均未切换或验收。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，

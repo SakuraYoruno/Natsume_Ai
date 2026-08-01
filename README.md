@@ -11,7 +11,7 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 > 最新实时切片：普通陪伴拥有独立的 provider/model/timeout lane，原生 prompt 已压缩并将常规输出上限收紧到 192 Token；可选语义召回首次冷加载最多等待 350ms，随后本轮明确降级而不阻塞 ASGI。真实 `deepseek-v4-flash` 回合的输入从 1791 降到 1250 Token，但 provider 首 Token 仍约 7.8 秒、首个可见分句约 10.0 秒，因此实时体验仍为 `PARTIAL`。MiniMax 实测因账户余额不足返回 402，不作为可用 fallback。远端 Edge 未启动，语音训练与物理动作验收仍是下一阶段。
 
-> 最新本地语音切片：昔涟语料已因“剧情演出感强、不够日常”退出主候选，只保留为中文基线。新路线复用本机《RIDDLE JOKER》七海日语语料 `2465` 条/`3.288h`，以日常/关系语境和剧情、成人、夸张喊叫排除规则收紧为 `811` 条/`1.1909h`，再用 `emotion2vec+ base + prosody` 生成五类各 8 条试听近邻。现成七海权重的四组检查点实测中 `GPT e5 + SoVITS e8` 最佳，五句中文本地 Whisper micro CER 为 `0.2955`，与当前昔涟样本持平；因此它成为新回退基线。日常子集已用硬链接准备并启动 `SoVITS 8 + GPT 5` 本机训练，未复制大语料。默认 manifest 与远端 Edge 仍未改动，来源授权仍是“用户声明、机器未验证、仅本地研究”，总体保持 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`。
+> 最新本地语音切片：昔涟因“剧情演出感强、不够日常”退出主候选；《RIDDLE JOKER》七海日语原声从 `2465` 条/`3.288h` 收紧为 `811` 条/`1.1909h` 日常关系语料，并已完成 `SoVITS 8 + GPT 5` 本机训练。复核同时发现 GPT-SoVITS 返回的是 `int16 PCM`，旧 Edge/Worker 却将其直接当作归一化浮点音频并硬截幅，导致先前 A/B 和 Whisper 检查点排名全部失效。常驻 Worker 与备用直连路径现均先做 PCM 缩放、再施加韵律，并以峰值缩放取代硬削波；修复后五句真实 CUDA 输出峰值 `0.33～0.80`、RMS `0.037～0.099`、削波率 `0%`。新训练权重与现成权重都尚未在干净音频上完成重评，默认 manifest 与远端 Edge 未改动，来源仍为“用户声明、机器未验证、仅本地研究”，总体保持 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`。
 
 > `2026-07-31` 验收状态纠偏：当远端 Edge 按用户要求保持关闭时，Host 不再把 ASR、TTS、VTS、音频播放或 Edge RPC 默认成健康。真实 Host `/health` 现返回 `ACCEPTANCE_PENDING_EXTERNAL`（`required_unavailable=0`、`required_not_tested=5`），`/ready` 返回 `ready=false`；独立 Obs 从 canonical SQLite `service_health_log` 重建五项 `NOT_TESTED`，Monitor Nginx 页面显示“未验收”而不是“健康”或含混的“未知”。这证明状态传播诚实，不证明远端设备、真实模型、Gateway 平台或真人体验已经验收。
 

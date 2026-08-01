@@ -354,9 +354,31 @@ def _apply_synthesized_prosody(
         audio_data = audio_data.cpu()
     if hasattr(audio_data, "numpy"):
         audio_data = audio_data.numpy()
-    audio = np.asarray(audio_data, dtype=np.float32)
-    if audio.size == 0:
-        return audio
+    raw_audio = np.asarray(audio_data)
+    if raw_audio.size == 0:
+        return raw_audio.astype(np.float32, copy=False)
+
+    # GPT-SoVITS TTS.run() returns signed PCM (normally int16), while older
+    # adapters can return normalized floats.  Scale PCM before applying pitch
+    # or energy; otherwise the later limiter turns most samples into plateaus.
+    if np.issubdtype(raw_audio.dtype, np.integer):
+        info = np.iinfo(raw_audio.dtype)
+        pcm_scale = float(max(abs(info.min), abs(info.max)))
+        audio = raw_audio.astype(np.float32) / pcm_scale
+    else:
+        audio = raw_audio.astype(np.float32, copy=False)
+        finite_peak = (
+            float(np.max(np.abs(audio[np.isfinite(audio)])))
+            if np.any(np.isfinite(audio))
+            else 0.0
+        )
+        if finite_peak > 8.0:
+            pcm_scale = 32768.0 if finite_peak <= 32768.0 * 1.25 else finite_peak
+            audio = audio / pcm_scale
+    audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0).astype(
+        np.float32,
+        copy=False,
+    )
 
     pitch = _clamp_float(float(pitch_semitones or 0.0), -2.0, 2.0)
     if abs(pitch) >= 0.01:
@@ -372,8 +394,14 @@ def _apply_synthesized_prosody(
 
     gain = float(energy_factor if energy_factor is not None else 1.0)
     if abs(gain - 1.0) >= 0.001:
-        audio = np.clip(audio * gain, -0.98, 0.98).astype(np.float32, copy=False)
-    return audio
+        audio = (audio * gain).astype(np.float32, copy=False)
+
+    # Peak-normalize only when necessary.  Hard clipping here audibly destroys
+    # the model's dynamics and was the source of the previous "炸音" output.
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 0.98:
+        audio = (audio * (0.98 / peak)).astype(np.float32, copy=False)
+    return audio.astype(np.float32, copy=False)
 
 
 _EXPRESSIVE_PUNCT_RE = re.compile(r"([^，,。.!！?？；;：:\n…]+)([，,。.!！?？；;：:\n…]*)")

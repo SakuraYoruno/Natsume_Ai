@@ -23,6 +23,61 @@ def test_worker_applies_expression_energy_without_application_imports() -> None:
     assert float(np.max(np.abs(rendered))) == pytest.approx(0.2, abs=1e-6)
 
 
+def test_worker_normalizes_gpt_sovits_int16_pcm_before_expression_gain() -> None:
+    pcm = np.array([-32768, -16384, 0, 16384, 32767], dtype=np.int16)
+
+    rendered = worker._apply_synthesized_prosody(
+        pcm,
+        32000,
+        energy_factor=0.8,
+        pitch_semitones=None,
+    )
+
+    assert rendered.dtype == np.float32
+    assert rendered.tolist() == pytest.approx([-0.8, -0.4, 0.0, 0.4, 0.7999756], abs=1e-5)
+
+
+def test_worker_normalizes_float_container_with_pcm_scale() -> None:
+    pcm_as_float = np.array([-8192.0, 0.0, 8192.0], dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        pcm_as_float,
+        32000,
+        energy_factor=1.0,
+        pitch_semitones=None,
+    )
+
+    assert rendered.tolist() == pytest.approx([-0.25, 0.0, 0.25], abs=1e-6)
+
+
+def test_worker_peak_normalizes_without_hard_clip_plateau() -> None:
+    audio = np.array([-0.9, -0.5, 0.0, 0.5, 0.9], dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        audio,
+        32000,
+        energy_factor=1.4,
+        pitch_semitones=None,
+    )
+
+    assert float(np.max(np.abs(rendered))) == pytest.approx(0.98, abs=1e-6)
+    assert float(rendered[1]) == pytest.approx(-0.544444, abs=1e-5)
+    assert np.count_nonzero(np.isclose(np.abs(rendered), 0.98, atol=1e-6)) == 2
+
+
+def test_worker_replaces_non_finite_samples_before_delivery() -> None:
+    audio = np.array([np.nan, np.inf, -np.inf, 0.25], dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        audio,
+        32000,
+        energy_factor=1.0,
+        pitch_semitones=None,
+    )
+
+    assert rendered.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.25], abs=1e-6)
+
+
 def test_model_worker_keeps_application_imports_out_of_python39_boundary() -> None:
     source_path = Path(worker.__file__)
     tree = ast.parse(source_path.read_text(encoding="utf-8"))

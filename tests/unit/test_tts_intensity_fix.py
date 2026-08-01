@@ -206,6 +206,24 @@ class TestTtsIntensityFix:
 
         assert float(np.max(np.abs(quiet))) == pytest.approx(0.2, abs=1e-6)
 
+    def test_direct_adapter_normalizes_gpt_sovits_pcm_without_clipping(self):
+        import numpy as np
+        from edge_client.actuators.tts_engine import _apply_synthesized_prosody
+
+        pcm = np.array([-32768, -16384, 0, 16384, 32767], dtype=np.int16)
+        rendered = _apply_synthesized_prosody(
+            pcm,
+            32000,
+            energy_factor=0.8,
+            pitch_semitones=None,
+        )
+
+        assert rendered.dtype == np.float32
+        assert rendered.tolist() == pytest.approx(
+            [-0.8, -0.4, 0.0, 0.4, 0.7999756],
+            abs=1e-5,
+        )
+
     def test_expressive_timing_adds_pauses_when_enabled(self, monkeypatch):
         import numpy as np
         from edge_client.actuators.tts_engine import _apply_expressive_audio_timing

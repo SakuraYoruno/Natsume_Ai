@@ -3,7 +3,7 @@
 
 # 当前架构程序注册表
 
-版本：v4.12
+版本：v4.13
 维护日期：2026-08-01
 状态：`ONE_ACTIVE_PROGRAM`
 
@@ -20,9 +20,10 @@ Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
 DL-05 当前已将昔涟降为中文对照基线，主候选切换到本机《RIDDLE JOKER》七海语料。原始
 `2465` 条/`3.288h` 经日常关系语境筛选为 `811` 条/`1.1909h`；声学近邻仍只供人工试听。
-现成权重检查点网格选出 `GPT e5 + SoVITS e8`，五句中文 Whisper micro CER `0.2955`，与昔涟
-对照持平。日常子集以硬链接完成训练准备并已启动 `S2=8 / S1=5`，默认 manifest 未提升，远端
-Edge 按要求保持关闭。
+日常子集以硬链接完成 `S2=8 / S1=5` 训练，但旧检查点网格把 GPT-SoVITS 的 `int16 PCM`
+误当作归一化浮点并硬削波，故所有旧 CER 与模型排序均已撤销。两个生产合成入口已修复缩放与
+峰值保护，五句干净输出削波率为 0；新旧权重仍需重新生成、ASR 和人工 A/B。默认 manifest
+未提升，远端 Edge 按要求保持关闭。
 
 当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical

@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.63
+版本：v2.64
 核对日期：2026-08-01
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -15,8 +15,9 @@
 > `voice_profile` 优先选择表达风格，`emotion_tag` 只作兼容回退，因而羞涩、调情、想念、安静亲密和
 > 温柔恋爱不会被压成同一个 `LOVING`，也不会反向创建 self-emotion。Voice RPC 与 Worker 现实际消费
 > speed/energy/pitch；离线 corpus 模块则加载项目风格配置，把 `2465` 条 Galgame 七海原声收紧成
-> `811` 条日常关系候选，再生成五类声学近邻。训练模块以硬链接复用源特征，并已启动 `S2=8/S1=5`；
-> 现成 `GPT e5 + SoVITS e8` 是失败回退基线，不是已提升默认。远端 Edge 仍未改动。
+> `811` 条日常关系候选，再生成五类声学近邻。训练模块以硬链接复用源特征，并已完成 `S2=8/S1=5`。
+> renderer 现负责识别 GPT-SoVITS 的整数 PCM 数值域，在韵律处理前归一化，并以峰值缩放避免硬削波；
+> 旧模型排序已撤销，新旧权重仍待干净 A/B。默认模型与远端 Edge 均未改动。
 
 > RealtimeCompanion 模块现拥有自己的 catalog scene、provider/model/timeout lane 和紧凑 native prompt；
 > `chat_retrieval_helpers` 只给可选语义 embedding 350ms 默认等待预算，并把冷加载移出 ASGI event loop。

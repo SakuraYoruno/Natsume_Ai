@@ -449,7 +449,35 @@ def _apply_synthesized_prosody(
 ) -> Any:
     import numpy as np
 
-    audio = np.asarray(audio_data, dtype=np.float32)
+    raw_audio = np.asarray(audio_data)
+    if raw_audio.size == 0:
+        return raw_audio.astype(np.float32, copy=False)
+
+    # GPT-SoVITS TTS.run() returns signed PCM (normally int16), while some
+    # adapters return already-normalized float samples.  Converting PCM to
+    # float without scaling turns values such as 32767 into a square wave as
+    # soon as expression gain is clipped to [-1, 1].
+    if np.issubdtype(raw_audio.dtype, np.integer):
+        info = np.iinfo(raw_audio.dtype)
+        pcm_scale = float(max(abs(info.min), abs(info.max)))
+        audio = raw_audio.astype(np.float32) / pcm_scale
+    else:
+        audio = raw_audio.astype(np.float32, copy=False)
+        finite_peak = (
+            float(np.max(np.abs(audio[np.isfinite(audio)])))
+            if np.any(np.isfinite(audio))
+            else 0.0
+        )
+        # A few compatible GPT-SoVITS builds expose PCM values in a float
+        # container.  Recognize that representation without rescaling normal
+        # model audio whose peak is already close to one.
+        if finite_peak > 8.0:
+            pcm_scale = 32768.0 if finite_peak <= 32768.0 * 1.25 else finite_peak
+            audio = audio / pcm_scale
+    audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0).astype(
+        np.float32,
+        copy=False,
+    )
     pitch = max(-2.0, min(2.0, float(pitch_semitones or 0.0)))
     if abs(pitch) >= 0.01:
         try:
@@ -463,8 +491,13 @@ def _apply_synthesized_prosody(
             )
     gain = float(energy_factor if energy_factor is not None else 1.0)
     if abs(gain - 1.0) >= 0.001:
-        audio = np.clip(audio * gain, -0.98, 0.98).astype(np.float32, copy=False)
-    return audio
+        audio = (audio * gain).astype(np.float32, copy=False)
+
+    # Preserve dynamics instead of hard-clipping peaks into a flat plateau.
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 0.98:
+        audio = (audio * (0.98 / peak)).astype(np.float32, copy=False)
+    return audio.astype(np.float32, copy=False)
 
 
 def _cache_key(payload: dict[str, Any]) -> str:
