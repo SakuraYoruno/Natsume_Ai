@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.76
+版本：v2.77
 维护日期：2026-08-01
 状态：当前证据
 
@@ -41,7 +41,13 @@
 - 常驻 Worker 与备用直连 adapter 都已在 pitch/gain 前归一化整数 PCM，并以整体峰值缩放替代
   硬削波。真实 Python 3.9 Worker + CUDA 重生成五句后，峰值 `0.3298～0.7970`、RMS
   `0.0373～0.0994`、`abs(sample) >= 0.98` 与相邻大跳变比例均为 `0`。该结果只证明信号缺陷
-  已修复；检查点网格、新训练模型 A/B、Whisper 与人工听审必须从头重跑。
+  已修复；旧检查点结果不得复用。
+- 修复后从头重跑相同五句。经 NFKC、繁转简和标点空白归一化，本地
+  faster-whisper-large-v3-turbo micro CER 为：现成 `e5/s4=0.1250、e5/s8=0.0455、
+  e10/s4=0.2386、e10/s8=0.2045`，日常训练 `e5/s8=0.0568`。因此新模型接近但未超过最佳
+  现成基线；结果只衡量小样本可懂度，不替代情感自然度听审。
+- 最佳现成 e5/s8 与日常训练 e5/s8 已用相同五句、reference、speed/energy/pitch 生成 A/B，
+  试听副本只做整段响度匹配，不改节奏或情感动态；当前仍为 `HUMAN_REVIEW_REQUIRED`。
 - PCM、韵律、Worker/直连 adapter、Voice RPC/合同和文档 Gate 的本切片定向回归为
   `100 passed in 16.82s`；Python 3.9 Worker 与当前 Python 编译、JSON 和 `git diff --check` 同步通过。
 - 本切片语料检索、Voice RPC、TTS manager、fresh/persistent Worker、ExpressionPlan、发布工具及相邻

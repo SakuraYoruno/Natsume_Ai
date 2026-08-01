@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.57
+版本：v3.58
 核对日期：2026-08-01
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -11,9 +11,10 @@
 > **DL-05 本地语音修订：** 昔涟已因舞台化分布退出主候选，保留为中文对照。新 Galgame 七海路线
 > 从 `2465` 条/`3.288h` 原声筛出 `811` 条/`1.1909h` 日常关系语料，并已完成硬链接子集的
 > `S2=8 / S1=5` 训练。旧检查点 A/B 和 CER 因 PCM 缩放缺陷全部作废；两个合成入口已修复，
-> 五句真实 CUDA 输出削波率为 0，但尚未重跑新旧模型比较。剩余缺口包括干净音频重评、人工 A/B、默认提升、
+> 五句真实 CUDA 输出削波率为 0。干净网格选出现成 e5/s8 micro CER `0.0455`；日常训练 e5/s8
+> 为 `0.0568`，未自动提升，响度匹配 A/B 待人工听审。剩余缺口包括主观自然度判定、默认提升、
 > 经授权部署远端 Edge，以及播放、打断、Avatar 动作与同轮同步；当前为
-> `GALGAME_DAILY_MODEL_REEVALUATION / INCOMPLETE`。
+> `GALGAME_DAILY_MODEL_HUMAN_REVIEW / INCOMPLETE`。
 
 > **实时陪伴性能修订：** 普通 native stream 已在实际 ModelAttempt 边界进入独立
 > `CHAT_SURFACE_REALTIME / B / realtime_companion` lane，常规输出上限 192 Token；MAY_RECALL 的本地

@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.49
+版本：v3.50
 
 核对日期：2026-08-01
 
@@ -23,9 +23,9 @@ Avatar，所以这不是三模态 delivery receipt。
 
 当前语料替换流为：`2465 条 Galgame 七海日语 WAV → 日常/关系语境门槛 → 剧情/成人/喊叫排除 →
 811 条/1.1909h → emotion2vec+ utterance embedding + 同说话人均值中心化 + prosody → 五组人工 seed
-近邻 → HUMAN_REVIEW_REQUIRED queue → NTFS hardlink 训练子集 → S2=8 / S1=5 → 干净音频重评`。
-台词只用于排除不适合日常陪伴的上下文，不参与声学相似度得分；训练已完成，但旧 A/B 与 CER
-因 PCM 缩放缺陷失效，默认模型在重评与听审完成前不切换。
+近邻 → HUMAN_REVIEW_REQUIRED queue → NTFS hardlink 训练子集 → S2=8 / S1=5 → 干净音频重评 →
+响度匹配人工 A/B`。台词只用于排除不适合日常陪伴的上下文，不参与声学相似度得分；训练已完成，
+干净 ASR 网格暂以现成 e5/s8 为参考基线，日常训练 e5/s8 进入人工听审。默认模型在听审前不切换。
 
 普通对话当前是轻量数据流：`Chat/Gateway text → Cortex context → RealtimeCompanion →
 AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、

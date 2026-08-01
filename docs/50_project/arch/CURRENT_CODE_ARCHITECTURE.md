@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.88
+版本：v5.89
 核对日期：2026-08-01
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -18,8 +18,9 @@
 > 与 prosody 近邻。派生训练资产使用硬链接而非重复复制，日语源允许空 `3-bert`；新日常模型已完成
 > `S2=8 / S1=5` 训练。GPT-SoVITS 返回整数 PCM，而旧直连/常驻后处理未缩放便施加硬削波，因此旧 A/B、
 > CER 和检查点排序全部无效。两个入口现在先归一化 PCM、再施加 pitch/energy，超峰时整体缩放而非截平；
-> 五句修复后真实 CUDA 输出无削波。新旧权重尚待干净重评，默认 voice bank、远端 Edge 与播放/Avatar
-> 物理执行仍未切换。
+> 五句修复后真实 CUDA 输出无削波。干净网格中现成 e5/s8 micro CER 为 `0.0455`，日常训练 e5/s8
+> 为 `0.0568`；二者已生成同输入、响度匹配 A/B，但只有人工听审能判断日常情感自然度。默认 voice bank、
+> 远端 Edge 与播放/Avatar 物理执行仍未切换。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

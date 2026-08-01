@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.26
+版本：v5.27
 核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -18,7 +18,9 @@ TRACE-DL05-LOCAL-VOICE-CANDIDATE（Galgame 七海语料与本地推理）：
 训练脚本以硬链接复用特征、允许日语源为空的 `3-bert`，并已完成日常子集 `S2=8/S1=5`。
 旧四组检查点 CER 与排序因 `int16 PCM → 未缩放 float → 硬削波` 缺陷失效；
 `tts_engine.py` 与 `tts_persistent_worker.py` 已修复，五句真实 CUDA 输出削波率为 0。
-状态为 `GALGAME_DAILY_MODEL_REEVALUATION / HUMAN_LISTENING_AND_REMOTE_EDGE_PENDING`。
+干净重跑的 micro CER 为现成 `e5/s4=0.1250、e5/s8=0.0455、e10/s4=0.2386、e10/s8=0.2045`，
+日常训练 `e5/s8=0.0568`。状态为
+`GALGAME_DAILY_MODEL_HUMAN_REVIEW / CLEAN_ASR_GRID_COMPLETE / REMOTE_EDGE_PENDING`。
 
 TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 reference A/B 因听感区分不足不予
 提升；用户逐段确认的 `xilian_00025/00003/01292/01162/00048/01101` 被确定性打包为
@@ -30,8 +32,9 @@ TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 r
 Host payload，而由 Voice RPC、manager、fresh/persistent adapter 和 standalone Worker 消费；第二轮完整
 参数 A/B 热态单句 `0.9977～1.8023s`。新 Galgame profile 仍生成五类各 8 条声学试听候选，
 但只从 811 条日常关系池中检索；排名状态为 `HUMAN_REVIEW_REQUIRED`，不能自动提升默认。
-旧合成 A/B 因同一 PCM 缩放缺陷失效，状态为
-`GALGAME_DAILY_MODEL_REEVALUATION / CLEAN_SYNTHESIZED_AB_HUMAN_REVIEW_PENDING / REMOTE_EDGE_NOT_RUN`。
+旧合成 A/B 因同一 PCM 缩放缺陷失效；最佳现成 e5/s8 与日常训练 e5/s8 的新 A/B 只做整段
+响度匹配，状态为
+`GALGAME_DAILY_MODEL_HUMAN_REVIEW / CLEAN_SYNTHESIZED_AB_READY / REMOTE_EDGE_NOT_RUN`。
 
 TRACE-DL04-REALTIME-LANE（普通陪伴低延迟链）：
 `route_catalog_runtime.py`、`route_execution_ports.py` 与 `surface_main_chain_adapter.py` 把普通 native stream
