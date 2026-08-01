@@ -11,6 +11,8 @@ Natsume AI 是一个本地优先、用户主权优先的个人数字生命系统
 
 > 最新实时切片：普通陪伴拥有独立的 provider/model/timeout lane，原生 prompt 已压缩并将常规输出上限收紧到 192 Token；可选语义召回首次冷加载最多等待 350ms，随后本轮明确降级而不阻塞 ASGI。真实 `deepseek-v4-flash` 回合的输入从 1791 降到 1250 Token，但 provider 首 Token 仍约 7.8 秒、首个可见分句约 10.0 秒，因此实时体验仍为 `PARTIAL`。MiniMax 实测因账户余额不足返回 402，不作为可用 fallback。远端 Edge 未启动，语音训练与物理动作验收仍是下一阶段。
 
+> 最新本地语音切片：从七海中文语料重新构造了 `597` 条、约 `64.65` 分钟的情感均衡集，其中非中性样本 `418` 条；GPT/SoVITS 分别训练到 `e10/e8`，并生成带 `21` 个情感参考的候选包。发布工具现在只会选择指定项目自己的最高 epoch/step 权重，不会误借其它角色或语言项目。持久 TTS Worker 已改为独立的 Python 3.9 模型进程，不再导入 Host/Edge 合同层；真实 CUDA + JSON IPC 冒烟得到 32 kHz、2.52 秒有效音频。候选模型尚未替换当前配置，A/B 人工听审和远端 Edge/TTS/Avatar 动作验收仍待用户确认，因此总体仍为 `EMOTIONAL_DIGITAL_LIFE=PARTIAL`。
+
 > `2026-07-31` 验收状态纠偏：当远端 Edge 按用户要求保持关闭时，Host 不再把 ASR、TTS、VTS、音频播放或 Edge RPC 默认成健康。真实 Host `/health` 现返回 `ACCEPTANCE_PENDING_EXTERNAL`（`required_unavailable=0`、`required_not_tested=5`），`/ready` 返回 `ready=false`；独立 Obs 从 canonical SQLite `service_health_log` 重建五项 `NOT_TESTED`，Monitor Nginx 页面显示“未验收”而不是“健康”或含混的“未知”。这证明状态传播诚实，不证明远端设备、真实模型、Gateway 平台或真人体验已经验收。
 
 DL-00 已修正一个会直接破坏陪伴关系的提示词边界：根目录 `Soul.md` 仍是不可在线改写的人格源材料和 digest 来源，但不再把其中的旧剧情、固定用户名或自动关系阶段原样送入模型。Surface、Cortex 与节点生成现在只消费受限的 runtime projection；本轮称呼、关系距离、主动联系和边界必须来自 scope 校验后的 `RelationshipStateV2` 与 `AffectiveTurnPlanV1`。同时，72 条合成多轮陪伴场景已明确覆盖低落、“没事”、误解、七海被伤害、裂痕/未接受修复、混合喜忧、非占有式吃醋、空间、技术任务、主动消息、ASR/TTS/Avatar 故障和打断；它们只是 `MEASUREMENT_PENDING` 的盲评样本，fixture、scripted replay、mock 或端口占位绝不能被写成体验通过。

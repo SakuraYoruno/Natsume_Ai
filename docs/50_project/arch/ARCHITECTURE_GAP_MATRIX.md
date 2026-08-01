@@ -3,10 +3,16 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.52
+版本：v3.53
 核对日期：2026-08-01
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
+
+> **DL-05 本地语音修订：** 情感均衡中文候选已训练为 GPT `e10` / SoVITS `e8/s2400`，
+> `597` 条语料中 `418` 条为非中性，并生成 `21` 个情感参考。项目权重选择污染和 Python 3.9
+> Worker 启动崩溃均已修复；本机 CUDA、正式 IPC 与父 adapter 的真实合成通过。剩余缺口不是继续堆
+> 合同，而是人工 A/B 听审、决定是否提升候选、经用户授权部署远端 Edge，并验证 TTS 播放、打断、
+> Avatar 动作与同轮同步。上述任一项未完成前仍是 `LOCAL_VOICE_CANDIDATE_READY / INCOMPLETE`。
 
 > **实时陪伴性能修订：** 普通 native stream 已在实际 ModelAttempt 边界进入独立
 > `CHAT_SURFACE_REALTIME / B / realtime_companion` lane，常规输出上限 192 Token；MAY_RECALL 的本地

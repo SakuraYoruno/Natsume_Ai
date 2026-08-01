@@ -156,7 +156,20 @@ def _dominant_language(counts: dict[str, int]) -> str:
     return dominant
 
 
-def _latest_weight(source_root: Path, kind: str) -> Path | None:
+def _project_weight_score(path: Path, *, project: str, kind: str) -> tuple[int, int, int, str]:
+    stem = path.stem
+    if kind == "t2s":
+        match = re.fullmatch(rf"{re.escape(project)}-e(\d+)", stem)
+        epoch = int(match.group(1)) if match else -1
+        step = 0
+    else:
+        match = re.fullmatch(rf"{re.escape(project)}_e(\d+)_s(\d+)", stem)
+        epoch = int(match.group(1)) if match else -1
+        step = int(match.group(2)) if match else -1
+    return epoch, step, path.stat().st_mtime_ns, path.name
+
+
+def _latest_weight(source_root: Path, kind: str, *, project: str) -> Path | None:
     candidates: list[Path] = []
     for folder, suffix, candidate_kind in WEIGHT_DIRS:
         if candidate_kind != kind:
@@ -164,10 +177,20 @@ def _latest_weight(source_root: Path, kind: str) -> Path | None:
         base = source_root / folder
         if not base.is_dir():
             continue
-        candidates.extend(path for path in base.iterdir() if path.is_file() and path.suffix.lower() == suffix)
+        project_prefix = f"{project}-" if kind == "t2s" else f"{project}_"
+        candidates.extend(
+            path
+            for path in base.iterdir()
+            if path.is_file()
+            and path.suffix.lower() == suffix
+            and path.stem.startswith(project_prefix)
+        )
     if not candidates:
         return None
-    return max(candidates, key=lambda path: (path.stat().st_mtime, path.name))
+    return max(
+        candidates,
+        key=lambda path: _project_weight_score(path, project=project, kind=kind),
+    )
 
 
 def _select_references(rows: list[ClipRow], *, voice_language: str, limit: int) -> list[ClipRow]:
@@ -242,8 +265,8 @@ def inspect_project(source_root: Path, project: str) -> dict[str, Any]:
     rows = _read_clip_rows(source_root, project)
     counts = _language_counts(rows)
     refs = [row for row in rows if 3.0 <= row.duration_s <= 10.0]
-    t2s = _latest_weight(source_root, "t2s")
-    vits = _latest_weight(source_root, "vits")
+    t2s = _latest_weight(source_root, "t2s", project=project)
+    vits = _latest_weight(source_root, "vits", project=project)
     return {
         "source_root": str(source_root),
         "project": project,
@@ -277,8 +300,8 @@ def package_release(
             "Use the correct trained project, or pass --allow-language-mismatch for manual recovery only."
         )
 
-    t2s = _latest_weight(source_root, "t2s")
-    vits = _latest_weight(source_root, "vits")
+    t2s = _latest_weight(source_root, "t2s", project=project)
+    vits = _latest_weight(source_root, "vits", project=project)
     if t2s is None or vits is None:
         raise FileNotFoundError("cannot locate both GPT (.ckpt) and SoVITS (.pth) weights")
 

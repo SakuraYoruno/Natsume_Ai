@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.6
+版本：v5.7
 日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -12,6 +12,13 @@ Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它�
 已经拥有持续情感生命”推导为完成。本合同以当前 `origin/dev@001c2f5d7` 为基线，
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。当前实现分支基于
 `origin/dev@001c2f5d7`；分支上的 DL-00～DL-06 提交尚未以本文件冒充 `dev` 已完成。
+
+DL-05 本地语音阶段已经完成一次可复现训练与推理接线：中文情感均衡集为 `597` 条、约
+`64.65` 分钟，非中性 `418` 条；候选权重为 GPT `e10`、SoVITS `e8/s2400`，发布包包含
+`21` 个情感参考。发布工具按 exact project 选择最高 epoch/step，禁止从其它项目借权重。
+GPT-SoVITS 自带 Python 3.9 现只启动独立模型 Worker，不再导入应用合同；本机 CUDA、正式
+JSON IPC、父进程 adapter 均已完成单句合成。该证据只提升为 `LOCAL_VOICE_CANDIDATE_READY`：
+候选尚未切换默认配置，人工 A/B 听审、远端 Edge 部署、TTS 播放与 Avatar 动作仍未验收。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，

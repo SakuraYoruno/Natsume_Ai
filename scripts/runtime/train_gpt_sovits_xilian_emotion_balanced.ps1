@@ -93,6 +93,11 @@ $SourceList = Join-Path $ProjectLogRoot "0-source.list"
 if (-not (Test-Path -LiteralPath $SourceList)) {
     throw "Balanced source list not found: $SourceList"
 }
+$sourceAuthorizationPath = Join-Path $SourceLogRoot "source_authorization.json"
+$projectAuthorizationPath = Join-Path $ProjectLogRoot "source_authorization.json"
+if (Test-Path -LiteralPath $sourceAuthorizationPath) {
+    Copy-Item -LiteralPath $sourceAuthorizationPath -Destination $projectAuthorizationPath -Force
+}
 $s2OutputDir = Join-Path $ProjectLogRoot "logs_s2_$Version"
 New-Item -ItemType Directory -Force -Path $s2OutputDir | Out-Null
 
@@ -224,6 +229,11 @@ $status = [ordered]@{
     prepared_at = (Get-Date).ToString("o")
     gpt_sovits_root = $Root
     project_log_root = $ProjectLogRoot
+    source_authorization_path = if (Test-Path -LiteralPath $projectAuthorizationPath) {
+        $projectAuthorizationPath
+    } else {
+        $null
+    }
     s2_config_path = $s2ConfigPath
     s1_config_path = $s1ConfigPath
     s2_log_path = $s2LogPath

@@ -3,11 +3,16 @@
 
 # Natsume AI 系统架构总览
 
-版本：v2.51
+版本：v2.52
 核对日期：2026-08-01
 文档类型：`CURRENT STRUCTURAL OVERVIEW`
 
 本文解释生产代码如何分层、各进程如何协作、状态和执行 authority 放在哪里。它不承担完成度裁决：具体接线状态看 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，目标看 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距看 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)。
+
+Voice 的进程边界与 Host 情感状态分离：应用 Python 负责 ExpressionPlan 和 Edge actuator，模型自带
+Python 3.9 只运行 standalone GPT-SoVITS Worker。两者通过小型 JSON-line/NPZ 协议交换一次合成请求，
+模型进程不加载 Host、Life 或 contracts。当前情感均衡候选已在本机 RTX 5080 上真实合成；远端 Edge
+仍按用户要求关闭，因而播放、打断和 Avatar 同步尚未进入物理验收。
 
 当前对话执行采用双路径，而不是把所有输入压进同一任务状态机：
 

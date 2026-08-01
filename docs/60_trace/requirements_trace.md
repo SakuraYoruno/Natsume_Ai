@@ -5,11 +5,20 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.21
+版本：v5.22
 核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
+
+TRACE-DL05-LOCAL-VOICE-CANDIDATE（情感语音训练与本地推理）：
+`train_gpt_sovits_xilian_emotion_balanced.ps1` 从授权源派生情感均衡训练集并保留来源授权文件；
+`gpt_sovits_edge_release.py` 只选择 exact project 的最高 epoch/step 权重；
+`tts_persistent_worker.py` 是不导入应用合同的 Python 3.9 standalone model process。
+候选语料 `597` 条/约 `64.65` 分钟/非中性 `418` 条，权重 GPT `e10`、SoVITS `e8/s2400`，
+release SHA-256 `5e0942574cd1131c0ddcdeb5fbc6230aff49cb63dcaa2915d4ab35e16b2351ff`。
+本机 CUDA 正式 IPC 得到 `32000Hz / 2.52s` 音频并正常 shutdown，父 adapter 二次合成通过；状态为
+`LOCAL_VOICE_CANDIDATE_READY / HUMAN_LISTENING_AND_REMOTE_EDGE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`。
 
 TRACE-DL04-REALTIME-LANE（普通陪伴低延迟链）：
 `route_catalog_runtime.py`、`route_execution_ports.py` 与 `surface_main_chain_adapter.py` 把普通 native stream

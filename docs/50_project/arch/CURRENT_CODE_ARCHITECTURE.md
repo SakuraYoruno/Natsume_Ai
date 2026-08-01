@@ -3,12 +3,20 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.83
+版本：v5.84
 核对日期：2026-08-01
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
+
+> `2026-08-01` 最新 Voice 事实：`tts_persistent_worker.py` 是 GPT-SoVITS 模型运行时的独立
+> JSON-line 子进程，不导入 `edge_client` 或 `natsume_contracts`，因而可由模型自带 Python 3.9
+> 直接启动。它只解析 voice manifest、加载指定 GPT/SoVITS 权重与情感参考、合成 NPZ、维护有界缓存并
+> 回传 ready/synth/shutdown；父进程 `_PersistentProcessSoVITSAdapter` 继续拥有 Edge 侧应用合同。
+> 新候选为中文 `597` 条、约 `64.65` 分钟、非中性 `418` 条，权重 `e10/e8_s2400`；发布工具严格按
+> project 和最高 epoch/step 取权重。本机 RTX 5080/CUDA 的正式 IPC 与父 adapter 合成均通过，但当前
+> 默认 voice bank 未切换，人工听审和远端设备物理执行未完成。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

@@ -43,6 +43,41 @@ def test_inspect_project_detects_japanese_corpus(tmp_path) -> None:
     assert result["ready_for_packaging"] is True
 
 
+def test_inspect_project_never_borrows_another_projects_weights(tmp_path) -> None:
+    _write_project(tmp_path, "other_project", "你好呀。")
+    wav_dir = tmp_path / "logs" / "missing_weights" / "5-wav32k"
+    wav_dir.mkdir(parents=True)
+    clip_name = "clip_0000000000_0000160000.wav"
+    _write_wav(wav_dir / clip_name)
+    (tmp_path / "logs" / "missing_weights" / "2-name2text.txt").write_text(
+        f"{clip_name}\tphones\tNone\t你好呀。\n",
+        encoding="utf-8",
+    )
+
+    result = inspect_project(tmp_path, "missing_weights")
+
+    assert result["latest_weights"] == {"t2s": None, "vits": None}
+    assert result["ready_for_packaging"] is False
+
+
+def test_inspect_project_prefers_highest_checkpoint_epoch_over_mtime(tmp_path) -> None:
+    project = "Natsume_Ai_zh"
+    _write_project(tmp_path, project, "你好呀。")
+    high_gpt = tmp_path / "GPT_weights_v2ProPlus" / f"{project}-e10.ckpt"
+    high_vits = tmp_path / "SoVITS_weights_v2ProPlus" / f"{project}_e8_s800.pth"
+    high_gpt.write_bytes(b"high-gpt")
+    high_vits.write_bytes(b"high-vits")
+    low_gpt = tmp_path / "GPT_weights_v2ProPlus" / f"{project}-e2.ckpt"
+    low_vits = tmp_path / "SoVITS_weights_v2ProPlus" / f"{project}_e2_s200.pth"
+    low_gpt.touch()
+    low_vits.touch()
+
+    result = inspect_project(tmp_path, project)
+
+    assert result["latest_weights"]["t2s"].endswith(f"{project}-e10.ckpt")
+    assert result["latest_weights"]["vits"].endswith(f"{project}_e8_s800.pth")
+
+
 def test_package_release_refuses_language_mismatch(tmp_path) -> None:
     _write_project(tmp_path, "Natsume_Ai", "こんにちは。")
 

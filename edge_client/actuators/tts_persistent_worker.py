@@ -1,23 +1,67 @@
 from __future__ import annotations
 
+"""Standalone GPT-SoVITS worker for the bundled model Python.
+
+This file is deliberately independent from ``edge_client`` and
+``natsume_contracts``.  The bundled GPT-SoVITS runtime currently uses Python
+3.9, while the host/edge application targets a newer Python.  Importing the
+application object graph inside the model process therefore makes an otherwise
+healthy CUDA runtime fail before loading the voice model.
+"""
+
 import argparse
 import contextlib
 import hashlib
 import json
 import os
+import re
 import sys
 import time
+import wave
 from typing import Any
+
+
+DEFAULT_SAMPLE_RATE = 32000
+_WEIGHT_DIRS = {
+    "t2s": (
+        ("GPT_weights_v2ProPlus", ".ckpt"),
+        ("GPT_weights_v2Pro", ".ckpt"),
+        ("GPT_weights_v4", ".ckpt"),
+        ("GPT_weights_v3", ".ckpt"),
+        ("GPT_weights_v2", ".ckpt"),
+        ("GPT_weights", ".ckpt"),
+    ),
+    "vits": (
+        ("SoVITS_weights_v2ProPlus", ".pth"),
+        ("SoVITS_weights_v2Pro", ".pth"),
+        ("SoVITS_weights_v4", ".pth"),
+        ("SoVITS_weights_v3", ".pth"),
+        ("SoVITS_weights_v2", ".pth"),
+        ("SoVITS_weights", ".pth"),
+    ),
+}
+_EMOTION_ALIASES = {
+    "COMFORT": "CALM",
+    "SOOTHING": "CALM",
+    "JOY": "HAPPY",
+    "HAPPINESS": "HAPPY",
+    "PLAYFUL": "HAPPY",
+    "LOVE": "LOVING",
+    "AFFECTION": "LOVING",
+    "COQUETTISH": "LOVING",
+    "SADNESS": "SAD",
+    "EXCITEMENT": "EXCITED",
+}
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m edge_client.actuators.tts_persistent_worker",
-        description="Persistent GPT-SoVITS worker using the model runtime Python.",
+        prog="python edge_client/actuators/tts_persistent_worker.py",
+        description="Standalone persistent GPT-SoVITS model worker.",
     )
     parser.add_argument("--model-path", required=True)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--sample-rate", type=int, default=32000)
+    parser.add_argument("--sample-rate", type=int, default=DEFAULT_SAMPLE_RATE)
     parser.add_argument("--language", default="zh")
     parser.add_argument("--ref-audio-path", default="")
     parser.add_argument("--ref-text", default="")
@@ -44,6 +88,321 @@ def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
     return max(int(minimum), min(int(maximum), int(value)))
 
 
+def _normalize_language(value: Any) -> str:
+    raw = str(value or "").strip().lower().replace("_", "-")
+    if raw.startswith("zh") or raw in {"cn", "chinese"}:
+        return "zh"
+    if raw.startswith("ja") or raw in {"jp", "japanese"}:
+        return "ja"
+    if raw.startswith("en") or raw == "english":
+        return "en"
+    return raw or "zh"
+
+
+def _normalize_emotion(value: Any) -> str:
+    return re.sub(r"[^A-Z0-9_]+", "_", str(value or "").strip().upper()).strip("_")
+
+
+def _validate_manifest_language(*, manifest: dict[str, Any], requested_language: str) -> None:
+    raw_manifest_language = str(manifest.get("voice_language") or "").strip()
+    manifest_language = _normalize_language(raw_manifest_language) if raw_manifest_language else ""
+    requested = _normalize_language(requested_language)
+    if (
+        manifest_language
+        and requested != "auto"
+        and manifest_language != requested
+        and not _env_bool("EDGE_TTS_ALLOW_LANGUAGE_MISMATCH", False)
+    ):
+        raise RuntimeError(
+            "GPT-SoVITS language mismatch: manifest=%s requested=%s"
+            % (manifest_language, requested)
+        )
+
+
+def _resolve_model_path(model_root: str, raw_path: Any) -> str:
+    path = str(raw_path or "").strip()
+    if not path:
+        return ""
+    if os.path.isabs(path):
+        return os.path.normpath(path)
+    return os.path.normpath(os.path.join(model_root, path))
+
+
+def _load_manifest(*, model_root: str, voice_bank_path: str) -> dict[str, Any]:
+    candidates = []
+    if str(voice_bank_path or "").strip():
+        candidates.append(str(voice_bank_path).strip())
+    candidates.append(os.path.join(model_root, "natsume_gpt_sovits_model_manifest.json"))
+    for raw_path in candidates:
+        path = raw_path if os.path.isabs(raw_path) else os.path.join(model_root, raw_path)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8-sig") as handle:
+                payload = json.load(handle)
+        except Exception as exc:
+            raise RuntimeError("invalid GPT-SoVITS voice manifest %s: %s" % (path, exc)) from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("GPT-SoVITS voice manifest must be an object: %s" % path)
+        payload["_manifest_path"] = os.path.abspath(path)
+        return payload
+    return {}
+
+
+def _latest_weight(model_root: str, *, kind: str) -> str:
+    for folder, suffix in _WEIGHT_DIRS[kind]:
+        root = os.path.join(model_root, folder)
+        if not os.path.isdir(root):
+            continue
+        candidates = [
+            os.path.join(root, name)
+            for name in os.listdir(root)
+            if str(name).lower().endswith(suffix)
+        ]
+        if candidates:
+            return max(candidates, key=lambda path: (os.path.getmtime(path), os.path.basename(path)))
+    return ""
+
+
+def _resolve_weights(*, model_root: str, manifest: dict[str, Any]) -> tuple[str, str]:
+    weights = manifest.get("weights") if isinstance(manifest.get("weights"), dict) else {}
+    t2s = _resolve_model_path(
+        model_root,
+        weights.get("t2s") or weights.get("gpt") or weights.get("t2s_weights_path"),
+    )
+    vits = _resolve_model_path(
+        model_root,
+        weights.get("vits") or weights.get("sovits") or weights.get("vits_weights_path"),
+    )
+    if weights:
+        if not os.path.isfile(t2s) or not os.path.isfile(vits):
+            raise RuntimeError(
+                "GPT-SoVITS manifest checkpoint is missing; refusing cross-project fallback"
+            )
+    else:
+        if not os.path.isfile(t2s):
+            t2s = _latest_weight(model_root, kind="t2s")
+        if not os.path.isfile(vits):
+            vits = _latest_weight(model_root, kind="vits")
+    if not t2s or not vits:
+        raise RuntimeError("GPT-SoVITS checkpoint files are missing")
+    return t2s, vits
+
+
+def _detect_version(*, t2s_path: str, vits_path: str) -> str:
+    probe = (t2s_path + " " + vits_path).lower()
+    for marker, version in (
+        ("v2proplus", "v2ProPlus"),
+        ("v2pro", "v2Pro"),
+        ("v4", "v4"),
+        ("v3", "v3"),
+        ("v2", "v2"),
+    ):
+        if marker in probe:
+            return version
+    return "v1"
+
+
+def _load_reference_bank(
+    *,
+    model_root: str,
+    manifest: dict[str, Any],
+    ref_audio_path: str,
+    ref_text: str,
+    language: str,
+) -> dict[str, dict[str, str]]:
+    bank: dict[str, dict[str, str]] = {}
+    raw_refs = manifest.get("references")
+    if isinstance(raw_refs, list):
+        for item in raw_refs:
+            if not isinstance(item, dict):
+                continue
+            audio_path = _resolve_model_path(model_root, item.get("audio_path"))
+            if not os.path.isfile(audio_path):
+                continue
+            tag = _normalize_emotion(item.get("emotion_tag")) or "NEUTRAL"
+            bank.setdefault(
+                tag,
+                {
+                    "audio_path": audio_path,
+                    "prompt_text": str(item.get("prompt_text") or "").strip(),
+                    "prompt_lang": _normalize_language(item.get("prompt_lang") or language),
+                },
+            )
+    explicit_audio = _resolve_model_path(model_root, ref_audio_path)
+    if explicit_audio and os.path.isfile(explicit_audio):
+        explicit = {
+            "audio_path": explicit_audio,
+            "prompt_text": str(ref_text or "").strip(),
+            "prompt_lang": _normalize_language(language),
+        }
+        bank["NEUTRAL"] = explicit
+        bank["DEFAULT"] = explicit
+    if "NEUTRAL" in bank:
+        bank.setdefault("DEFAULT", bank["NEUTRAL"])
+    if "DEFAULT" in bank:
+        bank.setdefault("NEUTRAL", bank["DEFAULT"])
+    if not bank:
+        discovered = _discover_reference(model_root=model_root, language=language)
+        if discovered:
+            bank["NEUTRAL"] = discovered
+            bank["DEFAULT"] = discovered
+    if not bank:
+        raise RuntimeError("voice manifest or EDGE_TTS_REF_AUDIO_PATH must provide a usable reference")
+    return bank
+
+
+def _discover_reference(*, model_root: str, language: str) -> dict[str, str] | None:
+    logs_root = os.path.join(model_root, "logs")
+    if not os.path.isdir(logs_root):
+        return None
+    candidates: list[tuple[float, str, str]] = []
+    for project in os.listdir(logs_root):
+        project_root = os.path.join(logs_root, project)
+        wav_root = os.path.join(project_root, "5-wav32k")
+        text_path = os.path.join(project_root, "2-name2text.txt")
+        if not os.path.isdir(wav_root) or not os.path.isfile(text_path):
+            continue
+        prompts: dict[str, str] = {}
+        with open(text_path, "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) >= 4:
+                    prompts[parts[0].strip()] = parts[3].strip()
+        for name, prompt in prompts.items():
+            path = os.path.join(wav_root, name)
+            if not prompt or not os.path.isfile(path):
+                continue
+            try:
+                with wave.open(path, "rb") as handle:
+                    duration = handle.getnframes() / float(handle.getframerate() or 1)
+            except Exception:
+                continue
+            if 3.0 <= duration <= 10.0:
+                candidates.append((abs(duration - 5.0), path, prompt))
+    if not candidates:
+        return None
+    _, path, prompt = min(candidates, key=lambda row: (row[0], row[1]))
+    return {
+        "audio_path": path,
+        "prompt_text": prompt,
+        "prompt_lang": _normalize_language(language),
+    }
+
+
+def _select_reference(bank: dict[str, dict[str, str]], emotion_tag: Any) -> dict[str, str]:
+    key = _normalize_emotion(emotion_tag)
+    for candidate in (key, _EMOTION_ALIASES.get(key, ""), "NEUTRAL", "DEFAULT"):
+        if candidate and candidate in bank:
+            return bank[candidate]
+    return next(iter(bank.values()))
+
+
+class _DirectSoVITSRuntime:
+    def __init__(self, args: argparse.Namespace) -> None:
+        self.model_root = os.path.abspath(str(args.model_path))
+        if not os.path.isdir(self.model_root):
+            raise RuntimeError("GPT-SoVITS model root does not exist: %s" % self.model_root)
+        self.language = _normalize_language(args.language)
+        self.manifest = _load_manifest(
+            model_root=self.model_root,
+            voice_bank_path=str(args.voice_bank_path or ""),
+        )
+        _validate_manifest_language(manifest=self.manifest, requested_language=self.language)
+        self.t2s_path, self.vits_path = _resolve_weights(
+            model_root=self.model_root,
+            manifest=self.manifest,
+        )
+        self.references = _load_reference_bank(
+            model_root=self.model_root,
+            manifest=self.manifest,
+            ref_audio_path=str(args.ref_audio_path or ""),
+            ref_text=str(args.ref_text or ""),
+            language=self.language,
+        )
+
+        os.chdir(self.model_root)
+        for path in (self.model_root, os.path.join(self.model_root, "GPT_SoVITS")):
+            if path not in sys.path:
+                sys.path.insert(0, path)
+        from GPT_SoVITS.TTS_infer_pack.TTS import TTS, TTS_Config
+
+        custom = {
+            "device": str(args.device),
+            "is_half": "cuda" in str(args.device).lower(),
+            "version": _detect_version(t2s_path=self.t2s_path, vits_path=self.vits_path),
+            "t2s_weights_path": self.t2s_path,
+            "vits_weights_path": self.vits_path,
+            "bert_base_path": os.path.join(
+                self.model_root,
+                "GPT_SoVITS",
+                "pretrained_models",
+                "chinese-roberta-wwm-ext-large",
+            ),
+            "cnhuhbert_base_path": os.path.join(
+                self.model_root,
+                "GPT_SoVITS",
+                "pretrained_models",
+                "chinese-hubert-base",
+            ),
+        }
+        for key in ("bert_base_path", "cnhuhbert_base_path"):
+            if not os.path.isdir(custom[key]):
+                raise RuntimeError("GPT-SoVITS pretrained model is missing: %s" % custom[key])
+        self.pipeline = TTS(TTS_Config({"custom": custom}))
+        self.model_identity = "%s|%s" % (self.t2s_path, self.vits_path)
+
+    def synthesize(
+        self,
+        *,
+        text: str,
+        language: str,
+        emotion_tag: str | None,
+        speed_factor: float | None,
+    ) -> tuple[Any, int]:
+        import numpy as np
+
+        if not str(text or "").strip():
+            raise ValueError("text is empty")
+        reference = _select_reference(self.references, emotion_tag)
+        inputs = {
+            "text": str(text),
+            "text_lang": _normalize_language(language or self.language),
+            "ref_audio_path": reference["audio_path"],
+            "aux_ref_audio_paths": [],
+            "prompt_text": reference["prompt_text"],
+            "prompt_lang": _normalize_language(reference["prompt_lang"]),
+            "seed": 42,
+            "parallel_infer": True,
+            "return_fragment": False,
+            "streaming_mode": False,
+            "fragment_interval": 0.0,
+        }
+        if speed_factor is not None:
+            inputs["speed_factor"] = float(speed_factor)
+
+        def _run(run_inputs: dict[str, Any]) -> tuple[list[Any], int]:
+            chunks = []
+            sample_rate = DEFAULT_SAMPLE_RATE
+            for sample_rate_value, audio_value in self.pipeline.run(run_inputs):
+                sample_rate = int(sample_rate_value)
+                if audio_value is not None and len(audio_value) > 0:
+                    chunks.append(np.asarray(audio_value))
+            return chunks, sample_rate
+
+        try:
+            chunks, sample_rate = _run(inputs)
+        except TypeError as exc:
+            if "speed_factor" not in str(exc) and "unexpected keyword" not in str(exc):
+                raise
+            fallback = dict(inputs)
+            fallback.pop("speed_factor", None)
+            chunks, sample_rate = _run(fallback)
+        if not chunks:
+            raise RuntimeError("GPT-SoVITS produced empty audio")
+        return np.concatenate(chunks), sample_rate
+
+
 def _cache_key(payload: dict[str, Any]) -> str:
     data = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
@@ -53,11 +412,7 @@ def _prune_cache(cache_dir: str, *, max_entries: int) -> None:
     if max_entries <= 0:
         return
     try:
-        entries = [
-            os.path.join(cache_dir, name)
-            for name in os.listdir(cache_dir)
-            if name.endswith(".npz")
-        ]
+        entries = [os.path.join(cache_dir, name) for name in os.listdir(cache_dir) if name.endswith(".npz")]
     except OSError:
         return
     excess = len(entries) - int(max_entries)
@@ -92,44 +447,15 @@ def main(argv: list[str] | None = None) -> int:
 
     os.environ["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-    os.chdir(repo_root)
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
-
-    # GPT-SoVITS prints progress and diagnostics to stdout. Keep stdout clean for
-    # JSON-lines IPC and send model logs to stderr instead.
+    # GPT-SoVITS prints progress to stdout. Reserve stdout for JSON-lines IPC.
     sys.stdout = sys.stderr
 
     try:
         import numpy as np
 
-        from edge_client.actuators.tts_engine import SoVITSModelManager, TtsConfig
-
-        cfg = TtsConfig(
-            model_path=str(args.model_path),
-            device=str(args.device),
-            sample_rate=int(args.sample_rate),
-            ref_audio_path=str(args.ref_audio_path or "").strip() or None,
-            ref_text=str(args.ref_text or "").strip() or None,
-            voice_bank_path=str(args.voice_bank_path or "").strip() or None,
-            language=str(args.language or "zh"),
-        )
-        manager = SoVITSModelManager(cfg)
         load_t0 = time.perf_counter()
-        load_result = manager.load()
+        runtime = _DirectSoVITSRuntime(args)
         load_s = time.perf_counter() - load_t0
-        if not load_result.success:
-            _emit(
-                protocol_stdout,
-                {
-                    "event": "ready",
-                    "success": False,
-                    "detail": load_result.detail,
-                    "load_s": round(load_s, 4),
-                    "reason_code": load_result.reason_code,
-                },
-            )
-            return 1
 
         cache_enabled = _env_bool("EDGE_TTS_PERSISTENT_WORKER_CACHE_ENABLED", True)
         cache_root = str(
@@ -137,63 +463,50 @@ def main(argv: list[str] | None = None) -> int:
             or os.path.join(repo_root, "runtime", "edge", "tts_cache")
         )
         cache_max_entries = _env_int(
-            "EDGE_TTS_PERSISTENT_WORKER_CACHE_MAX_ENTRIES",
-            256,
-            minimum=0,
-            maximum=10000,
+            "EDGE_TTS_PERSISTENT_WORKER_CACHE_MAX_ENTRIES", 256, minimum=0, maximum=10000
         )
         cache_max_text_chars = _env_int(
-            "EDGE_TTS_PERSISTENT_WORKER_CACHE_MAX_TEXT_CHARS",
-            80,
-            minimum=1,
-            maximum=2000,
+            "EDGE_TTS_PERSISTENT_WORKER_CACHE_MAX_TEXT_CHARS", 80, minimum=1, maximum=2000
         )
         if cache_enabled:
             os.makedirs(cache_root, exist_ok=True)
 
         warmup_enabled = _env_bool("EDGE_TTS_PERSISTENT_WORKER_WARMUP_ENABLED", True)
-        warmup_success: bool | None = None
-        warmup_detail: str | None = None
-        warmup_s: float | None = None
+        warmup_success = None
+        warmup_detail = None
+        warmup_s = None
         if warmup_enabled:
             warmup_text = str(os.environ.get("EDGE_TTS_PERSISTENT_WORKER_WARMUP_TEXT") or "嗯。").strip() or "嗯。"
             warmup_t0 = time.perf_counter()
             try:
                 with contextlib.redirect_stdout(sys.stderr):
-                    warmup_result = manager.synthesize(
-                        warmup_text,
+                    warmup_audio, _ = runtime.synthesize(
+                        text=warmup_text,
                         language=str(args.language or "zh"),
                         emotion_tag="NEUTRAL",
-                        emotion_intensity=0.5,
+                        speed_factor=None,
                     )
-                warmup_s = time.perf_counter() - warmup_t0
-                warmup_success = bool(warmup_result.success and warmup_result.audio_data is not None)
-                warmup_detail = str(warmup_result.detail or "")
-                print(
-                    "TTS persistent worker warmup: "
-                    f"success={warmup_success} wall_s={warmup_s:.4f} text_chars={len(warmup_text)}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                warmup_success = bool(warmup_audio is not None and len(warmup_audio) > 0)
+                warmup_detail = "warmup synthesized"
             except Exception as exc:  # pragma: no cover - warmup must not kill worker
-                warmup_s = time.perf_counter() - warmup_t0
                 warmup_success = False
                 warmup_detail = str(exc)
-                print(
-                    "TTS persistent worker warmup failed: "
-                    f"wall_s={warmup_s:.4f} error={exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+            warmup_s = time.perf_counter() - warmup_t0
+            print(
+                "TTS persistent worker warmup: success=%s wall_s=%.4f"
+                % (warmup_success, warmup_s),
+                file=sys.stderr,
+                flush=True,
+            )
 
         _emit(
             protocol_stdout,
             {
                 "event": "ready",
                 "success": True,
-                "detail": load_result.detail,
+                "detail": "standalone GPT-SoVITS runtime ready",
                 "load_s": round(load_s, 4),
-                "reason_code": load_result.reason_code,
+                "reason_code": None,
                 "warmup_enabled": bool(warmup_enabled),
                 "warmup_success": warmup_success,
                 "warmup_detail": warmup_detail,
@@ -211,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 request = json.loads(line)
             except Exception as exc:
-                _emit(protocol_stdout, {"event": "error", "success": False, "detail": f"invalid json: {exc}"})
+                _emit(protocol_stdout, {"event": "error", "success": False, "detail": "invalid json: %s" % exc})
                 continue
 
             request_id = str(request.get("request_id") or "")
@@ -238,24 +551,20 @@ def main(argv: list[str] | None = None) -> int:
                 text = str(request.get("text") or "")
                 language = str(request.get("language") or args.language or "zh")
                 emotion_tag = str(request.get("emotion_tag") or "").strip() or None
-                emotion_intensity = request.get("emotion_intensity")
                 speed_factor = request.get("speed_factor")
-                cache_path: str | None = None
+                cache_path = None
                 cache_allowed = bool(cache_enabled and text.strip() and len(text.strip()) <= cache_max_text_chars)
                 if cache_allowed:
                     cache_payload = {
-                        "model_path": str(args.model_path),
-                        "sample_rate": int(args.sample_rate),
+                        "model_identity": runtime.model_identity,
                         "language": language,
                         "text": text,
                         "emotion_tag": emotion_tag,
-                        "emotion_intensity": emotion_intensity,
+                        "emotion_intensity": request.get("emotion_intensity"),
                         "speed_factor": speed_factor,
-                        "ref_audio_path": str(args.ref_audio_path or ""),
-                        "ref_text": str(args.ref_text or ""),
                         "voice_bank_path": str(args.voice_bank_path or ""),
                     }
-                    cache_path = os.path.join(cache_root, f"{_cache_key(cache_payload)}.npz")
+                    cache_path = os.path.join(cache_root, "%s.npz" % _cache_key(cache_payload))
                     if os.path.exists(cache_path):
                         cached = _copy_cached_npz(cache_path, output_path, np)
                         if cached is not None:
@@ -275,62 +584,35 @@ def main(argv: list[str] | None = None) -> int:
                             )
                             continue
                 with contextlib.redirect_stdout(sys.stderr):
-                    result = manager.synthesize(
-                        text,
+                    audio, sample_rate = runtime.synthesize(
+                        text=text,
                         language=language,
                         emotion_tag=emotion_tag,
-                        emotion_intensity=emotion_intensity,
-                        speed_factor=speed_factor,
+                        speed_factor=float(speed_factor) if speed_factor is not None else None,
                     )
                 wall_s = time.perf_counter() - synth_t0
-                if not result.success or result.audio_data is None:
-                    _emit(
-                        protocol_stdout,
-                        {
-                            "event": "synth_result",
-                            "request_id": request_id,
-                            "success": False,
-                            "reason_code": result.reason_code,
-                            "detail": result.detail,
-                            "processing_time_s": result.processing_time_s,
-                            "wall_s": round(wall_s, 4),
-                        },
-                    )
-                    continue
-
-                np.savez(
-                    output_path,
-                    audio=np.asarray(result.audio_data, dtype=np.float32),
-                    sample_rate=np.int32(result.sample_rate),
-                )
+                os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+                np.savez(output_path, audio=np.asarray(audio, dtype=np.float32), sample_rate=np.int32(sample_rate))
                 cache_stored = False
                 if cache_allowed and cache_path:
                     try:
-                        cache_tmp = f"{cache_path}.tmp.npz"
-                        np.savez(
-                            cache_tmp,
-                            audio=np.asarray(result.audio_data, dtype=np.float32),
-                            sample_rate=np.int32(result.sample_rate),
-                        )
+                        cache_tmp = cache_path + ".tmp.npz"
+                        np.savez(cache_tmp, audio=np.asarray(audio, dtype=np.float32), sample_rate=np.int32(sample_rate))
                         os.replace(cache_tmp, cache_path)
                         _prune_cache(cache_root, max_entries=cache_max_entries)
                         cache_stored = True
                     except Exception as exc:
-                        print(
-                            f"TTS persistent worker cache store failed: {exc}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
+                        print("TTS persistent worker cache store failed: %s" % exc, file=sys.stderr, flush=True)
                 _emit(
                     protocol_stdout,
                     {
                         "event": "synth_result",
                         "request_id": request_id,
                         "success": True,
-                        "detail": result.detail,
-                        "sample_rate": int(result.sample_rate),
-                        "duration_s": float(result.duration_s),
-                        "processing_time_s": result.processing_time_s,
+                        "detail": "GPT-SoVITS synthesis completed",
+                        "sample_rate": int(sample_rate),
+                        "duration_s": float(len(audio) / sample_rate) if sample_rate > 0 else 0.0,
+                        "processing_time_s": round(wall_s, 4),
                         "wall_s": round(wall_s, 4),
                         "cache_hit": False,
                         "cache_stored": bool(cache_stored),

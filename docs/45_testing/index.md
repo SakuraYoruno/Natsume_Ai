@@ -3,9 +3,25 @@
 
 # 测试与验收目录
 
-版本：v2.71
+版本：v2.72
 维护日期：2026-08-01
 状态：当前证据
+
+## DL-05 情感语音训练与本地持久 Worker
+
+- 新候选 `Natsume_Ai_Xilian_zh_emotion_balanced_v2_20260801` 使用 `597` 条中文片段、约
+  `64.65` 分钟语料，其中非中性 `418` 条；S2 训练 8 epoch，S1 训练 10 epoch，未出现
+  OOM、NaN 或中断。候选包 SHA-256 为
+  `5e0942574cd1131c0ddcdeb5fbc6230aff49cb63dcaa2915d4ab35e16b2351ff`。
+- 发布检查已覆盖项目权重隔离和最高 epoch/step 选择，防止日文项目或其它角色误用最新中文权重。
+  独立模型 Worker 的代码边界测试同时禁止导入 `edge_client` 和 `natsume_contracts`。
+- 使用 GPT-SoVITS 自带 Python 3.9、RTX 5080/CUDA 和候选 manifest 运行真实 JSON-line IPC：
+  Worker 加载 `8.4316s`，单句合成 `3.4443s`，输出 `32000Hz / 2.52s`，随后正常 shutdown；
+  父进程 `_PersistentProcessSoVITSAdapter` 也完成第二次真实合成。这里不是 mock 或 scripted replay。
+- 六组 baseline/candidate A/B WAV 已生成且信号检查通过，但音色、自然度和情感表达仍需人工听审；
+  未经听审不会改写默认 manifest，也不会部署到另一台电脑上的 Edge。
+- Worker、数据集准备、情感语料、发布选择与相邻 TTS 合同定向回归共 `65 passed in 4.01s`；
+  PowerShell AST、Python 3.9/当前 Python 编译、JSON、文档 authority/freshness 与 diff check 通过。
 
 ## DL-04 实时陪伴与隔离启动复测
 
