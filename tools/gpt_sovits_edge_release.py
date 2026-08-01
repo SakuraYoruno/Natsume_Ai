@@ -39,6 +39,39 @@ EMOTION_REFERENCE_TAGS = {
     "EMBARRASSED": "anxious",
     "SERIOUS": "serious",
 }
+
+# Human-listened Xilian references.  These styles describe delivery only; all
+# five remain separate from the canonical self-emotion vocabulary.  The
+# explicit-love clip is used as a second same-speaker reference for the tender
+# style rather than inventing another near-duplicate runtime category.
+CURATED_ROMANCE_STYLE_REFERENCES = (
+    {
+        "voice_style": "SHY_AFFECTION",
+        "emotion_tag": "LOVING",
+        "wav_name": "xilian_00025.wav",
+    },
+    {
+        "voice_style": "FLIRTING",
+        "emotion_tag": "LOVING",
+        "wav_name": "xilian_00003.wav",
+    },
+    {
+        "voice_style": "LONGING",
+        "emotion_tag": "LOVING",
+        "wav_name": "xilian_01292.wav",
+    },
+    {
+        "voice_style": "QUIET_INTIMACY",
+        "emotion_tag": "LOVING",
+        "wav_name": "xilian_01162.wav",
+    },
+    {
+        "voice_style": "ROMANTIC_TENDER",
+        "emotion_tag": "LOVING",
+        "wav_name": "xilian_00048.wav",
+        "aux_wav_names": ("xilian_01101.wav",),
+    },
+)
 WEIGHT_DIRS = (
     ("GPT_weights_v2ProPlus", ".ckpt", "t2s"),
     ("GPT_weights_v2Pro", ".ckpt", "t2s"),
@@ -261,6 +294,71 @@ def _select_emotion_manifest_references(
     return refs
 
 
+def _select_curated_romance_references(
+    source_root: Path,
+    project: str,
+    *,
+    voice_language: str,
+    rows: list[ClipRow],
+) -> list[dict[str, Any]]:
+    """Return only complete, exact human-approved reference entries.
+
+    A project without the approved Xilian clips simply receives no romance
+    overlay.  We never substitute a similarly named or automatically labelled
+    clip because that was the source of the weak style separation in the first
+    candidate bank.
+    """
+
+    row_by_name = {row.name: row for row in rows}
+    wav_root = source_root / "logs" / project / "5-wav32k"
+    selected: list[dict[str, Any]] = []
+    for spec in CURATED_ROMANCE_STYLE_REFERENCES:
+        wav_name = str(spec["wav_name"])
+        row = row_by_name.get(wav_name)
+        wav_path = wav_root / wav_name
+        if (
+            row is None
+            or row.language != voice_language
+            or not 3.0 <= row.duration_s <= 10.0
+            or len(row.prompt_text) < 4
+            or not wav_path.is_file()
+        ):
+            continue
+
+        aux_paths: list[str] = []
+        aux_complete = True
+        for aux_name in tuple(spec.get("aux_wav_names") or ()):
+            aux_row = row_by_name.get(str(aux_name))
+            aux_path = wav_root / str(aux_name)
+            if (
+                aux_row is None
+                or aux_row.language != voice_language
+                or not 3.0 <= aux_row.duration_s <= 10.0
+                or not aux_path.is_file()
+            ):
+                aux_complete = False
+                break
+            aux_paths.append(
+                (Path("logs") / project / "5-wav32k" / str(aux_name)).as_posix()
+            )
+        if not aux_complete:
+            continue
+
+        item: dict[str, Any] = {
+            "voice_style": str(spec["voice_style"]),
+            "emotion_tag": str(spec["emotion_tag"]),
+            "audio_path": (Path("logs") / project / "5-wav32k" / wav_name).as_posix(),
+            "prompt_text": row.prompt_text,
+            "prompt_lang": voice_language,
+            "duration_s": row.duration_s,
+            "curation": "HUMAN_LISTENING_APPROVED",
+        }
+        if aux_paths:
+            item["aux_audio_paths"] = aux_paths
+        selected.append(item)
+    return selected
+
+
 def inspect_project(source_root: Path, project: str) -> dict[str, Any]:
     rows = _read_clip_rows(source_root, project)
     counts = _language_counts(rows)
@@ -350,14 +448,30 @@ def package_release(
                 for index, row in enumerate(refs)
             ]
 
+        manifest_refs.extend(
+            _select_curated_romance_references(
+                source_root,
+                project,
+                voice_language=voice_language,
+                rows=rows,
+            )
+        )
+
         for item in manifest_refs:
-            rel_path = str(item.get("audio_path") or "").strip()
-            if not rel_path:
-                continue
-            src = source_root / rel_path
-            dst = stage / rel_path
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
+            paths = [
+                str(item.get("audio_path") or "").strip(),
+                *[
+                    str(path or "").strip()
+                    for path in list(item.get("aux_audio_paths") or [])
+                ],
+            ]
+            for rel_path in paths:
+                if not rel_path:
+                    continue
+                src = source_root / rel_path
+                dst = stage / rel_path
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
 
         authorization_path = source_root / "logs" / project / "source_authorization.json"
         source_authorization = None

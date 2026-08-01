@@ -27,7 +27,9 @@ def test_worker_resolves_manifest_weights_and_emotion_reference(tmp_path: Path) 
     gpt = tmp_path / "GPT_weights_v2ProPlus" / "voice-e10.ckpt"
     sovits = tmp_path / "SoVITS_weights_v2ProPlus" / "voice_e8_s2400.pth"
     reference = tmp_path / "refs" / "playful.wav"
-    for path in (gpt, sovits, reference):
+    romantic = tmp_path / "refs" / "romantic.wav"
+    romantic_aux = tmp_path / "refs" / "romantic-direct.wav"
+    for path in (gpt, sovits, reference, romantic, romantic_aux):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"stub")
     manifest_path = tmp_path / "voice.json"
@@ -44,6 +46,14 @@ def test_worker_resolves_manifest_weights_and_emotion_reference(tmp_path: Path) 
                         "emotion_tag": "PLAYFUL",
                         "audio_path": reference.relative_to(tmp_path).as_posix(),
                         "prompt_text": "被我抓到了吧。",
+                        "prompt_lang": "zh",
+                    },
+                    {
+                        "voice_style": "ROMANTIC_TENDER",
+                        "emotion_tag": "LOVING",
+                        "audio_path": romantic.relative_to(tmp_path).as_posix(),
+                        "aux_audio_paths": [romantic_aux.relative_to(tmp_path).as_posix()],
+                        "prompt_text": "听着就让人心跳。",
                         "prompt_lang": "zh",
                     }
                 ],
@@ -64,7 +74,17 @@ def test_worker_resolves_manifest_weights_and_emotion_reference(tmp_path: Path) 
     )
 
     assert worker._select_reference(bank, "PLAYFUL")["audio_path"] == str(reference)
-    assert worker._select_reference(bank, "UNKNOWN")["audio_path"] == str(reference)
+    selected = worker._select_reference(
+        bank,
+        "PLAYFUL",
+        voice_profile="ROMANTIC_TENDER",
+    )
+    assert selected["audio_path"] == str(romantic)
+    assert selected["aux_audio_paths"] == [str(romantic_aux)]
+    assert worker._select_reference(bank, "UNKNOWN")["audio_path"] in {
+        str(reference),
+        str(romantic),
+    }
 
 
 def test_worker_refuses_manifest_language_mismatch(tmp_path: Path) -> None:

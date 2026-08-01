@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.45
+版本：v3.46
 
 核对日期：2026-08-01
 
@@ -13,11 +13,12 @@
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
-本地 TTS 推理边界现为：`ExpressionPlan/Edge request → Python 3.11 parent adapter → JSON-line IPC →
-Python 3.9 standalone GPT-SoVITS Worker → project-bound manifest/weights/reference → NPZ audio → parent`。
-模型进程不读取 Host/Life/Relationship，也不导入应用合同；情感标签只选择 manifest 中的参考音频和语速，
-不能回写七海 self-affect。候选已在本机真实 CUDA 上完成该链路，但尚未写入远端 Edge、播放设备或 Avatar，
-所以这不是三模态 delivery receipt。
+本地 TTS 推理边界现为：`ExpressionPlan.voice_style → Host voice_profile（同时保留 self emotion_tag）→
+Edge Voice RPC → Python 3.11 parent adapter → JSON-line IPC → Python 3.9 standalone GPT-SoVITS Worker →
+voice_profile 优先 / emotion_tag 回退的 project-bound reference → NPZ audio → parent`。模型进程不读取
+Host/Life/Relationship，也不导入应用合同；五种恋爱风格只改变表达 reference 与有界韵律，不创建或回写
+七海 self-affect。人工 reference 已在本机真实 CUDA 上完成五组 A/B，但尚未写入远端 Edge、播放设备或
+Avatar，所以这不是三模态 delivery receipt。
 
 普通对话当前是轻量数据流：`Chat/Gateway text → Cortex context → RealtimeCompanion →
 AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、

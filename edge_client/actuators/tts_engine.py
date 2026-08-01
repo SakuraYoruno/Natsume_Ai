@@ -69,6 +69,7 @@ class _TtsReference:
     prompt_text: str = ""
     prompt_lang: str | None = None
     samples: int = 0
+    aux_audio_paths: tuple[str, ...] = ()
 
 
 class TtsState(str, Enum):
@@ -958,6 +959,7 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                voice_profile=voice_profile,
             )
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
@@ -1028,6 +1030,7 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        voice_profile: str | None,
     ) -> tuple[Any, int]:
         try:
             return _synthesize_audio(
@@ -1037,6 +1040,7 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                voice_profile=voice_profile,
                 timeout_s=self._config.synth_timeout_s,
             )
         except Exception as exc:
@@ -1058,6 +1062,7 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
                         detail_prefix="recovered via fresh subprocess after reload failure"
@@ -1074,6 +1079,7 @@ class SoVITSModelManager:
                     emotion_tag=emotion_tag,
                     emotion_intensity=emotion_intensity,
                     speed_factor=speed_factor,
+                    voice_profile=voice_profile,
                     timeout_s=self._config.synth_timeout_s,
                 )
             except Exception as retry_exc:
@@ -1087,6 +1093,7 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
                         detail_prefix="recovered via fresh subprocess after retry failure"
@@ -1133,6 +1140,7 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        voice_profile: str | None,
     ) -> tuple[Any, int]:
         return _run_tts_fresh_process(
             config=self._config,
@@ -1141,6 +1149,7 @@ class SoVITSModelManager:
             emotion_tag=emotion_tag,
             emotion_intensity=emotion_intensity,
             speed_factor=speed_factor,
+            voice_profile=voice_profile,
         )
 
     @staticmethod
@@ -1572,7 +1581,11 @@ def make_sovits_synthesizer(
     def _synthesize(speak_event: dict[str, Any]) -> dict[str, Any]:
         text = str(speak_event.get("text") or "")
         emotion_tag = str(speak_event.get("emotion_tag") or "")
-        voice_profile = str(speak_event.get("voice_profile") or "default")
+        voice_profile = str(
+            speak_event.get("voice_profile")
+            or speak_event.get("style_note")
+            or "default"
+        )
         lang_hint = str(speak_event.get("lang_hint") or "").strip() or None
         # M26-I：透传 emotion_intensity
         raw_intensity = speak_event.get("emotion_intensity")
@@ -1898,11 +1911,16 @@ class _ModernSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
 
         text_lang = self._normalize_language(language or self._default_language)
-        reference = _select_tts_reference(self._reference_bank, emotion_tag=emotion)
+        reference = _select_tts_reference(
+            self._reference_bank,
+            emotion_tag=emotion,
+            voice_profile=voice_profile,
+        )
         if reference is None:
             raise RuntimeError("GPT-SoVITS reference bank is empty.")
         prompt_lang = self._normalize_language(reference.prompt_lang or self._default_language)
@@ -1912,7 +1930,7 @@ class _ModernSoVITSAdapter:
             "text": text,
             "text_lang": text_lang,
             "ref_audio_path": reference.audio_path,
-            "aux_ref_audio_paths": [],
+            "aux_ref_audio_paths": list(reference.aux_audio_paths),
             "prompt_text": prompt_text,
             "prompt_lang": prompt_lang if prompt_text else text_lang,
             "seed": 42,
@@ -1987,6 +2005,7 @@ class _FreshProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         audio, sample_rate = _run_tts_fresh_process(
             config=self._config,
@@ -1998,6 +2017,7 @@ class _FreshProcessSoVITSAdapter:
                 energy_factor=energy_factor,
             ),
             speed_factor=speed_factor,
+            voice_profile=voice_profile,
         )
         return {
             "audio": audio,
@@ -2045,6 +2065,7 @@ class _PersistentProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
 
@@ -2058,6 +2079,7 @@ class _PersistentProcessSoVITSAdapter:
                 "text": text,
                 "language": language,
                 "emotion_tag": emotion,
+                "voice_profile": voice_profile,
                 "emotion_intensity": _infer_emotion_intensity_from_prosody(
                     speed_factor=speed_factor,
                     energy_factor=energy_factor,
@@ -2466,6 +2488,7 @@ def _run_tts_fresh_process(
     emotion_tag: str | None,
     emotion_intensity: float | None,
     speed_factor: float | None = None,
+    voice_profile: str | None = None,
 ) -> tuple[Any, int]:
     import numpy as np
 
@@ -2498,6 +2521,8 @@ def _run_tts_fresh_process(
         cmd.extend(["--voice-bank-path", str(config.voice_bank_path)])
     if emotion_tag:
         cmd.extend(["--emotion-tag", str(emotion_tag)])
+    if voice_profile:
+        cmd.extend(["--voice-profile", str(voice_profile)])
     if emotion_intensity is not None:
         cmd.extend(["--emotion-intensity", str(float(emotion_intensity))])
     if speed_factor is not None:
@@ -2860,15 +2885,36 @@ def _load_tts_manifest_references(
         audio_path = os.path.normpath(audio_path)
         if not os.path.isfile(audio_path):
             continue
-        key = _normalize_tts_emotion_key(item.get("emotion_tag")) or "NEUTRAL"
+        voice_style_key = _normalize_tts_emotion_key(item.get("voice_style"))
+        emotion_key = _normalize_tts_emotion_key(item.get("emotion_tag"))
+        if not voice_style_key and not emotion_key:
+            emotion_key = "NEUTRAL"
+        aux_audio_paths: list[str] = []
+        raw_aux = item.get("aux_audio_paths")
+        if isinstance(raw_aux, list):
+            for raw_aux_path in raw_aux[:4]:
+                resolved_aux = str(raw_aux_path or "").strip()
+                if not resolved_aux:
+                    continue
+                resolved_aux = (
+                    resolved_aux
+                    if os.path.isabs(resolved_aux)
+                    else os.path.join(model_root, resolved_aux)
+                )
+                resolved_aux = os.path.normpath(resolved_aux)
+                if os.path.isfile(resolved_aux) and resolved_aux != audio_path:
+                    aux_audio_paths.append(resolved_aux)
         reference = _TtsReference(
             audio_path=audio_path,
             prompt_text=str(item.get("prompt_text") or "").strip(),
             prompt_lang=_normalize_tts_language(str(item.get("prompt_lang") or "")),
+            aux_audio_paths=tuple(aux_audio_paths),
         )
-        out.setdefault(key, reference)
-        if key == "NEUTRAL":
-            out.setdefault("DEFAULT", reference)
+        for key in (voice_style_key, emotion_key):
+            if key:
+                out.setdefault(key, reference)
+                if key == "NEUTRAL":
+                    out.setdefault("DEFAULT", reference)
     return out
 
 
@@ -2881,10 +2927,12 @@ def _select_tts_reference(
     reference_bank: dict[str, _TtsReference],
     *,
     emotion_tag: str | None,
+    voice_profile: str | None = None,
 ) -> _TtsReference | None:
     if not reference_bank:
         return None
-    key = _normalize_tts_emotion_key(emotion_tag)
+    profile_key = _normalize_tts_emotion_key(voice_profile)
+    emotion_key = _normalize_tts_emotion_key(emotion_tag)
     aliases = {
         "COMFORT": "CALM",
         "SOOTHING": "CALM",
@@ -2897,7 +2945,14 @@ def _select_tts_reference(
         "SADNESS": "SAD",
         "EXCITEMENT": "EXCITED",
     }
-    for candidate in (key, aliases.get(key, ""), "NEUTRAL", "DEFAULT"):
+    for candidate in (
+        profile_key,
+        aliases.get(profile_key, ""),
+        emotion_key,
+        aliases.get(emotion_key, ""),
+        "NEUTRAL",
+        "DEFAULT",
+    ):
         if candidate and candidate in reference_bank:
             return reference_bank[candidate]
     return next(iter(reference_bank.values()))
@@ -3025,6 +3080,7 @@ def _synthesize_audio(
     emotion_tag: str | None,
     emotion_intensity: float | None = None,
     speed_factor: float | None = None,
+    voice_profile: str | None = None,
     timeout_s: float,
 ) -> tuple[Any, int]:
     """Run synthesis on model. Returns (audio_ndarray, sample_rate).
@@ -3057,6 +3113,7 @@ def _synthesize_audio(
             # M28-S：真正传递 emotion_intensity 映射后的参数
             speed_factor=speed_factor,
             energy_factor=energy_factor,
+            voice_profile=voice_profile,
         )
     except Exception as exc:
         message = str(exc or "")

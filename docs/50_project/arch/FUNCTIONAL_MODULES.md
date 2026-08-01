@@ -3,18 +3,18 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.60
+版本：v2.61
 核对日期：2026-08-01
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> 语音模块现分成两个清晰责任：Edge 父进程负责 `TtsConfig`、请求/播放与 ExpressionPlan 绑定；
-> 独立 GPT-SoVITS Worker 只在模型 Python 中加载 project-bound 权重、选择情感参考并返回音频。
-> 训练/发布工具已产出 `597` 条情感均衡中文候选（GPT e10、SoVITS e8/s2400、21 references），
-> 并禁止按全局 mtime 误选其它项目权重。本机真实 CUDA 推理已通过，默认模型提升、人工听审和远端
-> Edge/TTS/Avatar 验收仍未完成。
+> 语音模块现分成两个清晰责任：Edge 父进程负责 `TtsConfig`、ExpressionPlan、RPC、请求与播放；
+> 独立 GPT-SoVITS Worker 只在模型 Python 中加载 project-bound 权重和 reference bank 并返回音频。
+> `voice_profile` 优先选择表达风格，`emotion_tag` 只作兼容回退，因而羞涩、调情、想念、安静亲密和
+> 温柔恋爱不会被压成同一个 `LOVING`，也不会反向创建 self-emotion。五类人工恋爱 reference 的真实
+> CUDA A/B 已生成；首轮自动标签候选因差异不足未提升，默认模型和远端 Edge 仍未改动。
 
 > RealtimeCompanion 模块现拥有自己的 catalog scene、provider/model/timeout lane 和紧凑 native prompt；
 > `chat_retrieval_helpers` 只给可选语义 embedding 350ms 默认等待预算，并把冷加载移出 ASGI event loop。

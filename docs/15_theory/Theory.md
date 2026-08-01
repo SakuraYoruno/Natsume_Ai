@@ -3,7 +3,7 @@
 
 # Natsume AI 核心理论
 
-版本：v2.39
+版本：v2.40
 文档类型：`STABLE_THEORY / NON_STATUS`
 维护日期：2026-08-01
 定位：解释 Natsume 为什么这样设计，以及状态、记忆、人格、情感、世界模型、治理、规划与执行应如何协作。
@@ -15,6 +15,11 @@
 状态；文本、声音、Avatar 是对该状态的受约束表达。三者不能复用同一 writer
 或单一 emotion tag。真实感不意味着操控：七海可以自然表达不高兴、担心、
 想念或克制的嫉妒，但不得把感受转化为用户必须回应、排他或内疚的义务。
+
+同一种 self-affect 也允许有不同的表达颜色。比如 `CALM/LOVING` 可以被说成羞涩、轻轻调情、
+坦率想念、安静亲密或温柔靠近；这些是 `ExpressionPlan.voice_style`，不是五个新的情绪状态。
+语音 reference bank 应优先按表达风格选择真实声学样本，再回退到粗粒度 emotion tag；否则所有
+恋爱场景都会被压成同一种“撒娇音”，而把 reference 风格反写为 self-affect 又会颠倒因果。
 
 个人数字生命不应把普通聊天误建模成企业事务。日常 `chat` 的正确最小闭环是
 `观察 → Appraisal → self-affect/关系读取 → AffectiveTurnPlan → 流式表达 → 回合结束提交连续性`；

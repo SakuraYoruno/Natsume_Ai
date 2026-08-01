@@ -82,6 +82,41 @@ class TestTtsIntensityFix:
         assert abs(captured.get("speed_factor", 0) - 1.0) < 0.01
         assert abs(captured.get("energy_factor", 0) - 1.0) < 0.01
 
+    def test_voice_profile_is_forwarded_without_rewriting_emotion(self):
+        from edge_client.actuators.tts_engine import _synthesize_audio
+
+        captured = {}
+        mock_model = self._make_mock_model(captured)
+
+        _synthesize_audio(
+            model=mock_model,
+            text="我只是有一点想你。",
+            language="zh",
+            emotion_tag="CALM",
+            voice_profile="LONGING",
+            emotion_intensity=0.5,
+            timeout_s=10.0,
+        )
+
+        assert captured["emotion"] == "CALM"
+        assert captured["voice_profile"] == "LONGING"
+
+    def test_voice_profile_reference_wins_over_generic_emotion_reference(self):
+        from edge_client.actuators.tts_engine import (
+            _TtsReference,
+            _select_tts_reference,
+        )
+
+        calm = _TtsReference(audio_path="calm.wav")
+        longing = _TtsReference(audio_path="longing.wav")
+        selected = _select_tts_reference(
+            {"CALM": calm, "LONGING": longing},
+            emotion_tag="CALM",
+            voice_profile="LONGING",
+        )
+
+        assert selected is longing
+
     def test_emotion_prosody_can_be_disabled(self, monkeypatch):
         from edge_client.actuators.tts_engine import _synthesize_audio
 

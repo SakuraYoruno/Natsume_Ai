@@ -191,6 +191,12 @@ def build_sentence_expression_delivery(
             "energy": _float(expression.get("voice_energy"), default=0.5, minimum=0.0, maximum=1.0),
             "pitch": _float(expression.get("voice_pitch"), default=0.0, minimum=-1.0, maximum=1.0),
             "pause_ms": _integer(expression.get("voice_pause_ms"), field_name="voice_pause_ms"),
+            # ``voice_profile`` is the machine-readable reference-bank key.
+            # It deliberately stays separate from ``emotion_tag``: a shy or
+            # longing delivery does not manufacture a new canonical emotion.
+            "voice_profile": _text(
+                expression.get("voice_style"), field_name="voice_style", limit=64
+            ).upper(),
             "style_note": _text(expression.get("voice_style"), field_name="voice_style", limit=64),
             "companion_profile_id": scope["companion_profile_id"],
             "companion_profile_digest": scope["companion_profile_digest"],

@@ -3,11 +3,23 @@
 
 # 测试与验收目录
 
-版本：v2.72
+版本：v2.73
 维护日期：2026-08-01
 状态：当前证据
 
 ## DL-05 情感语音训练与本地持久 Worker
+
+- 首轮六组情感均衡 A/B 经人工试听后被判定为差异不足，候选没有提升为默认模型；自动关键词
+  emotion label 只保留为训练采样线索，不再作为 reference 风格质量证明。
+- 用户已逐段试听并确认六个恋爱原始片段。发布工具把它们固定为五个表达风格：
+  `ROMANTIC_TENDER / SHY_AFFECTION / FLIRTING / LONGING / QUIET_INTIMACY`；第五类使用一条
+  heartbeat/support 主参考和一条 explicit-affection 辅助参考。manifest 同时保留 `LOVING`
+  emotion fallback，但 Worker 优先按 `voice_profile` 选择人工参考。
+- 真实父进程 → Python 3.9 Worker → CUDA 链已生成五组同文本 A/B，共 10 个 `32000Hz` WAV。
+  Worker 加载 `9.3831s`；热态单句为 `1.0452～1.5023s`，每组通用/风格输出 SHA-256 均不同。
+  reference 包 SHA-256 为
+  `cb3f952b6e02ad4648400117df0a68b7f1df6e1aeb0dfbddd09e9978552e58f7`。试听文件位于忽略目录
+  `artifacts/voice_eval/romance-v1/samples/`，不作为默认提升或远端播放回执。
 
 - 新候选 `Natsume_Ai_Xilian_zh_emotion_balanced_v2_20260801` 使用 `597` 条中文片段、约
   `64.65` 分钟语料，其中非中性 `418` 条；S2 训练 8 epoch，S1 训练 10 epoch，未出现

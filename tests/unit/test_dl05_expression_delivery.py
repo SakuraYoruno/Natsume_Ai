@@ -89,6 +89,8 @@ def test_sentence_expression_protocol_is_paired_and_has_no_edge_applied_claim() 
     assert len({item.self_affect_revision for item in intents}) == 1
     assert all(item.self_affect_revision == 31 for item in intents)
     assert intents[0].payload["edge_action"] == "speak"
+    assert intents[0].payload["voice_profile"] == plan["expression_plan"]["voice_style"]
+    assert intents[0].payload["emotion_tag"] == plan["self_emotion_tag"]
     assert intents[1].payload["edge_action"] == "set_expression"
     assert intents[1].payload["previous_expression"] == "SOFT_COMFORT"
     assert all(item.status == "HOST_PROTOCOL_STAGED" for item in receipts)

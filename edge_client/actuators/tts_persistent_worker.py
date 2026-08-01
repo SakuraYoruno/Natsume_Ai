@@ -210,8 +210,8 @@ def _load_reference_bank(
     ref_audio_path: str,
     ref_text: str,
     language: str,
-) -> dict[str, dict[str, str]]:
-    bank: dict[str, dict[str, str]] = {}
+) -> dict[str, dict[str, Any]]:
+    bank: dict[str, dict[str, Any]] = {}
     raw_refs = manifest.get("references")
     if isinstance(raw_refs, list):
         for item in raw_refs:
@@ -220,15 +220,26 @@ def _load_reference_bank(
             audio_path = _resolve_model_path(model_root, item.get("audio_path"))
             if not os.path.isfile(audio_path):
                 continue
-            tag = _normalize_emotion(item.get("emotion_tag")) or "NEUTRAL"
-            bank.setdefault(
-                tag,
-                {
-                    "audio_path": audio_path,
-                    "prompt_text": str(item.get("prompt_text") or "").strip(),
-                    "prompt_lang": _normalize_language(item.get("prompt_lang") or language),
-                },
-            )
+            voice_style = _normalize_emotion(item.get("voice_style"))
+            emotion_tag = _normalize_emotion(item.get("emotion_tag"))
+            if not voice_style and not emotion_tag:
+                emotion_tag = "NEUTRAL"
+            aux_audio_paths = []
+            raw_aux = item.get("aux_audio_paths")
+            if isinstance(raw_aux, list):
+                for raw_path in raw_aux[:4]:
+                    resolved = _resolve_model_path(model_root, raw_path)
+                    if resolved and os.path.isfile(resolved) and resolved != audio_path:
+                        aux_audio_paths.append(resolved)
+            reference = {
+                "audio_path": audio_path,
+                "aux_audio_paths": aux_audio_paths,
+                "prompt_text": str(item.get("prompt_text") or "").strip(),
+                "prompt_lang": _normalize_language(item.get("prompt_lang") or language),
+            }
+            for key in (voice_style, emotion_tag):
+                if key:
+                    bank.setdefault(key, reference)
     explicit_audio = _resolve_model_path(model_root, ref_audio_path)
     if explicit_audio and os.path.isfile(explicit_audio):
         explicit = {
@@ -290,9 +301,22 @@ def _discover_reference(*, model_root: str, language: str) -> dict[str, str] | N
     }
 
 
-def _select_reference(bank: dict[str, dict[str, str]], emotion_tag: Any) -> dict[str, str]:
-    key = _normalize_emotion(emotion_tag)
-    for candidate in (key, _EMOTION_ALIASES.get(key, ""), "NEUTRAL", "DEFAULT"):
+def _select_reference(
+    bank: dict[str, dict[str, Any]],
+    emotion_tag: Any,
+    *,
+    voice_profile: Any = None,
+) -> dict[str, Any]:
+    profile_key = _normalize_emotion(voice_profile)
+    emotion_key = _normalize_emotion(emotion_tag)
+    for candidate in (
+        profile_key,
+        _EMOTION_ALIASES.get(profile_key, ""),
+        emotion_key,
+        _EMOTION_ALIASES.get(emotion_key, ""),
+        "NEUTRAL",
+        "DEFAULT",
+    ):
         if candidate and candidate in bank:
             return bank[candidate]
     return next(iter(bank.values()))
@@ -358,18 +382,23 @@ class _DirectSoVITSRuntime:
         text: str,
         language: str,
         emotion_tag: str | None,
+        voice_profile: str | None,
         speed_factor: float | None,
     ) -> tuple[Any, int]:
         import numpy as np
 
         if not str(text or "").strip():
             raise ValueError("text is empty")
-        reference = _select_reference(self.references, emotion_tag)
+        reference = _select_reference(
+            self.references,
+            emotion_tag,
+            voice_profile=voice_profile,
+        )
         inputs = {
             "text": str(text),
             "text_lang": _normalize_language(language or self.language),
             "ref_audio_path": reference["audio_path"],
-            "aux_ref_audio_paths": [],
+            "aux_ref_audio_paths": list(reference.get("aux_audio_paths") or []),
             "prompt_text": reference["prompt_text"],
             "prompt_lang": _normalize_language(reference["prompt_lang"]),
             "seed": 42,
@@ -484,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
                         text=warmup_text,
                         language=str(args.language or "zh"),
                         emotion_tag="NEUTRAL",
+                        voice_profile=None,
                         speed_factor=None,
                     )
                 warmup_success = bool(warmup_audio is not None and len(warmup_audio) > 0)
@@ -551,6 +581,7 @@ def main(argv: list[str] | None = None) -> int:
                 text = str(request.get("text") or "")
                 language = str(request.get("language") or args.language or "zh")
                 emotion_tag = str(request.get("emotion_tag") or "").strip() or None
+                voice_profile = str(request.get("voice_profile") or "").strip() or None
                 speed_factor = request.get("speed_factor")
                 cache_path = None
                 cache_allowed = bool(cache_enabled and text.strip() and len(text.strip()) <= cache_max_text_chars)
@@ -560,6 +591,7 @@ def main(argv: list[str] | None = None) -> int:
                         "language": language,
                         "text": text,
                         "emotion_tag": emotion_tag,
+                        "voice_profile": voice_profile,
                         "emotion_intensity": request.get("emotion_intensity"),
                         "speed_factor": speed_factor,
                         "voice_bank_path": str(args.voice_bank_path or ""),
@@ -588,6 +620,7 @@ def main(argv: list[str] | None = None) -> int:
                         text=text,
                         language=language,
                         emotion_tag=emotion_tag,
+                        voice_profile=voice_profile,
                         speed_factor=float(speed_factor) if speed_factor is not None else None,
                     )
                 wall_s = time.perf_counter() - synth_t0

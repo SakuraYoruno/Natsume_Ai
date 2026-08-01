@@ -22,6 +22,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ref-text", default="")
     parser.add_argument("--voice-bank-path", default="")
     parser.add_argument("--emotion-tag", default="")
+    parser.add_argument("--voice-profile", default="")
     parser.add_argument("--emotion-intensity", type=float, default=None)
     parser.add_argument("--speed-factor", type=float, default=None)
     return parser
@@ -52,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         str(args.text),
         language=str(args.text_language or "zh"),
         emotion_tag=str(args.emotion_tag or "").strip() or None,
+        voice_profile=str(args.voice_profile or "").strip() or None,
         emotion_intensity=args.emotion_intensity,
         speed_factor=args.speed_factor,
     )

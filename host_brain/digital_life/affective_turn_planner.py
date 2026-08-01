@@ -58,6 +58,22 @@ _DIRECT_REPAIRABLE_APPRAISALS = frozenset(
     }
 )
 
+# These are expression intents, not new self-affect states.  Surface already
+# uses these task modes to distinguish relational scenes; the voice layer may
+# therefore choose a more precise delivery colour without rewriting Natsume's
+# canonical emotion or relationship state.
+_ROMANTIC_VOICE_STYLE_BY_TASK_MODE = {
+    "affection": "SHY_AFFECTION",
+    "ambiguous_affection": "SHY_AFFECTION",
+    "receive_affection_lightly": "SHY_AFFECTION",
+    "jealousy_low_pressure": "FLIRTING",
+    "lover_affection": "ROMANTIC_TENDER",
+    "lover_presence": "ROMANTIC_TENDER",
+    "return_affection_concretely": "ROMANTIC_TENDER",
+    "miss_you": "LONGING",
+    "lover_low_energy": "QUIET_INTIMACY",
+}
+
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
@@ -335,6 +351,7 @@ def build_affective_turn_guidance(
         act_kind=act_kind,
         emotion_tag=self_tag,
         regulation_mode=regulation_mode,
+        task_mode=mode,
     )
     avatar_expression = _avatar_expression(
         act_kind=act_kind,
@@ -595,7 +612,13 @@ def _text_pacing(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
     return "STEADY"
 
 
-def _voice_style(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> str:
+def _voice_style(
+    *,
+    act_kind: str,
+    emotion_tag: str,
+    regulation_mode: str,
+    task_mode: str = "",
+) -> str:
     if act_kind in {"GIVE_SPACE", "SILENCE"}:
         return "QUIET_PRESENCE"
     if act_kind == "REPAIR":
@@ -612,7 +635,12 @@ def _voice_style(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
         return "CONTAINED_JEALOUSY"
     if emotion_tag == "SAD":
         return "CONTAINED_HURT"
-    if act_kind == "COMFORT" or emotion_tag == "SAD":
+    romantic_style = _ROMANTIC_VOICE_STYLE_BY_TASK_MODE.get(
+        str(task_mode or "").strip().lower()
+    )
+    if romantic_style:
+        return romantic_style
+    if act_kind == "COMFORT":
         return "SOFT_COMFORT"
     if act_kind == "PLAY" or emotion_tag == "HAPPY":
         return "SHARED_JOY"
@@ -702,6 +730,36 @@ def _expression_controls(
             "voice_pause_ms": 80, "avatar_gaze": "OPEN",
             "avatar_posture": "LIGHT", "avatar_transition_ms": 200,
             "avatar_behavior": "SHARED_JOY",
+        },
+        "ROMANTIC_TENDER": {
+            "voice_rate": 0.92, "voice_energy": 0.46, "voice_pitch": 0.08,
+            "voice_pause_ms": 180, "avatar_gaze": "SOFT",
+            "avatar_posture": "OPEN_GENTLE", "avatar_transition_ms": 320,
+            "avatar_behavior": "ROMANTIC_TENDER",
+        },
+        "SHY_AFFECTION": {
+            "voice_rate": 0.9, "voice_energy": 0.4, "voice_pitch": 0.12,
+            "voice_pause_ms": 210, "avatar_gaze": "AVERTED",
+            "avatar_posture": "CONTAINED", "avatar_transition_ms": 300,
+            "avatar_behavior": "SHY_AFFECTION",
+        },
+        "FLIRTING": {
+            "voice_rate": 1.05, "voice_energy": 0.66, "voice_pitch": 0.15,
+            "voice_pause_ms": 95, "avatar_gaze": "OPEN",
+            "avatar_posture": "LIGHT", "avatar_transition_ms": 210,
+            "avatar_behavior": "FLIRTING",
+        },
+        "LONGING": {
+            "voice_rate": 0.85, "voice_energy": 0.36, "voice_pitch": -0.04,
+            "voice_pause_ms": 280, "avatar_gaze": "SOFT",
+            "avatar_posture": "OPEN_GENTLE", "avatar_transition_ms": 380,
+            "avatar_behavior": "LONGING",
+        },
+        "QUIET_INTIMACY": {
+            "voice_rate": 0.82, "voice_energy": 0.28, "voice_pitch": -0.08,
+            "voice_pause_ms": 340, "avatar_gaze": "SOFT",
+            "avatar_posture": "STILL", "avatar_transition_ms": 430,
+            "avatar_behavior": "QUIET_INTIMACY",
         },
         "STEADY_COMPANION": {
             "voice_rate": 1.0, "voice_energy": 0.5, "voice_pitch": 0.0,
@@ -814,14 +872,26 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
 
 
 def _style_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
+    voice_style = plan.expression_plan.voice_style
+    romantic_anchor = {
+        "ROMANTIC_TENDER": "亲近要落在具体的在意里，温柔但不堆甜腻称呼。",
+        "SHY_AFFECTION": "可以先躲一下、嘴硬一下，再自然露出一点喜欢；不要演成夸张结巴。",
+        "FLIRTING": "轻快地逗一下并给对方接话空间，暧昧但不油腻、不占有。",
+        "LONGING": "想念可以坦率，但不能变成催回复、索取安抚或要求对方证明关系。",
+        "QUIET_INTIMACY": "像靠近一点低声陪着，句子短、留白自然，不用连续追问填满安静。",
+    }.get(voice_style)
     pacing = plan.expression_plan.text_pacing
     if pacing == "SPARSE":
-        return ("节奏留白，句子短一些；克制不是冷掉，更不是消失。",)
+        base = "节奏留白，句子短一些；克制不是冷掉，更不是消失。"
+        return (base, romantic_anchor) if romantic_anchor else (base,)
     if pacing == "SOFT":
-        return ("语气放轻，少说教、少追问，先让对方省一点力。",)
+        base = "语气放轻，少说教、少追问，先让对方省一点力。"
+        return (base, romantic_anchor) if romantic_anchor else (base,)
     if pacing == "BRISK":
-        return ("节奏可以亮一点，有一点自然的开心或小得意，但别用夸张符号硬撑。",)
-    return ("节奏稳，先回应当前问题；技术内容保持准确，七海的质感留在措辞里。",)
+        base = "节奏可以亮一点，有一点自然的开心或小得意，但别用夸张符号硬撑。"
+        return (base, romantic_anchor) if romantic_anchor else (base,)
+    base = "节奏稳，先回应当前问题；技术内容保持准确，七海的质感留在措辞里。"
+    return (base, romantic_anchor) if romantic_anchor else (base,)
 
 
 __all__ = [
