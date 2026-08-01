@@ -384,6 +384,8 @@ class _DirectSoVITSRuntime:
         emotion_tag: str | None,
         voice_profile: str | None,
         speed_factor: float | None,
+        energy_factor: float | None,
+        pitch_semitones: float | None,
     ) -> tuple[Any, int]:
         import numpy as np
 
@@ -429,7 +431,40 @@ class _DirectSoVITSRuntime:
             chunks, sample_rate = _run(fallback)
         if not chunks:
             raise RuntimeError("GPT-SoVITS produced empty audio")
-        return np.concatenate(chunks), sample_rate
+        audio = _apply_synthesized_prosody(
+            np.concatenate(chunks),
+            sample_rate,
+            energy_factor=energy_factor,
+            pitch_semitones=pitch_semitones,
+        )
+        return audio, sample_rate
+
+
+def _apply_synthesized_prosody(
+    audio_data: Any,
+    sample_rate: int,
+    *,
+    energy_factor: float | None,
+    pitch_semitones: float | None,
+) -> Any:
+    import numpy as np
+
+    audio = np.asarray(audio_data, dtype=np.float32)
+    pitch = max(-2.0, min(2.0, float(pitch_semitones or 0.0)))
+    if abs(pitch) >= 0.01:
+        try:
+            import librosa
+        except ImportError:
+            print("TTS pitch requested but librosa is unavailable", file=sys.stderr, flush=True)
+        else:
+            audio = np.asarray(
+                librosa.effects.pitch_shift(audio, sr=max(1, int(sample_rate)), n_steps=pitch),
+                dtype=np.float32,
+            )
+    gain = float(energy_factor if energy_factor is not None else 1.0)
+    if abs(gain - 1.0) >= 0.001:
+        audio = np.clip(audio * gain, -0.98, 0.98).astype(np.float32, copy=False)
+    return audio
 
 
 def _cache_key(payload: dict[str, Any]) -> str:
@@ -515,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
                         emotion_tag="NEUTRAL",
                         voice_profile=None,
                         speed_factor=None,
+                        energy_factor=None,
+                        pitch_semitones=None,
                     )
                 warmup_success = bool(warmup_audio is not None and len(warmup_audio) > 0)
                 warmup_detail = "warmup synthesized"
@@ -583,6 +620,8 @@ def main(argv: list[str] | None = None) -> int:
                 emotion_tag = str(request.get("emotion_tag") or "").strip() or None
                 voice_profile = str(request.get("voice_profile") or "").strip() or None
                 speed_factor = request.get("speed_factor")
+                energy_factor = request.get("energy_factor")
+                pitch_semitones = request.get("pitch_semitones")
                 cache_path = None
                 cache_allowed = bool(cache_enabled and text.strip() and len(text.strip()) <= cache_max_text_chars)
                 if cache_allowed:
@@ -594,6 +633,8 @@ def main(argv: list[str] | None = None) -> int:
                         "voice_profile": voice_profile,
                         "emotion_intensity": request.get("emotion_intensity"),
                         "speed_factor": speed_factor,
+                        "energy_factor": energy_factor,
+                        "pitch_semitones": pitch_semitones,
                         "voice_bank_path": str(args.voice_bank_path or ""),
                     }
                     cache_path = os.path.join(cache_root, "%s.npz" % _cache_key(cache_payload))
@@ -622,6 +663,8 @@ def main(argv: list[str] | None = None) -> int:
                         emotion_tag=emotion_tag,
                         voice_profile=voice_profile,
                         speed_factor=float(speed_factor) if speed_factor is not None else None,
+                        energy_factor=float(energy_factor) if energy_factor is not None else None,
+                        pitch_semitones=float(pitch_semitones) if pitch_semitones is not None else None,
                     )
                 wall_s = time.perf_counter() - synth_t0
                 os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

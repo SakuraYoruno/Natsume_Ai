@@ -294,6 +294,7 @@ def _resolve_tts_speed_factor(
 
 def _resolve_tts_energy_factor(
     *,
+    requested_energy: float | None = None,
     emotion_intensity: float | None,
     emotion_tag: str | None = None,
 ) -> float:
@@ -308,6 +309,15 @@ def _resolve_tts_energy_factor(
         min_value=min_energy,
         max_value=max_energy,
     )
+    if requested_energy is not None:
+        try:
+            normalized = _clamp_float(float(requested_energy), 0.0, 1.0)
+        except (TypeError, ValueError):
+            normalized = 0.5
+        # ExpressionPlan energy is a 0..1 expressive axis, while the backend
+        # consumes an amplitude multiplier.  Keep 0.5 neutral and bounded.
+        requested_factor = 1.0 + (normalized - 0.5) * 0.56
+        return round(_clamp_float(requested_factor, min_energy, max_energy), 3)
     resolved = default_energy
     if profile is not _NEUTRAL_PROSODY and _emotion_prosody_enabled():
         resolved = _resolve_emotion_axis_value(
@@ -319,6 +329,51 @@ def _resolve_tts_energy_factor(
             emotion_intensity=emotion_intensity,
         )
     return round(_clamp_float(resolved, min_energy, max_energy), 3)
+
+
+def _apply_synthesized_prosody(
+    audio_data: Any,
+    sample_rate: int,
+    *,
+    energy_factor: float | None,
+    pitch_semitones: float | None,
+) -> Any:
+    """Apply controls GPT-SoVITS does not natively expose.
+
+    The model supports speed directly.  Energy and pitch are applied after
+    synthesis so Host ExpressionPlan values no longer disappear at the Edge.
+    Pitch uses librosa when present in the voice-model runtime; energy remains
+    available with only numpy.
+    """
+
+    import numpy as np
+
+    if hasattr(audio_data, "detach"):
+        audio_data = audio_data.detach()
+    if hasattr(audio_data, "cpu"):
+        audio_data = audio_data.cpu()
+    if hasattr(audio_data, "numpy"):
+        audio_data = audio_data.numpy()
+    audio = np.asarray(audio_data, dtype=np.float32)
+    if audio.size == 0:
+        return audio
+
+    pitch = _clamp_float(float(pitch_semitones or 0.0), -2.0, 2.0)
+    if abs(pitch) >= 0.01:
+        try:
+            import librosa
+        except ImportError:
+            logger.warning("TTS pitch requested but librosa is unavailable; preserving unshifted audio")
+        else:
+            audio = np.asarray(
+                librosa.effects.pitch_shift(audio, sr=max(1, int(sample_rate)), n_steps=pitch),
+                dtype=np.float32,
+            )
+
+    gain = float(energy_factor if energy_factor is not None else 1.0)
+    if abs(gain - 1.0) >= 0.001:
+        audio = np.clip(audio * gain, -0.98, 0.98).astype(np.float32, copy=False)
+    return audio
 
 
 _EXPRESSIVE_PUNCT_RE = re.compile(r"([^，,。.!！?？；;：:\n…]+)([，,。.!！?？；;：:\n…]*)")
@@ -909,6 +964,8 @@ class SoVITSModelManager:
         emotion_tag: str | None = None,
         emotion_intensity: float | None = None,
         speed_factor: float | None = None,
+        energy_level: float | None = None,
+        pitch_semitones: float | None = None,
         voice_profile: str | None = None,
     ) -> TtsSynthResult:
         """Synthesize text to audio using loaded model.
@@ -919,6 +976,8 @@ class SoVITSModelManager:
             emotion_tag: Emotion tag for prosody control.
             emotion_intensity: 情感强度（0.0~1.0），影响 TTS 语气幅度。缺省为 0.5。
                                超出范围时截断到 [0.0, 1.0]。
+            energy_level: ExpressionPlan energy axis (0.0~1.0).
+            pitch_semitones: Post-synthesis pitch offset in semitones.
             voice_profile: Voice profile override.
         """
         # M26-I：emotion_intensity 范围截断（不拒绝，防止链路中断）
@@ -959,6 +1018,8 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                energy_level=energy_level,
+                pitch_semitones=pitch_semitones,
                 voice_profile=voice_profile,
             )
             processing_time = time.monotonic() - t0
@@ -1030,6 +1091,8 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        energy_level: float | None,
+        pitch_semitones: float | None,
         voice_profile: str | None,
     ) -> tuple[Any, int]:
         try:
@@ -1040,6 +1103,8 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                energy_level=energy_level,
+                pitch_semitones=pitch_semitones,
                 voice_profile=voice_profile,
                 timeout_s=self._config.synth_timeout_s,
             )
@@ -1062,6 +1127,8 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        energy_level=energy_level,
+                        pitch_semitones=pitch_semitones,
                         voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
@@ -1079,6 +1146,8 @@ class SoVITSModelManager:
                     emotion_tag=emotion_tag,
                     emotion_intensity=emotion_intensity,
                     speed_factor=speed_factor,
+                    energy_level=energy_level,
+                    pitch_semitones=pitch_semitones,
                     voice_profile=voice_profile,
                     timeout_s=self._config.synth_timeout_s,
                 )
@@ -1093,6 +1162,8 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        energy_level=energy_level,
+                        pitch_semitones=pitch_semitones,
                         voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
@@ -1140,6 +1211,8 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        energy_level: float | None,
+        pitch_semitones: float | None,
         voice_profile: str | None,
     ) -> tuple[Any, int]:
         return _run_tts_fresh_process(
@@ -1149,6 +1222,8 @@ class SoVITSModelManager:
             emotion_tag=emotion_tag,
             emotion_intensity=emotion_intensity,
             speed_factor=speed_factor,
+            energy_level=energy_level,
+            pitch_semitones=pitch_semitones,
             voice_profile=voice_profile,
         )
 
@@ -1602,6 +1677,20 @@ def make_sovits_synthesizer(
                 speed_factor = float(raw_speed)
             except (TypeError, ValueError):
                 speed_factor = None
+        raw_energy = speak_event.get("energy")
+        energy_level: float | None = None
+        if raw_energy is not None:
+            try:
+                energy_level = float(raw_energy)
+            except (TypeError, ValueError):
+                energy_level = None
+        raw_pitch = speak_event.get("pitch")
+        pitch_semitones: float | None = None
+        if raw_pitch is not None:
+            try:
+                pitch_semitones = float(raw_pitch)
+            except (TypeError, ValueError):
+                pitch_semitones = None
 
         result = engine.synthesize(
             text,
@@ -1609,6 +1698,8 @@ def make_sovits_synthesizer(
             emotion_tag=emotion_tag or None,
             emotion_intensity=emotion_intensity,
             speed_factor=speed_factor,
+            energy_level=energy_level,
+            pitch_semitones=pitch_semitones,
             voice_profile=voice_profile or None,
         )
 
@@ -1911,6 +2002,7 @@ class _ModernSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
         voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
@@ -1973,8 +2065,14 @@ class _ModernSoVITSAdapter:
         if not chunks:
             raise RuntimeError("GPT-SoVITS produced empty audio.")
 
+        audio = _apply_synthesized_prosody(
+            np.concatenate(chunks),
+            sample_rate,
+            energy_factor=energy_factor,
+            pitch_semitones=pitch_semitones,
+        )
         return {
-            "audio": np.concatenate(chunks),
+            "audio": audio,
             "sample_rate": sample_rate,
         }
 
@@ -2005,6 +2103,7 @@ class _FreshProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
         voice_profile: str | None = None,
     ) -> dict[str, Any]:
         audio, sample_rate = _run_tts_fresh_process(
@@ -2017,6 +2116,12 @@ class _FreshProcessSoVITSAdapter:
                 energy_factor=energy_factor,
             ),
             speed_factor=speed_factor,
+            energy_level=(
+                _clamp_float(0.5 + (float(energy_factor) - 1.0) / 0.56, 0.0, 1.0)
+                if energy_factor is not None
+                else None
+            ),
+            pitch_semitones=pitch_semitones,
             voice_profile=voice_profile,
         )
         return {
@@ -2065,6 +2170,7 @@ class _PersistentProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
         voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
@@ -2085,6 +2191,8 @@ class _PersistentProcessSoVITSAdapter:
                     energy_factor=energy_factor,
                 ),
                 "speed_factor": speed_factor,
+                "energy_factor": energy_factor,
+                "pitch_semitones": pitch_semitones,
                 "output_path": output_path,
             }
             try:
@@ -2488,6 +2596,8 @@ def _run_tts_fresh_process(
     emotion_tag: str | None,
     emotion_intensity: float | None,
     speed_factor: float | None = None,
+    energy_level: float | None = None,
+    pitch_semitones: float | None = None,
     voice_profile: str | None = None,
 ) -> tuple[Any, int]:
     import numpy as np
@@ -2527,6 +2637,10 @@ def _run_tts_fresh_process(
         cmd.extend(["--emotion-intensity", str(float(emotion_intensity))])
     if speed_factor is not None:
         cmd.extend(["--speed-factor", str(float(speed_factor))])
+    if energy_level is not None:
+        cmd.extend(["--energy-level", str(float(energy_level))])
+    if pitch_semitones is not None:
+        cmd.extend(["--pitch-semitones", str(float(pitch_semitones))])
 
     env = dict(os.environ)
     env["EDGE_TTS_SUBPROCESS_HELPER"] = "1"
@@ -3080,6 +3194,8 @@ def _synthesize_audio(
     emotion_tag: str | None,
     emotion_intensity: float | None = None,
     speed_factor: float | None = None,
+    energy_level: float | None = None,
+    pitch_semitones: float | None = None,
     voice_profile: str | None = None,
     timeout_s: float,
 ) -> tuple[Any, int]:
@@ -3099,6 +3215,7 @@ def _synthesize_audio(
         emotion_tag=emotion_tag,
     )
     energy_factor = _resolve_tts_energy_factor(
+        requested_energy=energy_level,
         emotion_intensity=emotion_intensity,
         emotion_tag=emotion_tag,
     )
@@ -3113,6 +3230,7 @@ def _synthesize_audio(
             # M28-S：真正传递 emotion_intensity 映射后的参数
             speed_factor=speed_factor,
             energy_factor=energy_factor,
+            pitch_semitones=pitch_semitones,
             voice_profile=voice_profile,
         )
     except Exception as exc:

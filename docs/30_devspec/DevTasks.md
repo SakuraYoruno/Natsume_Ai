@@ -3,7 +3,7 @@
 
 # 当前架构程序注册表
 
-版本：v4.10
+版本：v4.11
 维护日期：2026-08-01
 状态：`ONE_ACTIVE_PROGRAM`
 
@@ -18,9 +18,11 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-DL-05 当前新增的是轻量表达切片而非新审计层：五种人工确认的恋爱语音 reference 已通过
-`ExpressionPlanV1.voice_style → voice_profile → GPT-SoVITS Worker` 接入；canonical self emotion 不变。
-首轮自动标签候选未提升，五组新合成 A/B 仍待用户试听，远端 Edge 按要求保持关闭。
+DL-05 当前进入语料纠偏切片：五种人工确认的恋爱语音 reference 已通过
+`ExpressionPlanV1.voice_style → voice_profile → GPT-SoVITS Worker` 接入，速度、能量和音高不再在
+Edge 断链；canonical self emotion 不变。`emotion2vec+ base + prosody` 已扫描 1408 条源语音并生成
+40 条仅供人工听审的近邻候选，文本关键词不参与排名。完整参数 A/B 与候选语料仍待用户试听，尚未重训、
+未提升默认 manifest，远端 Edge 按要求保持关闭。
 
 当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical

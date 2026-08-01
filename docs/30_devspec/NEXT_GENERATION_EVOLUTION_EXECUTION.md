@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.8
+版本：v5.9
 日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -19,11 +19,12 @@ DL-05 本地语音阶段已经完成一次可复现训练与推理接线，但 `
 `ROMANTIC_TENDER / SHY_AFFECTION / FLIRTING / LONGING / QUIET_INTIMACY` 五种人工 reference
 风格，其中 direct affection 作为 tender 的辅助参考。`ExpressionPlanV1.voice_style` 现以
 `voice_profile` 穿过 Host Voice intent、Edge RPC、父 adapter 和 Python 3.9 Worker，且始终与
-`self_emotion_tag` 分离。真实 Worker 已生成五组同文本 A/B（通用 `LOVING` 对照 + 指定风格），
-共 10 个 32 kHz WAV；热态单句约 `1.05～1.50s`。新 reference 包 SHA-256 为
-`cb3f952b6e02ad4648400117df0a68b7f1df6e1aeb0dfbddd09e9978552e58f7`。该证据只提升为
-`LOCAL_ROMANCE_REFERENCE_BANK_READY`：合成 A/B 尚待用户确认，默认 manifest、远端 Edge、真实
-播放、打断和 Avatar 动作均未切换或验收。
+`self_emotion_tag` 分离。用户对首轮合成的结论是“略有区别但远弱于原声”，因此该轮明确不提升。
+代码复核发现原 A/B 主要只换 reference：能量在 RPC 被丢弃、音高未进入合成。现已让速度、能量和
+音高进入 Edge 与 standalone Worker，并在真实 CUDA 上生成五组完整参数 A/B，热态单句约
+`1.00～1.80s`。语料侧新增 `emotion2vec+ base` 768 维嵌入与 prosody 混合检索，对 1408 条源音频
+全部完成分析并输出 40 条 `HUMAN_REVIEW_REQUIRED` 候选；关键词权重为 0，排名不得自动写回训练标签。
+默认 manifest、增量训练、远端 Edge、真实播放、打断和 Avatar 动作均未切换或验收。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，

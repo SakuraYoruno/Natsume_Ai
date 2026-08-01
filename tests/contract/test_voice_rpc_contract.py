@@ -113,6 +113,7 @@ class TestVoiceRpcContract(unittest.TestCase):
         valid["payload"]["lang_hint"] = "JA-JP"
         valid["payload"]["speed"] = 1.18
         valid["payload"]["pitch"] = -0.25
+        valid["payload"]["energy"] = 0.72
         valid["payload"]["style_note"] = "soft but excited"
 
         ok = self.rpc.speak(
@@ -128,6 +129,7 @@ class TestVoiceRpcContract(unittest.TestCase):
         self.assertEqual("ja", ok.event["lang_hint"])
         self.assertEqual(1.18, ok.event["speed"])
         self.assertEqual(-0.25, ok.event["pitch"])
+        self.assertEqual(0.72, ok.event["energy"])
         self.assertEqual("soft but excited", ok.event["style_note"])
 
         bad = self.rpc.speak(

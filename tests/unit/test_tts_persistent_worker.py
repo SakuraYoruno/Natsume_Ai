@@ -5,8 +5,22 @@ import json
 from pathlib import Path
 
 import pytest
+import numpy as np
 
 from edge_client.actuators import tts_persistent_worker as worker
+
+
+def test_worker_applies_expression_energy_without_application_imports() -> None:
+    audio = np.full(3200, 0.25, dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        audio,
+        32000,
+        energy_factor=0.8,
+        pitch_semitones=None,
+    )
+
+    assert float(np.max(np.abs(rendered))) == pytest.approx(0.2, abs=1e-6)
 
 
 def test_model_worker_keeps_application_imports_out_of_python39_boundary() -> None:

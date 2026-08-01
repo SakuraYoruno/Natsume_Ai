@@ -3,7 +3,7 @@
 
 # 测试与验收目录
 
-版本：v2.73
+版本：v2.74
 维护日期：2026-08-01
 状态：当前证据
 
@@ -20,6 +20,18 @@
   reference 包 SHA-256 为
   `cb3f952b6e02ad4648400117df0a68b7f1df6e1aeb0dfbddd09e9978552e58f7`。试听文件位于忽略目录
   `artifacts/voice_eval/romance-v1/samples/`，不作为默认提升或远端播放回执。
+- 用户试听认为上述 reference-only A/B 仅有轻微差异，未通过提升。复核确认 Host 虽携带 energy/pitch，
+  旧 Edge 合成只实际消费 speed/reference；修复后 RPC、manager、fresh/persistent adapter 与 Worker
+  均携带并应用 energy/pitch。完整 ExpressionPlan 参数的第二轮真实 CUDA A/B 位于忽略目录
+  `artifacts/voice_eval/romance-v2-full-plan/samples/`，Worker 加载 `9.7666s`、热态单句
+  `0.9977～1.8023s`，仍须听审，不能据此宣称语料或模型已通过。
+- `gpt_sovits_acoustic_style_miner.py` 已对授权源 `1408/1408` 条语音提取 emotion2vec+ base 768 维
+  embedding 与 pitch/energy/rate/pause 特征。检索先做同说话人 corpus-mean centering，再按
+  `0.8 embedding + 0.2 prosody + 0.0 transcript keyword` 排名；五类各输出 8 条试听候选和连播文件，
+  状态固定为 `HUMAN_REVIEW_REQUIRED`。模型分类或近邻排名都不能自动成为训练标签。
+- 本切片语料检索、Voice RPC、TTS manager、fresh/persistent Worker、ExpressionPlan、发布工具及相邻
+  voice pipeline 的定向回归为 `172 passed in 7.88s`；编译、JSON、文档 authority/freshness/audience 与
+  `git diff --check` 通过。该结果不替代人耳试听、重训或远端 Edge 验收。
 
 - 新候选 `Natsume_Ai_Xilian_zh_emotion_balanced_v2_20260801` 使用 `597` 条中文片段、约
   `64.65` 分钟语料，其中非中性 `418` 条；S2 训练 8 epoch，S1 训练 10 epoch，未出现

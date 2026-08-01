@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.46
+版本：v3.47
 
 核对日期：2026-08-01
 
@@ -15,10 +15,14 @@
 
 本地 TTS 推理边界现为：`ExpressionPlan.voice_style → Host voice_profile（同时保留 self emotion_tag）→
 Edge Voice RPC → Python 3.11 parent adapter → JSON-line IPC → Python 3.9 standalone GPT-SoVITS Worker →
-voice_profile 优先 / emotion_tag 回退的 project-bound reference → NPZ audio → parent`。模型进程不读取
+voice_profile 优先 / emotion_tag 回退的 project-bound reference + speed → energy/pitch post-render → NPZ audio → parent`。模型进程不读取
 Host/Life/Relationship，也不导入应用合同；五种恋爱风格只改变表达 reference 与有界韵律，不创建或回写
 七海 self-affect。人工 reference 已在本机真实 CUDA 上完成五组 A/B，但尚未写入远端 Edge、播放设备或
 Avatar，所以这不是三模态 delivery receipt。
+
+语料发现采用独立离线路径：`1408 条授权 WAV → emotion2vec+ utterance embedding → 同说话人均值中心化 →
+pitch/energy/rate/pause prosody → 五组人工 seed 近邻 → HUMAN_REVIEW_REQUIRED queue`。台词关键词权重为 0，
+候选 JSON、试听副本和连播文件只存在忽略目录；人工确认前不会生成训练 authority。
 
 普通对话当前是轻量数据流：`Chat/Gateway text → Cortex context → RealtimeCompanion →
 AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、

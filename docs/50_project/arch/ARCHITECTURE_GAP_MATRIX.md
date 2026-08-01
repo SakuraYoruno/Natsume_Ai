@@ -3,7 +3,7 @@
 
 # Natsume AI 当前架构差距矩阵
 
-版本：v3.54
+版本：v3.55
 核对日期：2026-08-01
 机器状态：[current_architecture_status.json](../../../configs/release/current_architecture_status.json)
 总体状态：`INCOMPLETE`
@@ -11,9 +11,11 @@
 > **DL-05 本地语音修订：** 首轮自动标签候选经试听确认风格区分不足，已明确不提升默认；这避免把
 > “样本数均衡”误写成“声音表达有效”。六个用户确认的原始片段现形成五类人工恋爱 reference，
 > `voice_profile` 已从 `ExpressionPlanV1` 贯通到 standalone Worker，并与 canonical `emotion_tag` 分离。
-> 本机 CUDA 生成五组同文本 A/B 共 10 个 WAV，代码路径和参考选择成立。剩余缺口是用户听审合成结果、
-> 默认提升决策、经授权部署远端 Edge，以及播放、打断、Avatar 动作与同轮同步；当前为
-> `LOCAL_ROMANCE_REFERENCE_BANK_READY / INCOMPLETE`。
+> 用户听审确认首轮 A/B 只有轻微差异，故未通过。代码随后修复能量与音高在 Edge/Worker 的实际断链，
+> 并生成第二轮完整参数 A/B；语料侧用 emotion2vec+ 与 prosody 扫描 1408 条源音频，形成 40 条
+> `HUMAN_REVIEW_REQUIRED` 候选。剩余缺口仍包括候选人工筛选、增量训练、第二轮 A/B 听审、默认提升、
+> 经授权部署远端 Edge，以及播放、打断、Avatar 动作与同轮同步；当前为
+> `LOCAL_ACOUSTIC_CORPUS_CANDIDATES_READY / INCOMPLETE`。
 
 > **实时陪伴性能修订：** 普通 native stream 已在实际 ModelAttempt 边界进入独立
 > `CHAT_SURFACE_REALTIME / B / realtime_companion` lane，常规输出上限 192 Token；MAY_RECALL 的本地

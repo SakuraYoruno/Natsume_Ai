@@ -5,7 +5,7 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.23
+版本：v5.24
 核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
@@ -26,8 +26,12 @@ TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 r
 `01101` 作为辅助参考。`affective_turn_planner.py` 只在表达层选择这些风格，
 `affective_expression_delivery.py` 同时下发独立 `voice_profile` 和原 canonical `emotion_tag`；
 `tts_engine.py`、fresh/persistent adapter 与 standalone Worker 全链透传并以前者优先选 reference。
-真实 CUDA 父子进程生成 5 组 A/B 共 10 个 WAV，热态单句 `1.0452～1.5023s`，相关 TTS 回归通过；
-状态为 `LOCAL_ROMANCE_REFERENCE_BANK_READY / SYNTHESIZED_AB_HUMAN_REVIEW_PENDING / REMOTE_EDGE_NOT_RUN`。
+首轮真实 CUDA A/B 经用户听审只有轻微区别，明确不提升。修复后 `voice_energy/voice_pitch` 不再止于
+Host payload，而由 Voice RPC、manager、fresh/persistent adapter 和 standalone Worker 消费；第二轮完整
+参数 A/B 热态单句 `0.9977～1.8023s`。`gpt_sovits_acoustic_style_miner.py` 又以用户确认的六条原声为 seed，
+对 1408 条授权源语音提取 emotion2vec+ base 768 维 embedding 与 prosody，生成五类各 8 条人工试听候选；
+关键词权重为 0，排名状态为 `HUMAN_REVIEW_REQUIRED`，不能自动进入训练。
+状态为 `LOCAL_ACOUSTIC_CORPUS_CANDIDATES_READY / RETRAIN_AND_SYNTHESIZED_AB_HUMAN_REVIEW_PENDING / REMOTE_EDGE_NOT_RUN`。
 
 TRACE-DL04-REALTIME-LANE（普通陪伴低延迟链）：
 `route_catalog_runtime.py`、`route_execution_ports.py` 与 `surface_main_chain_adapter.py` 把普通 native stream

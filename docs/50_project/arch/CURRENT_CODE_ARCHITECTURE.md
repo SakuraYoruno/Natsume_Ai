@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.85
+版本：v5.86
 核对日期：2026-08-01
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -15,8 +15,11 @@
 > `SoVITSModelManager`、fresh/persistent adapter 进入 standalone Worker；`emotion_tag` 继续只表达 canonical
 > self-affect 的兼容标签，二者不互相覆盖。发布工具只在 exact Xilian clip 完整存在时追加人工确认的
 > `ROMANTIC_TENDER / SHY_AFFECTION / FLIRTING / LONGING / QUIET_INTIMACY` reference，并打包
-> tender 辅助参考。Worker 会先查 voice profile，再回退 emotion/neutral。RTX 5080/CUDA 正式父子进程已
-> 生成五组同文本 A/B 共 10 个 WAV；默认 voice bank、远端 Edge 与播放/Avatar 物理执行仍未切换。
+> tender 辅助参考。Worker 会先查 voice profile，再回退 emotion/neutral。首轮 reference-only A/B 经用户
+> 听审仅有轻微差异；复核后，Voice RPC、SoVITS manager、fresh/persistent adapter 和 Worker 已真实消费
+> ExpressionPlan speed/energy/pitch，并生成第二轮 CUDA A/B。新的 acoustic miner 使用 emotion2vec+ 768 维
+> embedding、corpus-mean speaker centering 与 prosody，从 1408 条源语音产出 40 条人工试听候选；关键词不
+> 参与排名，结果不会自动写训练集。默认 voice bank、重训、远端 Edge 与播放/Avatar 物理执行仍未切换。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

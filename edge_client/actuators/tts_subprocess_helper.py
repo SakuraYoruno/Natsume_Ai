@@ -25,6 +25,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--voice-profile", default="")
     parser.add_argument("--emotion-intensity", type=float, default=None)
     parser.add_argument("--speed-factor", type=float, default=None)
+    parser.add_argument("--energy-level", type=float, default=None)
+    parser.add_argument("--pitch-semitones", type=float, default=None)
     return parser
 
 
@@ -56,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
         voice_profile=str(args.voice_profile or "").strip() or None,
         emotion_intensity=args.emotion_intensity,
         speed_factor=args.speed_factor,
+        energy_level=args.energy_level,
+        pitch_semitones=args.pitch_semitones,
     )
     if not result.success or result.audio_data is None:
         print(
