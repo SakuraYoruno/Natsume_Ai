@@ -8,6 +8,8 @@ import pytest
 from tools.gpt_sovits_acoustic_style_miner import (
     RankedCandidate,
     SourceEntry,
+    _eligible_clip_ids,
+    _load_style_config,
     materialize_review_queue,
     parse_source_list,
     rank_style_candidates,
@@ -92,6 +94,60 @@ def test_rank_style_candidates_rejects_unknown_seed() -> None:
             style_seeds={"LONGING": ("missing",)},
             top_k=1,
         )
+
+
+def test_style_config_replaces_xilian_defaults_and_filters_stage_lines(tmp_path: Path) -> None:
+    config = tmp_path / "style.json"
+    config.write_text(
+        '{"profile_id":"nanami","style_seeds":{"QUIET":["nanami_1"]},'
+        '"candidate_policy":{"max_exclamation_marks":1,"reject_truncated_lines":true,'
+        '"require_text_patterns":["今日|一緒"],"exclude_text_patterns":["戦闘|犯人"]}}',
+        encoding="utf-8",
+    )
+
+    loaded = _load_style_config(config)
+    eligible = _eligible_clip_ids(
+        [
+            SourceEntry("daily", "daily.wav", "nanami", "ja", "今日はゆっくりしようね"),
+            SourceEntry("battle", "battle.wav", "nanami", "ja", "戦闘を開始する！"),
+            SourceEntry("shout", "shout.wav", "nanami", "ja", "待って！！"),
+            SourceEntry("cut", "cut.wav", "nanami", "ja", "今日は――"),
+            SourceEntry("unrelated", "unrelated.wav", "nanami", "ja", "確認します"),
+        ],
+        loaded["candidate_policy"],
+    )
+
+    assert loaded["style_seeds"] == {"QUIET": ["nanami_1"]}
+    assert eligible == {"daily"}
+
+
+def test_rank_style_candidates_honours_eligible_pool() -> None:
+    entries = [
+        SourceEntry("seed", "seed.wav", "nanami", "ja", "seed"),
+        SourceEntry("daily", "daily.wav", "nanami", "ja", "daily"),
+        SourceEntry("stage", "stage.wav", "nanami", "ja", "stage"),
+    ]
+    embeddings = {
+        "seed": np.asarray([1.0, 0.0]),
+        "daily": np.asarray([0.8, 0.2]),
+        "stage": np.asarray([0.99, 0.01]),
+    }
+    prosody = {
+        clip_id: _prosody(duration=4.0, pitch=90.0, rate=4.0)
+        for clip_id in ("seed", "daily", "stage")
+    }
+
+    ranked = rank_style_candidates(
+        entries=entries,
+        embeddings_by_id=embeddings,
+        prosody_by_id=prosody,
+        emotion_labels_by_id={},
+        style_seeds={"QUIET": ("seed",)},
+        top_k=3,
+        eligible_clip_ids={"seed", "daily"},
+    )["QUIET"]
+
+    assert [item.clip_id for item in ranked] == ["daily"]
 
 
 def test_materialized_queue_is_explicitly_human_review_only(tmp_path: Path) -> None:

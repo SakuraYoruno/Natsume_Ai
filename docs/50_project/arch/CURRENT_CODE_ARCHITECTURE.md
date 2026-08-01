@@ -3,23 +3,21 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.86
+版本：v5.87
 核对日期：2026-08-01
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> `2026-08-01` 最新 Voice 事实：首轮自动 emotion-label reference bank 听感区分不足，未提升默认。
+> `2026-08-01` 最新 Voice 事实：首轮昔涟 reference bank 与完整韵律 A/B 仍显得舞台化，未提升默认。
 > `ExpressionPlanV1.voice_style` 现作为独立 `voice_profile` 经 Host Voice intent、Edge RPC、
 > `SoVITSModelManager`、fresh/persistent adapter 进入 standalone Worker；`emotion_tag` 继续只表达 canonical
-> self-affect 的兼容标签，二者不互相覆盖。发布工具只在 exact Xilian clip 完整存在时追加人工确认的
-> `ROMANTIC_TENDER / SHY_AFFECTION / FLIRTING / LONGING / QUIET_INTIMACY` reference，并打包
-> tender 辅助参考。Worker 会先查 voice profile，再回退 emotion/neutral。首轮 reference-only A/B 经用户
-> 听审仅有轻微差异；复核后，Voice RPC、SoVITS manager、fresh/persistent adapter 和 Worker 已真实消费
-> ExpressionPlan speed/energy/pitch，并生成第二轮 CUDA A/B。新的 acoustic miner 使用 emotion2vec+ 768 维
-> embedding、corpus-mean speaker centering 与 prosody，从 1408 条源语音产出 40 条人工试听候选；关键词不
-> 参与排名，结果不会自动写训练集。默认 voice bank、重训、远端 Edge 与播放/Avatar 物理执行仍未切换。
+> self-affect 的兼容标签，二者不互相覆盖。acoustic miner 现可加载项目风格配置，并将《RIDDLE JOKER》
+> 七海 `2465` 条原声先收紧为 `811` 条日常关系候选，再执行 corpus-mean speaker centering、emotion2vec+
+> 与 prosody 近邻。现成检查点网格选择 `GPT e5 + SoVITS e8`，中文 micro CER `0.2955`；派生训练资产
+> 使用硬链接而非重复复制，日语源允许空 `3-bert`。新日常模型训练中，默认 voice bank、远端 Edge 与
+> 播放/Avatar 物理执行仍未切换。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

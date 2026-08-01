@@ -1,9 +1,11 @@
-"""Mine emotionally similar GPT-SoVITS clips from approved acoustic seeds.
+"""Mine acoustically similar GPT-SoVITS clips from approved style seeds.
 
-This tool deliberately does not infer romance from transcript keywords.  It
-combines an emotion2vec utterance embedding with low-level prosody (pitch,
-energy, speaking rate, and pauses), then emits a human-listening queue.  The
-queue is evidence for corpus curation; it is never an automatic training label.
+This tool deliberately does not infer a delivery style from transcript
+keywords.  It combines an emotion2vec utterance embedding with low-level
+prosody (pitch, energy, speaking rate, and pauses), then emits a human-listening
+queue.  A style config may restrict the candidate pool by transcript shape,
+but those restrictions only remove obviously unsuitable material; they never
+turn a candidate into an automatic training label.
 """
 
 from __future__ import annotations
@@ -138,6 +140,7 @@ def rank_style_candidates(
     top_k: int,
     min_duration_s: float = 2.5,
     max_duration_s: float = 10.0,
+    eligible_clip_ids: set[str] | None = None,
 ) -> dict[str, list[RankedCandidate]]:
     """Rank candidates without converting the result into an automatic label."""
 
@@ -175,6 +178,8 @@ def rank_style_candidates(
 
         for index, clip_id in enumerate(clip_ids):
             if clip_id in seed_ids:
+                continue
+            if eligible_clip_ids is not None and clip_id not in eligible_clip_ids:
                 continue
             prosody = dict(prosody_by_id[clip_id])
             duration_s = float(prosody.get("duration_s", 0.0))
@@ -428,7 +433,7 @@ def _link_or_copy(source: Path, target: Path) -> None:
 def materialize_review_queue(output_dir: Path, rankings: Mapping[str, Sequence[RankedCandidate]]) -> None:
     review_root = output_dir / "review"
     review_root.mkdir(parents=True, exist_ok=True)
-    lines = ["# 恋爱声学候选试听队列", "", "候选只用于人工听审；排名不是自动训练标签。", ""]
+    lines = ["# 声学风格候选试听队列", "", "候选只用于人工听审；排名不是自动训练标签。", ""]
     for style, candidates in rankings.items():
         style_dir = review_root / style.lower()
         style_dir.mkdir(parents=True, exist_ok=True)
@@ -506,8 +511,76 @@ def _write_style_preview(
     return preview_path
 
 
-def _parse_seed_overrides(values: Iterable[str]) -> dict[str, tuple[str, ...]]:
-    parsed = dict(DEFAULT_ROMANCE_SEEDS)
+def _load_style_config(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {
+            "profile_id": "xilian_romance_v1",
+            "style_seeds": {key: list(value) for key, value in DEFAULT_ROMANCE_SEEDS.items()},
+            "candidate_policy": {},
+        }
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise ValueError("style config must be a JSON object")
+    raw_seeds = payload.get("style_seeds")
+    if not isinstance(raw_seeds, dict) or not raw_seeds:
+        raise ValueError("style config must define non-empty style_seeds")
+    normalized: dict[str, list[str]] = {}
+    for raw_style, raw_ids in raw_seeds.items():
+        style = str(raw_style or "").strip().upper()
+        if not style or not isinstance(raw_ids, list):
+            raise ValueError("style_seeds must map style names to clip-id arrays")
+        clip_ids = [str(item or "").strip() for item in raw_ids if str(item or "").strip()]
+        if not clip_ids:
+            raise ValueError(f"style {style!r} has no seed clips")
+        normalized[style] = clip_ids
+    candidate_policy = payload.get("candidate_policy")
+    if candidate_policy is None:
+        candidate_policy = {}
+    if not isinstance(candidate_policy, dict):
+        raise ValueError("candidate_policy must be a JSON object")
+    return dict(payload) | {"style_seeds": normalized, "candidate_policy": candidate_policy}
+
+
+def _eligible_clip_ids(
+    entries: Sequence[SourceEntry],
+    policy: Mapping[str, Any],
+) -> set[str]:
+    raw_patterns = policy.get("exclude_text_patterns") or []
+    if not isinstance(raw_patterns, list):
+        raise ValueError("candidate_policy.exclude_text_patterns must be an array")
+    patterns = [re.compile(str(pattern)) for pattern in raw_patterns if str(pattern).strip()]
+    raw_required_patterns = policy.get("require_text_patterns") or []
+    if not isinstance(raw_required_patterns, list):
+        raise ValueError("candidate_policy.require_text_patterns must be an array")
+    required_patterns = [
+        re.compile(str(pattern)) for pattern in raw_required_patterns if str(pattern).strip()
+    ]
+    max_exclamations = int(policy.get("max_exclamation_marks", 999))
+    reject_truncated = bool(policy.get("reject_truncated_lines", False))
+    eligible: set[str] = set()
+    for entry in entries:
+        text_value = str(entry.text or "")
+        if required_patterns and not any(pattern.search(text_value) for pattern in required_patterns):
+            continue
+        if any(pattern.search(text_value) for pattern in patterns):
+            continue
+        if text_value.count("!") + text_value.count("！") > max_exclamations:
+            continue
+        if reject_truncated and re.search(r"(?:―|—|-)\s*$", text_value):
+            continue
+        eligible.add(entry.clip_id)
+    return eligible
+
+
+def _parse_seed_overrides(
+    values: Iterable[str],
+    *,
+    base_seeds: Mapping[str, Sequence[str]] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    parsed = {
+        str(style).strip().upper(): tuple(str(item).strip() for item in ids if str(item).strip())
+        for style, ids in (base_seeds or DEFAULT_ROMANCE_SEEDS).items()
+    }
     for raw in values:
         style, separator, ids = str(raw).partition("=")
         seed_ids = tuple(item.strip() for item in ids.split(",") if item.strip())
@@ -518,9 +591,10 @@ def _parse_seed_overrides(values: Iterable[str]) -> dict[str, tuple[str, ...]]:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Mine acoustic neighbors for approved romance voice seeds.")
+    parser = argparse.ArgumentParser(description="Mine acoustic neighbors for approved voice-style seeds.")
     parser.add_argument("--source-list", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--style-config", type=Path)
     parser.add_argument("--model-id", default=DEFAULT_MODEL_ID)
     parser.add_argument("--hub", default="ms")
     parser.add_argument("--device", default="cuda:0")
@@ -537,6 +611,7 @@ def main(argv: list[str] | None = None) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     entries = parse_source_list(source_list)
     source_digest = _source_digest(source_list)
+    style_config = _load_style_config(args.style_config.resolve() if args.style_config else None)
     embeddings, emotion_labels = _load_or_extract_embeddings(
         entries=entries,
         source_digest=source_digest,
@@ -547,7 +622,18 @@ def main(argv: list[str] | None = None) -> int:
         batch_size=max(1, int(args.batch_size)),
     )
     prosody = _load_or_extract_prosody(entries=entries, source_digest=source_digest, output_dir=output_dir)
-    seeds = _parse_seed_overrides(args.seed)
+    seeds = _parse_seed_overrides(args.seed, base_seeds=style_config["style_seeds"])
+    eligible_ids = _eligible_clip_ids(entries, style_config.get("candidate_policy") or {})
+    eligible_ids.update(seed_id for seed_ids in seeds.values() for seed_id in seed_ids)
+    eligible_entries = [entry for entry in entries if entry.clip_id in eligible_ids]
+    eligible_source_list = output_dir / "eligible-source.list"
+    eligible_source_list.write_text(
+        "".join(
+            f"{entry.wav_path}|{entry.speaker}|{entry.language}|{entry.text}\n"
+            for entry in eligible_entries
+        ),
+        encoding="utf-8",
+    )
     rankings = rank_style_candidates(
         entries=entries,
         embeddings_by_id=embeddings,
@@ -555,6 +641,7 @@ def main(argv: list[str] | None = None) -> int:
         emotion_labels_by_id=emotion_labels,
         style_seeds=seeds,
         top_k=max(1, int(args.top_k)),
+        eligible_clip_ids=eligible_ids,
     )
     result = {
         "schema_version": 1,
@@ -563,7 +650,16 @@ def main(argv: list[str] | None = None) -> int:
         "source_sha256": source_digest,
         "source_clip_count": len(entries),
         "embedding_model": str(args.model_id),
+        "style_profile_id": str(style_config.get("profile_id") or "custom"),
         "style_seeds": {style: list(ids) for style, ids in seeds.items()},
+        "candidate_pool_count": len(eligible_ids),
+        "candidate_pool_duration_hours": round(
+            sum(float(prosody[entry.clip_id].get("duration_s", 0.0)) for entry in eligible_entries) / 3600.0,
+            4,
+        ),
+        "eligible_source_list": str(eligible_source_list),
+        "eligible_source_sha256": _source_digest(eligible_source_list),
+        "candidate_policy": dict(style_config.get("candidate_policy") or {}),
         "ranking_policy": {
             "embedding_weight": 0.8,
             "prosody_weight": 0.2,

@@ -49,7 +49,14 @@ function Copy-SelectedFiles([string]$SourceDir, [string]$TargetDir, [string[]]$N
             $missing.Add($src)
             continue
         }
-        Copy-Item -LiteralPath $src -Destination $dst -Force
+        if (Test-Path -LiteralPath $dst) {
+            Remove-Item -LiteralPath $dst -Force
+        }
+        try {
+            New-Item -ItemType HardLink -Path $dst -Target $src -ErrorAction Stop | Out-Null
+        } catch {
+            Copy-Item -LiteralPath $src -Destination $dst -Force
+        }
     }
     if ($missing.Count -gt 0) {
         throw "Missing selected feature files:`n$($missing -join "`n")"
@@ -119,11 +126,20 @@ Copy-SelectedTabRows `
     -SourcePath (Join-Path $SourceLogRoot "6-name2semantic.tsv") `
     -TargetPath (Join-Path $ProjectLogRoot "6-name2semantic.tsv") `
     -NameSet $nameSet
-Copy-SelectedFiles `
-    -SourceDir (Join-Path $SourceLogRoot "3-bert") `
-    -TargetDir (Join-Path $ProjectLogRoot "3-bert") `
-    -Names $names `
-    -Suffix ".pt"
+$sourceBertDir = Join-Path $SourceLogRoot "3-bert"
+$sourceBertFiles = @(
+    Get-ChildItem -LiteralPath $sourceBertDir -File -ErrorAction SilentlyContinue
+)
+if ($sourceBertFiles.Count -gt 0) {
+    Copy-SelectedFiles `
+        -SourceDir $sourceBertDir `
+        -TargetDir (Join-Path $ProjectLogRoot "3-bert") `
+        -Names $names `
+        -Suffix ".pt"
+} else {
+    New-Item -ItemType Directory -Force -Path (Join-Path $ProjectLogRoot "3-bert") | Out-Null
+    Write-Host "Source project has no BERT feature files; keeping 3-bert empty (valid for Japanese-only corpora)."
+}
 Copy-SelectedFiles `
     -SourceDir (Join-Path $SourceLogRoot "4-cnhubert") `
     -TargetDir (Join-Path $ProjectLogRoot "4-cnhubert") `
@@ -226,6 +242,7 @@ $status = [ordered]@{
     version = $Version
     run_id = $runId
     selected_count = $selectedLines.Count
+    selected_asset_storage = "hardlink_preferred_copy_fallback"
     prepared_at = (Get-Date).ToString("o")
     gpt_sovits_root = $Root
     project_log_root = $ProjectLogRoot

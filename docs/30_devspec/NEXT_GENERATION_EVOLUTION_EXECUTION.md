@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.9
+版本：v5.10
 日期：2026-08-01
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -13,18 +13,14 @@ Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它�
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。当前实现分支基于
 `origin/dev@001c2f5d7`；分支上的 DL-00～DL-06 提交尚未以本文件冒充 `dev` 已完成。
 
-DL-05 本地语音阶段已经完成一次可复现训练与推理接线，但 `597` 条自动情感均衡候选的首轮
-人工听感差异不足，不得提升默认配置。原因是原 emotion balance 主要依据文本关键词，不能把
-声学表演质量当作已标注事实。用户随后听审并确认六段恋爱原始素材；发布工具将它们整理为
-`ROMANTIC_TENDER / SHY_AFFECTION / FLIRTING / LONGING / QUIET_INTIMACY` 五种人工 reference
-风格，其中 direct affection 作为 tender 的辅助参考。`ExpressionPlanV1.voice_style` 现以
-`voice_profile` 穿过 Host Voice intent、Edge RPC、父 adapter 和 Python 3.9 Worker，且始终与
-`self_emotion_tag` 分离。用户对首轮合成的结论是“略有区别但远弱于原声”，因此该轮明确不提升。
-代码复核发现原 A/B 主要只换 reference：能量在 RPC 被丢弃、音高未进入合成。现已让速度、能量和
-音高进入 Edge 与 standalone Worker，并在真实 CUDA 上生成五组完整参数 A/B，热态单句约
-`1.00～1.80s`。语料侧新增 `emotion2vec+ base` 768 维嵌入与 prosody 混合检索，对 1408 条源音频
-全部完成分析并输出 40 条 `HUMAN_REVIEW_REQUIRED` 候选；关键词权重为 0，排名不得自动写回训练标签。
-默认 manifest、增量训练、远端 Edge、真实播放、打断和 Avatar 动作均未切换或验收。
+DL-05 已否决昔涟作为主语料：即使修通 reference、速度、能量和音高，它的剧情演出分布仍不符合
+日常陪伴。新路线使用本机《RIDDLE JOKER》七海日语原声 `2465` 条/`3.288h`。风格配置先要求
+日常/关系语境，再排除战斗、犯罪、任务、成人场景、截断句和夸张喊叫，形成 `811` 条/`1.1909h`
+候选；`emotion2vec+ base` 与 prosody 只在该池中寻找五类声学近邻，结果仍为人工试听队列。
+四组现成检查点已用相同五句中文和本地 Whisper 比较，`GPT e5 + SoVITS e8` 的 micro CER
+`0.2955` 最佳，与当前昔涟样本相同，故作为训练失败时的七海回退基线。日常子集通过 NTFS 硬链接
+复用原特征，已启动 `SoVITS 8 epoch + GPT 5 epoch` 本机训练。来源授权为用户声明、机器未验证、
+仅本地研究；默认 manifest、远端 Edge、真实播放、打断和 Avatar 动作均未切换或验收。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，

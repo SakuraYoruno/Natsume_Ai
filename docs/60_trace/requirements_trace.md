@@ -5,20 +5,19 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.24
+版本：v5.25
 核对日期：2026-08-01
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
 
-TRACE-DL05-LOCAL-VOICE-CANDIDATE（情感语音训练与本地推理）：
-`train_gpt_sovits_xilian_emotion_balanced.ps1` 从授权源派生情感均衡训练集并保留来源授权文件；
-`gpt_sovits_edge_release.py` 只选择 exact project 的最高 epoch/step 权重；
-`tts_persistent_worker.py` 是不导入应用合同的 Python 3.9 standalone model process。
-候选语料 `597` 条/约 `64.65` 分钟/非中性 `418` 条，权重 GPT `e10`、SoVITS `e8/s2400`，
-release SHA-256 `5e0942574cd1131c0ddcdeb5fbc6230aff49cb63dcaa2915d4ab35e16b2351ff`。
-本机 CUDA 正式 IPC 得到 `32000Hz / 2.52s` 音频并正常 shutdown，父 adapter 二次合成通过；状态为
-`LOCAL_VOICE_CANDIDATE_READY / HUMAN_LISTENING_AND_REMOTE_EDGE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`。
+TRACE-DL05-LOCAL-VOICE-CANDIDATE（Galgame 七海语料与本地推理）：
+`gpt_sovits_acoustic_style_miner.py` 加载 `configs/voice/riddlejoker_nanami_daily_v1.json`，从
+`2465` 条/`3.288h` 原声得到 `811` 条/`1.1909h` 日常关系候选；结果摘要 SHA-256 为
+`517b5585b4cfb81208a109571762c4d08cbe4e867cd34aefad09805bfed3a740`。
+四组现成检查点中文 micro CER 为 `0.3636/0.2955/0.4659/0.3409`，选中 `GPT e5 + SoVITS e8`
+作为回退基线。训练脚本现以硬链接复用特征、允许日语源为空的 `3-bert`，并启动日常子集
+`S2=8/S1=5`。状态为 `GALGAME_DAILY_CORPUS_TRAINING / HUMAN_LISTENING_AND_REMOTE_EDGE_PENDING`。
 
 TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 reference A/B 因听感区分不足不予
 提升；用户逐段确认的 `xilian_00025/00003/01292/01162/00048/01101` 被确定性打包为
@@ -26,12 +25,11 @@ TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 r
 `01101` 作为辅助参考。`affective_turn_planner.py` 只在表达层选择这些风格，
 `affective_expression_delivery.py` 同时下发独立 `voice_profile` 和原 canonical `emotion_tag`；
 `tts_engine.py`、fresh/persistent adapter 与 standalone Worker 全链透传并以前者优先选 reference。
-首轮真实 CUDA A/B 经用户听审只有轻微区别，明确不提升。修复后 `voice_energy/voice_pitch` 不再止于
+首轮昔涟 CUDA A/B 经用户听审仍过于舞台化，明确退出主候选。修复后 `voice_energy/voice_pitch` 不再止于
 Host payload，而由 Voice RPC、manager、fresh/persistent adapter 和 standalone Worker 消费；第二轮完整
-参数 A/B 热态单句 `0.9977～1.8023s`。`gpt_sovits_acoustic_style_miner.py` 又以用户确认的六条原声为 seed，
-对 1408 条授权源语音提取 emotion2vec+ base 768 维 embedding 与 prosody，生成五类各 8 条人工试听候选；
-关键词权重为 0，排名状态为 `HUMAN_REVIEW_REQUIRED`，不能自动进入训练。
-状态为 `LOCAL_ACOUSTIC_CORPUS_CANDIDATES_READY / RETRAIN_AND_SYNTHESIZED_AB_HUMAN_REVIEW_PENDING / REMOTE_EDGE_NOT_RUN`。
+参数 A/B 热态单句 `0.9977～1.8023s`。新 Galgame profile 仍生成五类各 8 条声学试听候选，
+但只从 811 条日常关系池中检索；排名状态为 `HUMAN_REVIEW_REQUIRED`，不能自动提升默认。
+状态为 `GALGAME_DAILY_MODEL_TRAINING / SYNTHESIZED_AB_HUMAN_REVIEW_PENDING / REMOTE_EDGE_NOT_RUN`。
 
 TRACE-DL04-REALTIME-LANE（普通陪伴低延迟链）：
 `route_catalog_runtime.py`、`route_execution_ports.py` 与 `surface_main_chain_adapter.py` 把普通 native stream

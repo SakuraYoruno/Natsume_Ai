@@ -3,7 +3,7 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.62
+版本：v2.63
 核对日期：2026-08-01
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
@@ -13,10 +13,10 @@
 > 语音模块现分成两个清晰责任：Edge 父进程负责 `TtsConfig`、ExpressionPlan、RPC、请求与播放；
 > 独立 GPT-SoVITS Worker 只在模型 Python 中加载 project-bound 权重和 reference bank 并返回音频。
 > `voice_profile` 优先选择表达风格，`emotion_tag` 只作兼容回退，因而羞涩、调情、想念、安静亲密和
-> 温柔恋爱不会被压成同一个 `LOVING`，也不会反向创建 self-emotion。五类人工恋爱 reference 的真实
-> CUDA A/B 已生成；首轮听审仅有轻微差异且未提升。Voice RPC 与 Worker 现实际消费 speed/energy/pitch，
-> acoustic style miner 则以 emotion2vec+ 与 prosody 扫描 1408 条源语音，产出 40 条必须人工确认的候选，
-> 不再用台词关键词当声学标签。默认模型、增量训练和远端 Edge 仍未改动。
+> 温柔恋爱不会被压成同一个 `LOVING`，也不会反向创建 self-emotion。Voice RPC 与 Worker 现实际消费
+> speed/energy/pitch；离线 corpus 模块则加载项目风格配置，把 `2465` 条 Galgame 七海原声收紧成
+> `811` 条日常关系候选，再生成五类声学近邻。训练模块以硬链接复用源特征，并已启动 `S2=8/S1=5`；
+> 现成 `GPT e5 + SoVITS e8` 是失败回退基线，不是已提升默认。远端 Edge 仍未改动。
 
 > RealtimeCompanion 模块现拥有自己的 catalog scene、provider/model/timeout lane 和紧凑 native prompt；
 > `chat_retrieval_helpers` 只给可选语义 embedding 350ms 默认等待预算，并把冷加载移出 ASGI event loop。

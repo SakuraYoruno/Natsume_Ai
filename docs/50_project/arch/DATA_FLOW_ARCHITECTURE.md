@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.47
+版本：v3.48
 
 核对日期：2026-08-01
 
@@ -20,9 +20,10 @@ Host/Life/Relationship，也不导入应用合同；五种恋爱风格只改变�
 七海 self-affect。人工 reference 已在本机真实 CUDA 上完成五组 A/B，但尚未写入远端 Edge、播放设备或
 Avatar，所以这不是三模态 delivery receipt。
 
-语料发现采用独立离线路径：`1408 条授权 WAV → emotion2vec+ utterance embedding → 同说话人均值中心化 →
-pitch/energy/rate/pause prosody → 五组人工 seed 近邻 → HUMAN_REVIEW_REQUIRED queue`。台词关键词权重为 0，
-候选 JSON、试听副本和连播文件只存在忽略目录；人工确认前不会生成训练 authority。
+当前语料替换流为：`2465 条 Galgame 七海日语 WAV → 日常/关系语境门槛 → 剧情/成人/喊叫排除 →
+811 条/1.1909h → emotion2vec+ utterance embedding + 同说话人均值中心化 + prosody → 五组人工 seed
+近邻 → HUMAN_REVIEW_REQUIRED queue → NTFS hardlink 训练子集 → S2=8 / S1=5`。台词只用于排除
+不适合日常陪伴的上下文，不参与声学相似度得分；默认模型在训练与听审完成前不切换。
 
 普通对话当前是轻量数据流：`Chat/Gateway text → Cortex context → RealtimeCompanion →
 AffectiveTurnPlan → Surface sentence stream → Life/relationship continuity`。它不写 HostCommand、TaskGraph、
