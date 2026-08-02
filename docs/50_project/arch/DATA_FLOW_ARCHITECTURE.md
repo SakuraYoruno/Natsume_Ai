@@ -3,9 +3,9 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.51
+版本：v3.52
 
-核对日期：2026-08-01
+核对日期：2026-08-02
 
 文档类型：`CURRENT_DATA_FLOW / CODE_FACTS`
 
@@ -13,13 +13,17 @@
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
-本地 TTS 推理边界现为：`ExpressionPlan.voice_style → Host voice_profile（同时保留 self emotion_tag）→
-Edge Voice RPC → Python 3.11 parent adapter → JSON-line IPC → Python 3.9 standalone GPT-SoVITS Worker →
-voice_profile 优先 / emotion_tag 回退的 project-bound reference + speed → int16 PCM 归一化 →
-energy/pitch post-render → 必要时整体峰值缩放 → NPZ audio → parent`。模型进程不读取
-Host/Life/Relationship，也不导入应用合同；五种恋爱风格只改变表达 reference 与有界韵律，不创建或回写
-七海 self-affect。人工 reference 已在本机真实 CUDA 上完成五组 A/B，但尚未写入远端 Edge、播放设备或
-Avatar，所以这不是三模态 delivery receipt。
+本地 TTS 推理现有两个显式 backend。默认 GPT-SoVITS 保留原链：`ExpressionPlan.voice_style → Host
+voice_profile → Edge Voice RPC → parent adapter → JSON-line IPC → standalone GPT-SoVITS Worker → reference
++ speed/energy/pitch → NPZ audio`。日语候选链为：`同一次 Surface 模型响应(reply_text 中文 + tts_text_ja
+日语) → accepted foreground → Voice intent(text=日语, display_text=中文, lang_hint=ja) → Edge
+style_bert_vits2 常驻 Worker → release manifest 绑定的 JP-Extra safetensors/config/style_vectors → style/weight
++ speed/energy/pitch → NPZ audio`。无效或缺失 `tts_text_ja` 时只降级本轮语音，不用中文回退喂给日语模型，
+也不额外调用翻译模型。当前该双文本链为完整回复缓冲；逐句双语流式和远端物理回执尚未完成。
+
+两个模型进程都不读取 Host/Life/Relationship，也不回写七海 self-affect。日语 Style-Bert-VITS2
+候选已训练到 `e10_s5423`，并由本机真实常驻 Worker 加载、合成和卸载；真实 DeepSeek 单例也已生成
+中日双文本。它仍需人耳 A/B、默认提升和远端 Edge 验收，当前不是三模态 delivery receipt。
 
 当前中文语音候选流改为：`原生中文模型或中文授权语料 → 中文日常/近讲门槛 → 声学近邻与人工听审 →
 固定中文句 A/B → 身份/发音/情感/延迟判定 → 默认提升提案`。源语言与目标语言显式不一致时，候选管线

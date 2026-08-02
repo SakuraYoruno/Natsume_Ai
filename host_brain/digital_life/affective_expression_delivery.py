@@ -18,6 +18,7 @@ from natsume_contracts.life import (
     ExpressionDeliveryIntentV1,
     ExpressionDeliveryReceiptV1,
 )
+from host_brain.digital_life.companion_voice import normalize_japanese_speech_text
 
 
 _EDGE_EMOTION_BY_EXPRESSION = {
@@ -145,6 +146,8 @@ def build_sentence_expression_delivery(
     *,
     affective_turn_plan: Mapping[str, Any],
     sentence: str,
+    speech_sentence: str | None = None,
+    speech_language: str | None = None,
     sentence_index: int,
     created_at_ms: int,
 ) -> tuple[tuple[ExpressionDeliveryIntentV1, ...], tuple[ExpressionDeliveryReceiptV1, ...]]:
@@ -157,6 +160,15 @@ def build_sentence_expression_delivery(
 
     scope = _plan_scope(affective_turn_plan)
     text = _text(sentence, field_name="sentence", limit=2_000)
+    speech_text = (
+        _text(speech_sentence, field_name="speech_sentence", limit=4_000)
+        if speech_sentence is not None
+        else text
+    )
+    language = str(speech_language or "zh").strip().lower().replace("_", "-")
+    language = "ja" if language.startswith("ja") else "zh"
+    if language == "ja" and normalize_japanese_speech_text(speech_text) != speech_text:
+        raise ValueError("speech_sentence must be bounded Japanese text")
     index = _integer(sentence_index, field_name="sentence_index")
     created = _integer(created_at_ms, field_name="created_at_ms")
     expression = _mapping(scope["expression"])
@@ -172,36 +184,41 @@ def build_sentence_expression_delivery(
     utterance_id = f"{scope['synchronization_id']}::sentence::{index}"
     voice_id = _stable_id(kind="voice-speak", identity=base)
     avatar_id = _stable_id(kind="avatar-transition", identity=base)
+    voice_payload: dict[str, Any] = {
+        # This is the exact payload shape consumed by the existing Edge voice
+        # protocol.  Extra affect controls are additive and may be ignored by
+        # an older Edge, never used to reinterpret text.
+        "edge_action": "speak",
+        "session_id": scope["session_id"],
+        "utterance_id": utterance_id,
+        "text": speech_text,
+        "lang_hint": language,
+        "emotion_tag": scope["self_emotion_tag"],
+        "emotion_intensity": scope["companion_intensity"],
+        "speed": _float(expression.get("voice_rate"), default=1.0, minimum=0.7, maximum=1.3),
+        "energy": _float(expression.get("voice_energy"), default=0.5, minimum=0.0, maximum=1.0),
+        "pitch": _float(expression.get("voice_pitch"), default=0.0, minimum=-1.0, maximum=1.0),
+        "pause_ms": _integer(expression.get("voice_pause_ms"), field_name="voice_pause_ms"),
+        # ``voice_profile`` is the machine-readable reference-bank key.
+        # It deliberately stays separate from ``emotion_tag``: a shy or
+        # longing delivery does not manufacture a new canonical emotion.
+        "voice_profile": _text(
+            expression.get("voice_style"), field_name="voice_style", limit=64
+        ).upper(),
+        "style_note": _text(expression.get("voice_style"), field_name="voice_style", limit=64),
+        "companion_profile_id": scope["companion_profile_id"],
+        "companion_profile_digest": scope["companion_profile_digest"],
+        "interruptible": True,
+    }
+    if speech_text != text or language != "zh":
+        # Keep the already-visible Chinese sentence separate from what the
+        # Japanese voice reads.  Acceptance later binds both exact strings.
+        voice_payload["display_text"] = text
     voice = ExpressionDeliveryIntentV1(
         delivery_id=voice_id,
         channel="VOICE",
         action="SPEAK",
-        payload={
-            # This is the exact payload shape consumed by the existing Edge
-            # voice protocol.  Extra affect controls are additive and may be
-            # ignored by an older Edge, never used to reinterpret text.
-            "edge_action": "speak",
-            "session_id": scope["session_id"],
-            "utterance_id": utterance_id,
-            "text": text,
-            "lang_hint": "zh",
-            "emotion_tag": scope["self_emotion_tag"],
-            "emotion_intensity": scope["companion_intensity"],
-            "speed": _float(expression.get("voice_rate"), default=1.0, minimum=0.7, maximum=1.3),
-            "energy": _float(expression.get("voice_energy"), default=0.5, minimum=0.0, maximum=1.0),
-            "pitch": _float(expression.get("voice_pitch"), default=0.0, minimum=-1.0, maximum=1.0),
-            "pause_ms": _integer(expression.get("voice_pause_ms"), field_name="voice_pause_ms"),
-            # ``voice_profile`` is the machine-readable reference-bank key.
-            # It deliberately stays separate from ``emotion_tag``: a shy or
-            # longing delivery does not manufacture a new canonical emotion.
-            "voice_profile": _text(
-                expression.get("voice_style"), field_name="voice_style", limit=64
-            ).upper(),
-            "style_note": _text(expression.get("voice_style"), field_name="voice_style", limit=64),
-            "companion_profile_id": scope["companion_profile_id"],
-            "companion_profile_digest": scope["companion_profile_digest"],
-            "interruptible": True,
-        },
+        payload=voice_payload,
         created_at_ms=created,
         **base,
     )

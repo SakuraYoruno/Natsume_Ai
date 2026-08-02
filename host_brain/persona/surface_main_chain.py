@@ -113,6 +113,10 @@ class SurfaceMainChainResult:
         return self.runtime.selected_text
 
     @property
+    def tts_text_ja(self) -> str:
+        return self.runtime.tts_text_ja
+
+    @property
     def observation_codes(self) -> tuple[str, ...]:
         return self.runtime.observation_codes
 
@@ -132,6 +136,7 @@ class SurfaceMainChainResult:
         return {
             "surface_main_chain": True,
             "selected_text": self.selected_text,
+            "tts_text_ja": self.tts_text_ja,
             "natsume_emotion_tag": self.natsume_emotion_tag,
             "user_emotion_tag": self.user_emotion_tag,
             "vts_expression_id": self.vts_expression_id,

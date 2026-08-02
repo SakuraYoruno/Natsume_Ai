@@ -3,20 +3,23 @@
 
 # Natsume AI 功能模块与责任边界
 
-版本：v2.66
-核对日期：2026-08-01
+版本：v2.67
+核对日期：2026-08-02
 原始审计基线：`2b84ae9ad`；当前模块事实以本文所在提交的工作树为准
 文档类型：`CURRENT MODULE MAP / TARGET BOUNDARIES`
 
 本文从生产入口和实际调用链反向说明“系统现在有哪些功能模块、各自应该管什么、当前边界哪里没有闭环”。它不以目录数量、文件数量或历史里程碑作为完成证据。
 
-> 语音模块现分成两个清晰责任：Edge 父进程负责 `TtsConfig`、ExpressionPlan、RPC、请求与播放；
-> 独立 GPT-SoVITS Worker 只在模型 Python 中加载 project-bound 权重和 reference bank 并返回音频。
+> 语音模块现分成三个清晰责任：Host 用同一次表层模型响应生成中文屏显与可选日语 speech text；Edge
+> 父进程负责 `TtsConfig`、ExpressionPlan、RPC、请求与播放；独立 GPT-SoVITS 或 Style-Bert-VITS2
+> Worker 只在模型 Python 中加载已绑定的权重、reference/style bank 并返回音频。
 > `voice_profile` 优先选择表达风格，`emotion_tag` 只作兼容回退，因而羞涩、调情、想念、安静亲密和
 > 温柔恋爱不会反向创建 self-emotion。Voice RPC 与 Worker 现实际消费 speed/energy/pitch；renderer
 > 已识别整数 PCM 数值域并以峰值缩放避免硬削波。离线 corpus 模块保留通用声学近邻和硬链接复用，
-> 但新增同语言门槛：显式源语言与目标语言不同的 profile 不能进入生产候选。日语中文模型已拒绝，
-> 当前没有提升默认模型；下一轮仅允许原生中文模型或经授权、转写合格的中文语料。
+> 但新增同语言门槛：显式源语言与目标语言不同的 profile 不能进入生产候选。日语模型读中文已拒绝；
+> 日语候选只接受 `tts_text_ja + lang_hint=ja`。字段缺失时本轮 Voice 降级，不阻塞中文文本，也不增加
+> 第二次翻译调用。最终候选已由本机真实 Worker 加载并合成，DeepSeek 单例也已产生有效双文本；
+> 默认模型、人耳接受与远端播放仍未提升或验收。
 
 > RealtimeCompanion 模块现拥有自己的 catalog scene、provider/model/timeout lane 和紧凑 native prompt；
 > `chat_retrieval_helpers` 只给可选语义 embedding 350ms 默认等待预算，并把冷加载移出 ASGI event loop。

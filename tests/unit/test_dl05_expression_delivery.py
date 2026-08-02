@@ -101,6 +101,32 @@ def test_sentence_expression_protocol_is_paired_and_has_no_edge_applied_claim() 
     assert "EDGE_APPLIED" not in str(trace)
 
 
+def test_sentence_expression_protocol_keeps_chinese_display_and_japanese_voice_separate() -> None:
+    intents, _receipts = build_sentence_expression_delivery(
+        affective_turn_plan=_plan(),
+        sentence="先歇一下，我就在这里。",
+        speech_sentence="少し休もっか。私はここにいるよ。",
+        speech_language="ja",
+        sentence_index=0,
+        created_at_ms=NOW + 1,
+    )
+
+    voice = intents[0]
+    assert voice.payload["display_text"] == "先歇一下，我就在这里。"
+    assert voice.payload["text"] == "少し休もっか。私はここにいるよ。"
+    assert voice.payload["lang_hint"] == "ja"
+
+    with pytest.raises(ValueError, match="bounded Japanese"):
+        build_sentence_expression_delivery(
+            affective_turn_plan=_plan(),
+            sentence="我在。",
+            speech_sentence="这不是日语。",
+            speech_language="ja",
+            sentence_index=0,
+            created_at_ms=NOW + 1,
+        )
+
+
 @pytest.mark.parametrize("action,status", [("CANCEL", "HOST_CANCEL_STAGED"), ("RELEASE", "HOST_RELEASE_STAGED")])
 def test_expression_controls_are_deterministic_and_only_cover_completed_prefix(
     action: str,
@@ -248,6 +274,82 @@ def test_canonical_expression_plan_retires_legacy_embodiment_delivery_path(monke
     ]
 
 
+def test_surface_foreground_stages_same_call_japanese_speech_text(monkeypatch) -> None:
+    from host_brain.surface_runtime import delivery_audit
+
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    submitted: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        delivery_audit,
+        "submit_life_command",
+        lambda **kwargs: submitted.append(kwargs)
+        or {
+            "status": "APPLIED",
+            "command_id": kwargs["command_id"],
+            "event_id": "event-dl05-ja",
+            "state_version": 1,
+            "replayed": False,
+        },
+    )
+    agent = SimpleNamespace(
+        request_id="request-dl05",
+        workspace_id="workspace-dl05",
+        person_id="person-dl05",
+        session_id="session-dl05",
+        user_message="有点累。",
+        ts_ms=NOW,
+        reply_channel="gateway",
+        reply_target="target-dl05",
+        bond_summary={},
+        emotion_context={},
+        emotion_snapshot={},
+        render_policy={},
+        governor_result={"decision": "APPROVE"},
+        delivery_authorization={},
+        defer_effects_to_task_runtime=False,
+    )
+    narrative = "那就先歇一下，我陪你待会儿。"
+    speech = "じゃあ、少し休もっか。私がそばにいるから。"
+    result = SimpleNamespace(
+        selected_text=narrative,
+        tts_text_ja=speech,
+        natsume_emotion_tag="CALM",
+        user_emotion_tag="SAD",
+        vts_expression_id="calm",
+        observation_codes=(),
+        compiled=SimpleNamespace(trace={}),
+        runtime=SimpleNamespace(
+            tts_text_ja=speech,
+            emotion_confidence=0.8,
+            generation_trace={},
+            latency_ms=12,
+        ),
+    )
+
+    delivery_audit._submit_surface_foreground_completed(
+        life_command_service=object(),
+        life_snapshot_reader=object(),
+        relationship_lifecycle_service=None,
+        agent_input=agent,
+        result=result,
+        envelope=ReplyEnvelope.final_reply(text=narrative, source="test"),
+        narrative=narrative,
+        trace_stage_meta={"affective_turn_plan": _plan()},
+        timings_ms={"surface_main_chain_ms": 12},
+        total_latency_ms=12,
+        llm_latency_ms=10,
+    )
+
+    payload = submitted[0]["payload"]
+    assert isinstance(payload, dict)
+    assert payload["assistant_reply"] == narrative
+    assert payload["tts_text_ja"] == speech
+    voice = payload["expression_delivery_intents"][0]
+    assert voice["payload"]["display_text"] == narrative
+    assert voice["payload"]["text"] == speech
+    assert voice["payload"]["lang_hint"] == "ja"
+
+
 def _governed_foreground(*, narrative: str = "我在，慢一点也没关系。") -> dict[str, object]:
     plan = _plan()
     intents, controls, receipts = build_buffered_expression_delivery(
@@ -310,6 +412,71 @@ def test_governed_expression_acceptance_rebuilds_exact_host_outbox_commands() ->
         for item in parsed
     )
     assert COMPANION_EXPRESSION_ENQUEUE_EFFECT == "host.companion_expression_enqueue"
+
+
+def test_governed_expression_acceptance_binds_japanese_speech_to_chinese_narrative() -> None:
+    narrative = "先歇一下，我就在这里。"
+    speech = "少し休もっか。私はここにいるよ。"
+    plan = _plan()
+    intents, sentence_receipts = build_sentence_expression_delivery(
+        affective_turn_plan=plan,
+        sentence=narrative,
+        speech_sentence=speech,
+        speech_language="ja",
+        sentence_index=0,
+        created_at_ms=NOW + 3,
+    )
+    controls, control_receipts = build_expression_delivery_controls(
+        affective_turn_plan=plan,
+        action="RELEASE",
+        sent_sentence_count=1,
+        created_at_ms=NOW + 3,
+    )
+    foreground = _governed_foreground(narrative=narrative)
+    payload = foreground["payload"]
+    assert isinstance(payload, dict)
+    payload["tts_text_ja"] = speech
+    payload["expression_delivery_intents"] = [item.as_dict() for item in intents]
+    payload["expression_delivery_controls"] = [item.as_dict() for item in controls]
+    payload["expression_delivery_receipts"] = [
+        *(item.as_dict() for item in sentence_receipts),
+        *(item.as_dict() for item in control_receipts),
+    ]
+
+    effects = compile_companion_expression_effect_payloads(
+        graph_id="graph-dl05",
+        graph_revision=1,
+        node_id="node-dl05",
+        attempt_id="attempt-dl05",
+        request_id="request-dl05",
+        principal_id="person-dl05",
+        relationship_subject_id="person-dl05",
+        workspace_id="workspace-dl05",
+        session_id="session-dl05",
+        node_grant_ref="node-grant://dl05",
+        foreground=foreground,
+    )
+
+    voice = parse_companion_expression_effect_payload(effects[0])["command"]
+    assert voice.payload["text"] == speech
+    assert voice.payload["display_text"] == narrative
+    assert voice.payload["lang_hint"] == "ja"
+
+    payload["tts_text_ja"] = "別の台詞だよ。"
+    with pytest.raises(CompanionExpressionEffectError, match="PROTOCOL_DRIFT"):
+        compile_companion_expression_effect_payloads(
+            graph_id="graph-dl05",
+            graph_revision=1,
+            node_id="node-dl05",
+            attempt_id="attempt-dl05",
+            request_id="request-dl05",
+            principal_id="person-dl05",
+            relationship_subject_id="person-dl05",
+            workspace_id="workspace-dl05",
+            session_id="session-dl05",
+            node_grant_ref="node-grant://dl05",
+            foreground=foreground,
+        )
 
 
 def test_governed_expression_acceptance_rejects_worker_protocol_drift() -> None:

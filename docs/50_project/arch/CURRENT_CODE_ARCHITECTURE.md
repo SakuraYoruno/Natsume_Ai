@@ -3,7 +3,7 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.91
+版本：v5.92
 核对日期：2026-08-02
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
@@ -14,12 +14,15 @@
 > Edge RPC 与现有 GPT-SoVITS Worker 传递；该生产 Worker 尚未切换。日语模型读中文仍为
 > `REJECTED_CROSS_LANGUAGE_VOICE`，但用户已选择真正的日语语音输出。新的 Style-Bert-VITS2 `2.7.0`
 > JP-Extra 候选在 RTX 5080 上完成官方模型 CUDA 烟测；确定性构建器已生成 1970 条/2.808685 小时七海
-> 日语数据和 `Natural + 6` 风格目录。七海本地短训练已经完成 1 epoch / 493 step，并生成可推理
-> step 493 权重与 14 条七风格试听；它仍只是 `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`。
+> 日语数据和 `Natural + 6` 风格目录。七海候选已训练到 `e10_s5423`，并生成最终 14 条七风格试听；
+> 它仍只是 `TRAINED_CANDIDATE_NOT_HUMAN_ACCEPTED`。
 > `TtsConfig.backend`、Edge bootstrap 和独立常驻 Worker 已支持 `style_bert_vits2`；发布目录必须包含
 > 显式 safetensors、config、style vectors 与摘要绑定的 manifest，日语 Worker 会拒绝非日语请求。
-> 默认 backend 仍是 GPT-SoVITS。日语 speech-text renderer、完整权重、人耳 A/B、默认 voice bank 和
-> 物理播放均未接入，不得从短训练样音或合同测试推导 DL-05 / DL-07 已完成。
+> Host 的 `HOST_COMPANION_TTS_LANGUAGE=ja` 会把普通表层回复切为单次双文本结果：中文用于显示，
+> 自然日语用于 Voice intent；字段无效时只降级 Voice，不增加翻译调用或阻塞聊天。默认 backend 仍是
+> GPT-SoVITS；当前双文本模式为完整回复缓冲。候选 Worker 已在本机真实加载并以最终权重合成，
+> `deepseek-v4-flash` 单例也已一次返回有效中日双文本；人耳 A/B、默认 voice bank、远端 Edge 和物理
+> 播放仍未验收，不得从本机候选推导 DL-05 / DL-07 已完成。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

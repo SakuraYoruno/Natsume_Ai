@@ -23,6 +23,10 @@ from host_brain.digital_life.affective_expression_delivery import (
     build_sentence_expression_delivery,
     expression_delivery_trace,
 )
+from host_brain.digital_life.companion_voice import (
+    japanese_companion_voice_enabled,
+    normalize_japanese_speech_text,
+)
 import time
 
 from host_brain.surface_runtime.common import (
@@ -197,6 +201,18 @@ def _submit_surface_foreground_completed(
         agent_input=agent_input,
         trace_stage_meta=trace_stage_meta,
     )
+    tts_text_ja = ""
+    if result is not None and japanese_companion_voice_enabled():
+        candidate = normalize_japanese_speech_text(
+            getattr(result, "tts_text_ja", "")
+        )
+        # A deterministic visible-text repair invalidates the model's original
+        # speech rendering.  Degrade voice for this turn instead of speaking a
+        # stale Japanese sentence with different meaning.
+        if candidate and str(result.selected_text or "").strip() == str(
+            narrative or ""
+        ).strip():
+            tts_text_ja = candidate
     governor_result = _safe_mapping(
         getattr(agent_input, "governor_result", None)
     )
@@ -213,6 +229,7 @@ def _submit_surface_foreground_completed(
         "workspace_id": workspace_id,
         "user_message": user_message,
         "assistant_reply": str(narrative or ""),
+        "tts_text_ja": tts_text_ja,
         "completed_at_ms": completed_at_ms,
     }
     delegated_agents = _delegated_agents_from_sub_agent_context(agent_input)
@@ -337,18 +354,27 @@ def _submit_surface_foreground_completed(
     ) or stream_mode == "native_sentence_stream"
     buffered_expression_segments: list[str] = []
     if affective_turn_plan and narrative and not sentence_delivery_already_staged:
-        # Preserve governed-node stable sentence boundaries instead of
-        # re-segmenting the completed narrative: Voice and Avatar must receive
-        # one paired protocol per exact visible sentence.
-        buffered_expression_segments = _expression_segments_for_foreground(
-            narrative=str(narrative or ""),
-            stream_mode=stream_mode,
-            stream_summary=stream_metadata,
-        )
+        if tts_text_ja:
+            # The first Japanese implementation is deliberately one same-call,
+            # buffered utterance.  It keeps display/speech semantics frozen
+            # together without guessing how independently punctuated Chinese
+            # and Japanese sentences should be paired.
+            buffered_expression_segments = [str(narrative or "").strip()]
+        else:
+            # Preserve governed-node stable sentence boundaries instead of
+            # re-segmenting the completed narrative: Voice and Avatar must receive
+            # one paired protocol per exact visible sentence.
+            buffered_expression_segments = _expression_segments_for_foreground(
+                narrative=str(narrative or ""),
+                stream_mode=stream_mode,
+                stream_summary=stream_metadata,
+            )
         for sentence_index, segment in enumerate(buffered_expression_segments):
             intents, receipts, trace = _expression_sentence_protocol(
                 plan=affective_turn_plan,
                 sentence=segment,
+                speech_sentence=tts_text_ja or None,
+                speech_language="ja" if tts_text_ja else None,
                 sentence_index=sentence_index,
                 created_at_ms=completed_at_ms,
             )
@@ -621,6 +647,8 @@ def _expression_sentence_protocol(
     *,
     plan: Mapping[str, Any],
     sentence: str,
+    speech_sentence: str | None = None,
+    speech_language: str | None = None,
     sentence_index: int,
     created_at_ms: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
@@ -630,6 +658,8 @@ def _expression_sentence_protocol(
         intents, receipts = build_sentence_expression_delivery(
             affective_turn_plan=plan,
             sentence=sentence,
+            speech_sentence=speech_sentence,
+            speech_language=speech_language,
             sentence_index=sentence_index,
             created_at_ms=created_at_ms,
         )

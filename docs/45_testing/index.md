@@ -17,15 +17,21 @@
   做确定性筛选；最终为 `1970` 条、`2.808685` 小时、`1970 hardlink / 0 copy`。五条已听审但未
   达基础阈值的风格 anchor 被显式保留，普通片段不会由关键词或 emotion2vec 自动获得风格标签。
   一条 OpenJTalk 无法读取专名汉字的语音被显式排除；数据工具单测为 `5 passed in 0.46s`。
-- batch 4 的训练兼容烟测完成 1 epoch / 493 step，约 4 分 45 秒，峰值显存约 15.2GB；训练未出现
-  OOM、NaN 或崩溃，step 250 与 step 493 均生成可推理权重。step 493 进一步生成 7 条同句跨风格和
-  7 条匹配台词，暖机后单条合成约 0.10～0.13 秒；14 条输出没有成片硬削波。状态为
-  `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`，完整训练、人耳 A/B、默认提升和远端 Edge 仍待证据。
+- batch 4 先完成 1 epoch / 493 step 烟测，随后续训至 `e10_s5423`；续训进程约 46 分 08 秒，峰值
+  显存约 15.2GB，全程无 OOM、NaN 或崩溃。最终权重生成 7 条同句跨风格和 7 条匹配台词；状态为
+  `TRAINED_CANDIDATE_NOT_HUMAN_ACCEPTED`，人耳 A/B、默认提升和远端 Edge 仍待证据。
 - Style-Bert-VITS2 Worker、Edge backend 选择、release 打包与旧 GPT-SoVITS 回归的定向集合为
   `78 passed in 5.08s`。release 必须显式指定 `.safetensors`，同时绑定 config、style vectors 及三者
   SHA-256；Worker 只接受日语语言请求。锚点近邻工具已从 1970 个真实 embedding 为 6 类各生成 12 条
   `CANDIDATE_REVIEW_REQUIRED`，且独立 style-bank builder 与官方目录算法逐风格最大差为 0（Neutral
-  仅因求和次序有 `5.96e-8` 浮点差）。训练仍占用 GPU，因此真实 Worker 进程启动留到检查点完成后。
+  仅因求和次序有 `5.96e-8` 浮点差）。最终候选 Worker 已真实加载，加载约 3.19 秒；暖机后两条
+  合成分别为 0.140 秒和 0.157 秒，中文语言请求按预期失败，Worker 随后正常卸载。
+- Host 同调用双文本定向验证覆盖：日语模式强制结构化回复、`reply_text/tts_text_ja` 分离、无效日语
+  降级、Gateway 日语优先、中文显示与日语 Voice intent 绑定、Acceptance 防篡改，以及默认中文与
+  原生单语流式回归。另用真实 `deepseek-v4-flash` 跑 1 条陪伴输入，3.058 秒一次返回语义一致的
+  中日双文本，日语字段再由最终 Worker 以 `SOFT_COMFORT` 合成 5.41 秒音频，暖机合成耗时 0.156 秒。
+  本轮受影响 Host/Edge/文档组合为 `177 passed`，Surface 除去 3 类已知时段依赖用例后为
+  `36 passed / 19 deselected`。单例证明链路可用，不等于批量自然度、人耳接受或远端播放通过。
 
 - 首轮六组情感均衡 A/B 经人工试听后被判定为差异不足，候选没有提升为默认模型；自动关键词
   emotion label 只保留为训练采样线索，不再作为 reference 风格质量证明。

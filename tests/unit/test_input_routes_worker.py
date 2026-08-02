@@ -1226,6 +1226,21 @@ def test_build_gateway_voice_text_prefers_chinese_reply_over_legacy_tts_text() -
     )
 
 
+def test_build_gateway_voice_text_prefers_japanese_only_when_companion_voice_enabled(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+
+    assert _build_gateway_voice_text(
+        reply_text="我记住了，明早九点有会。",
+        tts_text_ja="明日の朝九時に会議があること、ちゃんと覚えてるよ。",
+    ) == "明日の朝九時に会議があること、ちゃんと覚えてるよ。"
+    assert _build_gateway_voice_text(
+        reply_text="我在。",
+        tts_text_ja="",
+    ) == ""
+
+
 def test_build_gateway_voice_text_falls_back_to_safe_japanese_summary_for_latin_or_code() -> None:
     voice_text = _build_gateway_voice_text(
         reply_text="可以直接这样写：```python\\nfrom collections import Counter\\n```",

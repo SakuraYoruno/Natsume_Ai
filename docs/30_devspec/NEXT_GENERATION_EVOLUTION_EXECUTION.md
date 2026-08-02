@@ -21,11 +21,15 @@ PyTorch `2.7.0+cu128` 在 RTX 5080 上完成官方模型真实 CUDA 推理。训
 只进入 `Natural`，16 条人工确认或既有高置信原声锚分入 `WarmCare / SharedJoy / PlayfulShy /
 RomanticTender / ContainedHurt / QuietPresence`。风格目录只生成可替换的 style vector，不把自动
 情绪分类当训练真相，因此后续调恋爱感不要求重训声学模型。另有一条含 OpenJTalk 无法读取专名
-汉字的语音被显式排除，没有用忽略读音错误的参数掩盖。batch 4 的首轮训练已真实完成
-1 epoch / 493 step，峰值显存约 15.2GB，step 493 检查点生成的 14 条七风格试听未出现 OOM、NaN
-或成片硬削波；当前状态为 `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`，不能据此提升默认模型。
-后续 epoch、人耳 A/B、日语 speech-text renderer、真实七海 Worker 启动、默认 manifest、远端 Edge、真实播放、打断
-和 Avatar 动作均未完成或验收。代码侧已加入隔离的 Style-Bert-VITS2 常驻 Worker、显式 release
+汉字的语音被显式排除，没有用忽略读音错误的参数掩盖。batch 4 先完成 493 step 烟测，再续训到
+`e10_s5423`；训练没有 OOM、NaN 或崩溃，最终权重已生成 14 条七风格试听。当前状态为
+`TRAINED_CANDIDATE_NOT_HUMAN_ACCEPTED`，不能据此提升默认模型。候选 release 已由本机常驻 Worker
+真实加载，加载约 3.19 秒，暖机后合成约 0.14～0.16 秒，中文语言请求被拒绝。人耳 A/B、默认
+manifest、远端 Edge、真实播放、打断和 Avatar 动作仍未完成或验收。Host 已加入显式可选的同调用双文本模式：中文 `reply_text` 继续显示，日语
+`tts_text_ja` 绑定到同一 accepted foreground 和 Voice intent；无效或缺失日语只降级语音，不能回退
+为日语模型合成中文。真实 DeepSeek 单例在 3.058 秒返回中日双文本，并由最终 Worker 合成；当前
+先采用完整回复缓冲，双语逐句流式仍待后续优化。代码侧已加入隔离的
+Style-Bert-VITS2 常驻 Worker、显式 release
 manifest 与 Edge backend 选择；它只接受 `lang_hint=ja`，不会用日语检查点回退合成中文。另有锚点
 近邻候选工具从 1970 条 embedding 为每类输出 12 条待听审片段，审核后可只重算 style vector 而不重训
 声学模型；候选不得自动进入发布风格库。

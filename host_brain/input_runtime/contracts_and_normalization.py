@@ -29,6 +29,10 @@ from host_brain.digital_life.application_boundary import (
     project_inner_life_snapshot,
     read_life_snapshot,
 )
+from host_brain.digital_life.companion_voice import (
+    japanese_companion_voice_enabled,
+    normalize_japanese_speech_text,
+)
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.reply_envelope import can_send, coerce_reply_envelope, envelope_from_commit
 from host_brain.input_runtime.reply_performance import coerce_reply_performance
@@ -709,6 +713,11 @@ def _build_gateway_voice_text(
     voice_templates = dict(templates.get("voice_summary") or {})
 
     normalized_reply = str(reply_text or "").strip()
+    if japanese_companion_voice_enabled():
+        # In Japanese companion-voice mode, never feed the Chinese display
+        # text to the Japanese acoustic model.  Missing JA text degrades to no
+        # voice while the visible reply remains available.
+        return normalize_japanese_speech_text(tts_text_ja)
     if normalized_reply and _VOICE_TEXT_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
         return normalized_reply
 

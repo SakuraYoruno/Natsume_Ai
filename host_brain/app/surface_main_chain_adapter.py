@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
+from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
 from host_brain.persona.surface_main_chain import (
     SurfaceMainChain,
     SurfaceMainChainInput,
@@ -68,6 +69,8 @@ from host_brain.surface_runtime.ports import (
 
 
 def _surface_main_chain_response_format() -> dict[str, str] | None:
+    if japanese_companion_voice_enabled():
+        return {"type": "json_object"}
     mode = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_OUTPUT_CONTRACT") or "text").strip().lower()
     if mode in {"json", "json_object", "structured"}:
         return {"type": "json_object"}
@@ -190,6 +193,13 @@ def _native_affective_stream_preparation(
     trace_stage_meta: dict[str, Any],
 ) -> tuple[SurfaceMainChainInput, Any, dict[str, Any]] | None:
     """Compile once and select the native stream only for a frozen safe plan."""
+
+    # The current native protocol streams plain Chinese sentences.  Japanese
+    # voice mode uses one bilingual JSON response from the same model call;
+    # keep that route buffered until sentence-paired bilingual streaming is
+    # implemented, rather than speaking untranslated Chinese through a JP model.
+    if japanese_companion_voice_enabled():
+        return None
 
     governed_model_budget = _governed_model_budget_guard(trace_stage_meta)
     governed_delivery_authority = _governed_task_delivery_authority(agent_input)
@@ -2333,6 +2343,7 @@ async def surface_main_chain_sse_generator(
                 "model_id": model_audit["model_id"],
                 "provider_name": model_audit["provider_name"],
                 "response_form": "text",
+                "tts_text_ja": str(getattr(result, "tts_text_ja", "") or ""),
                 "timings_ms": timings_ms,
                 "reply_envelope": envelope.as_dict(),
                 "surface_main_chain": _public_result_trace(result),

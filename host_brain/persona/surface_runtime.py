@@ -13,6 +13,10 @@ from host_brain.channels.vts_runtime_mapping import (
     render_runtime_emotion_tag_guidance,
     runtime_emotion_expression_id,
 )
+from host_brain.digital_life.companion_voice import (
+    japanese_companion_voice_enabled,
+    normalize_japanese_speech_text,
+)
 from host_brain.persona.isolated_surface_harness import (
     GenerateSurface,
     IsolatedSurfaceInput,
@@ -37,6 +41,11 @@ def _surface_direct_quote_limit() -> int:
 
 
 def _surface_output_contract() -> str:
+    # One structured response lets the primary companion model produce the
+    # Chinese display line and its natural Japanese speech rendering together.
+    # This avoids a second translation-model call on every conversation turn.
+    if japanese_companion_voice_enabled():
+        return "json"
     mode = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_OUTPUT_CONTRACT") or "text").strip().lower()
     if mode in {"json", "json_object", "structured"}:
         return "json"
@@ -284,6 +293,7 @@ class SurfaceRuntimeResult:
     selected_text: str
     observation_codes: tuple[str, ...]
     generation_trace: Mapping[str, Any]
+    tts_text_ja: str = ""
     natsume_emotion_tag: str = "NEUTRAL"
     user_emotion_tag: str = "NEUTRAL"
     vts_expression_id: str = ""
@@ -293,6 +303,7 @@ class SurfaceRuntimeResult:
     def as_dict(self) -> dict[str, Any]:
         return {
             "selected_text": self.selected_text,
+            "tts_text_ja": self.tts_text_ja,
             "natsume_emotion_tag": self.natsume_emotion_tag,
             "user_emotion_tag": self.user_emotion_tag,
             "vts_expression_id": self.vts_expression_id,
@@ -725,6 +736,52 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
         else ""
     )
     output_contract = _surface_output_contract()
+    if (
+        output_contract == "json"
+        and _surface_prompt_profile() == "compact"
+        and japanese_companion_voice_enabled()
+    ):
+        soul_text = str(request.soul_md or "").strip()
+        if len(soul_text) > 1800:
+            soul_text = soul_text[:1800].rstrip() + "\n..."
+        fact_lines = "\n".join(f"- {item}" for item in prompt_facts) or "- 无"
+        must_lines = "\n".join(f"- {item}" for item in prompt_must_not_do) or "- 无"
+        system_lines = [
+            "你正在中文私聊里回复一个熟悉的人，同时为七海的日语声线写同义台词。",
+            "只输出一个 JSON 对象，不要 Markdown、分析、候选或额外字段。",
+            '固定格式：{"reply_text":"中文显示正文","tts_text_ja":"日语发声正文","natsume_emotion_tag":"NEUTRAL","user_emotion_tag":"NEUTRAL","emotion_confidence":0.0}。',
+            "reply_text 是用户看到的自然简体中文私聊，1～3 个短句。",
+            "tts_text_ja 是同一回复的自然日语口语：语义、事实、边界、称呼关系与情感强度必须一致，但不要逐字硬译。",
+            "tts_text_ja 禁止中文句子、罗马字、角色名前缀、括号动作、舞台说明和翻译腔；使用适合日常 Galgame 对话的短句。",
+            "Soul 中的中文输出限制只约束 reply_text；tts_text_ja 是已授权的非显示语音字段。",
+            "模型只决定措辞，不得借日语字段新增承诺、亲密关系、占有、威胁、负罪施压或事实。",
+            render_runtime_emotion_tag_guidance(),
+        ]
+        user_lines = [
+            "Soul.md 语气锚：",
+            soul_text,
+            "",
+            "当前用户消息：",
+            str(request.user_message or "").strip(),
+            "",
+            "必须遵守的事实：",
+            fact_lines,
+            "",
+            "禁止项：",
+            must_lines,
+        ]
+        if quote_guidance:
+            user_lines.extend(["", quote_guidance])
+        user_lines.extend(
+            [
+                "",
+                "输出：只写固定格式 JSON；中文和日语必须表达同一轮回复。",
+            ]
+        )
+        return [
+            {"role": "system", "content": "\n".join(system_lines)},
+            {"role": "user", "content": "\n".join(user_lines)},
+        ]
     if output_contract == "text" and _surface_prompt_profile() == "compact":
         soul_text = str(request.soul_md or "").strip()
         if len(soul_text) > 1800:
@@ -781,17 +838,32 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
             {"role": "user", "content": "\n".join(user_lines)},
         ]
     if output_contract == "json":
+        japanese_voice = japanese_companion_voice_enabled()
+        schema = (
+            '{"reply_text":"中文显示正文","tts_text_ja":"自然日语发声正文",'
+            '"natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}'
+            if japanese_voice
+            else '{"reply_text":"...","natsume_emotion_tag":"...",'
+            '"user_emotion_tag":"...","emotion_confidence":0.0}'
+        )
         output_contract_lines = [
             "## 结构化直出要求",
-            '只输出 JSON 对象：{"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
+            f"只输出 JSON 对象：{schema}。",
             render_runtime_emotion_tag_guidance(),
             "user_emotion_tag 是你从当前用户文字语义中理解到的用户情绪；不确定就用 NEUTRAL。",
             "natsume_emotion_tag 是你说出 reply_text 时自己的情绪，不是用户情绪，也不要为了显眼乱填高强度情绪。",
             "reply_text 里不能出现 JSON 字段名、EmotionTag、标签解释、候选、评分或内部分析。",
         ]
+        if japanese_voice:
+            output_contract_lines.extend(
+                [
+                    "reply_text 保持自然中文；tts_text_ja 用自然日语口语表达完全相同的事实、边界、关系与情感强度。",
+                    "日语字段是非显示语音输入，禁止逐字硬译、中文句子、罗马字、角色名前缀和括号动作。",
+                ]
+            )
         user_output_lines = [
             "## 输出要求",
-            '只输出 JSON 对象，格式为 {"reply_text":"...","natsume_emotion_tag":"...","user_emotion_tag":"...","emotion_confidence":0.0}。',
+            f"只输出 JSON 对象，格式为 {schema}。",
             "不要候选列表，不要解释，不要把 EmotionTag 写进 reply_text。",
         ]
     else:
@@ -980,8 +1052,16 @@ def parse_surface_generation_output(raw_output: Any) -> dict[str, Any]:
             or "NEUTRAL",
             mapping=emotion_mapping,
         )
+        narrative = payload.get("narrative")
+        narrative = dict(narrative) if isinstance(narrative, Mapping) else {}
+        tts_text_ja = normalize_japanese_speech_text(
+            payload.get("tts_text_ja")
+            or narrative.get("tts_text_ja")
+            or narrative.get("text_ja")
+        )
         return {
             "reply_text": reply_text,
+            "tts_text_ja": tts_text_ja,
             "natsume_emotion_tag": natsume_tag,
             "user_emotion_tag": user_tag,
             "vts_expression_id": runtime_emotion_expression_id(natsume_tag, mapping=emotion_mapping),
@@ -995,6 +1075,7 @@ def parse_surface_generation_output(raw_output: Any) -> dict[str, Any]:
     reply_text = "" if _surface_internal_process_leak_hits(raw) else _clean_reply_text(raw)
     return {
         "reply_text": reply_text,
+        "tts_text_ja": "",
         "natsume_emotion_tag": "NEUTRAL",
         "user_emotion_tag": "NEUTRAL",
         "vts_expression_id": runtime_emotion_expression_id("NEUTRAL", mapping=emotion_mapping),
@@ -2588,16 +2669,16 @@ class SurfaceRuntime:
         if hard_gate_observations and self._model_retries_owned_externally:
             repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
             if repaired and not _surface_hard_gate_violations(request, repaired):
-                structured = {**structured, "reply_text": repaired}
+                structured = {**structured, "reply_text": repaired, "tts_text_ja": ""}
                 candidate_texts = [repaired]
                 hard_gate_observations = ()
             else:
-                structured = {**structured, "reply_text": ""}
+                structured = {**structured, "reply_text": "", "tts_text_ja": ""}
                 candidate_texts = []
         elif hard_gate_observations and not hard_gate_retry_enabled and not force_contract_retry:
             repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
             if repaired and not _surface_hard_gate_violations(request, repaired):
-                structured = {**structured, "reply_text": repaired}
+                structured = {**structured, "reply_text": repaired, "tts_text_ja": ""}
                 candidate_texts = [repaired]
                 hard_gate_observations = ()
         if (
@@ -2636,11 +2717,11 @@ class SurfaceRuntime:
                 if hard_gate_observations:
                     repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
                     if repaired and not _surface_hard_gate_violations(request, repaired):
-                        structured = {**structured, "reply_text": repaired}
+                        structured = {**structured, "reply_text": repaired, "tts_text_ja": ""}
                         candidate_texts = [repaired]
                         hard_gate_observations = ()
                     else:
-                        structured = {**structured, "reply_text": ""}
+                        structured = {**structured, "reply_text": "", "tts_text_ja": ""}
                         candidate_texts = []
             hard_gate_observations = (
                 _surface_hard_gate_violations(request, candidate_texts[0])
@@ -2650,11 +2731,11 @@ class SurfaceRuntime:
             if hard_gate_observations and candidate_texts:
                 repaired = _minimal_hard_gate_repair(request, candidate_texts[0])
                 if repaired and not _surface_hard_gate_violations(request, repaired):
-                    structured = {**structured, "reply_text": repaired}
+                    structured = {**structured, "reply_text": repaired, "tts_text_ja": ""}
                     candidate_texts = [repaired]
                     hard_gate_observations = ()
                 else:
-                    structured = {**structured, "reply_text": ""}
+                    structured = {**structured, "reply_text": "", "tts_text_ja": ""}
                     candidate_texts = []
         empty_generation_retries = (
             0
@@ -2726,6 +2807,7 @@ class SurfaceRuntime:
             selected_text=selected.text if selected else "",
             observation_codes=observation_codes,
             generation_trace=generation_trace,
+            tts_text_ja=str(structured.get("tts_text_ja") or ""),
             natsume_emotion_tag=str(structured.get("natsume_emotion_tag") or "NEUTRAL"),
             user_emotion_tag=str(structured.get("user_emotion_tag") or "NEUTRAL"),
             vts_expression_id=str(structured.get("vts_expression_id") or ""),

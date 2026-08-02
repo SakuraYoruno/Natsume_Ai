@@ -282,6 +282,7 @@ def _rebuild_frozen_expression_protocol(
     raw_intents = _sequence(payload.get("expression_delivery_intents"), "expression_delivery_intents")
     raw_controls = _sequence(payload.get("expression_delivery_controls"), "expression_delivery_controls")
     raw_receipts = _sequence(payload.get("expression_delivery_receipts"), "expression_delivery_receipts")
+    expected_tts_text_ja = str(payload.get("tts_text_ja") or "").strip()
     try:
         parsed_intents = tuple(
             parse_expression_delivery_intent(item) for item in raw_intents
@@ -302,6 +303,8 @@ def _rebuild_frozen_expression_protocol(
     expected_sentence_receipts: list[Any] = []
     sentence_texts: list[str] = []
     sentence_count = len(parsed_intents) // 2
+    if expected_tts_text_ja and sentence_count != 1:
+        raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
     for sentence_index in range(sentence_count):
         offset = sentence_index * 2
         raw_pair = parsed_intents[offset : offset + 2]
@@ -316,14 +319,32 @@ def _rebuild_frozen_expression_protocol(
             or voice.created_at_ms != avatar.created_at_ms
         ):
             raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
-        sentence = _required_text(
-            _mapping(voice.payload, "voice.payload").get("text"),
+        voice_payload = _mapping(voice.payload, "voice.payload")
+        speech_sentence = _required_text(
+            voice_payload.get("text"),
             "voice.payload.text",
+            4_000,
+        )
+        sentence = _required_text(
+            voice_payload.get("display_text") or speech_sentence,
+            "voice.payload.display_text",
             2_000,
         )
+        speech_language = str(voice_payload.get("lang_hint") or "zh").strip().lower()
+        if expected_tts_text_ja:
+            if (
+                speech_sentence != expected_tts_text_ja
+                or not speech_language.startswith("ja")
+                or sentence != narrative
+            ):
+                raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+        elif speech_sentence != sentence or speech_language.startswith("ja"):
+            raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
         expected_pair, expected_pair_receipts = build_sentence_expression_delivery(
             affective_turn_plan=affective_turn_plan,
             sentence=sentence,
+            speech_sentence=(speech_sentence if expected_tts_text_ja else None),
+            speech_language=(speech_language if expected_tts_text_ja else None),
             sentence_index=sentence_index,
             created_at_ms=voice.created_at_ms,
         )
