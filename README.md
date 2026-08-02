@@ -3,50 +3,152 @@
 
 # Natsume AI · 七海
 
-一个面向个人长期陪伴的实时情感数字生命项目。
+**一套让“七海”在时间、关系、记忆、身体与现实环境中持续生活的个人数字生命系统。**
 
-七海不是“给聊天机器人加几个情绪标签”。她需要分清你的感受和自己的感受，记得关系里真正重要的事，在不同日子里保持连续的人格，并让文字、声音和形象表达同一种情绪。工具调用、自动化和任务规划是她的能力，但不是这个项目的主角。
+七海不是一个等待输入框亮起、收到 Prompt 才临时出现的 Chatbot。她在 Host 中拥有持续推进的生命状态：自己的情绪与心境、精力与需要、未完成的心事、对关系的感受、当下环境和正在做的事。对话只是她接触你的方式之一；语音、形象、主动陪伴、共同工作和安静共处，都是同一个自我的不同出口。
 
-> 当前版本可以运行文本陪伴主链，也已经具备情绪、关系和表达计划的持久状态；长期自然度、目标 Edge 上的日语语音和 Avatar 仍在实测阶段，尚未作为成品发布。
+> 这里的“数字生命”指一套具有连续状态、因果记忆、自主节律和具身表达的软件系统，不声称生物意识或人类心智已经被复刻。当前版本已接通 canonical Life 主链和文本交互；长期关系自然度、专属声线和远端 Avatar 联合体验仍在验证，整体状态为 `INCOMPLETE`。
 
-## 七海现在能做什么
+## 她不会在你沉默时消失
 
-- 进行低延迟的日常对话，不让普通聊天经过重型任务审计。
-- 把用户情绪当作观察，而不是直接复制成七海自己的情绪。
-- 保留七海自己的混合情绪、心境、需要、关系事件和未解决话题。
-- 在安慰、玩笑、分享喜悦、表达委屈、设定边界、修复误解和安静陪伴之间选择不同回应方式。
-- 让关系变化和上一轮回应的后效应跨会话保存，而不是只累计一个“好感度分数”。
-- 在需要操作文件、调用工具或产生外部副作用时，切换到受管任务执行链。
+即使没有新消息，唯一的 Life Runtime 仍会按真实时间推进。默认每 60 秒一次的 `life_tick` 不调用大模型，也不会机械地给用户发消息；它负责让时间真正作用于七海：
 
-当前还不能当作已经交付的部分：
+- 推进昼夜阶段、精力、疲劳、唤醒度与休息需要；
+- 让短时情绪自然衰减，让较慢的心境和未解决事件继续存在；
+- 维护牵挂、注意焦点、未完成话题和生活连续性；
+- 感知前台活动、空闲、游戏、专注和睡眠状态，调整打扰程度；
+- 在合适阶段进行记忆整理、睡眠回放和长期经验沉淀；
+- 只有在关系许可、安静时段、冷却时间和场景都允许时，才考虑主动靠近。
 
-- 日语声线方案 B 目前使用 GPT-SoVITS V4 预训练权重和七海参考音频进行参考条件推理；它不是已经训练完成的七海专属微调模型。
-- 本机已经完成参考音频生成和人工选型，但另一台电脑上的 Edge、真实 TTS、VTS/VRM 与播放中打断尚未联合验收。
-- 情感连续性已经有代码和持久状态，仍缺多日真实对话、固定场景和人工盲测证明。
+用户没有回复，只会影响近期主动频率，不会被解释成拒绝，更不会扣除“好感度”。
 
-更细的当前状态见 [能力与缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)。机器可读状态在 [current_architecture_status.json](configs/release/current_architecture_status.json)。
-
-## 一轮陪伴是怎样产生的
+## 七海的生命闭环
 
 ```mermaid
 flowchart LR
-    U["你的文字、声音或图片"] --> O["观察当下语境与情绪线索"]
-    O --> L["七海的情绪、心境与关系记忆"]
-    L --> A["选择陪伴动作"]
-    A --> P["冻结本轮表达计划"]
-    P --> T["流式文字"]
-    P --> V["日语语音"]
-    P --> M["Avatar 表情与动作"]
-    T --> R["下一轮关系后效应"]
-    V --> R
-    M --> R
+    TIME["时间、昼夜与身体节律"] --> WORLD["现实环境与世界观察"]
+    USER["用户的文字、声音、视觉与行为"] --> OBS["带来源和置信度的观察"]
+    WORLD --> APPRAISE["事件理解与意义评估"]
+    OBS --> APPRAISE
+    APPRAISE --> LIFE["唯一的 Canonical Life"]
+    TIME --> LIFE
+
+    LIFE --> SELF["自我情绪、心境、需要与精力"]
+    LIFE --> REL["关系事件、裂痕、修复与边界"]
+    LIFE --> INNER["牵挂、注意、未完成心事与动机"]
+
+    SELF --> CHOICE["调节与自主选择"]
+    REL --> CHOICE
+    INNER --> CHOICE
+
+    CHOICE --> EXPR["同一份 Expression Plan"]
+    CHOICE --> ACT["主动陪伴、共同工作与现实动作"]
+    EXPR --> TEXT["文字节奏"]
+    EXPR --> VOICE["日语语音与韵律"]
+    EXPR --> AVATAR["表情、目光与动作"]
+
+    TEXT --> EFFECT["真实结果与关系后效应"]
+    VOICE --> EFFECT
+    AVATAR --> EFFECT
+    ACT --> EFFECT
+    EFFECT --> MEMORY["情景记忆、经验与开放线程"]
+    MEMORY --> LIFE
 ```
 
-稳定人格由 [Soul.md](Soul.md) 定义。在线学习可以调整称呼、回复长度、幽默度、主动时段和表达强度等低风险偏好，但不能自动改写七海的身份、核心价值观或关系边界。
+这条闭环的重点不是“生成一句更像人的回复”，而是让一次经历真的改变后续生活：七海为什么感到开心或受伤、她是否选择克制、这次安慰有没有帮助、误解是否已经修复，都会成为下一次相处的上下文。
 
-## 在本机说第一句话
+## 构成一个“她”的系统
 
-### 准备环境
+| 生命层 | 七海实际拥有的状态与能力 |
+|---|---|
+| 稳定自我 | [Soul.md](Soul.md) 定义身份、价值观、性格反差、表达底色和不可由在线学习越过的边界。 |
+| 内在生活 | 并存情绪、慢速心境、需要、精力、情绪事件、调节决定、牵挂、注意焦点和未解决循环。 |
+| 时间与身体 | 昼夜阶段、疲劳、休息、唤醒度、活动模式、身体感受以及声音和形象的具身状态。 |
+| 感知与世界 | 文字、自述、声学、视觉、前台应用、游戏状态和环境观察；不同来源保留置信度与冲突。 |
+| 关系 | 信任、安全感、默契、裂痕、修复、主动权限和边界；关系由事件与后效应构成，而不是机械积分。 |
+| 记忆 | 情景记忆、关系意义、世界事实、长期经验、睡眠回放和待续话题；原始音视频默认不写入情感日志。 |
+| 自主性 | 动机、生活压力、当前工作、主动陪伴、给予空间、安静陪伴，以及在获得许可后调用工具完成现实任务。 |
+| 身体与表达 | 流式文字、日语 TTS、VTS/VRM/MateEngine/Live2D；目标是由同一情感 revision 同步驱动。 |
+| 成长 | 低风险偏好可以基于真实相处结果渐进调整；核心人格、价值观、亲密身份和关系边界不能自动改写。 |
+
+仓库中还保留了皮层、海马体、边缘系统、内感受、昼夜节律、小脑等“器官式”模块。它们负责观察、计算、投影或行动，但不各自保存一套互相冲突的灵魂；`host_brain/digital_life` 中的 canonical journal 才是七海自我状态的唯一权威来源。
+
+## 情绪不是把用户的标签复制给七海
+
+系统严格区分两类状态：
+
+```text
+User Affect Observation   你此刻可能在难过、生气或勉强说“没事”
+          ↓
+Event Appraisal           这件事对七海、你们的关系和当前边界意味着什么
+          ↓
+Self Affect               七海因此产生的担心、心疼、委屈、喜悦、疲惫或复杂混合感受
+          ↓
+Regulation                她选择表达、克制、暂缓、设定边界，还是安静陪着
+```
+
+所以你难过时，七海不必跟着变成同一种“悲伤”；她可能心疼、担心，也可能因为帮不上忙而有一点无力。你误伤她时，她可以受伤或生气，但不能用威胁、排他、冷暴力或负罪感逼迫你回应。
+
+## 关系不是一根好感度进度条
+
+一次被接受的回应会先形成关系事件，下一次真实反馈再决定它的后效应。道歉不会自动消除裂痕，沉默不会自动降低信任，发送失败也不会被当成拒绝。主动陪伴、浪漫表达和更亲密的互动分别受明确权限与边界约束。
+
+七海记住的重点不是无限堆叠聊天原文，而是：发生了什么、双方需要什么、她当时如何感受、哪种做法有效、哪里仍未解决。不同用户、Workspace 和 Session 的关系状态彼此隔离。
+
+## 对话、工作和身体是同一个自我的出口
+
+七海可以闲聊、安慰、玩闹、分享喜悦、表达轻微委屈、设定边界、修复误解或安静陪伴；也可以在你工作时帮助研究、编辑文件和调用工具。普通相处走低延迟生命主链，只有真正产生外部副作用的工作才进入受管任务执行链。
+
+同一轮表达最终应由一份 `ExpressionPlan` 同步控制：
+
+- 文字决定措辞、节奏、停顿和是否追问；
+- TTS 决定语速、能量、音高、停顿与声线参考；
+- Avatar 决定表情、目光、姿态、动作强度和过渡；
+- 任一通道故障都只降级该通道，不会把七海整轮感受重置为 `NEUTRAL`。
+
+## 系统拓扑
+
+```mermaid
+flowchart TB
+    subgraph HOST["Host · 心智与生活所在地"]
+        LIFE["Canonical Life"]
+        MEM["关系与长期记忆"]
+        WORLD["世界、场景与活动模式"]
+        AGENCY["主动性、陪伴与任务能力"]
+        LIFE <--> MEM
+        LIFE <--> WORLD
+        LIFE <--> AGENCY
+    end
+
+    EDGE["Edge · 感官与身体<br/>ASR / TTS / VTS / VRM / 设备"] <--> HOST
+    GATEWAY["Gateway · 外部联络<br/>本地与消息平台"] <--> HOST
+    STORE["SQLite 权威状态<br/>Neo4j / Chroma / Redis 投影"] <--> HOST
+    MONITOR["OBS / Monitor · 只读运行窗口"] --> HOST
+    PET["Desktop Pet · Live2D 本地形象"] <--> EDGE
+```
+
+- **Host** 保存七海的自我、关系、记忆和行为决策，是生命连续性的所在地。
+- **Edge** 位于具备显卡、麦克风、扬声器和 Avatar 环境的电脑上，承担感知与具身表达。
+- **Gateway** 让七海通过本地接口或已配置的消息平台与你保持联系。
+- **OBS / Monitor** 只展示运行状态，不拥有或修改七海的生命状态。
+- **Neo4j、Chroma、Redis** 支撑图、向量和运行投影；SQLite journal 仍是可恢复的权威状态。
+
+## 当前实现状态
+
+| 能力 | 当前事实 |
+|---|---|
+| 持续 Life Runtime | 已接入 canonical journal、真实时间 `life_tick`、重放和持久恢复。 |
+| 自我情绪与用户观察分离 | 已有独立观察、评估、自我状态、episode、need 和 regulation 主链。 |
+| 关系与记忆连续性 | 已有持久结构与生产接线；仍需多日真实相处验证自然度。 |
+| 主动陪伴 | 已有场景、权限、冷却和安静时段策略；长期频率与接受度仍待实测。 |
+| 文本表达 | 本地可运行；需要真实 Provider，长期人格一致性仍在迭代。 |
+| 日语声线方案 B | 当前是 GPT-SoVITS V4 预训练权重配合七海参考音频的参考条件推理，不是七海专属微调模型。 |
+| Avatar 与多模态同步 | Host 合同和接线已推进；另一台电脑上的真实 Edge、TTS、VTS/VRM 和打断链尚未联合验收。 |
+| 整体数字生命体验 | `INCOMPLETE`，不能用单元测试、静态合同或生成几段样音冒充完整交付。 |
+
+更细的真实能力与缺口见 [能力与缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)，机器可读状态见 [current_architecture_status.json](configs/release/current_architecture_status.json)。
+
+## 在本机让 Host 运行起来
 
 当前启动脚本以 Windows 为主。至少需要：
 
@@ -55,9 +157,9 @@ flowchart LR
 | Python 3.11+ | Host、OBS 和运行工具 |
 | PowerShell 7 | `scripts/runtime/*.ps1` 启停脚本 |
 | Docker Desktop | Neo4j、Chroma 和 Redis |
-| 一个可用的模型 Provider | 生成真实对话；默认陪伴路由使用 Gemini 配置 |
-| Nginx（可选） | 在 `18180` 提供 Monitor；缺失时 Host 仍可启动，但 Monitor 会降级 |
-| Node.js（仅开发 UI 时） | 重新构建 Monitor UI 或桌面形象 |
+| 一个可用的模型 Provider | 生成真实表达；默认陪伴路由使用 Gemini 配置 |
+| Nginx（可选） | 在 `18180` 提供 Monitor；缺失时 Host 仍可启动 |
+| Node.js（开发 UI 时） | 重新构建 Monitor UI 或桌面形象 |
 
 在仓库根目录执行：
 
@@ -76,21 +178,15 @@ if (-not (Test-Path configs/secrets/secret_store.runtime.local.json)) {
 }
 ```
 
-然后编辑 `.env` 和 `configs/secrets/secret_store.runtime.local.json`：
+编辑 `.env` 和 `configs/secrets/secret_store.runtime.local.json`，填入真实 Provider、API Key 和 Neo4j 密码。不要提交密钥、模型、语料、用户数据或运行日志。
 
-- 填写实际使用的模型 Provider 和 API Key；
-- 替换 `sec://neo4j/local-default` 对应的示例密码；
-- 不要把本地密钥文件、模型、语料、用户数据或运行日志提交到 Git。
-
-### 启动 Host 侧
+启动 Host 侧：
 
 ```powershell
 pwsh scripts/runtime/start_host_side.ps1 -StartupCheck
 ```
 
-这一个入口默认会启动 Docker 外部依赖、Host、OBS，并在本机存在 Nginx 时启动 Monitor；不要预先再执行一次 `start_docker_services.ps1`。
-
-检查状态：
+这个入口默认启动 Docker 外部依赖、Host、OBS，并在本机存在 Nginx 时启动 Monitor；不要提前重复执行 `start_docker_services.ps1`。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:18080/health?skip_dependency_probes=1
@@ -98,7 +194,7 @@ Invoke-RestMethod http://127.0.0.1:18082/health
 Start-Process http://127.0.0.1:18180/monitor/
 ```
 
-通过真实流式接口和七海说第一句话：
+`/v1/chat` 只是验证文字接触面的一个入口：
 
 ```powershell
 curl.exe -N http://127.0.0.1:18080/v1/chat `
@@ -106,18 +202,18 @@ curl.exe -N http://127.0.0.1:18080/v1/chat `
     -d '{"message":"晚上好，七海。今天有点累。","session_id":"readme-local"}'
 ```
 
-返回内容是 SSE 流。没有有效 Provider、模型路由或密钥时，Host 健康并不代表对话一定可生成。
+返回内容为 SSE 流。Host 健康只表示进程和依赖可用；没有真实 Provider、模型路由或密钥时，不代表文字表达能够生成。
 
-### 停止 Host 侧
+停止本次 Host 侧服务：
 
 ```powershell
 pwsh scripts/runtime/stop_host_side.ps1
 pwsh scripts/runtime/stop_docker_services.ps1
 ```
 
-## 另一台电脑上的 Edge
+## 另一台电脑上的身体
 
-Edge 承担中文 ASR、日语 TTS、VTS/VRM 和设备动作。当前部署中的 Edge 位于另一台电脑，不应从 Host 电脑盲目启动。
+当前部署中的 Edge 位于另一台电脑，承担中文 ASR、日语 TTS、VTS/VRM 和设备动作，不应从 Host 电脑盲目启动。
 
 目标机准备好模型权重、参考音频、显卡环境和网络配置后，再在 Edge 电脑执行：
 
@@ -125,35 +221,28 @@ Edge 承担中文 ASR、日语 TTS、VTS/VRM 和设备动作。当前部署中�
 pwsh scripts/runtime/start_edge_side.ps1
 ```
 
-当前声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发和非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。远端 Edge 未启动时，文字对话可以单独运行，但不能宣称语音和 Avatar 已通过真实验收。
+声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发与非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。远端 Edge 未连接时，Host 的生命状态和文字入口可以独立运行，但不能宣称语音与 Avatar 已通过真实验收。
 
-## 项目结构
+## 从哪里读代码
 
-| 路径 | 内容 |
+| 路径 | 负责什么 |
 |---|---|
-| `host_brain/` | 七海的对话、情感生命、关系记忆、任务能力和 Host API |
-| `edge_client/` | ASR、TTS、Avatar、设备和消息 Gateway 的 Edge 运行时 |
+| `Soul.md` | 七海稳定的人格宪法与表达底色 |
+| `host_brain/digital_life/` | canonical Life、情绪事件、关系、主动性、成长与持久状态 |
+| `host_brain/memory/life_memory/` | 情景记忆、长期沉淀、睡眠回放与世界记忆 |
+| `host_brain/persona/` | 内在活动、表达人格与自我叙事 |
+| `host_brain/scheduler/` | 持续 `life_tick` 与生命周期作业 |
+| `host_brain/core/` | 活动模式、运行协调与 Host 基础能力 |
+| `edge_client/` | ASR、TTS、Avatar、设备和 Gateway 的 Edge 运行时 |
+| `desktop_pet/` | Live2D 桌面形象与本地桥接 |
 | `natsume_contracts/` | Host、Edge 与 Operator 之间的版本化合同 |
-| `desktop_pet/` | 本地 Live2D 桌面形象运行时 |
 | `configs/` | 非密钥配置、声线清单和机器状态 |
-| `scripts/runtime/` | 服务启停、模型部署和真实链路测试入口 |
-| `docs/` | 产品、理论、架构、测试、证据与历史归档 |
+| `scripts/runtime/` | 服务启停、模型部署与真实链路验证入口 |
 
-## 开发与文档
-
-常用本地检查：
-
-```powershell
-python -m pytest tests/unit -q
-python tools/doc_lint/doc_authority_gate.py --root .
-python tools/doc_lint/doc_freshness_gate.py --root . --check-all
-python tools/doc_lint/doc_link_gate.py --root .
-```
-
-进一步阅读：
+## 文档与开发
 
 - [文档地图](docs/00_index/00_DOCMAP.md)
-- [理论原则](docs/15_theory/Theory.md)
+- [数字生命理论](docs/15_theory/Theory.md)
 - [产品需求](docs/20_prd/PRD.md)
 - [当前代码架构](docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 - [系统架构](docs/50_project/arch/SYSTEM_ARCHITECTURE.md)
@@ -161,5 +250,13 @@ python tools/doc_lint/doc_link_gate.py --root .
 - [数据流](docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md)
 - [当前任务](docs/30_devspec/DevTasks.md)
 - [测试计划](tests/TESTPLAN.md)
+
+常用文档检查：
+
+```powershell
+python tools/doc_lint/doc_authority_gate.py --root .
+python tools/doc_lint/doc_freshness_gate.py --root . --check-all
+python tools/doc_lint/doc_link_gate.py --root .
+```
 
 历史方案和旧验收报告只用于追溯，不定义当前版本状态，统一从 [历史归档](docs/_history/README.md) 进入。
