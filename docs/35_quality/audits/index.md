@@ -1,29 +1,8 @@
 受众：MASTER
-标题：质量审计索引
+标题：固定 NLE 机器证据索引
 
-# 质量审计索引
+# 固定 NLE 机器证据索引
 
-版本：v2.0
-维护日期：2026-07-15
-状态：精简保留
+本目录只保留被 M48/M48-B 固定 evidence 引用的 NLE baseline、validation 和 manifest。文件路径是历史 receipt 的一部分，不得移动、删除或改写。
 
-本目录只保留仍能支持当前判断的基线、封板摘要和少量系统审计；逐任务重复报告已移除。
-
-## NLE 基线与封板
-
-- `NLE_WP00_BASELINE_MANIFEST_20260710.json`
-- `NLE_WP00_BASELINE_REPORT_20260710.md`
-- `NLE_WP00_VALIDATION_REPORT_20260710.md`
-- `NLE_WP00_VALIDATION_REPORT_TEMPLATE.md`
-- `NLE_WP80_TASK0486_VALIDATION_20260711.md`
-
-## 保留的系统审计
-
-- `RUNTIME_CHAIN_ACCEPTANCE_20260531.md`
-- `MEMORY_SYSTEM_INTEGRITY_TEST_20260531.md`
-- `MOTIVE_ENGINE_MIN_SPEC_20260403.md`
-- `RESPONSE_POLICY_LAYER_MIN_SPEC_20260403.md`
-- `WEBUI_DIGITAL_LIFE_REFACTOR_20260406.md`
-- `audit_report_20260311.md`
-
-历史结论不得直接覆盖当前代码事实；使用前应对照 `../../50_project/arch/CURRENT_CODE_ARCHITECTURE.md`。
+它们不定义当前状态；其余旧专项审计已移入 `docs/_history/quality/audits/`。

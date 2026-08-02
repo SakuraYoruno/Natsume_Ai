@@ -93,6 +93,7 @@ python -m pytest tests/unit/test_doc_authority_gate.py tests/unit/test_doc_fresh
 python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
+python tools/doc_lint/doc_link_gate.py --root .
 git diff --check
 ```
 

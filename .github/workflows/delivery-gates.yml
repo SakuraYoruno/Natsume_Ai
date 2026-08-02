@@ -157,7 +157,7 @@ jobs:
           ]
           suffixes = {".py", ".yaml", ".yml", ".json"}
           roots = [root / name for name in ("host_brain", "tests", "scripts", "prompts")]
-          files = [root / "docs/50_project/arch/CODEX_DIGITAL_LIFE_ADVANCED_IDEAS.md"]
+          files = []
           for scan_root in roots:
               if not scan_root.exists():
                   continue

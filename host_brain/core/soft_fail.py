@@ -1,6 +1,6 @@
 """Soft-failure context manager + process-local counter.
 
-设计目标（OPT-3, docs/35_quality/OPTIMIZATION_PLAN_20260420.md §7）：
+历史设计目标（OPT-3, docs/_history/quality/OPTIMIZATION_PLAN_20260420.md §7）：
   统一"非致命降级"的业务路径处理方式，消除全仓散落的
   `except Exception: pass / return {}` 静默掩盖行为。
 

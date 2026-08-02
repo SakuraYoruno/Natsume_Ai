@@ -199,7 +199,7 @@ class VTSMappingStore:
         if not os.path.exists(path):
             raise FileNotFoundError(
                 f"VTS 热键配置文件不存在: {path!r}，"
-                f"请参考 docs/30_devspec/vts_hotkey_config_guide.md 创建配置文件。"
+                f"请参考 docs/50_project/guides/vts_hotkey_config_guide.md 创建配置文件。"
             )
 
         # 解析 YAML
@@ -222,7 +222,7 @@ class VTSMappingStore:
         if emotion_mapping is None:
             raise ValueError(
                 f"VTS 热键配置文件缺少必要字段 'emotion_mapping' (path={path!r})，"
-                f"请参考 docs/30_devspec/vts_hotkey_config_guide.md 补充该节点。"
+                f"请参考 docs/50_project/guides/vts_hotkey_config_guide.md 补充该节点。"
             )
         if not isinstance(emotion_mapping, dict):
             raise ValueError(

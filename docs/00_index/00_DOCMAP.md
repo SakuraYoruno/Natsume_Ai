@@ -33,14 +33,14 @@
 
 ## 测试证据与发布记录
 
-- `docs/45_testing/`：按日期或能力保存的测试报告，可能只证明局部范围。
-- `docs/50_release/`：发布与验收记录。
-- `docs/60_trace/`：需求、迁移与证据追溯。
+- [`docs/45_testing/`](../45_testing/index.md)：当前测试入口及被配置硬引用的 scope-bound 收据。
+- [`docs/50_release/`](../50_release/index.md)：工具生成的固定发布证据，不是当前状态入口。
+- [`docs/60_trace/`](../60_trace/index.md)：当前需求追溯，不再保存累计任务流水账。
 - `artifacts/local-gates/`：本地临时证据目录，默认不提交。
 
 ## 历史归档
 
-`docs/_history/` 中的旧计划、审计和阶段回执仅解释演进过程。历史文档中的 `PASS`、`DONE` 或阶段编号不得覆盖当前机器状态，也不得作为生产能力完成证明。
+[`docs/_history/`](../_history/README.md) 中的旧计划、审计和阶段回执仅解释演进过程。历史文档中的 `PASS`、`DONE` 或阶段编号不得覆盖当前机器状态，也不得作为生产能力完成证明。
 
 ## 状态词
 

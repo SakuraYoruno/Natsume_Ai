@@ -1,6 +1,6 @@
 """OPT-3: SoftFailure 统一降级 + 观测指标 契约测试。
 
-验收要点（docs/35_quality/OPTIMIZATION_PLAN_20260420.md §7）：
+历史验收背景（docs/_history/quality/OPTIMIZATION_PLAN_20260420.md §7）：
   1. soft_fail 可导入且行为符合契约（捕获 expected_exc、返回 fallback、致命不吞）
   2. 进程内 Counter 正确累加 stage × exc_type
   3. MetricsCollector.collect() 暴露 soft_failure_metrics 段落

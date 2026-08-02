@@ -113,6 +113,7 @@ python -m pytest tests/unit -q
 python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
+python tools/doc_lint/doc_link_gate.py --root .
 ```
 
 完整测试与真实服务验收见 [TESTPLAN](tests/TESTPLAN.md)。GitHub Actions 因账户额度未实际运行时，状态必须写作 `NOT_RUN_ACCOUNT_QUOTA`，不能记作通过。
@@ -145,4 +146,4 @@ python tools/doc_lint/doc_freshness_gate.py --root . --check-all
 - [缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
 - [需求追溯](docs/60_trace/requirements_trace.md)
 
-历史方案只用于追溯，不再定义当前完成状态，统一位于 `docs/_history/`。
+历史方案只用于追溯，不再定义当前完成状态，统一从 [历史归档](docs/_history/README.md) 进入。

@@ -1,66 +1,32 @@
 受众：CODEX
-标题：Desktop Pet Runtime
+标题：Desktop Pet 当前运行边界
 
-# Desktop Pet Runtime
+# Desktop Pet 当前运行边界
 
-The desktop pet is a dedicated local runtime, not a VTube Studio window and not a Monitor page.
+Desktop Pet 是 Edge 电脑上的独立 Electron／Live2D 窗口，与 VTube Studio、Monitor UI 分离。它只执行高层表现动作，不拥有人格、情绪、关系或记忆 authority。
 
-VTube Studio remains the avatar runtime for voice, VTS hotkeys, mouth sync, and OBS-style avatar behavior. The desktop pet is a separate transparent desktop window that renders a Live2D model directly and receives high-level actions from Host through Edge.
+## 拓扑
 
-## Architecture
-
-- `desktop_pet/`: Electron desktop pet runtime.
-- `desktop_pet` HTTP control port: `127.0.0.1:18788`.
-- Edge RPC endpoint: `POST /v1/edge/desktop_pet`.
-- Host helper: `host_brain.channels.edge_rpc_client.post_desktop_pet()`.
-- By default, Host talks directly to the local desktop pet runtime through `HOST_DESKTOP_PET_BASE_URL` or `http://127.0.0.1:18788`.
-- Set `HOST_DESKTOP_PET_DIRECT_ENABLED=false` to route through Edge instead.
-- Existing Host VTS emotion path bridges to desktop pet touch feedback when `HOST_DESKTOP_PET_EMOTION_BRIDGE_ENABLED` is not disabled.
-
-## Why not VTube Studio
-
-VTube Studio can express, move, talk, and react, but it is not a good desktop-pet container. A real desktop pet needs a transparent frameless window, independent click-through, drag behavior, local hit feedback, and a control protocol that does not depend on the VTS app window shape.
-
-## Runtime commands
-
-`GET /health`
-
-Returns process, window, and renderer state.
-
-`POST /action`
-
-Accepts a JSON payload:
-
-```json
-{
-  "action": "touch",
-  "touch_type": "head",
-  "emotion_tag": "HAPPY",
-  "expression": "HAPPY"
-}
+```text
+accepted ExpressionPlan
+→ Host durable embodiment outbox
+→ Edge /v1/edge/desktop_pet
+→ desktop_pet local runtime :18788
+→ action result + physical receipt
 ```
 
-Supported actions:
+`desktop_pet/` 负责透明窗口、点击穿透、拖拽、本地触摸反馈和 Live2D 渲染。Host 不应通过旧情绪回调直接操作窗口；设备动作必须来自已接受的表达计划。
 
-- `show`
-- `hide`
-- `preset`
-- `touch`
-- `emote`
-- `speak`
-- `click_through`
-- `status`
+## 动作
 
-## Host emotion mapping
+Edge adapter 可转交 `show`、`hide`、`preset`、`touch`、`emote`、`speak`、`click_through` 和 `status`。payload 必须携带当前 Edge session/fence 和 expression synchronization identity。
 
-- `HAPPY`, `JOY`, `EXCITED`, `AFFECTION`, `COMFORT`: `head`.
-- `PLAYFUL`, `SHY`: `hair`.
-- `SURPRISED`, `ANGRY`: `poke`.
-- `CONFUSED`, `THINKING`, `SAD`: `body`.
-- `NEUTRAL`: `idle`.
+## 运行约束
 
-## Edge session requirement
+- 必须在 Edge 的已登录交互式 Windows session 中运行，非交互 SSH 进程不能显示窗口。
+- 模型资产和本机用户路径不写入仓库配置。
+- health 与 action receipt 分开；进程存活不等于动作可见。
+- Edge 断开后禁止重放旧 session 已执行动作。
+- Desktop Pet 失败只降级该显示通道，不修改 canonical self affect。
 
-The desktop pet must be started in the logged-in Windows interactive session on `edge-lan`. The current task name is expected to be `NatsumeAiDesktopPet`, running as `STRIX\ROG`.
-
-Edge may still be controlled over SSH, but the Electron pet window itself must not run inside a non-interactive SSH session.
+目标 Edge 当前未启动，Desktop Pet 物理窗口和动作仍为 `NOT_TESTED`。

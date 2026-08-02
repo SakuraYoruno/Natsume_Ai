@@ -2,7 +2,7 @@
 # 版本：v1.0.0
 # 说明：本文件定义 VTube Studio 所有热键的 emotion_tag 映射、快捷键绑定及触发参数。
 #       由 VTSMappingStore.load_from_config_file() 加载，替代代码中的 DEFAULT_EMOTION_MAPPING 硬编码。
-#       字段说明详见 docs/30_devspec/vts_hotkey_config_guide.md
+#       字段说明详见 docs/50_project/guides/vts_hotkey_config_guide.md
 
 meta:
   model_name: "宅家少女"
