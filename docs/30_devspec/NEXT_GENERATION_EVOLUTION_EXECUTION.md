@@ -15,7 +15,8 @@
 
 - 情感生命核心代码已覆盖观察、自我情绪、关系 episode、表达计划、主动陪伴和 profile 版本。
 - 普通聊天采用轻量实时路径；工具和外部副作用仍采用 Governed Runtime。
-- GPT-SoVITS V4 方案 B 已在本机 CUDA 环境生成并通过定向检查。
+- GPT-SoVITS V4 方案 B 已在本机 CUDA 环境完成参考条件生成和人工试听；当前使用预训练权重，不是七海专属微调 checkpoint。
+- #194 与文档收口 PR #209 已合入 `dev`，本地和远端临时分支已清理。
 - 远端 Edge 尚未启动，VTS/VRM 和真实三模态未验收。
 - GitHub Actions 因账户额度不可用，远程状态为 `NOT_RUN_ACCOUNT_QUOTA`。
 - 整体状态保持 `INCOMPLETE`。
@@ -24,8 +25,8 @@
 
 ```mermaid
 flowchart LR
-    A["仓库与文档收口"] --> B["合入 dev / 删除临时分支"]
-    B --> C["Edge 资产准备"]
+    A["仓库与文档收口：已完成"] --> B["合入 dev / 删除临时分支：已完成"]
+    B --> C["Edge 资产准备：下一步"]
     C --> D["用户授权后启动 Edge"]
     D --> E["真实 TTS + Avatar"]
     E --> F["真实多轮盲测"]
@@ -43,15 +44,17 @@ flowchart LR
 - 运行证据放在忽略目录；密钥、用户数据、模型、音频语料和日志不得提交。
 - 未经用户明确许可不得启动另一台电脑上的 Edge。
 
-## 5. 当前波次退出条件
+## 5. 仓库收口结果
 
-仓库收口完成需同时满足：
+仓库收口已经满足：
 
-1. 当前权威文档内容简洁、一致，历史材料只留在归档。
-2. 文档 audience、authority、freshness 门禁通过。
-3. 机器状态保持真实，不出现 `Full Architecture DONE` 等越级结论。
-4. #194 以单一中文 squash 提交进入 `dev`。
-5. 本地和远端只保留长期分支 `dev`、`main`；明确临时 WIP 被删除。
+1. 当前权威文档与历史材料已经分层，旧结论不再进入当前 authority。
+2. 文档 audience、authority、freshness 和 link Gate 已在 PR #209 本地验证。
+3. 机器状态继续保持 `INCOMPLETE`，没有把局部实现写成整体交付。
+4. #194 与 #209 均以中文 squash 提交进入 `dev`。
+5. 本地和远端只保留长期分支 `dev`、`main`。
+
+当前执行点已经移动到 Edge 资产准备；未经用户授权仍不得启动目标 Edge。
 
 ## 6. 最终验收
 

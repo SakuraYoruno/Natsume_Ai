@@ -1,149 +1,165 @@
-受众：MASTER
-标题：Natsume AI（七海）实时情感数字生命
+<!-- 受众：MASTER -->
+<!-- 标题：Natsume AI（七海） -->
 
-# Natsume AI
+# Natsume AI · 七海
 
-Natsume AI 是一个面向个人长期陪伴的实时情感数字生命项目。角色名为“七海”。项目的首要目标不是把普通聊天包装成复杂工作流，而是让七海在长期相处中保持自己的情绪因果、关系连续性、人格边界和文本／声音／Avatar 的一致表达。
+一个面向个人长期陪伴的实时情感数字生命项目。
 
-当前仓库仍处于演进阶段，整体状态为 `INCOMPLETE`。已有能力不等于完成最终真实验收；静态合同、模拟测试和历史回执也不等于生产接线。
+七海不是“给聊天机器人加几个情绪标签”。她需要分清你的感受和自己的感受，记得关系里真正重要的事，在不同日子里保持连续的人格，并让文字、声音和形象表达同一种情绪。工具调用、自动化和任务规划是她的能力，但不是这个项目的主角。
 
-## 当前能力
+> 当前版本可以运行文本陪伴主链，也已经具备情绪、关系和表达计划的持久状态；长期自然度、目标 Edge 上的日语语音和 Avatar 仍在实测阶段，尚未作为成品发布。
 
-| 范围 | 状态 | 当前事实 |
-|---|---|---|
-| 普通对话 | `WIRED` | 走轻量实时陪伴链，不强制进入重型 TaskGraph 审计 |
-| 用户情绪观察 | `WIRED` | 文本／声学等观察与七海自身情绪分离，低置信观察不会直接改写自我状态 |
-| 七海自我情绪 | `WIRED / PARTIAL` | canonical Life journal 负责状态演化、回放与兼容写入计量；真实长期体验仍待验收 |
-| 关系与后效应 | `WIRED / PARTIAL` | 关系 episode、修复、主动权限和偏好版本已接线，长期自然度仍需真实多轮验证 |
-| 流式文本 | `WIRED / PARTIAL` | 对话计划与分句交付已接线；真实模型首字延迟仍未达最终目标 |
-| 日语语音 | `LOCAL_PASS` | 已选择 GPT-SoVITS V4 方案 B；本机 CUDA 样例通过，远端 Edge 尚未实测 |
-| Avatar 表达 | `CONTRACT_READY` | 与文本、语音共享 ExpressionPlan；远端 VTS/VRM 尚未验收 |
-| Skill／Plan／Delegate | `GOVERNED` | 涉及工具和副作用的路线继续使用受管 TaskGraph、预算、授权和回执 |
-| Host／OBS／Monitor／Gateway | `PARTIAL` | 本地入口与局部实测存在；完整真实服务栈尚未完成最终验收 |
-| 最终发布 | `NOT_READY` | 远端 Edge、真实三模态、真实 Provider 延迟和人工盲测仍是阻断项 |
+## 七海现在能做什么
 
-机器可读状态见 [current_architecture_status.json](configs/release/current_architecture_status.json)，当前执行边界见 [演进执行合同](docs/30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
+- 进行低延迟的日常对话，不让普通聊天经过重型任务审计。
+- 把用户情绪当作观察，而不是直接复制成七海自己的情绪。
+- 保留七海自己的混合情绪、心境、需要、关系事件和未解决话题。
+- 在安慰、玩笑、分享喜悦、表达委屈、设定边界、修复误解和安静陪伴之间选择不同回应方式。
+- 让关系变化和上一轮回应的后效应跨会话保存，而不是只累计一个“好感度分数”。
+- 在需要操作文件、调用工具或产生外部副作用时，切换到受管任务执行链。
 
-## 设计主线
+当前还不能当作已经交付的部分：
+
+- 日语声线方案 B 目前使用 GPT-SoVITS V4 预训练权重和七海参考音频进行参考条件推理；它不是已经训练完成的七海专属微调模型。
+- 本机已经完成参考音频生成和人工选型，但另一台电脑上的 Edge、真实 TTS、VTS/VRM 与播放中打断尚未联合验收。
+- 情感连续性已经有代码和持久状态，仍缺多日真实对话、固定场景和人工盲测证明。
+
+更细的当前状态见 [能力与缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)。机器可读状态在 [current_architecture_status.json](configs/release/current_architecture_status.json)。
+
+## 一轮陪伴是怎样产生的
 
 ```mermaid
 flowchart LR
-    U["用户文本／语音／视觉"] --> O["User Affect Observation"]
-    O --> F["Affect Fusion"]
-    F --> A["Event Appraisal"]
-    A --> S["七海 Self Affect／Mood／Need"]
-    S --> C["Companion Act 与 Regulation"]
-    C --> P["Affective Turn / Expression Plan"]
-    P --> T["流式文本"]
-    P --> V["日语 TTS"]
+    U["你的文字、声音或图片"] --> O["观察当下语境与情绪线索"]
+    O --> L["七海的情绪、心境与关系记忆"]
+    L --> A["选择陪伴动作"]
+    A --> P["冻结本轮表达计划"]
+    P --> T["流式文字"]
+    P --> V["日语语音"]
     P --> M["Avatar 表情与动作"]
-    T --> R["关系后效应"]
+    T --> R["下一轮关系后效应"]
     V --> R
     M --> R
-    R --> S
 ```
 
-关键约束：
+稳定人格由 [Soul.md](Soul.md) 定义。在线学习可以调整称呼、回复长度、幽默度、主动时段和表达强度等低风险偏好，但不能自动改写七海的身份、核心价值观或关系边界。
 
-- `Soul.md` 是稳定人格宪法，在线学习不能修改核心人格、价值观或非操控原则。
-- 用户情绪是观察，不是七海自己的情绪；二者必须保持身份、证据和生命周期隔离。
-- 七海可以开心、委屈、生气、疲倦、吃醋和想念，但不能用威胁、排他、冷暴力或负罪感迫使用户回应。
-- 普通聊天优先低延迟；只有工具、副作用、高风险动作和外部交付进入完整治理链。
-- 情绪与关系状态采用有界持久化，不保存原始音视频，不把用户正文堆成审计日志。
+## 在本机说第一句话
 
-## 运行拓扑
+### 准备环境
 
-```mermaid
-flowchart TB
-    UI["Monitor UI / Nginx :18180"] --> OBS["OBS :18082"]
-    UI --> HOST["Host :18080"]
-    GW["Unified Gateway :19000"] --> HOST
-    HOST --> DB["SQLite canonical ledgers"]
-    HOST --> EXT["Docker: Neo4j / Chroma / Redis"]
-    HOST <--> EDGE["远端 Edge :17800"]
-    EDGE --> ASR["ASR"]
-    EDGE --> TTS["GPT-SoVITS V4"]
-    EDGE --> AV["VTS / VRM"]
-```
+当前启动脚本以 Windows 为主。至少需要：
 
-Host、OBS、Monitor 和 Docker 依赖可在本机启动；Edge 位于另一台电脑，未经用户明确允许不得远程启动。
+| 依赖 | 用途 |
+|---|---|
+| Python 3.11+ | Host、OBS 和运行工具 |
+| PowerShell 7 | `scripts/runtime/*.ps1` 启停脚本 |
+| Docker Desktop | Neo4j、Chroma 和 Redis |
+| 一个可用的模型 Provider | 生成真实对话；默认陪伴路由使用 Gemini 配置 |
+| Nginx（可选） | 在 `18180` 提供 Monitor；缺失时 Host 仍可启动，但 Monitor 会降级 |
+| Node.js（仅开发 UI 时） | 重新构建 Monitor UI 或桌面形象 |
 
-## 快速开始
-
-### 1. Python 环境
+在仓库根目录执行：
 
 ```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+
+if (-not (Test-Path .env)) {
+    Copy-Item .env.example .env
+}
+if (-not (Test-Path configs/secrets/secret_store.runtime.local.json)) {
+    Copy-Item configs/secrets/secret_store.runtime.example.json `
+        configs/secrets/secret_store.runtime.local.json
+}
 ```
 
-按本机环境填写 `.env`。不要把密钥、模型、用户数据或运行日志提交到仓库。
+然后编辑 `.env` 和 `configs/secrets/secret_store.runtime.local.json`：
 
-### 2. 外部依赖与 Host 侧
+- 填写实际使用的模型 Provider 和 API Key；
+- 替换 `sec://neo4j/local-default` 对应的示例密码；
+- 不要把本地密钥文件、模型、语料、用户数据或运行日志提交到 Git。
+
+### 启动 Host 侧
 
 ```powershell
-pwsh scripts/runtime/start_docker_services.ps1
-pwsh scripts/runtime/start_host_side.ps1
+pwsh scripts/runtime/start_host_side.ps1 -StartupCheck
 ```
 
-默认端口：Host `18080`、OBS `18082`、Monitor `18180`、Neo4j HTTP `7474`／Bolt `17687`、Chroma `18000`、Redis `6379`。
+这一个入口默认会启动 Docker 外部依赖、Host、OBS，并在本机存在 Nginx 时启动 Monitor；不要预先再执行一次 `start_docker_services.ps1`。
 
-### 3. Edge（仅在 Edge 电脑上）
+检查状态：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:18080/health?skip_dependency_probes=1
+Invoke-RestMethod http://127.0.0.1:18082/health
+Start-Process http://127.0.0.1:18180/monitor/
+```
+
+通过真实流式接口和七海说第一句话：
+
+```powershell
+curl.exe -N http://127.0.0.1:18080/v1/chat `
+    -H "Content-Type: application/json" `
+    -d '{"message":"晚上好，七海。今天有点累。","session_id":"readme-local"}'
+```
+
+返回内容是 SSE 流。没有有效 Provider、模型路由或密钥时，Host 健康并不代表对话一定可生成。
+
+### 停止 Host 侧
+
+```powershell
+pwsh scripts/runtime/stop_host_side.ps1
+pwsh scripts/runtime/stop_docker_services.ps1
+```
+
+## 另一台电脑上的 Edge
+
+Edge 承担中文 ASR、日语 TTS、VTS/VRM 和设备动作。当前部署中的 Edge 位于另一台电脑，不应从 Host 电脑盲目启动。
+
+目标机准备好模型权重、参考音频、显卡环境和网络配置后，再在 Edge 电脑执行：
 
 ```powershell
 pwsh scripts/runtime/start_edge_side.ps1
 ```
 
-默认语言链路为中文 ASR、日语 TTS；声线配置见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)。启动前必须确认模型路径、显存、VTS/VRM 和网络地址。
+当前声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发和非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。远端 Edge 未启动时，文字对话可以单独运行，但不能宣称语音和 Avatar 已通过真实验收。
 
-### 4. 停止服务
+## 项目结构
 
-```powershell
-pwsh scripts/runtime/stop_edge_side.ps1
-pwsh scripts/runtime/stop_host_side.ps1
-pwsh scripts/runtime/stop_docker_services.ps1
-```
+| 路径 | 内容 |
+|---|---|
+| `host_brain/` | 七海的对话、情感生命、关系记忆、任务能力和 Host API |
+| `edge_client/` | ASR、TTS、Avatar、设备和消息 Gateway 的 Edge 运行时 |
+| `natsume_contracts/` | Host、Edge 与 Operator 之间的版本化合同 |
+| `desktop_pet/` | 本地 Live2D 桌面形象运行时 |
+| `configs/` | 非密钥配置、声线清单和机器状态 |
+| `scripts/runtime/` | 服务启停、模型部署和真实链路测试入口 |
+| `docs/` | 产品、理论、架构、测试、证据与历史归档 |
 
-## 测试
+## 开发与文档
 
-小改动只运行受影响测试；波次结束运行集成测试；真实服务栈只在正式验收时集中启动。
+常用本地检查：
 
 ```powershell
 python -m pytest tests/unit -q
-python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
 python tools/doc_lint/doc_link_gate.py --root .
 ```
 
-完整测试与真实服务验收见 [TESTPLAN](tests/TESTPLAN.md)。GitHub Actions 因账户额度未实际运行时，状态必须写作 `NOT_RUN_ACCOUNT_QUOTA`，不能记作通过。
-
-## 仓库结构
-
-| 路径 | 用途 |
-|---|---|
-| `host_brain/` | Host、情感生命、对话、任务、OBS 与生产组合根 |
-| `edge_client/` | ASR、TTS、Avatar、设备和 Gateway Edge 运行时 |
-| `natsume_contracts/` | Host／Edge／Operator 的版本化跨进程合同 |
-| `configs/` | 非密钥配置、声线与机器状态 |
-| `scripts/runtime/` | 本地与分布式服务启停入口 |
-| `tools/` | 文档门禁、迁移、验收和开发工具 |
-| `tests/` | 单元、合同、集成和 E2E 测试 |
-| `docs/` | 当前权威文档、证据与历史归档 |
-
-## 文档入口
+进一步阅读：
 
 - [文档地图](docs/00_index/00_DOCMAP.md)
 - [理论原则](docs/15_theory/Theory.md)
 - [产品需求](docs/20_prd/PRD.md)
-- [开发规格](docs/30_devspec/DevSpec.md)
-- [当前任务](docs/30_devspec/DevTasks.md)
 - [当前代码架构](docs/50_project/arch/CURRENT_CODE_ARCHITECTURE.md)
 - [系统架构](docs/50_project/arch/SYSTEM_ARCHITECTURE.md)
 - [功能模块](docs/50_project/arch/FUNCTIONAL_MODULES.md)
 - [数据流](docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md)
-- [部署架构](docs/50_project/arch/DEPLOYMENT_ARCHITECTURE.md)
-- [缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)
-- [需求追溯](docs/60_trace/requirements_trace.md)
+- [当前任务](docs/30_devspec/DevTasks.md)
+- [测试计划](tests/TESTPLAN.md)
 
-历史方案只用于追溯，不再定义当前完成状态，统一从 [历史归档](docs/_history/README.md) 进入。
+历史方案和旧验收报告只用于追溯，不定义当前版本状态，统一从 [历史归档](docs/_history/README.md) 进入。

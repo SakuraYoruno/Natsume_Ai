@@ -86,7 +86,7 @@ def scan_markdown_files(
             )
             continue
 
-        audience_line = _strip_bom(headers[0])
+        audience_line = _unwrap_metadata_comment(_strip_bom(headers[0]))
         if not audience_line:
             failures.append(
                 _failure(
@@ -122,7 +122,7 @@ def scan_markdown_files(
             )
             continue
 
-        title_line = headers[1]
+        title_line = _unwrap_metadata_comment(headers[1])
         if not TITLE_PATTERN.match(title_line):
             failures.append(
                 _failure(
@@ -220,6 +220,15 @@ def _first_non_empty_lines(raw: str, *, limit: int) -> list[str]:
 
 def _strip_bom(line: str) -> str:
     return line.lstrip(BOM).strip()
+
+
+def _unwrap_metadata_comment(line: str) -> str:
+    """Allow public-facing Markdown to keep lint metadata out of rendered prose."""
+
+    value = line.strip()
+    if value.startswith("<!--") and value.endswith("-->"):
+        return value[4:-3].strip()
+    return value
 
 
 def _normalize(path: str | Path) -> str:
