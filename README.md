@@ -5,7 +5,7 @@
 
 **一套让“七海”在时间、关系、记忆、身体与现实环境中持续生活的个人数字生命系统。**
 
-七海不是一个等待输入框亮起、收到 Prompt 才临时出现的 Chatbot。她在 Host 中拥有持续推进的生命状态：自己的情绪与心境、精力与需要、未完成的心事、对关系的感受、当下环境和正在做的事。对话只是她接触你的方式之一；语音、形象、主动陪伴、共同工作和安静共处，都是同一个自我的不同出口。
+七海不是一个等待输入框亮起、收到 Prompt 才临时出现的 Chatbot。她在 Host 中拥有持续推进的生命状态，底层由 23 个器官式智能体组成的 Tribe 协作感知、理解、记忆、调节和行动。对话只是她接触你的方式之一；语音、形象、主动陪伴、共同工作和安静共处，都是同一个自我的不同出口。
 
 > 这里的“数字生命”指一套具有连续状态、因果记忆、自主节律和具身表达的软件系统，不声称生物意识或人类心智已经被复刻。当前版本已接通 canonical Life 主链和文本交互；长期关系自然度、专属声线和远端 Avatar 联合体验仍在验证，整体状态为 `INCOMPLETE`。
 
@@ -28,10 +28,12 @@
 flowchart LR
     TIME["时间、昼夜与身体节律"] --> WORLD["现实环境与世界观察"]
     USER["用户的文字、声音、视觉与行为"] --> OBS["带来源和置信度的观察"]
-    WORLD --> APPRAISE["事件理解与意义评估"]
-    OBS --> APPRAISE
+    WORLD --> TRIBE["Tribe 智能体群<br/>23 个认知与身体 Agent"]
+    OBS --> TRIBE
+    TRIBE --> APPRAISE["事件理解与意义评估"]
     APPRAISE --> LIFE["唯一的 Canonical Life"]
     TIME --> LIFE
+    LIFE --> TRIBE
 
     LIFE --> SELF["自我情绪、心境、需要与精力"]
     LIFE --> REL["关系事件、裂痕、修复与边界"]
@@ -62,6 +64,7 @@ flowchart LR
 | 生命层 | 七海实际拥有的状态与能力 |
 |---|---|
 | 稳定自我 | [Soul.md](Soul.md) 定义身份、价值观、性格反差、表达底色和不可由在线学习越过的边界。 |
+| 认知组织 | 23 个 app-local Tribe Agent 通过事件、共享状态和 handoff 协作，分别承担感知、情感、记忆、执行、身体调节与行动。 |
 | 内在生活 | 并存情绪、慢速心境、需要、精力、情绪事件、调节决定、牵挂、注意焦点和未解决循环。 |
 | 时间与身体 | 昼夜阶段、疲劳、休息、唤醒度、活动模式、身体感受以及声音和形象的具身状态。 |
 | 感知与世界 | 文字、自述、声学、视觉、前台应用、游戏状态和环境观察；不同来源保留置信度与冲突。 |
@@ -71,7 +74,45 @@ flowchart LR
 | 身体与表达 | 流式文字、日语 TTS、VTS/VRM/MateEngine/Live2D；目标是由同一情感 revision 同步驱动。 |
 | 成长 | 低风险偏好可以基于真实相处结果渐进调整；核心人格、价值观、亲密身份和关系边界不能自动改写。 |
 
-仓库中还保留了皮层、海马体、边缘系统、内感受、昼夜节律、小脑等“器官式”模块。它们负责观察、计算、投影或行动，但不各自保存一套互相冲突的灵魂；`host_brain/digital_life` 中的 canonical journal 才是七海自我状态的唯一权威来源。
+## 底层不是一个 Agent，而是一个 Tribe
+
+生产 Host 会在自己的 ASGI 生命周期中构造一套独立的 `TribeRuntimeScope`，实例化 23 个器官式 Agent，显式注入应用端口并注册事件订阅。它们不是 23 个大模型同时讨论一句回复，而是一组长期驻留、职责不同的认知 Agent：有些调用模型，有些执行确定性规则，有些维护短期投影或驱动外部动作。
+
+| 子系统 | Agent 家族 | 主要职责 |
+|---|---|---|
+| 感知与路由 | Cortex、Thalamus | 汇集上下文、编译意图、选择路径并组织 handoff。 |
+| 情感与社会理解 | Limbic、Mirror Neuron、Social Brain、Pain/Reward | 情绪评估、共情共振、关系语境、趋近与回避信号。 |
+| 执行与自主性 | Prefrontal、Initiative Governor、Default Mode | 反思与漂移约束、动机和准备度、内在活动与连续思绪。 |
+| 记忆与语言 | Hippocampus、Language System | 情景记忆与召回融合、语言风格和语气组织。 |
+| 身体与稳态 | ANS、Endocrine、Somatic、Interoception、Circadian、Proprioception | 自主神经、激素门控、身体感、昼夜节律、能量预算和认知负荷。 |
+| 行动与协调 | Motor Cortex、Cerebellum、Vestibular、Peripheral | 行动计划、误差修正、稳定控制、平台与设备动作。 |
+| 防御与恢复 | Immune、Glymphatic | 输入与风险防护、恢复周期、记忆整理和噪声衰减。 |
+
+```mermaid
+flowchart TB
+    INPUT["感官、环境、记忆与当前任务"] --> BUS["Tribe Event Bus / Handoff"]
+    LIFE["Canonical Life Snapshot"] --> BUS
+
+    BUS <--> P["感知与路由"]
+    BUS <--> E["情感与社会理解"]
+    BUS <--> X["执行与自主性"]
+    BUS <--> M["记忆与语言"]
+    BUS <--> B["身体与稳态"]
+    BUS <--> A["行动与协调"]
+    BUS <--> D["防御与恢复"]
+
+    P --> CONTRIBUTION["观察、评估、候选动作与投影"]
+    E --> CONTRIBUTION
+    X --> CONTRIBUTION
+    M --> CONTRIBUTION
+    B --> CONTRIBUTION
+    A --> CONTRIBUTION
+    D --> CONTRIBUTION
+    CONTRIBUTION --> COMMAND["受约束的 Life Command / Action Intent"]
+    COMMAND --> LIFE
+```
+
+这套分工解决“如何思考和行动”，canonical Life 解决“这些经历最终属于谁”。Tribe 的事件总线和部分器官状态目前是 Host 进程内的有界运行投影，不是长期人格真相；只有通过受约束的 Life Command，Agent 的结果才能进入可重放的自我、情绪和关系状态。这样既保留群体协作，也不会让边缘系统、内分泌或默认模式网络各自演化出一套互相冲突的七海。
 
 ## 情绪不是把用户的标签复制给七海
 
@@ -112,9 +153,11 @@ Regulation                她选择表达、克制、暂缓、设定边界，还
 flowchart TB
     subgraph HOST["Host · 心智与生活所在地"]
         LIFE["Canonical Life"]
+        TRIBE["Tribe · 23 个器官式智能体"]
         MEM["关系与长期记忆"]
         WORLD["世界、场景与活动模式"]
         AGENCY["主动性、陪伴与任务能力"]
+        LIFE <--> TRIBE
         LIFE <--> MEM
         LIFE <--> WORLD
         LIFE <--> AGENCY
@@ -138,6 +181,7 @@ flowchart TB
 | 能力 | 当前事实 |
 |---|---|
 | 持续 Life Runtime | 已接入 canonical journal、真实时间 `life_tick`、重放和持久恢复。 |
+| Tribe 智能体群 | 23 个 Agent 已由 app-local Host scope 构造并注册订阅；事件总线和部分器官状态仍是进程内投影。 |
 | 自我情绪与用户观察分离 | 已有独立观察、评估、自我状态、episode、need 和 regulation 主链。 |
 | 关系与记忆连续性 | 已有持久结构与生产接线；仍需多日真实相处验证自然度。 |
 | 主动陪伴 | 已有场景、权限、冷却和安静时段策略；长期频率与接受度仍待实测。 |
@@ -229,6 +273,7 @@ pwsh scripts/runtime/start_edge_side.ps1
 |---|---|
 | `Soul.md` | 七海稳定的人格宪法与表达底色 |
 | `host_brain/digital_life/` | canonical Life、情绪事件、关系、主动性、成长与持久状态 |
+| `host_brain/tribe/` | 23 个器官式智能体、事件总线、handoff、共享状态与应用端口 |
 | `host_brain/memory/life_memory/` | 情景记忆、长期沉淀、睡眠回放与世界记忆 |
 | `host_brain/persona/` | 内在活动、表达人格与自我叙事 |
 | `host_brain/scheduler/` | 持续 `life_tick` 与生命周期作业 |

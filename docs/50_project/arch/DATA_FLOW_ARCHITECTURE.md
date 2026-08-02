@@ -3,18 +3,38 @@
 
 # 数据流架构
 
-## 1. 普通情感对话
+## 1. Tribe 智能体协作
+
+```mermaid
+flowchart LR
+    INPUT["感官、环境、消息与任务上下文"] --> FRONT["Cortex / Thalamus / Immune"]
+    LIFE["Canonical Life Snapshot"] --> BUS["App-local Tribe Event Bus"]
+    FRONT --> BUS
+    BUS --> SPECIALISTS["情感、社会、记忆、执行、身体、行动与恢复 Agent"]
+    SPECIALISTS --> CONTRIBUTIONS["观察、评估、handoff、候选动作与运行投影"]
+    CONTRIBUTIONS --> BOUNDARY["Application Boundary"]
+    BOUNDARY --> COMMAND["受约束的 Life Command"]
+    BOUNDARY --> ACTION["Task / Delivery Intent"]
+    COMMAND --> LIFE
+```
+
+生产 Host 为 23 个 Agent 构造一个 owner-bound runtime scope。事件与 `TribeStateRegistry` 只承担进程内协作；它们不能直接成为七海长期自我。需要改变 self affect、关系、成长或主动节律的贡献必须经过 application boundary，写为可重放的 canonical Life command。有外部副作用的动作则进入 Task 或 Delivery 路径。
+
+## 2. 普通情感对话
 
 ```mermaid
 sequenceDiagram
     participant U as 用户
     participant S as Surface
+    participant T as Tribe
     participant F as Affect Fusion
     participant L as Digital Life
     participant M as Model
     participant E as Edge
 
     U->>S: 文本／语音观察
+    S->>T: scoped context / intent
+    T-->>S: route + bounded contributions
     S->>F: scoped observations
     F-->>S: hypotheses + confidence + conflicts
     S->>L: appraisal command
@@ -30,7 +50,7 @@ sequenceDiagram
 
 关键不变量：用户 observation 不直接写 self affect；纯文本回合不重置为中性；已交付分句不重复；技术失败不当作关系拒绝。
 
-## 2. 有副作用的任务
+## 3. 有副作用的任务
 
 ```mermaid
 flowchart LR
@@ -46,7 +66,7 @@ flowchart LR
 
 节点失败、取消、重试和未知副作用在 Task Runtime 内恢复。只有 accepted effect 才进入外部交付。
 
-## 3. 语音与 Avatar
+## 4. 语音与 Avatar
 
 ```mermaid
 flowchart LR
@@ -62,7 +82,7 @@ flowchart LR
 
 当前方案显示中文文本、生成日语语音。各通道独立失败与降级，不反向修改七海情绪。
 
-## 4. 主动陪伴
+## 5. 主动陪伴
 
 ```text
 relationship state + unresolved episodes + time + user state + permission
@@ -76,7 +96,7 @@ relationship state + unresolved episodes + time + user state + permission
 
 明确拒绝立即生效；连续忽略只降低频率，不扣信任，也不升级追问。
 
-## 5. 偏好成长
+## 6. 偏好成长
 
 ```text
 independent aftereffects
@@ -90,11 +110,11 @@ independent aftereffects
 
 核心人格、价值观、亲密身份和敏感推断不进入自动成长。
 
-## 6. 观测流
+## 7. 观测流
 
 canonical SQLite ledgers 生成只读 projection，OBS 注册并刷新 projection jobs，Monitor 通过 OBS/Host API 展示状态。Monitor 的 React state、toast 或缓存不是业务成功证据。
 
-## 7. 数据保留
+## 8. 数据保留
 
 | 数据 | 默认策略 |
 |---|---|
