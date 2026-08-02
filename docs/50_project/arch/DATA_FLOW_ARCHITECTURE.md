@@ -3,7 +3,7 @@
 
 # Natsume AI 数据流与回执架构事实
 
-版本：v3.52
+版本：v3.53
 
 核对日期：2026-08-02
 
@@ -13,17 +13,14 @@
 
 本文不用理想化的箭头代替生产代码，只描述当前 composition 真正能够触发的数据流、状态流、副作用流和回执边界。架构总览见 [CURRENT_CODE_ARCHITECTURE.md](CURRENT_CODE_ARCHITECTURE.md)，最终目标见 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)，差距见 [ARCHITECTURE_GAP_MATRIX.md](ARCHITECTURE_GAP_MATRIX.md)，实施顺序见 [NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md)。
 
-本地 TTS 推理现有两个显式 backend。默认 GPT-SoVITS 保留原链：`ExpressionPlan.voice_style → Host
-voice_profile → Edge Voice RPC → parent adapter → JSON-line IPC → standalone GPT-SoVITS Worker → reference
-+ speed/energy/pitch → NPZ audio`。日语候选链为：`同一次 Surface 模型响应(reply_text 中文 + tts_text_ja
-日语) → accepted foreground → Voice intent(text=日语, display_text=中文, lang_hint=ja) → Edge
-style_bert_vits2 常驻 Worker → release manifest 绑定的 JP-Extra safetensors/config/style_vectors → style/weight
-+ speed/energy/pitch → NPZ audio`。无效或缺失 `tts_text_ja` 时只降级本轮语音，不用中文回退喂给日语模型，
-也不额外调用翻译模型。当前该双文本链为完整回复缓冲；逐句双语流式和远端物理回执尚未完成。
-
-两个模型进程都不读取 Host/Life/Relationship，也不回写七海 self-affect。日语 Style-Bert-VITS2
-候选已训练到 `e10_s5423`，并由本机真实常驻 Worker 加载、合成和卸载；真实 DeepSeek 单例也已生成
-中日双文本。它仍需人耳 A/B、默认提升和远端 Edge 验收，当前不是三模态 delivery receipt。
+活动 TTS 数据流为：`同一次 Surface 模型响应(reply_text 中文 + tts_text_ja 日语) → accepted foreground →
+Voice intent(text=日语, display_text=中文, lang_hint=ja, voice_profile) → Edge Voice RPC → parent adapter →
+JSON-line IPC → standalone GPT-SoVITS V4 Worker → 人工参考 + speed/energy/pitch → 48kHz audio`。
+`configs/voice/gpt_sovits_nanami_v4.json` 覆盖全部 16 个 ExpressionPlan 风格；Worker 优先按
+`voice_profile` 选参考，`emotion_tag` 只作兼容回退。无效或缺失 `tts_text_ja` 时只降级本轮语音，
+不用中文回退喂给日语模型，也不额外调用翻译模型。模型进程不读取 Host/Life/Relationship，
+也不回写七海 self-affect。Qwen3-TTS、CosyVoice3 与 Style-Bert-VITS2 均不在活动数据流中。
+当前仍是完整回复缓冲；远端物理播放、barge-in 和 Avatar 回执尚未完成。
 
 当前中文语音候选流改为：`原生中文模型或中文授权语料 → 中文日常/近讲门槛 → 声学近邻与人工听审 →
 固定中文句 A/B → 身份/发音/情感/延迟判定 → 默认提升提案`。源语言与目标语言显式不一致时，候选管线

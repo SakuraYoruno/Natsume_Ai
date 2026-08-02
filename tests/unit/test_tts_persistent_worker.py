@@ -184,3 +184,10 @@ def test_worker_never_falls_back_when_manifest_checkpoint_is_missing(tmp_path: P
 
     with pytest.raises(RuntimeError, match="refusing cross-project fallback"):
         worker._resolve_weights(model_root=str(tmp_path), manifest=manifest)
+
+
+def test_worker_detects_pretrained_gpt_sovits_v4_pair() -> None:
+    assert worker._detect_version(
+        t2s_path="GPT_SoVITS/pretrained_models/s1v3.ckpt",
+        vits_path="GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth",
+    ) == "v4"

@@ -3,26 +3,22 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.92
+版本：v5.93
 核对日期：2026-08-02
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> `2026-08-02` 最新 Voice 事实：`ExpressionPlanV1.voice_style` 仍可作为独立 `voice_profile` 经 Host、
-> Edge RPC 与现有 GPT-SoVITS Worker 传递；该生产 Worker 尚未切换。日语模型读中文仍为
-> `REJECTED_CROSS_LANGUAGE_VOICE`，但用户已选择真正的日语语音输出。新的 Style-Bert-VITS2 `2.7.0`
-> JP-Extra 候选在 RTX 5080 上完成官方模型 CUDA 烟测；确定性构建器已生成 1970 条/2.808685 小时七海
-> 日语数据和 `Natural + 6` 风格目录。七海候选已训练到 `e10_s5423`，并生成最终 14 条七风格试听；
-> 它仍只是 `TRAINED_CANDIDATE_NOT_HUMAN_ACCEPTED`。
-> `TtsConfig.backend`、Edge bootstrap 和独立常驻 Worker 已支持 `style_bert_vits2`；发布目录必须包含
-> 显式 safetensors、config、style vectors 与摘要绑定的 manifest，日语 Worker 会拒绝非日语请求。
-> Host 的 `HOST_COMPANION_TTS_LANGUAGE=ja` 会把普通表层回复切为单次双文本结果：中文用于显示，
-> 自然日语用于 Voice intent；字段无效时只降级 Voice，不增加翻译调用或阻塞聊天。默认 backend 仍是
-> GPT-SoVITS；当前双文本模式为完整回复缓冲。候选 Worker 已在本机真实加载并以最终权重合成，
-> `deepseek-v4-flash` 单例也已一次返回有效中日双文本；人耳 A/B、默认 voice bank、远端 Edge 和物理
-> 播放仍未验收，不得从本机候选推导 DL-05 / DL-07 已完成。
+> `2026-08-02` 最新 Voice 事实：用户已从 A/B/C 本地试听中选择 GPT-SoVITS V4（B）。
+> `ExpressionPlanV1.voice_style` 作为独立 `voice_profile` 经 Host、Edge RPC 和现有 GPT-SoVITS
+> 常驻 Worker 传递；`configs/voice/gpt_sovits_nanami_v4.json` 将全部 16 个运行时风格绑定到人工确认的
+> 七海日语参考，并固定 V4 预训练权重。Qwen3-TTS 与 CosyVoice3 不进入产品链；Style-Bert-VITS2
+> `e10_s5423` 不删除，但降为未启用实验资产。日语模型读中文继续为
+> `REJECTED_CROSS_LANGUAGE_VOICE`。Host 的 `HOST_COMPANION_TTS_LANGUAGE=ja` 仍在一次模型响应内产生
+> 中文显示与日语 Voice intent；字段无效时只降级 Voice。`start_edge.ps1` 的中文 ASR/日语 TTS 模式
+> 已选 GPT-SoVITS V4 profile。本机真实 Worker 约 10.98 秒就绪，热态单句约 1.79～3.35 秒，输出
+> 48kHz；远端 Edge、物理播放、barge-in 与 Avatar 同轮回执尚未运行，不能推导 DL-07 完成。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

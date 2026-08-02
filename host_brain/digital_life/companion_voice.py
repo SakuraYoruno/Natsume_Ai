@@ -2,8 +2,10 @@
 
 The visible Surface reply remains Chinese.  When Japanese companion voice is
 enabled, the same model response may additionally carry one natural Japanese
-speech rendering for the Japanese Style-Bert-VITS2 voice.  Missing or invalid
-speech text degrades voice only; it never blocks the visible conversation.
+speech rendering for the selected same-language voice backend.  The current
+candidate is GPT-SoVITS V4 with human-selected Nanami references.  Missing or
+invalid speech text degrades voice only; it never blocks the visible
+conversation.
 """
 
 from __future__ import annotations

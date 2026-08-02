@@ -3,13 +3,24 @@
 
 # 测试与验收目录
 
-版本：v2.78
+版本：v2.79
 维护日期：2026-08-02
 状态：当前证据
 
 ## DL-05 情感语音训练与本地持久 Worker
 
-- 新的同语言日语候选使用 Style-Bert-VITS2 `2.7.0` JP-Extra，而不是让日语模型继续读中文。
+- 最终引擎对比已由用户人耳裁决：GPT-SoVITS V4（B）进入产品候选；Qwen3-TTS（A）与
+  CosyVoice3（C）退出，Style-Bert-VITS2 `e10_s5423` 降为未启用实验资产。B 使用同语言七海日语
+  原声 reference，不采用跨语言中文合成或 Katakana 近似输入。
+- GPT-SoVITS V4 真实常驻 Worker 在 RTX 5080 上加载约 `10.9752s`；8 条 warm/joy/romance/hurt
+  目标句均成功，热态单句约 `1.7881～3.3544s`，输出 `48000Hz`。这证明本机模型链和人工试听选择，
+  不代表另一台电脑上的 Edge 已部署或物理播放通过。
+- `gpt_sovits_nanami_v4.json` 已覆盖 16 个 `ExpressionPlanV1.voice_style`，参考路径均相对模型根，
+  V4 权重可由现有 Worker 识别。另用仓库正式 profile 实际合成 `SHY_AFFECTION / QUIET_INTIMACY`：
+  两条均成功、48kHz，热态耗时 `1.9826s / 2.3050s`。`start_edge.ps1` 只完成启动配置接线，
+  本波没有执行该脚本或接触远端 Edge。
+
+- 历史同语言日语候选曾使用 Style-Bert-VITS2 `2.7.0` JP-Extra，而不是让日语模型继续读中文。
   本机兼容环境锁定 PyTorch `2.7.0+cu128`、Transformers `4.41.2` 与 Setuptools `80.9.0`；
   RTX 5080 实际完成官方 `jvnv-F1-jp` CUDA 合成，输出 `44100Hz / 151552 samples`。这只证明
   引擎和 GPU 路径可用，不代表七海模型已训练。
@@ -19,7 +30,7 @@
   一条 OpenJTalk 无法读取专名汉字的语音被显式排除；数据工具单测为 `5 passed in 0.46s`。
 - batch 4 先完成 1 epoch / 493 step 烟测，随后续训至 `e10_s5423`；续训进程约 46 分 08 秒，峰值
   显存约 15.2GB，全程无 OOM、NaN 或崩溃。最终权重生成 7 条同句跨风格和 7 条匹配台词；状态为
-  `TRAINED_CANDIDATE_NOT_HUMAN_ACCEPTED`，人耳 A/B、默认提升和远端 Edge 仍待证据。
+  `HISTORICAL_NOT_PROMOTED`；该路线已因听感单调退出当前候选，远端 Edge 从未部署。
 - Style-Bert-VITS2 Worker、Edge backend 选择、release 打包与旧 GPT-SoVITS 回归的定向集合为
   `78 passed in 5.08s`。release 必须显式指定 `.safetensors`，同时绑定 config、style vectors 及三者
   SHA-256；Worker 只接受日语语言请求。锚点近邻工具已从 1970 个真实 embedding 为 6 类各生成 12 条

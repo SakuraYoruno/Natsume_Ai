@@ -5,31 +5,29 @@
 
 > 当前库存纠偏：历史 trace 中的 `14/37、23 blocked` 只绑定当时提交。现行 Operator manifest 为 `16 active / 23 retired / 39 known / blocked=0`；退役 ID 不得计作产品能力。生产 locator consumer/import/module/field/lock/ref 全为 0。普通 `chat` 当前采用 RealtimeCompanion，不再把历史七路线 TaskGraph 收据当作日常对话默认合同；该收据只证明治理路径本身。Scheduler、Skill、Delegate、Plan、Internal、Operator 与外部 effect 继续受治理。真实网络/设备、部署验签 key、完整 Host 进程重启、外部 namespace 和完整 Worker/Obs composition 仍待验收。
 
-版本：v5.28
-核对日期：2026-08-01
+版本：v5.29
+核对日期：2026-08-02
 状态来源：[current_architecture_status.json](../../configs/release/current_architecture_status.json)
 
 本文只维护当前 FR → 工程合同 → 生产代码 → 测试/证据 → 下一执行波的关系。旧 R-01～R-192、TASK-0000～0622 和阶段状态已移出当前权威链，可通过 `docs/_history/programs/2026-07/` 与 Git `9b6db346^` 追溯。
 
-TRACE-DL05-LOCAL-VOICE-CANDIDATE（中文语音候选与本地推理）：
+TRACE-DL05-LOCAL-VOICE-CANDIDATE（同语言日语语音候选与本地推理）：
 日语角色模型合成中文的实验结论为 `REJECTED_CROSS_LANGUAGE_VOICE`；其活动配置已删除，不能再作为
-默认提升、reference bank 或远端部署输入。`gpt_sovits_acoustic_style_miner.py` 会拒绝显式
-`source_language != target_language` 的配置，中文训练子集恢复强制 `3-bert` 特征。此前
-`int16 PCM → 未缩放 float → 硬削波` 的缺陷已在 `tts_engine.py` 与
-`tts_persistent_worker.py` 修复，该信号处理修复独立有效。当前中文库存只有舞台化昔涟对照与
-转写不足的短时爱弥斯数据，状态为
-`NATIVE_CHINESE_VOICE_SELECTION_REQUIRED / REMOTE_EDGE_PENDING`。
+默认提升、reference bank 或远端部署输入。当前链由同一次 Surface 响应产生中文显示与日语 speech
+text。用户已选择 GPT-SoVITS V4（B），Qwen3-TTS（A）、CosyVoice3（C）和 Style-Bert-VITS2 候选均
+不进入活动 composition。`configs/voice/gpt_sovits_nanami_v4.json` 用 9 条人工确认七海日语原声覆盖
+16 个运行时风格；`tts_persistent_worker.py` 自动识别 V4 并保持 `voice_profile` 优先。
+本机真实 CUDA 结果为约 10.98 秒加载、1.79～3.35 秒热态合成、48kHz 输出。状态为
+`LOCAL_HUMAN_SELECTED / HOST_EDGE_CONFIG_WIRED / REMOTE_EDGE_NOT_RUN`。
 
-TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：首轮自动情感 reference A/B 因听感区分不足不予
-提升；用户逐段确认的 `xilian_00025/00003/01292/01162/00048/01101` 被确定性打包为
-`SHY_AFFECTION / FLIRTING / LONGING / QUIET_INTIMACY / ROMANTIC_TENDER`，最后一类使用
-`01101` 作为辅助参考。`affective_turn_planner.py` 只在表达层选择这些风格，
+TRACE-DL05-ROMANCE-REFERENCE-BANK（恋爱表达风格）：`affective_turn_planner.py` 只在表达层选择
+`SHY_AFFECTION / FLIRTING / LONGING / QUIET_INTIMACY / ROMANTIC_TENDER`，
 `affective_expression_delivery.py` 同时下发独立 `voice_profile` 和原 canonical `emotion_tag`；
 `tts_engine.py`、fresh/persistent adapter 与 standalone Worker 全链透传并以前者优先选 reference。
-首轮昔涟 CUDA A/B 经用户听审仍过于舞台化，明确退出主候选。修复后 `voice_energy/voice_pitch` 不再止于
-Host payload，而由 Voice RPC、manager、fresh/persistent adapter 和 standalone Worker 消费；表达风格合同
-和五类中文试听句继续保留。日语原声只允许作为人类听感参考，不进入中文模型；后续状态为
-`NATIVE_CHINESE_MODEL_AB_REQUIRED / REMOTE_EDGE_NOT_RUN`。
+昔涟中文路线经用户听审过于舞台化，Style-Bert 训练候选又过于单调，均明确退出主候选。当前 GPT-SoVITS
+V4 profile 分别使用 `nanami_01555 / 01677 / 00739 / 01324 / 01321` 原声参考；修复后的
+`voice_energy/voice_pitch` 继续由 Voice RPC、manager、fresh/persistent adapter 和 Worker 消费。
+当前状态为 `GPT_SOVITS_V4_PROFILE_SELECTED / REMOTE_EDGE_NOT_RUN`。
 
 TRACE-DL04-REALTIME-LANE（普通陪伴低延迟链）：
 `route_catalog_runtime.py`、`route_execution_ports.py` 与 `surface_main_chain_adapter.py` 把普通 native stream

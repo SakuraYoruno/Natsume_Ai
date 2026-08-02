@@ -3,7 +3,7 @@
 
 # 当前架构程序注册表
 
-版本：v4.16
+版本：v4.17
 维护日期：2026-08-02
 状态：`ONE_ACTIVE_PROGRAM`
 
@@ -19,21 +19,13 @@
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
 DL-05 继续禁止“日语声学模型直接读中文”，该失败路线仍为
-`REJECTED_CROSS_LANGUAGE_VOICE`。用户现选择日语输出，新候选因此改成同语言的
-`Japanese speech text → Style-Bert-VITS2 JP-Extra`。官方 `2.7.0` 推理已在 RTX 5080 与
-PyTorch `2.7.0+cu128` 上真实通过；`configs/voice/style_bert_vits2_nanami.json` 与
-`tools/style_bert_vits2_nanami_dataset.py` 已确定性生成 1970 条/2.808685 小时训练集，其中
-1954 条 Natural、16 条分属 6 个风格锚，全部使用硬链接；一条无法可靠 G2P 的专名语音被显式排除。
-batch 4 先完成 1 epoch / 493 step 烟测，再续训到最终候选 `e10_s5423`；训练过程没有 OOM、NaN
-或崩溃，最终权重已生成七风格同句和匹配台词共 14 条试听。候选状态仍为
-`TRAINED_CANDIDATE_NOT_HUMAN_ACCEPTED`，完整人耳 A/B 待完成。Host 已接
-`HOST_COMPANION_TTS_LANGUAGE=ja`：主回复模型一次产生中文屏显和日语 speech
-text，不增加第二次翻译调用；缺失日语只降级语音，当前暂走完整回复缓冲而不是双语逐句流式。
-Edge 已新增显式 `EDGE_TTS_BACKEND=style_bert_vits2` 的隔离
-常驻 Worker、SHA-256 绑定的候选 release manifest 和 `voice_profile → style/weight` 映射；日语后端
-拒绝非日语请求。最终 release 已在本机真实加载：约 3.19 秒就绪，暖机后合成约 0.14～0.16 秒；
-真实 DeepSeek 单回合在 3.058 秒返回双文本并成功进入同一最终 Worker。默认 manifest 未提升，
-人耳结果未封板，远端 Edge 按要求保持关闭。
+`REJECTED_CROSS_LANGUAGE_VOICE`。用户已选择日语输出，并在人耳对比中明确选择 GPT-SoVITS V4（B）；
+Qwen3-TTS（A）与 CosyVoice3（C）退出，Style-Bert-VITS2 `e10_s5423` 只保留未启用实验资产。
+活动链为 `中文 reply_text + 日语 tts_text_ja → ExpressionPlan.voice_style → GPT-SoVITS V4`。
+`configs/voice/gpt_sovits_nanami_v4.json` 覆盖 16 个运行时风格，全部使用 3～10 秒内的人工确认七海
+日语参考；Worker 复用现有隔离 Python/JSON-line 进程并自动识别 V4。本机 RTX 5080 真实结果为
+约 10.98 秒加载、1.79～3.35 秒热态单句、48kHz 输出。`start_edge.ps1` 的中文 ASR/日语 TTS 模式
+已指向该 profile；远端 Edge 未启动，播放、打断和 Avatar 仍待用户授权后的物理验收。
 
 当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical

@@ -3,7 +3,7 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.14
+版本：v5.15
 日期：2026-08-02
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
@@ -13,26 +13,18 @@ Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它�
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。当前实现分支基于
 `origin/dev@001c2f5d7`；分支上的 DL-00～DL-06 提交尚未以本文件冒充 `dev` 已完成。
 
-DL-05 语音路线再次按实际试听收敛：日语角色音频合成中文仍永久标记
-`REJECTED_CROSS_LANGUAGE_VOICE`；用户选择的活动候选改为“中文可见文本 + 日语 speech text +
-日语声学模型”，声学侧不再跨语言。Style-Bert-VITS2 `2.7.0` JP-Extra 已使用
-PyTorch `2.7.0+cu128` 在 RTX 5080 上完成官方模型真实 CUDA 推理。训练集构建器从已授权的
-2465 条七海原声中按时长、有效发声和停顿筛出 1970 条/2.808685 小时，并用硬链接落盘；1954 条
-只进入 `Natural`，16 条人工确认或既有高置信原声锚分入 `WarmCare / SharedJoy / PlayfulShy /
-RomanticTender / ContainedHurt / QuietPresence`。风格目录只生成可替换的 style vector，不把自动
-情绪分类当训练真相，因此后续调恋爱感不要求重训声学模型。另有一条含 OpenJTalk 无法读取专名
-汉字的语音被显式排除，没有用忽略读音错误的参数掩盖。batch 4 先完成 493 step 烟测，再续训到
-`e10_s5423`；训练没有 OOM、NaN 或崩溃，最终权重已生成 14 条七风格试听。当前状态为
-`TRAINED_CANDIDATE_NOT_HUMAN_ACCEPTED`，不能据此提升默认模型。候选 release 已由本机常驻 Worker
-真实加载，加载约 3.19 秒，暖机后合成约 0.14～0.16 秒，中文语言请求被拒绝。人耳 A/B、默认
-manifest、远端 Edge、真实播放、打断和 Avatar 动作仍未完成或验收。Host 已加入显式可选的同调用双文本模式：中文 `reply_text` 继续显示，日语
-`tts_text_ja` 绑定到同一 accepted foreground 和 Voice intent；无效或缺失日语只降级语音，不能回退
-为日语模型合成中文。真实 DeepSeek 单例在 3.058 秒返回中日双文本，并由最终 Worker 合成；当前
-先采用完整回复缓冲，双语逐句流式仍待后续优化。代码侧已加入隔离的
-Style-Bert-VITS2 常驻 Worker、显式 release
-manifest 与 Edge backend 选择；它只接受 `lang_hint=ja`，不会用日语检查点回退合成中文。另有锚点
-近邻候选工具从 1970 条 embedding 为每类输出 12 条待听审片段，审核后可只重算 style vector 而不重训
-声学模型；候选不得自动进入发布风格库。
+DL-05 语音路线已按实际试听收敛：日语角色音频合成中文仍永久标记
+`REJECTED_CROSS_LANGUAGE_VOICE`；产品链为“中文可见文本 + 日语 speech text + 日语声学模型”。
+用户在同一组 warm/joy/romance/hurt 目标句中选择 GPT-SoVITS V4（B），Qwen3-TTS（A）和
+CosyVoice3（C）停止投入，Style-Bert-VITS2 `e10_s5423` 保留为未启用实验资产而不删除。选中路线
+复用已有 GPT-SoVITS 常驻 Worker 与 `voice_profile` 合同，不新增第二套 TTS Runtime；
+`configs/voice/gpt_sovits_nanami_v4.json` 使用 V4 预训练权重，并把 16 个运行时表达风格映射到
+人工确认的 9 条七海日语原声参考。Worker 已在 RTX 5080 上真实加载约 10.98 秒，热态单句约
+1.79～3.35 秒并输出 48kHz 音频。Host 的同调用双文本保持不变：中文 `reply_text` 显示，日语
+`tts_text_ja` 绑定同一 foreground 和 Voice intent；缺失日语只降级 Voice，不能回退为日语模型读中文。
+`start_edge.ps1 -EnforceCnAsrJaTtsMode` 现选择中文 ASR、GPT-SoVITS V4 日语 TTS 与选中 profile，
+但本波不启动另一台电脑上的 Edge。下一步只做远端资产同步、真实播放/打断和 Avatar 同轮验收；
+在获得物理回执前状态保持 `ACCEPTANCE_PENDING_EXTERNAL`。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，
