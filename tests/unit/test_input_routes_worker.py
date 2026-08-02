@@ -10,12 +10,10 @@ import pytest
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.channels.embodiment import EmbodimentOutboxAck
 from host_brain.input_runtime.contracts_and_normalization import (
-    _build_gateway_route_started_voice_ack_text,
     _build_gateway_reply_text,
     _build_gateway_voice_text,
     _detect_gateway_execution_deviation,
     _should_send_gateway_immediate_ack,
-    _should_send_gateway_route_started_voice_ack,
 )
 from host_brain.input_runtime.gateway_delivery import _deliver_gateway_reply
 from host_brain.input_runtime.worker_dispatch import (
@@ -1075,9 +1073,7 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
         ) as pipeline_mock, patch(
             "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
             new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 5}),
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_route_started_voice_ack",
-        ) as route_ack_mock:
+        ):
             _run(
                 _dispatch_to_graph_worker(
                     request_id="req_gateway_worker_canonical",
@@ -1096,9 +1092,6 @@ def test_dispatch_worker_passes_canonical_thalamus_draft_to_gateway_pipeline(mon
         fake_agent.classify_and_compile_intent_draft.assert_awaited_once()
         pipeline_mock.assert_awaited_once()
         assert pipeline_mock.await_args.kwargs["intent_draft_override"] == canonical_intent
-        route_ack_mock.assert_called_once()
-        assert route_ack_mock.call_args.kwargs["route_type"] == "skill"
-        assert route_ack_mock.call_args.kwargs["target_id"] == "agent_worker"
     finally:
         ledger.close()
 
@@ -1215,15 +1208,6 @@ def test_build_gateway_reply_text_uses_prompt_template_override(monkeypatch) -> 
     ) == ""
 
 
-def test_build_gateway_route_started_voice_ack_text_uses_prompt_template_override(monkeypatch) -> None:
-    _ = monkeypatch
-    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="translate_agent") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="delegate", target_id="intent_agent") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="skill", target_id="agent_worker") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="plan", target_id="") == ""
-    assert _build_gateway_route_started_voice_ack_text(route_type="chat", target_id="") == ""
-
-
 def test_build_gateway_voice_text_uses_prompt_template_override(monkeypatch) -> None:
     _ = monkeypatch
     assert _build_gateway_voice_text(reply_text="```python\nprint('hi')\n```", tts_text_ja=None) == ""
@@ -1240,6 +1224,21 @@ def test_build_gateway_voice_text_prefers_chinese_reply_over_legacy_tts_text() -
         )
         == "我记住了，你明天上午九点有个会。"
     )
+
+
+def test_build_gateway_voice_text_prefers_japanese_only_when_companion_voice_enabled(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+
+    assert _build_gateway_voice_text(
+        reply_text="我记住了，明早九点有会。",
+        tts_text_ja="明日の朝九時に会議があること、ちゃんと覚えてるよ。",
+    ) == "明日の朝九時に会議があること、ちゃんと覚えてるよ。"
+    assert _build_gateway_voice_text(
+        reply_text="我在。",
+        tts_text_ja="",
+    ) == ""
 
 
 def test_build_gateway_voice_text_falls_back_to_safe_japanese_summary_for_latin_or_code() -> None:
@@ -1344,7 +1343,7 @@ def test_deliver_gateway_reply_sends_media_envelope_without_text_fallback(monkey
     assert call["raw_extra"]["reply_envelope"]["reaction_id"] == "awkward-1"
 
 
-def test_deliver_gateway_reply_blocks_voice_without_task_preview_when_auto_reply_disabled(monkeypatch) -> None:
+def test_deliver_gateway_reply_marks_legacy_voice_retired_when_auto_reply_disabled(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "false")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     result = _run(
@@ -1374,9 +1373,9 @@ def test_deliver_gateway_reply_blocks_voice_without_task_preview_when_auto_reply
     assert result["reason_code"] == "GATEWAY_REPLY_DISABLED"
     assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_durable_admitted"] is False
     assert result["voice_success"] is False
     assert result["voice_started"] is False
@@ -1384,7 +1383,7 @@ def test_deliver_gateway_reply_blocks_voice_without_task_preview_when_auto_reply
     assert result["voice_vts_expression_success"] is False
 
 
-def test_deliver_gateway_reply_force_dual_voice_keeps_text_but_blocks_unpreviewed_voice(monkeypatch) -> None:
+def test_deliver_gateway_reply_force_dual_voice_keeps_text_and_retires_legacy_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     post_gateway_reply_mock = AsyncMock(
@@ -1429,19 +1428,19 @@ def test_deliver_gateway_reply_force_dual_voice_keeps_text_but_blocks_unpreviewe
     assert result["reply_form_reason"] == "force_dual_voice_reply"
     assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_vts_expression_success"] is False
     assert result["voice_audio_path"] == ""
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] is None
+    assert result["voice_gateway_status"] == "RETIRED"
 
 
-def test_deliver_gateway_reply_smart_mode_blocks_unpreviewed_legacy_force_voice(monkeypatch) -> None:
+def test_deliver_gateway_reply_smart_mode_retires_legacy_force_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     monkeypatch.setenv("HOST_GATEWAY_FORCE_DUAL_VOICE_REPLY", "true")
     monkeypatch.setenv("HOST_GATEWAY_VOICE_SELECTION_MODE", "smart")
@@ -1488,17 +1487,17 @@ def test_deliver_gateway_reply_smart_mode_blocks_unpreviewed_legacy_force_voice(
     assert result["reply_form_reason"] == "embodied_presence_voice"
     assert result["voice_sent"] is False
     assert result["voice_waited"] is True
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_detail"] is None
+    assert "retired" in result["voice_gateway_detail"]
 
 
-def test_deliver_gateway_reply_primary_failure_does_not_bypass_voice_preview(monkeypatch) -> None:
+def test_deliver_gateway_reply_primary_failure_does_not_restore_legacy_voice(monkeypatch) -> None:
     monkeypatch.setenv("HOST_INPUT_GATEWAY_AUTO_REPLY", "true")
     embodiment_runtime = _RecordingEmbodimentRuntime()
     with patch(
@@ -1539,9 +1538,9 @@ def test_deliver_gateway_reply_primary_failure_does_not_bypass_voice_preview(mon
     assert result["success"] is False
     assert result["reason_code"] == "WECHAT_SEND_FAILED"
     assert result["voice_sent"] is False
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_success"] is False
     assert result["voice_started"] is False
     assert result["voice_vts_started"] is False
@@ -1860,18 +1859,6 @@ def test_should_skip_gateway_immediate_ack_for_chat_route_even_if_help_words_pre
     assert reason == "ACK_NON_EXECUTION_ROUTE"
 
 
-def test_should_send_gateway_route_started_voice_ack_for_translate_delegate() -> None:
-    should_send, reason = _should_send_gateway_route_started_voice_ack(
-        source="GATEWAY",
-        payload={"platform": "qq", "conversation_id": "qq_dm_route_ack"},
-        route_type="delegate",
-        target_id="translate_agent",
-    )
-
-    assert should_send is True
-    assert reason == "ROUTE_ACK_TRANSLATE_AGENT"
-
-
 def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
@@ -1907,8 +1894,11 @@ def test_dispatch_to_graph_schedules_gateway_immediate_ack(monkeypatch) -> None:
         ledger.close()
 
 
-def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(monkeypatch) -> None:
+def test_dispatch_worker_keeps_delegate_reply_on_normal_delivery_path() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
+    delivery_mock = AsyncMock(
+        return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 12}
+    )
 
     try:
         with patch(
@@ -1934,10 +1924,8 @@ def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(mon
             ),
         ), patch(
             "host_brain.input_runtime.worker_dispatch._deliver_gateway_reply",
-            new=AsyncMock(return_value={"success": True, "status": "OK", "latency_ms": 12, "reply_text_len": 12}),
-        ), patch(
-            "host_brain.input_runtime.worker_dispatch._maybe_schedule_gateway_route_started_voice_ack",
-        ) as route_ack_mock:
+            new=delivery_mock,
+        ):
             _run(
                 _dispatch_to_graph_worker(
                     request_id="req_worker_route_ack",
@@ -1950,16 +1938,13 @@ def test_dispatch_worker_schedules_route_started_voice_ack_for_long_delegate(mon
                     },
                     ts_ms=123456,
                     ledger=ledger,
-                        dispatch_mode="fire_and_forget.inline",
-                        run_in_thread=False,
-                        ports=_ports(),
+                    dispatch_mode="fire_and_forget.inline",
+                    run_in_thread=False,
+                    ports=_ports(),
                 )
             )
 
-        route_ack_mock.assert_called_once()
-        kwargs = route_ack_mock.call_args.kwargs
-        assert kwargs["route_type"] == "delegate"
-        assert kwargs["target_id"] == "translate_agent"
+        delivery_mock.assert_awaited_once()
     finally:
         ledger.close()
 

@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import asyncio
 from typing import Any
 import pytest
 
@@ -13,6 +14,7 @@ from host_brain.observability.runtime_audit import _normalize_retrieval_summary_
 from host_brain.agent_runtime.fastpaths import _needs_selection_followup_retrieval_budget
 from host_brain.persona.session_hooks import (
     _resolve_selection_followup_retrieval_timeout_seconds,
+    _run_persona_session_end_hooks,
     _run_surface_persona_session_end_sync,
 )
 
@@ -712,3 +714,52 @@ def test_surface_session_end_uses_canonical_user_and_forwards_emotion(
     assert result["person_id"] == "canon-user"
     assert result["emotion_tag"] == "SAD"
     assert result["inner_world"]["anticipation_topics"] == ["我有点难受"]
+
+
+def test_canonical_surface_session_end_skips_legacy_user_vad_hook(monkeypatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class _CanonicalLimbic:
+        def uses_canonical_affective_life(self) -> bool:
+            return True
+
+        def on_session_end(self, **kwargs: Any) -> dict[str, Any]:
+            calls.append(dict(kwargs))
+            raise AssertionError("canonical Host must not invoke legacy session_end")
+
+        def on_conversation_ended(self, **kwargs: Any) -> dict[str, Any]:
+            calls.append(dict(kwargs))
+            raise AssertionError("canonical Host must not invoke legacy conversation_end")
+
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        lambda: _CanonicalLimbic(),
+    )
+
+    result = _run_surface_persona_session_end_sync(
+        request_id="req-canonical",
+        person_id="external-user",
+        session_id="sess-canonical",
+        user_message="我有点难受",
+        emotion_context={"surface_user_emotion_tag": "SAD", "emotion_intensity": 0.75},
+    )
+    asyncio.run(
+        _run_persona_session_end_hooks(
+            request_id="req-canonical-async",
+            person_id="external-user",
+            session_id="sess-canonical",
+            user_message="我有点难受",
+            emotion_context={"surface_user_emotion_tag": "SAD", "emotion_intensity": 0.75},
+        )
+    )
+
+    assert result == {
+        "status": "SKIPPED",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_PERSONA_SESSION_END_RETIRED",
+        "request_id": "req-canonical",
+        "session_id": "sess-canonical",
+        "person_id": "external-user",
+        "inner_world": {},
+    }
+    assert calls == []

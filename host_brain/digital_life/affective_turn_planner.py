@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from natsume_contracts.life import (
+    AffectiveRepairTargetV1,
     AffectiveTurnPlanV1,
     CompanionActV1,
     CompanionProfilePreferencesV1,
@@ -42,9 +43,36 @@ _APPRAISAL_CANDIDATE_SELECTION_KINDS = frozenset(
         "NATSUME_MAY_HAVE_HURT_USER",
         "DIRECTED_DISRESPECT_TOWARD_NATSUME",
         "REPAIR_SIGNAL",
+        "RELATIONSHIP_REPAIR_ACCEPTED",
         "USER_MIXED_AFFECT",
+        "DIRECTED_RELATIONAL_HURT",
+        "DIRECTED_RELATIONAL_THREAT",
+        "DIRECTED_RELATIONAL_COMPARISON",
     }
 )
+_DIRECT_REPAIRABLE_APPRAISALS = frozenset(
+    {
+        "directed_relational_hurt",
+        "directed_relational_threat",
+        "directed_relational_comparison",
+    }
+)
+
+# These are expression intents, not new self-affect states.  Surface already
+# uses these task modes to distinguish relational scenes; the voice layer may
+# therefore choose a more precise delivery colour without rewriting Natsume's
+# canonical emotion or relationship state.
+_ROMANTIC_VOICE_STYLE_BY_TASK_MODE = {
+    "affection": "SHY_AFFECTION",
+    "ambiguous_affection": "SHY_AFFECTION",
+    "receive_affection_lightly": "SHY_AFFECTION",
+    "jealousy_low_pressure": "FLIRTING",
+    "lover_affection": "ROMANTIC_TENDER",
+    "lover_presence": "ROMANTIC_TENDER",
+    "return_affection_concretely": "ROMANTIC_TENDER",
+    "miss_you": "LONGING",
+    "lover_low_energy": "QUIET_INTIMACY",
+}
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -96,6 +124,7 @@ def _tag_for_component(value: Any) -> str:
         "RELIEF": "CALM",
         "HURT": "SAD",
         "ANGER": "ANGRY",
+        "JEALOUSY": "THINKING",
     }.get(component, "CALM")
 
 
@@ -128,6 +157,11 @@ class AffectiveTurnGuidance:
             "companion_profile_digest": self.plan.companion_profile_digest,
             "companion_profile_revision": self.plan.companion_profile_revision,
             "companion_profile_stage": self.plan.companion_profile_stage,
+            "affect_repair_target_episode_id": (
+                self.plan.affect_repair_target.affect_episode_id
+                if self.plan.affect_repair_target is not None
+                else ""
+            ),
         }
 
 
@@ -227,6 +261,15 @@ def build_affective_turn_guidance(
         if regulation_is_current
         else "EXPRESS"
     )
+    repair_target = _repair_target_for_plan(
+        affective_life=life,
+        self_affect=self_affect,
+        regulation=regulation if regulation_is_current else {},
+        workspace_id=expected_workspace,
+        relationship_subject_id=expected_subject,
+        session_id=expected_session,
+        self_affect_revision=self_revision,
+    )
     relationship_life = _mapping(life.get("relationship_life"))
     relationship_state = _mapping(relationship_life.get("state"))
     if relationship_state and _text(
@@ -280,6 +323,9 @@ def build_affective_turn_guidance(
         "regulation_id": regulation_id,
         "appraisal_id": appraisal_id,
         "appraisal_kind": appraisal_kind,
+        "affect_repair_target": (
+            repair_target.as_dict() if repair_target is not None else None
+        ),
         "companion_act": act_kind,
         "generation_mode": generation_mode,
         # The previous expression is read only from the durable Host delivery
@@ -305,6 +351,7 @@ def build_affective_turn_guidance(
         act_kind=act_kind,
         emotion_tag=self_tag,
         regulation_mode=regulation_mode,
+        task_mode=mode,
     )
     avatar_expression = _avatar_expression(
         act_kind=act_kind,
@@ -378,12 +425,68 @@ def build_affective_turn_guidance(
         companion_profile_digest=profile.profile_digest,
         companion_profile_revision=profile_revision,
         companion_profile_stage=profile_stage,
+        affect_repair_target=repair_target,
     )
     return AffectiveTurnGuidance(
         plan=plan,
         facts=_facts_for_plan(plan),
         must_not_do=_must_not_for_plan(plan),
         style_anchor=(*_style_for_plan(plan), *_profile_style_anchors(profile.preferences)),
+    )
+
+
+def _repair_target_for_plan(
+    *,
+    affective_life: Mapping[str, Any],
+    self_affect: Mapping[str, Any],
+    regulation: Mapping[str, Any],
+    workspace_id: str,
+    relationship_subject_id: str,
+    session_id: str,
+    self_affect_revision: int,
+) -> AffectiveRepairTargetV1 | None:
+    """Return an exact bridge only for a fresh direct relational impact.
+
+    An ordinary sad user message, a helpful response, or a later repair
+    signal must never manufacture a repair debt for Natsume.  The target is
+    therefore limited to the same atomic appraisal/regulation pair that
+    opened one of the three narrowly detected direct-impact episodes.
+    """
+
+    appraisal = _mapping(self_affect.get("last_appraisal"))
+    if _text(appraisal.get("event_kind")).lower() not in _DIRECT_REPAIRABLE_APPRAISALS:
+        return None
+    episode_id = _text(regulation.get("episode_id"))
+    if not episode_id:
+        return None
+    active = [
+        _mapping(item)
+        for item in list(self_affect.get("active_episodes") or [])
+        if isinstance(item, Mapping)
+    ]
+    episode = next(
+        (item for item in active if _text(item.get("episode_id")) == episode_id),
+        None,
+    )
+    if episode is None:
+        return None
+    components = {
+        _text(_mapping(component).get("emotion")).upper()
+        for component in list(episode.get("components") or [])
+        if isinstance(component, Mapping)
+    }
+    if not components.intersection({"HURT", "ANGER", "JEALOUSY"}):
+        return None
+    aggregate_id = _text(affective_life.get("aggregate_id"))
+    if not aggregate_id.startswith("affect::"):
+        return None
+    return AffectiveRepairTargetV1(
+        affect_aggregate_id=aggregate_id,
+        affect_episode_id=episode_id,
+        workspace_id=workspace_id,
+        relationship_subject_id=relationship_subject_id,
+        session_id=session_id,
+        self_affect_revision=self_affect_revision,
     )
 
 
@@ -441,8 +544,18 @@ def _select_companion_act(
     # of being lost until a later relationship aftereffect exists.
     if appraisal_kind == "USER_BOUNDARY_OR_SPACE":
         return "GIVE_SPACE"
-    if appraisal_kind in {"NATSUME_MAY_HAVE_HURT_USER", "REPAIR_SIGNAL"}:
+    if appraisal_kind in {
+        "NATSUME_MAY_HAVE_HURT_USER",
+        "REPAIR_SIGNAL",
+    }:
         return "REPAIR"
+    if appraisal_kind == "RELATIONSHIP_REPAIR_ACCEPTED":
+        # A user-confirmed repair closes the current rupture.  The next
+        # sentence may acknowledge the reopening warmly, but must not keep
+        # apologising or act as though the user now owes a further repair.
+        # ``REPAIR`` remains reserved for an unresolved rupture or a fresh
+        # signal that Natsume may have missed the user again.
+        return "ACKNOWLEDGE"
     if appraisal_kind == "DIRECTED_DISRESPECT_TOWARD_NATSUME":
         return "SET_BOUNDARY"
     if appraisal_kind == "USER_MIXED_AFFECT":
@@ -453,6 +566,8 @@ def _select_companion_act(
         return "SOLVE"
     if top_component == "ANGER":
         return "SET_BOUNDARY"
+    if top_component == "JEALOUSY":
+        return "CONTAINED_JEALOUSY"
     if top_component == "SHARED_JOY":
         return "PLAY"
     if _observed_low_mood(observations):
@@ -497,7 +612,13 @@ def _text_pacing(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
     return "STEADY"
 
 
-def _voice_style(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> str:
+def _voice_style(
+    *,
+    act_kind: str,
+    emotion_tag: str,
+    regulation_mode: str,
+    task_mode: str = "",
+) -> str:
     if act_kind in {"GIVE_SPACE", "SILENCE"}:
         return "QUIET_PRESENCE"
     if act_kind == "REPAIR":
@@ -510,9 +631,16 @@ def _voice_style(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
         return "SOFT_COMFORT"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
+    if act_kind == "CONTAINED_JEALOUSY":
+        return "CONTAINED_JEALOUSY"
     if emotion_tag == "SAD":
         return "CONTAINED_HURT"
-    if act_kind == "COMFORT" or emotion_tag == "SAD":
+    romantic_style = _ROMANTIC_VOICE_STYLE_BY_TASK_MODE.get(
+        str(task_mode or "").strip().lower()
+    )
+    if romantic_style:
+        return romantic_style
+    if act_kind == "COMFORT":
         return "SOFT_COMFORT"
     if act_kind == "PLAY" or emotion_tag == "HAPPY":
         return "SHARED_JOY"
@@ -528,6 +656,8 @@ def _avatar_expression(*, act_kind: str, emotion_tag: str, regulation_mode: str)
         return "SOFT_COMFORT"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
+    if act_kind == "CONTAINED_JEALOUSY":
+        return "CONTAINED_JEALOUSY"
     if emotion_tag == "SAD":
         return "CONTAINED_HURT"
     if act_kind == "COMFORT" or emotion_tag == "SAD":
@@ -565,6 +695,12 @@ def _expression_controls(
             "avatar_posture": "CONTAINED", "avatar_transition_ms": 360,
             "avatar_behavior": "CONTAINED_HURT",
         },
+        "CONTAINED_JEALOUSY": {
+            "voice_rate": 0.96, "voice_energy": 0.42, "voice_pitch": -0.04,
+            "voice_pause_ms": 190, "avatar_gaze": "AVERTED",
+            "avatar_posture": "CONTAINED", "avatar_transition_ms": 300,
+            "avatar_behavior": "CONTAINED_JEALOUSY",
+        },
         "GENTLE_BOUNDARY": {
             "voice_rate": 0.95, "voice_energy": 0.52, "voice_pitch": -0.04,
             "voice_pause_ms": 180, "avatar_gaze": "STEADY",
@@ -594,6 +730,36 @@ def _expression_controls(
             "voice_pause_ms": 80, "avatar_gaze": "OPEN",
             "avatar_posture": "LIGHT", "avatar_transition_ms": 200,
             "avatar_behavior": "SHARED_JOY",
+        },
+        "ROMANTIC_TENDER": {
+            "voice_rate": 0.92, "voice_energy": 0.46, "voice_pitch": 0.08,
+            "voice_pause_ms": 180, "avatar_gaze": "SOFT",
+            "avatar_posture": "OPEN_GENTLE", "avatar_transition_ms": 320,
+            "avatar_behavior": "ROMANTIC_TENDER",
+        },
+        "SHY_AFFECTION": {
+            "voice_rate": 0.9, "voice_energy": 0.4, "voice_pitch": 0.12,
+            "voice_pause_ms": 210, "avatar_gaze": "AVERTED",
+            "avatar_posture": "CONTAINED", "avatar_transition_ms": 300,
+            "avatar_behavior": "SHY_AFFECTION",
+        },
+        "FLIRTING": {
+            "voice_rate": 1.05, "voice_energy": 0.66, "voice_pitch": 0.15,
+            "voice_pause_ms": 95, "avatar_gaze": "OPEN",
+            "avatar_posture": "LIGHT", "avatar_transition_ms": 210,
+            "avatar_behavior": "FLIRTING",
+        },
+        "LONGING": {
+            "voice_rate": 0.85, "voice_energy": 0.36, "voice_pitch": -0.04,
+            "voice_pause_ms": 280, "avatar_gaze": "SOFT",
+            "avatar_posture": "OPEN_GENTLE", "avatar_transition_ms": 380,
+            "avatar_behavior": "LONGING",
+        },
+        "QUIET_INTIMACY": {
+            "voice_rate": 0.82, "voice_energy": 0.28, "voice_pitch": -0.08,
+            "voice_pause_ms": 340, "avatar_gaze": "SOFT",
+            "avatar_posture": "STILL", "avatar_transition_ms": 430,
+            "avatar_behavior": "QUIET_INTIMACY",
         },
         "STEADY_COMPANION": {
             "voice_rate": 1.0, "voice_energy": 0.5, "voice_pitch": 0.0,
@@ -673,6 +839,8 @@ def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         facts.append("陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。")
     elif act == "SET_BOUNDARY":
         facts.append("陪伴动作：可以诚实承认被刺到，但把界限说清楚且不伤人，不把自己的委屈变成对方的义务。")
+    elif act == "CONTAINED_JEALOUSY":
+        facts.append("陪伴动作：可以诚实流露一点在意和小小吃味，但把选择权完整留给对方，不比较、不拉扯。")
     elif act in {"GIVE_SPACE", "SILENCE"}:
         facts.append("陪伴动作：尊重留白，短一点，不催促、不追问，也不把失落变成对方要安抚的责任。")
     elif act == "SOLVE":
@@ -692,6 +860,8 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     ]
     if plan.companion_act.kind in {"GIVE_SPACE", "SILENCE"}:
         items.append("不要追问、催回复、连发安慰或把沉默解释为拒绝关系。")
+    if plan.companion_act.kind == "CONTAINED_JEALOUSY":
+        items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚。")
     if plan.companion_act.kind == "REPAIR":
         items.append("不要要求原谅、替自己辩解，或把道歉写成修复已经完成。")
     if plan.companion_act.kind == "SET_BOUNDARY":
@@ -702,14 +872,26 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
 
 
 def _style_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
+    voice_style = plan.expression_plan.voice_style
+    romantic_anchor = {
+        "ROMANTIC_TENDER": "亲近要落在具体的在意里，温柔但不堆甜腻称呼。",
+        "SHY_AFFECTION": "可以先躲一下、嘴硬一下，再自然露出一点喜欢；不要演成夸张结巴。",
+        "FLIRTING": "轻快地逗一下并给对方接话空间，暧昧但不油腻、不占有。",
+        "LONGING": "想念可以坦率，但不能变成催回复、索取安抚或要求对方证明关系。",
+        "QUIET_INTIMACY": "像靠近一点低声陪着，句子短、留白自然，不用连续追问填满安静。",
+    }.get(voice_style)
     pacing = plan.expression_plan.text_pacing
     if pacing == "SPARSE":
-        return ("节奏留白，句子短一些；克制不是冷掉，更不是消失。",)
+        base = "节奏留白，句子短一些；克制不是冷掉，更不是消失。"
+        return (base, romantic_anchor) if romantic_anchor else (base,)
     if pacing == "SOFT":
-        return ("语气放轻，少说教、少追问，先让对方省一点力。",)
+        base = "语气放轻，少说教、少追问，先让对方省一点力。"
+        return (base, romantic_anchor) if romantic_anchor else (base,)
     if pacing == "BRISK":
-        return ("节奏可以亮一点，有一点自然的开心或小得意，但别用夸张符号硬撑。",)
-    return ("节奏稳，先回应当前问题；技术内容保持准确，七海的质感留在措辞里。",)
+        base = "节奏可以亮一点，有一点自然的开心或小得意，但别用夸张符号硬撑。"
+        return (base, romantic_anchor) if romantic_anchor else (base,)
+    base = "节奏稳，先回应当前问题；技术内容保持准确，七海的质感留在措辞里。"
+    return (base, romantic_anchor) if romantic_anchor else (base,)
 
 
 __all__ = [

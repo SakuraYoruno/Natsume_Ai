@@ -19,7 +19,6 @@ AGENT_ID_SAFETY = "safety_agent"
 AGENT_ID_JUDGE = "judge_agent"
 AGENT_ID_RENDERER = "renderer_agent"
 AGENT_ID_RETRIEVAL = "retrieval_agent"  # P11 新增
-AGENT_ID_EMOTION = "emotion_agent"    # 方向 G Phase 2 新增
 AGENT_ID_REPAIR = "repair_agent"
 AGENT_ID_PENTEST = "pentest_agent"  # 无副作用规划与 canonical SecureRun 交接
 
@@ -36,7 +35,6 @@ AGENT_ALLOWLIST: frozenset[str] = frozenset({
     # 待 P17+ 补充 handler 后再加入。
     AGENT_ID_JUDGE,
     AGENT_ID_RETRIEVAL,  # P11 新增
-    AGENT_ID_EMOTION,    # 方向 G Phase 2 新增
     AGENT_ID_REPAIR,
     AGENT_ID_PENTEST,
 })
@@ -125,16 +123,6 @@ _AGENT_META: dict[str, dict[str, Any]] = {
         "has_side_effects": True,
         "risk_level": "high",
         "description": "环境修复与依赖安装，负责补齐运行所需的浏览器/工具后端",
-    },
-    AGENT_ID_EMOTION: {  # 方向 G Phase 2 新增
-        "agent_id": AGENT_ID_EMOTION,
-        "display_name": "EmotionAgent",
-        "node_id": "emotion_agent_node",
-        "fast_path": False,
-        "allow_parallel": True,                # 只读分析，允许并行
-        "has_side_effects": False,
-        "risk_level": "low",
-        "description": "深度情感分析，检索情感记忆，评估 Bond 状态，产出情感工件",
     },
     AGENT_ID_PENTEST: {
         "agent_id": AGENT_ID_PENTEST,

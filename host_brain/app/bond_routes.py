@@ -16,6 +16,7 @@ import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from host_brain.bond.bond_stage_engine import (
@@ -31,11 +32,20 @@ from host_brain.core.ids import new_request_id
 
 _logger = logging.getLogger("Natsume.bond_routes")
 
+_LEGACY_BOND_READ_RETIRED = "LEGACY_BOND_READ_RETIRED"
+
 def _get_engine(route_ports: HostRoutePorts) -> BondStageEngine:
     provider = route_ports.bond_engine_provider
-    engine = provider() if provider is not None else None
+    # Canonical Hosts deliberately omit this rollback-only provider.  Missing
+    # authority is therefore the stable retired state, not a transient 503
+    # that might encourage callers to retry or reintroduce a legacy engine.
+    if provider is None:
+        raise RuntimeError(_LEGACY_BOND_READ_RETIRED)
+    engine = provider()
     if engine is None:
-        raise RuntimeError("BondStageEngine provider not configured")
+        raise RuntimeError(_LEGACY_BOND_READ_RETIRED)
+    if str(getattr(engine, "reason_code", "")).strip() == _LEGACY_BOND_READ_RETIRED:
+        raise RuntimeError(_LEGACY_BOND_READ_RETIRED)
     return engine
 
 
@@ -91,6 +101,16 @@ class RetiredBondWriteResponse(BaseModel):
     timestamp: int
 
 
+class RetiredBondReadResponse(BaseModel):
+    """Stable response for historical Bond GET routes in canonical Hosts."""
+
+    status: str = Field(default="RETIRED")
+    reason_code: str = Field(default=_LEGACY_BOND_READ_RETIRED)
+    detail: str
+    request_id: str
+    timestamp: int
+
+
 class BondHealthResponse(BaseModel):
     """GET /bond/health 响应体。"""
     status: str
@@ -100,6 +120,23 @@ class BondHealthResponse(BaseModel):
     timestamp: int
 
 
+def _retired_bond_read_response(*, request_id: str, ts_ms: int) -> JSONResponse:
+    """Reject a GET before a legacy engine can create an INIT ledger row."""
+
+    return JSONResponse(
+        status_code=410,
+        content=RetiredBondReadResponse(
+            detail=(
+                "Legacy Bond read projections are retired in a canonical "
+                "Digital Life Host; use scope-bound Digital Life projections."
+            ),
+            request_id=request_id,
+            timestamp=ts_ms,
+        ).model_dump(),
+        headers={"X-Reason-Code": _LEGACY_BOND_READ_RETIRED},
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /bond/health
 # ---------------------------------------------------------------------------
@@ -107,7 +144,7 @@ class BondHealthResponse(BaseModel):
 async def bond_health(
     *,
     _route_ports: HostRoutePorts,
-) -> BondHealthResponse:
+) -> BondHealthResponse | JSONResponse:
     """BondStageEngine 健康状态检查。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
@@ -122,6 +159,8 @@ async def bond_health(
             timestamp=ts_ms,
         )
     except RuntimeError as exc:
+        if str(exc) == _LEGACY_BOND_READ_RETIRED:
+            return _retired_bond_read_response(request_id=request_id, ts_ms=ts_ms)
         return BondHealthResponse(
             status="DEGRADED",
             user_count=0,
@@ -141,7 +180,7 @@ async def bond_health(
 async def list_bond_users(
     *,
     _route_ports: HostRoutePorts,
-) -> Dict[str, Any]:
+) -> Dict[str, Any] | JSONResponse:
     """列出所有有 Bond 状态的用户 ID。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
@@ -155,6 +194,8 @@ async def list_bond_users(
             "timestamp": ts_ms,
         }
     except RuntimeError as exc:
+        if str(exc) == _LEGACY_BOND_READ_RETIRED:
+            return _retired_bond_read_response(request_id=request_id, ts_ms=ts_ms)
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -168,7 +209,7 @@ async def get_bond_summary(
     user_id: str,
     *,
     _route_ports: HostRoutePorts,
-) -> BondSummaryResponse:
+) -> BondSummaryResponse | JSONResponse:
     """获取 context-pack-safe Bond Summary（不含数值，供语义内核消费）。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
@@ -185,6 +226,8 @@ async def get_bond_summary(
             timestamp=ts_ms,
         )
     except RuntimeError as exc:
+        if str(exc) == _LEGACY_BOND_READ_RETIRED:
+            return _retired_bond_read_response(request_id=request_id, ts_ms=ts_ms)
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         _logger.error("get_bond_summary 接口异常: %s", exc)
@@ -199,7 +242,7 @@ async def get_bond_stage(
     user_id: str,
     *,
     _route_ports: HostRoutePorts,
-) -> BondStageResponse:
+) -> BondStageResponse | JSONResponse:
     """查询用户当前 Bond 阶段与积分状态（含数值，仅供管理/调试使用）。"""
     request_id = new_request_id()
     ts_ms = int(time.time() * 1000)
@@ -221,6 +264,8 @@ async def get_bond_stage(
             timestamp=ts_ms,
         )
     except RuntimeError as exc:
+        if str(exc) == _LEGACY_BOND_READ_RETIRED:
+            return _retired_bond_read_response(request_id=request_id, ts_ms=ts_ms)
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         _logger.error("get_bond_stage 接口异常: %s", exc)
@@ -257,7 +302,7 @@ async def submit_bond_event(
 
 
 def create_bond_router(route_ports: HostRoutePorts) -> APIRouter:
-    """Create Bond routes with app-local engine and writer providers."""
+    """Create fail-closed legacy Bond routes for the rollback window."""
 
     router = APIRouter(prefix="/bond", tags=["bond"])
 
@@ -269,19 +314,34 @@ def create_bond_router(route_ports: HostRoutePorts) -> APIRouter:
             **kwargs,
         )
 
-    add("/health", bond_health, methods=["GET"], response_model=BondHealthResponse)
-    add("/users", list_bond_users, methods=["GET"], response_model=Dict[str, Any])
+    read_retired_response = {410: {"model": RetiredBondReadResponse}}
+    add(
+        "/health",
+        bond_health,
+        methods=["GET"],
+        response_model=BondHealthResponse,
+        responses=read_retired_response,
+    )
+    add(
+        "/users",
+        list_bond_users,
+        methods=["GET"],
+        response_model=Dict[str, Any],
+        responses=read_retired_response,
+    )
     add(
         "/summary/{user_id}",
         get_bond_summary,
         methods=["GET"],
         response_model=BondSummaryResponse,
+        responses=read_retired_response,
     )
     add(
         "/stage/{user_id}",
         get_bond_stage,
         methods=["GET"],
         response_model=BondStageResponse,
+        responses=read_retired_response,
     )
     add(
         "/event",
@@ -295,6 +355,7 @@ def create_bond_router(route_ports: HostRoutePorts) -> APIRouter:
 
 __all__ = [
     "BondEventRequest",
+    "RetiredBondReadResponse",
     "RetiredBondWriteResponse",
     "create_bond_router",
     "submit_bond_event",

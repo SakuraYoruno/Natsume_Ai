@@ -566,7 +566,13 @@ class StartupReleaseRef:
     boot_status: str
 
     def __post_init__(self) -> None:
-        if self.boot_status not in {"READY", "DEGRADED", "FAILED", "UNKNOWN"}:
+        if self.boot_status not in {
+            "READY",
+            "DEGRADED",
+            "FAILED",
+            "UNKNOWN",
+            "ACCEPTANCE_PENDING_EXTERNAL",
+        }:
             raise ContractViolation(CONTRACT_FIELD_INVALID, "startup boot_status is invalid")
 
     def to_dict(self) -> dict[str, Any]:
@@ -577,7 +583,16 @@ class StartupReleaseRef:
         data = _strict_mapping(value, allowed={"source", "boot_status"}, name="StartupReleaseRef")
         return cls(
             source=IdentitySourceRef.from_mapping(_mapping(data.get("source"))),
-            boot_status=_allowed_token(data.get("boot_status"), allowed={"READY", "DEGRADED", "FAILED", "UNKNOWN"}),
+            boot_status=_allowed_token(
+                data.get("boot_status"),
+                allowed={
+                    "READY",
+                    "DEGRADED",
+                    "FAILED",
+                    "UNKNOWN",
+                    "ACCEPTANCE_PENDING_EXTERNAL",
+                },
+            ),
         )
 
 
@@ -885,7 +900,13 @@ def build_identity_snapshot(
         source=IdentitySourceRef(ref=startup_ref, digest=startup_snapshot.snapshot_hash),
         boot_status=_allowed_token(
             startup_snapshot.boot_status,
-            allowed={"READY", "DEGRADED", "FAILED", "UNKNOWN"},
+            allowed={
+                "READY",
+                "DEGRADED",
+                "FAILED",
+                "UNKNOWN",
+                "ACCEPTANCE_PENDING_EXTERNAL",
+            },
         ),
     )
     manifest_source = IdentitySourceRef.from_payload(ref=release_manifest_ref, payload=release_manifest)

@@ -459,6 +459,7 @@ def test_edge_events_emotion_is_logged_without_legacy_bond_or_avatar_side_effect
     )
 
     assert response.accepted == 1
+    assert len(ledger.rows) == 1
     assert ledger.rows[0]["event_type"] == "EMOTION_DETECTED"
     assert fake_cortex.calls == []
 

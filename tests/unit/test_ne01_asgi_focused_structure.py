@@ -44,7 +44,6 @@ def test_asgi_keeps_lifespan_state_and_reverse_close_order_in_one_scope() -> Non
         "host_lifecycle.stop_activity_monitor",
         "reset_life_command_authority",
         "embodiment_runtime.close()",
-        "close_bond_runtime",
         "close_governance_runtime",
         "withdraw_memory_service_container(memory)",
         "memory.close()",

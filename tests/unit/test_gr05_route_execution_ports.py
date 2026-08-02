@@ -10,9 +10,11 @@ import pytest
 from host_brain.app.route_execution_ports import (
     GovernedRouteExecutionPorts,
     RouteExecutionBoundaryError,
+    build_realtime_companion_execution_ports,
     build_governed_route_execution_ports,
     dispatch_governed_delegate,
     stream_governed_chat_with_context,
+    stream_realtime_chat_with_context,
 )
 from host_brain.app.governed_delegate_dispatch import GovernedDelegateOutcome
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
@@ -202,6 +204,92 @@ async def test_bound_governed_chat_port_forwards_the_injected_surface_authority(
         route_ports.resolve_surface_reply_llm_runtime
         is surface_ports.resolve_surface_reply_llm_runtime
     )
+
+
+@pytest.mark.asyncio
+async def test_realtime_companion_port_streams_without_task_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    surface_runtime_ports_factory,
+) -> None:  # noqa: ANN001
+    resolved_bases: list[dict[str, object]] = []
+
+    def resolve_surface_runtime(*, base_runtime):  # noqa: ANN001
+        resolved_bases.append(dict(base_runtime or {}))
+        return {
+            **dict(base_runtime or {}),
+            "agent_role": "surface_reply",
+            "route_lane": "realtime_companion",
+        }
+
+    surface_ports = surface_runtime_ports_factory(
+        resolve_surface_reply_llm_runtime=resolve_surface_runtime,
+    )
+    captured: list[object] = []
+
+    async def fake_surface_reply(value, *, ports):  # noqa: ANN001
+        captured.extend((value, ports))
+        yield "data: realtime\n\n"
+
+    monkeypatch.setattr(
+        "host_brain.app.surface_reply_runtime.surface_reply_sse_generator",
+        fake_surface_reply,
+    )
+    realtime_ports = build_realtime_companion_execution_ports(
+        surface_runtime_ports=surface_ports,
+    )
+    request_body = SimpleNamespace(
+        workspace_id="workspace-realtime",
+        thread_id="thread-realtime",
+        input_source="GATEWAY",
+        response_form="text",
+        reply_channel="gateway",
+        reply_target="device-realtime",
+        suppress_edge_tts=None,
+        suppress_edge_vts=None,
+        render_policy={},
+        surface_task_control={},
+        attachments=[],
+        multimodal_observations={},
+        attachment_summary="",
+    )
+
+    events = [
+        event
+        async for event in stream_realtime_chat_with_context(
+            ports=realtime_ports,
+            request_body=request_body,
+            route_reason="ordinary_chat",
+            request_id="request-realtime",
+            session_id="session-realtime",
+            person_id="person-realtime",
+            sanitized_message="今天想和你聊聊。",
+            emotion_context={},
+            emotion_snapshot={},
+            bond_summary={},
+            retrieval_evidence_items=[],
+            retrieval_summary={"status": "SKIPPED"},
+            render_target_lang="zh",
+            llm_runtime={"provider_name": "deepseek", "model_id": "base-chat"},
+            ts_ms=123,
+            intent_draft={"route": "chat", "target_id": "surface_reply"},
+            trace_stage_meta={"runtime_path": "realtime_companion"},
+        )
+    ]
+
+    assert events == ["data: realtime\n\n"]
+    chat_input = captured[0]
+    assert captured[1] is surface_ports
+    assert chat_input.thread_id == "thread-realtime"
+    assert chat_input.defer_effects_to_task_runtime is False
+    assert chat_input.governed_delivery_authority is None
+    assert resolved_bases == [
+        {
+            "provider_name": "deepseek",
+            "model_id": "base-chat",
+            "runtime_path": "realtime_companion",
+        }
+    ]
+    assert chat_input.llm_runtime["route_lane"] == "realtime_companion"
 
 
 @pytest.mark.asyncio

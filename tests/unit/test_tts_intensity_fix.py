@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 
 class TestTtsIntensityFix:
     """Verify TTS prosody follows emotion without leaving safe model-native bounds."""
@@ -82,6 +84,41 @@ class TestTtsIntensityFix:
         assert abs(captured.get("speed_factor", 0) - 1.0) < 0.01
         assert abs(captured.get("energy_factor", 0) - 1.0) < 0.01
 
+    def test_voice_profile_is_forwarded_without_rewriting_emotion(self):
+        from edge_client.actuators.tts_engine import _synthesize_audio
+
+        captured = {}
+        mock_model = self._make_mock_model(captured)
+
+        _synthesize_audio(
+            model=mock_model,
+            text="我只是有一点想你。",
+            language="zh",
+            emotion_tag="CALM",
+            voice_profile="LONGING",
+            emotion_intensity=0.5,
+            timeout_s=10.0,
+        )
+
+        assert captured["emotion"] == "CALM"
+        assert captured["voice_profile"] == "LONGING"
+
+    def test_voice_profile_reference_wins_over_generic_emotion_reference(self):
+        from edge_client.actuators.tts_engine import (
+            _TtsReference,
+            _select_tts_reference,
+        )
+
+        calm = _TtsReference(audio_path="calm.wav")
+        longing = _TtsReference(audio_path="longing.wav")
+        selected = _select_tts_reference(
+            {"CALM": calm, "LONGING": longing},
+            emotion_tag="CALM",
+            voice_profile="LONGING",
+        )
+
+        assert selected is longing
+
     def test_emotion_prosody_can_be_disabled(self, monkeypatch):
         from edge_client.actuators.tts_engine import _synthesize_audio
 
@@ -134,6 +171,58 @@ class TestTtsIntensityFix:
             timeout_s=10.0,
         )
         assert abs(captured.get("speed_factor", 0) - 0.72) < 0.01
+
+    def test_expression_energy_and_pitch_reach_model_adapter(self):
+        from edge_client.actuators.tts_engine import _synthesize_audio
+
+        captured = {}
+        mock_model = self._make_mock_model(captured)
+
+        _synthesize_audio(
+            model=mock_model,
+            text="我在这里陪你。",
+            language="zh",
+            emotion_tag="LOVING",
+            emotion_intensity=0.6,
+            energy_level=0.25,
+            pitch_semitones=-0.5,
+            timeout_s=10.0,
+        )
+
+        assert captured["energy_factor"] < 1.0
+        assert captured["pitch_semitones"] == -0.5
+
+    def test_energy_post_processing_changes_waveform_level(self):
+        import numpy as np
+        from edge_client.actuators.tts_engine import _apply_synthesized_prosody
+
+        audio = np.full(3200, 0.25, dtype=np.float32)
+        quiet = _apply_synthesized_prosody(
+            audio,
+            32000,
+            energy_factor=0.8,
+            pitch_semitones=None,
+        )
+
+        assert float(np.max(np.abs(quiet))) == pytest.approx(0.2, abs=1e-6)
+
+    def test_direct_adapter_normalizes_gpt_sovits_pcm_without_clipping(self):
+        import numpy as np
+        from edge_client.actuators.tts_engine import _apply_synthesized_prosody
+
+        pcm = np.array([-32768, -16384, 0, 16384, 32767], dtype=np.int16)
+        rendered = _apply_synthesized_prosody(
+            pcm,
+            32000,
+            energy_factor=0.8,
+            pitch_semitones=None,
+        )
+
+        assert rendered.dtype == np.float32
+        assert rendered.tolist() == pytest.approx(
+            [-0.8, -0.4, 0.0, 0.4, 0.7999756],
+            abs=1e-5,
+        )
 
     def test_expressive_timing_adds_pauses_when_enabled(self, monkeypatch):
         import numpy as np

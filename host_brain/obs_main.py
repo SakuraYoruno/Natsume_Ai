@@ -12,7 +12,7 @@ from pathlib import Path
 def _load_env_file(env_path: Path, *, override: bool = False) -> None:
     if not env_path.exists():
         return
-    with open(env_path, encoding="utf-8") as handle:
+    with open(env_path, encoding="utf-8-sig") as handle:
         for raw_line in handle:
             line = raw_line.strip()
             if not line or line.startswith("#") or "=" not in line:

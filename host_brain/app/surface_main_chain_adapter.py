@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
+from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
 from host_brain.persona.surface_main_chain import (
     SurfaceMainChain,
     SurfaceMainChainInput,
@@ -30,7 +31,10 @@ from host_brain.surface_runtime.delivery_audit import (
     _surface_timings_ms,
 )
 from host_brain.app.sentence_splitter import SentenceSplitter
-from host_brain.persona.isolated_surface_harness import build_isolated_surface_messages
+from host_brain.persona.isolated_surface_harness import (
+    build_isolated_surface_messages,
+    build_native_stream_surface_messages,
+)
 from host_brain.surface_runtime.fact_compiler import (
     _coerce_int,
     _safe_mapping,
@@ -53,7 +57,6 @@ from host_brain.surface_runtime.quality_guards import (
 from host_brain.surface_runtime.affective_streaming import (
     affective_turn_plan_from_trace,
     gate_stream_sentence,
-    native_stream_messages,
     should_use_native_sentence_stream,
 )
 from host_brain.surface_runtime.subagent_context import (
@@ -66,6 +69,8 @@ from host_brain.surface_runtime.ports import (
 
 
 def _surface_main_chain_response_format() -> dict[str, str] | None:
+    if japanese_companion_voice_enabled():
+        return {"type": "json_object"}
     mode = str(os.environ.get("HOST_SURFACE_MAIN_CHAIN_OUTPUT_CONTRACT") or "text").strip().lower()
     if mode in {"json", "json_object", "structured"}:
         return {"type": "json_object"}
@@ -86,6 +91,27 @@ def _surface_model_deadline_ms(governed_model_budget: Any | None) -> int:
     if governed_model_budget is None:
         return configured
     return min(int(governed_model_budget.deadline_ms), configured)
+
+
+def _surface_model_request_profile(
+    trace_stage_meta: Mapping[str, Any] | None,
+    *,
+    realtime_eligible: bool,
+) -> tuple[str, str, str]:
+    """Select the server-owned model lane at the actual ModelAttempt boundary.
+
+    Route projection alone is insufficient because the Surface main chain
+    creates the canonical ModelAttemptRequest itself.  Only the ordinary
+    native sentence stream may use the low-latency companion lane; buffered
+    repair/ambiguity and governed nodes retain the quality-first Surface lane.
+    """
+
+    runtime_path = str(
+        _safe_mapping(trace_stage_meta).get("runtime_path") or ""
+    ).strip().lower()
+    if realtime_eligible and runtime_path == "realtime_companion":
+        return "CHAT_SURFACE_REALTIME", "B", "realtime_companion"
+    return "CHAT_SURFACE", "A", "surface_reply"
 
 
 def _final_stream_usage_is_attested(result: Any) -> bool:
@@ -167,6 +193,13 @@ def _native_affective_stream_preparation(
     trace_stage_meta: dict[str, Any],
 ) -> tuple[SurfaceMainChainInput, Any, dict[str, Any]] | None:
     """Compile once and select the native stream only for a frozen safe plan."""
+
+    # The current native protocol streams plain Chinese sentences.  Japanese
+    # voice mode uses one bilingual JSON response from the same model call;
+    # keep that route buffered until sentence-paired bilingual streaming is
+    # implemented, rather than speaking untranslated Chinese through a JP model.
+    if japanese_companion_voice_enabled():
+        return None
 
     governed_model_budget = _governed_model_budget_guard(trace_stage_meta)
     governed_delivery_authority = _governed_task_delivery_authority(agent_input)
@@ -453,17 +486,25 @@ async def _native_affective_sentence_stream(
         ),
     }
 
-    messages = native_stream_messages(build_isolated_surface_messages(compiled_request))
+    messages = build_native_stream_surface_messages(compiled_request)
     stream_started = time.perf_counter()
     first_token_ms: int | None = None
     splitter = SentenceSplitter()
     narrative_parts: list[str] = []
     sent_sentence_count = 0
     sentence_receipts: list[dict[str, Any]] = []
+    model_scene_type, model_cognitive_tier, model_route_lane = (
+        _surface_model_request_profile(trace, realtime_eligible=True)
+    )
+    trace["surface_model_route"] = {
+        "scene_type": model_scene_type,
+        "cognitive_tier": model_cognitive_tier,
+        "route_lane": model_route_lane,
+    }
     model_request = ModelAttemptRequest(
         request_id=request_id or "surface-main-chain",
-        scene_type="CHAT_SURFACE",
-        cognitive_tier="A",
+        scene_type=model_scene_type,
+        cognitive_tier=model_cognitive_tier,
         prompt=PromptRef(SURFACE_MAIN_TEXT_PROMPT_ID, {"messages": messages}),
         deadline_ms=_surface_model_deadline_ms(governed_model_budget),
         foreground=True,
@@ -471,6 +512,8 @@ async def _native_affective_sentence_stream(
         metadata={
             "chain": "surface_main_native_sentence_stream",
             "affective_turn_plan_id": plan_id,
+            "runtime_path": str(trace.get("runtime_path") or ""),
+            "route_lane": model_route_lane,
             **(
                 # The durable attempt journal must be tied to the immutable
                 # TaskNode that owns this stream.  The buffered Surface path
@@ -1017,6 +1060,611 @@ async def _native_affective_sentence_stream(
     )
 
 
+def _gated_deterministic_affective_sentences(
+    text: str,
+    *,
+    agent_input: Any,
+    trace: dict[str, Any],
+) -> tuple[str, ...]:
+    """Split a rule/fallback reply before it enters the visible protocol.
+
+    Evidence requirements and deterministic sub-agent fallbacks do not need a
+    model call, but they are still a reply from Natsume.  They therefore use
+    the same sentence gate as native streaming instead of bypassing the
+    frozen affective plan with one un-audited text blob.
+    """
+
+    splitter = SentenceSplitter()
+    candidates = list(splitter.feed(str(text or "")))
+    remainder = splitter.flush()
+    if remainder:
+        candidates.append(remainder)
+    if not candidates and str(text or "").strip():
+        candidates.append(str(text or "").strip())
+
+    accepted: list[str] = []
+    for raw_sentence in candidates:
+        candidate = _sanitize_native_stream_sentence(
+            raw_sentence,
+            agent_input=agent_input,
+            trace=trace,
+        )
+        gate = gate_stream_sentence(candidate)
+        if not gate.accepted:
+            raise RuntimeError(gate.reason_code)
+        accepted.append(gate.sentence)
+    if not accepted:
+        raise RuntimeError("SURFACE_STREAM_EMPTY_SENTENCE")
+    return tuple(accepted)
+
+
+async def _canonical_affective_deterministic_delivery(
+    agent_input: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+    trace: dict[str, Any],
+    plan: Mapping[str, Any],
+    text: str,
+    started_ms: int,
+    reply_source: str,
+    reason_code: str,
+    degraded: bool,
+    audit: Mapping[str, Any] | None = None,
+    raw_extra: Mapping[str, Any] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Deliver a non-model reply through the canonical affective protocol.
+
+    This deliberately covers only direct Host delivery.  A governed worker is
+    still speculative until Task Acceptance and keeps its buffered route;
+    letting this helper write Life directly from that worker would recreate a
+    second acceptance authority merely to make a fallback look responsive.
+    """
+
+    request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    plan_id = str(plan.get("plan_id") or "").strip()
+    expression = _safe_mapping(plan.get("expression_plan"))
+    synchronization_id = str(expression.get("synchronization_id") or "").strip()
+    try:
+        sentences = _gated_deterministic_affective_sentences(
+            text,
+            agent_input=agent_input,
+            trace=trace,
+        )
+    except Exception as exc:
+        trace["affective_deterministic_delivery"] = {
+            "status": "REJECTED",
+            "reason_code": str(exc).split(":", 1)[0][:160],
+            "reply_source": reply_source,
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": str(exc).split(":", 1)[0][:160]
+                or "SURFACE_STREAM_EMPTY_SENTENCE",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:canonical_affective_deterministic",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    narrative = "".join(sentences).strip()
+    if not narrative:
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "SURFACE_STREAM_EMPTY_SENTENCE",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:canonical_affective_deterministic",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    try:
+        planned_receipt = await asyncio.to_thread(
+            _submit_surface_affective_turn_planned,
+            life_command_service=ports.get_life_command_service(),
+            life_snapshot_reader=ports.get_life_snapshot_reader(),
+            agent_input=agent_input,
+            trace_stage_meta=trace,
+            source="surface_affective_deterministic_delivery",
+        )
+    except Exception as exc:
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "AFFECTIVE_TURN_PLAN_COMMIT_FAILED",
+            "error_type": type(exc).__name__,
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "AFFECTIVE_TURN_PLAN_COMMIT_FAILED",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:canonical_affective_deterministic",
+                    "durability": "fail_closed_before_stream",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    trace["affective_turn_plan_receipt"] = {
+        "command_id": planned_receipt.get("command_id"),
+        "event_id": planned_receipt.get("event_id"),
+        "state_version": planned_receipt.get("state_version"),
+        "replayed": bool(planned_receipt.get("replayed")),
+    }
+    sentence_receipts: list[dict[str, Any]] = []
+    try:
+        for sentence_index, sentence in enumerate(sentences):
+            sentence_receipt = await asyncio.to_thread(
+                _submit_surface_sentence_delivery_intent,
+                life_command_service=ports.get_life_command_service(),
+                life_snapshot_reader=ports.get_life_snapshot_reader(),
+                agent_input=agent_input,
+                trace_stage_meta=trace,
+                sentence=sentence,
+                sentence_index=sentence_index,
+                source="surface_affective_deterministic_delivery",
+            )
+            sentence_receipts.append(
+                {
+                    "command_id": sentence_receipt.get("command_id"),
+                    "event_id": sentence_receipt.get("event_id"),
+                    "sentence_index": sentence_index,
+                    "replayed": bool(sentence_receipt.get("replayed")),
+                    "expression_delivery": _safe_mapping(
+                        sentence_receipt.get("expression_delivery")
+                    ),
+                }
+            )
+    except Exception as exc:
+        trace["affective_deterministic_delivery"] = {
+            "status": "FAILED",
+            "reason_code": "SURFACE_SENTENCE_DELIVERY_INTENT_FAILED",
+            "error_type": type(exc).__name__,
+            "reply_source": reply_source,
+            "sent_sentence_count": len(sentence_receipts),
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "SURFACE_SENTENCE_DELIVERY_INTENT_FAILED",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:canonical_affective_deterministic",
+                    "durability": "fail_closed_before_stream",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    stream_summary = {
+        "mode": "deterministic_affective_delivery",
+        "streaming": False,
+        "sentence_delivery_staged": True,
+        "sentence_count": len(sentences),
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "self_affect_revision": plan.get("self_affect_revision"),
+        "first_token_ms": 0,
+        "provider_usage_status": "NO_MODEL_RULE_FALLBACK",
+        "reply_source": reply_source,
+    }
+    trace["affective_deterministic_delivery"] = {
+        "status": "SENTENCES_STAGED",
+        "reply_source": reply_source,
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "sentence_receipts": sentence_receipts,
+    }
+    envelope = ReplyEnvelope(
+        kind="final_reply",
+        text=narrative,
+        response_form="text",
+        source=reply_source,
+        sendable=True,
+        persistable=True,
+        cacheable=False,
+        # ``ReplyEnvelope.degraded`` means an unsendable degraded failure, not
+        # a safe deterministic wording fallback.  Keep this accepted response
+        # deliverable and record renderer degradation separately below.
+        degraded=False,
+        reason_code=str(reason_code or "").strip() or None,
+        audit={"request_id": request_id, **dict(audit or {})},
+        raw_extra=dict(raw_extra or {}),
+    )
+
+    for sentence_index, sentence in enumerate(sentences):
+        receipt = _safe_mapping(sentence_receipts[sentence_index].get("expression_delivery"))
+        delivery_event = _expression_delivery_sse(
+            {"expression_delivery": receipt},
+            sentence_index=sentence_index,
+        )
+        if delivery_event is not None:
+            yield _sse(delivery_event)
+        yield _sse({"phase": "RENDER", "chunk": sentence})
+        yield _sse(
+            {
+                "phase": "SENTENCE",
+                "sentence": sentence,
+                "sentence_index": sentence_index,
+                "affective_turn_plan_id": plan_id,
+                "synchronization_id": synchronization_id,
+            }
+        )
+
+    total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    timings_ms = _surface_timings_ms(
+        total_latency_ms=total_latency_ms,
+        llm_latency_ms=0,
+    )
+    try:
+        foreground_receipt = await asyncio.to_thread(
+            _submit_surface_foreground_completed,
+            life_command_service=ports.get_life_command_service(),
+            life_snapshot_reader=ports.get_life_snapshot_reader(),
+            relationship_lifecycle_service=ports.get_relationship_lifecycle_service(),
+            agent_input=agent_input,
+            result=None,
+            envelope=envelope,
+            narrative=narrative,
+            trace_stage_meta=trace,
+            timings_ms=timings_ms,
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=0,
+            stream_summary=stream_summary,
+            first_token_ms=0,
+            buffer_stream=False,
+        )
+    except Exception as exc:
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "LIFE_FOREGROUND_COMMIT_FAILED_AFTER_STREAM",
+            "error_type": type(exc).__name__,
+            "sent_sentence_count": len(sentences),
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "REJECT",
+                "reason_code": "LIFE_FOREGROUND_COMMIT_FAILED_AFTER_STREAM",
+                "narrative": narrative,
+                "request_id": request_id,
+                "sent_sentence_count": len(sentences),
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:canonical_affective_deterministic",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    trace["life_causality"] = {
+        "status": str(foreground_receipt.get("status") or "UNKNOWN"),
+        "reason_code": foreground_receipt.get("reason_code"),
+        "command_id": foreground_receipt.get("command_id"),
+        "event_id": foreground_receipt.get("event_id"),
+        "state_version": foreground_receipt.get("state_version"),
+        "outbox_count": foreground_receipt.get("outbox_count"),
+        "replayed": bool(foreground_receipt.get("replayed")),
+    }
+    release_delivery_event = _expression_delivery_sse(foreground_receipt)
+    if release_delivery_event is not None:
+        yield _sse(release_delivery_event)
+    effect_intents = [
+        dict(item)
+        for item in list(foreground_receipt.get("effect_intents") or [])
+        if isinstance(item, Mapping)
+    ]
+    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    yield _sse(
+        {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "reason_code": envelope.reason_code or None,
+            "narrative": narrative,
+            "request_id": request_id,
+            "reply_envelope": envelope.as_dict(),
+            "acceptance_effect_intents": effect_intents,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "surface_reply:canonical_affective_deterministic",
+                "latency_ms": total_latency_ms,
+                "first_token_ms": 0,
+                "llm_latency_ms": 0,
+                "model_id": model_audit["model_id"],
+                "provider_name": model_audit["provider_name"] or "rule",
+                "response_form": "text",
+                "timings_ms": timings_ms,
+                "reply_envelope": envelope.as_dict(),
+                "surface_main_chain": _public_result_trace(
+                    None,
+                    stream_summary=stream_summary,
+                ),
+                "trace_stage_meta": {
+                    **trace,
+                    "surface_main_chain_used": True,
+                    "reply_source": reply_source,
+                    "surface_renderer": {
+                        "status": "DEGRADED" if degraded else "OK",
+                        "invoked": True,
+                        "affected_output": True,
+                        "source": reply_source,
+                        "reason_code": envelope.reason_code or "",
+                    },
+                },
+            },
+        }
+    )
+
+
+async def _canonical_affective_deferred_delivery(
+    agent_input: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+    trace: dict[str, Any],
+    plan: Mapping[str, Any],
+    text: str,
+    started_ms: int,
+    reply_source: str,
+    reason_code: str,
+    degraded: bool,
+    audit: Mapping[str, Any] | None = None,
+    raw_extra: Mapping[str, Any] | None = None,
+) -> AsyncGenerator[str, None]:
+    """Return a canonical rule reply as a Task-Acceptance-owned effect.
+
+    The governed worker buffers this generator's nonterminal frames.  It must
+    therefore not call the direct plan/sentence writers used by the Host
+    stream: the one deferred ``life.foreground_completed`` effect carries the
+    frozen plan and becomes the sole writer after Task Acceptance.
+    """
+
+    request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    plan_id = str(plan.get("plan_id") or "").strip()
+    expression = _safe_mapping(plan.get("expression_plan"))
+    synchronization_id = str(expression.get("synchronization_id") or "").strip()
+    try:
+        sentences = _gated_deterministic_affective_sentences(
+            text,
+            agent_input=agent_input,
+            trace=trace,
+        )
+    except Exception as exc:
+        trace["affective_deterministic_delivery"] = {
+            "status": "REJECTED",
+            "reason_code": str(exc).split(":", 1)[0][:160],
+            "reply_source": reply_source,
+            "delivery_authority": "TASK_ACCEPTANCE",
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": str(exc).split(":", 1)[0][:160]
+                or "SURFACE_STREAM_EMPTY_SENTENCE",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    narrative = "".join(sentences).strip()
+    if not narrative:
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "SURFACE_STREAM_EMPTY_SENTENCE",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    stream_summary = {
+        "mode": "governed_deterministic_affective_buffered",
+        "streaming": False,
+        "sentence_delivery_staged": False,
+        "sentence_count": len(sentences),
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "self_affect_revision": plan.get("self_affect_revision"),
+        "first_token_ms": None,
+        "provider_usage_status": "NO_MODEL_RULE_FALLBACK",
+        "reply_source": reply_source,
+    }
+    trace["affective_deterministic_delivery"] = {
+        "status": "DEFERRED_TO_TASK_ACCEPTANCE",
+        "reply_source": reply_source,
+        "plan_id": plan_id,
+        "synchronization_id": synchronization_id,
+        "sentence_count": len(sentences),
+    }
+    envelope = ReplyEnvelope(
+        kind="final_reply",
+        text=narrative,
+        response_form="text",
+        source=reply_source,
+        sendable=True,
+        persistable=True,
+        cacheable=False,
+        degraded=False,
+        reason_code=str(reason_code or "").strip() or None,
+        audit={"request_id": request_id, **dict(audit or {})},
+        raw_extra=dict(raw_extra or {}),
+    )
+    total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
+    timings_ms = _surface_timings_ms(
+        total_latency_ms=total_latency_ms,
+        llm_latency_ms=0,
+    )
+    try:
+        foreground_receipt = await asyncio.to_thread(
+            _submit_surface_foreground_completed,
+            life_command_service=ports.get_life_command_service(),
+            life_snapshot_reader=ports.get_life_snapshot_reader(),
+            relationship_lifecycle_service=ports.get_relationship_lifecycle_service(),
+            agent_input=agent_input,
+            result=None,
+            envelope=envelope,
+            narrative=narrative,
+            trace_stage_meta=trace,
+            timings_ms=timings_ms,
+            total_latency_ms=total_latency_ms,
+            llm_latency_ms=0,
+            stream_summary=stream_summary,
+            first_token_ms=None,
+            buffer_stream=True,
+        )
+    except Exception as exc:
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "LIFE_FOREGROUND_DEFER_FAILED",
+            "error_type": type(exc).__name__,
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "LIFE_FOREGROUND_DEFER_FAILED",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    if str(foreground_receipt.get("status") or "") != "DEFERRED_TO_TASK_ACCEPTANCE":
+        trace["life_causality"] = {
+            "status": "FAILED",
+            "reason_code": "LIFE_FOREGROUND_DEFER_AUTHORITY_DRIFT",
+        }
+        yield _sse(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "NO_REPLY",
+                "reason_code": "LIFE_FOREGROUND_DEFER_AUTHORITY_DRIFT",
+                "narrative": "",
+                "request_id": request_id,
+                "audit_refs": {
+                    "request_id": request_id,
+                    "path": "surface_reply:governed_affective_deterministic_buffered",
+                    "trace_stage_meta": dict(trace),
+                },
+            }
+        )
+        return
+
+    trace["life_causality"] = {
+        "status": "DEFERRED_TO_TASK_ACCEPTANCE",
+        "reason_code": foreground_receipt.get("reason_code"),
+        "effect_count": len(list(foreground_receipt.get("effect_intents") or [])),
+    }
+    effect_intents = [
+        dict(item)
+        for item in list(foreground_receipt.get("effect_intents") or [])
+        if isinstance(item, Mapping)
+    ]
+    model_audit = _surface_model_audit_fields(agent_input=agent_input, trace_stage_meta=trace)
+    for sentence_index, sentence in enumerate(sentences):
+        yield _sse({"phase": "RENDER", "chunk": sentence})
+        yield _sse(
+            {
+                "phase": "SENTENCE",
+                "sentence": sentence,
+                "sentence_index": sentence_index,
+                "affective_turn_plan_id": plan_id,
+                "synchronization_id": synchronization_id,
+            }
+        )
+    yield _sse(
+        {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "APPROVE",
+            "reason_code": envelope.reason_code or None,
+            "narrative": narrative,
+            "request_id": request_id,
+            "reply_envelope": envelope.as_dict(),
+            "acceptance_effect_intents": effect_intents,
+            "audit_refs": {
+                "request_id": request_id,
+                "path": "surface_reply:governed_affective_deterministic_buffered",
+                "latency_ms": total_latency_ms,
+                "first_token_ms": None,
+                "llm_latency_ms": 0,
+                "model_id": model_audit["model_id"],
+                "provider_name": model_audit["provider_name"] or "rule",
+                "response_form": "text",
+                "timings_ms": timings_ms,
+                "reply_envelope": envelope.as_dict(),
+                "surface_main_chain": _public_result_trace(
+                    None,
+                    stream_summary=stream_summary,
+                ),
+                "trace_stage_meta": {
+                    **trace,
+                    "surface_main_chain_used": True,
+                    "reply_source": reply_source,
+                    "surface_renderer": {
+                        "status": "DEGRADED" if degraded else "OK",
+                        "invoked": True,
+                        "affected_output": True,
+                        "source": reply_source,
+                        "reason_code": envelope.reason_code or "",
+                    },
+                },
+            },
+        }
+    )
+
+
 async def run_surface_main_chain_for_surface_reply_input(
     agent_input: Any,
     *,
@@ -1177,8 +1825,113 @@ async def surface_main_chain_sse_generator(
     delegated_agents = _delegated_agents_from_sub_agent_context(agent_input)
     _merge_delegated_agent_trace(trace, delegated_agents)
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
+    canonical_affective_context = bool(
+        _safe_mapping(getattr(agent_input, "emotion_context", None)).get(
+            "_affective_life_internal"
+        )
+    )
     evidence_gate_text = _surface_perception_evidence_gate_text(agent_input)
     if evidence_gate_text:
+        # A rule-based perception boundary is still Natsume speaking.  It
+        # therefore always receives the canonical plan.  Direct Host delivery
+        # stages it locally; a governed worker instead returns one deferred
+        # foreground effect, which becomes the sole writer after Acceptance.
+        if canonical_affective_context:
+            try:
+                surface_input = build_surface_main_chain_input_from_surface_reply_input(
+                    agent_input,
+                    ports=ports,
+                    trace_stage_meta=trace,
+                )
+                _record_surface_memory_guard_packet(
+                    agent_input=agent_input,
+                    surface_input=surface_input,
+                    trace_stage_meta=trace,
+                )
+                plan = affective_turn_plan_from_trace(trace)
+                if not plan:
+                    raise RuntimeError("AFFECTIVE_TURN_PLAN_REQUIRED_FOR_RULE_REPLY")
+            except Exception as exc:
+                yield _sse(
+                    {
+                        "phase": "COMMIT",
+                        "done": True,
+                        "decision": "NO_REPLY",
+                        "reason_code": str(exc).split(":", 1)[0][:160]
+                        or "AFFECTIVE_TURN_PLAN_REQUIRED_FOR_RULE_REPLY",
+                        "narrative": "",
+                        "request_id": request_id,
+                        "audit_refs": {
+                            "request_id": request_id,
+                            "path": "surface_reply:canonical_affective_deterministic",
+                            "durability": "fail_closed_before_stream",
+                            "trace_stage_meta": {
+                                **trace,
+                                "surface_main_chain_used": True,
+                                "reply_source": "surface_evidence_gate_prepare_reject",
+                            },
+                        },
+                    }
+                )
+                return
+            trace["surface_evidence_gate"] = {
+                "status": "OK",
+                "reason_code": "SURFACE_PERCEPTION_EVIDENCE_REQUIRED",
+                "has_multimodal_payload": False,
+            }
+            if bool(getattr(agent_input, "defer_effects_to_task_runtime", False)):
+                async for event in _canonical_affective_deferred_delivery(
+                    agent_input,
+                    ports=ports,
+                    trace=trace,
+                    plan=plan,
+                    text=evidence_gate_text,
+                    started_ms=started_ms,
+                    reply_source="surface_evidence_gate",
+                    reason_code="SURFACE_PERCEPTION_EVIDENCE_REQUIRED",
+                    degraded=False,
+                    audit={"evidence_gate": True},
+                    raw_extra={"evidence_gate": True},
+                ):
+                    yield event
+                return
+            if _has_governed_model_budget(trace):
+                yield _sse(
+                    {
+                        "phase": "COMMIT",
+                        "done": True,
+                        "decision": "NO_REPLY",
+                        "reason_code": "GOVERNED_AFFECTIVE_DEFER_REQUIRED",
+                        "narrative": "",
+                        "request_id": request_id,
+                        "audit_refs": {
+                            "request_id": request_id,
+                            "path": "surface_reply:governed_affective_deterministic_buffered",
+                            "durability": "fail_closed_before_stream",
+                            "trace_stage_meta": {
+                                **trace,
+                                "surface_main_chain_used": True,
+                                "reply_source": "surface_evidence_gate_defer_reject",
+                            },
+                        },
+                    }
+                )
+                return
+            async for event in _canonical_affective_deterministic_delivery(
+                agent_input,
+                ports=ports,
+                trace=trace,
+                plan=plan,
+                text=evidence_gate_text,
+                started_ms=started_ms,
+                reply_source="surface_evidence_gate",
+                reason_code="SURFACE_PERCEPTION_EVIDENCE_REQUIRED",
+                degraded=False,
+                audit={"evidence_gate": True},
+                raw_extra={"evidence_gate": True},
+            ):
+                yield event
+            return
         total_latency_ms = max(0, int(time.time() * 1000) - started_ms)
         envelope = ReplyEnvelope(
             kind="final_reply",
@@ -1236,7 +1989,7 @@ async def surface_main_chain_sse_generator(
     # DL-04 only changes calls that already carry the authenticated Affect
     # Fusion hand-off.  Legacy inputs deliberately stay on the compatibility
     # path until DL-06 removes their remaining parallel emotion writers.
-    if bool(_safe_mapping(getattr(agent_input, "emotion_context", None)).get("_affective_life_internal")):
+    if canonical_affective_context:
         try:
             prepared_stream = _native_affective_stream_preparation(
                 agent_input,
@@ -1315,6 +2068,49 @@ async def surface_main_chain_sse_generator(
             return
         fallback_text = _surface_failure_fallback_text(agent_input, exc=exc)
         if fallback_text:
+            if canonical_affective_context:
+                plan = affective_turn_plan_from_trace(trace)
+                if not plan:
+                    yield _sse(
+                        {
+                            "phase": "COMMIT",
+                            "done": True,
+                            "decision": "NO_REPLY",
+                            "reason_code": "AFFECTIVE_TURN_PLAN_REQUIRED_FOR_FALLBACK",
+                            "narrative": "",
+                            "request_id": request_id,
+                            "audit_refs": {
+                                "request_id": request_id,
+                                "path": "surface_reply:canonical_affective_deterministic",
+                                "durability": "fail_closed_before_stream",
+                                "trace_stage_meta": {
+                                    **trace,
+                                    "surface_main_chain_used": True,
+                                    "reply_source": "surface_main_chain_fallback_reject",
+                                },
+                            },
+                        }
+                    )
+                    return
+                async for event in _canonical_affective_deterministic_delivery(
+                    agent_input,
+                    ports=ports,
+                    trace=trace,
+                    plan=plan,
+                    text=fallback_text,
+                    started_ms=started_ms,
+                    reply_source="surface_main_chain_affective_fallback",
+                    reason_code="SURFACE_MAIN_CHAIN_FALLBACK",
+                    degraded=True,
+                    audit={"request_id": request_id, "error": type(exc).__name__},
+                    raw_extra={
+                        "fallback": True,
+                        "degraded": True,
+                        "reason_code": "SURFACE_MAIN_CHAIN_FAILED",
+                    },
+                ):
+                    yield event
+                return
             envelope = ReplyEnvelope(
                 kind="final_reply",
                 text=fallback_text,
@@ -1547,6 +2343,7 @@ async def surface_main_chain_sse_generator(
                 "model_id": model_audit["model_id"],
                 "provider_name": model_audit["provider_name"],
                 "response_form": "text",
+                "tts_text_ja": str(getattr(result, "tts_text_ja", "") or ""),
                 "timings_ms": timings_ms,
                 "reply_envelope": envelope.as_dict(),
                 "surface_main_chain": _public_result_trace(result),

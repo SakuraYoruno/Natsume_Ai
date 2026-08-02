@@ -83,6 +83,9 @@ _SPACE_MARKERS = (
 )
 _REPAIR_MARKERS = ("对不起", "抱歉", "误会", "不是那个意思", "我刚才说重了")
 _BOUNDARY_MARKERS = ("不要这样", "别这样", "不舒服", "越界", "停止")
+# These are deliberately narrow, direct-address patterns. They are appraisal
+# triggers only: original utterances remain outside the Life journal. A request
+# for space, a boundary, or a repair signal always takes priority below.
 _NATSUME_HARM_MARKERS = (
     "伤到我",
     "伤害我",
@@ -109,6 +112,9 @@ _DIRECTED_DISRESPECT_MARKERS = (
     "you're awful",
     "you are awful",
 )
+_DIRECTED_THREAT_MARKERS = ("我要杀了你", "我弄死你", "你去死")
+_DIRECTED_HURT_MARKERS = ("你真恶心", "你恶心死了", "我讨厌你", "真的讨厌你")
+_DIRECTED_COMPARISON_MARKERS = ("别人比你好", "你不如别人", "还是别人好", "我更喜欢别人")
 
 
 def _digest(value: Any) -> str:
@@ -331,6 +337,89 @@ class AffectFusionResult:
         }
 
 
+def _appraisal_identity(
+    *,
+    scope: AffectiveScope,
+    request_id: str,
+) -> tuple[str, str]:
+    """Return the immutable identity for one request's selected appraisal.
+
+    Candidate content is intentionally *not* part of this identity.  If the
+    first bounded candidate is rejected and the second one commits, the next
+    replay must reopen that accepted selection instead of attempting the
+    primary candidate again and mutating Natsume's self-affect a second time.
+    """
+
+    seed = {
+        "schema": "affective-appraisal-selection.v1",
+        "aggregate_id": scope.aggregate_id,
+        "workspace_id": scope.workspace_id,
+        "relationship_subject_id": scope.relationship_subject_id,
+        "session_id": scope.session_id,
+        "request_id": request_id,
+    }
+    digest = _digest(seed)
+    return (
+        f"appraisal_{digest[:32]}",
+        f"affect_appraisal_{digest[:40]}",
+    )
+
+
+def _find_existing_appraisal_selection(
+    *,
+    reader: LifeSnapshotReader,
+    scope: AffectiveScope,
+    command_id: str,
+    appraisal_id: str,
+    observations: Sequence[UserAffectObservationV1],
+) -> tuple[str, LifeCommandReceipt, str] | None:
+    """Reopen a selected appraisal without re-running candidate choice.
+
+    The stable v2 command id covers new writes.  The bounded journal scan is
+    only an upgrade bridge for a pre-v2 accepted appraisal that used a
+    candidate-shaped command id.  It compares opaque observation refs and
+    exact scope; it never inspects or stores raw user material.
+    """
+
+    receipt = reader.get_receipt(command_id)
+    if receipt is not None:
+        return appraisal_id, receipt, "APPRAISAL_SELECTION_REPLAYED"
+
+    expected_refs = tuple(
+        f"affect-observation://{item.observation_id}"
+        for item in observations[:8]
+    )
+    # An exact ingress replay is normally close to its original event.  The
+    # scan is intentionally bounded and does not become a new history reader.
+    for event in reversed(reader.list_events(scope.aggregate_id, limit=128)):
+        if event.event_type != "affective_event_appraised":
+            continue
+        command_payload = _safe_mapping(event.payload).get("command_payload")
+        appraisal = _safe_mapping(_safe_mapping(command_payload).get("appraisal"))
+        if (
+            _text(appraisal.get("workspace_id")) != scope.workspace_id
+            or _text(appraisal.get("relationship_subject_id"))
+            != scope.relationship_subject_id
+            or _text(appraisal.get("session_id")) != scope.session_id
+        ):
+            continue
+        observation_refs = tuple(
+            _text(item, limit=240)
+            for item in (appraisal.get("observation_refs") or ())
+        )
+        if observation_refs != expected_refs:
+            continue
+        legacy_receipt = reader.get_receipt(event.command_id)
+        legacy_appraisal_id = _text(appraisal.get("appraisal_id"), limit=240)
+        if legacy_receipt is not None and legacy_appraisal_id:
+            return (
+                legacy_appraisal_id,
+                legacy_receipt,
+                "APPRAISAL_LEGACY_SELECTION_REPLAYED",
+            )
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class _ObservationDraft:
     modality: str
@@ -357,6 +446,7 @@ class _AppraisalCandidate:
     uncertainty: float
     components: tuple[EmotionComponentV1, ...]
     action: str
+    regulation_mode: str = "EXPRESS"
     evidence_refs: tuple[str, ...] = ()
 
 
@@ -398,6 +488,32 @@ class AffectFusionService:
                 "message": _text(getattr(request_body, "message", None), limit=8_000),
             }
         )[:32]
+        # Affective decay and needs must progress from an immutable, scoped
+        # Life command at a real interaction boundary.  Do not let a
+        # process-global recovery agent infer this from unrelated clocks or
+        # body caches: that would reintroduce a second self-affect authority.
+        # The request-scoped idempotency seed below makes an exact ingress
+        # replay reopen this receipt rather than advance time twice.
+        service = self._require_command_service()
+        receipts: list[LifeCommandReceipt] = [
+            self._submit(
+                service=service,
+                scope=scope,
+                request_id=stable_request_id,
+                ordinal=-1,
+                command_type="affective_time_advanced",
+                # The aggregate key is deliberately opaque.  Carry only the
+                # typed scope needed for the reducer's first canonical
+                # identity binding and later audit; no raw user material or
+                # user affect is present in a time command.
+                payload={
+                    "workspace_id": scope.workspace_id,
+                    "relationship_subject_id": scope.relationship_subject_id,
+                    "session_id": scope.session_id,
+                },
+                created_at_ms=now_ms,
+            )
+        ]
         relationship_state: Mapping[str, Any] | None = None
         relationship_aftereffect: Mapping[str, Any] | None = None
         companion_profile: Mapping[str, Any] | None = None
@@ -445,8 +561,6 @@ class AffectFusionService:
         active = tuple(
             item for item in observations if item.expires_at_ms >= now_ms
         )
-        service = self._require_command_service()
-        receipts: list[LifeCommandReceipt] = []
         for index, observation in enumerate(observations):
             receipts.append(
                 self._submit(
@@ -467,8 +581,8 @@ class AffectFusionService:
             relationship_aftereffect=relationship_aftereffect,
         )
         # The deep policy is bounded by construction: at most two deterministic
-        # candidates and no hidden model loop. A future model-backed selector
-        # may use one retry but must retain this same public ceiling.
+        # candidates, exactly one possible second-candidate retry and no
+        # hidden model loop.
         candidates = tuple(candidates[:2])
         retry_count = 0
         appraisal_id: str | None = None
@@ -478,23 +592,57 @@ class AffectFusionService:
             reason_codes.append(relationship_reason_code)
         if candidates:
             path = "DEEP"
-            selected = candidates[0]
-            try:
-                appraisal_id, appraisal_receipts = self._submit_appraisal(
-                    service=service,
-                    scope=scope,
-                    request_id=stable_request_id,
-                    candidate=selected,
-                    observations=active,
-                    created_at_ms=now_ms,
-                )
-                receipts.extend(appraisal_receipts)
-            except (TypeError, ValueError):
-                # Do not retry an invalid candidate indefinitely. The turn
-                # still has its durable observations and explicitly takes the
-                # uncertainty-aware fast path.
-                path = "FAST_FALLBACK"
-                reason_codes.append("APPRAISAL_CANDIDATE_REJECTED")
+            appraisal_id, appraisal_command_id = _appraisal_identity(
+                scope=scope,
+                request_id=stable_request_id,
+            )
+            existing_selection = _find_existing_appraisal_selection(
+                reader=self._require_snapshot_reader(),
+                scope=scope,
+                command_id=appraisal_command_id,
+                appraisal_id=appraisal_id,
+                observations=active,
+            )
+            if existing_selection is not None:
+                # The selected candidate is already a durable, immutable
+                # fact for this ingress identity.  Reopening it before any
+                # candidate attempt prevents a restart from selecting a
+                # different self-affect after an earlier primary rejection.
+                appraisal_id, existing_receipt, selection_mode = existing_selection
+                receipts.append(existing_receipt.as_replayed())
+                reason_codes.append(selection_mode)
+            else:
+                for candidate_index, candidate in enumerate(candidates):
+                    try:
+                        selected_appraisal_id, receipt = self._submit_appraisal(
+                            service=service,
+                            scope=scope,
+                            request_id=stable_request_id,
+                            command_id=appraisal_command_id,
+                            appraisal_id=appraisal_id,
+                            candidate=candidate,
+                            observations=active,
+                            created_at_ms=now_ms,
+                        )
+                        appraisal_id = selected_appraisal_id
+                        receipts.append(receipt)
+                        break
+                    except (TypeError, ValueError):
+                        reason_codes.append(
+                            f"APPRAISAL_CANDIDATE_{candidate_index + 1}_REJECTED"
+                        )
+                        if candidate_index == 0 and len(candidates) > 1:
+                            # The second candidate is the only permitted
+                            # retry.  Both candidates share the same stable
+                            # command identity so the accepted selection is
+                            # exact-replay safe after a restart.
+                            retry_count = 1
+                            reason_codes.append("APPRAISAL_SECOND_CANDIDATE_RETRY")
+                            continue
+                        path = "FAST_FALLBACK"
+                        reason_codes.append("APPRAISAL_CANDIDATES_REJECTED")
+                        appraisal_id = None
+                        break
 
         snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
         affective = _safe_mapping(snapshot.state.get("affective"))
@@ -545,6 +693,7 @@ class AffectFusionService:
         command_type: str,
         payload: Mapping[str, Any],
         created_at_ms: int,
+        command_id: str | None = None,
     ) -> LifeCommandReceipt:
         command_seed = {
             "schema": "affective-fusion-command.v1",
@@ -554,11 +703,11 @@ class AffectFusionService:
             "command_type": command_type,
             "payload": payload,
         }
-        command_id = f"affect_{_digest(command_seed)[:40]}"
+        resolved_command_id = _text(command_id, limit=240) or f"affect_{_digest(command_seed)[:40]}"
 
         def build(snapshot: Any) -> LifeCommand:
             return LifeCommand(
-                command_id=command_id,
+                command_id=resolved_command_id,
                 person_id=scope.aggregate_id,
                 command_type=command_type,
                 payload=dict(payload),
@@ -581,10 +730,12 @@ class AffectFusionService:
         service: LifeCommandService,
         scope: AffectiveScope,
         request_id: str,
+        command_id: str,
+        appraisal_id: str,
         candidate: _AppraisalCandidate,
         observations: Sequence[UserAffectObservationV1],
         created_at_ms: int,
-    ) -> tuple[str, tuple[LifeCommandReceipt, LifeCommandReceipt]]:
+    ) -> tuple[str, LifeCommandReceipt]:
         observation_refs = tuple(
             f"affect-observation://{item.observation_id}"
             for item in observations[:8]
@@ -600,13 +751,12 @@ class AffectFusionService:
         ]
         regulation_candidate_evidence_refs = candidate_evidence_refs[:14]
         appraisal_seed = {
-            "schema": "event-appraisal.v1",
-            "request_id": request_id,
+            "schema": "event-appraisal.v2",
+            "appraisal_id": appraisal_id,
             "kind": candidate.kind,
             "observation_refs": observation_refs,
             "candidate_evidence_refs": candidate_evidence_refs,
         }
-        appraisal_id = f"appraisal_{_digest(appraisal_seed)[:32]}"
         target_ref = _opaque_ref("affect-turn", appraisal_seed)
         appraisal = EventAppraisalV1(
             appraisal_id=appraisal_id,
@@ -639,16 +789,21 @@ class AffectFusionService:
                 *episode_candidate_evidence_refs,
             ),
         )
-        regulation_mode = _regulation_mode_for_candidate(candidate)
+        # Appraisal and its first expression boundary are one Life command.
+        # A crash cannot leave a newly opened self-affect episode visible to
+        # Surface without the regulation that constrains its expression.
+        # A later re-regulation may still use ``affective_regulation_decided``
+        # as its own command, but the initial decision belongs atomically to
+        # the causal event that opened the episode.
         regulation_seed = {
             "schema": "regulation-decision.v1",
             "appraisal_id": appraisal_id,
-            "mode": regulation_mode,
+            "mode": candidate.regulation_mode,
         }
         regulation = RegulationDecisionV1(
             regulation_id=f"regulation_{_digest(regulation_seed)[:32]}",
             relationship_subject_id=scope.relationship_subject_id,
-            mode=regulation_mode,
+            mode=candidate.regulation_mode,
             # The current-turn planner reopens this exact provenance link.
             # It must not apply an old durable regulation to a later, unrelated
             # input merely because it happens to be the latest snapshot head.
@@ -658,33 +813,23 @@ class AffectFusionService:
                 *regulation_candidate_evidence_refs,
             ),
             decided_at_ms=max(0, int(created_at_ms)),
-            # The affective head keeps only four active episodes.  An
-            # appraisal can therefore be journaled even when its low-salience
-            # episode is immediately pruned; binding regulation to that
-            # optional active id would turn a valid current-turn decision into
-            # a partial-write failure.  The immutable appraisal ref remains
-            # the authoritative causal link.
-            episode_id=None,
+            episode_id=episode.episode_id,
         )
-        appraisal_receipt = self._submit(
+        receipt = self._submit(
             service=service,
             scope=scope,
             request_id=request_id,
             ordinal=999,
             command_type="affective_event_appraised",
-            payload={"appraisal": appraisal.as_dict(), "episode": episode.as_dict()},
+            payload={
+                "appraisal": appraisal.as_dict(),
+                "episode": episode.as_dict(),
+                "regulation": regulation.as_dict(),
+            },
             created_at_ms=created_at_ms,
+            command_id=command_id,
         )
-        regulation_receipt = self._submit(
-            service=service,
-            scope=scope,
-            request_id=request_id,
-            ordinal=1_000,
-            command_type="affective_regulation_decided",
-            payload={"regulation": regulation.as_dict()},
-            created_at_ms=created_at_ms,
-        )
-        return appraisal_id, (appraisal_receipt, regulation_receipt)
+        return appraisal_id, receipt
 
 
 def _collect_observation_drafts(
@@ -1041,6 +1186,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.3, -0.08, 0.3, "clarify"),
                 ),
                 action="clarify_gently",
+                regulation_mode="GROUND",
             )
         )
     if has_space or has_boundary:
@@ -1061,6 +1207,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.3, -0.04, 0.25, "contain"),
                 ),
                 action="give_space",
+                regulation_mode="GIVE_SPACE",
             )
         )
     if natsume_may_have_hurt_user:
@@ -1084,6 +1231,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.22, -0.06, 0.24, "slow_down"),
                 ),
                 action="repair_open",
+                regulation_mode="SEEK_REPAIR",
             )
         )
     if directed_disrespect_toward_natsume:
@@ -1107,6 +1255,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.34, -0.06, 0.24, "contain"),
                 ),
                 action="set_boundary",
+                regulation_mode="CONTAIN",
             )
         )
     if aftereffect_outcome == "REPAIR_ACCEPTED" and aftereffect_id:
@@ -1127,6 +1276,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CARE", 0.36, 0.3, 0.18, "receive"),
                 ),
                 action="receive_repair",
+                regulation_mode="EXPRESS",
                 evidence_refs=(f"relationship-aftereffect://{aftereffect_id}",),
             )
         )
@@ -1145,6 +1295,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("OPENNESS", 0.28, 0.22, 0.16, "listen"),
                 ),
                 action="repair_open",
+                regulation_mode="SEEK_REPAIR",
             )
         )
     if not conflict and _has_mixed_user_affect(observations):
@@ -1166,8 +1317,24 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CAUTION", 0.26, -0.04, 0.22, "hold"),
                 ),
                 action="hold_complexity",
+                regulation_mode="EXPRESS",
             )
         )
+    # Do not turn a user asking us to stop, state a boundary, or repair an
+    # earlier exchange into Natsume feeling slighted.  Once those conditions
+    # are absent, a small fixed set of direct relational impacts can form
+    # Natsume-owned affect.  The appraised components are intentionally not
+    # copies of a user emotion label.
+    if not (
+        has_space
+        or has_boundary
+        or has_repair
+        or natsume_may_have_hurt_user
+        or directed_disrespect_toward_natsume
+    ):
+        direct = _direct_relational_candidate(lower)
+        if direct is not None:
+            candidates.append(direct)
     # Keyword text is intentionally low confidence, but a clear distress
     # marker still deserves the bounded deep path so Natsume can choose a
     # careful, uncertainty-aware companion response. The appraisal produces
@@ -1187,6 +1354,7 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CONCERN", 0.38, -0.18, 0.42, "support"),
                 ),
                 action="comfort",
+                regulation_mode="EXPRESS",
             )
         )
     if confidence >= 0.6 and tag in _POSITIVE_TAGS:
@@ -1204,10 +1372,78 @@ def _build_appraisal_candidates(
                     EmotionComponentV1("CARE", 0.2, 0.25, 0.14, "share"),
                 ),
                 action="share_joy",
+                regulation_mode="EXPRESS",
             )
         )
     candidates.sort(key=lambda item: (-item.score, item.kind))
     return tuple(candidates[:2])
+
+
+def _direct_relational_candidate(message: str) -> _AppraisalCandidate | None:
+    """Return one high-precision, self-owned relational appraisal.
+
+    This detector deliberately recognises only direct threats, denigration and
+    explicit comparison.  It neither infers relationship permission nor turns
+    ordinary negative mood into a grievance.  Jealousy is held at low
+    intensity and always regulated as ``CONTAIN`` so it cannot become an
+    exclusive, comparative or reply-seeking move.
+    """
+
+    if any(marker in message for marker in _DIRECTED_THREAT_MARKERS):
+        return _candidate(
+            kind="directed_relational_threat",
+            score=0.96,
+            goal=-0.72,
+            significance=0.82,
+            boundary=0.9,
+            risk=0.72,
+            uncertainty=0.12,
+            responsibility=0.84,
+            controllability=0.76,
+            components=(
+                EmotionComponentV1("ANGER", 0.48, -0.66, 0.66, "set_boundary"),
+                EmotionComponentV1("CAUTION", 0.34, -0.12, 0.42, "contain"),
+            ),
+            action="set_boundary",
+            regulation_mode="CONTAIN",
+        )
+    if any(marker in message for marker in _DIRECTED_HURT_MARKERS):
+        return _candidate(
+            kind="directed_relational_hurt",
+            score=0.86,
+            goal=-0.52,
+            significance=0.76,
+            boundary=0.5,
+            risk=0.24,
+            uncertainty=0.42,
+            responsibility=0.66,
+            controllability=0.62,
+            components=(
+                EmotionComponentV1("HURT", 0.47, -0.54, 0.38, "contain"),
+                EmotionComponentV1("CARE", 0.22, 0.18, 0.14, "stay_kind"),
+            ),
+            action="contain_hurt",
+            regulation_mode="CONTAIN",
+        )
+    if any(marker in message for marker in _DIRECTED_COMPARISON_MARKERS):
+        return _candidate(
+            kind="directed_relational_comparison",
+            score=0.7,
+            goal=-0.14,
+            significance=0.58,
+            boundary=0.08,
+            risk=0.08,
+            uncertainty=0.5,
+            responsibility=0.14,
+            controllability=0.72,
+            components=(
+                EmotionComponentV1("JEALOUSY", 0.28, -0.12, 0.28, "contain"),
+                EmotionComponentV1("CARE", 0.18, 0.18, 0.12, "respect_choice"),
+            ),
+            action="contain_jealousy",
+            regulation_mode="CONTAIN",
+        )
+    return None
 
 
 def _candidate(
@@ -1223,6 +1459,7 @@ def _candidate(
     uncertainty: float,
     components: tuple[EmotionComponentV1, ...],
     action: str,
+    regulation_mode: str = "EXPRESS",
     evidence_refs: tuple[str, ...] = (),
 ) -> _AppraisalCandidate:
     return _AppraisalCandidate(
@@ -1237,6 +1474,7 @@ def _candidate(
         uncertainty=uncertainty,
         components=components,
         action=action,
+        regulation_mode=regulation_mode,
         evidence_refs=evidence_refs,
     )
 
@@ -1253,6 +1491,7 @@ def _self_component_to_transport_tag(value: Any) -> str:
         "RELIEF": "CALM",
         "HURT": "SAD",
         "ANGER": "ANGRY",
+        "JEALOUSY": "THINKING",
     }
     return mapping.get(component, "CALM")
 

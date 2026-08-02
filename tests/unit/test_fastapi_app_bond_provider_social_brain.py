@@ -1,61 +1,57 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import json
 
-import host_brain.app.bond_routes as bond_routes
 import host_brain.app.asgi as asgi
-from host_brain.app.host_lifecycle_composition import HostLifecycleApplicationPorts
-from host_brain.composition.host_application import HostApplicationPorts
+import host_brain.app.bond_routes as bond_routes
+import host_brain.app.host_runtime_shutdown as host_runtime_shutdown
+import host_brain.app.http_hooks as http_hooks
+import host_brain.app.tribe_composition as tribe_composition
+from host_brain.app.host_route_ports import HostRoutePorts
+from host_brain.composition import host_application
+from host_brain.contracts import host_lifecycle
+from host_brain.tribe import application_ports as tribe_application_ports
 
 
-def test_asgi_bond_provider_wired_to_canonical_composition() -> None:
-    assert not hasattr(bond_routes, "_engine_provider")
-    source = inspect.getsource(asgi.create_app)
-    assert "bond_engine_provider=bond_engine_provider" in source
-    assert "process_services" not in source
-
-
-def test_asgi_bond_provider_uses_the_injected_lifecycle_port() -> None:
-    sentinel = object()
-    provider = lambda: sentinel
-    service_provider = lambda: object()
-    lifecycle = HostLifecycleApplicationPorts(
-        memory_guard=service_provider,
-        state_arbiter=service_provider,
-        distillation_engine=service_provider,
-        semantic_recaller=service_provider,
-        episodic_store=service_provider,
-        skill_registry=service_provider,
-        tool_catalog=service_provider,
-        capability_broker=service_provider,
-        model_attempt_service=service_provider,
-        mode_transition_service_factory=lambda **_kwargs: object(),
-        activity_monitor_factory=lambda **_kwargs: object(),
-        resource_manager_factory=lambda **_kwargs: object(),
-        ledger=service_provider,
-        life_snapshot_reader=service_provider,
-        intent_engine=service_provider,
-        prompt_registry=service_provider,
-        bond_stage_engine=provider,
-    )
-    ports = HostApplicationPorts(
-        lifecycle=lifecycle,
-        memory_worth_evaluator=service_provider,
-        security_immune_agent=service_provider,
-        token_service=service_provider,
-        bond_dynamics_writer=service_provider,
-        capability_forge_service=service_provider,
-        capability_gap_telemetry=service_provider,
-        capability_scorecard_provider=service_provider,
-        begin_authority_runtime=lambda: None,
-        close_authority_runtime=lambda: None,
-        begin_bond_runtime=lambda: None,
-        close_bond_runtime=lambda: None,
-        begin_governance_runtime=lambda: None,
-        close_governance_runtime=lambda: None,
-        publish_memory_service_container=lambda _value: None,
-        withdraw_memory_service_container=lambda _value: None,
+def test_production_asgi_does_not_compose_legacy_bond_runtime() -> None:
+    production_sources = "\n".join(
+        (
+            inspect.getsource(asgi.create_app),
+            inspect.getsource(host_application),
+            inspect.getsource(http_hooks),
+            inspect.getsource(host_runtime_shutdown),
+            inspect.getsource(tribe_composition),
+            inspect.getsource(host_lifecycle),
+            inspect.getsource(tribe_application_ports),
+        )
     )
 
-    assert ports.lifecycle.require_provider("bond_stage_engine") is provider
-    assert ports.lifecycle.require_provider("bond_stage_engine")() is sentinel
+    for retired_name in (
+        "bond_engine_provider",
+        "HostBondRuntimeOwner",
+        "BondDynamicsWriter",
+        "BondUpdateQueue",
+        "bond_dynamics_writer",
+        "begin_bond_runtime",
+        "close_bond_runtime",
+        "bond_update_queue",
+        "bond_stage_engine",
+    ):
+        assert retired_name not in production_sources
+
+
+def test_missing_legacy_bond_provider_is_stable_retired_response() -> None:
+    response = asyncio.run(
+        bond_routes.get_bond_summary(
+            "user-001",
+            _route_ports=HostRoutePorts(),
+        )
+    )
+
+    assert response.status_code == 410
+    assert response.headers["x-reason-code"] == "LEGACY_BOND_READ_RETIRED"
+    payload = json.loads(response.body)
+    assert payload["status"] == "RETIRED"
+    assert payload["reason_code"] == "LEGACY_BOND_READ_RETIRED"

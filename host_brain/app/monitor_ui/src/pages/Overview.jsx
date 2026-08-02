@@ -189,7 +189,7 @@ export default function Overview() {
       ) : null}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MetricCard icon={Server} label="在线器官" value={data?.up ?? '—'} hint={`总计 ${data?.total ?? '—'} / 未知 ${data?.unknown ?? '—'}`} tone="text-green-600" />
+        <MetricCard icon={Server} label="在线器官" value={data?.up ?? '—'} hint={`总计 ${data?.total ?? '—'} / 未验收 ${data?.not_tested ?? '—'}`} tone="text-green-600" />
         <MetricCard icon={AlertTriangle} label="器官降级" value={data?.degraded ?? '—'} hint={`离线 ${data?.down ?? '—'} / 未知 ${data?.unknown ?? '—'}`} tone="text-orange-500" />
         <MetricCard icon={Bot} label="执行环达成率" value={agentLoopData?.achievement_rate != null ? `${agentLoopData.achievement_rate}%` : '—'} hint={`样本 ${agentLoopData?.total_loops ?? 0}`} tone="text-indigo-600" />
         <MetricCard icon={Activity} label="界面护栏拦截率" value={uiAssertionData?.block_rate != null ? `${uiAssertionData.block_rate}%` : '—'} hint={`总断言 ${uiAssertionData?.total_assertions ?? 0}`} tone="text-rose-600" />
@@ -217,7 +217,7 @@ export default function Overview() {
                 name={service.display_name || service.service_id}
                 status={service.status}
                 latency={service.p95_ms != null ? `${service.p95_ms}ms` : undefined}
-                detail={service.success_rate != null ? `成功率 ${service.success_rate}%` : undefined}
+                detail={service.public_summary || service.detail || (service.success_rate != null ? `成功率 ${service.success_rate}%` : undefined)}
               />
             ))}
           </div>
@@ -237,7 +237,7 @@ export default function Overview() {
                 name={service.display_name || service.role || service.service_id}
                 status={service.status}
                 latency={service.p95_ms != null ? `${service.p95_ms}ms` : undefined}
-                detail={service.model_id || (service.success_rate != null ? `成功率 ${service.success_rate}%` : undefined)}
+                detail={service.public_summary || service.detail || service.model_id || (service.success_rate != null ? `成功率 ${service.success_rate}%` : undefined)}
               />
             ))}
           </div>

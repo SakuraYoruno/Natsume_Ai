@@ -130,7 +130,81 @@ class DefaultModeAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_inner_activity_authority_retired(self) -> bool:
+        """Whether canonical Life has retired this global background writer.
+
+        The former idle loop persisted a process-local inner monologue and
+        turned continuity/loneliness into old-organ affect, recovery and
+        proactive signals.  None of those signals is relationship-scoped or
+        backed by an accepted Life command, so they cannot coexist with the
+        canonical emotional-life journal.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return ports is not None and ports.uses_canonical_affective_life()
+
+    @staticmethod
+    def _retired_inner_activity_tick(
+        *,
+        person_id: str,
+        source: str,
+        now_ts_ms: int | None,
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED",
+            "reason_code": "LEGACY_DEFAULT_MODE_INNER_ACTIVITY_RETIRED",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "user_id": resolve_persona_self_id(person_id),
+            "note": "",
+            "focus": "",
+            "source": str(source or "runtime").strip() or "runtime",
+            "offline_state": {},
+            "proactive_voice_candidate": False,
+            "inner_monologue": {},
+            "self_directive": {},
+            "inner_stream_size": 0,
+            "llm_meta": {"retired": True},
+            "background_side_effects_suppressed": True,
+            "ts_ms": int(now_ts_ms or now_ms()),
+        }
+
+    @staticmethod
+    def _retired_inner_activity_projection() -> dict[str, Any]:
+        return {
+            "last_note": "",
+            "last_focus": "",
+            "proactive_voice_candidate": False,
+            "continuity_score": 0.0,
+            "loneliness_level": 0.0,
+            "anticipation_level": 0.0,
+            "inner_monologue": {},
+            "self_directive": {},
+            "self_identity": "",
+            "self_values": [],
+            "self_boundaries": [],
+            "active_intentions": [],
+            "unresolved_tensions": [],
+            "agency_score": 0.0,
+            "self_continuity_score": 0.0,
+            "thought_stream_active": False,
+            "private_thought_count": 0,
+            "dominant_focus": "",
+            "emotion_tag": "",
+            "care_drive": 0.0,
+            "continuity_drive": 0.0,
+            "repair_drive": 0.0,
+            "style_anchor": [],
+            "must_not_do": [],
+            "inner_stream_size": 0,
+            "tick_count": 0,
+            "last_tick_ts_ms": 0,
+            "reason_code": "LEGACY_DEFAULT_MODE_INNER_ACTIVITY_RETIRED",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_inner_activity_authority_retired():
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -149,6 +223,12 @@ class DefaultModeAgent:
         now_ts_ms: int | None = None,
         inner_state: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_inner_activity_authority_retired():
+            return self._retired_inner_activity_tick(
+                person_id=person_id,
+                source=source,
+                now_ts_ms=now_ts_ms,
+            )
         from host_brain.persona.inner_monologue import build_inner_monologue_digest  # noqa: PLC0415
         from host_brain.persona.inner_activity_agent import generate_inner_activity_note  # noqa: PLC0415
         from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
@@ -388,6 +468,8 @@ class DefaultModeAgent:
         return result
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_inner_activity_authority_retired():
+            return self._retired_inner_activity_projection()
         from host_brain.persona.inner_monologue import build_inner_monologue_digest  # noqa: PLC0415
         from host_brain.persona.motive_runtime import build_offline_state_from_inner_state  # noqa: PLC0415
         from host_brain.persona.self_model import build_self_directive_packet, load_persistent_self_state  # noqa: PLC0415
@@ -465,6 +547,8 @@ class DefaultModeAgent:
         }
 
     async def _on_inner_world_ticked(self, event: Any) -> None:
+        if self._legacy_inner_activity_authority_retired():
+            return
         if not _background_tasks_enabled():
             return
         payload = dict(getattr(event, "payload", None) or {})
@@ -478,6 +562,8 @@ class DefaultModeAgent:
         )
 
     async def _on_conversation_ended(self, event: Any) -> None:
+        if self._legacy_inner_activity_authority_retired():
+            return
         payload = dict(getattr(event, "payload", None) or {})
         if not _background_tasks_enabled():
             return

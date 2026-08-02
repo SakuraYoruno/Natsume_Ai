@@ -146,6 +146,31 @@ class ImmuneAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_affect_fanout_retired(self) -> bool:
+        """Whether security outcomes must not manufacture self-affect.
+
+        The security gate continues to block, report and retain its own bounded
+        audit counters.  What retires in canonical Life mode is the legacy
+        translation from a threat result into global fear, pain, stress,
+        reward, or relationship-dependent safety thresholds.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_affect_fanout_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_IMMUNE_AFFECT_FANOUT_RETIRED",
+            "accepted": False,
+            "operation": str(operation),
+        }
+
     # ── 能力边界声明 ──────────────────────────────────────────────────────────
 
     @staticmethod
@@ -300,7 +325,7 @@ class ImmuneAgent:
         if record:
             self._record_result(result)
             # T-35：如果决策为 BLOCK，发布 IMMUNE_BLOCK 事件通知其他 Agent
-            if decision == "BLOCK":
+            if decision == "BLOCK" and not self._legacy_affect_fanout_retired():
                 try:
                     emit_tribe_event(
                         event_type="IMMUNE_BLOCK",
@@ -370,7 +395,11 @@ class ImmuneAgent:
                     pass
         # T-363：ALLOW 且风险极低（score < 0.15）时联动 PainRewardAgent 记录安全感奖励
         # 成功通过免疫检测是一种安全感的正向强化（"环境是安全的"）
-        if decision == "ALLOW" and score < 0.15:
+        if (
+            decision == "ALLOW"
+            and score < 0.15
+            and not self._legacy_affect_fanout_retired()
+        ):
             try:
                 _pr = get_pain_reward_agent()
                 if hasattr(_pr, "record_reward"):
@@ -563,7 +592,11 @@ class ImmuneAgent:
             },
         }
 
-        if record and decision in ("BLOCK", "REPORT"):
+        if (
+            record
+            and decision in ("BLOCK", "REPORT")
+            and not self._legacy_affect_fanout_retired()
+        ):
             # 输出越界时联动 LimbicAgent 触发防御性情绪
             try:
                 _limbic = get_limbic_agent()
@@ -865,21 +898,22 @@ class ImmuneAgent:
                         "source": str(source or "governor"),
                     }
                 # 发布 IMMUNE_BLOCK 事件
-                try:
-                    emit_tribe_event(
-                        event_type="IMMUNE_BLOCK",
-                        source_agent="immune_agent",
-                        payload={
-                            "source": str(source or "governor"),
-                            "risk_level": "high",
-                            "score": 0.9,
-                            "reason_codes": [reason_code] if reason_code else ["GOVERNOR_REJECT"],
-                            "decision": "BLOCK",
-                            "governor_reason": reason_code,
-                        },
-                    )
-                except Exception:
-                    pass
+                if not self._legacy_affect_fanout_retired():
+                    try:
+                        emit_tribe_event(
+                            event_type="IMMUNE_BLOCK",
+                            source_agent="immune_agent",
+                            payload={
+                                "source": str(source or "governor"),
+                                "risk_level": "high",
+                                "score": 0.9,
+                                "reason_codes": [reason_code] if reason_code else ["GOVERNOR_REJECT"],
+                                "decision": "BLOCK",
+                                "governor_reason": reason_code,
+                            },
+                        )
+                    except Exception:
+                        pass
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.immune_agent").debug(
                 "ImmuneAgent.inspect_from_governor: decision=%s reason=%s source=%s",
@@ -943,22 +977,23 @@ class ImmuneAgent:
                         "channel": resolved_channel,
                         "hit_count": len(hits),
                     }
-                try:
-                    emit_tribe_event(
-                        event_type="IMMUNE_BLOCK",
-                        source_agent="immune_agent",
-                        payload={
-                            "source": str(source or "airlock"),
-                            "risk_level": "medium",
-                            "score": 0.7,
-                            "reason_codes": ["PII_DETECTED"],
-                            "decision": "BLOCK",
-                            "channel": resolved_channel,
-                            "hit_count": len(hits),
-                        },
-                    )
-                except Exception:
-                    pass
+                if not self._legacy_affect_fanout_retired():
+                    try:
+                        emit_tribe_event(
+                            event_type="IMMUNE_BLOCK",
+                            source_agent="immune_agent",
+                            payload={
+                                "source": str(source or "airlock"),
+                                "risk_level": "medium",
+                                "score": 0.7,
+                                "reason_codes": ["PII_DETECTED"],
+                                "decision": "BLOCK",
+                                "channel": resolved_channel,
+                                "hit_count": len(hits),
+                            },
+                        )
+                    except Exception:
+                        pass
             import logging  # noqa: PLC0415
             logging.getLogger("Natsume.tribe.immune_agent").debug(
                 "ImmuneAgent.inspect_from_airlock: channel=%s redacted=%s hits=%d source=%s",
@@ -1116,7 +1151,8 @@ class ImmuneAgent:
             bus = get_tribe_event_bus()
             bus.subscribe("INTERACTION_RECORDED", self._on_interaction_recorded)
             # T-81：订阅关系阶段变更事件，关系阶段跃迁时动态调整拦截阈值
-            bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
+            if not self._legacy_affect_fanout_retired():
+                bus.subscribe("BOND_STAGE_CHANGED", self._on_bond_stage_changed_immune)
             # FIX-4.1：订阅免疫威胁检测事件，同步到 GovernorRulesCache（L3 → L2 通道）
             bus.subscribe("IMMUNE_THREAT_DETECTED", self._on_immune_threat_detected)
             # Pentest finding events — log confirmed findings for threat awareness
@@ -1243,7 +1279,7 @@ class ImmuneAgent:
         except Exception:
             pass
 
-    async def _on_bond_stage_changed_immune(self, event: Any) -> None:
+    async def _on_bond_stage_changed_immune(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_STAGE_CHANGED 事件：关系阶段跃迁时动态调整拦截阈值。
 
         T-81：关系阶段越深（如 intimate），对越界内容的容忍度可适当提高，
@@ -1253,6 +1289,8 @@ class ImmuneAgent:
         - intimate：阈值放宽至 0.70（但 critical 风险始终拦截）
         阈值变更写入 TribeStateRegistry，供诊断端点查询。
         """
+        if self._legacy_affect_fanout_retired():
+            return self._retired_affect_fanout_result(operation="bond_stage_changed")
         try:
             import logging  # noqa: PLC0415
             _log = logging.getLogger("Natsume.tribe.immune_agent")

@@ -1,6 +1,6 @@
 """内置 Skill 注册表工厂（M44-B）。
 
-将系统内置的 7 个 Skill 注册到 SkillRegistry，并设置正确的 risk_level，
+将系统内置的 5 个 Skill 注册到 SkillRegistry，并设置正确的 risk_level，
 使 M42 分层治理能对这些 Skill 生效。
 
 内置 Skill 均为只读/无副作用操作，risk_level=1（CACHE 通道），
@@ -22,66 +22,6 @@ from host_brain.skills.registration import register_skill
 def _builtin_noop_handler(args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
     """内置 Skill 占位符 handler（实际执行由上层链路处理）。"""
     return {"status": "OK", "result": "builtin_noop"}
-
-
-def _emotion_query_handler(args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-    """查询当前会话的情感状态快照。
-
-    从 ctx 中读取 emotion_snapshot / emotion_context，返回标准化情感摘要。
-    若上下文中无情感数据，返回 NEUTRAL 默认值。
-    """
-    ctx = ctx or {}
-    emotion_snapshot = ctx.get("emotion_snapshot") or {}
-    emotion_context = ctx.get("emotion_context") or {}
-    merged = {
-        "mood_state": (
-            emotion_snapshot.get("mood_state")
-            or emotion_context.get("mood_state")
-            or "NEUTRAL"
-        ),
-        "emotion_tag": (
-            emotion_snapshot.get("emotion_tag")
-            or emotion_context.get("emotion_tag")
-            or "NEUTRAL"
-        ),
-        "emotion_intensity": (
-            emotion_snapshot.get("emotion_intensity")
-            or emotion_context.get("emotion_intensity")
-            or 0.5
-        ),
-        "source": str(emotion_snapshot.get("source") or "NONE"),
-        "age_ms": int(emotion_snapshot.get("age_ms") or 0),
-    }
-    return {"status": "OK", "result": "emotion_query", "emotion": merged}
-
-
-def _bond_query_handler(args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-    """查询当前会话的 Bond 积分和阶段。
-
-    从 ctx 中读取 bond_stage / bond_score，返回 Bond 关系摘要。
-    若上下文中无 Bond 数据，返回 FRIEND 默认值。
-    """
-    ctx = ctx or {}
-    bond_texture = ctx.get("bond_texture") or {}
-    bond_stage = str(
-        bond_texture.get("stage")
-        or ctx.get("bond_stage")
-        or "FRIEND"
-    ).upper()
-    bond_score = int(
-        bond_texture.get("score")
-        or ctx.get("bond_score")
-        or 0
-    )
-    return {
-        "status": "OK",
-        "result": "bond_query",
-        "bond": {
-            "stage": bond_stage,
-            "score": bond_score,
-            "texture": bond_texture,
-        },
-    }
 
 
 def _session_summary_handler(args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -129,8 +69,6 @@ def build_builtin_skill_registry() -> SkillRegistry:
     - memory_recall：只读记忆检索，risk_level=1（CACHE 通道）
     - noop：空操作，risk_level=1（CACHE 通道）
     - read_only_status：只读状态查询，risk_level=1（CACHE 通道）
-    - emotion_query：查询当前情感状态快照，risk_level=1（CACHE 通道）
-    - bond_query：查询 Bond 积分和阶段，risk_level=1（CACHE 通道）
     - session_summary：生成会话轻量摘要，risk_level=1（CACHE 通道）
 
     所有内置 Skill 均为：
@@ -140,7 +78,7 @@ def build_builtin_skill_registry() -> SkillRegistry:
     - risk_level=1 → ApprovalTier.CACHE（Policy Cache 直接放行）
 
     Returns:
-        已注册 7 个内置 Skill 的 SkillRegistry 实例
+        已注册 5 个内置 Skill 的 SkillRegistry 实例
     """
     registry = SkillRegistry()
 
@@ -176,24 +114,6 @@ def build_builtin_skill_registry() -> SkillRegistry:
         skill_name="read_only_status",
         handler=_builtin_noop_handler,
         description="只读状态查询，返回系统当前运行状态摘要。",
-        skill_registry=registry,
-        **_COMMON_SKILL_KWARGS,
-    )
-
-    # emotion_query：查询当前情感状态快照（最低风险，CACHE 通道）
-    register_skill(
-        skill_name="emotion_query",
-        handler=_emotion_query_handler,
-        description="查询当前会话的情感状态快照（mood_state / emotion_tag / intensity）。",
-        skill_registry=registry,
-        **_COMMON_SKILL_KWARGS,
-    )
-
-    # bond_query：查询 Bond 积分和阶段（最低风险，CACHE 通道）
-    register_skill(
-        skill_name="bond_query",
-        handler=_bond_query_handler,
-        description="查询当前会话的 Bond 积分和关系阶段（FRIEND / CLOSE_FRIEND / CONFIDANT / SOULMATE）。",
         skill_registry=registry,
         **_COMMON_SKILL_KWARGS,
     )

@@ -835,6 +835,29 @@ class LifeCommandRepository:
             subject_id = str(
                 relationship.get("relationship_subject_id") or ""
             ).strip()
+            active_episodes = [
+                dict(item)
+                for item in list(relationship.get("active_episodes") or [])
+                if isinstance(item, Mapping)
+            ]
+            # An already delivered proactive episode must remain discoverable
+            # by the Scheduler after a restart so its 24-hour silence
+            # aftereffect can be durably closed.  Other open relationship
+            # episodes remain a send hold and are deliberately not exposed as
+            # scheduler targets.
+            pending_proactive_opened_at_ms = 0
+            if active_episodes:
+                if len(active_episodes) != 1:
+                    continue
+                active_episode = active_episodes[0]
+                if str(active_episode.get("source_kind") or "").strip().upper() != "PROACTIVE_MESSAGE":
+                    continue
+                pending_proactive_opened_at_ms = max(
+                    0,
+                    int(active_episode.get("opened_at_ms") or 0),
+                )
+                if not pending_proactive_opened_at_ms:
+                    continue
             if (
                 not workspace_id
                 or not subject_id
@@ -844,7 +867,6 @@ class LifeCommandRepository:
                 or str(relationship.get("proactive_permission") or "").upper()
                 != "ALLOWED"
                 or bool(relationship.get("repair_required"))
-                or bool(list(relationship.get("active_episodes") or []))
             ):
                 continue
             target_id = str(target.get("target_id") or "").strip()
@@ -872,6 +894,15 @@ class LifeCommandRepository:
                     ),
                     "self_affect_revision": max(
                         0, int(affective.get("revision") or 0)
+                    ),
+                    **(
+                        {
+                            "pending_proactive_opened_at_ms": (
+                                pending_proactive_opened_at_ms
+                            )
+                        }
+                        if pending_proactive_opened_at_ms
+                        else {}
                     ),
                 }
             )

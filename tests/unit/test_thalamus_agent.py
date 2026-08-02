@@ -69,18 +69,18 @@ def test_compile_intent_draft_fills_missing_required_fields_without_dropping_exi
     compiled = agent.compile_intent_draft(
         request_id="req-thalamus-plan",
         session_id="session-thalamus-plan",
-        user_message="first summarize then read emotion snapshot",
+        user_message="first summarize then recall the session history",
         existing_intent_draft={
             "route": "plan",
             "target_id": "skill_dag",
             "task": "first summarize then read emotion snapshot",
             "args": {
-                "text": "first summarize then read emotion snapshot",
-                "query": "first summarize then read emotion snapshot",
+                "text": "first summarize then recall the session history",
+                "query": "first summarize then recall the session history",
             },
             "planned_steps": [
                 {"route": "skill", "target_id": "session_summary"},
-                {"route": "skill", "target_id": "emotion_query"},
+                {"route": "skill", "target_id": "memory_recall"},
             ],
         },
         source="chat_handler",
@@ -91,11 +91,11 @@ def test_compile_intent_draft_fills_missing_required_fields_without_dropping_exi
     assert compiled["session_id"] == "session-thalamus-plan"
     assert compiled["nonce"] == "nonce::req-thalamus-plan"
     assert compiled["action"] == "exec_intent"
-    assert compiled["args"]["text"] == "first summarize then read emotion snapshot"
+    assert compiled["args"]["text"] == "first summarize then recall the session history"
     assert "query" not in compiled["args"]
     assert len(compiled["planned_steps"]) == 2
     assert compiled["planned_steps"][0]["target_id"] == "session_summary"
-    assert compiled["planned_steps"][1]["target_id"] == "emotion_query"
+    assert compiled["planned_steps"][1]["target_id"] == "memory_recall"
 
 
 def test_compile_intent_draft_infers_skill_and_plan_routes_from_explicit_extensions() -> None:
@@ -115,12 +115,12 @@ def test_compile_intent_draft_infers_skill_and_plan_routes_from_explicit_extensi
     plan_compiled = agent.compile_intent_draft(
         request_id="req-thalamus-infer-plan",
         session_id="session-thalamus-infer-plan",
-        user_message="first summarize then read emotion snapshot",
+        user_message="first summarize then recall the session history",
         existing_intent_draft={
             "action": "exec_intent",
             "planned_steps": [
                 {"route": "skill", "target_id": "session_summary"},
-                {"route": "skill", "target_id": "emotion_query"},
+                {"route": "skill", "target_id": "memory_recall"},
             ],
         },
         source="chat_handler",
@@ -698,47 +698,43 @@ def test_classify_and_compile_intent_draft_routes_frontend_component_audit_tool(
     assert compiled["args"]["min_repeated_label_count"] == 5
 
 
-def test_classify_and_compile_intent_draft_builds_explicit_supported_plan() -> None:
+def test_classify_and_compile_intent_draft_routes_affective_plan_wording_to_canonical_chat() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(
         agent.classify_and_compile_intent_draft(
             request_id="req-thalamus-supported-plan",
             session_id="session-thalamus-supported-plan",
-            user_message="first summarize the current session then read emotion snapshot",
+            user_message="first summarize the current session then read your emotion snapshot",
             source="chat_handler",
             ts_ms=1776349003200,
         )
     )
 
-    assert compiled["route"] == "plan"
-    assert compiled["target_id"] == "skill_dag"
-    assert compiled["route_reason"] == "THALAMUS_RULE_EXPLICIT_PLAN"
-    assert [step["target_id"] for step in compiled["planned_steps"]] == [
-        "session_summary",
-        "emotion_query",
-    ]
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_SELF_AFFECT_REFLECTION"
+    assert compiled["semantic_intent"]["context_binding"] == "canonical_self_affect"
+    assert "without_numeric" in compiled["semantic_intent"]["answer_strategy"]
 
 
-def test_classify_and_compile_intent_draft_builds_chinese_supported_plan() -> None:
+def test_classify_and_compile_intent_draft_routes_chinese_affective_plan_wording_to_canonical_chat() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(
         agent.classify_and_compile_intent_draft(
             request_id="req-thalamus-supported-plan-zh",
             session_id="session-thalamus-supported-plan-zh",
-            user_message="先帮我总结一下这段会话，再查一下当前情绪状态。",
+            user_message="先帮我总结一下这段会话，再查一下你当前情绪状态。",
             source="chat_handler",
             ts_ms=1776349003210,
         )
     )
 
-    assert compiled["route"] == "plan"
-    assert compiled["target_id"] == "skill_dag"
-    assert [step["target_id"] for step in compiled["planned_steps"]] == [
-        "session_summary",
-        "emotion_query",
-    ]
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["route_reason"] == "THALAMUS_RULE_SELF_AFFECT_REFLECTION"
+    assert compiled["semantic_intent"]["type"] == "self_affect_reflection"
 
 
 def test_classify_and_compile_intent_draft_keeps_canonical_route_seed_without_reclassifying() -> None:
@@ -1393,7 +1389,7 @@ def test_classify_and_compile_intent_draft_does_not_misroute_task_like_message_a
     assert compiled["route_reason"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
-def test_classify_and_compile_intent_draft_keeps_long_support_chat_out_of_emotion_query() -> None:
+def test_classify_and_compile_intent_draft_keeps_long_support_chat_on_canonical_chat_path() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(

@@ -106,6 +106,36 @@ class PainRewardAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_hedonic_writes_retired(self) -> bool:
+        """Whether the canonical Life journal owns self-affect evolution."""
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_hedonic_state(*, operation: str) -> dict[str, Any]:
+        """Return a stable zero projection without reviving legacy state."""
+
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_PAIN_REWARD_AFFECT_FEEDBACK_RETIRED",
+            "operation": str(operation),
+            "accepted": False,
+            "pain_level": 0.0,
+            "reward_level": 0.0,
+            "net_valence": 0.0,
+            "cumulative_pain": 0.0,
+            "cumulative_reward": 0.0,
+            "last_pain_source": None,
+            "last_reward_source": None,
+            "hedonic_tone": "retired",
+            "ts_ms": 0,
+        }
+
     # ── 核心接口 ─────────────────────────────────────────────────────────────
 
     def record_pain(
@@ -125,6 +155,8 @@ class PainRewardAgent:
         Returns:
             更新后的 hedonic_state
         """
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="record_pain")
         intensity = max(0.0, min(1.0, float(intensity)))
         with self._lock:
             # 痛觉叠加（非线性：已有痛觉时新增痛觉效果减弱）
@@ -153,6 +185,8 @@ class PainRewardAgent:
         Returns:
             更新后的 hedonic_state
         """
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="record_reward")
         intensity = max(0.0, min(1.0, float(intensity)))
         with self._lock:
             _existing = self._reward_level
@@ -211,6 +245,8 @@ class PainRewardAgent:
         Returns:
             衰减后的 hedonic_state
         """
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="tick_decay")
         with self._lock:
             self._pain_level = max(_PAIN_FLOOR, self._pain_level * (1.0 - _DECAY_RATE))
             self._reward_level = max(_REWARD_FLOOR, self._reward_level * (1.0 - _DECAY_RATE))
@@ -218,6 +254,8 @@ class PainRewardAgent:
 
     def get_hedonic_state(self) -> dict[str, Any]:
         """获取当前享乐状态快照（不触发写入）。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="get_hedonic_state")
         with self._lock:
             return self._build_state_dict()
 
@@ -231,6 +269,8 @@ class PainRewardAgent:
             float: 当前孤独感强度，0.0 表示无孤独感，1.0 表示极度孤独。
                    若从未收到 LONELINESS_SIGNAL 事件则返回 0.0。
         """
+        if self._legacy_hedonic_writes_retired():
+            return 0.0
         return float(getattr(self, "_loneliness_level", 0.0))
 
     def get_stress_signal(self) -> dict[str, Any]:
@@ -241,6 +281,14 @@ class PainRewardAgent:
             reward_relief_delta (float): 奖励引起的皮质醇减量建议（0.0 ~ 0.2）
             net_stress_delta (float): 净压力变化量
         """
+        if self._legacy_hedonic_writes_retired():
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "pain_stress_delta": 0.0,
+                "reward_relief_delta": 0.0,
+                "net_stress_delta": 0.0,
+            }
         with self._lock:
             pain = self._pain_level
             reward = self._reward_level
@@ -260,6 +308,14 @@ class PainRewardAgent:
             arousal_boost (float 0~1): 唤醒度提升（pain/reward 均会提升唤醒）
             suggested_emotion_tag (str | None): 建议的情绪标签（仅在极端状态时）
         """
+        if self._legacy_hedonic_writes_retired():
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "valence_bias": 0.0,
+                "arousal_boost": 0.0,
+                "suggested_emotion_tag": None,
+            }
         with self._lock:
             pain = self._pain_level
             reward = self._reward_level
@@ -297,6 +353,10 @@ class PainRewardAgent:
           - TASK_SUCCESS：任务成功时记录 task_success 奖励（T-24）
           - HUMOR_LANDED：幽默成功时记录 humor_landed 奖励（T-24）
         """
+        if self._legacy_hedonic_writes_retired():
+            # Canonical Life owns episode appraisal, decay and relationship
+            # aftereffects; a global event fan-in cannot carry their scope.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -317,15 +377,19 @@ class PainRewardAgent:
                 "PainRewardAgent 订阅注册失败（降级）: %s", exc
             )
 
-    async def _on_interaction_recorded(self, event: Any) -> None:
+    async def _on_interaction_recorded(self, event: Any) -> dict[str, Any] | None:
         """处理 INTERACTION_RECORDED 事件：触发 pain/reward 自然衰减。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="interaction_recorded")
         try:
             self.tick_decay()
         except Exception:
             pass
 
-    async def _on_emotion_updated(self, event: Any) -> None:
+    async def _on_emotion_updated(self, event: Any) -> dict[str, Any] | None:
         """处理 EMOTION_UPDATED 事件：根据情绪标签推断痛觉/奖励。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="emotion_updated")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             emotion_tag = str(payload.get("emotion_tag") or "").strip().upper()
@@ -345,8 +409,10 @@ class PainRewardAgent:
         except Exception:
             pass
 
-    async def _on_immune_block(self, event: Any) -> None:
+    async def _on_immune_block(self, event: Any) -> dict[str, Any] | None:
         """处理 IMMUNE_BLOCK 事件：记录 topic_blocked 痛觉。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="immune_block")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             self.record_pain(
@@ -359,8 +425,10 @@ class PainRewardAgent:
 
     # ── T-24：新增事件源 handler ──────────────────────────────────────────────
 
-    async def _on_bond_progress(self, event: Any) -> None:
+    async def _on_bond_progress(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_PROGRESS 事件：关系进展 → bond_progress 奖励。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="bond_progress")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             # 根据 bond_stage 变化幅度调整奖励强度（默认 0.5）
@@ -373,8 +441,10 @@ class PainRewardAgent:
         except Exception:
             pass
 
-    async def _on_bond_regress(self, event: Any) -> None:
+    async def _on_bond_regress(self, event: Any) -> dict[str, Any] | None:
         """处理 BOND_REGRESS 事件：关系退步 → bond_regress 痛觉。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="bond_regress")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             intensity = float(payload.get("intensity") or 0.4)
@@ -386,8 +456,10 @@ class PainRewardAgent:
         except Exception:
             pass
 
-    async def _on_task_success(self, event: Any) -> None:
+    async def _on_task_success(self, event: Any) -> dict[str, Any] | None:
         """处理 TASK_SUCCESS 事件：任务成功 → task_success 奖励。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="task_success")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             intensity = float(payload.get("intensity") or 0.35)
@@ -399,8 +471,10 @@ class PainRewardAgent:
         except Exception:
             pass
 
-    async def _on_humor_landed(self, event: Any) -> None:
+    async def _on_humor_landed(self, event: Any) -> dict[str, Any] | None:
         """处理 HUMOR_LANDED 事件：幽默成功 → humor_landed 奖励。"""
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="humor_landed")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             intensity = float(payload.get("intensity") or 0.3)
@@ -412,13 +486,15 @@ class PainRewardAgent:
         except Exception:
             pass
 
-    async def _on_loneliness_signal(self, event: Any) -> None:
+    async def _on_loneliness_signal(self, event: Any) -> dict[str, Any] | None:
         """处理 LONELINESS_SIGNAL 事件：孤独感 → loneliness 痛觉。
 
         T-40：ANSAgent 的 inner_world_skill 在检测到高孤独感时发布此事件，
         PainRewardAgent 订阅后记录 loneliness 痛觉，影响 hedonic_state。
         孤独感强度与 pain_level 正相关，但上限为 0.6（避免单次事件过度影响）。
         """
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="loneliness_signal")
         try:
             payload = dict(getattr(event, "payload", None) or {})
             loneliness = max(0.0, min(1.0, float(payload.get("loneliness") or 0.4)))
@@ -435,7 +511,7 @@ class PainRewardAgent:
 
     # ── 事件订阅（TribeEventBus）────────────────────────────────────────────
 
-    def on_tribe_event(self, event: Any) -> None:
+    def on_tribe_event(self, event: Any) -> dict[str, Any] | None:
         """处理 TribeEventBus 事件。
 
         订阅：
@@ -443,6 +519,8 @@ class PainRewardAgent:
           - EMOTION_UPDATED：情绪更新时，根据情绪标签推断痛觉/奖励
           - IMMUNE_BLOCK：ImmuneAgent 拦截时记录 topic_blocked 痛觉
         """
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="on_tribe_event")
         try:
             event_type = str(getattr(event, "event_type", "") or "").strip().upper()
             payload = dict(getattr(event, "payload", None) or {})
@@ -542,6 +620,8 @@ class PainRewardAgent:
         T-27：每 _PERSIST_THROTTLE 次 flush 触发一次磁盘持久化，
         确保重启后 hedonic_state 不归零。
         """
+        if self._legacy_hedonic_writes_retired():
+            return self._retired_legacy_hedonic_state(operation="flush_state")
         with self._lock:
             state = self._build_state_dict()
             self._flush_counter += 1
@@ -630,6 +710,8 @@ class PainRewardAgent:
         Returns:
             True 表示保存成功，False 表示保存失败（降级，不抛异常）。
         """
+        if self._legacy_hedonic_writes_retired():
+            return False
         try:
             with self._lock:
                 persist_data = {
@@ -664,6 +746,8 @@ class PainRewardAgent:
         Returns:
             True 表示加载成功，False 表示文件不存在或加载失败（降级，不抛异常）。
         """
+        if self._legacy_hedonic_writes_retired():
+            return False
         try:
             path = self._state_path
             if not path.exists():
@@ -712,6 +796,8 @@ class PainRewardAgent:
         Returns:
             内心感受叙事字符串，或 None（未触发/失败）。
         """
+        if self._legacy_hedonic_writes_retired():
+            return None
         if abs(float(delta_valence or 0.0)) <= 0.3:
             return None
 
@@ -757,6 +843,15 @@ class PainRewardAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_hedonic_writes_retired():
+            return {
+                "status": "RETIRED_CANONICAL_LIFE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "LEGACY_PAIN_REWARD_AFFECT_FEEDBACK_RETIRED",
+                "state": self._retired_legacy_hedonic_state(operation="export_runtime_state"),
+                "stress_signal": self.get_stress_signal(),
+                "emotion_modulation": self.get_emotion_modulation(),
+            }
         return {
             "state": self.get_hedonic_state(),
             "stress_signal": self.get_stress_signal(),

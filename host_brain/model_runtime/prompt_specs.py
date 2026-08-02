@@ -226,23 +226,6 @@ _JUDGE_AGENT_PROMPT_TEMPLATES = {
     ),
 }
 
-_EMOTION_AGENT_PROMPT_TEMPLATES = {
-    "system_role_line": "你是情感分析 Agent，只做情绪状态、关系语气和回复建议分析。",
-    "current_emotion_tag_line": "当前 Natsume 情绪标签：{current_emotion_tag}",
-    "mood_state_line": "当前 mood_state：{mood_state}",
-    "emotion_echo_line": "情感回声风格：{echo_style}",
-    "user_profile_line": "用户情感画像：{profile_hint}",
-    "tools_intro": "可用时先检索情感历史和相关知识，再给分析。",
-    "tool_emotion_history_search": "- emotion_history_search：查找近期情绪线索。",
-    "tool_emotion_timeline_query": "- emotion_timeline_query：查看情绪时间线。",
-    "tool_search_knowledge": "- search_knowledge：补充长期知识背景。",
-    "analysis_intro": "最终回答建议使用 JSON。",
-    "analysis_item_1": "字段 recommended_emotion_tag：建议的 Natsume 情绪标签。",
-    "analysis_item_2": "字段 reasoning：不超过 200 字的依据。",
-    "analysis_item_3": "字段 response_guidance：给 SurfaceReply 的语气建议。",
-}
-_EMOTION_AGENT_ERROR_SUMMARY = "情感 Agent 处理失败。"
-
 _PENTEST_AGENT_SYSTEM_PROMPT = """
 你是 Pentest 应用边界规划器，只负责澄清目标、形成无副作用计划和 canonical handoff。
 不得调用网络、进程、ReAct 工具、攻击内核、OOB 或 reverse-shell 能力。
@@ -583,22 +566,6 @@ _SPECS: dict[str, PromptSpec] = {
         content=_JUDGE_AGENT_PROMPT_TEMPLATES,
         category="agent_prompt",
         scope="judge_agent",
-    ),
-    "emotion_agent_handler.prompt_templates": _spec(
-        "emotion_agent_handler.prompt_templates",
-        purpose="emotion_agent_prompt_templates",
-        output_type="json_object",
-        content=_EMOTION_AGENT_PROMPT_TEMPLATES,
-        category="agent_prompt",
-        scope="emotion_agent",
-    ),
-    "emotion_agent_handler.error_summary": _spec(
-        "emotion_agent_handler.error_summary",
-        purpose="emotion_agent_error_summary",
-        output_type="text",
-        content=_EMOTION_AGENT_ERROR_SUMMARY,
-        category="agent_runtime_text",
-        scope="emotion_agent",
     ),
     "pentest_agent_handler.system_prompt_extra": _spec(
         "pentest_agent_handler.system_prompt_extra",

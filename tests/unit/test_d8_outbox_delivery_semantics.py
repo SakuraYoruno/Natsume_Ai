@@ -78,8 +78,8 @@ def test_duplicate_terminal_outbox_ack_remains_a_successful_durable_admission(tm
         runtime.close()
 
 
-def test_gateway_voice_without_preview_fails_before_durable_admission() -> None:
-    """The legacy Gateway voice route must not bypass terminal Preview."""
+def test_legacy_gateway_voice_is_retired_without_durable_admission() -> None:
+    """The legacy Gateway voice route cannot bypass the accepted expression path."""
 
     class _AppliedRuntime:
         def __init__(self) -> None:
@@ -107,14 +107,15 @@ def test_gateway_voice_without_preview_fails_before_durable_admission() -> None:
         )
     )
 
-    assert result["voice_status"] == "FAILED"
-    assert result["voice_reason_code"] == "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-    assert result["voice_delivery_state"] == "FAILED"
+    assert result["voice_status"] == "RETIRED"
+    assert result["voice_reason_code"] == "LEGACY_GATEWAY_VOICE_RETIRED"
+    assert result["voice_delivery_state"] == "RETIRED"
     assert result["voice_durable_admitted"] is False
     assert result["voice_success"] is False
     assert result["voice_physical_effect_verified"] is False
     assert result["voice_gateway_sent"] is False
-    assert result["voice_gateway_status"] is None
+    assert result["voice_gateway_status"] == "RETIRED"
+    assert result["replacement_authority"] == "accepted_expression_plan_life_delivery_transport"
     assert result["voice_event"] == {}
     assert runtime.calls == 0
 

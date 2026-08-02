@@ -43,8 +43,12 @@ class TestInfraNodeContract(unittest.TestCase):
         )
 
         self.assertEqual(S_INFRA_NODE_CATALOG, report["stage"])
-        self.assertEqual("READY", report["status"])
-        self.assertIsNone(report["reason_code"])
+        self.assertEqual("ACCEPTANCE_PENDING_EXTERNAL", report["status"])
+        self.assertEqual(
+            fixture["expected_node_count"],
+            report["summary"]["node_not_tested"],
+        )
+        self.assertEqual("ACCEPTANCE_PENDING_EXTERNAL", report["reason_code"])
         self.assertEqual(9, report["summary"]["node_count"])
         self.assertEqual(9, len(report["node_catalog"]))
         self.assertEqual(0, report["validation"]["summary"]["issue_count"])

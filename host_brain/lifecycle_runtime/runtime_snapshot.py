@@ -19,15 +19,30 @@ def build_digital_life_runtime_snapshot(
     persona_user_id, subject_status, subject_detail = (
         resolve_runtime_relationship_subject_id()
     )
-    if canonical_life_reader_is_composed(ports):
-        return build_canonical_life_runtime_snapshot(
+    canonical_reader_composed = canonical_life_reader_is_composed(ports)
+    if canonical_reader_composed or ports.require_canonical_life_snapshot:
+        if not canonical_reader_composed:
+            # The production app composition has declared the canonical
+            # reader mandatory.  A missing provider is a degraded canonical
+            # result, never permission to rebuild affect/relationship state
+            # from the rollback-window assembler.
+            ports.compatibility_usage_meter.record_legacy_runtime_snapshot_fallback_suppressed()
+        return _attach_compatibility_usage(
+            build_canonical_life_runtime_snapshot(
+                ports=ports,
+                current_topic=normalized_topic,
+                now_ms=now_ms,
+                relationship_subject_id=persona_user_id,
+                subject_status=subject_status,
+                subject_detail=subject_detail,
+            ),
             ports=ports,
-            current_topic=normalized_topic,
-            now_ms=now_ms,
-            relationship_subject_id=persona_user_id,
-            subject_status=subject_status,
-            subject_detail=subject_detail,
         )
+
+    # A direct, isolated port graph may temporarily opt into the historic
+    # projection while migration tests are retired.  Every such use is
+    # explicitly visible; production composition cannot reach this branch.
+    ports.compatibility_usage_meter.record_legacy_runtime_snapshot_read()
     slot_status: dict[str, str] = {}
     degraded_reasons: list[str] = []
 
@@ -276,7 +291,10 @@ def build_digital_life_runtime_snapshot(
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
         silence_state = _as_plain_dict(
-            get_limbic_agent().resolve_silence_state(current_topic=normalized_topic)
+            get_limbic_agent().resolve_silence_state(
+                current_topic=normalized_topic,
+                person_id=persona_user_id,
+            )
         )
         slot_status["silence_state"] = "live"
     except Exception as exc:
@@ -721,46 +739,62 @@ def build_digital_life_runtime_snapshot(
         inner_world_state=inner_world_state,
     )
 
-    return {
-        "persona_user_id": persona_user_id,
-        "current_topic": normalized_topic,
-        "sys_mode": sys_mode,
-        "hard_state": hard_state,
-        "activity_monitor": activity_monitor,
-        "emotion_context": emotion_context,
-        "endocrine_state": endocrine_state,
-        "immune_state": immune_state,
-        "bond_state": bond_state,
-        "bond_summary": bond_summary,
-        "bond_summary_human": bond_summary_human,
-        "inner_world_state": inner_world_state,
-        "offline_state": offline_state,
-        "silence_state": silence_state,
-        "body_sense": body_sense,
-        "self_model_snapshot": self_model_snapshot,
-        "self_reflection_pulse": self_reflection_pulse,
-        "bond_narrative": bond_narrative,
-        "motive_state": motive_state,
-        "render_policy": render_policy,
-        "somatic_state": somatic_state,
-        "peripheral_state": peripheral_state,
-        "circadian_state": circadian_state,
-        "proprioception_state": proprioception_state,
-        "initiative_decision": initiative_decision,
-        "default_mode_state": default_mode_state,
-        "mirror_neuron_state": mirror_neuron_state,
-        "memory_layers": memory_layers,
-        "language_dual_system": language_dual_system,
-        "homeostasis_report": homeostasis_report,
-        "interoception_state": interoception_state,
-        "motor_cortex_state": motor_cortex_state,
-        "cerebellum_state": cerebellum_state,
-        "glymphatic_state": glymphatic_state,
-        "vestibular_state": vestibular_state,
-        "runtime_summary": runtime_summary,
-        "background_runtime": background_runtime,
-        "slot_status": slot_status,
-        "degraded": bool(degraded_reasons),
-        "degraded_reasons": degraded_reasons,
-        "timestamp": now_ms,
-    }
+    return _attach_compatibility_usage(
+        {
+            "persona_user_id": persona_user_id,
+            "current_topic": normalized_topic,
+            "sys_mode": sys_mode,
+            "hard_state": hard_state,
+            "activity_monitor": activity_monitor,
+            "emotion_context": emotion_context,
+            "endocrine_state": endocrine_state,
+            "immune_state": immune_state,
+            "bond_state": bond_state,
+            "bond_summary": bond_summary,
+            "bond_summary_human": bond_summary_human,
+            "inner_world_state": inner_world_state,
+            "offline_state": offline_state,
+            "silence_state": silence_state,
+            "body_sense": body_sense,
+            "self_model_snapshot": self_model_snapshot,
+            "self_reflection_pulse": self_reflection_pulse,
+            "bond_narrative": bond_narrative,
+            "motive_state": motive_state,
+            "render_policy": render_policy,
+            "somatic_state": somatic_state,
+            "peripheral_state": peripheral_state,
+            "circadian_state": circadian_state,
+            "proprioception_state": proprioception_state,
+            "initiative_decision": initiative_decision,
+            "default_mode_state": default_mode_state,
+            "mirror_neuron_state": mirror_neuron_state,
+            "memory_layers": memory_layers,
+            "language_dual_system": language_dual_system,
+            "homeostasis_report": homeostasis_report,
+            "interoception_state": interoception_state,
+            "motor_cortex_state": motor_cortex_state,
+            "cerebellum_state": cerebellum_state,
+            "glymphatic_state": glymphatic_state,
+            "vestibular_state": vestibular_state,
+            "runtime_summary": runtime_summary,
+            "background_runtime": background_runtime,
+            "slot_status": slot_status,
+            "degraded": bool(degraded_reasons),
+            "degraded_reasons": degraded_reasons,
+            "timestamp": now_ms,
+        },
+        ports=ports,
+    )
+
+
+def _attach_compatibility_usage(
+    snapshot: dict[str, Any],
+    *,
+    ports: LifecycleRuntimeApplicationPorts,
+) -> dict[str, Any]:
+    """Expose rollback-window use without exposing user-derived content."""
+
+    snapshot["compatibility_projection_usage"] = (
+        ports.compatibility_usage_meter.snapshot()
+    )
+    return snapshot

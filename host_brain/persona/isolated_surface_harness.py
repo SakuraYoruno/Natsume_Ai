@@ -26,6 +26,7 @@ __all__ = [
     "RelationshipStyleProfile",
     "build_isolated_surface_input",
     "build_isolated_surface_messages",
+    "build_native_stream_surface_messages",
     "build_minimal_repair_messages",
     "build_surface_original_quote_query",
     "find_forbidden_input_paths",

@@ -119,3 +119,8 @@ def test_runtime_snapshot_keeps_user_profile_out_of_self_affect_and_marks_retire
     assert "emotion_diary" not in emotion_context
     assert snapshot["slot_status"]["emotion_context"] == "retired"
     assert "emotion_context:retired" not in snapshot["degraded_reasons"]
+    assert (
+        snapshot["compatibility_projection_usage"]
+        ["legacy_runtime_snapshot_read_count"]
+        == 1
+    )

@@ -32,7 +32,55 @@ class InteroceptionAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_interoception_writes_retired(self) -> bool:
+        """Whether the canonical Life journal owns body-derived self-affect.
+
+        The old agent merged unscoped global caches, emitted a new global
+        event, and directly drove hedonic/Limbic state.  Those inputs are not
+        safe replacements for a scoped Life command, so production canonical
+        mode exposes an explicit unavailable compatibility projection instead
+        of silently fabricating a second body budget.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_legacy_interoception_result(
+        *,
+        operation: str,
+        source: str,
+        ts_ms: int | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_INTEROCEPTION_BODY_BUDGET_RETIRED",
+            "operation": str(operation),
+            "source": str(source or "interoception_agent"),
+            "accepted": False,
+            "projection": "UNAVAILABLE",
+            "interoceptive_index": 0.0,
+            "body_budget": 0.5,
+            "recovery_urgency": 0.0,
+            "stress_index": 0.0,
+            "cognitive_load_index": 0.0,
+            "sleep_pressure": 0.0,
+            "energy_reserve": 0.0,
+            "immune_risk_level": "unknown",
+            "homeostasis_ok": False,
+            "sample_count": 0,
+            "ts_ms": int(ts_ms or 0),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_interoception_writes_retired():
+            # A global body signal lacks the immutable relationship/task
+            # scope required to mutate SelfAffectStateV2 or a Need.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -47,6 +95,13 @@ class InteroceptionAgent:
 
     def evaluate_profile(self, *, source: str = "runtime", ts_ms: int | None = None) -> dict[str, Any]:
         resolved_ts = int(ts_ms or now_ms())
+        if self._legacy_interoception_writes_retired():
+            return self._retired_legacy_interoception_result(
+                operation="evaluate_profile",
+                source=source,
+                ts_ms=resolved_ts,
+            )
+
         vital_signs = self.state_registry.aggregate_vital_signs()
         stress = _clamp(float(vital_signs.get("stress_index") or 0.0))
         cognitive_load = _clamp(float(vital_signs.get("cognitive_load_index") or 0.2))
@@ -193,6 +248,11 @@ class InteroceptionAgent:
         Returns:
             内感受描述字符串，或 None（未触发/失败）。
         """
+        if self._legacy_interoception_writes_retired():
+            # The frozen AffectiveTurnPlan is the only production narrator of
+            # Natsume's embodied state.  Do not run a second model over an
+            # unscoped compatibility cache.
+            return None
         _significant = (
             float(interoception_index or 0.5) < 0.3
             or float(recovery_urgency or 0.0) > 0.7
@@ -241,6 +301,29 @@ class InteroceptionAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_interoception_writes_retired():
+            state = self._retired_legacy_interoception_result(
+                operation="runtime_state_export",
+                source="export_runtime_state",
+            )
+            return {
+                "interoceptive_index": float(state["interoceptive_index"]),
+                "body_budget": float(state["body_budget"]),
+                "recovery_urgency": float(state["recovery_urgency"]),
+                "stress_index": float(state["stress_index"]),
+                "cognitive_load_index": float(state["cognitive_load_index"]),
+                "sleep_pressure": float(state["sleep_pressure"]),
+                "energy_reserve": float(state["energy_reserve"]),
+                "immune_risk_level": str(state["immune_risk_level"]),
+                "homeostasis_ok": bool(state["homeostasis_ok"]),
+                "sample_count": int(state["sample_count"]),
+                "last_updated_ts_ms": int(state["ts_ms"]),
+                "status": str(state["status"]),
+                "authority": str(state["authority"]),
+                "reason_code": str(state["reason_code"]),
+                "projection": str(state["projection"]),
+            }
+
         state = self.evaluate_profile(source="export_runtime_state")
         return {
             "interoceptive_index": float(state.get("interoceptive_index") or 0.0),
@@ -256,7 +339,13 @@ class InteroceptionAgent:
             "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
         }
 
-    async def _on_state_signal(self, event: Any) -> None:
+    async def _on_state_signal(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_interoception_writes_retired():
+            return self._retired_legacy_interoception_result(
+                operation="state_signal",
+                source=str(getattr(event, "event_type", "") or "signal"),
+                ts_ms=int(getattr(event, "ts_ms", 0) or 0),
+            )
         await asyncio.to_thread(
             self.evaluate_profile,
             source=str(getattr(event, "event_type", "") or "signal"),
@@ -269,7 +358,7 @@ class InteroceptionAgent:
         source: str,
         intensity: float,
         ts_ms: int | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-226：外部族注入压力信号，叠加到 recovery_urgency 上。
 
         由 SomaticAgent（孤独感）、ProprioceptionAgent（高打断）等外部族调用，
@@ -278,6 +367,12 @@ class InteroceptionAgent:
         注意：intensity 仅接受正值（0.0~1.0），负值请使用 reduce_recovery_urgency()。
         """
         resolved_ts = int(ts_ms or now_ms())
+        if self._legacy_interoception_writes_retired():
+            return self._retired_legacy_interoception_result(
+                operation="inject_external_stress",
+                source=source,
+                ts_ms=resolved_ts,
+            )
         # 仅处理正向压力，负值静默忽略（负值应使用 reduce_recovery_urgency）
         raw = float(intensity)
         if raw <= 0.0:
@@ -302,7 +397,7 @@ class InteroceptionAgent:
         source: str,
         relief: float,
         ts_ms: int | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-296：外部族注入恢复/缓解信号，降低 recovery_urgency。
 
         由 PeripheralAgent（外设恢复）、GlymphaticAgent（恢复周期完成）等外部族调用，
@@ -314,6 +409,12 @@ class InteroceptionAgent:
             ts_ms: 时间戳（毫秒），默认使用当前时间。
         """
         resolved_ts = int(ts_ms or now_ms())
+        if self._legacy_interoception_writes_retired():
+            return self._retired_legacy_interoception_result(
+                operation="reduce_recovery_urgency",
+                source=source,
+                ts_ms=resolved_ts,
+            )
         clamped_relief = _clamp(float(relief))
         prev = self.state_registry.get_state("interoception_agent") or {}
         prev_state = dict(prev.get("state") or {})
@@ -343,6 +444,14 @@ class InteroceptionAgent:
         Returns:
             {"body_budget": float, "interoceptive_index": float, "recovery_urgency": float}
         """
+        if self._legacy_interoception_writes_retired():
+            return {
+                **self._retired_legacy_interoception_result(
+                    operation="tick_body_budget",
+                    source=source,
+                ),
+                "ticked": False,
+            }
         import logging as _logging
         _log = _logging.getLogger("Natsume.tribe.interoception_agent")
         try:

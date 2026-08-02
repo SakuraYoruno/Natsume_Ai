@@ -16,6 +16,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from .relationship import AffectiveRepairTargetV1
+
 
 _SELF_ID = "natsume_ai"
 _COMPANION_ACT_KINDS = frozenset(
@@ -29,6 +31,7 @@ _COMPANION_ACT_KINDS = frozenset(
         "SOLVE",
         "ACKNOWLEDGE",
         "HOLD_COMPLEXITY",
+        "CONTAINED_JEALOUSY",
     }
 )
 _TEXT_PACING = frozenset({"STEADY", "SOFT", "BRISK", "SPARSE"})
@@ -384,6 +387,7 @@ class AffectiveTurnPlanV1:
     companion_profile_digest: str = ""
     companion_profile_revision: int = 0
     companion_profile_stage: str = "COMPATIBILITY_UNBOUND"
+    affect_repair_target: AffectiveRepairTargetV1 | None = None
 
     def __post_init__(self) -> None:
         mode = _required(self.generation_mode, "generation_mode", limit=64).upper()
@@ -468,6 +472,18 @@ class AffectiveTurnPlanV1:
             object.__setattr__(self, "companion_profile_digest", "")
         object.__setattr__(self, "companion_profile_revision", revision)
         object.__setattr__(self, "companion_profile_stage", stage)
+        repair_target = self.affect_repair_target
+        if repair_target is not None:
+            if not isinstance(repair_target, AffectiveRepairTargetV1):
+                raise ValueError("affect_repair_target must be AffectiveRepairTargetV1")
+            if (
+                repair_target.workspace_id != self.workspace_id
+                or repair_target.relationship_subject_id
+                != self.relationship_subject_id
+                or repair_target.session_id != self.session_id
+                or repair_target.self_affect_revision != self.self_affect_revision
+            ):
+                raise ValueError("turn affect_repair_target scope or revision drift")
         if self.companion_act.relationship_subject_id != self.relationship_subject_id:
             raise ValueError("companion_act relationship subject differs from turn plan")
         if self.expression_plan.self_affect_revision != self.self_affect_revision:
@@ -503,6 +519,11 @@ class AffectiveTurnPlanV1:
             "companion_profile_digest": self.companion_profile_digest,
             "companion_profile_revision": self.companion_profile_revision,
             "companion_profile_stage": self.companion_profile_stage,
+            "affect_repair_target": (
+                self.affect_repair_target.as_dict()
+                if self.affect_repair_target is not None
+                else None
+            ),
         }
 
 

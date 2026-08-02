@@ -61,26 +61,19 @@ def _runtime(tmp_path: Path):  # noqa: ANN201
     clock = {"now": NOW}
     command_service = LifeCommandService(repository, clock=lambda: int(clock["now"]))
     reader = LifeSnapshotReader(repository)
+    profile_holder: dict[str, CompanionProfileLifecycleService] = {}
     relationship = RelationshipLifecycleService(
         command_service_provider=lambda: command_service,
         snapshot_reader_provider=lambda: reader,
+        companion_profile_lifecycle_service_provider=lambda: profile_holder.get("service"),
         clock_ms=lambda: int(clock["now"]),
-    )
-    # The relationship classifier is intentionally replaced only in this
-    # evidence fixture: production's conservative text classifier currently
-    # has no direct preference-rating transport, so it cannot honestly claim a
-    # >= .85 preference confidence by itself.
-    relationship._classify_followup = lambda **_kwargs: (  # type: ignore[method-assign]
-        "HELPFUL",
-        0.91,
-        True,
-        False,
     )
     profile = CompanionProfileLifecycleService(
         command_service_provider=lambda: command_service,
         snapshot_reader_provider=lambda: reader,
         clock_ms=lambda: int(clock["now"]),
     )
+    profile_holder["service"] = profile
     fusion = AffectFusionService(
         command_service_provider=lambda: command_service,
         snapshot_reader_provider=lambda: reader,
@@ -99,7 +92,38 @@ def _accepted_response(*, ordinal: int, created_at_ms: int) -> dict[str, object]
     }
 
 
-def _helpful_aftereffect(
+def _strong_helpful_aftereffect(
+    *,
+    relationship: RelationshipLifecycleService,
+    clock: dict[str, int],
+    ordinal: int,
+) -> str:
+    response = _accepted_response(ordinal=ordinal, created_at_ms=clock["now"])
+    relationship.provision_accepted_response(
+        workspace_id="workspace-profile",
+        relationship_subject_id="person-profile",
+        session_id=f"session-profile-{ordinal}",
+        request_id=f"response-profile-{ordinal}",
+        response_receipt=response,
+        response_text="我在，慢一点也没关系。",
+    )
+    clock["now"] += 1_000
+    result = relationship.record_explicit_response_feedback(
+        workspace_id="workspace-profile",
+        relationship_subject_id="person-profile",
+        session_id=f"session-profile-{ordinal}",
+        request_id=f"aftereffect-profile-{ordinal}",
+        response_receipt_ref=f"life-event://{response['event_id']}",
+        feedback="HELPFUL",
+        source_ref=f"secure-ingress-audit://profile-aftereffect-{ordinal}",
+    )
+    assert result.aftereffect is not None
+    assert result.aftereffect.outcome == "HELPFUL"
+    assert result.aftereffect.helpfulness == 0.95
+    return result.aftereffect.aftereffect_id
+
+
+def _low_confidence_text_aftereffect(
     *,
     relationship: RelationshipLifecycleService,
     clock: dict[str, int],
@@ -108,18 +132,19 @@ def _helpful_aftereffect(
     relationship.provision_accepted_response(
         workspace_id="workspace-profile",
         relationship_subject_id="person-profile",
-        session_id=f"session-profile-{ordinal}",
-        request_id=f"response-profile-{ordinal}",
+        session_id=f"session-profile-weak-{ordinal}",
+        request_id=f"response-profile-weak-{ordinal}",
         response_receipt=_accepted_response(ordinal=ordinal, created_at_ms=clock["now"]),
         response_text="我在，慢一点也没关系。",
     )
     clock["now"] += 1_000
     result = relationship.record_followup(
-        request_body=_request(session_id=f"session-profile-{ordinal}"),
-        request_id=f"aftereffect-profile-{ordinal}",
+        request_body=_request(session_id=f"session-profile-weak-{ordinal}"),
+        request_id=f"aftereffect-profile-weak-{ordinal}",
     )
     assert result.aftereffect is not None
     assert result.aftereffect.outcome == "HELPFUL"
+    assert result.aftereffect.helpfulness == 0.72
     return result.aftereffect.aftereffect_id
 
 
@@ -130,7 +155,7 @@ def test_profile_canary_activation_changes_next_turn_and_exact_rollback(
     evidence_ids: list[str] = []
     for ordinal in range(5):
         evidence_ids.append(
-            _helpful_aftereffect(
+            _strong_helpful_aftereffect(
                 relationship=relationship,
                 clock=clock,
                 ordinal=ordinal,
@@ -159,34 +184,28 @@ def test_profile_canary_activation_changes_next_turn_and_exact_rollback(
     assert candidate is not None
     assert started.state.active_profile.is_baseline is True
 
+    scope = RelationshipScope.from_values(
+        workspace_id="workspace-profile",
+        relationship_subject_id="person-profile",
+        session_id="any-session",
+    )
+
     for ordinal in range(5, 10):
         clock["now"] += DAY_MS
-        aftereffect_id = _helpful_aftereffect(
+        _strong_helpful_aftereffect(
             relationship=relationship,
             clock=clock,
             ordinal=ordinal,
         )
-        recorded = profile.record_eligible_canary_aftereffect(
-            workspace_id="workspace-profile",
-            relationship_subject_id="person-profile",
-            session_id=f"session-profile-{ordinal}",
-            request_id=f"profile-canary-observation-{ordinal}",
-            aftereffect_id=aftereffect_id,
+        state = CompanionProfileStateV1.from_mapping(
+            reader.get_snapshot(scope.aggregate_id).state["companion_profile"]
         )
-        assert recorded.receipt is not None
         if ordinal < 9:
-            assert len(recorded.state.canary_accepted_interaction_ids) == ordinal - 4
-            assert (
-                recorded.reason_code
-                == "COMPANION_PROFILE_CANARY_INTERACTION_RECORDED"
-            )
+            assert state.canary_profile is not None
+            assert len(state.canary_accepted_interaction_ids) == ordinal - 4
         else:
-            assert (
-                recorded.reason_code
-                == "COMPANION_PROFILE_CANARY_AUTO_ACTIVATED"
-            )
-            assert recorded.state.active_profile.profile_id == candidate.profile_id
-            assert recorded.state.canary_profile is None
+            assert state.active_profile.profile_id == candidate.profile_id
+            assert state.canary_profile is None
 
     # A normal Host fusion reads the relationship-scoped active profile. The
     # next frozen plan carries the same profile identity into text, voice and
@@ -233,11 +252,42 @@ def test_profile_canary_activation_changes_next_turn_and_exact_rollback(
     assert rolled_back.state.active_profile.is_baseline is True
     assert rolled_back.state.active_profile.profile_id != candidate.profile_id
 
-    scope = RelationshipScope.from_values(
+    rollback_fused = fusion.resolve_request(
+        request_body=_request(
+            session_id="session-profile-after-rollback",
+            message="我想继续慢慢说。",
+        ),
+        request_id="profile-after-rollback-turn",
+    )
+    rollback_guidance = build_affective_turn_guidance(
+        emotion_context=rollback_fused.as_emotion_context(),
+        request_id="profile-after-rollback-turn",
         workspace_id="workspace-profile",
         relationship_subject_id="person-profile",
-        session_id="any-session",
+        session_id="session-profile-after-rollback",
+        created_at_ms=clock["now"],
     )
+    assert rollback_guidance is not None
+    rollback_plan = rollback_guidance.plan
+    assert rollback_plan.companion_profile_id == rolled_back.state.active_profile.profile_id
+    assert rollback_plan.companion_profile_digest == rolled_back.state.active_profile.profile_digest
+    assert rollback_plan.companion_profile_id != plan.companion_profile_id
+    assert rollback_plan.expression_plan.voice_rate != plan.expression_plan.voice_rate
+    assert (
+        rollback_plan.expression_plan.avatar_motion_intensity
+        != plan.expression_plan.avatar_motion_intensity
+    )
+    rollback_intents, _rollback_receipts = build_sentence_expression_delivery(
+        affective_turn_plan=rollback_plan.as_dict(),
+        sentence="那我们就继续慢一点。",
+        sentence_index=0,
+        created_at_ms=clock["now"],
+    )
+    rollback_voice = next(item for item in rollback_intents if item.channel == "VOICE")
+    rollback_avatar = next(item for item in rollback_intents if item.channel == "AVATAR")
+    assert rollback_voice.payload["companion_profile_id"] == rollback_plan.companion_profile_id
+    assert rollback_avatar.payload["companion_profile_id"] == rollback_plan.companion_profile_id
+
     projection = reader.list_companion_profile_event_heads(scope.aggregate_id, limit=20)
     assert [row["profile_kind"] for row in projection] == [
         "CANARY_STARTED",
@@ -276,15 +326,12 @@ def test_profile_cannot_start_from_low_confidence_legacy_text_aftereffects(
     tmp_path: Path,
 ) -> None:
     _database, clock, _reader, relationship, profile, _fusion = _runtime(tmp_path)
-    # Restore the real conservative classifier: it is deliberately below the
-    # automatic profile threshold until a future direct preference-feedback
-    # transport supplies stronger evidence.
-    relationship._classify_followup = RelationshipLifecycleService._classify_followup.__get__(
-        relationship,
-        RelationshipLifecycleService,
-    )
     ids = [
-        _helpful_aftereffect(relationship=relationship, clock=clock, ordinal=index)
+        _low_confidence_text_aftereffect(
+            relationship=relationship,
+            clock=clock,
+            ordinal=index,
+        )
         for index in range(5)
     ]
     with pytest.raises(ValueError, match="AFTEREFFECT_NOT_ELIGIBLE"):
@@ -305,7 +352,7 @@ def test_composed_relationship_lifecycle_counts_only_strong_canary_aftereffects(
     evidence_ids: list[str] = []
     for ordinal in range(5):
         evidence_ids.append(
-            _helpful_aftereffect(
+            _strong_helpful_aftereffect(
                 relationship=relationship,
                 clock=clock,
                 ordinal=ordinal,
@@ -320,9 +367,8 @@ def test_composed_relationship_lifecycle_counts_only_strong_canary_aftereffects(
         preferences=CompanionProfilePreferencesV1(),
         evidence_aftereffect_ids=evidence_ids,
     )
-    relationship._companion_profile_lifecycle_service_provider = lambda: profile
     clock["now"] += DAY_MS
-    _helpful_aftereffect(
+    _strong_helpful_aftereffect(
         relationship=relationship,
         clock=clock,
         ordinal=99,

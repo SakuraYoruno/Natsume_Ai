@@ -98,7 +98,6 @@ async def shutdown_host_runtime_authority(
     embodiment_authority_task: Any | None,
     reset_life_command_authority: Callable[[], Any],
     embodiment_runtime: Any | None,
-    close_bond_runtime: Callable[[], Any],
     close_governance_runtime: Callable[[], Any],
     close_authority_runtime: Callable[[], Any],
     withdraw_memory_service_container: Callable[[Any], Any],
@@ -200,7 +199,6 @@ async def shutdown_host_runtime_authority(
             if embodiment_runtime is not None
             else None,
         ),
-        ("bond_runtime", close_bond_runtime),
         ("governance_runtime", close_governance_runtime),
         (
             "memory_publication",

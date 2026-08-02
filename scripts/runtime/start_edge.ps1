@@ -913,7 +913,10 @@ if ([bool]$qqOneBotResult.enabled) {
 if ($EnforceCnAsrJaTtsMode) {
   $enforcedVoiceEnv = [ordered]@{
     EDGE_ASR_LANGUAGE = "zh"
-    EDGE_TTS_LANGUAGE = "zh"
+    EDGE_TTS_BACKEND = "gpt_sovits"
+    EDGE_TTS_LANGUAGE = "ja"
+    EDGE_TTS_VOICE_BANK_PATH = (Join-Path $repoRoot "configs\voice\gpt_sovits_nanami_v4.json")
+    EDGE_TTS_PERSISTENT_WORKER_ENABLED = "true"
     EDGE_BARGE_IN_ENABLED = "false"
   }
   foreach ($enforcedKey in $enforcedVoiceEnv.Keys) {

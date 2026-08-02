@@ -55,6 +55,11 @@ from host_brain.task_runtime.operation_reconciliation_acceptance_effect import (
 from host_brain.task_runtime.worker_authority_guard import forbidden_worker_authority_path
 from host_brain.task_runtime import agent_workspace_acceptance_effect as agent_workspace_effects
 from host_brain.agent_runtime.workspace_artifact_effect import AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE
+from host_brain.digital_life.companion_expression_acceptance import (
+    COMPANION_EXPRESSION_ENQUEUE_EFFECT,
+    CompanionExpressionEffectError,
+    compile_companion_expression_effect_payloads,
+)
 
 ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID = "ACCEPTANCE_EFFECT_DESCRIPTOR_INVALID"
 _EFFECT_TYPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
@@ -214,7 +219,7 @@ def compile_graph_acceptance_effects(
         for descriptor in descriptors
         if descriptor["effect_type"] == "life.foreground_completed"
     )
-    companion_subject_id = _frozen_companion_subject_id(
+    companion_subject_id, companion_workspace_id = _frozen_companion_scope(
         command=command,
         pack=pack,
     )
@@ -230,6 +235,51 @@ def compile_graph_acceptance_effects(
         bond_summary=bond_summary,
         pack=pack,
     )
+    preview_context = _action_preview_context(
+        command=command,
+        work_order=work_order,
+        node_id=node_ref,
+        worker_commit=commit,
+    )
+    raw_affective_plan = _json_mapping(
+        foreground.get("payload"),
+        field_name="foreground.payload",
+    ).get("affective_turn_plan")
+    if raw_affective_plan is None or raw_affective_plan == {}:
+        # Compatibility/task routes that did not freeze a companion plan may
+        # still accept their text result.  They cannot manufacture Voice or
+        # Avatar effects from an empty placeholder.
+        has_affective_plan = False
+    elif not isinstance(raw_affective_plan, Mapping) or (
+        raw_affective_plan.get("schema_version") != "affective_turn_plan.v1"
+    ):
+        raise AcceptanceEffectCompileError("affective turn plan is invalid")
+    else:
+        has_affective_plan = True
+    companion_expression_effects: tuple[dict[str, Any], ...] = ()
+    if has_affective_plan:
+        if preview_context is None:
+            raise AcceptanceEffectCompileError(
+                "affective companion delivery requires a Runtime Context Preview binding"
+            )
+        try:
+            companion_expression_effects = (
+                compile_companion_expression_effect_payloads(
+                    graph_id=command.graph_id,
+                    graph_revision=command.graph_revision,
+                    node_id=node_ref,
+                    attempt_id=attempt_ref,
+                    request_id=command.request_id,
+                    principal_id=command.principal_id,
+                    relationship_subject_id=companion_subject_id,
+                    workspace_id=companion_workspace_id,
+                    session_id=command.session_id,
+                    node_grant_ref=str(preview_context["node_grant_ref"]),
+                    foreground=foreground,
+                )
+            )
+        except CompanionExpressionEffectError as exc:
+            raise AcceptanceEffectCompileError(str(exc)) from exc
     user_turn = {
         "request_id": command.request_id,
         "session_id": command.session_id,
@@ -298,6 +348,10 @@ def compile_graph_acceptance_effects(
         ),
         ("life.foreground_completed", foreground),
     ])
+    payloads.extend(
+        (COMPANION_EXPRESSION_ENQUEUE_EFFECT, payload)
+        for payload in companion_expression_effects
+    )
     reply_channel = str(delivery_context.get("reply_channel") or "").strip()
     reply_target = str(delivery_context.get("reply_target") or "").strip()
     if reply_channel and reply_target:
@@ -322,12 +376,6 @@ def compile_graph_acceptance_effects(
             )
         )
 
-    preview_context = _action_preview_context(
-        command=command,
-        work_order=work_order,
-        node_id=node_ref,
-        worker_commit=commit,
-    )
     if preview_context is not None:
         payloads = [
             (
@@ -1400,11 +1448,11 @@ def _trusted_foreground_command(
     }
 
 
-def _frozen_companion_subject_id(
+def _frozen_companion_scope(
     *,
     command: HostCommand,
     pack: Mapping[str, Any],
-) -> str:
+) -> tuple[str, str]:
     """Resolve the immutable relationship subject for companion projections.
 
     Runtime Context v1 deliberately separates an authenticated transport
@@ -1417,7 +1465,7 @@ def _frozen_companion_subject_id(
 
     schema = pack.get("runtime_context_schema")
     if schema is None:
-        return str(command.principal_id or "").strip()
+        return str(command.principal_id or "").strip(), ""
     if schema != "natsume.runtime-context.request.v1":
         raise AcceptanceEffectCompileError(
             "runtime-context companion subject schema is invalid"
@@ -1428,7 +1476,7 @@ def _frozen_companion_subject_id(
         raise AcceptanceEffectCompileError(
             "runtime-context companion projection has no canonical subject or workspace"
         )
-    return subject_id
+    return subject_id, workspace_id
 
 
 def _spec(

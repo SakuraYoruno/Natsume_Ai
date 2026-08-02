@@ -109,6 +109,7 @@ class DigitalLifeRuntimeSnapshotResponse(BaseModel):
     vestibular_state: Dict[str, Any] = Field(default_factory=dict)
     runtime_summary: Dict[str, Any] = Field(default_factory=dict)
     background_runtime: Dict[str, Any] = Field(default_factory=dict)
+    compatibility_projection_usage: Dict[str, Any] = Field(default_factory=dict)
     # Projection serialization can add a nested ``_operator_privacy`` envelope
     # when a slot name is content-shaped (for example ``bond_narrative``).
     # The read model must preserve that fail-closed metadata alongside the

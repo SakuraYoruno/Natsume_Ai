@@ -147,9 +147,6 @@ def _shutdown_kwargs(
             lambda: events.append("life-authority:close")
         ),
         "embodiment_runtime": _SyncResource(events, "embodiment"),
-        "close_bond_runtime": (
-            lambda: events.append("bond-runtime:close")
-        ),
         "close_governance_runtime": (
             lambda: events.append("governance-runtime:close")
         ),
@@ -324,7 +321,6 @@ async def test_partial_startup_failure_releases_every_constructed_resource() -> 
         "hard-state:close",
         "life-authority:close",
         "embodiment:close",
-        "bond-runtime:close",
         "governance-runtime:close",
         "memory:withdraw:exact",
         "memory:close",

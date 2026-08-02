@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import time
@@ -61,6 +62,7 @@ _COLLECTION_FASTPATH_CONTRACTS: frozenset[str] = frozenset({"collection_date", "
 _SURFACE_MEMORY_RECALL_COVERAGE_FAILED = "SURFACE_MEMORY_RECALL_COVERAGE_FAILED"
 _SURFACE_MEMORY_RECALL_VALIDATION_FAILED = "SURFACE_MEMORY_RECALL_VALIDATION_FAILED"
 _DATED_TEMPORAL_SCOPES: frozenset[str] = frozenset({"today", "yesterday", "day_before_yesterday"})
+_OPTIONAL_SEMANTIC_EMBEDDING_BUDGET_ENV = "HOST_SURFACE_OPTIONAL_SEMANTIC_BUDGET_MS"
 _EXPANDED_RECALL_STORES: tuple[str, ...] = (
     "life_memory_collection",
     "life_memory_entity",
@@ -316,69 +318,122 @@ async def _run_retrieval(
                 build_packet_fn=build_surface_memory_recall_packet,
                 life_memory_store=life_memory_store,
             )
+            recall_invoked = packet is not None
             if packet is None:
-                query_embedding, embedding_model_id = _embed_surface_memory_query(plan.query)
-                recall_service = (
-                    recall_service_factory or _build_surface_memory_recall_service
-                )()
-                packet = recall_surface_memory_packet(
-                    recall_service=recall_service,
-                    request_id=request_id,
-                    query=plan.query,
-                    query_embedding=query_embedding,
-                    intent_id=_surface_intent_id(intent_draft),
-                    person_id=person_id,
-                    session_id=session_id,
-                    ts_ms=ts_ms,
-                    emotion_filter=emotion_tag,
-                    mood_state=mood_state,
-                    bond_summary=bond_summary,
-                    motive_state=motive_state,
-                    render_target_lang=render_target_lang,
-                    target_store_ids=plan.target_store_ids,
-                    time_lookback_days=plan.time_lookback_days,
-                    max_facts=plan.max_facts,
-                    distortion_bias=_surface_memory_distortion_bias(
-                        person_id,
-                        life_snapshot_reader=life_snapshot_reader,
-                    ),
-                    max_chars_per_fact=plan.max_chars_per_fact,
-                    validation_requirements=plan.validation_requirements,
-                    temporal_scope=plan.temporal_scope,
-                    query_kind=plan.query_kind,
-                    target_domains=plan.target_domains,
-                    recall_contract_id=plan.recall_contract_id,
-                    primary_memory_layer=plan.primary_memory_layer,
-                    expected_memory_layers=plan.expected_memory_layers,
-                    min_collection_items=plan.min_collection_items,
-                    answer_obligations=plan.answer_obligations,
-                    fail_soft=True,
+                # Semantic model import/load can take tens of seconds on the
+                # first request.  Keep it off the ASGI event loop so Cortex's
+                # bounded relational-retrieval timeout can actually fire and
+                # the conversation can continue with canonical short-term and
+                # relationship context while the local model warms in a worker.
+                embed_task = asyncio.to_thread(
+                    _embed_surface_memory_query,
+                    plan.query,
                 )
-                packet = _maybe_retry_surface_memory_recall_with_expanded_scope(
-                    packet=packet,
-                    plan=plan,
-                    recall_service=recall_service,
-                    recall_packet_fn=recall_surface_memory_packet,
-                    request_id=request_id,
-                    query_embedding=query_embedding,
-                    intent_id=_surface_intent_id(intent_draft),
-                    person_id=person_id,
-                    session_id=session_id,
-                    ts_ms=ts_ms,
-                    emotion_tag=emotion_tag,
-                    mood_state=mood_state,
-                    bond_summary=bond_summary,
-                    motive_state=motive_state,
-                    render_target_lang=render_target_lang,
-                    coverage_failed_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
-                )
+                if str(plan.recall_policy or "").strip().upper() == "MAY_RECALL":
+                    optional_budget_ms = max(
+                        25,
+                        min(
+                            2_000,
+                            _coerce_int(
+                                os.environ.get(_OPTIONAL_SEMANTIC_EMBEDDING_BUDGET_ENV),
+                                default=350,
+                            ),
+                        ),
+                    )
+                    try:
+                        query_embedding, embedding_model_id = await asyncio.wait_for(
+                            embed_task,
+                            timeout=float(optional_budget_ms) / 1_000.0,
+                        )
+                    except asyncio.TimeoutError:
+                        # Optional relationship/emotion context must never turn
+                        # a cold local embedding import into several seconds of
+                        # dead air.  The worker thread may finish warming the
+                        # process while this turn continues with canonical Life
+                        # and short-term relationship context.
+                        packet = SurfaceMemoryRecallPacket(
+                            query=plan.query,
+                            degraded=True,
+                            reason_code="SURFACE_OPTIONAL_SEMANTIC_WARMING",
+                            trace={
+                                "skipped": False,
+                                "plan": plan.as_dict(),
+                                "recall_decision": build_surface_memory_recall_decision_trace(
+                                    plan,
+                                    invoked=False,
+                                ),
+                                "route_count": 0,
+                                "optional_embedding_budget_ms": optional_budget_ms,
+                            },
+                        )
+                else:
+                    query_embedding, embedding_model_id = await embed_task
+                if packet is None:
+                    recall_invoked = True
+                    recall_service = (
+                        recall_service_factory or _build_surface_memory_recall_service
+                    )()
+                    packet = recall_surface_memory_packet(
+                        recall_service=recall_service,
+                        request_id=request_id,
+                        query=plan.query,
+                        query_embedding=query_embedding,
+                        intent_id=_surface_intent_id(intent_draft),
+                        person_id=person_id,
+                        session_id=session_id,
+                        ts_ms=ts_ms,
+                        emotion_filter=emotion_tag,
+                        mood_state=mood_state,
+                        bond_summary=bond_summary,
+                        motive_state=motive_state,
+                        render_target_lang=render_target_lang,
+                        target_store_ids=plan.target_store_ids,
+                        time_lookback_days=plan.time_lookback_days,
+                        max_facts=plan.max_facts,
+                        distortion_bias=_surface_memory_distortion_bias(
+                            person_id,
+                            life_snapshot_reader=life_snapshot_reader,
+                        ),
+                        max_chars_per_fact=plan.max_chars_per_fact,
+                        validation_requirements=plan.validation_requirements,
+                        temporal_scope=plan.temporal_scope,
+                        query_kind=plan.query_kind,
+                        target_domains=plan.target_domains,
+                        recall_contract_id=plan.recall_contract_id,
+                        primary_memory_layer=plan.primary_memory_layer,
+                        expected_memory_layers=plan.expected_memory_layers,
+                        min_collection_items=plan.min_collection_items,
+                        answer_obligations=plan.answer_obligations,
+                        fail_soft=True,
+                    )
+                    packet = _maybe_retry_surface_memory_recall_with_expanded_scope(
+                        packet=packet,
+                        plan=plan,
+                        recall_service=recall_service,
+                        recall_packet_fn=recall_surface_memory_packet,
+                        request_id=request_id,
+                        query_embedding=query_embedding,
+                        intent_id=_surface_intent_id(intent_draft),
+                        person_id=person_id,
+                        session_id=session_id,
+                        ts_ms=ts_ms,
+                        emotion_tag=emotion_tag,
+                        mood_state=mood_state,
+                        bond_summary=bond_summary,
+                        motive_state=motive_state,
+                        render_target_lang=render_target_lang,
+                        coverage_failed_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
+                    )
             packet = replace(
                 packet,
                 trace={
                     **dict(packet.trace or {}),
                     "skipped": False,
                     "plan": plan.as_dict(),
-                    "recall_decision": build_surface_memory_recall_decision_trace(plan, invoked=True),
+                    "recall_decision": build_surface_memory_recall_decision_trace(
+                        plan,
+                        invoked=recall_invoked,
+                    ),
                 },
             )
         packet = await _maybe_apply_lightnovel_deep_review(
@@ -1445,15 +1500,20 @@ def _build_surface_memory_recall_service(
             score_weight=0.85,
             node_selector=node_id,
         ),
-        "surface_bond": RecallRouteConfig(
+    }
+    # The canonical Host no longer supplies a Bond graph.  Leaving this route
+    # registered with a ``None`` client would still advertise legacy score/
+    # stage evidence to downstream planners.  Explicit offline compatibility
+    # roots may pass a client during the rollback window.
+    if bond_neo4j_client is not None:
+        routes["surface_bond"] = RecallRouteConfig(
             route_id="surface_bond",
             store_id="neo4j_bond",
             collection="neo4j_bond",
             top_k=4,
             score_weight=0.95,
             node_selector=node_id,
-        ),
-    }
+        )
     return RecallFusionServiceContract(
         ledger=ledger,
         life_memory_store=life_memory_store,

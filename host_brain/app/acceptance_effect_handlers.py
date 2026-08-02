@@ -28,9 +28,14 @@ from host_brain.app.accepted_operation_reconciliation_handler import (
 from host_brain.app.accepted_effect_reconciliation_handler import (
     register_accepted_effect_reconciliation_handler,
 )
+from host_brain.app.accepted_preference_signal_handler import (
+    _AcceptedPreferenceSignalHandler,
+)
 from host_brain.app.accepted_edge_embodiment_handler import (
     AcceptedEdgeEmbodimentEnqueueHandler,
 )
+from host_brain.app.accepted_companion_expression_handler import AcceptedCompanionExpressionEnqueueHandler
+from host_brain.digital_life.companion_expression_acceptance import COMPANION_EXPRESSION_ENQUEUE_EFFECT
 from host_brain.app.accepted_sys_mode_receipt import (
     sys_mode_transition_handler_receipt_ref,
 )
@@ -50,7 +55,6 @@ from host_brain.app.life_projection_barrier import (
 )
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedLifeConversationProjectionV1,
-    AcceptedPreferenceSignalV1,
 )
 from host_brain.digital_life.application_boundary import submit_life_command
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
@@ -172,11 +176,13 @@ def build_production_acceptance_effect_handlers(
     if embodiment_runtime_provider is not None:
         if not callable(embodiment_runtime_provider):
             raise TypeError("embodiment_runtime_provider must be callable")
-        handlers["edge.embodiment_enqueue"] = (
-            AcceptedEdgeEmbodimentEnqueueHandler(
-                runtime_provider=embodiment_runtime_provider,
+        handlers["edge.embodiment_enqueue"] = AcceptedEdgeEmbodimentEnqueueHandler(runtime_provider=embodiment_runtime_provider)
+        if life_receipt_reader_provider is not None:
+            if not callable(life_receipt_reader_provider):
+                raise TypeError("life_receipt_reader_provider must be callable")
+            handlers[COMPANION_EXPRESSION_ENQUEUE_EFFECT] = AcceptedCompanionExpressionEnqueueHandler(
+                runtime_provider=embodiment_runtime_provider, life_receipt_reader_provider=life_receipt_reader_provider
             )
-        )
     if scheduler_operation_handler is not None:
         if not callable(scheduler_operation_handler):
             raise TypeError("scheduler_operation_handler must be callable")
@@ -224,7 +230,6 @@ def build_production_acceptance_effect_handlers(
     )
     return handlers
 
-
 class _AcceptedConversationUserTurnHandler:
     """Commit one visible turn and reconcile only from canonical SQLite rows."""
 
@@ -265,107 +270,6 @@ class _AcceptedConversationUserTurnHandler:
             turn_reader=self._turn_reader,
             event_reader=self._event_reader,
         )
-
-
-class _AcceptedPreferenceSignalHandler:
-    """Commit one extraction evaluation and reopen its immutable receipt."""
-
-    def __init__(self, *, preference_store: Any | None) -> None:
-        self._preference_store = preference_store
-
-    def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        request = AcceptedPreferenceSignalV1.from_mapping(
-            _without_terminal_preview_proof(payload)
-        )
-        store = self._preference_store
-        repository = getattr(store, "repository", None)
-        if store is None or repository is None:
-            raise AcceptanceEffectOutcomeUnknown(
-                "preference signal has no app-local canonical store"
-            )
-        try:
-            repository.assert_signal_effect_schema_ready(
-                require_catalog=repository.db_path != ":memory:"
-            )
-            from host_brain.app.recommendation_feedback import (  # noqa: PLC0415
-                derive_user_preference_signal_events,
-            )
-            from host_brain.app.user_preference_store import (  # noqa: PLC0415
-                build_profile_from_events,
-            )
-
-            enabled = getattr(store, "signal_writes_enabled", None)
-            if not isinstance(enabled, bool):
-                raise RuntimeError("PREFERENCE_PRIVACY_GATE_UNAVAILABLE")
-            metadata = request.conversation.metadata
-            events = []
-            if enabled:
-                events = derive_user_preference_signal_events(
-                    session_id=request.conversation.session_id,
-                    person_id=request.conversation.person_id,
-                    user_message=request.conversation.content,
-                    payload={
-                        **metadata,
-                        "request_id": request.conversation.request_id,
-                        "session_id": request.conversation.session_id,
-                        "conversation_id": (
-                            metadata.get("conversation_id")
-                            or metadata.get("reply_target")
-                            or request.conversation.session_id
-                        ),
-                        "platform": (
-                            metadata.get("platform")
-                            or metadata.get("reply_channel")
-                            or ""
-                        ),
-                    },
-                    store=store,
-                    ts_ms=request.conversation.ts_ms,
-                    operation_id=request.operation_id,
-                )
-            receipt = repository.commit_signal_effect(
-                operation_id=request.operation_id,
-                payload_sha256=request.payload_sha256,
-                events=[store.event_to_dict(event) for event in events],
-                profile_builder=build_profile_from_events,
-                completed_at_ms=request.conversation.ts_ms,
-                evaluation_disposition=None if enabled else "DISABLED",
-            )
-            return _validated_preference_effect_receipt(request, receipt)
-        except Exception as exc:
-            try:
-                return self.reconcile(payload)
-            except AcceptanceEffectOutcomeUnknown as reconciliation:
-                raise AcceptanceEffectOutcomeUnknown(
-                    "preference signal invocation has no exact durable attribution "
-                    f"after {_opaque_failure(exc)}; {reconciliation.detail}"
-                ) from exc
-
-    def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        request = AcceptedPreferenceSignalV1.from_mapping(
-            _without_terminal_preview_proof(payload)
-        )
-        repository = getattr(self._preference_store, "repository", None)
-        get_receipt = getattr(repository, "get_signal_effect_receipt", None)
-        if not callable(get_receipt):
-            raise AcceptanceEffectOutcomeUnknown(
-                "preference signal reconciliation requires an app-local read port"
-            )
-        try:
-            repository.assert_signal_effect_schema_ready(
-                require_catalog=repository.db_path != ":memory:"
-            )
-            receipt = get_receipt(request.operation_id)
-            if not isinstance(receipt, Mapping):
-                raise LookupError("exact preference effect receipt is absent")
-            return _validated_preference_effect_receipt(request, receipt)
-        except AcceptanceEffectOutcomeUnknown:
-            raise
-        except Exception as exc:
-            raise AcceptanceEffectOutcomeUnknown(
-                "preference signal requires exact read-only SQLite reconciliation: "
-                f"{_opaque_failure(exc)}"
-            ) from exc
 
 
 class _AcceptedLifeConversationHandler:
@@ -465,7 +369,6 @@ class _AcceptedLifeConversationHandler:
         if not isinstance(projected, Mapping):
             raise TypeError("Life conversation receipt is not mapping-compatible")
         return _validated_life_conversation_receipt(request, projected)
-
 
 class _AcceptedLifeForegroundHandler:
     """Submit one Life command and require its exact local projection receipts."""
@@ -581,6 +484,20 @@ class _AcceptedLifeForegroundHandler:
         )
         reply_channel = str(payload.get("reply_channel") or "").strip()
         reply_target = str(payload.get("reply_target") or "").strip()
+        raw_affective_turn_plan = payload.get("affective_turn_plan")
+        affective_turn_plan = (
+            dict(raw_affective_turn_plan)
+            if isinstance(raw_affective_turn_plan, Mapping)
+            else {}
+        )
+        raw_affect_repair_target = affective_turn_plan.get(
+            "affect_repair_target"
+        )
+        affect_repair_target = (
+            dict(raw_affect_repair_target)
+            if isinstance(raw_affect_repair_target, Mapping)
+            else {}
+        )
         return {
             "workspace_id": str(payload.get("workspace_id") or "workspace::default").strip(),
             "relationship_subject_id": str(value.get("person_id") or "").strip(),
@@ -599,6 +516,7 @@ class _AcceptedLifeForegroundHandler:
                 if reply_channel and reply_target
                 else None
             ),
+            "affect_repair_target": affect_repair_target or None,
         }
 
     def _provision_relationship_episode(
@@ -901,36 +819,6 @@ def _without_terminal_preview_proof(payload: Mapping[str, Any]) -> dict[str, Any
     value = dict(payload or {})
     value.pop("_action_preview_terminal_proof", None)
     return value
-
-
-def _validated_preference_effect_receipt(
-    request: AcceptedPreferenceSignalV1,
-    receipt: Mapping[str, Any],
-) -> dict[str, Any]:
-    projected = dict(receipt)
-    disposition = str(projected.get("disposition") or "")
-    event_bindings = projected.get("event_bindings")
-    profile_receipts = projected.get("profile_receipts")
-    receipt_digest = str(projected.get("receipt_digest") or "")
-    if (
-        projected.get("operation_id") != request.operation_id
-        or projected.get("payload_sha256") != request.payload_sha256
-        or disposition not in {"APPLIED", "NO_SIGNAL", "DISABLED"}
-        or not isinstance(event_bindings, list)
-        or not isinstance(profile_receipts, list)
-        or ((disposition == "APPLIED") != bool(event_bindings))
-        or (disposition == "DISABLED" and profile_receipts)
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", receipt_digest)
-    ):
-        raise RuntimeError("PREFERENCE_EFFECT_DURABLE_RECEIPT_INVALID")
-    return {
-        **projected,
-        "status": disposition,
-        "receipt_ref": _canonical_id_ref(
-            "preference-effect",
-            request.operation_id,
-        ),
-    }
 
 
 def _submit_accepted_life_conversation(

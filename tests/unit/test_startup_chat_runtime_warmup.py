@@ -55,13 +55,12 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
         "host_brain.persona.persona_engine.PersonaEngine.get_instance",
         lambda *args, **kwargs: object(),
     )
-    monkeypatch.setattr(
-        "host_brain.persona.body_sense.get_body_sense_model",
-        lambda: object(),
-    )
-
     status = warmup_chat_runtime_basics(
-        ports=_ports(),
+        ports=_ports(
+            silence_engine=lambda: (_ for _ in ()).throw(
+                AssertionError("canonical startup must not warm legacy silence engine")
+            )
+        ),
         eager_persona=True,
         thalamus_agent_provider=lambda: object(),
     )
@@ -73,6 +72,7 @@ def test_warmup_chat_runtime_basics_reports_ready(monkeypatch) -> None:
     assert "state_write_arbiter=ready" in status
     assert "thalamus=ready" in status
     assert "persona_runtime=ready" in status
+    assert "legacy_silence=retired" in status
 
 
 def test_warmup_chat_runtime_basics_reports_degraded(monkeypatch) -> None:
@@ -101,12 +101,20 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
             "available": True,
         }),
     )
+    def _surface_runtime(*, catalog, base_runtime):  # noqa: ANN001, ARG001
+        runtime_path = str(base_runtime.get("runtime_path") or "")
+        return {
+            **base_runtime,
+            "model_id": (
+                "chat::realtime"
+                if runtime_path == "realtime_companion"
+                else "chat::default"
+            ),
+        }
+
     monkeypatch.setattr(
         "host_brain.app.route_catalog_runtime.resolve_surface_reply_llm_runtime",
-        lambda *, catalog, base_runtime: {
-            **base_runtime,
-            "model_id": "chat::default",
-        },
+        _surface_runtime,
     )
     monkeypatch.setattr(
         "host_brain.app.route_catalog_runtime.resolve_executive_router_llm_runtime",
@@ -128,6 +136,7 @@ def test_warmup_chat_llm_runtime_profiles_reports_ready(monkeypatch) -> None:
     assert status.startswith("OK")
     assert "base=gemini:gemini-2.5-flash-lite" in status
     assert "default=chat::default" in status
+    assert "realtime=chat::realtime" in status
     assert "router=router::ready" in status
     assert "subagent=subagent::ready" in status
 

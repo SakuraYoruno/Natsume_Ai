@@ -30,18 +30,17 @@ class TestBuiltinSkillRegistryM44(unittest.TestCase):
         self.registry = build_builtin_skill_registry()
         self.policy = GovernorTierPolicy()
 
-    def test_registry_contains_four_builtin_skills(self) -> None:
-        """T-TG-BUILTIN-01：build_builtin_skill_registry() 返回包含内置 Skill 的 SkillRegistry（当前 7 个）。"""
+    def test_registry_contains_canonical_builtin_skills(self) -> None:
+        """T-TG-BUILTIN-01：只保留非情感状态查询的 5 个内置 Skill。"""
         names = self.registry.list_skill_names()
         self.assertIn("narrative_only", names)
         self.assertIn("memory_recall", names)
         self.assertIn("noop", names)
         self.assertIn("read_only_status", names)
-        # M44 后新增：emotion_query / bond_query / session_summary
-        self.assertIn("emotion_query", names)
-        self.assertIn("bond_query", names)
         self.assertIn("session_summary", names)
-        self.assertEqual(7, len(names))
+        self.assertNotIn("emotion_query", names)
+        self.assertNotIn("bond_query", names)
+        self.assertEqual(5, len(names))
 
     def test_narrative_only_is_cache_tier(self) -> None:
         """T-TG-BUILTIN-02：narrative_only 的 risk_level=1，GovernorTierPolicy 映射为 ApprovalTier.CACHE。"""

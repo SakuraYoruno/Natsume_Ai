@@ -323,6 +323,21 @@ def test_durable_intake_kill_switch_keeps_worker_without_legacy_drain(monkeypatc
     assert server.thread.joined is True
 
 
+def test_gateway_server_uses_explicit_loopback_bind_host(monkeypatch) -> None:
+    _patch_durable_bootstrap(monkeypatch)
+
+    instance = _start_gateway(GatewayConfig(
+        bind_host="127.0.0.1",
+        gateway_port=29000,
+        enabled_platforms=(),
+    ))
+
+    server = _FakeManagedServer.instances[-1]
+    assert server.host == "127.0.0.1"
+    assert server.port == 29000
+    instance.stop()
+
+
 def test_verifier_preflight_fails_before_any_background_component(monkeypatch) -> None:
     _patch_durable_bootstrap(monkeypatch)
     monkeypatch.setattr("edge_client.gateway.adapters.qq_adapter.QQAdapter", _FakeQQAdapter)

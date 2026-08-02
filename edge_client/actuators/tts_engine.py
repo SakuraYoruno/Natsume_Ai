@@ -1,8 +1,8 @@
-"""GPT-SoVITS TTS engine: model management, synthesis, and audio device output.
+"""Edge TTS engine: model management, synthesis, and audio device output.
 
-Provides GPU-resident GPT-SoVITS model lifecycle management with graceful
-degradation when model or GPU is unavailable. Integrates with the
-SpeechPlaybackQueue as a drop-in Synthesizer callback.
+Provides GPU-resident GPT-SoVITS and Style-Bert-VITS2 model lifecycle
+management with graceful degradation when model or GPU is unavailable.
+Integrates with the SpeechPlaybackQueue as a drop-in Synthesizer callback.
 """
 
 from __future__ import annotations
@@ -47,6 +47,7 @@ DEFAULT_DEVICE = "cuda"
 DEFAULT_SAMPLE_RATE = 32000
 DEFAULT_MAX_TEXT_LENGTH = 500
 DEFAULT_SYNTH_TIMEOUT_S = 30.0
+DEFAULT_TTS_BACKEND = "gpt_sovits"
 _TORCHAUDIO_LOAD_PATCHED = False
 _DLL_DIRECTORY_HANDLES: list[Any] = []
 _DLL_DIRECTORY_PATHS: set[str] = set()
@@ -69,6 +70,7 @@ class _TtsReference:
     prompt_text: str = ""
     prompt_lang: str | None = None
     samples: int = 0
+    aux_audio_paths: tuple[str, ...] = ()
 
 
 class TtsState(str, Enum):
@@ -83,7 +85,9 @@ class TtsState(str, Enum):
 
 @dataclass
 class TtsConfig:
-    """GPT-SoVITS engine configuration."""
+    """Edge TTS engine configuration."""
+
+    backend: str = DEFAULT_TTS_BACKEND
     model_path: str = DEFAULT_MODEL_PATH
     device: str = DEFAULT_DEVICE
     sample_rate: int = DEFAULT_SAMPLE_RATE
@@ -96,6 +100,7 @@ class TtsConfig:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "backend": self.backend,
             "model_path": self.model_path,
             "device": self.device,
             "sample_rate": self.sample_rate,
@@ -105,6 +110,18 @@ class TtsConfig:
             "voice_bank_path": self.voice_bank_path,
             "language": self.language,
         }
+
+
+def _normalize_tts_backend(value: Any) -> str | None:
+    normalized = str(value or DEFAULT_TTS_BACKEND).strip().lower().replace("-", "_")
+    aliases = {
+        "gpt_sovits": "gpt_sovits",
+        "gptsovits": "gpt_sovits",
+        "style_bert_vits2": "style_bert_vits2",
+        "stylebertvits2": "style_bert_vits2",
+        "sbv2": "style_bert_vits2",
+    }
+    return aliases.get(normalized)
 
 
 @dataclass
@@ -293,6 +310,7 @@ def _resolve_tts_speed_factor(
 
 def _resolve_tts_energy_factor(
     *,
+    requested_energy: float | None = None,
     emotion_intensity: float | None,
     emotion_tag: str | None = None,
 ) -> float:
@@ -307,6 +325,15 @@ def _resolve_tts_energy_factor(
         min_value=min_energy,
         max_value=max_energy,
     )
+    if requested_energy is not None:
+        try:
+            normalized = _clamp_float(float(requested_energy), 0.0, 1.0)
+        except (TypeError, ValueError):
+            normalized = 0.5
+        # ExpressionPlan energy is a 0..1 expressive axis, while the backend
+        # consumes an amplitude multiplier.  Keep 0.5 neutral and bounded.
+        requested_factor = 1.0 + (normalized - 0.5) * 0.56
+        return round(_clamp_float(requested_factor, min_energy, max_energy), 3)
     resolved = default_energy
     if profile is not _NEUTRAL_PROSODY and _emotion_prosody_enabled():
         resolved = _resolve_emotion_axis_value(
@@ -318,6 +345,79 @@ def _resolve_tts_energy_factor(
             emotion_intensity=emotion_intensity,
         )
     return round(_clamp_float(resolved, min_energy, max_energy), 3)
+
+
+def _apply_synthesized_prosody(
+    audio_data: Any,
+    sample_rate: int,
+    *,
+    energy_factor: float | None,
+    pitch_semitones: float | None,
+) -> Any:
+    """Apply controls GPT-SoVITS does not natively expose.
+
+    The model supports speed directly.  Energy and pitch are applied after
+    synthesis so Host ExpressionPlan values no longer disappear at the Edge.
+    Pitch uses librosa when present in the voice-model runtime; energy remains
+    available with only numpy.
+    """
+
+    import numpy as np
+
+    if hasattr(audio_data, "detach"):
+        audio_data = audio_data.detach()
+    if hasattr(audio_data, "cpu"):
+        audio_data = audio_data.cpu()
+    if hasattr(audio_data, "numpy"):
+        audio_data = audio_data.numpy()
+    raw_audio = np.asarray(audio_data)
+    if raw_audio.size == 0:
+        return raw_audio.astype(np.float32, copy=False)
+
+    # GPT-SoVITS TTS.run() returns signed PCM (normally int16), while older
+    # adapters can return normalized floats.  Scale PCM before applying pitch
+    # or energy; otherwise the later limiter turns most samples into plateaus.
+    if np.issubdtype(raw_audio.dtype, np.integer):
+        info = np.iinfo(raw_audio.dtype)
+        pcm_scale = float(max(abs(info.min), abs(info.max)))
+        audio = raw_audio.astype(np.float32) / pcm_scale
+    else:
+        audio = raw_audio.astype(np.float32, copy=False)
+        finite_peak = (
+            float(np.max(np.abs(audio[np.isfinite(audio)])))
+            if np.any(np.isfinite(audio))
+            else 0.0
+        )
+        if finite_peak > 8.0:
+            pcm_scale = 32768.0 if finite_peak <= 32768.0 * 1.25 else finite_peak
+            audio = audio / pcm_scale
+    audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0).astype(
+        np.float32,
+        copy=False,
+    )
+
+    pitch = _clamp_float(float(pitch_semitones or 0.0), -2.0, 2.0)
+    if abs(pitch) >= 0.01:
+        try:
+            import librosa
+        except ImportError:
+            logger.warning("TTS pitch requested but librosa is unavailable; preserving unshifted audio")
+        else:
+            audio = np.asarray(
+                librosa.effects.pitch_shift(audio, sr=max(1, int(sample_rate)), n_steps=pitch),
+                dtype=np.float32,
+            )
+
+    gain = float(energy_factor if energy_factor is not None else 1.0)
+    if abs(gain - 1.0) >= 0.001:
+        audio = (audio * gain).astype(np.float32, copy=False)
+
+    # Peak-normalize only when necessary.  Hard clipping here audibly destroys
+    # the model's dynamics and was the source of the previous "炸音" output.
+    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
+    if peak > 0.98:
+        audio = (audio * (0.98 / peak)).astype(np.float32, copy=False)
+    return audio.astype(np.float32, copy=False)
 
 
 _EXPRESSIVE_PUNCT_RE = re.compile(r"([^，,。.!！?？；;：:\n…]+)([，,。.!！?？；;：:\n…]*)")
@@ -753,10 +853,11 @@ def build_barge_in_event(
 # ---------------------------------------------------------------------------
 
 class SoVITSModelManager:
-    """Manages GPT-SoVITS model lifecycle with GPU-resident priority.
+    """Manages an Edge voice model lifecycle with GPU-resident priority.
 
-    Lazy-loads the model on first use. Handles GPU OOM by reporting error
-    (no CPU fallback for SoVITS as it requires GPU for quality).
+    The historical class name remains API-compatible.  Backend selection is
+    explicit in ``TtsConfig``; Style-Bert-VITS2 always runs in its isolated
+    persistent worker instead of importing a second ML stack into Edge.
     Thread-safe singleton pattern per instance.
     """
 
@@ -783,7 +884,7 @@ class SoVITSModelManager:
     def startup(self) -> None:
         result = self.load()
         if not result.success:
-            logger.warning("GPT-SoVITS startup degraded: %s", result.detail)
+            logger.warning("TTS startup degraded: %s", result.detail)
 
     def shutdown(self) -> None:
         self.unload()
@@ -800,9 +901,18 @@ class SoVITSModelManager:
 
             self._state = TtsState.LOADING
 
-            # 尝试加载 GPT-SoVITS 推理引擎
+            backend = _normalize_tts_backend(self._config.backend)
+            if backend is None:
+                self._state = TtsState.ERROR
+                self._load_error = f"unsupported TTS backend: {self._config.backend}"
+                return TtsSynthResult(
+                    success=False,
+                    reason_code=TTS_MODEL_UNAVAILABLE,
+                    detail=self._load_error,
+                )
+
             try:
-                if _use_persistent_tts_worker():
+                if backend == "style_bert_vits2" or _use_persistent_tts_worker():
                     model = _PersistentProcessSoVITSAdapter(config=self._config)
                     start_detail = model.start()
                     self._model = model
@@ -811,7 +921,8 @@ class SoVITSModelManager:
                     self._state = TtsState.READY
                     self._load_error = None
                     logger.info(
-                        "GPT-SoVITS persistent worker loaded: %s on %s (%s)",
+                        "%s persistent worker loaded: %s on %s (%s)",
+                        backend,
                         self._config.model_path,
                         self._config.device,
                         start_detail,
@@ -835,7 +946,8 @@ class SoVITSModelManager:
                 self._state = TtsState.READY
                 self._load_error = None
                 logger.info(
-                    "GPT-SoVITS model loaded: %s on %s",
+                    "%s model loaded: %s on %s",
+                    backend,
                     self._config.model_path,
                     self._config.device,
                 )
@@ -872,7 +984,7 @@ class SoVITSModelManager:
                     return TtsSynthResult(
                         success=False,
                         reason_code=TTS_GPU_OOM,
-                        detail=f"GPU memory insufficient for GPT-SoVITS: {e}",
+                        detail=f"GPU memory insufficient for TTS backend: {e}",
                     )
                 logger.error("Model load failed: %s", e)
                 return TtsSynthResult(
@@ -908,6 +1020,8 @@ class SoVITSModelManager:
         emotion_tag: str | None = None,
         emotion_intensity: float | None = None,
         speed_factor: float | None = None,
+        energy_level: float | None = None,
+        pitch_semitones: float | None = None,
         voice_profile: str | None = None,
     ) -> TtsSynthResult:
         """Synthesize text to audio using loaded model.
@@ -918,6 +1032,8 @@ class SoVITSModelManager:
             emotion_tag: Emotion tag for prosody control.
             emotion_intensity: 情感强度（0.0~1.0），影响 TTS 语气幅度。缺省为 0.5。
                                超出范围时截断到 [0.0, 1.0]。
+            energy_level: ExpressionPlan energy axis (0.0~1.0).
+            pitch_semitones: Post-synthesis pitch offset in semitones.
             voice_profile: Voice profile override.
         """
         # M26-I：emotion_intensity 范围截断（不拒绝，防止链路中断）
@@ -958,6 +1074,9 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                energy_level=energy_level,
+                pitch_semitones=pitch_semitones,
+                voice_profile=voice_profile,
             )
             processing_time = time.monotonic() - t0
             self._state = TtsState.READY
@@ -1018,7 +1137,7 @@ class SoVITSModelManager:
             self._backend_mode = "inprocess"
         self._cleanup_model_resources(model)
         self._release_gpu_cache()
-        logger.info("GPT-SoVITS model unloaded")
+        logger.info("TTS model unloaded")
 
     def _synthesize_with_recovery(
         self,
@@ -1028,6 +1147,9 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        energy_level: float | None,
+        pitch_semitones: float | None,
+        voice_profile: str | None,
     ) -> tuple[Any, int]:
         try:
             return _synthesize_audio(
@@ -1037,6 +1159,9 @@ class SoVITSModelManager:
                 emotion_tag=emotion_tag,
                 emotion_intensity=emotion_intensity,
                 speed_factor=speed_factor,
+                energy_level=energy_level,
+                pitch_semitones=pitch_semitones,
+                voice_profile=voice_profile,
                 timeout_s=self._config.synth_timeout_s,
             )
         except Exception as exc:
@@ -1058,6 +1183,9 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        energy_level=energy_level,
+                        pitch_semitones=pitch_semitones,
+                        voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
                         detail_prefix="recovered via fresh subprocess after reload failure"
@@ -1074,6 +1202,9 @@ class SoVITSModelManager:
                     emotion_tag=emotion_tag,
                     emotion_intensity=emotion_intensity,
                     speed_factor=speed_factor,
+                    energy_level=energy_level,
+                    pitch_semitones=pitch_semitones,
+                    voice_profile=voice_profile,
                     timeout_s=self._config.synth_timeout_s,
                 )
             except Exception as retry_exc:
@@ -1087,6 +1218,9 @@ class SoVITSModelManager:
                         emotion_tag=emotion_tag,
                         emotion_intensity=emotion_intensity,
                         speed_factor=speed_factor,
+                        energy_level=energy_level,
+                        pitch_semitones=pitch_semitones,
+                        voice_profile=voice_profile,
                     )
                     activation = self._activate_fresh_process_backend(
                         detail_prefix="recovered via fresh subprocess after retry failure"
@@ -1106,6 +1240,12 @@ class SoVITSModelManager:
         return self.load()
 
     def _activate_fresh_process_backend(self, *, detail_prefix: str) -> TtsSynthResult:
+        if _normalize_tts_backend(self._config.backend) != "gpt_sovits":
+            return TtsSynthResult(
+                success=False,
+                reason_code=TTS_MODEL_UNAVAILABLE,
+                detail="fresh subprocess fallback is only available for GPT-SoVITS",
+            )
         if not _allow_tts_subprocess_fallback():
             return TtsSynthResult(
                 success=False,
@@ -1133,6 +1273,9 @@ class SoVITSModelManager:
         emotion_tag: str | None,
         emotion_intensity: float | None,
         speed_factor: float | None,
+        energy_level: float | None,
+        pitch_semitones: float | None,
+        voice_profile: str | None,
     ) -> tuple[Any, int]:
         return _run_tts_fresh_process(
             config=self._config,
@@ -1141,6 +1284,9 @@ class SoVITSModelManager:
             emotion_tag=emotion_tag,
             emotion_intensity=emotion_intensity,
             speed_factor=speed_factor,
+            energy_level=energy_level,
+            pitch_semitones=pitch_semitones,
+            voice_profile=voice_profile,
         )
 
     @staticmethod
@@ -1173,6 +1319,7 @@ class SoVITSModelManager:
         """Return engine health snapshot."""
         return {
             "state": self._state.value,
+            "backend": _normalize_tts_backend(self._config.backend) or self._config.backend,
             "model_path": self._config.model_path,
             "device": self._actual_device,
             "backend_mode": self._backend_mode,
@@ -1183,6 +1330,7 @@ class SoVITSModelManager:
             "last_recovery_detail": self._last_recovery_detail,
             "recovery_count": self._recovery_count,
             "model_artifacts": _summarize_tts_model_artifacts(
+                backend=self._config.backend,
                 model_path=self._config.model_path,
                 voice_bank_path=self._config.voice_bank_path,
             ),
@@ -1572,7 +1720,11 @@ def make_sovits_synthesizer(
     def _synthesize(speak_event: dict[str, Any]) -> dict[str, Any]:
         text = str(speak_event.get("text") or "")
         emotion_tag = str(speak_event.get("emotion_tag") or "")
-        voice_profile = str(speak_event.get("voice_profile") or "default")
+        voice_profile = str(
+            speak_event.get("voice_profile")
+            or speak_event.get("style_note")
+            or "default"
+        )
         lang_hint = str(speak_event.get("lang_hint") or "").strip() or None
         # M26-I：透传 emotion_intensity
         raw_intensity = speak_event.get("emotion_intensity")
@@ -1589,6 +1741,20 @@ def make_sovits_synthesizer(
                 speed_factor = float(raw_speed)
             except (TypeError, ValueError):
                 speed_factor = None
+        raw_energy = speak_event.get("energy")
+        energy_level: float | None = None
+        if raw_energy is not None:
+            try:
+                energy_level = float(raw_energy)
+            except (TypeError, ValueError):
+                energy_level = None
+        raw_pitch = speak_event.get("pitch")
+        pitch_semitones: float | None = None
+        if raw_pitch is not None:
+            try:
+                pitch_semitones = float(raw_pitch)
+            except (TypeError, ValueError):
+                pitch_semitones = None
 
         result = engine.synthesize(
             text,
@@ -1596,6 +1762,8 @@ def make_sovits_synthesizer(
             emotion_tag=emotion_tag or None,
             emotion_intensity=emotion_intensity,
             speed_factor=speed_factor,
+            energy_level=energy_level,
+            pitch_semitones=pitch_semitones,
             voice_profile=voice_profile or None,
         )
 
@@ -1898,11 +2066,17 @@ class _ModernSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
 
         text_lang = self._normalize_language(language or self._default_language)
-        reference = _select_tts_reference(self._reference_bank, emotion_tag=emotion)
+        reference = _select_tts_reference(
+            self._reference_bank,
+            emotion_tag=emotion,
+            voice_profile=voice_profile,
+        )
         if reference is None:
             raise RuntimeError("GPT-SoVITS reference bank is empty.")
         prompt_lang = self._normalize_language(reference.prompt_lang or self._default_language)
@@ -1912,7 +2086,7 @@ class _ModernSoVITSAdapter:
             "text": text,
             "text_lang": text_lang,
             "ref_audio_path": reference.audio_path,
-            "aux_ref_audio_paths": [],
+            "aux_ref_audio_paths": list(reference.aux_audio_paths),
             "prompt_text": prompt_text,
             "prompt_lang": prompt_lang if prompt_text else text_lang,
             "seed": 42,
@@ -1955,8 +2129,14 @@ class _ModernSoVITSAdapter:
         if not chunks:
             raise RuntimeError("GPT-SoVITS produced empty audio.")
 
+        audio = _apply_synthesized_prosody(
+            np.concatenate(chunks),
+            sample_rate,
+            energy_factor=energy_factor,
+            pitch_semitones=pitch_semitones,
+        )
         return {
-            "audio": np.concatenate(chunks),
+            "audio": audio,
             "sample_rate": sample_rate,
         }
 
@@ -1987,6 +2167,8 @@ class _FreshProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         audio, sample_rate = _run_tts_fresh_process(
             config=self._config,
@@ -1998,6 +2180,13 @@ class _FreshProcessSoVITSAdapter:
                 energy_factor=energy_factor,
             ),
             speed_factor=speed_factor,
+            energy_level=(
+                _clamp_float(0.5 + (float(energy_factor) - 1.0) / 0.56, 0.0, 1.0)
+                if energy_factor is not None
+                else None
+            ),
+            pitch_semitones=pitch_semitones,
+            voice_profile=voice_profile,
         )
         return {
             "audio": audio,
@@ -2009,7 +2198,7 @@ class _FreshProcessSoVITSAdapter:
 
 
 class _PersistentProcessSoVITSAdapter:
-    """Persistent GPT-SoVITS worker backed by the model runtime Python."""
+    """Persistent isolated worker backed by the selected model runtime Python."""
 
     def __init__(self, *, config: TtsConfig) -> None:
         self._config = config
@@ -2045,6 +2234,8 @@ class _PersistentProcessSoVITSAdapter:
         emotion: str | None = None,
         speed_factor: float | None = None,
         energy_factor: float | None = None,
+        pitch_semitones: float | None = None,
+        voice_profile: str | None = None,
     ) -> dict[str, Any]:
         import numpy as np
 
@@ -2058,11 +2249,14 @@ class _PersistentProcessSoVITSAdapter:
                 "text": text,
                 "language": language,
                 "emotion_tag": emotion,
+                "voice_profile": voice_profile,
                 "emotion_intensity": _infer_emotion_intensity_from_prosody(
                     speed_factor=speed_factor,
                     energy_factor=energy_factor,
                 ),
                 "speed_factor": speed_factor,
+                "energy_factor": energy_factor,
+                "pitch_semitones": pitch_semitones,
                 "output_path": output_path,
             }
             try:
@@ -2135,10 +2329,14 @@ class _PersistentProcessSoVITSAdapter:
         env["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        backend = _normalize_tts_backend(self._config.backend)
+        if backend is None:
+            raise RuntimeError(f"unsupported TTS backend: {self._config.backend}")
+        worker_name = _resolve_tts_worker_script(backend)
         cmd = [
             _resolve_tts_worker_python(self._config),
             "-u",
-            os.path.join(repo_root, "edge_client", "actuators", "tts_persistent_worker.py"),
+            os.path.join(repo_root, "edge_client", "actuators", worker_name),
             "--model-path",
             str(self._config.model_path),
             "--device",
@@ -2442,6 +2640,15 @@ def _resolve_tts_worker_python(config: TtsConfig) -> str:
     return sys.executable
 
 
+def _resolve_tts_worker_script(backend: str) -> str:
+    normalized = _normalize_tts_backend(backend)
+    if normalized == "style_bert_vits2":
+        return "style_bert_vits2_worker.py"
+    if normalized == "gpt_sovits":
+        return "tts_persistent_worker.py"
+    raise RuntimeError(f"unsupported TTS backend: {backend}")
+
+
 def _infer_emotion_intensity_from_prosody(
     *,
     speed_factor: float | None,
@@ -2466,6 +2673,9 @@ def _run_tts_fresh_process(
     emotion_tag: str | None,
     emotion_intensity: float | None,
     speed_factor: float | None = None,
+    energy_level: float | None = None,
+    pitch_semitones: float | None = None,
+    voice_profile: str | None = None,
 ) -> tuple[Any, int]:
     import numpy as np
 
@@ -2498,10 +2708,16 @@ def _run_tts_fresh_process(
         cmd.extend(["--voice-bank-path", str(config.voice_bank_path)])
     if emotion_tag:
         cmd.extend(["--emotion-tag", str(emotion_tag)])
+    if voice_profile:
+        cmd.extend(["--voice-profile", str(voice_profile)])
     if emotion_intensity is not None:
         cmd.extend(["--emotion-intensity", str(float(emotion_intensity))])
     if speed_factor is not None:
         cmd.extend(["--speed-factor", str(float(speed_factor))])
+    if energy_level is not None:
+        cmd.extend(["--energy-level", str(float(energy_level))])
+    if pitch_semitones is not None:
+        cmd.extend(["--pitch-semitones", str(float(pitch_semitones))])
 
     env = dict(os.environ)
     env["EDGE_TTS_SUBPROCESS_HELPER"] = "1"
@@ -2653,8 +2869,18 @@ def _resolve_modern_weights(model_root: str, *, voice_bank_path: str | None = No
     return t2s_weights_path, vits_weights_path
 
 
-def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | None) -> dict[str, Any]:
+def _summarize_tts_model_artifacts(
+    *,
+    backend: str = DEFAULT_TTS_BACKEND,
+    model_path: str,
+    voice_bank_path: str | None,
+) -> dict[str, Any]:
     model_root = os.path.abspath(model_path)
+    if _normalize_tts_backend(backend) == "style_bert_vits2":
+        return _summarize_style_bert_vits2_artifacts(
+            model_root=model_root,
+            manifest_path=voice_bank_path,
+        )
     summary: dict[str, Any] = {
         "model_root": model_root,
         "manifest": None,
@@ -2698,6 +2924,61 @@ def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | No
     except Exception as exc:
         summary["weights"] = {"error": str(exc)}
 
+    return summary
+
+
+def _summarize_style_bert_vits2_artifacts(
+    *,
+    model_root: str,
+    manifest_path: str | None,
+) -> dict[str, Any]:
+    raw_manifest_path = str(manifest_path or "").strip()
+    path = (
+        os.path.abspath(raw_manifest_path)
+        if raw_manifest_path
+        else os.path.join(model_root, "natsume_style_bert_vits2_manifest.json")
+    )
+    summary: dict[str, Any] = {
+        "model_root": model_root,
+        "manifest": {"path": path, "exists": os.path.isfile(path)},
+        "weights": None,
+    }
+    if not os.path.isfile(path):
+        return summary
+    try:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            manifest = json.load(handle)
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest must be an object")
+
+        asset_root = os.path.dirname(path)
+
+        def _resolved(field: str) -> str:
+            raw = str(manifest.get(field) or "").strip()
+            return raw if os.path.isabs(raw) else os.path.join(asset_root, raw)
+
+        weight = _resolved("model_file")
+        config_path = _resolved("config_file")
+        styles_path = _resolved("style_vectors_file")
+        runtime_style_map = manifest.get("runtime_style_map")
+        summary["manifest"] = {
+            "path": path,
+            "exists": True,
+            "schema_version": manifest.get("schema_version"),
+            "model_id": str(manifest.get("model_id") or "").strip() or None,
+            "voice_language": str(manifest.get("voice_language") or "").strip() or None,
+            "style_count": len(runtime_style_map) if isinstance(runtime_style_map, dict) else 0,
+        }
+        summary["weights"] = {
+            "model": weight,
+            "config": config_path,
+            "style_vectors": styles_path,
+            "model_exists": os.path.isfile(weight),
+            "config_exists": os.path.isfile(config_path),
+            "style_vectors_exist": os.path.isfile(styles_path),
+        }
+    except Exception as exc:
+        summary["manifest"] = {"path": path, "exists": True, "error": str(exc)}
     return summary
 
 
@@ -2860,15 +3141,36 @@ def _load_tts_manifest_references(
         audio_path = os.path.normpath(audio_path)
         if not os.path.isfile(audio_path):
             continue
-        key = _normalize_tts_emotion_key(item.get("emotion_tag")) or "NEUTRAL"
+        voice_style_key = _normalize_tts_emotion_key(item.get("voice_style"))
+        emotion_key = _normalize_tts_emotion_key(item.get("emotion_tag"))
+        if not voice_style_key and not emotion_key:
+            emotion_key = "NEUTRAL"
+        aux_audio_paths: list[str] = []
+        raw_aux = item.get("aux_audio_paths")
+        if isinstance(raw_aux, list):
+            for raw_aux_path in raw_aux[:4]:
+                resolved_aux = str(raw_aux_path or "").strip()
+                if not resolved_aux:
+                    continue
+                resolved_aux = (
+                    resolved_aux
+                    if os.path.isabs(resolved_aux)
+                    else os.path.join(model_root, resolved_aux)
+                )
+                resolved_aux = os.path.normpath(resolved_aux)
+                if os.path.isfile(resolved_aux) and resolved_aux != audio_path:
+                    aux_audio_paths.append(resolved_aux)
         reference = _TtsReference(
             audio_path=audio_path,
             prompt_text=str(item.get("prompt_text") or "").strip(),
             prompt_lang=_normalize_tts_language(str(item.get("prompt_lang") or "")),
+            aux_audio_paths=tuple(aux_audio_paths),
         )
-        out.setdefault(key, reference)
-        if key == "NEUTRAL":
-            out.setdefault("DEFAULT", reference)
+        for key in (voice_style_key, emotion_key):
+            if key:
+                out.setdefault(key, reference)
+                if key == "NEUTRAL":
+                    out.setdefault("DEFAULT", reference)
     return out
 
 
@@ -2881,10 +3183,12 @@ def _select_tts_reference(
     reference_bank: dict[str, _TtsReference],
     *,
     emotion_tag: str | None,
+    voice_profile: str | None = None,
 ) -> _TtsReference | None:
     if not reference_bank:
         return None
-    key = _normalize_tts_emotion_key(emotion_tag)
+    profile_key = _normalize_tts_emotion_key(voice_profile)
+    emotion_key = _normalize_tts_emotion_key(emotion_tag)
     aliases = {
         "COMFORT": "CALM",
         "SOOTHING": "CALM",
@@ -2897,7 +3201,14 @@ def _select_tts_reference(
         "SADNESS": "SAD",
         "EXCITEMENT": "EXCITED",
     }
-    for candidate in (key, aliases.get(key, ""), "NEUTRAL", "DEFAULT"):
+    for candidate in (
+        profile_key,
+        aliases.get(profile_key, ""),
+        emotion_key,
+        aliases.get(emotion_key, ""),
+        "NEUTRAL",
+        "DEFAULT",
+    ):
         if candidate and candidate in reference_bank:
             return reference_bank[candidate]
     return next(iter(reference_bank.values()))
@@ -3025,6 +3336,9 @@ def _synthesize_audio(
     emotion_tag: str | None,
     emotion_intensity: float | None = None,
     speed_factor: float | None = None,
+    energy_level: float | None = None,
+    pitch_semitones: float | None = None,
+    voice_profile: str | None = None,
     timeout_s: float,
 ) -> tuple[Any, int]:
     """Run synthesis on model. Returns (audio_ndarray, sample_rate).
@@ -3043,6 +3357,7 @@ def _synthesize_audio(
         emotion_tag=emotion_tag,
     )
     energy_factor = _resolve_tts_energy_factor(
+        requested_energy=energy_level,
         emotion_intensity=emotion_intensity,
         emotion_tag=emotion_tag,
     )
@@ -3057,6 +3372,8 @@ def _synthesize_audio(
             # M28-S：真正传递 emotion_intensity 映射后的参数
             speed_factor=speed_factor,
             energy_factor=energy_factor,
+            pitch_semitones=pitch_semitones,
+            voice_profile=voice_profile,
         )
     except Exception as exc:
         message = str(exc or "")

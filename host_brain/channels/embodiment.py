@@ -1292,7 +1292,35 @@ def _require_terminal_embodiment_preview(
         and str(authority_context.get("schema_version") or "")
         == "Natsume.action_preview.acceptance_effect_authority_request.v1"
     )
-    if not direct_preview and not acceptance_effect_preview:
+    companion_expression_preview = False
+    if (
+        str(boundary.get("action_kind") or "")
+        == "acceptance-effect.host.companion_expression_enqueue"
+        and isinstance(args, Mapping)
+        and isinstance(authority_context, Mapping)
+        and str(authority_context.get("effect_id") or "").strip()
+        == str(boundary.get("action_scope") or "").strip()
+        and str(authority_context.get("schema_version") or "")
+        == "Natsume.action_preview.acceptance_effect_authority_request.v1"
+        and str(command.grant_ref or "")
+        == str(boundary.get("node_grant_ref") or "").strip()
+    ):
+        # Keep the public enqueue boundary independent from the handler while
+        # still proving that a companion-plan Preview owns this exact command.
+        # The helper is pure; it cannot open an Edge transport or mutate Life.
+        from host_brain.digital_life.companion_expression_acceptance import (  # noqa: PLC0415
+            verify_companion_expression_command,
+        )
+
+        companion_expression_preview = verify_companion_expression_command(
+            payload=dict(args),
+            command=command,
+        )
+    if (
+        not direct_preview
+        and not acceptance_effect_preview
+        and not companion_expression_preview
+    ):
         raise RuntimeError("ACTION_PREVIEW_DRIFT")
     action_preview_service.require_execution(
         event_id=str(action_preview_event_id),

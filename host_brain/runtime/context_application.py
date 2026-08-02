@@ -24,6 +24,10 @@ from .context_contracts import (
     WorldFactV2,
     WorldSnapshotV2,
 )
+from .conversation_scope import (
+    GatewayConversationScopeError,
+    SecureGatewayConversationScopeV1,
+)
 from .production_composition import RuntimeContextComposition
 from .world_observation_application import RuntimeWorldObservationError
 from .world_resolver import WorldResolverError
@@ -333,19 +337,41 @@ class RuntimeContextApplicationService:
         if isinstance(ts_ms, bool) or not isinstance(ts_ms, int) or ts_ms < 0:
             raise RuntimeContextApplicationError("ts_ms must be non-negative")
         authority = _mapping(command_authority)
-        principal = _digest_identifier(
-            "principal",
-            authority.get("principal_id") or person_id or "anonymous",
-        )
-        # ``command_authority`` is assembled by Secure Ingress.  Raw request
-        # bodies never nominate a workspace.  Conversational requests without
-        # a tenant use a stable, server-derived personal workspace.
-        tenant = authority.get("tenant_id") or authority.get("workspace_id")
-        workspace = _digest_identifier(
-            "workspace",
-            f"tenant:{tenant}" if tenant else f"personal:{principal}",
-        )
-        subject = _digest_identifier("subject", person_id or principal)
+        try:
+            secure_gateway_scope = (
+                SecureGatewayConversationScopeV1.from_command_authority(authority)
+            )
+            if secure_gateway_scope is not None:
+                secure_gateway_scope.assert_bound_to_authority(authority)
+        except GatewayConversationScopeError as exc:
+            raise RuntimeContextApplicationError(
+                "Secure Gateway conversation scope is invalid"
+            ) from exc
+        if secure_gateway_scope is not None:
+            # AffectFusion/relationship input and Runtime Context must share
+            # this exact ingress-bound scope.  Re-deriving it here from raw
+            # request fields would reopen the cross-user default-identity gap.
+            if str(person_id or "").strip() != secure_gateway_scope.relationship_subject_id:
+                raise RuntimeContextApplicationError(
+                    "Secure Gateway conversation subject drifted"
+                )
+            principal = secure_gateway_scope.principal_id
+            workspace = secure_gateway_scope.workspace_id
+            subject = secure_gateway_scope.relationship_subject_id
+        else:
+            principal = _digest_identifier(
+                "principal",
+                authority.get("principal_id") or person_id or "anonymous",
+            )
+            # ``command_authority`` is assembled by Secure Ingress.  Raw request
+            # bodies never nominate a workspace.  Conversational requests without
+            # a tenant use a stable, server-derived personal workspace.
+            tenant = authority.get("tenant_id") or authority.get("workspace_id")
+            workspace = _digest_identifier(
+                "workspace",
+                f"tenant:{tenant}" if tenant else f"personal:{principal}",
+            )
+            subject = _digest_identifier("subject", person_id or principal)
         now_ms = int(ts_ms)
         # The raw request body (including desired Scene, constraints, and
         # multimodal activity hints) has no path into World.  Canonical server

@@ -186,6 +186,7 @@ def build_edge_runtime(
     )
 
     tts_cfg = TtsConfig(
+        backend=_as_text(_env_get(env_lookup, "EDGE_TTS_BACKEND"), "gpt_sovits"),
         model_path=_as_text(_env_get(env_lookup, "EDGE_TTS_MODEL_PATH"), "models/gpt_sovits"),
         device=_as_text(_env_get(env_lookup, "EDGE_TTS_DEVICE"), "cuda"),
         sample_rate=_parse_int(
@@ -710,6 +711,7 @@ def bootstrap(
             gw_config = GatewayConfig(
                 host_url=gateway_host_url,
                 hmac_key=config.hmac_shared_key,
+                bind_host=config.rpc_host,
                 enabled_platforms=config.gateway_platforms,
                 wx_db_storage_dir=config.wx_db_storage_dir or "",
                 wx_decrypt_output_dir=config.wx_decrypt_output_dir or "",

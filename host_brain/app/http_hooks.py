@@ -179,8 +179,6 @@ def runtime_lifespan(
     skill_registry_provider: Callable[[], Any] | None = None,
     begin_authority_runtime: Callable[[], Any] | None = None,
     close_authority_runtime: Callable[[], Any] | None = None,
-    begin_bond_runtime: Callable[[], Any] | None = None,
-    close_bond_runtime: Callable[[], Any] | None = None,
     begin_governance_runtime: Callable[[], Any] | None = None,
     close_governance_runtime: Callable[[], Any] | None = None,
     defer_activity_monitor: bool = False,
@@ -192,12 +190,10 @@ def runtime_lifespan(
         logger.info("Natsume AI Host Brain starting up ...")
         authority_runtime_started = False
         governance_runtime_started = False
-        bond_runtime_started = False
 
         def close_started_runtime_owners() -> None:
             first_error: BaseException | None = None
             for started, close_runtime in (
-                (bond_runtime_started, close_bond_runtime),
                 (governance_runtime_started, close_governance_runtime),
                 (authority_runtime_started, close_authority_runtime),
             ):
@@ -217,9 +213,6 @@ def runtime_lifespan(
             if begin_governance_runtime is not None:
                 begin_governance_runtime()
                 governance_runtime_started = True
-            if begin_bond_runtime is not None:
-                begin_bond_runtime()
-                bond_runtime_started = True
             host_lifecycle.begin()
         except Exception:
             close_started_runtime_owners()
@@ -421,9 +414,15 @@ def runtime_lifespan(
                 _edge_health = await probe_edge_rpc_health()
                 _edge_available = bool(_edge_health.get("available", False))
                 _edge_status = str(_edge_health.get("status") or "").strip().upper()
-                if _edge_status == "SKIPPED":
-                    new_module_statuses["edge_rpc"] = f"SKIPPED: {_edge_health.get('detail', 'gateway-only mode')}"
-                    logger.info("Edge RPC 启动探针已跳过: %s", _edge_health.get("detail", ""))
+                if _edge_status in {"SKIPPED", "NOT_TESTED"}:
+                    new_module_statuses["edge_rpc"] = (
+                        "NOT_TESTED: "
+                        f"{_edge_health.get('detail', 'remote Edge not tested')}"
+                    )
+                    logger.info(
+                        "Edge RPC 启动探针未执行（外部验收待定）: %s",
+                        _edge_health.get("detail", ""),
+                    )
                 elif _edge_available:
                     new_module_statuses["edge_rpc"] = f"OK (latency={_edge_health.get('latency_ms', 0)}ms)"
                     logger.info(
@@ -570,7 +569,7 @@ def runtime_lifespan(
             degraded_modules = [k for k, v in new_module_statuses.items() if _startup_status_is_degraded(v)]
             if degraded_modules:
                 logger.warning(
-                    "⚠️ 以下新模块启动时处于降级状态，请检查配置: %s",
+                    "以下新模块启动时处于降级状态，请检查配置: %s",
                     degraded_modules,
                     extra={"degraded_modules": degraded_modules},
                 )
@@ -584,15 +583,10 @@ def runtime_lifespan(
             except Exception as _vts_loop_exc:
                 logger.warning("VTS 主事件循环注册失败（降级）: %s", _vts_loop_exc)
 
-            # [ANSAgent] 注册主事件循环到 ANSAgent，使 Timer 线程可跨线程发布 Tribe 事件
-            # Phase 1：ANSAgent.emit_from_thread() 依赖此循环引用
-            try:
-                tribe_runtime_agent_ports.require_ans_agent().set_event_loop(
-                    asyncio.get_running_loop()
-                )
-                logger.info("ANSAgent 主事件循环已注册")
-            except Exception as _ans_loop_exc:
-                logger.warning("ANSAgent 主事件循环注册失败（降级）: %s", _ans_loop_exc)
+            new_module_statuses["ans_legacy_event_loop"] = (
+                "RETIRED: canonical Life owns affect; Host does not bind an "
+                "ANS cross-thread event loop"
+            )
 
             # [ModeTransition] ActivityMonitor 启动：游戏进程检测 + 空闲检测 + 早间唤醒
             if defer_activity_monitor:

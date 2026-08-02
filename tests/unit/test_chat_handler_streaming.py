@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from types import SimpleNamespace
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,6 +17,7 @@ from host_brain.app.emotion_context import (
 from host_brain.app.chat_handler import handle_chat
 import host_brain.app.chat_handler as chat_handler_module
 from host_brain.app.schemas import ChatRequest
+from host_brain.app.settings.chat import get_chat_settings
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 
 
@@ -85,13 +86,11 @@ def _input_runtime_ports(
     intent_engine: Any,
     *,
     thalamus_agent: Any | None = None,
-    ans_agent: Any | None = None,
 ) -> InputRuntimeApplicationPorts:
     def _unused(*_args: Any, **_kwargs: Any) -> Any:
         return None
 
     resolved_thalamus = thalamus_agent or _FakeThalamusAgent()
-    resolved_ans = ans_agent or SimpleNamespace(emit_task_success=_unused)
     emotion_runtime = HostEmotionRuntime()
 
     def resolve_emotion_with_app_runtime(**kwargs: Any) -> dict[str, Any]:
@@ -125,7 +124,6 @@ def _input_runtime_ports(
         render_quick_gateway_progress_text=lambda **_kwargs: "",
         render_quick_gateway_realign_text=lambda **_kwargs: "",
         get_thalamus_agent=lambda: resolved_thalamus,
-        get_ans_agent=lambda: resolved_ans,
     )
 
 
@@ -161,23 +159,13 @@ async def test_handle_chat_requires_typed_input_runtime_ports_after_mode_gate() 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("field_name", "expected_code"),
-    [
-        ("get_thalamus_agent", "HOST_INPUT_THALAMUS_AGENT_NOT_INJECTED"),
-        ("get_ans_agent", "HOST_INPUT_ANS_AGENT_NOT_INJECTED"),
-    ],
-)
-async def test_handle_chat_fails_closed_when_typed_tribe_agent_is_missing(
-    field_name: str,
-    expected_code: str,
-) -> None:
+async def test_handle_chat_fails_closed_when_thalamus_agent_is_missing() -> None:
     input_ports = replace(
         _input_runtime_ports(_FakeIntentEngine()),
-        **{field_name: None},
+        get_thalamus_agent=None,
     )
 
-    with pytest.raises(RuntimeError, match=expected_code):
+    with pytest.raises(RuntimeError, match="HOST_INPUT_THALAMUS_AGENT_NOT_INJECTED"):
         await handle_chat(
             request_body=ChatRequest(message="聊天入口必须拒绝缺失的 Tribe 运行时端口。"),
             request=_build_request(),
@@ -192,6 +180,10 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
     fake_thalamus = _FakeThalamusAgent()
     governed_command_application = object()
     cortex_kwargs: dict[str, Any] = {}
+    input_ports = _input_runtime_ports(
+        _FakeIntentEngine(),
+        thalamus_agent=fake_thalamus,
+    )
 
     async def _fake_cortex_orchestrator_sse_generator(**kwargs):  # noqa: ANN003
         cortex_kwargs.update(kwargs)
@@ -205,10 +197,7 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
         metrics=metrics,
         governed_command_application=governed_command_application,
         hard_state_provider=lambda: {"sys_mode": "normal"},
-        input_runtime_ports=_input_runtime_ports(
-            _FakeIntentEngine(),
-            thalamus_agent=fake_thalamus,
-        ),
+        input_runtime_ports=input_ports,
         cortex_orchestrator_sse_generator=(
             _fake_cortex_orchestrator_sse_generator
         ),
@@ -216,6 +205,7 @@ async def test_handle_chat_streams_presence_before_thalamus_classification(monke
 
     assert fake_thalamus.calls == 0
     assert metrics.chat_calls == 1
+    assert not hasattr(input_ports, "get_ans_agent")
 
     body_iter = response.body_iterator
     first_chunk = await body_iter.__anext__()
@@ -460,14 +450,25 @@ async def test_handle_chat_normalizes_thalamus_memory_recall_without_surface_con
     assert raw_intent["_surface_route_override"]["reason_code"] == "THALAMUS_RULE_MEMORY_RECALL"
 
 
-def test_chat_settings_are_typed_and_resolved_without_module_reload(monkeypatch) -> None:
+def test_chat_settings_cannot_reenable_direct_mateengine_output_authority(monkeypatch) -> None:
     monkeypatch.setenv("HOST_ACTION_ARBITER_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_ENABLED", "true")
+    monkeypatch.setenv("HOST_MATEENGINE_STATE_CUES_ENABLED", "true")
     monkeypatch.setenv("HOST_MATEENGINE_CHAT_BUBBLE_MAX_CHARS", "64")
     monkeypatch.setenv("HOST_MATEENGINE_MEMORY_RECALL_CUE_TEXT", "正在找记忆")
 
-    assert chat_handler_module._action_arbiter_enabled() is True
+    # The legacy environment keys remain parseable for the rollback window,
+    # but cannot reopen a Chat→MateEngine side effect without a frozen,
+    # accepted ExpressionPlan.
+    assert get_chat_settings().action_arbiter_enabled is True
+    assert get_chat_settings().mateengine_chat_bubble_enabled is True
+    assert get_chat_settings().mateengine_state_cues_enabled is True
+    assert chat_handler_module._mateengine_chat_bubble_enabled() is False
+    assert chat_handler_module._mateengine_state_cues_enabled() is False
     assert chat_handler_module._mateengine_bubble_text_limit() == 64
     assert chat_handler_module._mateengine_state_cue_text("memory_recall") == "正在找记忆"
+    source = Path(chat_handler_module.__file__).read_text(encoding="utf-8")
+    assert "queue_mateengine_command" not in source
 
 
 @pytest.mark.asyncio

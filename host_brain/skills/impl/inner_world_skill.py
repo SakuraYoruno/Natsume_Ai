@@ -143,6 +143,15 @@ def _inner_world_memory_event_key(*, user_id: str, event_ts: int, note: str) -> 
     return f"{user_id}:inner_world:{int(event_ts)}:{digest}"
 
 
+def _uses_canonical_affective_life(limbic: Any) -> bool:
+    """Return the app-local authority mode without reviving a legacy fallback."""
+
+    probe = getattr(limbic, "uses_canonical_affective_life", None)
+    if not callable(probe):
+        return False
+    return bool(probe())
+
+
 def _execute_inner_world_tick(
     args: dict[str, Any],
     context: dict[str, Any] | None = None,
@@ -166,6 +175,14 @@ def _execute_inner_world_tick(
 
     limbic = get_limbic_agent()
     try:
+        uses_canonical_affective_life = _uses_canonical_affective_life(limbic)
+    except Exception:
+        return {
+            "status": "SKIPPED",
+            "user_id": user_id,
+            "reason_code": "CANONICAL_AFFECTIVE_LIFE_SCOPE_UNAVAILABLE",
+        }
+    try:
         result = dict(limbic.tick_inner_world(person_id=user_id, emit_inner_stream=emit_inner_stream) or {})
     except TypeError:
         result = dict(limbic.tick_inner_world(person_id=user_id) or {})
@@ -173,6 +190,22 @@ def _execute_inner_world_tick(
     result.setdefault("user_id", user_id)
     result.setdefault("tick_kind", ("monologue" if emit_inner_stream else "numeric"))
     result.setdefault("skill_name", skill_name)
+    if uses_canonical_affective_life:
+        # The canonical tick is a bounded Life projection.  The legacy
+        # continuation below records volatile EventBus state, can route an
+        # unscoped evolution event, and can persist an inner monologue as raw
+        # episodic text.  Do not turn this read-only projection into another
+        # affect, relationship, or Persona authority.
+        result["authority"] = "CANONICAL_LIFE_JOURNAL"
+        result["legacy_side_effects_suppressed"] = True
+        result["suppressed_effects"] = [
+            "tribe_signal",
+            "default_mode_tick",
+            "legacy_evolution_event",
+            "background_inner_world_memory",
+            "ans_event_bus",
+        ]
+        return result
     payload = {
         "user_id": user_id,
         "status": str(result.get("status") or "OK"),
@@ -338,6 +371,26 @@ def execute_inner_world_session_end(
     from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
     user_id = _resolve_user_id(args, context)
+    limbic = get_limbic_agent()
+    try:
+        uses_canonical_affective_life = _uses_canonical_affective_life(limbic)
+    except Exception:
+        return {
+            "status": "SKIPPED",
+            "user_id": user_id,
+            "reason_code": "CANONICAL_AFFECTIVE_LIFE_SCOPE_UNAVAILABLE",
+        }
+    if uses_canonical_affective_life:
+        # The former session-end path accepted caller-provided VAD and topics
+        # then mutated a legacy inner-world/body model.  Canonical relation
+        # aftereffects are written by accepted-chat flow instead, so this
+        # compatibility endpoint must not create a second session writer.
+        return {
+            "status": "RETIRED",
+            "user_id": user_id,
+            "reason_code": "LEGACY_INNER_WORLD_SESSION_END_RETIRED",
+            "inner_world_state": {},
+        }
     try:
         valence = float((args or {}).get("valence") or 0.0)
     except (TypeError, ValueError):
@@ -353,7 +406,6 @@ def execute_inner_world_session_end(
         mood_baseline = None
     pending_topics = _normalize_topics((args or {}).get("pending_topics"))
 
-    limbic = get_limbic_agent()
     inner_world_state = dict(
         limbic.on_session_end(
             person_id=user_id,

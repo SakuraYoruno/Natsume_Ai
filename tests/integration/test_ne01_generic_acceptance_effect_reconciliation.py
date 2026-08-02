@@ -48,11 +48,7 @@ def _agent_runtime_ports(
         resolve_surface_reply_llm_runtime=lambda **kwargs: dict(
             kwargs.get("base_runtime") or {}
         ),
-        resolve_state_arbiter_bond_fact=_empty_async,
-        apply_surface_emotion_bond_flow=lambda **_kwargs: {},
         build_conversation_experience_read_pack=lambda **_kwargs: {},
-        drive_stream_vts_emotion=_empty_async,
-        resolve_tts_route=lambda **_kwargs: None,
         conversation_history=lambda: None,
         life_memory_service=lambda: None,
         audit_ledger=lambda: None,

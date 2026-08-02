@@ -70,10 +70,6 @@ def _instantiate_builtin_provider(provider_path: str):
         from host_brain.skills.frontend_registry import FrontendSkillProvider
 
         return FrontendSkillProvider()
-    if provider_path == "host_brain.skills.emotion_registry:EmotionSkillProvider":
-        from host_brain.skills.emotion_registry import EmotionSkillProvider
-
-        return EmotionSkillProvider()
     if provider_path == "host_brain.skills.scheduler_registry:SchedulerSkillProvider":
         from host_brain.skills.scheduler_registry import SchedulerSkillProvider
 
@@ -105,7 +101,6 @@ BUILTIN_SKILL_PROVIDER_SPECS: tuple[SkillProviderSpec, ...] = (
     SkillProviderSpec("HOST_SKILL_MEMORY_ENABLED", "host_brain.skills.memory_registry:MemorySkillProvider", "Memory Skills", "memory_search / memory_store / memory_preference_extract / memory_consolidate / memory_forget"),
     SkillProviderSpec("HOST_SKILL_REPO_ENABLED", "host_brain.skills.repo_registry:RepoSkillProvider", "Repo Doctor Skills", "repo_health_scan / test_failure_triage"),
     SkillProviderSpec("HOST_SKILL_FRONTEND_ENABLED", "host_brain.skills.frontend_registry:FrontendSkillProvider", "Frontend Audit Skills", "frontend_route_audit / frontend_component_value_audit"),
-    SkillProviderSpec("HOST_SKILL_EMOTION_ENABLED", "host_brain.skills.emotion_registry:EmotionSkillProvider", "Emotion Skills", "emotion_update / bond_score_update / emotion_get / bond_score_get"),
     SkillProviderSpec("HOST_SKILL_SCHEDULER_ENABLED", "host_brain.skills.scheduler_registry:SchedulerSkillProvider", "Scheduler Skills", "scheduler_add / scheduler_cancel / scheduler_list"),
     SkillProviderSpec("HOST_SKILL_SYSTEM_ENABLED", "host_brain.skills.system_registry:SystemSkillProvider", "System Skills", "system_info / system_resource_snapshot / process_resource_top / resource_manager_status / resource_release / process_list / process_kill / network_status / open_app"),
     SkillProviderSpec("HOST_SKILL_TOKEN_USAGE_ENABLED", "host_brain.skills.token_usage_registry:TokenUsageSkillProvider", "Token Usage Skills", "llm_token_usage_report"),

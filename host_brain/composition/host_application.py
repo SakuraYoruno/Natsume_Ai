@@ -19,10 +19,6 @@ from host_brain.composition.host_owned_runtime import (
     build_host_graph_runtime,
     build_host_routing_matrix,
 )
-from host_brain.composition.host_bond_runtime import (
-    HostBondRuntimeOwner,
-    build_host_bond_client,
-)
 from host_brain.composition.host_governance_runtime import (
     HostGovernanceRuntimeOwner,
 )
@@ -36,7 +32,7 @@ from host_brain.memory.memory_worth_evaluator import MemoryWorthEvaluator
 from host_brain.persistence.skill_lifecycle_v2_repository import (
     SQLiteSkillLifecycleV2Repository,
 )
-from host_brain.persona.emotional_silence import EmotionalSilenceEngine
+from host_brain.persona.emotional_silence import RetiredEmotionalSilenceEngine
 from host_brain.skills.lifecycle_registry import LifecycleBoundSkillRegistry
 
 
@@ -79,14 +75,11 @@ class HostApplicationPorts:
     memory_worth_evaluator: ServiceProvider
     security_immune_agent: ServiceProvider
     token_service: ServiceProvider
-    bond_dynamics_writer: ServiceProvider
     capability_forge_service: ServiceProvider
     capability_gap_telemetry: ServiceProvider
     capability_scorecard_provider: ServiceProvider
     begin_authority_runtime: Callable[[], None]
     close_authority_runtime: Callable[[], None]
-    begin_bond_runtime: Callable[[], None]
-    close_bond_runtime: Callable[[], None]
     begin_governance_runtime: Callable[[], None]
     close_governance_runtime: Callable[[], None]
     publish_memory_service_container: MemoryContainerAction
@@ -99,14 +92,11 @@ class HostApplicationPorts:
             "memory_worth_evaluator",
             "security_immune_agent",
             "token_service",
-            "bond_dynamics_writer",
             "capability_forge_service",
             "capability_gap_telemetry",
             "capability_scorecard_provider",
             "begin_authority_runtime",
             "close_authority_runtime",
-            "begin_bond_runtime",
-            "close_bond_runtime",
             "begin_governance_runtime",
             "close_governance_runtime",
             "publish_memory_service_container",
@@ -148,7 +138,9 @@ def build_production_host_application_ports(
     )
     ledger_provider = authority_runtime_owner.require_ledger
     memory_service_publication = HostMemoryServicePublication()
-    silence_engine = EmotionalSilenceEngine()
+    # Keep the rollback-window port explicit without recreating the old
+    # process-local mutable response-posture engine in a production Host.
+    silence_engine = RetiredEmotionalSilenceEngine()
     milestone_tracker = MilestoneTracker()
     multimodal_processor = MultimodalProcessor()
     tts_context_router = TtsContextRouter()
@@ -212,16 +204,6 @@ def build_production_host_application_ports(
             routing_matrix_factory=process_application_ports.routing_matrix_factory,
             ledger_provider=ledger_provider,
         )
-    )
-    bond_runtime_owner = HostBondRuntimeOwner(
-        ledger_provider=ledger_provider,
-        stage_engine_factory=process_application_ports.bond_stage_engine_factory,
-        dynamics_writer_factory=None,
-        update_queue_factory=None,
-        client_factory=build_host_bond_client,
-        # Digital Life owns production relationship mutation.  This Host owner
-        # keeps only legacy read projections alive during the rollback window.
-        legacy_write_authority_enabled=False,
     )
     evolution_runtime_owner = HostEvolutionRuntimeOwner(
         persistence_db_path_provider=(
@@ -291,7 +273,6 @@ def build_production_host_application_ports(
             life_memory_store=(
                 authority_runtime_owner.require_life_memory_store
             ),
-            bond_update_queue=bond_runtime_owner.require_update_queue,
             life_snapshot_reader=(
                 process_application_ports.life_snapshot_reader
             ),
@@ -302,8 +283,9 @@ def build_production_host_application_ports(
             emotion_timeline=(
                 memory_runtime_owner.require_emotion_timeline
             ),
-            bond_stage_engine=bond_runtime_owner.require_stage_engine,
-            bond_neo4j_client=bond_runtime_owner.require_client,
+            # Agent Runtime recall and Host routes must not re-open the legacy
+            # Neo4j Bond graph in a canonical Digital Life Host.
+            bond_neo4j_client=None,
             shared_memory_index=shared_memory_index,
             milestone_tracker=_app_local_provider(milestone_tracker),
             prompt_registry=authority_runtime_owner.require_prompt_registry,
@@ -334,7 +316,6 @@ def build_production_host_application_ports(
         memory_worth_evaluator=_app_local_provider(memory_worth_evaluator),
         security_immune_agent=security_immune_agent,
         token_service=governance_runtime_owner.require_token_service,
-        bond_dynamics_writer=bond_runtime_owner.require_writer,
         capability_forge_service=capability_forge_service,
         capability_gap_telemetry=capability_gap_telemetry,
         capability_scorecard_provider=(
@@ -342,8 +323,6 @@ def build_production_host_application_ports(
         ),
         begin_authority_runtime=authority_runtime_owner.begin,
         close_authority_runtime=authority_runtime_owner.close,
-        begin_bond_runtime=bond_runtime_owner.begin,
-        close_bond_runtime=bond_runtime_owner.close,
         begin_governance_runtime=governance_runtime_owner.begin,
         close_governance_runtime=governance_runtime_owner.close,
         publish_memory_service_container=memory_service_publication.publish,

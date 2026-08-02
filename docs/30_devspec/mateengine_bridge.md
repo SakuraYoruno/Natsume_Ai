@@ -3,7 +3,27 @@
 
 # MateEngine bridge
 
-Status: v1 local bridge.
+状态：历史 MateEngine 协议参考；生产 Host 直接写接口已退役。
+
+## 当前 authority 边界（DL-06）
+
+本文件后续的 UDP、文本和动作格式保留为 Edge/bridge 协议参考，**不再是 Host HTTP 写 authority**。当前生产
+Host 的边界如下：
+
+- `GET /v1/mateengine/capabilities`：只读能力目录。
+- `GET /v1/mateengine/health`：只读 Host outbox projection；它不会联系 Edge、不会创建 command，且在没有
+  Edge receipt 时明确返回 `REMOTE_EDGE_UNVERIFIED` 和 `physical_effect_verified=false`。
+- `POST /v1/mateengine/action`、`/signal`、`/say`：统一返回
+  `410 MATEENGINE_DIRECT_COMMAND_RETIRED`，不解析为设备 command。
+- Input Runtime 的 `ReplyEnvelope.performance` callback 与 Gateway 同步 voice adapter：统一返回
+  `RETIRED`，不解析 embodiment runtime、不创建 command/outbox、不调用 TTS、不联系 Edge、也不发送平台语音。
+- Gateway 的 “route started 即播语音” scheduler、资格 gate 与模板已删除，不会再产生一个无 Preview、无 receipt 的
+  后台 voice task。
+- 唯一可写路径是已接受的 `ExpressionPlanV1` 经受治理的 TaskGraph、Action Preview 与 Host durable outbox，随后由
+  Edge 独占执行并返回可核验 receipt；Host 入队从不等于实体设备完成。
+
+远端 Edge 当前在另一台电脑，本波没有启动或连接。下面的历史 probe 只能用于该 Edge/bridge 自身的隔离调试，不能
+绕过上述 Host authority 或作为三模态验收证据。
 
 MateEngine is currently the preferred desktop pet runtime for the local Windows desktop. Natsume Host should treat it as a presentation surface, not as the source of truth for memory, dialogue policy, or personality.
 
@@ -17,9 +37,7 @@ The Host-side MateSignal client is:
 
 `host_brain/channels/mateengine.py`
 
-The Host MateSignal route is:
-
-`POST /v1/mateengine/signal`
+历史 Host MateSignal route `POST /v1/mateengine/signal` 已退役；它现在返回 `410`。
 
 The local probe is:
 
@@ -59,9 +77,7 @@ The wire payload still goes to MateEngine UDP port `32145`:
 }
 ```
 
-The Host route is:
-
-`POST /v1/mateengine/say`
+历史 Host text route `POST /v1/mateengine/say` 已退役；它现在返回 `410`。
 
 The local probe is:
 
@@ -194,27 +210,29 @@ The next useful bridge layer should expose:
 
 Host remains responsible for deciding when and why an event happens. MateEngine remains responsible for rendering the desktop body.
 
-### 本机桌宠与 Edge/VTS 情绪镜像隔离
+### 本机桌宠与 Edge/VTS 表达边界
 
-Host 侧 MateEngine 桌宠现在优先由聊天生命周期状态驱动，例如 `focus -> speak -> home`。为避免 Edge/VTS 表情解析的异步结果在对话结束后覆盖本机桌宠最终状态，`HOST_MATEENGINE_VTS_EMOTION_MIRROR_ENABLED` 默认关闭。
+`/v1/chat` 不再以聊天生命周期的 `focus -> speak -> home`、最终文本或 `reply_envelope.performance`
+直接驱动 MateEngine。那类 callback 没有冻结的 `ExpressionPlanV1`、同步编号或 Acceptance Preview，且缺失
+标签时曾可能伪造 `NEUTRAL`；它已被硬退役。遗留 `HOST_MATEENGINE_*` 配置键仅为回滚窗口保持可解析，不能
+重新打开 Chat→MateEngine 写 authority。
 
-如确实需要把 VTS 情绪解析结果同步给本机 MateEngine，可显式设置：
+Gateway 的同步语音与 Input Runtime 的 ReplyEnvelope 表演 adapter 也不能把文字回包当作 Voice/Avatar 的写授权。
+它们不再“先尝试入队、再由 Preview 拒绝”，而是以 `RETIRED` 无副作用结果结束；真正的声音、表情和动作必须从同轮
+accepted `ExpressionPlanV1` 的 `LifeDeliveryTransport` receipt 链启动。
 
-```powershell
-$env:HOST_MATEENGINE_VTS_EMOTION_MIRROR_ENABLED="1"
-```
-
-### 回复表现层情绪驱动本机说话状态
-
-本机 MateEngine 桌宠的 `speak` 阶段现在从 `/v1/chat` 的 `reply_envelope.performance` / `audit.natsume_emotion_tag` 中提取本轮回复情绪，并作为 `emotion_tag` / `intensity` 发送给 MateEngine。这样桌宠说话时的表情来源是本轮 Natsume 输出本身，而不是 Edge/VTS 的异步表情镜像。
+面向陪伴的桌宠/Avatar 表达必须由同轮 accepted `ExpressionPlanV1` 经 Task Acceptance 写入 Host durable
+outbox；Host admission 仍不等于设备播放或动作完成。设备调试也必须经受治理的 Operator/TaskGraph command，
+不得被聊天回调、模型输出、关系/情绪标签或历史直连 HTTP API 自动调用。
 
 ### 桌宠动作验证标准
 
 验证本机桌宠控制时，不能只看命令流水或脸部 blendshape。当前可验证的动作层证据包括 MateEngine 窗口位移：bridge 默认 `MATEENGINE_WINDOW_MOTION_MAX_OFFSET_X=260`、`MATEENGINE_WINDOW_MOTION_MAX_OFFSET_Y=180`，用于让 `happy`、`focus`、`surprised` 等状态在截图中产生肉眼可见的位置差异。
 
-### 连续动作编排入口
+### 连续动作编排协议（历史格式）
 
-Host 侧 `/v1/mateengine/action` 支持 `gesture` / `animation` / `animate`。这些动作会被转换为 bridge 的 `motion_sequence` 命令，由 bridge 按步骤移动 MateEngine 窗口，形成当前可验证的连续桌宠动作。
+`gesture` / `animation` / `animate` 的 `motion_sequence` 格式仍可由受治理的 Edge command 使用；Host 侧
+`/v1/mateengine/action` 已退役，不能再把 HTTP 调用转换为 bridge 命令。
 
 当前内置动作：
 
@@ -225,13 +243,14 @@ Host 侧 `/v1/mateengine/action` 支持 `gesture` / `animation` / `animate`。�
 - `peek` / `listen`：探身式动作。
 - `surprised` / `interrupt`：惊讶弹起并轻微左右摆。
 
-该入口是动作层的稳定抽象：当前底层用窗口位移实现可见连续动作；后续如果 MateEngine 插件提供原生骨骼/动画 API，可以在 bridge 的 `motion_sequence` 或新增 native action 中替换实现，而 Host 调用方不需要改协议。
+该协议是动作层的历史抽象：当前底层用窗口位移实现可见连续动作；后续如果 MateEngine 插件提供原生骨骼/动画 API，可以在 Edge 的 `motion_sequence` 或新增 native action 中替换实现，但仍须保留 TaskGraph/Preview/outbox/receipt 边界。
 
-`motion_sequence` 在 bridge 中异步执行：Host HTTP 调用只负责排队并立即返回，bridge 后台线程逐步执行窗口运动。执行完成后可在 `/health.last_motion_sequence` 查看最近一次动作结果。
+`motion_sequence` 在 bridge 中异步执行；只有 Edge receipt 才能说明结果，Host 不再通过 HTTP 直连排队，也不能把 Host outbox receipt 写成设备成功。
 
 ### 生命周期/情绪自动触发 gesture
 
-Host MateEngine 通道会在现有 `state` / `speak` / `emote` / `touch` 动作后自动追加短 `motion_sequence`，默认开启：
+受治理的 Edge command 可在已批准的 `state` / `speak` / `emote` / `touch` 动作后追加短 `motion_sequence`；它不是
+Host 自动调用、也不能由旧 HTTP route 默认开启：
 
 ```powershell
 $env:HOST_MATEENGINE_AUTO_GESTURES_ENABLED="1"

@@ -99,7 +99,15 @@ class TestEnvReadinessReportToolContract(unittest.TestCase):
             self.assertEqual(S_ENV_READY, report["stage"])
             self.assertEqual("dev", report["env"])
             self.assertEqual(9, report["node_count"])
-            self.assertIn(report["readiness_status"], {"READY", "DEGRADED", "FAILED"})
+            self.assertIn(
+                report["readiness_status"],
+                {
+                    "READY",
+                    "DEGRADED",
+                    "FAILED",
+                    "ACCEPTANCE_PENDING_EXTERNAL",
+                },
+            )
             self.assertIn("dependency_matrix", report)
             self.assertIn("dependency_summary", report)
             self.assertIn("graph_runtime", report)

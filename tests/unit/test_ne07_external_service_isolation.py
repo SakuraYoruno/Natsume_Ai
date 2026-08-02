@@ -103,6 +103,9 @@ def test_host_stack_scripts_accept_an_isolated_runtime_root() -> None:
     host = sources["start_host_side.ps1"]
     assert "RuntimeRoot = $RuntimeRoot" in host
     assert 'RuntimeRoot = (Join-Path $RuntimeRoot "monitor_proxy")' in host
+    assert '-DefaultValue (Join-Path $RuntimeRoot "audit.sqlite3")' in host
+    assert '$envValues["NATSUME_AUDIT_DB"] = $auditDbPath' in host
+    assert '"--db-path", $auditDbPath' in host
     assert "if ($ForceRestart.IsPresent -and -not $runtimeRootWasExplicit)" in host
     restart_stop = host.index("if ($ForceRestart.IsPresent) {", host.index(
         'Set-ObjectProperty -Target $localServices -Name "external_services_ready"'
@@ -115,6 +118,28 @@ def test_host_stack_scripts_accept_an_isolated_runtime_root() -> None:
     assert "Get-ListeningPid -ProbePort $obsBindPort" in restart_source
     stop_host = sources["stop_host_side.ps1"]
     assert "if (-not $runtimeRootWasExplicit)" in stop_host
+
+
+def test_detached_host_uses_a_separate_runtime_secret_file() -> None:
+    source = START_HOST.read_text(encoding="utf-8")
+
+    assert '[string]$SecretEnvFile = ""' in source
+    assert "HOST_RUNTIME_SECRET_ENV_FILE_NOT_FOUND" in source
+    assert "HOST_RUNTIME_SECRET_ENV_FILE_MUST_BE_SEPARATE" in source
+    assert 'set ""HOST_RUNTIME_SECRET_ENV_FILE=$runtimeSecretEnvFile""' in source
+    assert "runtime_secret_env_configured = [bool]$runtimeSecretEnvFile" in source
+    assert "Get-Content -LiteralPath $runtimeSecretEnvFile" not in source
+    assert "Read-EnvFile -Path $runtimeSecretEnvFile" not in source
+
+
+def test_host_passes_resolved_obs_endpoint_to_detached_child() -> None:
+    source = START_HOST.read_text(encoding="utf-8")
+    obs_args_start = source.index("$obsArgs = @{")
+    obs_args_end = source.index("}", obs_args_start)
+    obs_args = source[obs_args_start:obs_args_end]
+
+    assert "BindHost = $obsBindHost" in obs_args
+    assert "Port = $obsBindPort" in obs_args
 
 
 def test_runtime_snapshot_excludes_secrets_but_keeps_safe_refs(

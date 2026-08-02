@@ -283,7 +283,6 @@ def test_host_app_factory_forwards_the_read_ports_to_the_router_registry(
         get_ledger=lambda: None,
         get_tool_broker=lambda: None,
         get_tool_catalog=lambda: None,
-        get_bond_engine=lambda: None,
         chat_endpoint=lambda _body, _request: Response(),
         edge_events_endpoint=lambda _body: None,
         root_endpoint=lambda: Response(),

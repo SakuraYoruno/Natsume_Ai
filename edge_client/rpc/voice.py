@@ -274,6 +274,12 @@ class VoiceRpcContract:
                 pitch = max(-2.0, min(2.0, float(payload.get("pitch"))))
             except (TypeError, ValueError):
                 pitch = None
+        energy: float | None = None
+        if payload.get("energy") is not None:
+            try:
+                energy = max(0.0, min(1.0, float(payload.get("energy"))))
+            except (TypeError, ValueError):
+                energy = None
         event = {
             "request_id": request_id,
             "session_id": session_id,
@@ -296,6 +302,8 @@ class VoiceRpcContract:
             event["speed"] = speed
         if pitch is not None:
             event["pitch"] = pitch
+        if energy is not None:
+            event["energy"] = energy
         if payload.get("style_note"):
             event["style_note"] = str(payload.get("style_note") or "").strip()
         return self._accept(

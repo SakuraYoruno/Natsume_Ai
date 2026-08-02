@@ -62,7 +62,6 @@ def test_chat_immune_gate_uses_an_explicit_host_composed_agent_port() -> None:
 def test_tribe_runtime_ports_fail_closed_when_chat_immune_agent_is_missing() -> None:
     ports = TribeRuntimeAgentPorts(
         get_thalamus_agent=object,
-        get_ans_agent=object,
     )
 
     with pytest.raises(RuntimeError, match="HOST_TRIBE_IMMUNE_AGENT_NOT_INJECTED"):

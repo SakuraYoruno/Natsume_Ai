@@ -5,7 +5,6 @@ from .cortex_dispatch import _maybe_realign_gateway_pipeline, _run_cortex_orches
 from .gateway_delivery import _deliver_gateway_reply
 from .multimodal_progress import (
     _maybe_schedule_gateway_immediate_ack,
-    _maybe_schedule_gateway_route_started_voice_ack,
     _run_gateway_proactive_progress_push,
     _should_start_gateway_progress_push,
     _stop_progress_push_task,
@@ -158,19 +157,6 @@ async def _dispatch_to_graph_worker(
         _logger.warning("[%s] thalamus intent draft build degraded before input dispatch: %s", request_id, intent_exc)
         thalamus_intent_draft = None
 
-    if source_upper == "GATEWAY":
-        try:
-            _maybe_schedule_gateway_route_started_voice_ack(
-                request_id=request_id,
-                session_id=session_id,
-                source=source_upper,
-                payload=payload,
-                route_type=str((thalamus_intent_draft or {}).get("route") or "").strip().lower(),
-                target_id=str((thalamus_intent_draft or {}).get("target_id") or "").strip(),
-                ledger=ledger,
-            )
-        except Exception as route_ack_exc:
-            _logger.debug("[%s] gateway route-started ack intent draft failed: %s", request_id, route_ack_exc)
     if source_upper == "GATEWAY":
         should_push, push_reason = _should_start_gateway_progress_push(
             source=source_upper,

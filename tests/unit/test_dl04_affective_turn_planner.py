@@ -84,6 +84,58 @@ def test_user_sadness_does_not_mirror_into_natsume_self_affect() -> None:
     assert any("不要把用户观察到的情绪直接说成七海自己的情绪" in item for item in guidance.must_not_do)
 
 
+@pytest.mark.parametrize(
+    ("task_mode", "expected_style"),
+    [
+        ("lover_presence", "ROMANTIC_TENDER"),
+        ("ambiguous_affection", "SHY_AFFECTION"),
+        ("jealousy_low_pressure", "FLIRTING"),
+        ("miss_you", "LONGING"),
+        ("lover_low_energy", "QUIET_INTIMACY"),
+    ],
+)
+def test_romantic_delivery_styles_do_not_become_self_emotions(
+    task_mode: str,
+    expected_style: str,
+) -> None:
+    guidance = build_affective_turn_guidance(
+        emotion_context=_context(),
+        request_id=f"request-{task_mode}",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        task_mode=task_mode,
+        created_at_ms=1_900_000_000_000,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.self_emotion_tag == "CALM"
+    assert guidance.plan.expression_plan.voice_style == expected_style
+    assert all(expected_style not in item for item in guidance.facts)
+    assert len(guidance.style_anchor) >= 2
+
+
+def test_romantic_scene_does_not_mask_natsume_hurt() -> None:
+    context = _context()
+    context["affective_life"]["self_affect"]["components"] = [
+        {"emotion": "HURT", "intensity": 0.58}
+    ]
+
+    guidance = build_affective_turn_guidance(
+        emotion_context=context,
+        request_id="request-romantic-hurt",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        task_mode="lover_presence",
+        created_at_ms=1_900_000_000_000,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.self_emotion_tag == "SAD"
+    assert guidance.plan.expression_plan.voice_style == "CONTAINED_HURT"
+
+
 def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     guidance = _guidance(conflict=True, repair_required=True)
 
@@ -92,6 +144,36 @@ def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     assert guidance.plan.candidate_count == 2
     assert guidance.plan.companion_act.kind == "REPAIR"
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
+
+
+def test_contained_jealousy_keeps_choice_with_the_user_across_expression_plan() -> None:
+    context = _context()
+    context["affective_life"]["self_affect"] = {
+        "self_id": "natsume_ai",
+        "relationship_subject_id": "person-a",
+        "revision": 18,
+        "components": [{"emotion": "JEALOUSY", "intensity": 0.28}],
+        "last_regulation": {
+            "regulation_id": "regulation-jealousy",
+            "mode": "CONTAIN",
+        },
+    }
+    guidance = build_affective_turn_guidance(
+        emotion_context=context,
+        request_id="request-jealousy",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        created_at_ms=1_900_000_000_000,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.self_emotion_tag == "THINKING"
+    assert guidance.plan.companion_act.kind == "CONTAINED_JEALOUSY"
+    assert guidance.plan.expression_plan.voice_style == "CONTAINED_JEALOUSY"
+    assert guidance.plan.expression_plan.avatar_expression == "CONTAINED_JEALOUSY"
+    assert any("把选择权完整留给对方" in item for item in guidance.facts)
+    assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
 
 
 def test_same_canonical_hand_off_builds_same_plan_identity() -> None:

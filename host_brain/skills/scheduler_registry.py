@@ -16,7 +16,7 @@ _VALID_TRIGGER_TYPES = frozenset({"cron", "interval", "once", "idle", "event"})
 _VALID_TASK_TYPES = frozenset({
     "diary_writer", "dream_generator",
     "notify_desktop", "notify_tts_speak", "notify_schedule_reminder",
-    "focus_mode", "memory_store", "emotion_update",
+    "focus_mode", "memory_store",
     "custom",
 })
 

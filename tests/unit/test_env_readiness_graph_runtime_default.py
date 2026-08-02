@@ -37,7 +37,7 @@ def _edge_env() -> dict[str, str]:
     }
 
 
-def test_graph_runtime_missing_defaults_to_skipped_without_forcing_degraded() -> None:
+def test_graph_runtime_missing_stays_skipped_without_hiding_unprobed_nodes() -> None:
     nodes, expected_count = _load_node_inventory()
     report = build_env_readiness_report(
         env="dev",
@@ -53,8 +53,9 @@ def test_graph_runtime_missing_defaults_to_skipped_without_forcing_degraded() ->
     assert report["graph_runtime"]["status"] == "SKIPPED"
     graph_row = next(row for row in report["dependency_matrix"] if row["component_id"] == "graph_runtime")
     assert graph_row["available"] is True
-    assert report["readiness_status"] == "READY"
-    assert report["reason_code"] is None
+    assert report["readiness_status"] == "ACCEPTANCE_PENDING_EXTERNAL"
+    assert report["reason_code"] == "ACCEPTANCE_PENDING_EXTERNAL"
+    assert report["node_deployment"]["summary"]["node_not_tested"] == expected_count
 
 
 def test_graph_runtime_failed_still_forces_failed_readiness() -> None:

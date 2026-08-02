@@ -18,10 +18,6 @@ from host_brain.capability_plane.production_composition import (
 )
 from host_brain.integrations.graph_governed_tool_node import GovernedToolNode
 from host_brain.tools.contracts import ToolSpec
-from host_brain.app.handlers.emotion_agent_handler import (
-    EMOTION_AGENT_GOVERNED_OUTPUT_REQUIRED,
-    emotion_agent_handler,
-)
 
 
 class _ToolThenFinishGateway:
@@ -71,7 +67,7 @@ def test_legacy_react_tool_spec_is_metadata_only_and_handler_never_runs() -> Non
     gateway = _ToolThenFinishGateway(spec.tool_id)
 
     result = run_react_loop(
-        agent_id="emotion_agent",
+        agent_id="surface_reply",
         user_input="inspect",
         tools=[spec],
         gateway=gateway,
@@ -93,32 +89,6 @@ def test_legacy_react_tool_spec_is_metadata_only_and_handler_never_runs() -> Non
         REACT_TOOL_GOVERNED_ADMISSION_REQUIRED
     )
     assert result.steps[0].observation["side_effects_executed"] is False
-
-
-def test_emotion_handler_does_not_publish_artifact_after_tool_proposal() -> None:
-    gateway = _ToolThenFinishGateway("search_knowledge")
-
-    result = emotion_agent_handler(
-        {
-            "request_id": "request-emotion-proposal-only",
-            "user_input": "look up private history",
-            "emotion_context": {"emotion_tag": "NEUTRAL"},
-        },
-        context={
-            "request_id": "request-emotion-proposal-only",
-            "gateway": gateway,
-        },
-    )
-
-    assert gateway.calls == 1
-    assert result.get("agent_artifacts") in (None, {})
-    trace = result["emotion_agent_trace"]
-    assert trace["status"] == "DEGRADED"
-    assert trace["reason_code"] == EMOTION_AGENT_GOVERNED_OUTPUT_REQUIRED
-    assert trace["stopped_reason"] == "TOOL_GOVERNED_ADMISSION_REQUIRED"
-    assert trace["artifact_ref"] is None
-    assert trace["side_effects_executed"] is False
-    assert "recommended_emotion_tag" not in trace
 
 
 def test_retired_graph_node_leaves_real_sqlite_capability_journal_empty_after_restart(
@@ -156,12 +126,16 @@ def test_retired_graph_node_leaves_real_sqlite_capability_journal_empty_after_re
 def test_react_metadata_and_raw_dispatcher_expose_no_callback() -> None:
     assert all(
         spec.executor is None
-        for agent_id in ("intent_agent", "retrieval_agent", "judge_agent", "emotion_agent")
+        for agent_id in ("intent_agent", "retrieval_agent", "judge_agent")
         for spec in get_tools_for_agent(agent_id, allow_side_effects=True)
     )
     rejected = execute_tool("search_knowledge", {"query": "private"})
     assert rejected["reason_code"] == REACT_TOOL_GOVERNED_ADMISSION_REQUIRED
     assert rejected["side_effects_executed"] is False
+
+
+def test_retired_emotion_agent_exposes_no_react_metadata() -> None:
+    assert get_tools_for_agent("emotion_agent", allow_side_effects=True) == []
 
 
 def test_production_sources_contain_no_nested_react_dispatch_authority() -> None:

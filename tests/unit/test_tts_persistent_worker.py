@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+import ast
+import json
+from pathlib import Path
+
+import pytest
+import numpy as np
+
+from edge_client.actuators import tts_persistent_worker as worker
+
+
+def test_worker_applies_expression_energy_without_application_imports() -> None:
+    audio = np.full(3200, 0.25, dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        audio,
+        32000,
+        energy_factor=0.8,
+        pitch_semitones=None,
+    )
+
+    assert float(np.max(np.abs(rendered))) == pytest.approx(0.2, abs=1e-6)
+
+
+def test_worker_normalizes_gpt_sovits_int16_pcm_before_expression_gain() -> None:
+    pcm = np.array([-32768, -16384, 0, 16384, 32767], dtype=np.int16)
+
+    rendered = worker._apply_synthesized_prosody(
+        pcm,
+        32000,
+        energy_factor=0.8,
+        pitch_semitones=None,
+    )
+
+    assert rendered.dtype == np.float32
+    assert rendered.tolist() == pytest.approx([-0.8, -0.4, 0.0, 0.4, 0.7999756], abs=1e-5)
+
+
+def test_worker_normalizes_float_container_with_pcm_scale() -> None:
+    pcm_as_float = np.array([-8192.0, 0.0, 8192.0], dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        pcm_as_float,
+        32000,
+        energy_factor=1.0,
+        pitch_semitones=None,
+    )
+
+    assert rendered.tolist() == pytest.approx([-0.25, 0.0, 0.25], abs=1e-6)
+
+
+def test_worker_peak_normalizes_without_hard_clip_plateau() -> None:
+    audio = np.array([-0.9, -0.5, 0.0, 0.5, 0.9], dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        audio,
+        32000,
+        energy_factor=1.4,
+        pitch_semitones=None,
+    )
+
+    assert float(np.max(np.abs(rendered))) == pytest.approx(0.98, abs=1e-6)
+    assert float(rendered[1]) == pytest.approx(-0.544444, abs=1e-5)
+    assert np.count_nonzero(np.isclose(np.abs(rendered), 0.98, atol=1e-6)) == 2
+
+
+def test_worker_replaces_non_finite_samples_before_delivery() -> None:
+    audio = np.array([np.nan, np.inf, -np.inf, 0.25], dtype=np.float32)
+
+    rendered = worker._apply_synthesized_prosody(
+        audio,
+        32000,
+        energy_factor=1.0,
+        pitch_semitones=None,
+    )
+
+    assert rendered.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.25], abs=1e-6)
+
+
+def test_model_worker_keeps_application_imports_out_of_python39_boundary() -> None:
+    source_path = Path(worker.__file__)
+    tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    imported_roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_roots.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_roots.add(node.module.split(".", 1)[0])
+
+    assert "edge_client" not in imported_roots
+    assert "natsume_contracts" not in imported_roots
+
+
+def test_worker_resolves_manifest_weights_and_emotion_reference(tmp_path: Path) -> None:
+    gpt = tmp_path / "GPT_weights_v2ProPlus" / "voice-e10.ckpt"
+    sovits = tmp_path / "SoVITS_weights_v2ProPlus" / "voice_e8_s2400.pth"
+    reference = tmp_path / "refs" / "playful.wav"
+    romantic = tmp_path / "refs" / "romantic.wav"
+    romantic_aux = tmp_path / "refs" / "romantic-direct.wav"
+    for path in (gpt, sovits, reference, romantic, romantic_aux):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"stub")
+    manifest_path = tmp_path / "voice.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "voice_language": "zh",
+                "weights": {
+                    "t2s": gpt.relative_to(tmp_path).as_posix(),
+                    "vits": sovits.relative_to(tmp_path).as_posix(),
+                },
+                "references": [
+                    {
+                        "emotion_tag": "PLAYFUL",
+                        "audio_path": reference.relative_to(tmp_path).as_posix(),
+                        "prompt_text": "被我抓到了吧。",
+                        "prompt_lang": "zh",
+                    },
+                    {
+                        "voice_style": "ROMANTIC_TENDER",
+                        "emotion_tag": "LOVING",
+                        "audio_path": romantic.relative_to(tmp_path).as_posix(),
+                        "aux_audio_paths": [romantic_aux.relative_to(tmp_path).as_posix()],
+                        "prompt_text": "听着就让人心跳。",
+                        "prompt_lang": "zh",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = worker._load_manifest(model_root=str(tmp_path), voice_bank_path=str(manifest_path))
+    assert worker._resolve_weights(model_root=str(tmp_path), manifest=manifest) == (str(gpt), str(sovits))
+    bank = worker._load_reference_bank(
+        model_root=str(tmp_path),
+        manifest=manifest,
+        ref_audio_path="",
+        ref_text="",
+        language="zh",
+    )
+
+    assert worker._select_reference(bank, "PLAYFUL")["audio_path"] == str(reference)
+    selected = worker._select_reference(
+        bank,
+        "PLAYFUL",
+        voice_profile="ROMANTIC_TENDER",
+    )
+    assert selected["audio_path"] == str(romantic)
+    assert selected["aux_audio_paths"] == [str(romantic_aux)]
+    assert worker._select_reference(bank, "UNKNOWN")["audio_path"] in {
+        str(reference),
+        str(romantic),
+    }
+
+
+def test_worker_refuses_manifest_language_mismatch(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "voice.json"
+    manifest_path.write_text(
+        json.dumps({"voice_language": "ja"}),
+        encoding="utf-8",
+    )
+
+    manifest = worker._load_manifest(model_root=str(tmp_path), voice_bank_path=str(manifest_path))
+
+    with pytest.raises(RuntimeError, match="language mismatch"):
+        worker._validate_manifest_language(manifest=manifest, requested_language="zh-CN")
+
+
+def test_worker_never_falls_back_when_manifest_checkpoint_is_missing(tmp_path: Path) -> None:
+    fallback_gpt = tmp_path / "GPT_weights_v2ProPlus" / "another-project-e10.ckpt"
+    fallback_sovits = tmp_path / "SoVITS_weights_v2ProPlus" / "another-project_e8_s1.pth"
+    for path in (fallback_gpt, fallback_sovits):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"other")
+    manifest = {
+        "weights": {
+            "t2s": "GPT_weights_v2ProPlus/selected-e10.ckpt",
+            "vits": "SoVITS_weights_v2ProPlus/selected_e8_s1.pth",
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="refusing cross-project fallback"):
+        worker._resolve_weights(model_root=str(tmp_path), manifest=manifest)
+
+
+def test_worker_detects_pretrained_gpt_sovits_v4_pair() -> None:
+    assert worker._detect_version(
+        t2s_path="GPT_SoVITS/pretrained_models/s1v3.ckpt",
+        vits_path="GPT_SoVITS/pretrained_models/gsv-v4-pretrained/s2Gv4.pth",
+    ) == "v4"

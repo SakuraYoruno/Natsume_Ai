@@ -18,7 +18,11 @@ class _Reader:
         return dict(self._snapshot)
 
 
-def _ports(reader_provider) -> LifecycleRuntimeApplicationPorts:  # noqa: ANN001
+def _ports(
+    reader_provider,
+    *,
+    require_canonical_life_snapshot: bool = False,
+) -> LifecycleRuntimeApplicationPorts:  # noqa: ANN001
     return LifecycleRuntimeApplicationPorts(
         get_activity_monitor=lambda: None,
         get_endocrine_state=lambda **_kwargs: {"energy": 0.7},
@@ -32,6 +36,7 @@ def _ports(reader_provider) -> LifecycleRuntimeApplicationPorts:  # noqa: ANN001
             build_daily_diary=lambda **_kwargs: {},
         ),
         get_life_snapshot_reader=reader_provider,
+        require_canonical_life_snapshot=require_canonical_life_snapshot,
     )
 
 
@@ -128,6 +133,13 @@ def test_canonical_runtime_snapshot_keeps_user_observation_out_of_natsume_affect
     assert result["slot_status"]["canonical_life"] == "live"
     assert result["slot_status"]["legacy_emotion_timeline"] == "retired"
     assert result["slot_status"]["legacy_bond"] == "retired"
+    assert result["compatibility_projection_usage"] == {
+        "schema_version": "Natsume.lifecycle_runtime.compatibility_usage.v1",
+        "scope": "port_instance",
+        "projection_id": "legacy_runtime_snapshot_assembler",
+        "legacy_runtime_snapshot_read_count": 0,
+        "legacy_runtime_snapshot_fallback_suppressed_count": 0,
+    }
 
 
 def test_composed_canonical_reader_failure_never_falls_back_to_social_brain(
@@ -153,3 +165,44 @@ def test_composed_canonical_reader_failure_never_falls_back_to_social_brain(
     assert result["slot_status"]["canonical_life"] == "degraded"
     assert result["slot_status"]["legacy_bond"] == "retired"
     assert result["bond_state"] == {}
+    assert (
+        result["compatibility_projection_usage"]
+        ["legacy_runtime_snapshot_read_count"]
+        == 0
+    )
+
+
+def test_required_canonical_reader_missing_never_revives_legacy_assembler(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.bond.user_identity.get_canonical_bond_user_id",
+        lambda: "user-001",
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.social_brain_agent.get_social_brain_agent",
+        _forbidden,
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.get_limbic_agent",
+        _forbidden,
+    )
+
+    result = build_digital_life_runtime_snapshot(
+        ports=_ports(
+            None,
+            require_canonical_life_snapshot=True,
+        ),
+    )
+
+    assert result["degraded"] is True
+    assert result["slot_status"]["canonical_life"] == "degraded"
+    assert result["slot_status"]["legacy_bond"] == "retired"
+    assert result["bond_state"] == {}
+    assert result["compatibility_projection_usage"] == {
+        "schema_version": "Natsume.lifecycle_runtime.compatibility_usage.v1",
+        "scope": "port_instance",
+        "projection_id": "legacy_runtime_snapshot_assembler",
+        "legacy_runtime_snapshot_read_count": 0,
+        "legacy_runtime_snapshot_fallback_suppressed_count": 1,
+    }

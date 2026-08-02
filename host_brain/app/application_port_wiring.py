@@ -18,7 +18,6 @@ def build_process_application_ports(
     from host_brain.app.capability_forge import CapabilityForgeService
     from host_brain.app.capability_gap_telemetry import CapabilityGapTelemetry
     from host_brain.app.graph_config_builder import (
-        EMOTION_AGENT_HANDLER_ID,
         INTENT_AGENT_ENTRY_HANDLER_ID,
         INTENT_AGENT_HANDLER_ID,
         JUDGE_AGENT_HANDLER_ID,
@@ -29,7 +28,6 @@ def build_process_application_ports(
         SURFACE_REPLY_HANDLER_ID,
         TRANSLATE_AGENT_HANDLER_ID,
     )
-    from host_brain.app.handlers.emotion_agent_handler import emotion_agent_handler
     from host_brain.app.handlers.intent_agent_entry_handler import intent_agent_entry_handler
     from host_brain.app.handlers.intent_agent_handler import intent_agent_handler
     from host_brain.app.handlers.judge_agent_handler import judge_agent_handler
@@ -51,7 +49,6 @@ def build_process_application_ports(
         resolve_model_provider_credential,
     )
     from host_brain.app.multimodal_observer import MultimodalObserver
-    from host_brain.bond.bond_stage_engine import BondStageEngine
     from host_brain.bond.shared_memory_index import SharedMemoryIndex
     from host_brain.app.recall.semantic_recall import SemanticRecaller
     from host_brain.app.settings import get_persistence_settings
@@ -80,7 +77,6 @@ def build_process_application_ports(
             (INTENT_AGENT_HANDLER_ID, intent_agent_handler),
             (JUDGE_AGENT_HANDLER_ID, judge_agent_handler),
             (RETRIEVAL_AGENT_HANDLER_ID, retrieval_agent_handler),
-            (EMOTION_AGENT_HANDLER_ID, emotion_agent_handler),
             (REPAIR_AGENT_HANDLER_ID, repair_agent_handler),
             (PENTEST_AGENT_HANDLER_ID, pentest_agent_handler),
         )
@@ -101,7 +97,6 @@ def build_process_application_ports(
         model_transport=invoke_model_provider_transport,
         graph_handler_bindings=graph_handler_bindings,
         graph_runtime_factory=GraphRuntimeContract,
-        bond_stage_engine_factory=BondStageEngine,
         shared_memory_index_factory=SharedMemoryIndex,
         multimodal_observer_factory=MultimodalObserver,
         conversation_turn_store_factory=conversation_turn_store_factory,

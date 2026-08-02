@@ -25,6 +25,10 @@ def test_host_command_codec_owns_no_connection_or_transaction() -> None:
     assert "INSERT INTO host_command_journal" not in source
 
 
+def test_gateway_business_command_binds_the_second_hop_host_authority() -> None:
+    assert host_command_repository_codec.secure_ingress_surface("gateway") == "host.input"
+
+
 def test_claim_result_validation_reuses_repository_connection_and_uow() -> None:
     source = inspect.getsource(host_command_claim_result_validation)
 

@@ -105,10 +105,6 @@ def build_input_runtime_application_ports(
         tribe_runtime_agent_ports,
         "get_thalamus_agent",
     )
-    get_ans_agent = _tribe_agent_provider(
-        tribe_runtime_agent_ports,
-        "get_ans_agent",
-    )
     get_immune_agent = _tribe_agent_provider(
         tribe_runtime_agent_ports,
         "get_immune_agent",
@@ -118,15 +114,10 @@ def build_input_runtime_application_ports(
         return build_durable_task_status_projection(ledger=get_ledger())
 
     async def trigger_reply_performance_with_runtime(**kwargs: Any) -> Any:
-        runtime = (
-            embodiment_runtime_provider()
-            if embodiment_runtime_provider is not None
-            else None
-        )
-        return await trigger_reply_performance(
-            **kwargs,
-            embodiment_runtime=runtime,
-        )
+        # The compatibility adapter is intentionally side-effect free.  Do not
+        # resolve the embodiment runtime here: accepted ExpressionPlan effects
+        # obtain it later through LifeDeliveryTransport.
+        return await trigger_reply_performance(**kwargs)
 
     async def cortex_orchestrator_with_app_ports(**kwargs: Any):  # noqa: ANN202
         application_ports = (
@@ -176,7 +167,6 @@ def build_input_runtime_application_ports(
         render_quick_gateway_realign_text=render_quick_gateway_realign_text,
         get_embodiment_runtime=embodiment_runtime_provider,
         get_thalamus_agent=get_thalamus_agent,
-        get_ans_agent=get_ans_agent,
         get_immune_agent=get_immune_agent,
         get_evolution_activation_service=(
             get_evolution_activation_service

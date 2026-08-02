@@ -266,6 +266,96 @@ class CompanionResponseFeedbackRequestV1:
 
 
 @dataclass(frozen=True)
+class AffectiveRepairTargetV1:
+    """One exact, internal-only affect episode that a repair may settle.
+
+    A relationship aftereffect and Natsume's self-affect live in separate
+    aggregates: the former is continuous across sessions while the latter is
+    deliberately session-scoped.  This bounded reference is the only bridge
+    between them.  It contains identifiers and revisions only—never a user
+    utterance, an assistant reply, or a private evidence body.
+    """
+
+    affect_aggregate_id: str
+    affect_episode_id: str
+    workspace_id: str
+    relationship_subject_id: str
+    session_id: str
+    self_affect_revision: int
+    self_id: str = _SELF_ID
+
+    def __post_init__(self) -> None:
+        if _required(self.self_id, "self_id", limit=64) != _SELF_ID:
+            raise ValueError("self_id must be natsume_ai")
+        aggregate_id = _required(
+            self.affect_aggregate_id,
+            "affect_aggregate_id",
+            limit=240,
+        )
+        if not aggregate_id.startswith("affect::"):
+            raise ValueError("affect_aggregate_id must reference an affect aggregate")
+        object.__setattr__(self, "affect_aggregate_id", aggregate_id)
+        object.__setattr__(
+            self,
+            "affect_episode_id",
+            _required(self.affect_episode_id, "affect_episode_id", limit=240),
+        )
+        object.__setattr__(self, "workspace_id", _required(self.workspace_id, "workspace_id"))
+        object.__setattr__(
+            self,
+            "relationship_subject_id",
+            _required(self.relationship_subject_id, "relationship_subject_id"),
+        )
+        object.__setattr__(self, "session_id", _required(self.session_id, "session_id"))
+        object.__setattr__(
+            self,
+            "self_affect_revision",
+            _non_negative_int(self.self_affect_revision, "self_affect_revision"),
+        )
+        object.__setattr__(self, "self_id", _SELF_ID)
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "AffectiveRepairTargetV1":
+        if not isinstance(value, Mapping):
+            raise ValueError("affect repair target must be an object")
+        expected = {
+            "schema_version",
+            "self_id",
+            "affect_aggregate_id",
+            "affect_episode_id",
+            "workspace_id",
+            "relationship_subject_id",
+            "session_id",
+            "self_affect_revision",
+        }
+        if set(value) != expected:
+            raise ValueError("affect repair target field set is invalid")
+        if value.get("schema_version") != "affective_repair_target.v1":
+            raise ValueError("affect repair target schema is invalid")
+        return cls(
+            affect_aggregate_id=value.get("affect_aggregate_id"),
+            affect_episode_id=value.get("affect_episode_id"),
+            workspace_id=value.get("workspace_id"),
+            relationship_subject_id=value.get("relationship_subject_id"),
+            session_id=value.get("session_id"),
+            self_affect_revision=value.get("self_affect_revision"),
+            self_id=value.get("self_id") or _SELF_ID,
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "affective_repair_target.v1",
+            "self_id": self.self_id,
+            "affect_aggregate_id": self.affect_aggregate_id,
+            "affect_episode_id": self.affect_episode_id,
+            "workspace_id": self.workspace_id,
+            "relationship_subject_id": self.relationship_subject_id,
+            "session_id": self.session_id,
+            "self_affect_revision": self.self_affect_revision,
+        }
+
+
+@dataclass(frozen=True)
 class RelationshipEpisodeV1:
     """A provisional, accepted response waiting for user-side evidence."""
 
@@ -278,6 +368,7 @@ class RelationshipEpisodeV1:
     response_digest: str
     opened_at_ms: int
     evidence_refs: Sequence[str] = ()
+    affect_repair_target: AffectiveRepairTargetV1 | None = None
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
@@ -295,6 +386,15 @@ class RelationshipEpisodeV1:
         object.__setattr__(self, "response_digest", _required(self.response_digest, "response_digest", limit=128))
         object.__setattr__(self, "opened_at_ms", _non_negative_int(self.opened_at_ms, "opened_at_ms"))
         object.__setattr__(self, "evidence_refs", _refs(self.evidence_refs, "evidence_refs"))
+        target = self.affect_repair_target
+        if target is not None:
+            if not isinstance(target, AffectiveRepairTargetV1):
+                raise ValueError("affect_repair_target must be AffectiveRepairTargetV1")
+            if (
+                target.workspace_id != self.workspace_id
+                or target.relationship_subject_id != self.relationship_subject_id
+            ):
+                raise ValueError("affect_repair_target scope drift")
         object.__setattr__(self, "self_id", _SELF_ID)
 
     def as_dict(self) -> dict[str, Any]:
@@ -310,6 +410,11 @@ class RelationshipEpisodeV1:
             "response_digest": self.response_digest,
             "opened_at_ms": self.opened_at_ms,
             "evidence_refs": list(self.evidence_refs),
+            "affect_repair_target": (
+                self.affect_repair_target.as_dict()
+                if self.affect_repair_target is not None
+                else None
+            ),
         }
 
 
@@ -395,6 +500,7 @@ class RelationalAftereffectV1:
     repair_acknowledged: bool
     observed_at_ms: int
     evidence_refs: Sequence[str] = ()
+    affect_repair_target: AffectiveRepairTargetV1 | None = None
     self_id: str = _SELF_ID
 
     def __post_init__(self) -> None:
@@ -408,6 +514,19 @@ class RelationalAftereffectV1:
             raise ValueError("silence or delivery failure cannot claim helpfulness")
         if self.repair_acknowledged and outcome != "REPAIR_ACCEPTED":
             raise ValueError("repair_acknowledged requires REPAIR_ACCEPTED")
+        target = self.affect_repair_target
+        if target is not None:
+            if not isinstance(target, AffectiveRepairTargetV1):
+                raise ValueError("affect_repair_target must be AffectiveRepairTargetV1")
+            if outcome != "REPAIR_ACCEPTED" or not self.repair_acknowledged:
+                raise ValueError(
+                    "affect_repair_target requires acknowledged repair acceptance"
+                )
+            if (
+                target.workspace_id != self.workspace_id
+                or target.relationship_subject_id != self.relationship_subject_id
+            ):
+                raise ValueError("affect_repair_target scope drift")
         object.__setattr__(self, "aftereffect_id", _required(self.aftereffect_id, "aftereffect_id"))
         object.__setattr__(self, "episode_id", _required(self.episode_id, "episode_id"))
         object.__setattr__(self, "workspace_id", _required(self.workspace_id, "workspace_id"))
@@ -440,6 +559,11 @@ class RelationalAftereffectV1:
             "repair_acknowledged": self.repair_acknowledged,
             "observed_at_ms": self.observed_at_ms,
             "evidence_refs": list(self.evidence_refs),
+            "affect_repair_target": (
+                self.affect_repair_target.as_dict()
+                if self.affect_repair_target is not None
+                else None
+            ),
         }
 
 
@@ -463,6 +587,7 @@ class RelationshipStateV2:
     proactive_permission: str
     active_episodes: Sequence[RelationshipEpisodeV1] = ()
     last_aftereffect: RelationalAftereffectV1 | None = None
+    pending_affect_repair_targets: Sequence[AffectiveRepairTargetV1] = ()
     romantic_consent: str = "NOT_GRANTED"
     exclusive_consent: str = "NOT_GRANTED"
     dependency_consent: str = "NOT_GRANTED"
@@ -487,6 +612,29 @@ class RelationshipStateV2:
         for episode in episodes:
             if episode.workspace_id != str(self.workspace_id) or episode.relationship_subject_id != str(self.relationship_subject_id):
                 raise ValueError("active episode scope drift")
+        repair_targets = tuple(self.pending_affect_repair_targets)
+        if len(repair_targets) > _MAX_ACTIVE_EPISODES:
+            raise ValueError(
+                "pending_affect_repair_targets cannot exceed active episode limit"
+            )
+        if len(
+            {
+                (target.affect_aggregate_id, target.affect_episode_id)
+                for target in repair_targets
+            }
+        ) != len(repair_targets):
+            raise ValueError("pending_affect_repair_targets must not repeat a target")
+        for target in repair_targets:
+            if not isinstance(target, AffectiveRepairTargetV1):
+                raise ValueError(
+                    "pending_affect_repair_targets must contain AffectiveRepairTargetV1"
+                )
+            if (
+                target.workspace_id != str(self.workspace_id)
+                or target.relationship_subject_id
+                != str(self.relationship_subject_id)
+            ):
+                raise ValueError("pending affect repair target scope drift")
         if self.last_aftereffect is not None and (
             self.last_aftereffect.workspace_id != str(self.workspace_id)
             or self.last_aftereffect.relationship_subject_id != str(self.relationship_subject_id)
@@ -502,6 +650,7 @@ class RelationshipStateV2:
         object.__setattr__(self, "repair_required", bool(self.repair_required))
         object.__setattr__(self, "proactive_permission", permission)
         object.__setattr__(self, "active_episodes", episodes)
+        object.__setattr__(self, "pending_affect_repair_targets", repair_targets)
         object.__setattr__(self, "self_id", _SELF_ID)
 
     def as_dict(self) -> dict[str, Any]:
@@ -521,6 +670,9 @@ class RelationshipStateV2:
             "exclusive_consent": self.exclusive_consent,
             "dependency_consent": self.dependency_consent,
             "active_episodes": [episode.as_dict() for episode in self.active_episodes],
+            "pending_affect_repair_targets": [
+                target.as_dict() for target in self.pending_affect_repair_targets
+            ],
             "last_aftereffect": (
                 self.last_aftereffect.as_dict()
                 if self.last_aftereffect is not None
@@ -533,6 +685,7 @@ __all__ = [
     "CompanionProactivePermissionRequestV1",
     "CompanionProactiveTargetV1",
     "CompanionResponseFeedbackRequestV1",
+    "AffectiveRepairTargetV1",
     "RelationshipEpisodeV1",
     "RelationshipStateV2",
     "RelationalAftereffectV1",

@@ -343,7 +343,9 @@ def test_regulation_stays_appraisal_bound_when_episode_head_is_full(
     assert state["affective"]["last_appraisal"]["event_kind"] == "shared_positive_moment"
     assert len(state["affective"]["active_episodes"]) == 4
     assert regulation["mode"] == "EXPRESS"
-    assert regulation["episode_id"] is None
+    assert regulation["episode_id"] in {
+        item["episode_id"] for item in state["affective"]["active_episodes"]
+    }
     assert f"appraisal://{result.appraisal_id}" in regulation["reason_refs"]
     assert any(
         receipt.command_id.startswith("affect_") for receipt in result.receipts
@@ -392,6 +394,8 @@ def test_rich_candidate_evidence_cannot_overflow_the_bounded_episode_contract(
         service=command_service,
         scope=scope,
         request_id="request-bounded-evidence",
+        command_id="affect_bounded_evidence",
+        appraisal_id="appraisal_bounded_evidence",
         candidate=candidate,
         observations=observations,
         created_at_ms=NOW,
@@ -428,6 +432,80 @@ def test_fresh_directed_harm_outranks_a_preceding_repair_acceptance() -> None:
     )
 
     assert candidates[0].kind == "natsume_may_have_hurt_user"
+
+
+def test_direct_relational_hurt_becomes_self_owned_and_atomically_regulated(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message="你真恶心。"),
+        request_id="request-directed-hurt",
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    affective = state["affective"]
+    active = affective["active_episodes"]
+    events = reader.list_events(result.scope.aggregate_id, limit=20)
+
+    # This is Natsume's own appraisal of a direct relational impact, not a
+    # copied user SAD/ANGRY label. Its first expression rule is journaled in
+    # the same causal command, so a restart cannot expose an unregulated turn.
+    assert result.path == "DEEP"
+    assert [item["emotion"] for item in affective["components"]] == ["HURT", "CARE"]
+    assert affective["last_regulation"]["mode"] == "CONTAIN"
+    assert affective["last_regulation"]["episode_id"] == active[0]["episode_id"]
+    assert any(
+        event.event_type == "affective_event_appraised"
+        and event.payload["command_payload"]["regulation"]["mode"] == "CONTAIN"
+        for event in events
+    )
+    assert "你真恶心" not in str([event.payload for event in events])
+
+
+def test_user_space_or_boundary_beats_a_directed_hurt_interpretation(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message="你真恶心，别说了，给我一点空间。"),
+        request_id="request-space-wins",
+    )
+    affective = reader.get_snapshot(result.scope.aggregate_id).state["affective"]
+
+    assert {item["emotion"] for item in affective["components"]} == {
+        "RESPECT",
+        "CAUTION",
+    }
+    assert affective["last_regulation"]["mode"] == "GIVE_SPACE"
+    assert "HURT" not in {item["emotion"] for item in affective["components"]}
+
+
+def test_direct_comparison_reaches_a_nonpossessive_shared_expression_plan(
+    tmp_path: Path,
+) -> None:
+    fusion, _, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message="别人比你好。"),
+        request_id="request-directed-comparison",
+    )
+    guidance = build_affective_turn_guidance(
+        emotion_context=result.as_emotion_context(),
+        request_id="request-directed-comparison",
+        workspace_id=result.scope.workspace_id,
+        relationship_subject_id=result.scope.relationship_subject_id,
+        session_id=result.scope.session_id,
+        created_at_ms=NOW,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "CONTAINED_JEALOUSY"
+    assert guidance.plan.expression_plan.synchronization_id
+    assert (
+        guidance.plan.expression_plan.self_affect_revision
+        == guidance.plan.self_affect_revision
+    )
+    assert any("把选择权完整留给对方" in item for item in guidance.facts)
+    assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
 
 
 def test_fused_context_does_not_advance_legacy_host_emotion_runtime(tmp_path: Path) -> None:
@@ -481,6 +559,90 @@ def test_conflicting_modalities_preserve_conflict_and_choose_uncertainty(tmp_pat
         "CARE",
         "CAUTION",
     }
+
+
+def test_second_appraisal_candidate_is_single_retry_and_exact_replay_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fusion, reader, command_service = _runtime(tmp_path)
+    request = _request(message="你真恶心，我真的很难受。")
+    original_submit = fusion._submit_appraisal
+    attempted_kinds: list[str] = []
+
+    def reject_only_primary(**kwargs):  # noqa: ANN003
+        attempted_kinds.append(str(kwargs["candidate"].kind))
+        if len(attempted_kinds) == 1:
+            raise ValueError("synthetic primary rejection")
+        return original_submit(**kwargs)
+
+    monkeypatch.setattr(fusion, "_submit_appraisal", reject_only_primary)
+    first = fusion.resolve_request(
+        request_body=request,
+        request_id="request-appraisal-second-candidate",
+    )
+    event_count = len(reader.list_events(first.scope.aggregate_id, limit=20))
+
+    assert first.path == "DEEP"
+    assert first.candidate_count == 2
+    assert first.retry_count == 1
+    assert attempted_kinds == ["directed_relational_hurt", "user_distress"]
+    assert first.appraisal_id is not None
+    assert "APPRAISAL_CANDIDATE_1_REJECTED" in first.reason_codes
+    assert "APPRAISAL_SECOND_CANDIDATE_RETRY" in first.reason_codes
+
+    restarted = AffectFusionService(
+        command_service_provider=lambda: command_service,
+        snapshot_reader_provider=lambda: reader,
+        clock_ms=lambda: NOW,
+    )
+
+    def must_not_select_again(**_kwargs):  # noqa: ANN003
+        raise AssertionError("accepted appraisal selection must be replayed")
+
+    monkeypatch.setattr(restarted, "_submit_appraisal", must_not_select_again)
+    replayed = restarted.resolve_request(
+        request_body=request,
+        request_id="request-appraisal-second-candidate",
+    )
+
+    assert replayed.path == "DEEP"
+    assert replayed.retry_count == 0
+    assert replayed.appraisal_id == first.appraisal_id
+    assert replayed.receipts[-1].command_id == first.receipts[-1].command_id
+    assert replayed.receipts[-1].replayed is True
+    assert "APPRAISAL_SELECTION_REPLAYED" in replayed.reason_codes
+    assert len(reader.list_events(first.scope.aggregate_id, limit=20)) == event_count
+
+
+def test_two_rejected_appraisal_candidates_fall_back_without_unbounded_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request = _request(message="你真恶心，我真的很难受。")
+    attempted_kinds: list[str] = []
+
+    def reject_every_candidate(**kwargs):  # noqa: ANN003
+        attempted_kinds.append(str(kwargs["candidate"].kind))
+        raise ValueError("synthetic candidate rejection")
+
+    monkeypatch.setattr(fusion, "_submit_appraisal", reject_every_candidate)
+    result = fusion.resolve_request(
+        request_body=request,
+        request_id="request-all-appraisal-candidates-rejected",
+    )
+    events = reader.list_events(result.scope.aggregate_id, limit=20)
+
+    assert result.path == "FAST_FALLBACK"
+    assert result.candidate_count == 2
+    assert result.retry_count == 1
+    assert result.appraisal_id is None
+    assert attempted_kinds == ["directed_relational_hurt", "user_distress"]
+    assert "APPRAISAL_CANDIDATE_1_REJECTED" in result.reason_codes
+    assert "APPRAISAL_CANDIDATE_2_REJECTED" in result.reason_codes
+    assert "APPRAISAL_CANDIDATES_REJECTED" in result.reason_codes
+    assert not any(event.event_type == "affective_event_appraised" for event in events)
 
 
 def test_sensor_ttls_are_bounded_and_raw_sensor_material_is_not_journaled(
@@ -575,6 +737,59 @@ def test_duplicate_request_reopens_exact_receipts_without_duplicate_events(tmp_p
     assert len(events) == len(first.receipts)
 
 
+def test_real_scoped_turn_time_advances_canonical_affect_without_global_recovery(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "dl02-affect-turn-clock.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=database).apply_migrations(
+        request_id="dl02-affect-turn-clock",
+        ts_ms=NOW,
+    )
+    assert migrated.success is True, migrated.as_dict()
+    repository = LifeCommandRepository(database)
+    command_service = LifeCommandService(repository, clock=lambda: NOW)
+    reader = LifeSnapshotReader(repository)
+    clock = [NOW]
+    fusion = AffectFusionService(
+        command_service_provider=lambda: command_service,
+        snapshot_reader_provider=lambda: reader,
+        clock_ms=lambda: clock[0],
+    )
+
+    first = fusion.resolve_request(
+        request_body=_request(message="我真的很难受，什么都不想做。"),
+        request_id="turn-clock-first",
+    )
+    before = reader.get_snapshot(first.scope.aggregate_id).state["affective"]
+    clock[0] += 3_600_000
+    second = fusion.resolve_request(
+        request_body=_request(message="嗯。"),
+        request_id="turn-clock-second",
+    )
+    after = reader.get_snapshot(second.scope.aggregate_id).state["affective"]
+    events = reader.list_events(second.scope.aggregate_id, limit=20)
+    time_event = next(
+        event
+        for event in events
+        if event.event_type == "affective_time_advanced"
+        and event.created_at_ms == clock[0]
+    )
+
+    assert time_event.command_id == second.receipts[0].command_id
+    assert time_event.payload["command_payload"] == {
+        "workspace_id": "workspace-a",
+        "relationship_subject_id": "person-a",
+        "session_id": "session-a",
+    }
+    assert after["last_integrated_ms"] == clock[0]
+    assert after["needs"]["rest"] > before["needs"]["rest"]
+    assert max(
+        (item["intensity"] for item in after["components"]),
+        default=0.0,
+    ) < max(item["intensity"] for item in before["components"])
+    assert all("raw" not in str(event.payload).lower() for event in events)
+
+
 def test_input_runtime_composition_does_not_resolve_host_emotion_runtime_when_fused(
     tmp_path: Path,
 ) -> None:
@@ -621,11 +836,9 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
     providers = {
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: reader,
-        "bond_update_queue": lambda: object(),
         "silence_engine": lambda: object(),
         "state_write_arbiter": lambda: object(),
         "emotion_timeline": lambda: object(),
-        "bond_stage_engine": lambda: object(),
         "shared_memory_index": lambda: object(),
         "milestone_tracker": lambda: object(),
         "model_attempt_service": lambda: object(),
@@ -650,6 +863,16 @@ def test_tribe_composition_uses_canonical_fusion_without_legacy_runtime(
     assert result["affective_life"]["self_id"] == "natsume_ai"
     assert ports.canonical_affect_fusion is not None
     assert ports.uses_canonical_affective_life() is True
+
+    for port_name in (
+        "silence_engine",
+        "emotion_timeline",
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match=rf"LEGACY_AFFECT_PORT_RETIRED:{port_name}",
+        ):
+            ports.require(port_name)()
 
 
 def test_input_composition_fails_closed_when_life_authority_is_missing() -> None:
@@ -685,11 +908,9 @@ def test_tribe_composition_fails_closed_when_life_authority_is_missing() -> None
     providers = {
         "ledger": lambda: object(),
         "life_snapshot_reader": lambda: object(),
-        "bond_update_queue": lambda: object(),
         "silence_engine": lambda: object(),
         "state_write_arbiter": lambda: object(),
         "emotion_timeline": lambda: object(),
-        "bond_stage_engine": lambda: object(),
         "shared_memory_index": lambda: object(),
         "milestone_tracker": lambda: object(),
         "model_attempt_service": lambda: object(),

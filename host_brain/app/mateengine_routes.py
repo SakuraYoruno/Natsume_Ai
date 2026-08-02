@@ -7,68 +7,16 @@ two Host apps in the same process cannot borrow an outbox or an Edge lease.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
 
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.channels.mateengine import (
-    EVENT_MOB_PROXIMITY,
-    NATSUME_TEXT_PREFIX,
     SUPPORTED_MATEENGINE_ACTIONS,
     SUPPORTED_SIGNAL_EVENTS,
-    build_mateengine_signal_payload,
     list_mateengine_pose_presets,
 )
-from natsume_contracts.edge.v1 import new_request_id
-
-
-class MateEngineSignalRequest(BaseModel):
-    event_type: str = Field(default=EVENT_MOB_PROXIMITY)
-    name: str | None = None
-    event_id: str | None = None
-    phase: str | None = None
-    distance: float | None = None
-    biome: str | None = None
-
-
-class MateEngineSignalResponse(BaseModel):
-    """A durable enqueue acknowledgement, never an actuator receipt."""
-
-    ok: bool
-    status: str
-    host: str | None = None
-    port: int | None = None
-    payload: dict[str, Any]
-    bytes_sent: int = 0
-    error: str | None = None
-    outbox_id: str | None = None
-    physical_effect_verified: bool = False
-
-
-class MateEngineSayRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=2000)
-    emotion: str | None = None
-    ttl: float | None = Field(default=8.0, ge=0.1, le=30.0)
-
-
-class MateEngineActionRequest(BaseModel):
-    action: str = Field(default="state")
-    state: str | None = None
-    touch_type: str | None = None
-    emotion_tag: str | None = None
-    expression: str | None = None
-    preset: str | None = None
-    text: str | None = Field(default=None, max_length=2000)
-    enabled: bool | None = None
-    ttl: float | None = Field(default=8.0, ge=0.1, le=60.0)
-    duration: float | None = Field(default=None, ge=0.1, le=60.0)
-    intensity: float | None = Field(default=None, ge=0.0, le=1.0)
-    scale: float | None = Field(default=None, ge=0.1, le=4.0)
-    position_x: float | None = Field(default=None, ge=-1.0, le=1.0)
-    position_y: float | None = Field(default=None, ge=-1.0, le=1.0)
-    request_id: str | None = None
 
 
 def _require_runtime(route_ports: HostRoutePorts) -> Any:
@@ -79,11 +27,60 @@ def _require_runtime(route_ports: HostRoutePorts) -> Any:
     return runtime
 
 
-def _pending_ack(ack: Any) -> dict[str, Any]:
-    value = dict(ack.as_dict())
-    value["physical_effect_verified"] = False
-    value["delivery_state"] = "DURABLY_QUEUED"
-    return value
+def _read_only_health(route_ports: HostRoutePorts) -> dict[str, Any]:
+    """Project Host outbox readiness without creating an embodiment command.
+
+    ``GET /health`` is consumed by the Monitor as a low-risk query.  It must
+    never manufacture a durable ``health`` command merely to answer that
+    query: physical device state belongs to Edge and can only be established
+    by an Edge-owned receipt.  In particular, an isolated Host must be able
+    to start while the remote Edge machine is intentionally absent.
+    """
+
+    runtime = _require_runtime(route_ports)
+    runtime_scope_id = str(getattr(runtime, "runtime_scope_id", "") or "")
+    authority_lease = getattr(runtime, "authority_lease", None)
+    # Narrow test and adapter runtimes may not expose ``closed``; an app
+    # runtime with an ``enqueue`` port is treated as open unless it explicitly
+    # reports that it has closed.
+    host_outbox_ready = not bool(getattr(runtime, "closed", False))
+    return {
+        # ``ok`` intentionally answers the remote physical-health question,
+        # not whether this Host can write to its outbox.
+        "ok": False,
+        "status": "REMOTE_EDGE_UNVERIFIED",
+        "host_outbox_ready": host_outbox_ready,
+        "runtime_scope_id": runtime_scope_id or None,
+        "authority_lease_active": isinstance(authority_lease, dict),
+        "physical_effect_verified": False,
+        "delivery_state": "NOT_DISPATCHED",
+        "reason_code": "EMBODIMENT_REMOTE_HEALTH_REQUIRES_EDGE_RECEIPT",
+        "notes": [
+            "This endpoint is a Host-local read-only projection.",
+            "It does not contact Edge or enqueue an embodiment command.",
+            "Physical MateEngine health requires an Edge-owned receipt.",
+        ],
+    }
+
+
+def _raise_direct_command_retired() -> NoReturn:
+    """Reject the pre-TaskGraph MateEngine mutation adapters.
+
+    These historical HTTP routes cannot bind an exact Task/Grant/Preview
+    boundary.  Leaving them reachable would either bypass the governed
+    embodiment authority or fail only after partially constructing a command.
+    The canonical replacement is a governed TaskGraph effect delivered through
+    the Host embodiment outbox and settled by an Edge-owned receipt.
+    """
+
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "reason_code": "MATEENGINE_DIRECT_COMMAND_RETIRED",
+            "replacement_authority": "governed_taskgraph_edge_embodiment",
+            "physical_effect_verified": False,
+        },
+    )
 
 
 def create_mateengine_router(route_ports: HostRoutePorts) -> APIRouter:
@@ -103,109 +100,25 @@ def create_mateengine_router(route_ports: HostRoutePorts) -> APIRouter:
             "notes": [
                 "Host writes versioned commands to its durable outbox; Edge exclusively owns MateEngine transport.",
                 "A PENDING response is only durable admission. Read a durable Edge receipt before claiming an effect.",
+                "The historical direct POST routes are retired; a governed TaskGraph is required for every device effect.",
             ],
         }
 
     @router.get("/health")
     async def mateengine_health() -> dict[str, Any]:
-        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
-
-        return _pending_ack(
-            queue_mateengine_command(
-                action="health",
-                payload={},
-                request_id=new_request_id(),
-                runtime=_require_runtime(route_ports),
-            )
-        )
-
-    @router.post("/signal", response_model=MateEngineSignalResponse)
-    async def mateengine_signal(request: MateEngineSignalRequest) -> MateEngineSignalResponse:
-        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
-
-        payload = build_mateengine_signal_payload(
-            event_type=request.event_type,
-            name=request.name,
-            event_id=request.event_id,
-            phase=request.phase,
-            distance=request.distance,
-            biome=request.biome,
-        )
-        ack = queue_mateengine_command(
-            action="signal",
-            payload={"signal": payload},
-            request_id=new_request_id(),
-            runtime=_require_runtime(route_ports),
-        )
-        return MateEngineSignalResponse(
-            ok=ack.accepted,
-            status=ack.status.lower(),
-            payload=payload,
-            error=None if ack.accepted else ack.detail,
-            outbox_id=ack.outbox_id,
-        )
-
-    @router.post("/say", response_model=MateEngineSignalResponse)
-    async def mateengine_say(request: MateEngineSayRequest) -> MateEngineSignalResponse:
-        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
-
-        signal = build_mateengine_signal_payload(
-            event_type=EVENT_MOB_PROXIMITY,
-            name=NATSUME_TEXT_PREFIX + request.text,
-            event_id="natsume_say",
-            phase="enter",
-            distance=1.0,
-        )
-        if request.emotion:
-            signal["emotion"] = request.emotion
-        if request.ttl is not None:
-            signal["ttl"] = request.ttl
-        ack = queue_mateengine_command(
-            action="signal",
-            payload={"signal": signal},
-            request_id=new_request_id(),
-            runtime=_require_runtime(route_ports),
-        )
-        return MateEngineSignalResponse(
-            ok=ack.accepted,
-            status=ack.status.lower(),
-            payload=signal,
-            error=None if ack.accepted else ack.detail,
-            outbox_id=ack.outbox_id,
-        )
+        return _read_only_health(route_ports)
 
     @router.post("/action")
-    async def mateengine_action(request: MateEngineActionRequest) -> dict[str, Any]:
-        from host_brain.channels.embodiment import queue_mateengine_command  # noqa: PLC0415
+    async def mateengine_action() -> dict[str, Any]:
+        _raise_direct_command_retired()
 
-        action = str(request.action or "state").strip().lower()
-        if action in {"idle", "reset"} or str(request.state or "").lower() == "idle":
-            command: dict[str, Any] = {"type": "reset"}
-        elif action in {"state", "thinking", "listening", "speak", "speaking", "emote", "expression"}:
-            emotion = str(request.emotion_tag or request.expression or request.preset or "NEUTRAL").upper()
-            command = {
-                "type": "expression", "preset": emotion, "emotion_tag": emotion,
-                "value": request.intensity, "ttl": request.duration or request.ttl,
-            }
-        elif action in {"say", "show"}:
-            command = {"type": "say", "text": request.text or "", "ttl": request.ttl}
-        else:
-            command = {
-                "type": action, "state": request.state, "touch_type": request.touch_type,
-                "preset": request.preset, "enabled": request.enabled,
-                "duration": request.duration, "value": request.intensity,
-                "scale": request.scale, "position_x": request.position_x,
-                "position_y": request.position_y,
-            }
-        command = {key: value for key, value in command.items() if value is not None}
-        return _pending_ack(
-            queue_mateengine_command(
-                action="command",
-                payload={"command": command},
-                request_id=request.request_id,
-                runtime=_require_runtime(route_ports),
-            )
-        )
+    @router.post("/signal")
+    async def mateengine_signal() -> dict[str, Any]:
+        _raise_direct_command_retired()
+
+    @router.post("/say")
+    async def mateengine_say() -> dict[str, Any]:
+        _raise_direct_command_retired()
 
     return router
 

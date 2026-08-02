@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
+
 
 def _pick_config_issue_detail(issues: tuple[Any, ...], *, fallback: str) -> str:
     if not issues:
@@ -145,6 +147,9 @@ def _build_dependency_matrix(
                 "service_id": str(row.get("service_id") or ""),
                 "component_type": "service_probe",
                 "available": bool(row.get("available", True)),
+                "status": str(row.get("status") or "").strip().upper()
+                or ("UP" if bool(row.get("available", True)) else "DOWN"),
+                "not_tested": bool(row.get("not_tested", False)),
                 "reason_code": (str(row.get("reason_code") or "").strip() or None),
                 "detail": str(row.get("detail") or ""),
             }
@@ -158,6 +163,8 @@ def _build_dependency_matrix(
             "service_id": "graph_runtime",
             "component_type": "graph_runtime",
             "available": graph_available,
+            "status": graph_status or "SKIPPED",
+            "not_tested": False,
             "reason_code": graph_runtime.get("reason_code"),
             "detail": str(graph_runtime.get("detail") or ""),
         }
@@ -193,7 +200,39 @@ def _pick_readiness_status_reason(
     if str(node_report.get("status") or "").upper() == "DEGRADED":
         return "DEGRADED", str(node_report.get("reason_code") or "").strip() or None
     for row in dependency_matrix:
-        if not bool(row.get("available", True)):
+        if not bool(row.get("available", True)) and not bool(row.get("not_tested")):
             reason_code = str(row.get("reason_code") or "").strip()
             return "DEGRADED", (reason_code or None)
+
+    required_not_tested = int(
+        startup_report.get("summary", {}).get("required_not_tested", 0)
+    )
+    optional_not_tested = int(
+        startup_report.get("summary", {}).get("optional_not_tested", 0)
+    )
+    node_not_tested = int(
+        node_report.get("summary", {}).get("node_not_tested", 0)
+    )
+    dependency_not_tested = any(
+        bool(row.get("not_tested"))
+        or str(row.get("status") or "").strip().upper() == "NOT_TESTED"
+        for row in dependency_matrix
+    )
+    if (
+        required_not_tested > 0
+        or optional_not_tested > 0
+        or node_not_tested > 0
+        or dependency_not_tested
+        or str(
+            startup_report.get("summary", {}).get("boot_status") or ""
+        ).strip().upper()
+        == ACCEPTANCE_PENDING_EXTERNAL
+        or node_status == ACCEPTANCE_PENDING_EXTERNAL
+    ):
+        reason_code = str(
+            startup_report.get("reason_code")
+            or node_report.get("reason_code")
+            or ACCEPTANCE_PENDING_EXTERNAL
+        ).strip()
+        return ACCEPTANCE_PENDING_EXTERNAL, reason_code
     return "READY", None

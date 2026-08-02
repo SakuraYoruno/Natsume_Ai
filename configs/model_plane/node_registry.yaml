@@ -103,6 +103,16 @@ nodes:
     node_allowlist_envs: [dev, staging, prod]
     # 环境变量覆盖：HOST_SURFACE_REPLY_MODEL_ID / HOST_SURFACE_REPLY_TIMEOUT_MS
 
+  realtime_companion_node:
+    description: "RealtimeCompanion 日常陪伴低延迟节点"
+    provider: gemini
+    model_id: gemini-2.5-flash-lite
+    temperature: 0.72
+    max_output_tokens: 192
+    node_allowlist_envs: [dev, staging, prod]
+    # 环境变量覆盖：HOST_REALTIME_COMPANION_PROVIDER /
+    # HOST_REALTIME_COMPANION_MODEL_ID / HOST_REALTIME_COMPANION_TIMEOUT_MS
+
   surface_reply_node_pool_b:
     description: "SurfaceReply 共享池 B 档（MiniMax fallback）"
     provider: minimax

@@ -18,9 +18,14 @@ from host_brain.digital_life.application_boundary import (
     submit_life_command,
 )
 from host_brain.digital_life.affective_expression_delivery import (
+    bounded_expression_segments,
     build_expression_delivery_controls,
     build_sentence_expression_delivery,
     expression_delivery_trace,
+)
+from host_brain.digital_life.companion_voice import (
+    japanese_companion_voice_enabled,
+    normalize_japanese_speech_text,
 )
 import time
 
@@ -46,7 +51,7 @@ def _public_result_trace(
     if result is None:
         summary = _safe_mapping(stream_summary)
         return {
-            "streaming": True,
+            "streaming": bool(summary.get("streaming", True)),
             "mode": str(summary.get("mode") or "native_sentence_stream"),
             "sentence_count": max(0, _coerce_int(summary.get("sentence_count"), default=0)),
             "plan_id": str(summary.get("plan_id") or "").strip(),
@@ -196,6 +201,18 @@ def _submit_surface_foreground_completed(
         agent_input=agent_input,
         trace_stage_meta=trace_stage_meta,
     )
+    tts_text_ja = ""
+    if result is not None and japanese_companion_voice_enabled():
+        candidate = normalize_japanese_speech_text(
+            getattr(result, "tts_text_ja", "")
+        )
+        # A deterministic visible-text repair invalidates the model's original
+        # speech rendering.  Degrade voice for this turn instead of speaking a
+        # stale Japanese sentence with different meaning.
+        if candidate and str(result.selected_text or "").strip() == str(
+            narrative or ""
+        ).strip():
+            tts_text_ja = candidate
     governor_result = _safe_mapping(
         getattr(agent_input, "governor_result", None)
     )
@@ -212,6 +229,7 @@ def _submit_surface_foreground_completed(
         "workspace_id": workspace_id,
         "user_message": user_message,
         "assistant_reply": str(narrative or ""),
+        "tts_text_ja": tts_text_ja,
         "completed_at_ms": completed_at_ms,
     }
     delegated_agents = _delegated_agents_from_sub_agent_context(agent_input)
@@ -325,31 +343,38 @@ def _submit_surface_foreground_completed(
     expression_controls: list[dict[str, Any]] = []
     expression_receipts: list[dict[str, Any]] = []
     expression_traces: list[dict[str, Any]] = []
-    # Direct Host native streaming has already staged its expression protocol
-    # before text visibility.  A governed-node sentence stream stages only a
-    # Task-bound text visibility receipt before SSE; Voice/Avatar intents stay
-    # deferred until Task Verification and Acceptance.  Treat it like the
-    # buffered route here so the Task runtime remains the only effect writer.
+    # Direct native streaming and deterministic fallbacks may already stage
+    # paired Voice/Avatar protocol before text becomes visible. A governed
+    # TaskNode stream only stages text visibility before SSE; it is compiled
+    # here after Acceptance, using its exact persisted sentence boundaries.
     stream_metadata = _safe_mapping(stream_summary)
     stream_mode = str(stream_metadata.get("mode") or "").strip()
-    direct_native_sentence_stream = stream_mode == "native_sentence_stream"
+    sentence_delivery_already_staged = bool(
+        stream_metadata.get("sentence_delivery_staged")
+    ) or stream_mode == "native_sentence_stream"
     buffered_expression_segments: list[str] = []
-    if affective_turn_plan and narrative and not direct_native_sentence_stream:
-        # A governed native stream has already made each sentence visible via
-        # the Task-owned delivery ledger.  Do not destroy that immutable
-        # boundary by re-segmenting the completed narrative here: voice and
-        # avatar must receive one paired protocol per exact visible sentence.
-        # The summary is constructed inside the Surface runtime, then checked
-        # again below before it can influence the accepted Life command.
-        buffered_expression_segments = _expression_segments_for_foreground(
-            narrative=str(narrative or ""),
-            stream_mode=stream_mode,
-            stream_summary=stream_metadata,
-        )
+    if affective_turn_plan and narrative and not sentence_delivery_already_staged:
+        if tts_text_ja:
+            # The first Japanese implementation is deliberately one same-call,
+            # buffered utterance.  It keeps display/speech semantics frozen
+            # together without guessing how independently punctuated Chinese
+            # and Japanese sentences should be paired.
+            buffered_expression_segments = [str(narrative or "").strip()]
+        else:
+            # Preserve governed-node stable sentence boundaries instead of
+            # re-segmenting the completed narrative: Voice and Avatar must receive
+            # one paired protocol per exact visible sentence.
+            buffered_expression_segments = _expression_segments_for_foreground(
+                narrative=str(narrative or ""),
+                stream_mode=stream_mode,
+                stream_summary=stream_metadata,
+            )
         for sentence_index, segment in enumerate(buffered_expression_segments):
             intents, receipts, trace = _expression_sentence_protocol(
                 plan=affective_turn_plan,
                 sentence=segment,
+                speech_sentence=tts_text_ja or None,
+                speech_language="ja" if tts_text_ja else None,
                 sentence_index=sentence_index,
                 created_at_ms=completed_at_ms,
             )
@@ -538,6 +563,11 @@ def _submit_surface_foreground_completed(
             if reply_channel and reply_target
             else None
         ),
+        affect_repair_target=(
+            dict(affective_turn_plan["affect_repair_target"])
+            if isinstance(affective_turn_plan.get("affect_repair_target"), Mapping)
+            else None
+        ),
     )
     return {
         **dict(foreground_receipt),
@@ -617,6 +647,8 @@ def _expression_sentence_protocol(
     *,
     plan: Mapping[str, Any],
     sentence: str,
+    speech_sentence: str | None = None,
+    speech_language: str | None = None,
     sentence_index: int,
     created_at_ms: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
@@ -626,6 +658,8 @@ def _expression_sentence_protocol(
         intents, receipts = build_sentence_expression_delivery(
             affective_turn_plan=plan,
             sentence=sentence,
+            speech_sentence=speech_sentence,
+            speech_language=speech_language,
             sentence_index=sentence_index,
             created_at_ms=created_at_ms,
         )
@@ -640,34 +674,9 @@ def _expression_sentence_protocol(
 
 
 def _bounded_expression_segments(narrative: str, *, maximum: int = 2_000) -> list[str]:
-    """Split a buffered accepted reply without silently dropping its tail.
+    """Compatibility wrapper for the shared canonical segmentation rule."""
 
-    Native streaming already yields stable sentences.  A governed/buffered
-    reply becomes visible only after Acceptance, so it may be compiled here.
-    The Voice protocol retains its per-intent bound; a long reply is split at
-    a nearby natural boundary, falling back to a bounded Unicode slice.
-    """
-
-    remaining = str(narrative or "").strip()
-    if not remaining:
-        return []
-    maximum = max(64, int(maximum))
-    segments: list[str] = []
-    separators = "。！？!?；;，,、\n"
-    while remaining:
-        if len(remaining) <= maximum:
-            segments.append(remaining)
-            break
-        window = remaining[:maximum]
-        boundary = max(window.rfind(marker) for marker in separators)
-        cut = boundary + 1 if boundary >= maximum // 2 else maximum
-        segment = remaining[:cut].strip()
-        if not segment:  # defensive only; a non-empty source always advances
-            segment = remaining[:maximum]
-            cut = len(segment)
-        segments.append(segment)
-        remaining = remaining[cut:].lstrip()
-    return segments
+    return list(bounded_expression_segments(narrative, maximum=maximum))
 
 
 def _expression_segments_for_foreground(
@@ -749,6 +758,7 @@ def _submit_surface_affective_turn_planned(
     life_snapshot_reader: Any,
     agent_input: Any,
     trace_stage_meta: Mapping[str, Any],
+    source: str = "surface_native_sentence_stream",
 ) -> dict[str, Any]:
     """Persist one immutable plan before the first visible stream sentence."""
 
@@ -789,7 +799,7 @@ def _submit_surface_affective_turn_planned(
         payload=payload,
         created_at_ms=max(0, _coerce_int(plan.get("created_at_ms"), default=0)),
         metadata={
-            "source": "surface_native_sentence_stream",
+            "source": str(source or "surface_native_sentence_stream"),
             "workspace_id": workspace_id,
             "session_id": session_id,
         },
@@ -804,6 +814,7 @@ def _submit_surface_sentence_delivery_intent(
     trace_stage_meta: Mapping[str, Any],
     sentence: str,
     sentence_index: int,
+    source: str = "surface_native_sentence_stream",
 ) -> dict[str, Any]:
     """Durably stage one already-gated sentence before its SSE emission."""
 
@@ -875,7 +886,7 @@ def _submit_surface_sentence_delivery_intent(
         payload=payload,
         created_at_ms=created_at_ms,
         metadata={
-            "source": "surface_native_sentence_stream",
+            "source": str(source or "surface_native_sentence_stream"),
             "workspace_id": workspace_id,
             "session_id": session_id,
             "sentence_digest": sentence_digest,

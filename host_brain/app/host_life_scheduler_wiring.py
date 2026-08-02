@@ -153,6 +153,7 @@ def submit_life_tick_command(
     person_id, target_selection = _select_life_tick_person_id(
         args=args,
         occurrence_id=str(occurrence.occurrence_id),
+        now_ms=int(clock_ms()),
         frozen_runtime_context=frozen_runtime_context,
         life_snapshot_reader=life_snapshot_reader,
     )
@@ -225,6 +226,7 @@ def _select_life_tick_person_id(
     *,
     args: Mapping[str, Any],
     occurrence_id: str,
+    now_ms: int,
     frozen_runtime_context: Mapping[str, Any],
     life_snapshot_reader: LifeSnapshotReaderPort,
 ) -> tuple[str, str]:
@@ -266,10 +268,47 @@ def _select_life_tick_person_id(
     ]
     if not compatible:
         return "default", "NO_SCENE_COMPATIBLE_REGISTERED_TARGET"
-    compatible.sort(key=lambda row: str(row.get("aggregate_id") or ""))
+    from host_brain.digital_life.companion_proactive import (  # noqa: PLC0415
+        PROACTIVE_SILENCE_GRACE_MS,
+    )
+
+    observed_at_ms = max(0, int(now_ms))
+    due_silence = [
+        row
+        for row in compatible
+        if _pending_proactive_silence_is_due(
+            row,
+            now_ms=observed_at_ms,
+            grace_ms=PROACTIVE_SILENCE_GRACE_MS,
+        )
+    ]
+    ready_for_contact = [
+        row
+        for row in compatible
+        if not int(row.get("pending_proactive_opened_at_ms") or 0)
+    ]
+    candidates = due_silence or ready_for_contact
+    if not candidates:
+        return "default", "NO_SCENE_COMPATIBLE_REGISTERED_TARGET"
+    candidates.sort(key=lambda row: str(row.get("aggregate_id") or ""))
     digest = hashlib.sha256(str(occurrence_id).encode("utf-8")).digest()
-    selected = compatible[int.from_bytes(digest[:8], "big") % len(compatible)]
-    return str(selected["aggregate_id"]), "CANONICAL_REGISTERED_TARGET"
+    selected = candidates[int.from_bytes(digest[:8], "big") % len(candidates)]
+    selection = (
+        "CANONICAL_PROACTIVE_SILENCE_MAINTENANCE_TARGET"
+        if due_silence
+        else "CANONICAL_REGISTERED_TARGET"
+    )
+    return str(selected["aggregate_id"]), selection
+
+
+def _pending_proactive_silence_is_due(
+    candidate: Mapping[str, Any],
+    *,
+    now_ms: int,
+    grace_ms: int,
+) -> bool:
+    opened_at_ms = max(0, int(candidate.get("pending_proactive_opened_at_ms") or 0))
+    return bool(opened_at_ms and max(0, int(now_ms)) >= opened_at_ms + max(1, int(grace_ms)))
 
 
 def scheduler_seed_configs(

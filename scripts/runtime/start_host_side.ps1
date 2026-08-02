@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$SecretEnvFile = "",
   [string]$RuntimeRoot = "",
   [string]$LogDir = "",
   [string]$AgentWorkspaceRoot = "",
@@ -1160,9 +1161,44 @@ $pidFile = Join-Path $RuntimeRoot "host.pid"
 $stdoutLog = Join-Path $LogDir "host.stdout.log"
 $stderrLog = Join-Path $LogDir "host.stderr.log"
 $runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
+$runtimeSecretEnvFile = ""
+
+if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
+  $secretCandidate = [Environment]::ExpandEnvironmentVariables($SecretEnvFile.Trim())
+  if (-not [System.IO.Path]::IsPathRooted($secretCandidate)) {
+    $secretCandidate = Join-Path $repoRoot $secretCandidate
+  }
+  if (-not (Test-Path -LiteralPath $secretCandidate -PathType Leaf)) {
+    throw "HOST_RUNTIME_SECRET_ENV_FILE_NOT_FOUND: $secretCandidate"
+  }
+  $runtimeSecretEnvFile = (Resolve-Path -LiteralPath $secretCandidate).Path
+  $resolvedEnvFile = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+    (Resolve-Path -LiteralPath $EnvFile).Path
+  } else {
+    [System.IO.Path]::GetFullPath($EnvFile)
+  }
+  if (
+    [string]::Equals($runtimeSecretEnvFile, $resolvedEnvFile, [System.StringComparison]::OrdinalIgnoreCase) -or
+    [string]::Equals($runtimeSecretEnvFile, $runtimeEnvFile, [System.StringComparison]::OrdinalIgnoreCase)
+  ) {
+    throw "HOST_RUNTIME_SECRET_ENV_FILE_MUST_BE_SEPARATE"
+  }
+}
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
+
+$configuredAuditDbPath = Get-EnvSetting `
+  -Values $envValues `
+  -Name "NATSUME_AUDIT_DB" `
+  -DefaultValue (Join-Path $RuntimeRoot "audit.sqlite3")
+if (-not [System.IO.Path]::IsPathRooted($configuredAuditDbPath)) {
+  $configuredAuditDbPath = Join-Path $repoRoot $configuredAuditDbPath
+}
+$auditDbPath = [System.IO.Path]::GetFullPath($configuredAuditDbPath)
+Ensure-Directory -Path ([System.IO.Path]::GetDirectoryName($auditDbPath))
+$env:NATSUME_AUDIT_DB = $auditDbPath
+$envValues["NATSUME_AUDIT_DB"] = $auditDbPath
 
 $configuredAgentWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceRoot)) {
   [string]$AgentWorkspaceRoot
@@ -1506,7 +1542,13 @@ $mateengineBridgeResult = Start-MateEngineBridgeRuntime `
   -ShowWindow:$ShowConsoleWindow.IsPresent `
   -Breakaway:$BreakawayFromConsole
 
-$hostArgs = @("-m", "host_brain", "--host", $BindHost, "--port", ([string]$Port), "--log-level", "INFO")
+$hostArgs = @(
+  "-m", "host_brain",
+  "--host", $BindHost,
+  "--port", ([string]$Port),
+  "--db-path", $auditDbPath,
+  "--log-level", "INFO"
+)
 if ($StartupCheck.IsPresent) {
   $hostArgs += "--startup-check"
 }
@@ -1521,16 +1563,25 @@ if ($catalogTargetStage -notin @("AUDIT", "SHADOW", "PREFLIGHT", "CANARY", "ENFO
 }
 
 $null = Write-RuntimeEnvFile -Path $runtimeEnvFile -SeedValues $envValues
-$cmdLine = @(
+$hostCommandParts = @(
   "set ""HOST_RUNTIME_ENV_FILE=$runtimeEnvFile""",
-  "&&",
+  "&&"
+)
+if ($runtimeSecretEnvFile) {
+  $hostCommandParts += @(
+    "set ""HOST_RUNTIME_SECRET_ENV_FILE=$runtimeSecretEnvFile""",
+    "&&"
+  )
+}
+$hostCommandParts += @(
   (ConvertTo-CmdArgument -Value $pythonExe),
   (Join-CmdArguments -Arguments $hostArgs),
   "1>>",
   (ConvertTo-CmdArgument -Value $stdoutLog),
   "2>>",
   (ConvertTo-CmdArgument -Value $stderrLog)
-) -join " "
+)
+$cmdLine = $hostCommandParts -join " "
 
 $proc = Start-HostCommand `
   -CommandLine $cmdLine `
@@ -1591,6 +1642,8 @@ if ($obsEnabled) {
       $obsArgs = @{
         EnvFile = $EnvFile
         RuntimeRoot = $RuntimeRoot
+        BindHost = $obsBindHost
+        Port = $obsBindPort
         WaitSeconds = $WaitSeconds
       }
       if ($ForceRestart.IsPresent) {
@@ -1875,6 +1928,7 @@ $result = [ordered]@{
   runtime_root = $RuntimeRoot
   agent_workspace_root = $resolvedAgentWorkspaceRoot
   runtime_env_file = $runtimeEnvFile
+  runtime_secret_env_configured = [bool]$runtimeSecretEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices

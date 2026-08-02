@@ -1,12 +1,12 @@
 受众：PROJECT
-标题：图 02——Governed Host 请求主链
+标题：图 02——实时陪伴与 Governed Host 双主链
 
-# 图 02：Governed Host 请求主链
+# 图 02：实时陪伴与 Governed Host 双主链
 
-版本：v2.16
-核对日期：2026-07-27
+版本：v2.17
+核对日期：2026-08-01
 
-本文画的是 `chat/skill/delegate/plan` canonical route。它替换了旧图中“所有请求都由 Executive Runtime 决策并直接后处理”的错误主链。
+本文画的是当前双路径：普通 `chat` 直接进入 RealtimeCompanion；`skill/delegate/plan` 进入 Governed Runtime。两者共享 Cortex 的上下文和 Surface 的人格/情感表达，但不共享执行权限和事务开销。
 
 ## 请求总览
 
@@ -18,7 +18,9 @@ flowchart TD
     INTENT["Intent draft"]
     GOV["Official Governor decision"]
     CORTEX["Cortex route gate"]
-    SUPPORT{"route in\nchat/skill/delegate/plan?"}
+    SUPPORT{"selected route"}
+    RTC["RealtimeCompanion\napp-local Surface ports"]
+    AFFECT["AffectiveTurnPlan\n+ native sentence stream"]
     GR["GovernedHostRuntime"]
     BUILD["HostCommand + WorkOrderV3 + BudgetPolicy"]
     PLAN{"route=plan?"}
@@ -45,12 +47,13 @@ flowchart TD
     REJECT["Unsupported route\nfail closed"]
 
     REQ --> ROUTE --> AIR --> INTENT --> GOV --> CORTEX --> SUPPORT
-    SUPPORT -->|"yes"| GR --> BUILD --> PLAN
+    SUPPORT -->|"chat"| RTC --> AFFECT --> SSE
+    SUPPORT -->|"skill / delegate / plan"| GR --> BUILD --> PLAN
     PLAN -->|"yes"| SEARCH --> XPOL --> ADMIT
     PLAN -->|"no"| DIRECT --> KIND
     KIND -->|"skill"| SPOL
     KIND -->|"delegate"| XPOL
-    KIND -->|"chat / tool"| ADMIT
+    KIND -->|"task-owned chat / tool"| ADMIT
     SPOL -->|"read / proposal / workspace"| ADMIT
     SPOL -->|"pending typed Effect"| REJECT
     ADMIT --> REOPEN --> TASK --> NODE --> WORK --> PROJECTION --> VERIFY --> ACCEPT --> ADEC
@@ -61,6 +64,8 @@ flowchart TD
     SUPPORT -->|"unsupported"| REJECT
 
     style GR fill:#d7f5df,stroke:#22863a
+    style RTC fill:#d7f5df,stroke:#22863a
+    style AFFECT fill:#d7f5df,stroke:#22863a
     style TASK fill:#d7f5df,stroke:#22863a
     style READ fill:#d7f5df,stroke:#22863a
     style REJECT fill:#ffd9d9,stroke:#b31d28

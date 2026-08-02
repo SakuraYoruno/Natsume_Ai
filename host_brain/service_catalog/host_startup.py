@@ -39,6 +39,7 @@ from host_brain.service_catalog.rollout_runtime import (
     IdentityCapturingHealthProbe,
 )
 from host_brain.service_catalog.socket_reservation import OwnedSocketReservationProbe
+from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
 
 
 HOST_MAIN_ENDPOINT_ID = "host.main.http"
@@ -51,7 +52,11 @@ HOST_CATALOG_CANDIDATE_OWNER_HEADER = "x-natsume-catalog-candidate-owner"
 HOST_CATALOG_STAGE_HEADER = "x-natsume-catalog-stage"
 HOST_SERVICE_CATALOG_TARGET_MODE_ENV = "HOST_SERVICE_CATALOG_TARGET_MODE"
 HOST_SERVICE_CATALOG_ROLLBACK_REF_ENV = "HOST_SERVICE_CATALOG_ROLLBACK_REF"
+HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS_ENV = (
+    "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS"
+)
 DEFAULT_HOST_SERVICE_CATALOG_TARGET_MODE = CatalogMode.ENFORCE
+DEFAULT_HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS = 60_000
 _ROLLOUT_STAGES = (
     CatalogMode.AUDIT,
     CatalogMode.SHADOW,
@@ -139,7 +144,12 @@ class HostHttpHealthProbe:
             endpoint_id=endpoint.endpoint_id,
             healthy=(
                 200 <= status_code < 300
-                and str(document.get("status") or "").upper() in {"OK", "DEGRADED"}
+                # External acceptance can remain pending while this exact
+                # local Host candidate is alive and identity-valid.  Treating
+                # that state as a dead candidate prevents the Host from
+                # exposing the truthful NOT_TESTED readiness payload at all.
+                and str(document.get("status") or "").upper()
+                in {"OK", "DEGRADED", ACCEPTANCE_PENDING_EXTERNAL}
             ),
             status_code=status_code,
             owner_id=str(health_identity.get("owner_id") or ""),
@@ -313,6 +323,24 @@ def _configured_rollback_ref(source: Mapping[str, str]) -> str | None:
     return raw
 
 
+def _coordinator_lease_ms(source: Mapping[str, str]) -> int:
+    raw = str(
+        source.get(HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS_ENV)
+        or DEFAULT_HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS
+    ).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ServiceCatalogRolloutError(
+            "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS is invalid"
+        ) from exc
+    if value < 60_000 or value > 300_000:
+        raise ServiceCatalogRolloutError(
+            "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS must be between 60000 and 300000"
+        )
+    return value
+
+
 def _stage_operation_id(base_operation_id: str, stage: CatalogMode) -> str:
     operation_id = f"{base_operation_id}:{stage.value.lower()}"
     if len(operation_id) > 512:
@@ -391,6 +419,7 @@ def start_host_through_service_catalog(
         raise ServiceCatalogRolloutError("Service Catalog operation identity is empty")
     target_stage = _host_catalog_target_mode(source)
     configured_rollback_ref = _configured_rollback_ref(source)
+    coordinator_lease_ms = _coordinator_lease_ms(source)
     source[HOST_SERVICE_CATALOG_TARGET_MODE_ENV] = target_stage.value
     if env is None:
         os.environ[HOST_SERVICE_CATALOG_TARGET_MODE_ENV] = target_stage.value
@@ -403,7 +432,7 @@ def start_host_through_service_catalog(
     authority = store.acquire_authority(
         runtime_scope_id=runtime_scope,
         owner_id=f"host.main.catalog::{os.getpid()}::{uuid4().hex}",
-        lease_ms=300_000,
+        lease_ms=coordinator_lease_ms,
     )
     if authority is None:
         raise ServiceCatalogRolloutError("another Service Catalog coordinator owns this runtime")
@@ -414,10 +443,6 @@ def start_host_through_service_catalog(
             runtime_scope_id=runtime_scope,
             candidate_owner_id=HOST_MAIN_OWNER_ID,
         )
-        if head is not None and str(head["catalog_snapshot_digest"]) != snapshot.digest:
-            raise ServiceCatalogRolloutError(
-                "durable Service Catalog head uses another catalog snapshot"
-            )
         target_rank = _ROLLOUT_STAGE_RANK[target_stage]
         if head is None:
             first_rank = 0
@@ -427,13 +452,19 @@ def start_host_through_service_catalog(
                 raise ServiceCatalogRolloutError(
                     "configured Service Catalog target regresses the durable head"
                 )
-            # A completed target is reactivated on process restart; a lower
-            # durable head resumes at exactly the next stage.
+            # A completed target is reactivated on process restart, including
+            # when a legitimate runtime configuration change produces a new
+            # catalog digest. The prior operation remains the rollback ref;
+            # freezing one SQLite runtime to its first-ever endpoint snapshot
+            # would make normal port and sidecar changes impossible.
             first_rank = target_rank if target_rank == head_rank else head_rank + 1
 
         outcomes: list[CatalogActivationOutcomeV1] = []
         for stage in _ROLLOUT_STAGES[first_rank : target_rank + 1]:
-            renewed = store.renew_authority(authority, lease_ms=300_000)
+            renewed = store.renew_authority(
+                authority,
+                lease_ms=coordinator_lease_ms,
+            )
             if renewed is None:
                 raise ServiceCatalogRolloutError(
                     "Service Catalog coordinator authority was lost during rollout"

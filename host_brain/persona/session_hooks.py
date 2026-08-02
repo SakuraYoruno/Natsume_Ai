@@ -40,6 +40,27 @@ from host_brain.agent_runtime.runtime_texts import (
     _EMOTION_INFER_KEYWORDS,
     _logger,
 )
+
+
+def _uses_canonical_affective_life(limbic: Any) -> bool:
+    """Fail closed before invoking a mutable legacy session hook.
+
+    Old compatibility fixtures do not expose the probe and retain their
+    isolated behaviour.  A production Limbic instance either explicitly
+    selects canonical Life or, if its probe is broken, is treated as
+    canonical so a post-process callback cannot revive a second affect
+    authority.
+    """
+
+    probe = getattr(limbic, "uses_canonical_affective_life", None)
+    if not callable(probe):
+        return False
+    try:
+        return bool(probe())
+    except Exception:
+        return True
+
+
 def _resolve_persona_session_emotion(emotion_context: Mapping[str, Any]) -> tuple[float, float]:
     """为人格 session_end 提取可用的 valence / arousal。"""
     payload = dict(emotion_context or {})
@@ -91,8 +112,16 @@ async def _run_persona_session_end_hooks(
 ) -> None:
     """统一触发人格 session_end/conversation_end 收口。"""
     try:
-        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+        limbic = get_limbic_agent()
+        if _uses_canonical_affective_life(limbic):
+            # Accepted chat already records canonical self-affect and
+            # relational aftereffects.  This hook used user-derived VAD and a
+            # compatibility default user id, so it must not become a shadow
+            # session writer in production.
+            return
+        from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
 
         persona_user_id = get_canonical_bond_user_id()
         valence, arousal = _resolve_persona_session_emotion(emotion_context)
@@ -101,7 +130,7 @@ async def _run_persona_session_end_hooks(
         if topic_preview:
             pending_topics = [topic_preview]
         await asyncio.to_thread(
-            get_limbic_agent().on_session_end,
+            limbic.on_session_end,
             person_id=persona_user_id,
             valence=valence,
             arousal=arousal,
@@ -113,8 +142,11 @@ async def _run_persona_session_end_hooks(
     try:
         from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
 
+        limbic = get_limbic_agent()
+        if _uses_canonical_affective_life(limbic):
+            return
         await asyncio.to_thread(
-            get_limbic_agent().on_conversation_ended,
+            limbic.on_conversation_ended,
             request_id=request_id,
             session_id=session_id,
             person_id=person_id,
@@ -131,8 +163,24 @@ def _run_surface_persona_session_end_sync(
     user_message: str,
     emotion_context: Mapping[str, Any],
 ) -> dict[str, Any]:
-    from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
     from host_brain.tribe.limbic_agent import get_limbic_agent  # noqa: PLC0415
+
+    limbic = get_limbic_agent()
+    if _uses_canonical_affective_life(limbic):
+        # Do not derive a user-emotion VAD or collapse an inbound subject into
+        # the historical default Bond id merely to feed a retired session
+        # hook.  The foreground accepted turn owns the canonical record.
+        return {
+            "status": "SKIPPED",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_PERSONA_SESSION_END_RETIRED",
+            "request_id": request_id,
+            "session_id": session_id,
+            "person_id": str(person_id or "").strip() or None,
+            "inner_world": {},
+        }
+
+    from host_brain.bond.user_identity import get_canonical_bond_user_id  # noqa: PLC0415
 
     payload_emotion = dict(emotion_context or {})
     user_emotion_tag = str(
@@ -146,7 +194,7 @@ def _run_surface_persona_session_end_sync(
     _ = person_id
     persona_user_id = get_canonical_bond_user_id()
     pending_topics = [topic_preview] if topic_preview else []
-    state = get_limbic_agent().on_session_end(
+    state = limbic.on_session_end(
         person_id=persona_user_id,
         valence=valence,
         arousal=arousal,

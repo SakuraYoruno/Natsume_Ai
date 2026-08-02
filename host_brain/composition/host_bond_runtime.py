@@ -30,6 +30,39 @@ SettingsProvider = Callable[[], "HostBondRuntimeSettings"]
 _logger = logging.getLogger("Natsume.host_bond_runtime")
 
 
+class RetiredBondReadProjection:
+    """Fail closed when canonical Life has retired legacy Bond reads.
+
+    A ``BondStageEngine`` creates an ``INIT`` row on an apparently harmless
+    ``get_state``/``get_summary`` call.  That makes a legacy GET endpoint a
+    hidden relationship writer.  The production Host therefore receives this
+    explicit adapter instead of a real engine; isolated legacy compositions
+    continue to opt in through ``legacy_read_authority_enabled=True``.
+    """
+
+    status = "RETIRED_CANONICAL_LIFE"
+    reason_code = "LEGACY_BOND_READ_RETIRED"
+
+    @classmethod
+    def _raise_retired(cls) -> None:
+        raise RuntimeError(cls.reason_code)
+
+    def get_state(self, *_args: Any, **_kwargs: Any) -> Any:
+        self._raise_retired()
+
+    def peek_state(self, *_args: Any, **_kwargs: Any) -> Any:
+        self._raise_retired()
+
+    def get_bond_state(self, *_args: Any, **_kwargs: Any) -> Any:
+        self._raise_retired()
+
+    def get_summary(self, *_args: Any, **_kwargs: Any) -> Any:
+        self._raise_retired()
+
+    def list_users(self, *_args: Any, **_kwargs: Any) -> Any:
+        self._raise_retired()
+
+
 @dataclass(frozen=True, slots=True)
 class HostBondRuntimeSettings:
     stage_thresholds: Mapping[str, int]
@@ -54,8 +87,9 @@ class HostBondRuntimeCloseError(RuntimeError):
 class HostBondRuntimeOwner:
     """Own one legacy Bond projection epoch for one Host application root.
 
-    Production disables its score writer and in-process queue; the owner then
-    serves read compatibility only and returns explicit no-write adapters.
+    Production disables score writes, in-process queues and legacy read
+    engines.  Explicit legacy/offline compositions can retain the historical
+    adapters for one rollback window.
     """
 
     def __init__(
@@ -68,6 +102,7 @@ class HostBondRuntimeOwner:
         client_factory: ServiceProvider,
         settings_provider: SettingsProvider = lambda: load_host_bond_runtime_settings(),
         legacy_write_authority_enabled: bool = True,
+        legacy_read_authority_enabled: bool = True,
     ) -> None:
         self._ledger_provider = ledger_provider
         self._stage_engine_factory = stage_engine_factory
@@ -76,6 +111,7 @@ class HostBondRuntimeOwner:
         self._client_factory = client_factory
         self._settings_provider = settings_provider
         self._legacy_write_authority_enabled = bool(legacy_write_authority_enabled)
+        self._legacy_read_authority_enabled = bool(legacy_read_authority_enabled)
         self._lock = RLock()
         self._active = False
         self._closing = False
@@ -105,20 +141,25 @@ class HostBondRuntimeOwner:
         with self._lock:
             self._require_active()
             if self._stage_engine is None:
-                settings = self._require_settings()
-                self._stage_engine = self._stage_engine_factory(
-                    ledger=self._ledger_provider(),
-                stage_thresholds=dict(settings.stage_thresholds),
-                score_map=dict(settings.score_map),
-                automatic_stage_transitions=(
-                    bool(settings.automatic_stage_transitions)
-                ),
-                )
+                if not self._legacy_read_authority_enabled:
+                    self._stage_engine = RetiredBondReadProjection()
+                else:
+                    settings = self._require_settings()
+                    self._stage_engine = self._stage_engine_factory(
+                        ledger=self._ledger_provider(),
+                        stage_thresholds=dict(settings.stage_thresholds),
+                        score_map=dict(settings.score_map),
+                        automatic_stage_transitions=(
+                            bool(settings.automatic_stage_transitions)
+                        ),
+                    )
             return self._stage_engine
 
     def require_client(self) -> Any:
         with self._lock:
             self._require_active()
+            if not self._legacy_read_authority_enabled:
+                raise RuntimeError("LEGACY_BOND_CLIENT_RETIRED")
             if self._client is None:
                 self._client = self._client_factory()
             return self._client
@@ -366,6 +407,7 @@ __all__ = [
     "HostBondRuntimeCloseError",
     "HostBondRuntimeOwner",
     "HostBondRuntimeSettings",
+    "RetiredBondReadProjection",
     "build_host_bond_client",
     "load_host_bond_runtime_settings",
 ]

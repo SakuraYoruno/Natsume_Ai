@@ -29,6 +29,10 @@ from host_brain.digital_life.application_boundary import (
     project_inner_life_snapshot,
     read_life_snapshot,
 )
+from host_brain.digital_life.companion_voice import (
+    japanese_companion_voice_enabled,
+    normalize_japanese_speech_text,
+)
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.input_runtime.reply_envelope import can_send, coerce_reply_envelope, envelope_from_commit
 from host_brain.input_runtime.reply_performance import coerce_reply_performance
@@ -38,8 +42,6 @@ from host_brain.persona.response_form_contract import (
     is_pure_media_response_form,
     normalize_response_form,
 )
-from host_brain.agent_runtime.skill_ids import is_agent_runtime_skill
-
 # ── service 层 import ──────────────────────────────────────────────────────
 from host_brain.input_runtime.audit import (
     get_ledger_safe as _get_ledger_safe,
@@ -489,34 +491,8 @@ def _should_send_gateway_immediate_ack(
     )
 
 
-def _should_send_gateway_route_started_voice_ack(
-    *,
-    source: str,
-    payload: dict[str, Any],
-    route_type: str,
-    target_id: str,
-) -> tuple[bool, str]:
-    if str(source or "").strip().upper() != "GATEWAY":
-        return False, "ROUTE_ACK_SOURCE_NOT_GATEWAY"
-    if not get_input_settings().gateway_route_ack_voice_enabled:
-        return False, "ROUTE_ACK_DISABLED"
-    if not str(payload.get("platform") or "").strip() or not str(payload.get("conversation_id") or "").strip():
-        return False, "ROUTE_ACK_TARGET_MISSING"
-
-    normalized_route = str(route_type or "").strip().lower()
-    normalized_target = str(target_id or "").strip().lower()
-    if normalized_route == "plan":
-        return True, "ROUTE_ACK_PLAN"
-    if normalized_route == "delegate" and normalized_target in {"translate_agent", "intent_agent"}:
-        return True, f"ROUTE_ACK_{normalized_target.upper()}"
-    if normalized_route == "skill" and is_agent_runtime_skill(normalized_target):
-        return True, "ROUTE_ACK_codex_runtime"
-    return False, "ROUTE_ACK_FAST_ROUTE"
-
-
 def _load_gateway_fallback_texts() -> dict[str, Any]:
     return {
-        "route_started_voice_ack": {},
         "voice_summary": {},
     }
 
@@ -661,26 +637,6 @@ def _build_gateway_multimodal_async_ack_text(*, attachments: list[dict[str, Any]
     return str(templates.get("async_accept_generic") or "")
 
 
-def _build_gateway_route_started_voice_ack_text(
-    *,
-    route_type: str,
-    target_id: str,
-    render_target_lang: str = "ja",
-) -> str:
-    normalized_route = str(route_type or "").strip().lower()
-    normalized_target = str(target_id or "").strip().lower()
-    templates = _load_gateway_fallback_texts_localized(render_target_lang=render_target_lang)
-    route_templates = dict(templates.get("route_started_voice_ack") or {})
-    if normalized_route == "delegate" and normalized_target == "translate_agent":
-        return str(route_templates.get("translate_agent") or "")
-    if normalized_route == "delegate" and normalized_target == "intent_agent":
-        return str(route_templates.get("intent_agent") or "")
-    if normalized_route == "skill" and is_agent_runtime_skill(normalized_target):
-        return str(route_templates.get("agent_worker") or "")
-    if normalized_route == "plan":
-        return str(route_templates.get("plan") or "")
-    return str(route_templates.get("default") or "")
-
 def _detect_gateway_execution_deviation(
     *,
     source: str,
@@ -757,6 +713,11 @@ def _build_gateway_voice_text(
     voice_templates = dict(templates.get("voice_summary") or {})
 
     normalized_reply = str(reply_text or "").strip()
+    if japanese_companion_voice_enabled():
+        # In Japanese companion-voice mode, never feed the Chinese display
+        # text to the Japanese acoustic model.  Missing JA text degrades to no
+        # voice while the visible reply remains available.
+        return normalize_japanese_speech_text(tts_text_ja)
     if normalized_reply and _VOICE_TEXT_CHAR_PATTERN.search(normalized_reply) and not _VOICE_LATIN_PATTERN.search(normalized_reply):
         return normalized_reply
 
@@ -925,14 +886,6 @@ def _extract_voice_audio_path(event_map: dict[str, Any]) -> str:
         if path:
             return path
     return ""
-
-
-def _resolve_gateway_voice_emotion_tag(emotion_tag: str | None) -> str | None:
-    normalized = str(emotion_tag or "").strip().upper()
-    if normalized and normalized != "NEUTRAL":
-        return normalized
-    configured = str(get_input_settings().gateway_default_voice_emotion_tag or "").strip().upper()
-    return configured or None
 
 
 def _gateway_ingress_rejection_http_status(reason_code: str) -> int:

@@ -24,10 +24,13 @@ from host_brain.app.route_catalog_runtime import (
     resolve_host_llm_runtime_async_from_catalog,
     resolve_surface_reply_llm_runtime,
 )
-from host_brain.app.state_arbiter_queries import _resolve_state_arbiter_bond_fact
-from host_brain.app.tts_route import resolve_tts_route
+from host_brain.app.route_execution_ports import (
+    RealtimeCompanionExecutionPorts,
+    build_realtime_companion_execution_ports,
+    stream_realtime_chat_with_context,
+)
+from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
 from host_brain.app.user_preference_store import build_user_preference_pack
-from host_brain.app.vts_emotion_driver import _drive_stream_vts_emotion
 from host_brain.observability.runtime_audit import _persist_post_process_audit
 
 
@@ -95,16 +98,13 @@ def build_agent_runtime_application_ports(
     prompt_registry = host_services.require_provider("prompt_registry")
     model_attempt_service = host_services.require_provider("model_attempt_service")
     model_route_catalog = host_services.require_provider("model_route_catalog")
-    bond_stage_engine = host_services.require_provider("bond_stage_engine")
     session_topic_ledger_store = host_services.require_provider(
         "session_topic_ledger_store"
     )
     session_tactic_ledger_store = host_services.require_provider(
         "session_tactic_ledger_store"
     )
-    tts_context_router = host_services.require_provider("tts_context_router")
-    meta_learning_loop = host_services.require_provider("meta_learning_loop")
-    bond_neo4j_client = host_services.require_provider("bond_neo4j_client")
+    realtime_companion_ports: RealtimeCompanionExecutionPorts | None = None
 
     def resolve_life_authority() -> tuple[Any, Any]:
         try:
@@ -126,7 +126,6 @@ def build_agent_runtime_application_ports(
             return _build_surface_memory_recall_service(
                 ledger=ledger(),
                 life_memory_store=life_memory_store(),
-                bond_neo4j_client=bond_neo4j_client(),
             )
 
         return await _run_retrieval(
@@ -182,28 +181,8 @@ def build_agent_runtime_application_ports(
             **kwargs,
         )
 
-    async def resolve_state_arbiter_bond_fact_with_engine(**kwargs: Any) -> Any:
-        return await _resolve_state_arbiter_bond_fact(
-            bond_stage_engine=bond_stage_engine(),
-            **kwargs,
-        )
-
     def build_user_preference_pack_with_ledger(**kwargs: Any) -> dict[str, Any]:
         return build_user_preference_pack(ledger=ledger(), **kwargs)
-
-    def retire_surface_emotion_bond_flow(**_kwargs: Any) -> dict[str, Any]:
-        """Keep the old Surface hook observable without resurrecting Bond writes.
-
-        Foreground relationship outcomes are already committed through the
-        canonical Life relationship lifecycle before this post-process stage.
-        A second score queue would be volatile and could contradict recovery.
-        """
-
-        return {
-            "status": "RETIRED_CANONICAL_LIFE",
-            "authority": "CANONICAL_LIFE_JOURNAL",
-            "reason_code": "LEGACY_SURFACE_BOND_FLOW_RETIRED",
-        }
 
     def task_status_projection() -> Any:
         return build_durable_task_status_projection(ledger=ledger())
@@ -218,20 +197,18 @@ def build_agent_runtime_application_ports(
 
         return build_conversation_experience_read_pack(ledger=ledger(), **kwargs)
 
-    async def drive_stream_vts_emotion_with_ledger(**kwargs: Any) -> Any:
-        return await _drive_stream_vts_emotion(
-            ledger=ledger(),
+    async def stream_realtime_chat(**kwargs: Any):
+        if realtime_companion_ports is None:
+            raise AgentRuntimeCompositionError(
+                "HOST_REALTIME_COMPANION_RUNTIME_UNAVAILABLE"
+            )
+        async for event in stream_realtime_chat_with_context(
+            ports=realtime_companion_ports,
             **kwargs,
-        )
+        ):
+            yield event
 
-    def resolve_tts_route_with_host_services(**kwargs: Any) -> Any:
-        return resolve_tts_route(
-            tts_context_router=tts_context_router(),
-            meta_learning_loop=meta_learning_loop(),
-            **kwargs,
-        )
-
-    return AgentRuntimeApplicationPorts(
+    application_ports = AgentRuntimeApplicationPorts(
         record_user_turn=record_user_turn_with_life_authority,
         record_assistant_turn=record_assistant_turn_with_life_authority,
         run_retrieval=run_retrieval_with_life_authority,
@@ -243,11 +220,7 @@ def build_agent_runtime_application_ports(
         resolve_surface_reply_llm_runtime=(
             resolve_surface_reply_llm_runtime_with_catalog
         ),
-        resolve_state_arbiter_bond_fact=resolve_state_arbiter_bond_fact_with_engine,
-        apply_surface_emotion_bond_flow=retire_surface_emotion_bond_flow,
         build_conversation_experience_read_pack=conversation_experience_read_pack,
-        drive_stream_vts_emotion=drive_stream_vts_emotion_with_ledger,
-        resolve_tts_route=resolve_tts_route_with_host_services,
         conversation_history=conversation_history,
         life_memory_service=life_memory_service,
         audit_ledger=ledger,
@@ -264,7 +237,16 @@ def build_agent_runtime_application_ports(
             _persist_post_process_audit,
             audit_ledger=ledger,
         ),
+        stream_realtime_chat=stream_realtime_chat,
     )
+    surface_runtime_ports = build_surface_runtime_ports(
+        agent_runtime_ports=application_ports,
+        life_authority_provider=life_authority_provider,
+    )
+    realtime_companion_ports = build_realtime_companion_execution_ports(
+        surface_runtime_ports=surface_runtime_ports,
+    )
+    return application_ports
 
 
 __all__ = [

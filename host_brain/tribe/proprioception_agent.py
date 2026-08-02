@@ -32,7 +32,37 @@ class ProprioceptionAgent:
     def describe(self) -> dict[str, Any]:
         return self.descriptor.to_dict()
 
+    def _legacy_load_writer_retired(self) -> bool:
+        """Whether canonical Life owns the meaning of load and interruption.
+
+        Activity is a useful technical observation, but this legacy agent
+        turns process-local sessions and interruptions into a second affect,
+        need, and proactive-rhythm writer.  Canonical callers must receive an
+        explicit unavailable projection instead of a synthetic body state.
+        """
+
+        ports = getattr(self, "application_ports", None)
+        return bool(
+            isinstance(ports, TribeApplicationPorts)
+            and ports.uses_canonical_affective_life()
+        )
+
+    @staticmethod
+    def _retired_load_result(*, operation: str) -> dict[str, Any]:
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "projection": "UNAVAILABLE",
+            "reason_code": "LEGACY_PROPRIOCEPTION_LOAD_WRITER_RETIRED",
+            "accepted": False,
+            "operation": str(operation),
+        }
+
     def register_subscriptions(self) -> None:
+        if self._legacy_load_writer_retired():
+            # Host activity monitoring is injected separately.  Do not turn
+            # old conversation/voice/task events into a global affect cache.
+            return
         try:
             from host_brain.tribe.event_bus import get_tribe_event_bus  # noqa: PLC0415
 
@@ -85,6 +115,8 @@ class ProprioceptionAgent:
         return state
 
     def _update_state(self, *, changes: dict[str, Any], source: str, ts_ms: int | None = None) -> dict[str, Any]:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation=f"state_update:{source}")
         resolved_ts = int(ts_ms or now_ms())
         prev = self.state_registry.get_state("proprioception_agent") or {}
         state = dict(prev.get("state") or {})
@@ -160,6 +192,8 @@ class ProprioceptionAgent:
         Returns:
             认知状态描述字符串，或 None（未触发/失败）。
         """
+        if self._legacy_load_writer_retired():
+            return None
         if float(cognitive_load_index or 0.0) <= 0.6:
             return None
 
@@ -203,6 +237,22 @@ class ProprioceptionAgent:
             return None
 
     def export_runtime_state(self) -> dict[str, Any]:
+        if self._legacy_load_writer_retired():
+            return {
+                "active_user_id": None,
+                "active_session_id": None,
+                "active_session": False,
+                "active_task_count": 0,
+                "interrupt_count_5m": 0,
+                "voice_pipeline_active": False,
+                "cognitive_load_index": None,
+                "readiness_hint": None,
+                "continuity_hint": None,
+                "prolonged_silence_ms": 0,
+                "last_user_event_ts_ms": 0,
+                "last_updated_ts_ms": 0,
+                **self._retired_load_result(operation="runtime_state_export"),
+            }
         state = self._update_state(changes={}, source="export_runtime_state")
         return {
             "active_user_id": state.get("active_user_id"),
@@ -219,7 +269,9 @@ class ProprioceptionAgent:
             "last_updated_ts_ms": int(state.get("ts_ms") or now_ms()),
         }
 
-    async def _on_conversation_started(self, event: Any) -> None:
+    async def _on_conversation_started(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="conversation_started")
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._update_state(
@@ -234,7 +286,9 @@ class ProprioceptionAgent:
             },
         )
 
-    async def _on_conversation_ended(self, event: Any) -> None:
+    async def _on_conversation_ended(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="conversation_ended")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         prev = self.state_registry.get_state("proprioception_agent") or {}
         prev_state = dict(prev.get("state") or {})
@@ -249,7 +303,9 @@ class ProprioceptionAgent:
             },
         )
 
-    async def _on_channel_message_received(self, event: Any) -> None:
+    async def _on_channel_message_received(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="channel_message_received")
         payload = dict(getattr(event, "payload", None) or {})
         ts_ms = int(payload.get("ts_ms") or getattr(event, "ts_ms", 0) or now_ms())
         self._interrupt_ts_ms.append(ts_ms)
@@ -286,7 +342,9 @@ class ProprioceptionAgent:
             except Exception:
                 pass
 
-    async def _on_voice_pipeline_started(self, event: Any) -> None:
+    async def _on_voice_pipeline_started(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="voice_pipeline_started")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._update_state(
             source="voice_pipeline_started",
@@ -294,7 +352,9 @@ class ProprioceptionAgent:
             changes={"voice_pipeline_active": True},
         )
 
-    async def _on_voice_pipeline_ended(self, event: Any) -> None:
+    async def _on_voice_pipeline_ended(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="voice_pipeline_ended")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         self._update_state(
             source="voice_pipeline_ended",
@@ -308,8 +368,10 @@ class ProprioceptionAgent:
         intensity: float = 0.35,
         task_count: int = 0,
         ts_ms: int | None = None,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """T-367：任务成功时同步联动入口，供外部直接调用。"""
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="task_success")
         resolved_ts = int(ts_ms or now_ms())
         self._update_state(
             source="task_success",
@@ -355,7 +417,9 @@ class ProprioceptionAgent:
         except Exception:
             pass
 
-    async def _on_task_success(self, event: Any) -> None:
+    async def _on_task_success(self, event: Any) -> dict[str, Any] | None:
+        if self._legacy_load_writer_retired():
+            return self._retired_load_result(operation="task_success_event")
         ts_ms = int(getattr(event, "ts_ms", 0) or now_ms())
         payload = dict(getattr(event, "payload", None) or {})
         intensity = _clamp(float(payload.get("intensity") or 0.35))

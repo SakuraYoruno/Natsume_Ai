@@ -68,6 +68,81 @@ def test_scene_lanes_preserve_configured_provider_model_and_timeout(monkeypatch)
     assert "ignored" not in repr(surface) + repr(subagent)
 
 
+def test_realtime_companion_uses_tier_b_without_surface_pro_override(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_LLM_TIMEOUT_MS", "8000")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-pro")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "deepseek-v4-pro")
+    monkeypatch.setenv("HOST_SURFACE_REPLY_TIMEOUT_MS", "45000")
+    for name in (
+        "HOST_MODEL_ROUTE_SCENE_CHAT_SURFACE_REALTIME_TIER_B_MODEL_ID",
+        "HOST_MODEL_ROUTE_TIER_B_MODEL_ID",
+        "HOST_MODEL_ROUTE_SCENE_CHAT_SURFACE_REALTIME_MODEL_ID",
+        "HOST_DEEPSEEK_REALTIME_COMPANION_MODEL_ID",
+        "HOST_REALTIME_COMPANION_MODEL_ID",
+        "HOST_CHAT_AGENT_MODEL_ID",
+        "HOST_REALTIME_COMPANION_TIMEOUT_MS",
+        "HOST_CHAT_AGENT_TIMEOUT_MS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    realtime = resolve_surface_reply_llm_runtime(
+        catalog=ServerRouteCatalog(),
+        base_runtime={"runtime_path": "realtime_companion"},
+    )
+    governed = resolve_surface_reply_llm_runtime(
+        catalog=ServerRouteCatalog(),
+        base_runtime={},
+    )
+
+    assert realtime["scene_type"] == "CHAT_SURFACE_REALTIME"
+    assert realtime["route_lane"] == "realtime_companion"
+    assert realtime["model_id"] == "deepseek-v4-flash"
+    assert realtime["timeout_ms"] == 15000
+    assert realtime["model_selection_source"] == "provider_fallback"
+    assert governed["scene_type"] == "CHAT_SURFACE"
+    assert governed["model_id"] == "deepseek-v4-pro"
+    assert governed["timeout_ms"] == 45000
+
+
+def test_realtime_companion_accepts_dedicated_provider_override(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv(
+        "HOST_DEEPSEEK_REALTIME_COMPANION_MODEL_ID",
+        "deepseek-realtime-custom",
+    )
+    monkeypatch.setenv("HOST_REALTIME_COMPANION_TIMEOUT_MS", "7200")
+
+    route = resolve_surface_reply_llm_runtime(
+        catalog=ServerRouteCatalog(),
+        base_runtime={"runtime_path": "realtime_companion"},
+    )
+
+    assert route["model_id"] == "deepseek-realtime-custom"
+    assert route["model_selection_source"] == (
+        "HOST_DEEPSEEK_REALTIME_COMPANION_MODEL_ID"
+    )
+    assert route["timeout_ms"] == 7200
+
+
+def test_realtime_companion_accepts_dedicated_provider_lane(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_REALTIME_COMPANION_PROVIDER", "gemini")
+    monkeypatch.delenv(
+        "HOST_MODEL_ROUTE_SCENE_CHAT_SURFACE_REALTIME_PROVIDER",
+        raising=False,
+    )
+
+    route = resolve_surface_reply_llm_runtime(
+        catalog=ServerRouteCatalog(),
+        base_runtime={"runtime_path": "realtime_companion"},
+    )
+
+    assert route["provider_name"] == "gemini"
+    assert route["model_id"] == "gemini-2.5-flash-lite"
+    assert route["route_lane"] == "realtime_companion"
+
+
 def test_cross_provider_role_models_are_ignored_for_selected_provider(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
     monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-runtime-default")

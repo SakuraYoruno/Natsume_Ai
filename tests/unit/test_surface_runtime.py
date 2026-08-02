@@ -198,6 +198,47 @@ def test_parse_surface_generation_output_normalizes_emotion_aliases() -> None:
     assert parsed["emotion_confidence"] == 1.0
 
 
+def test_japanese_companion_voice_uses_one_bilingual_model_response(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    messages = surface_runtime_module.build_direct_surface_messages(
+        _payload(user_message="今天有点累，陪我说两句。")
+    )
+    rendered = "\n".join(str(item["content"]) for item in messages)
+
+    assert "tts_text_ja" in rendered
+    assert "同一回复" in rendered
+    assert "不要逐字硬译" in rendered
+
+    def generate(_messages):
+        return json.dumps(
+            {
+                "reply_text": "那就先歇一下，我陪你待会儿。",
+                "tts_text_ja": "じゃあ、少し休もっか。私がそばにいるから。",
+                "natsume_emotion_tag": "CALM",
+                "user_emotion_tag": "SAD",
+                "emotion_confidence": 0.78,
+            },
+            ensure_ascii=False,
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(_payload(user_message="今天有点累，陪我说两句。"))
+    )
+
+    assert result.selected_text == "那就先歇一下，我陪你待会儿。"
+    assert result.tts_text_ja == "じゃあ、少し休もっか。私がそばにいるから。"
+    assert result.as_dict()["tts_text_ja"] == result.tts_text_ja
+
+
+def test_japanese_companion_voice_discards_non_japanese_speech_text() -> None:
+    parsed = parse_surface_generation_output(
+        '{"reply_text":"我在。","tts_text_ja":"这仍然是中文。"}'
+    )
+
+    assert parsed["reply_text"] == "我在。"
+    assert parsed["tts_text_ja"] == ""
+
+
 def test_parse_surface_generation_output_cleans_chat_punctuation_tail() -> None:
     parsed = parse_surface_generation_output(
         '{"reply_text":"老哥早上好呀～。","natsume_emotion_tag":"HAPPY","user_emotion_tag":"NEUTRAL","emotion_confidence":0.8}'

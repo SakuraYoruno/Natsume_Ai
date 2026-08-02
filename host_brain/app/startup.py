@@ -26,6 +26,7 @@ from host_brain.core.edge_endpoint_config import (
     resolve_edge_base_url,
     resolve_edge_base_urls,
 )
+from host_brain.core.errors import ACCEPTANCE_PENDING_EXTERNAL
 
 _logger = logging.getLogger("Natsume.startup")
 _AsyncT = TypeVar("_AsyncT")
@@ -117,7 +118,10 @@ def _resolve_edge_probe_timeout_s() -> float:
 
 
 def _build_edge_rpc_skip_detail() -> str:
-    return f"edge rpc skipped: gateway-only mode ({resolve_edge_base_url()})"
+    return (
+        "edge rpc not tested: remote Edge disabled by Host configuration "
+        f"({resolve_edge_base_url()})"
+    )
 
 
 async def probe_edge_rpc_health() -> dict:
@@ -129,8 +133,11 @@ async def probe_edge_rpc_health() -> dict:
     t0 = int(time.time() * 1000)
     if not _is_edge_rpc_enabled():
         return {
-            "available": True,
-            "status": "SKIPPED",
+            "available": False,
+            "status": "NOT_TESTED",
+            "not_tested": True,
+            "unavailable_kind": "external_pending",
+            "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
             "detail": _build_edge_rpc_skip_detail(),
             "latency_ms": 0,
             "base_url": "",
@@ -218,11 +225,18 @@ def build_edge_dependency_probe_statuses(
     except (TypeError, ValueError):
         latency_ms = 0
 
-    if status == "SKIPPED":
+    if status in {"SKIPPED", "NOT_TESTED"}:
         if not detail:
             detail = _build_edge_rpc_skip_detail()
         return {
-            service_id: {"available": True, "detail": detail}
+            service_id: {
+                "available": False,
+                "status": "NOT_TESTED",
+                "not_tested": True,
+                "unavailable_kind": "external_pending",
+                "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
+                "detail": detail,
+            }
             for service_id in _EDGE_RPC_DEPENDENCY_SERVICE_IDS
         }
 
@@ -586,8 +600,9 @@ def warmup_chat_runtime_basics(
             from host_brain.persona.persona_engine import PersonaEngine  # noqa: PLC0415
 
             PersonaEngine.get_instance()
-            ports.silence_engine()
-            warmed_parts.append("persona_runtime=ready")
+            # The canonical Host must not warm the retired mutable
+            # EmotionalSilenceEngine as part of chat cold-start reduction.
+            warmed_parts.append("persona_runtime=ready,legacy_silence=retired")
         else:
             warmed_parts.append("persona_runtime=lazy")
 
@@ -625,6 +640,10 @@ def warmup_chat_llm_runtime_profiles(
             catalog=catalog,
             base_runtime=base_runtime,
         )
+        realtime_runtime = resolve_surface_reply_llm_runtime(
+            catalog=catalog,
+            base_runtime={**base_runtime, "runtime_path": "realtime_companion"},
+        )
         router_runtime = resolve_executive_router_llm_runtime(
             catalog=catalog,
             base_runtime=base_runtime,
@@ -637,6 +656,7 @@ def warmup_chat_llm_runtime_profiles(
         warmed_parts = [
             f"base={str(base_runtime.get('provider_name') or 'unknown')}:{str(base_runtime.get('model_id') or 'unknown')}",
             f"default={str(default_runtime.get('model_id') or 'unknown')}",
+            f"realtime={str(realtime_runtime.get('model_id') or 'unknown')}",
             f"router={str(router_runtime.get('model_id') or 'unknown')}",
             f"subagent={str(subagent_runtime.get('model_id') or 'unknown')}",
         ]

@@ -198,6 +198,7 @@ def test_limbic_agent_projects_body_sense_from_canonical_life_without_global_mut
                     "affective": {
                         "mood": {"energy": 0.5},
                         "needs": {"rest": 0.72},
+                        "last_regulation": {"mode": "GIVE_SPACE"},
                     },
                     "affect": {"fatigue": 0.12, "loneliness": 0.66},
                     "life_pressure": {"fatigue": 0.4},
@@ -211,6 +212,18 @@ def test_limbic_agent_projects_body_sense_from_canonical_life_without_global_mut
 
         def apply_body_sense_penalty(self, penalty: float) -> None:
             self.penalties.append(penalty)
+
+        def get_silence_state(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not read legacy silence engine")
+
+        def tick(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not tick legacy silence engine")
+
+        def update_emotion(self, **_kwargs) -> None:  # noqa: ANN003
+            raise AssertionError("canonical Life must not mutate legacy silence engine")
+
+        def add_topic_resistance(self, *_args, **_kwargs) -> None:  # noqa: ANN002, ANN003
+            raise AssertionError("canonical Life must not mutate legacy silence engine")
 
     monkeypatch.setattr(
         "host_brain.persona.body_sense.get_body_sense_model",
@@ -236,12 +249,42 @@ def test_limbic_agent_projects_body_sense_from_canonical_life_without_global_mut
         mood_state="low",
         offline_loneliness=0.99,
     )
+    conversation_signal = agent.on_conversation_started(
+        request_id="request-a",
+        session_id="session-a",
+        person_id="person-a",
+        emotion_tag="SAD",
+        mood_state="low",
+    )
+    session_projection = agent.on_session_end(
+        person_id="person-a",
+        valence=-0.8,
+        arousal=0.9,
+        pending_topics=["caller-supplied topic"],
+    )
     ended = agent.on_conversation_ended(person_id="person-a", duration_minutes=45)
     loneliness = agent.update_body_sense_loneliness(
         person_id="person-a",
         loneliness_value=0.99,
     )
     tick = agent.tick_body_sense(current_hour=2)
+    silence_projection = agent.resolve_silence_state(person_id="person-a", current_topic="ignored")
+    silence_tick = agent.tick_silence(
+        user_id="person-a",
+        current_topic="private",
+        bond_summary={"stage": "SOULMATE"},
+        emotion_context={"emotion_tag": "ANGRY"},
+    )
+    silence_update = agent.update_silence_emotion(
+        emotion_tag="SAD",
+        mood_state="low",
+        emotion_valence=-0.8,
+        emotion_arousal=0.9,
+    )
+    silence_resistance = agent.add_silence_topic_resistance(
+        topic_label="private",
+        strength=1.0,
+    )
     asyncio.run(
         agent._on_body_sense_updated(
             SimpleNamespace(payload={"fatigue": 1.0, "loneliness": 1.0})
@@ -255,9 +298,24 @@ def test_limbic_agent_projects_body_sense_from_canonical_life_without_global_mut
     assert projection["fatigue"] == 0.72
     assert projection["drowsiness"] == 0.68
     assert projection["loneliness"] == 0.66
+    assert silence_projection["status"] == "OK"
+    assert silence_projection["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert silence_projection["projection"] == "READ_ONLY"
+    assert silence_projection["relationship_subject_id"] == "person-a"
+    assert silence_projection["willingness_level"] == "SUBDUED"
+    assert silence_projection["trigger_reason"] == "canonical_regulation:GIVE_SPACE"
     for result in (started, ended, loneliness, tick):
         assert result["status"] == "RETIRED_CANONICAL_LIFE"
         assert result["reason_code"] == "LEGACY_BODY_SENSE_MUTATION_RETIRED"
+    for result in (silence_tick, silence_update, silence_resistance):
+        assert result["status"] == "RETIRED_CANONICAL_LIFE"
+        assert result["reason_code"] == "LEGACY_SILENCE_MUTATION_RETIRED"
+    assert conversation_signal["status"] == "RETIRED_CANONICAL_LIFE"
+    assert conversation_signal["reason_code"] == "LEGACY_LIMBIC_SIGNAL_RETIRED"
+    assert conversation_signal["accepted"] is False
+    assert session_projection["authority"] == "CANONICAL_LIFE_JOURNAL"
+    assert session_projection["projection"] == "READ_ONLY"
+    assert session_projection["session_end_observer"] == "CANONICAL_LIFE_SNAPSHOT"
     assert started["body_sense"]["authority"] == "CANONICAL_LIFE_JOURNAL"
     assert ended["body_sense"]["relationship_subject_id"] == "person-a"
     assert silence.penalties == []
@@ -281,6 +339,14 @@ def test_limbic_agent_requires_relationship_subject_for_canonical_body_projectio
         "authority": "CANONICAL_LIFE_JOURNAL",
         "reason_code": "CANONICAL_BODY_SENSE_SUBJECT_REQUIRED",
         "body_sense": {},
+    }
+
+    silence_result = agent.resolve_silence_state(current_topic="ignored")
+    assert silence_result == {
+        "status": "UNAVAILABLE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "CANONICAL_SILENCE_SUBJECT_REQUIRED",
+        "silence_state": {},
     }
 
 
@@ -525,6 +591,37 @@ def test_limbic_agent_handle_signal_records_state_and_event(monkeypatch) -> None
     assert payload_state["recent_signals"][-1]["payload"]["loneliness"] == 0.3
     assert captured["kwargs"]["event_type"] == "BODY_SENSE_UPDATED"
     assert captured["kwargs"]["source_agent"] == "ans_agent"
+
+
+def test_limbic_agent_retires_global_signal_bus_with_canonical_life(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "host_brain.tribe.limbic_agent.emit_tribe_event",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not re-publish a legacy Limbic signal")
+        ),
+    )
+    agent = _build_limbic_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    result = agent.handle_signal(
+        event_type="conversation_started",
+        payload={"emotion_tag": "SAD", "person_id": "person-a"},
+        source_agent="cortex_agent",
+    )
+
+    assert result == {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_LIMBIC_SIGNAL_RETIRED",
+        "operation": "tribe_signal",
+        "event_type": "CONVERSATION_STARTED",
+        "accepted": False,
+        "state_signal_count": 0,
+    }
+    assert agent.state_registry.get_state("limbic") is None
 
 
 def test_limbic_agent_on_conversation_started_normalizes_payload(monkeypatch) -> None:

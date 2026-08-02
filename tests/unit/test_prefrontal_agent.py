@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 from host_brain.tribe.prefrontal_agent import PrefrontalAgent
@@ -105,11 +106,9 @@ def test_prefrontal_run_evolution_cycle_success(monkeypatch) -> None:
     assert len(logger.info_calls) == 1
 
 
-def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
+def test_prefrontal_canonical_life_defers_unscoped_evolution(
     monkeypatch,
 ) -> None:
-    captured: dict[str, object] = {}
-
     class _ForbiddenTimeline:
         def rebuild_summary(self, **_kwargs):
             raise AssertionError("canonical Life must not read legacy timeline")
@@ -117,27 +116,11 @@ def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
         def build_daily_diary(self, **_kwargs):
             raise AssertionError("canonical Life must not read legacy timeline")
 
-    class _FakeOrchestrator:
-        def run_evolution_cycle(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace(
-                cycle_id="evo_canonical",
-                traits_changed=False,
-                growth_awareness={},
-                errors=[],
-            )
-
-    class _FakeSocial:
-        def resolve_bond_snapshot(self, *, person_id: str):
-            assert person_id == "user_x"
-            return {"bond_state_obj": None, "bond_summary": {}}
-
-        def resolve_scheduler_bond_summary(self, **_kwargs):
-            return {}
-
     monkeypatch.setattr(
         "host_brain.tribe.prefrontal_agent.get_social_brain_agent",
-        lambda: _FakeSocial(),
+        lambda: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not read legacy Bond")
+        ),
     )
     agent = _build_prefrontal_agent(
         application_ports=TribeApplicationPorts(
@@ -145,16 +128,163 @@ def test_prefrontal_canonical_life_skips_legacy_emotion_timeline(
             emotion_timeline=lambda: _ForbiddenTimeline(),
         ),
     )
-    agent._evolution_orchestrator = _FakeOrchestrator()
 
     result = agent.run_evolution_cycle(
         system_intent={"args": {"user_id": "user_x", "date": "2026-04-09"}},
         logger=_FakeLogger(),
     )
 
-    assert result["status"] == "OK"
-    assert captured["timeline_summary"] == {}
-    assert captured["timeline_diary"] == {}
+    assert result == {
+        "status": "DEFERRED",
+        "reason_code": "CANONICAL_RELATIONSHIP_SCOPE_REQUIRED",
+        "proposal_only": True,
+        "proposals": [],
+        "growth_awareness": {},
+        "errors": [],
+        "relationship_input_source": "CANONICAL_RELATIONSHIP_SCOPE_REQUIRED",
+    }
+
+
+def test_prefrontal_canonical_life_retires_bond_stage_growth_paths(
+    monkeypatch,
+) -> None:
+    subscriptions: list[str] = []
+
+    class _FakeBus:
+        def subscribe(self, event_type: str, _handler) -> None:  # noqa: ANN001
+            subscriptions.append(event_type)
+
+    monkeypatch.setattr(
+        "host_brain.tribe.event_bus.get_tribe_event_bus",
+        lambda: _FakeBus(),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    agent.register_subscriptions()
+    direct_result = agent.apply_stage_promotion_growth(
+        user_id="user_x",
+        from_stage="FRIEND",
+        to_stage="SOULMATE",
+        ts_ms=1,
+    )
+    milestone_result = agent.apply_milestone_growth(
+        user_id="user_x",
+        milestone_key="deep_loneliness_experience",
+        ts_ms=1,
+    )
+    asyncio.run(
+        agent._on_bond_stage_changed_growth(  # noqa: SLF001
+            SimpleNamespace(
+                payload={
+                    "user_id": "user_x",
+                    "from_stage": "FRIEND",
+                    "to_stage": "SOULMATE",
+                },
+                ts_ms=1,
+            )
+        )
+    )
+    asyncio.run(
+        agent._on_evolution_cycle_triggered(  # noqa: SLF001
+            SimpleNamespace(payload={"user_id": "user_x", "reason": "legacy"})
+        )
+    )
+    asyncio.run(
+        agent._on_loneliness_signal(  # noqa: SLF001
+            SimpleNamespace(payload={"user_id": "user_x", "loneliness": 0.95}, ts_ms=1)
+        )
+    )
+    asyncio.run(
+        agent._on_immune_block_growth(  # noqa: SLF001
+            SimpleNamespace(payload={"user_id": "user_x", "risk_level": "critical"}, ts_ms=1)
+        )
+    )
+
+    assert subscriptions == ["INTERACTION_RECORDED"]
+    assert "BOND_STAGE_CHANGED" not in subscriptions
+    assert direct_result == {
+        "applied": False,
+        "reason": "LEGACY_BOND_STAGE_GROWTH_RETIRED",
+        "proposal": {
+            "status": "NO_CANDIDATE",
+            "reason_code": "LEGACY_BOND_STAGE_GROWTH_RETIRED",
+        },
+    }
+    assert milestone_result == {
+        "applied": False,
+        "reason": "LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED",
+        "proposal": {
+            "status": "NO_CANDIDATE",
+            "reason_code": "LEGACY_UNSCOPED_MILESTONE_GROWTH_RETIRED",
+        },
+    }
+
+
+def test_prefrontal_canonical_life_keeps_drift_guard_but_blocks_legacy_side_effects(
+    monkeypatch,
+) -> None:
+    legacy_calls: list[str] = []
+    emitted: list[str] = []
+    governor_updates: list[dict[str, object]] = []
+
+    class _Governor:
+        def update_prefrontal_state(self, **kwargs) -> None:  # noqa: ANN003
+            governor_updates.append(dict(kwargs))
+
+    monkeypatch.setattr(
+        PrefrontalAgent,
+        "run_growth_feedback_cycle",
+        lambda _self, **_kwargs: {
+            "drift_alert_level": "SEVERE",
+            "drift_dims": ["identity"],
+        },
+    )
+    monkeypatch.setattr(
+        "host_brain.integrations.governor_rules_cache.get_governor_rules_cache",
+        lambda: _Governor(),
+    )
+    for target in (
+        "get_limbic_agent",
+        "get_endocrine_agent",
+        "get_pain_reward_agent",
+        "get_interoception_agent",
+    ):
+        monkeypatch.setattr(
+            f"host_brain.tribe.prefrontal_agent.{target}",
+            lambda _target=target: legacy_calls.append(_target),
+        )
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.emit_tribe_event",
+        lambda **kwargs: emitted.append(str(kwargs.get("event_type") or "")),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    asyncio.run(
+        agent._on_interaction_recorded(  # noqa: SLF001
+            SimpleNamespace(
+                payload={
+                    "user_id": "user_x",
+                    "session_id": "session_x",
+                    "user_message": "可以帮我分析这个吗？",
+                    "assistant_reply": "好的，我来看看。哈哈。",
+                }
+            )
+        )
+    )
+
+    assert governor_updates == [
+        {"drift_detected": True, "scope_override": "drift_restricted:severe"},
+    ]
+    assert legacy_calls == []
+    assert emitted == []
 
 
 def test_prefrontal_run_evolution_cycle_degraded_on_error(monkeypatch) -> None:
@@ -387,6 +517,42 @@ def test_prefrontal_run_growth_feedback_cycle(monkeypatch) -> None:
         ("user::s-001", "signal_1"),
         ("user::s-001", "signal_2"),
     ]
+
+
+def test_prefrontal_canonical_life_retires_legacy_session_feedback_growth(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.bond.user_identity.resolve_bond_user_id",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not resolve a legacy Bond user")
+        ),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    result = agent.run_growth_feedback_cycle(
+        session_id="s-001",
+        user_message="你真的帮到我了",
+        assistant_reply="我在呢",
+    )
+
+    assert result == {
+        "status": "RETIRED",
+        "reason_code": "LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED",
+        "feedback_source": "CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED",
+        "user_id": "",
+        "feedback_count": 0,
+        "applied": False,
+        "proposal": {
+            "status": "NO_CANDIDATE",
+            "reason_code": "LEGACY_SESSION_FEEDBACK_GROWTH_RETIRED",
+        },
+        "triggered_rules": [],
+    }
 
 
 def test_prefrontal_apply_stage_and_milestone_growth(monkeypatch) -> None:
@@ -633,6 +799,54 @@ def test_prefrontal_run_emergent_growth_weekly_skips_without_llm() -> None:
     assert result["reason_code"] == "EMERGENT_GROWTH_LLM_REQUIRED"
 
 
+def test_prefrontal_canonical_life_retires_raw_emergent_growth_before_analyzer(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.persona.interaction_pattern_analyzer.InteractionPatternAnalyzer",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not construct legacy analyzer")
+        ),
+    )
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    weekly = agent.run_emergent_growth_weekly(
+        user_id="user-eg",
+        lookback_days=7,
+        episodic_store=object(),
+        llm_fn=lambda _prompt: (_ for _ in ()).throw(
+            AssertionError("canonical Life must not call legacy LLM")
+        ),
+    )
+    status = agent.resolve_emergent_growth_status(user_id="user-eg", recent_limit=5)
+
+    assert agent.uses_canonical_affective_life() is True
+    assert weekly == {
+        "status": "DEFERRED",
+        "reason_code": "CANONICAL_RELATIONAL_AFTEREFFECT_REQUIRED",
+        "user_id": "user-eg",
+        "lookback_days": 7,
+        "pattern_result": {},
+        "growth_result": {},
+        "proposal": {
+            "status": "NO_CANDIDATE",
+            "reason_code": "LEGACY_EMERGENT_GROWTH_RETIRED",
+        },
+    }
+    assert status == {
+        "status": "RETIRED",
+        "reason_code": "LEGACY_EMERGENT_GROWTH_RETIRED",
+        "user_id": "user-eg",
+        "recent_limit": 5,
+        "growth_summary": {},
+        "recent_growth_log": [],
+    }
+
+
 def test_prefrontal_resolve_persona_change_and_growth_payloads(monkeypatch) -> None:
     class _Engine:
         def get_change_log(self, user_id: str, limit: int = 5):
@@ -871,3 +1085,54 @@ def test_prefrontal_autobiographical_gate_and_commit(monkeypatch) -> None:
     assert gate["reason_code"] == "PASS"
     assert committed["status"] == "OK"
     assert committed["write_result"]["layer"] == "autobiographical"
+
+
+def test_prefrontal_canonical_life_retires_legacy_autobio_before_global_reads(
+    monkeypatch,
+) -> None:
+    agent = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(
+            affective_life_authority=CANONICAL_AFFECT_LIFE_JOURNAL,
+        ),
+    )
+
+    def _unexpected(*_args, **_kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("canonical Life must not invoke legacy autobiographical dependencies")
+
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.get_social_brain_agent",
+        _unexpected,
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.get_hippocampus_agent",
+        _unexpected,
+    )
+    monkeypatch.setattr(
+        "host_brain.tribe.prefrontal_agent.emit_tribe_event",
+        _unexpected,
+    )
+
+    gate = agent.evaluate_autobiographical_memory_gate(
+        persona_user_id="u-canonical",
+        narrative="未经 accepted aftereffect 证明的叙事不能直接写入。",
+        context={"session_id": "s-canonical"},
+    )
+    committed = agent.commit_autobiographical_memory(
+        persona_user_id="u-canonical",
+        narrative="未经 accepted aftereffect 证明的叙事不能直接写入。",
+        context={"session_id": "s-canonical"},
+        request_id="req-canonical",
+    )
+
+    assert gate == {
+        "status": "RETIRED_CANONICAL_LIFE",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "reason_code": "LEGACY_PREFRONTAL_GROWTH_RETIRED",
+        "operation": "evaluate_autobiographical_memory_gate",
+        "applied": False,
+        "retired": True,
+        "decision": "BLOCK",
+    }
+    assert committed["status"] == "RETIRED_CANONICAL_LIFE"
+    assert committed["operation"] == "commit_autobiographical_memory"
+    assert committed["gate"] == gate

@@ -73,6 +73,48 @@ def _read_canonical_body_sense(person_id: str, *, reader: Any) -> dict[str, Any]
     return projection
 
 
+def _read_canonical_silence_state(person_id: str, *, reader: Any) -> dict[str, Any]:
+    """Project response posture from one scoped canonical regulation head.
+
+    ``EmotionalSilenceEngine`` used to keep a process-wide willingness and
+    topic-resistance state.  In a canonical Host those are consequences of
+    the accepted RegulationDecision and body projection, not a second mutable
+    organ.  The projection deliberately contains no caller-supplied topic or
+    emotion data, so an untrusted compatibility request cannot steer
+    Natsume's self-affect by asking for a silence refresh.
+    """
+
+    from host_brain.digital_life.application_boundary import read_life_snapshot  # noqa: PLC0415
+    from host_brain.persona.body_sense import (  # noqa: PLC0415
+        project_body_sense_from_life_snapshot,
+    )
+
+    snapshot = read_life_snapshot(person_id, reader=reader)
+    state = dict(snapshot.get("state") or {})
+    affective = dict(state.get("affective") or {})
+    regulation = dict(affective.get("last_regulation") or {})
+    regulation_mode = str(regulation.get("mode") or "NONE").strip().upper() or "NONE"
+    body_sense = project_body_sense_from_life_snapshot(snapshot).as_dict()
+    willingness_penalty = max(0.0, min(1.0, float(body_sense.get("willingness_penalty") or 0.0)))
+    return {
+        "status": "OK",
+        "authority": "CANONICAL_LIFE_JOURNAL",
+        "projection": "READ_ONLY",
+        "relationship_subject_id": str(person_id),
+        "life_version": int(snapshot.get("version") or 0),
+        "life_state_digest": str(snapshot.get("state_digest") or ""),
+        "response_willingness": round(max(0.0, 1.0 - willingness_penalty), 4),
+        "willingness_level": (
+            "SUBDUED"
+            if regulation_mode in {"GIVE_SPACE", "PAUSE", "SILENCE"}
+            else "NORMAL"
+        ),
+        "topic_resistance_active": regulation_mode in {"SET_BOUNDARY", "BOUNDARY"},
+        "resistant_topic": "",
+        "trigger_reason": f"canonical_regulation:{regulation_mode}",
+    }
+
+
 def _is_trusted_runtime_emotion_source(
     *,
     emotion_source: str,
@@ -119,6 +161,16 @@ class LimbicAgent:
             and ports.uses_canonical_affective_life()
         )
 
+    def uses_canonical_affective_life(self) -> bool:
+        """Expose the read-only composition boundary to compatibility adapters.
+
+        Inner-world adapters use this before they emit legacy EventBus signals
+        or persist a private monologue.  The method deliberately does not
+        expose a mutable state object or create an additional Life authority.
+        """
+
+        return self._legacy_self_affect_writes_retired()
+
     @staticmethod
     def _retired_legacy_affect_result(
         *,
@@ -156,6 +208,56 @@ class LimbicAgent:
             result["relationship_subject_id"] = str(person_id).strip()
         return result
 
+    @staticmethod
+    def _retired_silence_result(
+        *,
+        operation: str,
+        person_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Describe a retired mutable silence operation without faking calm.
+
+        A retired compatibility call must not look like a successful
+        ``NEUTRAL``/normalization update.  Callers receive an explicit result
+        and can consume the read-only canonical projection through
+        ``resolve_silence_state`` instead.
+        """
+
+        result = {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_SILENCE_MUTATION_RETIRED",
+            "operation": str(operation),
+            "silence_state": {},
+        }
+        if str(person_id or "").strip():
+            result["relationship_subject_id"] = str(person_id).strip()
+        return result
+
+    @staticmethod
+    def _retired_legacy_signal_result(
+        *,
+        event_type: str,
+        operation: str,
+    ) -> dict[str, Any]:
+        """Refuse the retired global Limbic signal bus in a canonical Host.
+
+        The old signal path wrote user-derived VAD, Bond deltas and body
+        hints to ``TribeStateRegistry`` before fanning them back through the
+        event bus.  It is neither durable nor scoped enough to represent
+        Natsume's affect.  A canonical Host therefore acknowledges the
+        compatibility call without retaining or re-publishing its payload.
+        """
+
+        return {
+            "status": "RETIRED_CANONICAL_LIFE",
+            "authority": "CANONICAL_LIFE_JOURNAL",
+            "reason_code": "LEGACY_LIMBIC_SIGNAL_RETIRED",
+            "operation": str(operation),
+            "event_type": str(event_type or "UNKNOWN").strip().upper() or "UNKNOWN",
+            "accepted": False,
+            "state_signal_count": 0,
+        }
+
     def _canonical_body_sense_projection(
         self,
         *,
@@ -179,6 +281,33 @@ class LimbicAgent:
         if self.application_ports is None:
             raise RuntimeError("TRIBE_APPLICATION_PORTS_NOT_CONFIGURED")
         return _read_canonical_body_sense(
+            subject_id,
+            reader=self.application_ports.require("life_snapshot_reader")(),
+        )
+
+    def _canonical_silence_projection(
+        self,
+        *,
+        person_id: str | None,
+    ) -> dict[str, Any]:
+        """Read one relationship-scoped response-posture projection.
+
+        Canonical silence has no global fallback: a missing relationship
+        subject is an unavailable read rather than permission to consult the
+        former process-wide ``EmotionalSilenceEngine``.
+        """
+
+        subject_id = str(person_id or "").strip()
+        if not subject_id:
+            return {
+                "status": "UNAVAILABLE",
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "reason_code": "CANONICAL_SILENCE_SUBJECT_REQUIRED",
+                "silence_state": {},
+            }
+        if self.application_ports is None:
+            raise RuntimeError("TRIBE_APPLICATION_PORTS_NOT_CONFIGURED")
+        return _read_canonical_silence_state(
             subject_id,
             reader=self.application_ports.require("life_snapshot_reader")(),
         )
@@ -451,7 +580,17 @@ class LimbicAgent:
         )
         return payload
 
-    def resolve_silence_state(self, *, current_topic: str = "") -> dict[str, Any]:
+    def resolve_silence_state(
+        self,
+        *,
+        current_topic: str = "",
+        person_id: str | None = None,
+    ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            # ``current_topic`` belongs to the old mutable engine and cannot
+            # select or alter a canonical regulation decision.
+            del current_topic
+            return self._canonical_silence_projection(person_id=person_id)
         engine = self.application_ports.require("silence_engine")()
         state = engine.get_silence_state(current_topic=str(current_topic or ""))
         payload = dict(state.as_dict() if hasattr(state, "as_dict") else {})
@@ -764,6 +903,11 @@ class LimbicAgent:
         bond_summary: Mapping[str, Any] | None = None,
         emotion_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            return self._retired_silence_result(
+                operation="silence_tick",
+                person_id=user_id,
+            )
         engine = self.application_ports.require("silence_engine")()
         result = dict(
             engine.tick(
@@ -790,6 +934,8 @@ class LimbicAgent:
         emotion_arousal: float,
         current_topic: str = "",
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            return self._retired_silence_result(operation="silence_emotion_update")
         engine = self.application_ports.require("silence_engine")()
         willingness = engine.update_emotion(
             emotion_tag=str(emotion_tag or "NEUTRAL").strip().upper() or "NEUTRAL",
@@ -809,6 +955,8 @@ class LimbicAgent:
         topic_label: str,
         strength: float = 0.7,
     ) -> dict[str, Any]:
+        if self._legacy_self_affect_writes_retired():
+            return self._retired_silence_result(operation="silence_topic_resistance")
         resolved_topic = str(topic_label or "").strip()
         if not resolved_topic:
             return {
@@ -839,6 +987,18 @@ class LimbicAgent:
         # continuity.  Session-end hooks are observers and must not append a
         # second Life command for the same foreground occurrence.
         payload = self.resolve_inner_world_state(person_id=user_id)
+        if self._legacy_self_affect_writes_retired():
+            # In a canonical Host the historical hook receives VAD derived
+            # from the *user* turn.  Do not retain, signal or reinterpret it
+            # as Natsume's state: the accepted AffectiveTurnPlan and Life
+            # journal already own the causal record.
+            del valence, arousal, pending_topics, mood_baseline
+            return {
+                **payload,
+                "authority": "CANONICAL_LIFE_JOURNAL",
+                "projection": "READ_ONLY",
+                "session_end_observer": "CANONICAL_LIFE_SNAPSHOT",
+            }
         try:
             self.handle_signal(
                 event_type="SESSION_ENDED",
@@ -952,6 +1112,16 @@ class LimbicAgent:
         target_agent: str | None = None,
     ) -> dict[str, Any]:
         normalized_event = str(event_type or "").strip().upper() or "UNKNOWN"
+        if self._legacy_self_affect_writes_retired():
+            # Do not even emit the event in canonical composition.  Several
+            # historical subscribers turn these unscoped compatibility
+            # signals into private metabolism/body/Bond mutations; emitting a
+            # no-op marker would still let a delayed subscriber recreate a
+            # second authority.
+            return self._retired_legacy_signal_result(
+                event_type=normalized_event,
+                operation="tribe_signal",
+            )
         normalized_payload = dict(payload or {})
         writer = str(source_agent or "limbic_agent").strip() or "limbic_agent"
 
@@ -1256,6 +1426,11 @@ class LimbicAgent:
             return {"status": "ERROR", "emotion_tag": str(emotion_tag or ""), "error": str(exc)}
 
     def _touch_state(self, *, key: str, value: Any) -> None:
+        if self._legacy_self_affect_writes_retired():
+            # ``TribeStateRegistry`` is a process-local diagnostic cache.
+            # In canonical composition it must not retain a second copy of
+            # self-affect, relationship posture or user-derived VAD.
+            return
         prev = self.state_registry.get_state("limbic") or {}
         prev_state = dict(prev.get("state") or {})
         merged = dict(prev_state)

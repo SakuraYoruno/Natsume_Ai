@@ -231,7 +231,6 @@ async def test_app_factory_exception_handler_uses_injected_logger(monkeypatch: p
         get_ledger=lambda: None,
         get_tool_broker=lambda: None,
         get_tool_catalog=lambda: None,
-        get_bond_engine=lambda: None,
         chat_endpoint=lambda _body, _request: Response(),
         edge_events_endpoint=lambda _body: None,  # type: ignore[arg-type]
         root_endpoint=lambda: Response(),

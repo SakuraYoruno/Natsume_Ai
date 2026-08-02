@@ -42,13 +42,17 @@ def _injected_spec(tool_id: str) -> ToolSpec:
 
 
 def test_react_toolsets_do_not_advertise_nested_skill_or_delegate() -> None:
-    for agent_id in ("intent_agent", "emotion_agent", "retrieval_agent"):
+    for agent_id in ("intent_agent", "retrieval_agent"):
         tool_ids = {
             tool.tool_id
             for tool in get_tools_for_agent(agent_id, allow_side_effects=True)
         }
         assert "run_skill" not in tool_ids
         assert "dispatch_sub_agent" not in tool_ids
+
+
+def test_retired_emotion_agent_has_no_react_toolset() -> None:
+    assert get_tools_for_agent("emotion_agent", allow_side_effects=True) == []
 
 
 def test_injected_skill_proposal_stops_before_legacy_runtime() -> None:

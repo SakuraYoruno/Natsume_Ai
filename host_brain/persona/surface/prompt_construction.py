@@ -432,6 +432,95 @@ def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_sce
     return _SURFACE_QUOTE_SCENE_ALIASES.get(scene, scene)
 
 
+def build_native_stream_surface_messages(
+    request: IsolatedSurfaceInput,
+) -> list[dict[str, str]]:
+    """Build the single-response prompt used by ordinary realtime chat.
+
+    The buffered generator below intentionally asks the model for several
+    structured alternatives.  Reusing that prompt and appending a later
+    plain-text instruction made real providers follow both contracts at once.
+    This prompt is independent: one affective plan, one natural reply.
+    """
+
+    control = request.control
+    axes = relationship_control_axes_for_distance(
+        control.relationship_distance
+    ).as_dict()
+    facts = surface_prompt_facts(request)
+    must_not_do = merged_must_not_do(request)
+    # This is the realtime prompt, not the archived Soul or the buffered
+    # candidate/judge contract.  Keep the compiled, relationship-safe Soul
+    # projection intact while avoiding repeated policy prose and verbose JSON
+    # that used to add roughly two thousand input tokens to every hello.
+    system_prompt = "\n".join(
+        (
+            "你是七海，直接回复眼前的人；不是分析器、客服或任务回执生成器。",
+            "只输出一条可发送的自然中文私聊，可有少量短句；不要输出 JSON、列表、标签、分析或内部状态。",
+            "先真实反应，再按本轮动作安慰、玩闹、回答、设边界或安静陪着；用户情绪只是观察，不是七海自己的情绪。",
+            "事实不足就承认不确定；不编造历史、地点、动作或现实陪同。不得威胁、排他、冷暴力、负罪施压或诱导依赖。",
+            "【稳定人格投影】",
+            request.soul_md.strip(),
+        )
+    )
+
+    inner_state_lines: list[str] = []
+    if request.inner_weather:
+        inner_state_lines.append(f"- 内在天气：{request.inner_weather}")
+    if request.body_state_hint:
+        inner_state_lines.append(f"- 身体感知：{request.body_state_hint}")
+    if request.tension_hint:
+        inner_state_lines.append(f"- 内在张力：{request.tension_hint}")
+    if request.care_signal >= 0.15:
+        inner_state_lines.append(f"- 关怀驱动：{request.care_signal:.0%}")
+    if request.continuity_signal >= 0.15:
+        inner_state_lines.append(f"- 连续性驱动：{request.continuity_signal:.0%}")
+    if request.liveliness < 0.35 or request.liveliness > 0.70:
+        inner_state_lines.append(f"- 活力：{request.liveliness:.0%}")
+    if request.active_loops:
+        inner_state_lines.append(f"- 仍挂念的线索数：{request.active_loops}")
+
+    relationship_scale = "; ".join(
+        _clean_list(
+            [
+                f"阶段={axes.get('stage')}",
+                f"称呼={axes.get('nickname_policy')}",
+                f"打趣={axes.get('tease_permission')}",
+                "不使用恋爱表达" if not axes.get("explicit_romance_allowed") else "可使用已授权的恋爱表达",
+                "不使用身体亲密表达" if not axes.get("physical_intimacy_allowed") else "可使用已授权的身体亲密表达",
+                *list(axes.get("generation_notes") or [])[:2],
+            ]
+        )
+    )
+    user_parts = [
+        "【当前输入】",
+        request.user_message,
+        "【本轮表达】",
+        (
+            f"动作={control.response_move}; 场景={control.task_mode}; 色调={control.emotional_tone}; "
+            f"关系距离={control.relationship_distance}; 长度={control.information_budget}; "
+            f"最多问句={max(0, int(control.question_budget))}"
+        ),
+        f"关系尺度：{relationship_scale}",
+    ]
+    if inner_state_lines:
+        user_parts.extend(("【你的当前感受】", *inner_state_lines))
+    if facts:
+        user_parts.extend(("【必要事实】", *(f"- {item}" for item in facts[:8])))
+    style_anchor = _clean_list(control.style_anchor)[:3]
+    if style_anchor:
+        user_parts.extend(("【语言节奏】", *(f"- {item}" for item in style_anchor)))
+    must_include = _clean_list(control.must_include)[:8]
+    if must_include:
+        user_parts.extend(("【必须自然包含】", *(f"- {item}" for item in must_include)))
+    if must_not_do:
+        user_parts.extend(("【本轮禁止】", *(f"- {item}" for item in must_not_do[:16])))
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "\n".join(user_parts)},
+    ]
+
+
 
 
 def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
@@ -675,4 +764,3 @@ def build_minimal_repair_messages(
         )
     )
     return messages
-

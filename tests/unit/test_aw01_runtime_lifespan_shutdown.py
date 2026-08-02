@@ -94,7 +94,6 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
             tribe_application_ports=TribeApplicationPorts(),
             tribe_runtime_agent_ports=TribeRuntimeAgentPorts(
                 get_thalamus_agent=object,
-                get_ans_agent=object,
             ),
             tribe_runtime=_TribeRuntime(),
             begin_authority_runtime=lambda: events.append(
@@ -103,8 +102,6 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
             close_authority_runtime=lambda: events.append(
                 "authority-close"
             ),
-            begin_bond_runtime=lambda: events.append("bond-begin"),
-            close_bond_runtime=lambda: events.append("bond-close"),
             begin_governance_runtime=lambda: events.append(
                 "governance-begin"
             ),
@@ -118,12 +115,10 @@ async def test_runtime_lifespan_body_error_still_enters_shutdown_finally(
     assert events == [
         "authority-begin",
         "governance-begin",
-        "bond-begin",
         "tribe-bind",
         "tribe-context-activate",
         "body",
         "shutdown",
-        "bond-close",
         "governance-close",
         "authority-close",
         "tribe-context-deactivate",

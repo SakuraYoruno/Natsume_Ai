@@ -81,6 +81,14 @@ _DIRECT_EMOTION_QUERY_MARKERS = (
     "查下",
     "看看",
     "读取",
+    "什么",
+    "怎样",
+    "怎么样",
+    "如何",
+    "what",
+    "how",
+    "current",
+    "tell me",
 )
 _DIRECT_BOND_MARKERS = (
     "bond",
@@ -98,6 +106,29 @@ _DIRECT_BOND_QUERY_MARKERS = (
     "程度",
     "查询",
     "看看",
+    "什么",
+    "怎样",
+    "怎么样",
+    "意味着",
+    "what",
+    "how",
+    "mean",
+    "current",
+)
+_AFFECTIVE_SELF_REFERENT_MARKERS = (
+    "你",
+    "七海",
+    "natsume",
+    "your",
+    "you",
+)
+_RELATIONSHIP_SELF_REFERENT_MARKERS = (
+    "我们",
+    "我和你",
+    "你和我",
+    "七海和我",
+    "natsume and i",
+    "our",
 )
 _DIRECT_MEMORY_RECALL_MARKERS = (
     "recall",
@@ -924,6 +955,93 @@ def _build_conversational_opinion_chat_seed(text: str, *, route_source: str) -> 
             "text": normalized,
         },
     }
+
+
+def _classify_affective_reflection_scope(text: str) -> str | None:
+    """识别向七海询问自身感受或关系的自然对话，不把它编译为旧查询 Skill。"""
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+    asks_affect = (
+        _contains_any(normalized, _DIRECT_EMOTION_MARKERS)
+        and _contains_any(normalized, _DIRECT_EMOTION_QUERY_MARKERS)
+        and _contains_any(normalized, _AFFECTIVE_SELF_REFERENT_MARKERS)
+    )
+    asks_relationship = (
+        _contains_any(normalized, _DIRECT_BOND_MARKERS)
+        and _contains_any(normalized, _DIRECT_BOND_QUERY_MARKERS)
+        and _contains_any(normalized, _RELATIONSHIP_SELF_REFERENT_MARKERS)
+    )
+    if asks_affect and asks_relationship:
+        return "self_affect_and_relationship"
+    if asks_affect:
+        return "self_affect"
+    if asks_relationship:
+        return "relationship"
+    return None
+
+
+def _build_affective_reflection_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any] | None:
+    """构造只读、第一人称的 canonical Life 自省对话种子。
+
+    这类问题需要七海自然地回答，而不是把任意 caller payload 中的
+    ``emotion_snapshot``、``bond_score`` 或阶段名称伪装成她的感受。Surface
+    后续仍会冻结本轮 AffectiveTurnPlan；此处不读取或写入任何 Life 状态。
+    """
+    normalized = _normalize_text(text)
+    scope = _classify_affective_reflection_scope(normalized)
+    if scope is None:
+        return None
+    metadata = {
+        "self_affect": (
+            "THALAMUS_RULE_SELF_AFFECT_REFLECTION",
+            "self_affect_reflection",
+            "ask_assistant_current_feeling",
+            "canonical_self_affect",
+            "first_person_canonical_self_reflection_without_numeric_state",
+            "companion_affect",
+        ),
+        "relationship": (
+            "THALAMUS_RULE_RELATIONSHIP_REFLECTION",
+            "relationship_reflection",
+            "ask_assistant_relationship_meaning",
+            "canonical_relationship_state",
+            "first_person_canonical_relationship_reflection_without_score_or_stage",
+            "companion_relationship",
+        ),
+        "self_affect_and_relationship": (
+            "THALAMUS_RULE_AFFECTIVE_RELATIONAL_REFLECTION",
+            "affective_relational_reflection",
+            "ask_assistant_feeling_and_relationship_meaning",
+            "canonical_self_affect_and_relationship",
+            "first_person_canonical_affective_relational_reflection_without_numeric_state",
+            "companion_relationship",
+        ),
+    }
+    (
+        reason_code,
+        semantic_type,
+        dialogue_act,
+        context_binding,
+        answer_strategy,
+        domain,
+    ) = metadata[scope]
+    seed = _build_semantic_chat_seed(
+        normalized,
+        route_source=route_source,
+        reason_code=reason_code,
+        semantic_type=semantic_type,
+        dialogue_act=dialogue_act,
+        context_binding=context_binding,
+        answer_strategy=answer_strategy,
+        confidence=0.97,
+        domain=domain,
+    )
+    return seed
 
 
 def _looks_like_generic_action_intent(text: str) -> bool:
@@ -2134,10 +2252,10 @@ def _infer_supported_step_route(text: str) -> tuple[str, str, str] | None:
 
     if _contains_any(cleaned, _DIRECT_SUMMARIZE_MARKERS) and _contains_any(cleaned, _DIRECT_SUMMARIZE_CONTEXT_MARKERS):
         return ("skill", "session_summary", "THALAMUS_RULE_SESSION_SUMMARY")
-    if _contains_any(cleaned, _DIRECT_EMOTION_MARKERS) and not _looks_like_companion_open_chat(cleaned):
-        return ("skill", "emotion_query", "THALAMUS_RULE_EMOTION_QUERY")
-    if _contains_any(cleaned, _DIRECT_BOND_MARKERS):
-        return ("skill", "bond_query", "THALAMUS_RULE_BOND_QUERY")
+    # 自身情感与关系自省只能作为一轮 canonical Life 支撑的自然聊天，
+    # 不是可以塞进 Skill DAG 的数据查询节点。
+    if _classify_affective_reflection_scope(cleaned) is not None:
+        return None
     if _contains_any(cleaned, _DIRECT_MEMORY_RECALL_MARKERS):
         return ("skill", "memory_recall", "THALAMUS_RULE_MEMORY_RECALL")
     codex_production_seed = _build_codex_production_route_seed(cleaned)
@@ -2349,6 +2467,13 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if _looks_like_conversational_opinion_chat(cleaned):
         return _build_conversational_opinion_chat_seed(cleaned, route_source="thalamus.rule")
 
+    affective_reflection_seed = _build_affective_reflection_chat_seed(
+        cleaned,
+        route_source="thalamus.rule",
+    )
+    if affective_reflection_seed is not None:
+        return affective_reflection_seed
+
     system_seed = _build_system_observation_route_seed(cleaned)
     if system_seed is not None:
         return system_seed
@@ -2436,30 +2561,6 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
             "task": cleaned,
             "reason_code": "THALAMUS_RULE_SESSION_SUMMARY",
             "confidence": 0.96,
-            "route_source": "thalamus.rule",
-        }
-
-    if (
-        _contains_any(cleaned, _DIRECT_EMOTION_MARKERS)
-        and _contains_any(cleaned, _DIRECT_EMOTION_QUERY_MARKERS)
-        and not _looks_like_companion_open_chat(cleaned)
-    ):
-        return {
-            "route": "skill",
-            "target_id": "emotion_query",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_EMOTION_QUERY",
-            "confidence": 0.95,
-            "route_source": "thalamus.rule",
-        }
-
-    if _contains_any(cleaned, _DIRECT_BOND_MARKERS) and _contains_any(cleaned, _DIRECT_BOND_QUERY_MARKERS):
-        return {
-            "route": "skill",
-            "target_id": "bond_query",
-            "task": cleaned,
-            "reason_code": "THALAMUS_RULE_BOND_QUERY",
-            "confidence": 0.95,
             "route_source": "thalamus.rule",
         }
 
@@ -2867,6 +2968,12 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
     semantic_chat_seed = _build_structured_chat_semantic_seed(normalized, route_source="rule.fastpath")
     if semantic_chat_seed is not None:
         return semantic_chat_seed
+    affective_reflection_seed = _build_affective_reflection_chat_seed(
+        normalized,
+        route_source="rule.fastpath",
+    )
+    if affective_reflection_seed is not None:
+        return affective_reflection_seed
 
     compact = re.sub(r"\s+", "", normalized).lower()
     if _TASK_CHAT_CONTINUATION_RE.match(normalized):

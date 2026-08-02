@@ -16,6 +16,7 @@ def test_startup_status_marks_only_real_degraded_values() -> None:
     assert _startup_status_is_degraded("OK") is False
     assert _startup_status_is_degraded("OK (task_id=distillation_engine_periodic, interval=600s)") is False
     assert _startup_status_is_degraded("SKIPPED: gateway-only mode") is False
+    assert _startup_status_is_degraded("NOT_TESTED: remote Edge disabled") is False
 
 
 def test_tool_runtime_startup_status_rejects_catalog_only_or_zero_executor() -> None:

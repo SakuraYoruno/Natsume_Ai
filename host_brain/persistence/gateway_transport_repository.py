@@ -67,6 +67,19 @@ _SAFE_HEADER_ALLOWLIST = frozenset(
 # delivery.  Only delivered/acked/cancelled records release the sequence.
 _INBOX_TERMINAL = frozenset({"DELIVERED"})
 _OUTBOX_TERMINAL = frozenset({"ACKED", "CANCELLED"})
+_SAFE_PRE_EFFECT_DENIAL_REASONS = frozenset(
+    {
+        "SECURE_INGRESS_SCHEMA_INVALID",
+        "SECURE_INGRESS_PRINCIPAL_INVALID",
+        "SECURE_INGRESS_CREDENTIAL_MISSING",
+        "SECURE_INGRESS_CREDENTIAL_INVALID",
+        "SECURE_INGRESS_CREDENTIAL_EXPIRED",
+        "SECURE_INGRESS_SCOPE_DENIED",
+        "SECURE_INGRESS_RATE_LIMITED",
+        "SECURE_INGRESS_RATE_BACKEND_UNAVAILABLE",
+        "SECURE_INGRESS_IDEMPOTENCY_KEY_MISSING",
+    }
+)
 
 _REQUIRED_SCHEMA: dict[str, frozenset[str]] = {
     "gateway_transport_inbox": frozenset(
@@ -1057,6 +1070,232 @@ class SQLiteGatewayTransportStore:
 
     def replay_inbox(self, *, inbox_id: str, operator_ref: str) -> dict[str, Any]:
         return self._replay(direction="INBOX", message_id=inbox_id, operator_ref=operator_ref)
+
+    def reconcile_inbox_pre_effect_denial(
+        self,
+        *,
+        inbox_id: str,
+        secure_ingress_audit_ref: str,
+        operator_ref: str,
+    ) -> dict[str, Any]:
+        """Re-drive an uncertain inbox only after reopening no-effect evidence.
+
+        The evidence is not supplied as a caller-authored payload.  This method
+        reopens the canonical Secure Ingress audit in the same SQLite
+        transaction, verifies the frozen Host body/idempotency identity and
+        appends an immutable reconciliation record before making the inbox
+        claimable again.
+        """
+
+        message_id = _required_text(
+            inbox_id,
+            "GATEWAY_TRANSPORT_INBOX_ID_REQUIRED",
+        )
+        audit_ref = _required_text(
+            secure_ingress_audit_ref,
+            "GATEWAY_TRANSPORT_RECONCILIATION_AUDIT_REQUIRED",
+            512,
+        )
+        operator = _required_text(
+            operator_ref,
+            "GATEWAY_TRANSPORT_REPLAY_OPERATOR_REQUIRED",
+            2048,
+        )
+        now = self._now()
+        try:
+            with self._transaction() as conn:
+                existing = conn.execute(
+                    """
+                    SELECT *
+                    FROM gateway_transport_inbox_reconciliation
+                    WHERE inbox_id = ? AND secure_ingress_audit_ref = ?
+                    """,
+                    (message_id, audit_ref),
+                ).fetchone()
+                if existing is not None:
+                    if str(existing["operator_ref"]) != operator:
+                        raise GatewayTransportStoreError(
+                            "GATEWAY_TRANSPORT_RECONCILIATION_CONFLICT"
+                        )
+                    row = self._require_message(conn, "INBOX", message_id)
+                    result = self._inbox_record(row)
+                    result["reconciliation_ref"] = str(
+                        existing["reconciliation_ref"]
+                    )
+                    result["reconciliation_outcome"] = str(existing["outcome"])
+                    return result
+
+                row = self._require_message(conn, "INBOX", message_id)
+                if (
+                    str(row["status"]) != "DLQ"
+                    or str(row["last_reason_code"] or "").strip().upper()
+                    != "GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN"
+                ):
+                    raise GatewayTransportStoreError(
+                        "GATEWAY_TRANSPORT_RECONCILIATION_NOT_UNCERTAIN"
+                    )
+                if not self._inbox_payload_valid(row):
+                    raise GatewayTransportStoreError(
+                        "GATEWAY_TRANSPORT_PAYLOAD_DIGEST_MISMATCH"
+                    )
+
+                attempt = conn.execute(
+                    """
+                    SELECT *
+                    FROM gateway_transport_attempt
+                    WHERE direction = 'INBOX' AND message_id = ?
+                    ORDER BY replay_no DESC, attempt_no DESC
+                    LIMIT 1
+                    """,
+                    (message_id,),
+                ).fetchone()
+                if (
+                    attempt is None
+                    or str(attempt["outcome"]) != "DLQ"
+                    or str(attempt["reason_code"] or "").strip().upper()
+                    != "GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN"
+                    or attempt["dispatch_started_at_ms"] is None
+                    or attempt["completed_at_ms"] is None
+                ):
+                    raise GatewayTransportStoreError(
+                        "GATEWAY_TRANSPORT_RECONCILIATION_ATTEMPT_INVALID"
+                    )
+
+                audit = conn.execute(
+                    "SELECT * FROM secure_ingress_audit WHERE audit_ref = ?",
+                    (audit_ref,),
+                ).fetchone()
+                if audit is None:
+                    raise GatewayTransportStoreError(
+                        "GATEWAY_TRANSPORT_RECONCILIATION_EVIDENCE_NOT_FOUND"
+                    )
+                reason = str(audit["reason_code"] or "").strip().upper()
+                expected_host_key = "edge-host:" + hashlib.sha256(
+                    message_id.encode("utf-8")
+                ).hexdigest()
+                expected_idempotency_digest = _digest_text(expected_host_key)
+                expected_body_sha256 = str(row["normalized_payload_digest"])[7:]
+                requested_scopes = _canonical_json(["host:write"])
+                dispatch_started_at_ms = int(attempt["dispatch_started_at_ms"])
+                completed_at_ms = int(attempt["completed_at_ms"])
+                audit_ts_ms = int(audit["ts_ms"])
+                evidence_valid = (
+                    str(audit["surface"]) == "host.input"
+                    and str(audit["action"]) == "host:input"
+                    and str(audit["method"]).upper() == "POST"
+                    and str(audit["normalized_path"]) == "/v1/host/input"
+                    and str(audit["principal_id"] or "") == "service.edge.gateway"
+                    and str(audit["tenant_id"] or "") == str(row["tenant_id"])
+                    and str(audit["key_id"] or "") == "edge.gateway.hmac.v1"
+                    and str(audit["requested_scopes_json"]) == requested_scopes
+                    and str(audit["required_scopes_json"]) == requested_scopes
+                    and str(audit["body_sha256"]) == expected_body_sha256
+                    and str(audit["idempotency_digest"] or "")
+                    == expected_idempotency_digest
+                    and str(audit["decision"]) == "DENY"
+                    and reason in _SAFE_PRE_EFFECT_DENIAL_REASONS
+                    and audit["claim_ref"] is None
+                    and int(audit["side_effects_executed"]) == 0
+                    and dispatch_started_at_ms <= audit_ts_ms <= completed_at_ms
+                )
+                if not evidence_valid:
+                    raise GatewayTransportStoreError(
+                        "GATEWAY_TRANSPORT_RECONCILIATION_EVIDENCE_INVALID"
+                    )
+
+                evidence = {
+                    "schema_version": "Natsume.gateway.inbox-reconciliation.v1",
+                    "inbox_id": message_id,
+                    "attempt_id": str(attempt["attempt_id"]),
+                    "replay_no": int(attempt["replay_no"]),
+                    "attempt_no": int(attempt["attempt_no"]),
+                    "prior_status_version": int(row["status_version"]),
+                    "normalized_payload_digest": str(
+                        row["normalized_payload_digest"]
+                    ),
+                    "host_idempotency_digest": expected_idempotency_digest,
+                    "secure_ingress_audit_ref": audit_ref,
+                    "secure_ingress_reason_code": reason,
+                    "secure_ingress_stage": str(audit["stage"]),
+                    "outcome": "NO_SIDE_EFFECT_SAFE_RETRY",
+                }
+                evidence_json = _canonical_json(evidence)
+                evidence_digest = _digest_text(evidence_json)
+                reconciliation_ref = (
+                    "gateway-inbox-reconciliation://"
+                    + hashlib.sha256(
+                        (
+                            message_id
+                            + "\n"
+                            + str(attempt["attempt_id"])
+                            + "\n"
+                            + audit_ref
+                            + "\n"
+                            + evidence_digest
+                        ).encode("utf-8")
+                    ).hexdigest()
+                )
+                conn.execute(
+                    """
+                    INSERT INTO gateway_transport_inbox_reconciliation(
+                        reconciliation_ref, schema_version, inbox_id, replay_no,
+                        attempt_no, attempt_id, prior_status_version, outcome,
+                        secure_ingress_audit_ref, secure_ingress_reason_code,
+                        operator_ref, evidence_json, evidence_digest, created_at_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        reconciliation_ref,
+                        "Natsume.gateway.inbox-reconciliation.v1",
+                        message_id,
+                        int(attempt["replay_no"]),
+                        int(attempt["attempt_no"]),
+                        str(attempt["attempt_id"]),
+                        int(row["status_version"]),
+                        "NO_SIDE_EFFECT_SAFE_RETRY",
+                        audit_ref,
+                        reason,
+                        operator,
+                        evidence_json,
+                        evidence_digest,
+                        now,
+                    ),
+                )
+                cursor = conn.execute(
+                    """
+                    UPDATE gateway_transport_inbox
+                    SET status = 'READY', attempt_count = 0,
+                        next_attempt_at_ms = ?, claim_token = NULL,
+                        claim_owner = NULL, claim_expires_at_ms = NULL,
+                        last_reason_code = NULL, last_replay_operator_ref = ?,
+                        replay_count = replay_count + 1, dlq_at_ms = NULL,
+                        updated_at_ms = ?, status_version = status_version + 1
+                    WHERE inbox_id = ? AND status = 'DLQ'
+                      AND status_version = ?
+                    """,
+                    (
+                        now,
+                        operator,
+                        now,
+                        message_id,
+                        int(row["status_version"]),
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise GatewayTransportStoreError(
+                        "GATEWAY_TRANSPORT_RECONCILIATION_CONFLICT"
+                    )
+                row = self._require_message(conn, "INBOX", message_id)
+                result = self._inbox_record(row)
+                result["reconciliation_ref"] = reconciliation_ref
+                result["reconciliation_outcome"] = "NO_SIDE_EFFECT_SAFE_RETRY"
+                return result
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                raise GatewayTransportStoreError(
+                    "GATEWAY_TRANSPORT_RECONCILIATION_SCHEMA_UNAVAILABLE"
+                ) from exc
+            raise
 
     # -- durable egress ----------------------------------------------------------
 

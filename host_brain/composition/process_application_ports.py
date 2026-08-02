@@ -17,7 +17,6 @@ class ProcessApplicationPorts:
     model_transport: Callable[..., str | dict[str, Any]]
     graph_handler_bindings: Callable[[], Sequence[GraphHandlerBinding]]
     graph_runtime_factory: Factory
-    bond_stage_engine_factory: Factory
     shared_memory_index_factory: Factory
     multimodal_observer_factory: Factory
     conversation_turn_store_factory: Factory

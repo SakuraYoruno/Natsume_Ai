@@ -41,6 +41,15 @@ class GovernedRouteExecutionPorts:
 
 
 @dataclass(frozen=True, slots=True)
+class RealtimeCompanionExecutionPorts:
+    """Minimal app-local ports for an ordinary conversational turn."""
+
+    surface_reply_input_factory: Callable[..., Any]
+    resolve_surface_reply_llm_runtime: Callable[..., Any]
+    surface_reply_sse_generator: SurfaceReplyStream
+
+
+@dataclass(frozen=True, slots=True)
 class RouteExecutionOutcome:
     """Authority-free result returned by a single low-level route call."""
 
@@ -114,6 +123,93 @@ def build_governed_route_execution_ports(
         surface_reply_sse_generator=surface_reply_sse_generator,
         governed_delegate_dispatcher=governed_delegate_dispatcher,
     )
+
+
+def build_realtime_companion_execution_ports(
+    *,
+    surface_runtime_ports: SurfaceRuntimePorts,
+) -> RealtimeCompanionExecutionPorts:
+    """Bind the existing Surface stream without task-execution authority."""
+
+    if not isinstance(surface_runtime_ports, SurfaceRuntimePorts):
+        raise RouteExecutionBoundaryError(
+            "realtime companion chat requires lifespan-owned SurfaceRuntimePorts"
+        )
+    from host_brain.app.surface_reply_preprocessor import (  # noqa: PLC0415
+        SurfaceReplyInput,
+    )
+    from host_brain.app.surface_reply_runtime import (  # noqa: PLC0415
+        surface_reply_sse_generator as _surface_reply_sse_generator,
+    )
+
+    def surface_reply_sse_generator(value: Any) -> AsyncIterator[str]:
+        return _surface_reply_sse_generator(value, ports=surface_runtime_ports)
+
+    def resolve_realtime_surface_reply_llm_runtime(
+        *,
+        base_runtime: dict,
+    ) -> dict[str, Any]:
+        runtime = dict(base_runtime or {})
+        runtime["runtime_path"] = "realtime_companion"
+        return surface_runtime_ports.resolve_surface_reply_llm_runtime(
+            base_runtime=runtime,
+        )
+
+    return RealtimeCompanionExecutionPorts(
+        surface_reply_input_factory=SurfaceReplyInput,
+        resolve_surface_reply_llm_runtime=resolve_realtime_surface_reply_llm_runtime,
+        surface_reply_sse_generator=surface_reply_sse_generator,
+    )
+
+
+async def stream_realtime_chat_with_context(
+    *,
+    ports: RealtimeCompanionExecutionPorts,
+    request_body: Any,
+    route_reason: str,
+    request_id: str,
+    session_id: str,
+    person_id: str,
+    sanitized_message: str,
+    emotion_context: dict[str, Any],
+    emotion_snapshot: dict[str, Any],
+    bond_summary: dict[str, Any],
+    retrieval_evidence_items: list[dict[str, Any]],
+    retrieval_summary: dict[str, Any],
+    render_target_lang: str,
+    llm_runtime: dict[str, Any] | None,
+    ts_ms: int,
+    intent_draft: dict[str, Any],
+    trace_stage_meta: dict[str, Any],
+) -> AsyncIterator[str]:
+    """Stream one ordinary companion turn through canonical affective Life.
+
+    This boundary deliberately has no TaskGraph, grant, budget, review or
+    external tool port.  A router must choose ``skill``, ``delegate`` or
+    ``plan`` before those capabilities can be used.
+    """
+
+    async for event in _stream_chat_with_context(
+        ports=ports,
+        request_body=request_body,
+        route_reason=route_reason,
+        request_id=request_id,
+        session_id=session_id,
+        person_id=person_id,
+        sanitized_message=sanitized_message,
+        emotion_context=emotion_context,
+        emotion_snapshot=emotion_snapshot,
+        bond_summary=bond_summary,
+        retrieval_evidence_items=retrieval_evidence_items,
+        retrieval_summary=retrieval_summary,
+        render_target_lang=render_target_lang,
+        llm_runtime=llm_runtime,
+        ts_ms=ts_ms,
+        intent_draft=intent_draft,
+        trace_stage_meta=trace_stage_meta,
+        sub_agent_context=None,
+    ):
+        yield event
 
 
 async def stream_governed_chat_with_context(
@@ -270,6 +366,9 @@ def _build_chat_input(
         user_message=sanitized_message,
         person_id=person_id,
         workspace_id=str(getattr(request_body, "workspace_id", "") or "").strip(),
+        thread_id=(
+            str(getattr(request_body, "thread_id", "") or "").strip() or None
+        ),
         emotion_context=dict(emotion_context or {}),
         emotion_snapshot=dict(emotion_snapshot or {}),
         bond_summary=dict(bond_summary or {}),
@@ -408,9 +507,12 @@ def _text(value: Any, *, lower: bool = False) -> str:
 
 __all__ = [
     "GovernedRouteExecutionPorts",
+    "RealtimeCompanionExecutionPorts",
     "RouteExecutionBoundaryError",
     "RouteExecutionOutcome",
     "build_governed_route_execution_ports",
+    "build_realtime_companion_execution_ports",
     "dispatch_governed_delegate",
     "stream_governed_chat_with_context",
+    "stream_realtime_chat_with_context",
 ]

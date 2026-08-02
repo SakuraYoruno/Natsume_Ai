@@ -361,7 +361,7 @@ class ActivityMonitor:
         if is_gaming and not prev_gaming:
             # 进入游戏
             self._gaming_detect_count += 1
-            logger.info("🎮 游戏进程检测到: %s (%s)", process_name, window_title)
+            logger.info("游戏进程检测到: %s (%s)", process_name, window_title)
             _mode_transition = None
             if self._mode_service:
                 _mode_transition = self._mode_service.on_event("gaming_process_detected", {
@@ -384,7 +384,7 @@ class ActivityMonitor:
         elif not is_gaming and prev_gaming:
             # 退出游戏
             self._gaming_exit_count += 1
-            logger.info("🎮 游戏进程退出，当前前台: %s", process_name)
+            logger.info("游戏进程退出，当前前台: %s", process_name)
             _mode_transition = None
             if self._mode_service:
                 _mode_transition = self._mode_service.on_event("gaming_process_exited", {

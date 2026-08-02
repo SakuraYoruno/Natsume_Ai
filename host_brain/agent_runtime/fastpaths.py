@@ -14,8 +14,6 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _airlock_sanitize_input,
     _airlock_sanitize_output,
     _build_reply_preview,
-    _coerce_trace_mapping,
-    _coerce_trace_score,
     _coerce_trace_bool,
     _normalize_trace_stage_meta,
     _resolve_envelope_confidence,
@@ -98,30 +96,6 @@ def _maybe_build_previous_meaning_answer(
     return None
 
 
-def _build_retrieval_bond_summary(summary_raw: Mapping[str, Any] | None) -> dict[str, Any]:
-    raw = _coerce_trace_mapping(summary_raw)
-    bond_stage = str(raw.get("bond_stage") or raw.get("stage") or "").strip()
-    if not bond_stage:
-        return {}
-
-    bond_summary: dict[str, Any] = {
-        "stage": bond_stage,
-        "trend": str(raw.get("trend") or "").strip(),
-        "capability_hint": str(raw.get("capability_hint") or "").strip(),
-    }
-    bond_score = _coerce_trace_score(raw.get("bond_score"))
-    if bond_score is not None:
-        bond_summary["score"] = bond_score
-        bond_summary["bond_score"] = bond_score
-    try:
-        interaction_count = int(raw.get("interaction_count") or 0)
-    except (TypeError, ValueError):
-        interaction_count = 0
-    if interaction_count > 0:
-        bond_summary["interaction_count"] = interaction_count
-    return bond_summary
-
-
 def _build_canonical_retrieval_relationship_summary(
     *,
     emotion_context: Mapping[str, Any] | None,
@@ -133,9 +107,9 @@ def _build_canonical_retrieval_relationship_summary(
 
     Retrieval and motive prefetch are user-visible influences: they must not
     resurrect a legacy Bond score just because a compatibility reader happens
-    to run before the final Surface gate.  A non-claimed context keeps the
-    rollback-only compatibility route; a claimed but invalid context is
-    explicitly guarded and must never fall back to the state arbiter.
+    to run before the final Surface gate.  A claimed but invalid context is
+    explicitly guarded; a missing hand-off receives the same safe, scoreless
+    floor from ``_canonical_relationship_unavailable_summary``.
     """
 
     from host_brain.persona.context.relationship_state import (  # noqa: PLC0415
@@ -178,6 +152,26 @@ def _build_canonical_retrieval_relationship_summary(
     }
 
 
+def _canonical_relationship_unavailable_summary() -> dict[str, Any]:
+    """Return the safe relationship floor when no Life hand-off exists.
+
+    The former fallback opened the legacy ``BondStageEngine`` and injected its
+    score/stage into retrieval.  That made an omitted canonical hand-off look
+    like a valid relationship read and could reintroduce historical intimacy
+    semantics before Surface's final guard.  A production conversation is
+    supposed to carry canonical Life context; when it does not, keep a
+    bounded, non-intimate friend projection instead of reading another truth.
+    """
+
+    return {
+        "source_authority": "CANONICAL_RELATIONSHIP_UNAVAILABLE",
+        "stage": "FRIEND",
+        "bond_stage": "FRIEND",
+        "relationship_phase": "stepsibling",
+        "relationship_distance": "guarded",
+    }
+
+
 async def _prefetch_retrieval_persona_inputs(
     *,
     application_ports: AgentRuntimeApplicationPorts,
@@ -203,14 +197,10 @@ async def _prefetch_retrieval_persona_inputs(
     if canonical_relationship is not None:
         bond_summary = canonical_relationship
     else:
-        try:
-            bond_summary_raw, bond_evidence = await application_ports.resolve_state_arbiter_bond_fact(
-                session_id=session_id,
-                request_id=request_id,
-            )
-            bond_summary = _build_retrieval_bond_summary(bond_summary_raw)
-        except Exception as exc:
-            _logger.debug("[%s] retrieval persona bond prefetch failed: %s", request_id, exc)
+        # DL-06: no production Agent Runtime port may reopen the retired
+        # BondStageEngine.  The safe projection keeps downstream Motive and
+        # retrieval deterministic without inventing intimacy from a score.
+        bond_summary = _canonical_relationship_unavailable_summary()
 
     try:
         from host_brain.persona.motive_runtime import (  # noqa: PLC0415
