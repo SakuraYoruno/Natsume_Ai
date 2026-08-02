@@ -3,21 +3,13 @@
 
 # 开发规格目录
 
-版本：v3.0
-维护日期：2026-07-15
+| 文档 | 职责 |
+|---|---|
+| [当前执行合同](NEXT_GENERATION_EVOLUTION_EXECUTION.md) | 当前唯一实施边界与退出条件 |
+| [DevSpec](DevSpec.md) | 运行时、合同、状态和迁移规格 |
+| [DevTasks](DevTasks.md) | 未完成任务清单 |
+| [Model Plane](ModelPlane.md) | 模型角色、路由、延迟和隐私 |
+| [Desktop Pet](desktop_pet_runtime.md) | 独立桌宠运行时 |
+| [MateEngine Bridge](mateengine_bridge.md) | 当前只读能力和 Edge 边界 |
 
-## 当前入口
-
-1. `NEXT_GENERATION_EVOLUTION_EXECUTION.md`：唯一活动执行合同。
-2. `DevSpec.md`：稳定工程合同。
-3. `DevTasks.md`：当前程序注册表。
-4. `../50_project/arch/ARCHITECTURE_GAP_MATRIX.md`：当前状态解释。
-
-## 专项规格
-
-- `ModelPlane.md`
-- `desktop_pet_runtime.md`
-- `mateengine_bridge.md`
-- `evidence/m48b/index.md`（固定历史证据）
-
-旧执行合同已移动到 `../_history/programs/2026-07/`，不得作为当前入口。
+`evidence/m48b/` 是固定历史机器证据，不是当前执行入口。旧程序方案位于 `docs/_history/`。

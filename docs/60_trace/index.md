@@ -1,13 +1,10 @@
 受众：MASTER
-标题：Trace 与追溯目录
+标题：当前追溯入口
 
-# Trace 与追溯目录
+# 当前追溯入口
 
-版本：v2.0
-维护日期：2026-07-15
+- [需求追溯](requirements_trace.md)：当前需求到代码、测试和证据的映射。
+- [架构缺口](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md)：当前未完成项。
+- [历史追溯](../_history/trace/README.md)：旧 Bug、风险、投影和试运行报告。
 
-- `requirements_trace.md`：当前 FR→合同→代码→证据→NE 波映射。
-- `BUG_FIX_LOG.md`：历史问题记录。
-- `../50_project/arch/ARCHITECTURE_GAP_MATRIX.md`：当前状态解释。
-
-旧 R/TASK/Milestone 状态不再在本目录重复维护；从 `../_history/programs/2026-07/` 与 Git 历史追溯。
+当前目录不再维护重复的任务流水账或累计修复日志。

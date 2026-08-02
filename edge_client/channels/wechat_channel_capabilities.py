@@ -1,6 +1,6 @@
 """WeChat 通道能力声明（OPT-8 三期 · 首个平台灰度）.
 
-背景：docs/35_quality/OPTIMIZATION_PLAN_20260420.md §12 / OPT-8 的目标是把
+历史背景：docs/_history/quality/OPTIMIZATION_PLAN_20260420.md §12 / OPT-8 的目标是把
 散落在 host_brain / edge_client 中的 ``if platform == "wechat"`` 条件分支
 收敛到 :class:`ChatChannel` Protocol + :class:`ChannelCapabilities` 声明里。
 

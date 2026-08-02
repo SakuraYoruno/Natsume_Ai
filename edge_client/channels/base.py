@@ -1,6 +1,6 @@
 """ChatChannel Protocol 与能力声明（OPT-8）.
 
-背景：docs/35_quality/OPTIMIZATION_PLAN_20260420.md §12 / OPT-8 指出，
+历史背景：docs/_history/quality/OPTIMIZATION_PLAN_20260420.md §12 / OPT-8 指出，
 当前六平台（微信/QQ/Telegram/飞书/企微/LINE）的能力差异（语音、图片、长文本上限）
 分散在 host_brain / edge_client 的多个 ``if platform == "wechat"`` 分支中，
 新增平台接入成本高、易遗漏降级路径。

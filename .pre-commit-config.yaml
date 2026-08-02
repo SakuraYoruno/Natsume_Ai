@@ -14,6 +14,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^(\.pre-commit-config\.yaml|README\.md|docs/|configs/release/current_architecture_status\.json|tools/|tests/)
+      - id: doc-link-gate
+        name: 当前文档本地链接门禁
+        entry: python tools/doc_lint/doc_link_gate.py --root .
+        language: system
+        pass_filenames: false
+        files: ^(README\.md|docs/|host_brain/.+README\.md|tools/doc_lint/|tests/unit/test_doc_link_gate\.py)
       - id: chinese-commit-message
         name: 中文提交标题门禁
         entry: python tools/delivery/change_metadata_gate.py --commit-message-file

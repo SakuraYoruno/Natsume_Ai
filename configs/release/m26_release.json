@@ -84,7 +84,7 @@
       "files_changed": [
         "configs/vts/vts_hotkey_config.yaml",
         "host_brain/channels/vts_mapping_store.py",
-        "docs/30_devspec/vts_hotkey_config_guide.md",
+        "docs/50_project/guides/vts_hotkey_config_guide.md",
         "tests/unit/test_vts_hotkey_config_m26.py"
       ],
       "new_tests": 4,

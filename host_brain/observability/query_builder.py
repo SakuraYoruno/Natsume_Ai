@@ -1,6 +1,6 @@
 """ObsQueryBuilder — Named SQL Query Loader（OPT-9 一期）.
 
-背景：docs/35_quality/OPTIMIZATION_PLAN_20260420.md §13 / OPT-9 指出
+历史背景：docs/_history/quality/OPTIMIZATION_PLAN_20260420.md §13 / OPT-9 指出
 `host_brain/app/obs_routes_*.py` 群内各个 route 都在重复拼 SQL、做聚合、映射
 DTO，缺少统一抽象。本模块提供 OPT-9 的**一期骨架**：
 
