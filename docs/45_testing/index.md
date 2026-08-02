@@ -21,6 +21,11 @@
   OOM、NaN 或崩溃，step 250 与 step 493 均生成可推理权重。step 493 进一步生成 7 条同句跨风格和
   7 条匹配台词，暖机后单条合成约 0.10～0.13 秒；14 条输出没有成片硬削波。状态为
   `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`，完整训练、人耳 A/B、默认提升和远端 Edge 仍待证据。
+- Style-Bert-VITS2 Worker、Edge backend 选择、release 打包与旧 GPT-SoVITS 回归的定向集合为
+  `78 passed in 5.08s`。release 必须显式指定 `.safetensors`，同时绑定 config、style vectors 及三者
+  SHA-256；Worker 只接受日语语言请求。锚点近邻工具已从 1970 个真实 embedding 为 6 类各生成 12 条
+  `CANDIDATE_REVIEW_REQUIRED`，且独立 style-bank builder 与官方目录算法逐风格最大差为 0（Neutral
+  仅因求和次序有 `5.96e-8` 浮点差）。训练仍占用 GPU，因此真实 Worker 进程启动留到检查点完成后。
 
 - 首轮六组情感均衡 A/B 经人工试听后被判定为差异不足，候选没有提升为默认模型；自动关键词
   emotion label 只保留为训练采样线索，不再作为 reference 风格质量证明。

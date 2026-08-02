@@ -1,8 +1,8 @@
-"""GPT-SoVITS TTS engine: model management, synthesis, and audio device output.
+"""Edge TTS engine: model management, synthesis, and audio device output.
 
-Provides GPU-resident GPT-SoVITS model lifecycle management with graceful
-degradation when model or GPU is unavailable. Integrates with the
-SpeechPlaybackQueue as a drop-in Synthesizer callback.
+Provides GPU-resident GPT-SoVITS and Style-Bert-VITS2 model lifecycle
+management with graceful degradation when model or GPU is unavailable.
+Integrates with the SpeechPlaybackQueue as a drop-in Synthesizer callback.
 """
 
 from __future__ import annotations
@@ -47,6 +47,7 @@ DEFAULT_DEVICE = "cuda"
 DEFAULT_SAMPLE_RATE = 32000
 DEFAULT_MAX_TEXT_LENGTH = 500
 DEFAULT_SYNTH_TIMEOUT_S = 30.0
+DEFAULT_TTS_BACKEND = "gpt_sovits"
 _TORCHAUDIO_LOAD_PATCHED = False
 _DLL_DIRECTORY_HANDLES: list[Any] = []
 _DLL_DIRECTORY_PATHS: set[str] = set()
@@ -84,7 +85,9 @@ class TtsState(str, Enum):
 
 @dataclass
 class TtsConfig:
-    """GPT-SoVITS engine configuration."""
+    """Edge TTS engine configuration."""
+
+    backend: str = DEFAULT_TTS_BACKEND
     model_path: str = DEFAULT_MODEL_PATH
     device: str = DEFAULT_DEVICE
     sample_rate: int = DEFAULT_SAMPLE_RATE
@@ -97,6 +100,7 @@ class TtsConfig:
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "backend": self.backend,
             "model_path": self.model_path,
             "device": self.device,
             "sample_rate": self.sample_rate,
@@ -106,6 +110,18 @@ class TtsConfig:
             "voice_bank_path": self.voice_bank_path,
             "language": self.language,
         }
+
+
+def _normalize_tts_backend(value: Any) -> str | None:
+    normalized = str(value or DEFAULT_TTS_BACKEND).strip().lower().replace("-", "_")
+    aliases = {
+        "gpt_sovits": "gpt_sovits",
+        "gptsovits": "gpt_sovits",
+        "style_bert_vits2": "style_bert_vits2",
+        "stylebertvits2": "style_bert_vits2",
+        "sbv2": "style_bert_vits2",
+    }
+    return aliases.get(normalized)
 
 
 @dataclass
@@ -837,10 +853,11 @@ def build_barge_in_event(
 # ---------------------------------------------------------------------------
 
 class SoVITSModelManager:
-    """Manages GPT-SoVITS model lifecycle with GPU-resident priority.
+    """Manages an Edge voice model lifecycle with GPU-resident priority.
 
-    Lazy-loads the model on first use. Handles GPU OOM by reporting error
-    (no CPU fallback for SoVITS as it requires GPU for quality).
+    The historical class name remains API-compatible.  Backend selection is
+    explicit in ``TtsConfig``; Style-Bert-VITS2 always runs in its isolated
+    persistent worker instead of importing a second ML stack into Edge.
     Thread-safe singleton pattern per instance.
     """
 
@@ -867,7 +884,7 @@ class SoVITSModelManager:
     def startup(self) -> None:
         result = self.load()
         if not result.success:
-            logger.warning("GPT-SoVITS startup degraded: %s", result.detail)
+            logger.warning("TTS startup degraded: %s", result.detail)
 
     def shutdown(self) -> None:
         self.unload()
@@ -884,9 +901,18 @@ class SoVITSModelManager:
 
             self._state = TtsState.LOADING
 
-            # 尝试加载 GPT-SoVITS 推理引擎
+            backend = _normalize_tts_backend(self._config.backend)
+            if backend is None:
+                self._state = TtsState.ERROR
+                self._load_error = f"unsupported TTS backend: {self._config.backend}"
+                return TtsSynthResult(
+                    success=False,
+                    reason_code=TTS_MODEL_UNAVAILABLE,
+                    detail=self._load_error,
+                )
+
             try:
-                if _use_persistent_tts_worker():
+                if backend == "style_bert_vits2" or _use_persistent_tts_worker():
                     model = _PersistentProcessSoVITSAdapter(config=self._config)
                     start_detail = model.start()
                     self._model = model
@@ -895,7 +921,8 @@ class SoVITSModelManager:
                     self._state = TtsState.READY
                     self._load_error = None
                     logger.info(
-                        "GPT-SoVITS persistent worker loaded: %s on %s (%s)",
+                        "%s persistent worker loaded: %s on %s (%s)",
+                        backend,
                         self._config.model_path,
                         self._config.device,
                         start_detail,
@@ -919,7 +946,8 @@ class SoVITSModelManager:
                 self._state = TtsState.READY
                 self._load_error = None
                 logger.info(
-                    "GPT-SoVITS model loaded: %s on %s",
+                    "%s model loaded: %s on %s",
+                    backend,
                     self._config.model_path,
                     self._config.device,
                 )
@@ -956,7 +984,7 @@ class SoVITSModelManager:
                     return TtsSynthResult(
                         success=False,
                         reason_code=TTS_GPU_OOM,
-                        detail=f"GPU memory insufficient for GPT-SoVITS: {e}",
+                        detail=f"GPU memory insufficient for TTS backend: {e}",
                     )
                 logger.error("Model load failed: %s", e)
                 return TtsSynthResult(
@@ -1109,7 +1137,7 @@ class SoVITSModelManager:
             self._backend_mode = "inprocess"
         self._cleanup_model_resources(model)
         self._release_gpu_cache()
-        logger.info("GPT-SoVITS model unloaded")
+        logger.info("TTS model unloaded")
 
     def _synthesize_with_recovery(
         self,
@@ -1212,6 +1240,12 @@ class SoVITSModelManager:
         return self.load()
 
     def _activate_fresh_process_backend(self, *, detail_prefix: str) -> TtsSynthResult:
+        if _normalize_tts_backend(self._config.backend) != "gpt_sovits":
+            return TtsSynthResult(
+                success=False,
+                reason_code=TTS_MODEL_UNAVAILABLE,
+                detail="fresh subprocess fallback is only available for GPT-SoVITS",
+            )
         if not _allow_tts_subprocess_fallback():
             return TtsSynthResult(
                 success=False,
@@ -1285,6 +1319,7 @@ class SoVITSModelManager:
         """Return engine health snapshot."""
         return {
             "state": self._state.value,
+            "backend": _normalize_tts_backend(self._config.backend) or self._config.backend,
             "model_path": self._config.model_path,
             "device": self._actual_device,
             "backend_mode": self._backend_mode,
@@ -1295,6 +1330,7 @@ class SoVITSModelManager:
             "last_recovery_detail": self._last_recovery_detail,
             "recovery_count": self._recovery_count,
             "model_artifacts": _summarize_tts_model_artifacts(
+                backend=self._config.backend,
                 model_path=self._config.model_path,
                 voice_bank_path=self._config.voice_bank_path,
             ),
@@ -2162,7 +2198,7 @@ class _FreshProcessSoVITSAdapter:
 
 
 class _PersistentProcessSoVITSAdapter:
-    """Persistent GPT-SoVITS worker backed by the model runtime Python."""
+    """Persistent isolated worker backed by the selected model runtime Python."""
 
     def __init__(self, *, config: TtsConfig) -> None:
         self._config = config
@@ -2293,10 +2329,14 @@ class _PersistentProcessSoVITSAdapter:
         env["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONPATH"] = repo_root + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+        backend = _normalize_tts_backend(self._config.backend)
+        if backend is None:
+            raise RuntimeError(f"unsupported TTS backend: {self._config.backend}")
+        worker_name = _resolve_tts_worker_script(backend)
         cmd = [
             _resolve_tts_worker_python(self._config),
             "-u",
-            os.path.join(repo_root, "edge_client", "actuators", "tts_persistent_worker.py"),
+            os.path.join(repo_root, "edge_client", "actuators", worker_name),
             "--model-path",
             str(self._config.model_path),
             "--device",
@@ -2600,6 +2640,15 @@ def _resolve_tts_worker_python(config: TtsConfig) -> str:
     return sys.executable
 
 
+def _resolve_tts_worker_script(backend: str) -> str:
+    normalized = _normalize_tts_backend(backend)
+    if normalized == "style_bert_vits2":
+        return "style_bert_vits2_worker.py"
+    if normalized == "gpt_sovits":
+        return "tts_persistent_worker.py"
+    raise RuntimeError(f"unsupported TTS backend: {backend}")
+
+
 def _infer_emotion_intensity_from_prosody(
     *,
     speed_factor: float | None,
@@ -2820,8 +2869,18 @@ def _resolve_modern_weights(model_root: str, *, voice_bank_path: str | None = No
     return t2s_weights_path, vits_weights_path
 
 
-def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | None) -> dict[str, Any]:
+def _summarize_tts_model_artifacts(
+    *,
+    backend: str = DEFAULT_TTS_BACKEND,
+    model_path: str,
+    voice_bank_path: str | None,
+) -> dict[str, Any]:
     model_root = os.path.abspath(model_path)
+    if _normalize_tts_backend(backend) == "style_bert_vits2":
+        return _summarize_style_bert_vits2_artifacts(
+            model_root=model_root,
+            manifest_path=voice_bank_path,
+        )
     summary: dict[str, Any] = {
         "model_root": model_root,
         "manifest": None,
@@ -2865,6 +2924,61 @@ def _summarize_tts_model_artifacts(*, model_path: str, voice_bank_path: str | No
     except Exception as exc:
         summary["weights"] = {"error": str(exc)}
 
+    return summary
+
+
+def _summarize_style_bert_vits2_artifacts(
+    *,
+    model_root: str,
+    manifest_path: str | None,
+) -> dict[str, Any]:
+    raw_manifest_path = str(manifest_path or "").strip()
+    path = (
+        os.path.abspath(raw_manifest_path)
+        if raw_manifest_path
+        else os.path.join(model_root, "natsume_style_bert_vits2_manifest.json")
+    )
+    summary: dict[str, Any] = {
+        "model_root": model_root,
+        "manifest": {"path": path, "exists": os.path.isfile(path)},
+        "weights": None,
+    }
+    if not os.path.isfile(path):
+        return summary
+    try:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            manifest = json.load(handle)
+        if not isinstance(manifest, dict):
+            raise ValueError("manifest must be an object")
+
+        asset_root = os.path.dirname(path)
+
+        def _resolved(field: str) -> str:
+            raw = str(manifest.get(field) or "").strip()
+            return raw if os.path.isabs(raw) else os.path.join(asset_root, raw)
+
+        weight = _resolved("model_file")
+        config_path = _resolved("config_file")
+        styles_path = _resolved("style_vectors_file")
+        runtime_style_map = manifest.get("runtime_style_map")
+        summary["manifest"] = {
+            "path": path,
+            "exists": True,
+            "schema_version": manifest.get("schema_version"),
+            "model_id": str(manifest.get("model_id") or "").strip() or None,
+            "voice_language": str(manifest.get("voice_language") or "").strip() or None,
+            "style_count": len(runtime_style_map) if isinstance(runtime_style_map, dict) else 0,
+        }
+        summary["weights"] = {
+            "model": weight,
+            "config": config_path,
+            "style_vectors": styles_path,
+            "model_exists": os.path.isfile(weight),
+            "config_exists": os.path.isfile(config_path),
+            "style_vectors_exist": os.path.isfile(styles_path),
+        }
+    except Exception as exc:
+        summary["manifest"] = {"path": path, "exists": True, "error": str(exc)}
     return summary
 
 

@@ -27,8 +27,10 @@ PyTorch `2.7.0+cu128` 上真实通过；`configs/voice/style_bert_vits2_nanami.j
 batch 4 的短训练烟测已完成 1 epoch / 493 step，峰值显存约 15.2GB；step 493 检查点已生成
 同句跨风格与匹配台词两套共 14 条试听，没有 OOM、NaN 或成片硬削波。该证据只把候选提升为
 `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`，当前正从同一检查点续训；完整训练和人耳 A/B
-通过后，才接日语 speech-text renderer 与本地 Worker。默认 manifest 未提升，远端 Edge 按要求保持关闭。
-当前默认 manifest 未提升，远端 Edge 按要求保持关闭。
+通过后，才接日语 speech-text renderer。Edge 已新增显式 `EDGE_TTS_BACKEND=style_bert_vits2` 的隔离
+常驻 Worker、SHA-256 绑定的候选 release manifest 和 `voice_profile → style/weight` 映射；日语后端
+拒绝非日语请求，当前仅通过 78 项定向测试，尚未在训练占用 GPU 时并行加载真实七海权重。默认
+manifest 未提升，远端 Edge 按要求保持关闭。
 
 当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical

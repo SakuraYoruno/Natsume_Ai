@@ -16,8 +16,10 @@
 > JP-Extra 候选在 RTX 5080 上完成官方模型 CUDA 烟测；确定性构建器已生成 1970 条/2.808685 小时七海
 > 日语数据和 `Natural + 6` 风格目录。七海本地短训练已经完成 1 epoch / 493 step，并生成可推理
 > step 493 权重与 14 条七风格试听；它仍只是 `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`。
-> 日语 speech-text renderer、完整权重、人耳 A/B、Edge adapter、默认 voice bank 和物理播放均未接入，
-> 不得从短训练样音推导 DL-05 或 DL-07 已完成。
+> `TtsConfig.backend`、Edge bootstrap 和独立常驻 Worker 已支持 `style_bert_vits2`；发布目录必须包含
+> 显式 safetensors、config、style vectors 与摘要绑定的 manifest，日语 Worker 会拒绝非日语请求。
+> 默认 backend 仍是 GPT-SoVITS。日语 speech-text renderer、完整权重、人耳 A/B、默认 voice bank 和
+> 物理播放均未接入，不得从短训练样音或合同测试推导 DL-05 / DL-07 已完成。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

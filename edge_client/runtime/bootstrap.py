@@ -186,6 +186,7 @@ def build_edge_runtime(
     )
 
     tts_cfg = TtsConfig(
+        backend=_as_text(_env_get(env_lookup, "EDGE_TTS_BACKEND"), "gpt_sovits"),
         model_path=_as_text(_env_get(env_lookup, "EDGE_TTS_MODEL_PATH"), "models/gpt_sovits"),
         device=_as_text(_env_get(env_lookup, "EDGE_TTS_DEVICE"), "cuda"),
         sample_rate=_parse_int(

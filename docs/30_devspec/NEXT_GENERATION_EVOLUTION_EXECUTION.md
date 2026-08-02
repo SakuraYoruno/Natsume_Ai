@@ -24,8 +24,11 @@ RomanticTender / ContainedHurt / QuietPresence`。风格目录只生成可替换
 汉字的语音被显式排除，没有用忽略读音错误的参数掩盖。batch 4 的首轮训练已真实完成
 1 epoch / 493 step，峰值显存约 15.2GB，step 493 检查点生成的 14 条七风格试听未出现 OOM、NaN
 或成片硬削波；当前状态为 `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`，不能据此提升默认模型。
-后续 epoch、人耳 A/B、日语 speech-text renderer、Worker、默认 manifest、远端 Edge、真实播放、打断
-和 Avatar 动作均未完成或验收。
+后续 epoch、人耳 A/B、日语 speech-text renderer、真实七海 Worker 启动、默认 manifest、远端 Edge、真实播放、打断
+和 Avatar 动作均未完成或验收。代码侧已加入隔离的 Style-Bert-VITS2 常驻 Worker、显式 release
+manifest 与 Edge backend 选择；它只接受 `lang_hint=ja`，不会用日语检查点回退合成中文。另有锚点
+近邻候选工具从 1970 条 embedding 为每类输出 12 条待听审片段，审核后可只重算 style vector 而不重训
+声学模型；候选不得自动进入发布风格库。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，
