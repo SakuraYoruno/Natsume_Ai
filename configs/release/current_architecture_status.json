@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
-  "updated_at": "2026-08-02",
-  "commit_scope": "POST_PR_209_USER_FACING_DOCUMENTATION_REFRESH",
+  "updated_at": "2026-08-03",
+  "commit_scope": "TRIBE_AGENT_ARCHITECTURE_DOCUMENTATION_REFRESH",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -14,6 +14,14 @@
     "note": "GitHub Actions account quota unavailable; workflows were not removed or treated as passing."
   },
   "capabilities": {
+    "tribe_agent_runtime": {
+      "status": "WIRED_APP_LOCAL",
+      "agent_family_count": 23,
+      "runtime_owner": "HOST_ASGI_LIFESPAN",
+      "coordination": "BOUNDED_IN_MEMORY_EVENT_BUS_AND_HANDOFF",
+      "canonical_life_write_authority": "DIGITAL_LIFE_JOURNAL",
+      "noncanonical_runtime_state": "PROCESS_LOCAL_PROJECTION_ONLY"
+    },
     "realtime_companion_chat": {
       "status": "WIRED",
       "governance_mode": "LIGHTWEIGHT",

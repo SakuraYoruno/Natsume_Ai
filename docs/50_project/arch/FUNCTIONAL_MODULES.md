@@ -3,7 +3,23 @@
 
 # 功能模块
 
-## 1. 情感陪伴核心
+## 1. Tribe 智能体群
+
+生产 Host 在一个 app-local `TribeRuntimeScope` 中持有 23 个器官式 Agent。它们通过有界事件总线、共享运行投影和 handoff 协作，应用依赖由 `TribeApplicationPorts` 显式注入。
+
+| 子系统 | Agent 家族 | 主要能力 | 状态与边界 |
+|---|---|---|---|
+| 感知与路由 | Cortex、Thalamus | 上下文汇集、意图编译、路由、handoff | `WIRED` |
+| 情感与社会 | Limbic、Mirror Neuron、Social Brain、Pain/Reward | 情感贡献、共情、关系语境、奖惩 | `WIRED / CONTRIBUTOR_ONLY` |
+| 执行与自主 | Prefrontal、Initiative Governor、Default Mode | 反思、动机、准备度、内在活动 | `WIRED / PARTIAL` |
+| 记忆与语言 | Hippocampus、Language System | 情景记忆、召回融合、语言风格 | `WIRED` |
+| 身体与稳态 | ANS、Endocrine、Somatic、Interoception、Circadian、Proprioception | 活动模式、身体信号、昼夜和负荷 | `WIRED / PROJECTION` |
+| 行动与协调 | Motor Cortex、Cerebellum、Vestibular、Peripheral | 行动计划、误差修正、稳定和设备边界 | `WIRED / PARTIAL` |
+| 防御与恢复 | Immune、Glymphatic | 输入防护、风险、恢复和记忆整理 | `WIRED / PARTIAL` |
+
+`HostTribeRegistry` 提供家族与能力目录，`TribeAgentCatalog` 在 Host scope 内构造唯一 Agent 实例，`InMemoryTribeEventBus` 负责进程内协作。事件总线和 `TribeStateRegistry` 不是长期生命 authority；涉及 self affect、关系和成长的结果必须转为 canonical Life command 后才能持久化。
+
+## 2. 情感陪伴核心
 
 | 能力 | 主要实现 | 状态 |
 |---|---|---|
@@ -17,7 +33,7 @@
 | 表达计划 | `affective_turn_planner.py`、`companion_voice.py` | `WIRED` |
 | 表达交付 | `affective_expression_delivery.py`、Surface streaming | `WIRED / PARTIAL` |
 
-## 2. 对话与记忆
+## 3. 对话与记忆
 
 | 能力 | 主要实现 | 边界 |
 |---|---|---|
@@ -27,13 +43,13 @@
 | Memory grounding | `surface_runtime/memory_context.py`、`memory_grounding.py` | 只取必要摘要，不写 self affect |
 | 长期记忆 | `host_brain/memory/` | person 与 workspace namespace 分离 |
 
-## 3. 受管执行
+## 4. 受管执行
 
 `host_brain/task_runtime/` 负责 TaskGraph 调度、Attempt、Lease、Budget、Review、Verification、Acceptance、Effect、Outbox、Receipt、取消和恢复。`host_brain/agent_runtime/` 负责受管 Delegate／Skill 工作单和 Workspace 接线。
 
 该模块不应进入普通无副作用聊天的同步热路径。
 
-## 4. 身体与外部通道
+## 5. 身体与外部通道
 
 | 能力 | 主要实现 | 当前状态 |
 |---|---|---|
@@ -43,20 +59,20 @@
 | Avatar | `edge_client/actuators/`、gateway embodiment | 协议接线，目标 VTS/VRM `NOT_TESTED` |
 | Unified Gateway | `edge_client/gateway/` | 本地 transport 可测，真实平台按凭据验收 |
 
-## 5. 观测与操作
+## 6. 观测与操作
 
 - `host_brain/app/obs_*`：OBS API、指标与读模型。
 - `host_brain/app/monitor_ui/`：Vite 前端。
 - Nginx Monitor Proxy：托管构建产物并代理 Host/OBS。
 - Operator 命令：只提交合同化命令，成功以服务端 receipt 为准。
 
-## 6. 配置、合同与迁移
+## 7. 配置、合同与迁移
 
 - `natsume_contracts/`：版本化跨进程数据合同。
 - `configs/`：非密钥默认配置、声线和机器状态。
 - `host_brain/migrations/` 与 Edge/Gateway migrations：append-only schema 演进。
 - `scripts/runtime/`：生产形态的本地启停脚本。
 
-## 7. 模块完成规则
+## 8. 模块完成规则
 
 “类存在”或“测试夹具通过”不等于模块完成。模块状态至少需要生产调用点、真实输入、持久恢复、失败边界、目标环境证据和对应文档一致。
