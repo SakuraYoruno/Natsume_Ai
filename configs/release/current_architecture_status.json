@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-02",
-  "commit_scope": "PR_194_DOCUMENTATION_CLOSEOUT",
+  "commit_scope": "POST_PR_209_USER_FACING_DOCUMENTATION_REFRESH",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -37,6 +37,8 @@
       "status": "LOCAL_PASS",
       "selected_backend": "GPT_SOVITS_V4",
       "selected_variant": "B",
+      "inference_mode": "PRETRAINED_REFERENCE_CONDITIONED",
+      "dedicated_finetuned_checkpoint": "NOT_AVAILABLE",
       "display_language": "zh",
       "speech_language": "ja",
       "voice_bank": "configs/voice/gpt_sovits_nanami_v4.json",
