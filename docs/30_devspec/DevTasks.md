@@ -3,8 +3,8 @@
 
 # 当前架构程序注册表
 
-版本：v4.15
-维护日期：2026-08-01
+版本：v4.16
+维护日期：2026-08-02
 状态：`ONE_ACTIVE_PROGRAM`
 
 ## 唯一活动程序
@@ -18,13 +18,17 @@
 当前执行波为 `NE-08 / DL-00～DL-07`。NE 是面向产品的端到端 Architecture
 Wave，DL 是该波内部的连续交付面，不拆回逐个 TASK Seal。
 
-DL-05 已终止“日语角色模型合成中文”的错误路线，状态固定为
-`REJECTED_CROSS_LANGUAGE_VOICE`。活动 profile 已删除；离线候选管线会拒绝显式源语言与目标语言
-不一致的配置，中文训练子集必须具备中文 BERT 特征。PCM 数值域归一化、峰值保护、表达风格合同和
-硬链接复用属于有效工程修复，继续保留。当前本机中文语料只有昔涟 `1408` 条/约 `127.98` 分钟
-（舞台化对照）与爱弥斯 `334` 条/约 `23.64` 分钟（转写不可直接使用），尚无可提升的日常中文
-七海主模型。下一切片改为原生中文模型同句试听，再决定是否采集、购买或人工校正同一中文说话人的
-授权日常语料；默认 manifest 未提升，远端 Edge 按要求保持关闭。
+DL-05 继续禁止“日语声学模型直接读中文”，该失败路线仍为
+`REJECTED_CROSS_LANGUAGE_VOICE`。用户现选择日语输出，新候选因此改成同语言的
+`Japanese speech text → Style-Bert-VITS2 JP-Extra`。官方 `2.7.0` 推理已在 RTX 5080 与
+PyTorch `2.7.0+cu128` 上真实通过；`configs/voice/style_bert_vits2_nanami.json` 与
+`tools/style_bert_vits2_nanami_dataset.py` 已确定性生成 1970 条/2.808685 小时训练集，其中
+1954 条 Natural、16 条分属 6 个风格锚，全部使用硬链接；一条无法可靠 G2P 的专名语音被显式排除。
+batch 4 的短训练烟测已完成 1 epoch / 493 step，峰值显存约 15.2GB；step 493 检查点已生成
+同句跨风格与匹配台词两套共 14 条试听，没有 OOM、NaN 或成片硬削波。该证据只把候选提升为
+`SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`，当前正从同一检查点续训；完整训练和人耳 A/B
+通过后，才接日语 speech-text renderer 与本地 Worker。默认 manifest 未提升，远端 Edge 按要求保持关闭。
+当前默认 manifest 未提升，远端 Edge 按要求保持关闭。
 
 当前活动实现波为 `NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING`：以实时
 情感陪伴数字生命为唯一产品主线。DL-00 已冻结体验基线；DL-01 已完成 canonical

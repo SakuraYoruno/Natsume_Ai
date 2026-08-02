@@ -3,19 +3,21 @@
 
 # Natsume AI 当前代码架构事实
 
-版本：v5.90
-核对日期：2026-08-01
+版本：v5.91
+核对日期：2026-08-02
 合并基线：`origin/dev@001c2f5d7`；当前事实以本文所在提交的工作树为准
 状态：`CODE_FACTS / FULL_ARCHITECTURE_INCOMPLETE`
 
 本文只回答“代码现在是什么”。目标、执行顺序和历史结论分别由 [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md)、[NEXT_GENERATION_EVOLUTION_EXECUTION.md](../../30_devspec/NEXT_GENERATION_EVOLUTION_EXECUTION.md) 与 [历史程序目录](../../_history/programs/2026-07/README.md) 承担。若本文与代码冲突，以生产代码和生产 composition 为准。
 
-> `2026-08-01` 最新 Voice 事实：`ExpressionPlanV1.voice_style` 仍可作为独立 `voice_profile` 经 Host、
-> Edge RPC、`SoVITSModelManager` 和 standalone Worker 传递；整数 PCM 归一化、pitch/energy 和峰值保护
-> 已修复。昔涟中文 reference 因舞台化未提升。随后训练的日语角色模型虽然能输出可识别中文，却因中文
-> 音系、咬字和停顿失真被判定为 `REJECTED_CROSS_LANGUAGE_VOICE`；活动 profile 已删除，acoustic miner
-> 会拒绝显式源语言与目标语言不一致的配置，中文训练脚本也重新要求 `3-bert` 特征。当前没有已批准的
-> 中文七海主模型；默认 voice bank、远端 Edge 与播放/Avatar 物理执行均未切换。
+> `2026-08-02` 最新 Voice 事实：`ExpressionPlanV1.voice_style` 仍可作为独立 `voice_profile` 经 Host、
+> Edge RPC 与现有 GPT-SoVITS Worker 传递；该生产 Worker 尚未切换。日语模型读中文仍为
+> `REJECTED_CROSS_LANGUAGE_VOICE`，但用户已选择真正的日语语音输出。新的 Style-Bert-VITS2 `2.7.0`
+> JP-Extra 候选在 RTX 5080 上完成官方模型 CUDA 烟测；确定性构建器已生成 1970 条/2.808685 小时七海
+> 日语数据和 `Natural + 6` 风格目录。七海本地短训练已经完成 1 epoch / 493 step，并生成可推理
+> step 493 权重与 14 条七风格试听；它仍只是 `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`。
+> 日语 speech-text renderer、完整权重、人耳 A/B、Edge adapter、默认 voice bank 和物理播放均未接入，
+> 不得从短训练样音推导 DL-05 或 DL-07 已完成。
 
 > `2026-08-01` 最新 Chat 事实：Cortex 将 `chat` 与 `skill/delegate/plan` 分流。普通 Chat 和
 > Gateway 文本通过 `AgentRuntimeApplicationPorts.stream_realtime_chat` 进入 app-local

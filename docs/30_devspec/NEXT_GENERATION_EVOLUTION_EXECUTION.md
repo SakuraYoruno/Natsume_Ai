@@ -3,8 +3,8 @@
 
 # 七海实时情感数字生命正式执行合同
 
-版本：v5.13
-日期：2026-08-01
+版本：v5.14
+日期：2026-08-02
 状态：`NE-08_IN_PROGRESS / DL-06_COMPATIBILITY_AUTHORITY_RETIRED / DL-07_LOCAL_CORE_STACK_PASS_EXTERNAL_ACCEPTANCE_PENDING / EMOTIONAL_DIGITAL_LIFE_PARTIAL`
 
 本文是唯一活动执行合同。此前 NE-01～NE-07 的 Runtime、Lab、Skill、
@@ -13,15 +13,19 @@ Knowledge、Docker 与验收记录均是范围受限的历史基础资产；它�
 只把直接支撑实时情感陪伴、连续关系与三模态表达的工程纳入活动 Goal。当前实现分支基于
 `origin/dev@001c2f5d7`；分支上的 DL-00～DL-06 提交尚未以本文件冒充 `dev` 已完成。
 
-DL-05 语音路线已纠偏：日语角色音频不得承担中文陪伴语音的声学模型或 reference bank，既有候选
-统一标记为 `REJECTED_CROSS_LANGUAGE_VOICE`，不再调参、提升或部署。跨语言“能合成”和小样本 CER
-不能替代中文母语听感；活动配置已删除，离线风格管线会直接拒绝显式语言不一致的 profile。
-GPT-SoVITS 整数 PCM 归一化、整体峰值保护、Voice RPC 的 speed/energy/pitch 透传和通用声学近邻工具
-仍是有效修复。当前本机中文库存为昔涟 `1408` 条/约 `127.98` 分钟（舞台化，只作对照）和爱弥斯
-`334` 条/约 `23.64` 分钟（自动转写错误较多，不能直接训练）。下一步只允许原生中文 TTS 或同一中文
-说话人的授权、人工校正语料：先用固定中文日常/恋爱/安慰句做人耳模型筛选，身份稳定性不足时再采集或
-训练。Galgame 只提供中文表达风格目标，不进入跨语言声学链。默认 manifest、远端 Edge、真实播放、
-打断和 Avatar 动作仍未切换或验收。
+DL-05 语音路线再次按实际试听收敛：日语角色音频合成中文仍永久标记
+`REJECTED_CROSS_LANGUAGE_VOICE`；用户选择的活动候选改为“中文可见文本 + 日语 speech text +
+日语声学模型”，声学侧不再跨语言。Style-Bert-VITS2 `2.7.0` JP-Extra 已使用
+PyTorch `2.7.0+cu128` 在 RTX 5080 上完成官方模型真实 CUDA 推理。训练集构建器从已授权的
+2465 条七海原声中按时长、有效发声和停顿筛出 1970 条/2.808685 小时，并用硬链接落盘；1954 条
+只进入 `Natural`，16 条人工确认或既有高置信原声锚分入 `WarmCare / SharedJoy / PlayfulShy /
+RomanticTender / ContainedHurt / QuietPresence`。风格目录只生成可替换的 style vector，不把自动
+情绪分类当训练真相，因此后续调恋爱感不要求重训声学模型。另有一条含 OpenJTalk 无法读取专名
+汉字的语音被显式排除，没有用忽略读音错误的参数掩盖。batch 4 的首轮训练已真实完成
+1 epoch / 493 step，峰值显存约 15.2GB，step 493 检查点生成的 14 条七风格试听未出现 OOM、NaN
+或成片硬削波；当前状态为 `SHORT_TRAINING_SMOKE_PASS_NOT_HUMAN_ACCEPTED`，不能据此提升默认模型。
+后续 epoch、人耳 A/B、日语 speech-text renderer、Worker、默认 manifest、远端 Edge、真实播放、打断
+和 Avatar 动作均未完成或验收。
 
 DL-07 的本机部署入口现区分 Gateway 与远端 Edge：`run_gateway_side.py` 作为外层
 composition 注入 canonical migration 与真实 SQLite transport store，
