@@ -255,6 +255,48 @@ def test_command_ingress_composition_rejects_gateway_authority_drift(
         )
 
 
+def test_command_ingress_composition_preserves_valid_rotated_secret_reference(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    first.close()
+    rotated_ref = "env://HOST_EDGE_GATEWAY_HMAC_SECRET_ROTATED"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE secure_ingress_credential
+            SET secret_ref = ?
+            WHERE principal_id = ? AND key_id = ?
+            """,
+            (rotated_ref, PRINCIPAL_ID, KEY_ID),
+        )
+
+    restarted = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    restarted.close()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            """
+            SELECT secret_ref FROM secure_ingress_credential
+            WHERE principal_id = ? AND key_id = ?
+            """,
+            (PRINCIPAL_ID, KEY_ID),
+        ).fetchone()[0] == rotated_ref
+
+
 def test_valid_exact_raw_body_is_allowed_and_restart_duplicate_is_stable(tmp_path: Path) -> None:
     db_path = _database(tmp_path)
     body = b'{"source":"GATEWAY","content":"hello"}'

@@ -77,7 +77,7 @@ HostCommand → immutable TaskGraph → node attempt
            → acceptance → outbox → durable receipt
 ```
 
-该链用于 Skill、Delegate、Plan、Scheduler、Internal、Operator、Gateway 回信和设备副作用。Gateway Secure Ingress 在 Host composition 启动时按已配置 HMAC key 幂等注册最小权限 service principal；数据库中只保存 secret ref，不保存密钥值，已有 authority 不一致时启动失败而不是覆盖。
+该链用于 Skill、Delegate、Plan、Scheduler、Internal、Operator、Gateway 回信和设备副作用。Gateway Secure Ingress 在 Host composition 启动时按已配置 HMAC key 幂等注册最小权限 service principal；数据库中只保存 secret ref，不保存密钥值。合法的既有轮换引用会原样保留，权限、身份或凭据类型不一致时启动失败而不是覆盖。
 
 ## 6. 故障模型
 

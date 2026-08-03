@@ -426,19 +426,27 @@ class SQLiteSecureIngressStore:
                     expected_credential = (
                         CredentialProofKind.HMAC_SHA256.value,
                         "hmac-sha256",
-                        reference,
                         "ACTIVE",
                     )
                     actual_credential = (
                         str(credential_row["credential_kind"]),
                         str(credential_row["algorithm"]),
-                        str(credential_row["secret_ref"]),
                         str(credential_row["status"]),
                     )
-                    if actual_credential != expected_credential or not self._within_validity(
+                    existing_secret_ref = str(
+                        credential_row["secret_ref"] or ""
+                    ).strip()
+                    secret_ref_is_safe = existing_secret_ref.startswith(
+                        ("env://", "sec://")
+                    ) and len(existing_secret_ref) > len("env://")
+                    if (
+                        actual_credential != expected_credential
+                        or not secret_ref_is_safe
+                        or not self._within_validity(
                         now_ms,
                         int(credential_row["valid_from_ms"]),
                         credential_row["valid_until_ms"],
+                        )
                     ):
                         raise SecureIngressStoreError(
                             "SECURE_INGRESS_AUTHORITY_DRIFT:credential"
