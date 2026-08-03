@@ -191,16 +191,28 @@ def _derive_scene(
             )
         )
     if guardian_status in {"DEGRADED", "RECOVERY_PENDING", "SLO_BREACH"}:
+        low_risk_companion_chat = (
+            task_kind in {"CHAT", "CONVERSATION"}
+            and context.risk_level <= 2
+        )
         derived.append(
             ContextConstraintV1(
-                code="GUARDIAN_DEGRADED_REVIEW",
-                disposition="REVIEW",
+                code=(
+                    "GUARDIAN_DEGRADED_RESTRICTION"
+                    if low_risk_companion_chat
+                    else "GUARDIAN_DEGRADED_REVIEW"
+                ),
+                disposition="RESTRICT" if low_risk_companion_chat else "REVIEW",
                 origin="GUARDIAN",
                 source_ref=(
                     "guardian://snapshot/sha256/"
                     f"{guardian.snapshot_digest}"
                 ),
-                reason="运行期降级或 SLO 故障时必须复核效果",
+                reason=(
+                    "低风险陪伴对话按可用通道降级，不阻塞文字回复"
+                    if low_risk_companion_chat
+                    else "运行期降级或 SLO 故障时必须复核效果"
+                ),
             )
         )
     if guardian_status == "SLEEP":

@@ -28,6 +28,7 @@
 - governed TaskGraph、effect 和 outbox 回归；
 - 文档 audience、authority、freshness 和机器状态。
 - Edge 组件明确关闭时必须投影为 `NOT_TESTED`，不得因 Edge 传输可达而显示 `UP`；barge-in、resource gate 与实际播放设备也不得互相冒充。
+- Guardian 降级时，低风险陪伴 Chat 只能收紧到可用通道降级，不能触发人工 Review；风险三级以上的 Chat 以及其他高风险执行仍须 Review。
 
 ## 3. 固定情感场景
 

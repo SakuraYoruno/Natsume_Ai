@@ -94,6 +94,7 @@ def _context(
     user_state: str = "CALM",
     activity_state: str = "WORKING",
     local_hour: int = 14,
+    risk_level: int = 2,
 ) -> SceneResolutionInputV1:
     return SceneResolutionInputV1(
         workspace_id="workspace-a",
@@ -103,7 +104,7 @@ def _context(
         user_state=user_state,
         activity_state=activity_state,
         local_hour=local_hour,
-        risk_level=2,
+        risk_level=risk_level,
     )
 
 
@@ -279,6 +280,33 @@ def test_scene_resolver_derives_eight_required_scenarios(
     )
 
     assert decision.scene_id == expected_scene
+
+
+def test_guardian_degradation_restricts_but_does_not_review_low_risk_chat() -> None:
+    decision = _resolver(
+        clock=lambda: 500,
+        guardian_status="RECOVERY_PENDING",
+    ).resolve(
+        snapshot=_snapshot(),
+        context=_context(task_kind="CHAT", risk_level=2),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["GUARDIAN_DEGRADED_RESTRICTION"] == "RESTRICT"
+    assert "GUARDIAN_DEGRADED_REVIEW" not in constraints
+
+
+def test_guardian_degradation_still_requires_review_for_higher_risk_chat() -> None:
+    decision = _resolver(
+        clock=lambda: 500,
+        guardian_status="DEGRADED",
+    ).resolve(
+        snapshot=_snapshot(),
+        context=_context(task_kind="CHAT", risk_level=3),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["GUARDIAN_DEGRADED_REVIEW"] == "REVIEW"
 
 
 def test_scene_sleep_activity_restricts_intent_and_blocks_proactive_projection() -> None:
