@@ -85,7 +85,7 @@ HostCommand → immutable TaskGraph → node attempt
 - Tribe 重建：Agent catalog、event bus 和短期状态重新构造；长期自我只从 canonical Life 恢复。
 - Edge 断开：文本可继续；语音／Avatar 各自降级，self affect 不被改写。
 - Provider 超时：快速回退并表达不确定性，不阻塞数分钟。
-- Gateway 网络中断：accepted outbox eventual delivery，重复 webhook 不重复建任务。
+- Gateway 网络中断：INBOX 以稳定 Host 幂等键精确重试，重复 webhook 不重复建任务；accepted OUTBOX eventual delivery，但平台 dispatch 后的未知结果必须隔离对账，不能盲目重发。
 - Neo4j／Chroma／Redis 中断：依能力降级；不可把内存 fallback 当最终验收。
 
 ## 7. 安全与隐私

@@ -1346,8 +1346,12 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
         )
         store.retry_outbox.assert_not_called()
 
-    def test_unknown_side_effect_failure_keeps_fenced_lease_for_uncertain_dlq(self) -> None:
+    def test_host_uncertainty_retries_but_platform_uncertainty_is_quarantined(self) -> None:
         store = MagicMock()
+        store.retry_inbox.return_value = {
+            "status": "RETRY_WAIT",
+            "last_reason_code": "INPUT_REPORT_DELIVERY_UNCERTAIN",
+        }
         reporter = MagicMock()
         reporter.deliver_gateway_payload.return_value = MagicMock(
             success=False,
@@ -1382,7 +1386,8 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
         store.retry_outbox.assert_called_once()
         store.complete_inbox.assert_not_called()
         store.ack_outbox.assert_not_called()
-        self.assertEqual(1, runtime.stats()["inbox_uncertain"])
+        self.assertEqual(1, runtime.stats()["inbox_retried"])
+        self.assertEqual(0, runtime.stats()["inbox_uncertain"])
         self.assertEqual(1, runtime.stats()["outbox_uncertain"])
 
     def test_outbox_preflight_rejection_never_marks_dispatch_started(self) -> None:

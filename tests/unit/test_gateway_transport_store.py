@@ -171,6 +171,45 @@ def _record_no_effect_denial(
         )
 
 
+def _force_legacy_uncertain_inbox(
+    db_path: Path,
+    *,
+    inbox_id: str = "inbox-1",
+) -> None:
+    """Recreate the pre-fix INBOX quarantine for compatibility tests only."""
+
+    with sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT updated_at_ms FROM gateway_transport_inbox WHERE inbox_id = ?",
+            (inbox_id,),
+        ).fetchone()
+        assert row is not None
+        updated_at_ms = int(row[0])
+        conn.execute(
+            """
+            UPDATE gateway_transport_inbox
+            SET status = 'DLQ', next_attempt_at_ms = ?,
+                last_reason_code = 'GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN',
+                dlq_at_ms = ?, status_version = status_version + 1
+            WHERE inbox_id = ?
+            """,
+            (updated_at_ms, updated_at_ms, inbox_id),
+        )
+        conn.execute(
+            """
+            UPDATE gateway_transport_attempt
+            SET outcome = 'DLQ',
+                reason_code = 'GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN'
+            WHERE attempt_id = (
+                SELECT attempt_id FROM gateway_transport_attempt
+                WHERE direction = 'INBOX' AND message_id = ?
+                ORDER BY replay_no DESC, attempt_no DESC LIMIT 1
+            )
+            """,
+            (inbox_id,),
+        )
+
+
 def test_schema_is_catalog_checksum_bound_and_runtime_has_no_ddl(tmp_path: Path) -> None:
     migration_text = MIGRATION.read_text(encoding="utf-8")
     assert hashlib.sha256(migration_text.encode("utf-8")).hexdigest() == (
@@ -722,72 +761,106 @@ def test_retry_backoff_dlq_and_in_place_replay(tmp_path: Path) -> None:
     assert next_claim["outbox_id"] == "outbox-after-retry"
 
 
-@pytest.mark.parametrize("direction", ("INBOX", "OUTBOX"))
-def test_retry_after_dispatch_started_is_immediately_quarantined(
+def test_inbox_retry_after_dispatch_started_uses_exact_host_replay(
     tmp_path: Path,
-    direction: str,
 ) -> None:
     clock = FrozenClock()
     store = SQLiteGatewayTransportStore(_migrated_db(tmp_path), clock=clock)
-    if direction == "INBOX":
-        _accept(store, max_attempts=3)
-        claim = store.claim_inbox(worker_id="worker", lease_ms=100)
-        assert claim is not None
-        store.mark_inbox_dispatch_started(
-            inbox_id="inbox-1",
-            claim_token=claim["claim_token"],
-            fencing_token=claim["fencing_token"],
-        )
-        result = store.retry_inbox(
-            inbox_id="inbox-1",
-            claim_token=claim["claim_token"],
-            fencing_token=claim["fencing_token"],
-            reason_code="HOST_TIMEOUT",
-        )
-        record_id = result["inbox_id"]
-    else:
-        _enqueue(store,
-            outbox_id="outbox-uncertain",
-            destination="qq:uncertain",
-            idempotency_key="outbox-uncertain",
-            payload=b"frozen-payload",
-            max_attempts=3,
-        )
-        claim = store.claim_outbox(worker_id="sender", lease_ms=100)
-        assert claim is not None
-        store.mark_outbox_dispatch_started(
-            outbox_id="outbox-uncertain",
-            claim_token=claim["claim_token"],
-            fencing_token=claim["fencing_token"],
-        )
-        result = store.retry_outbox(
-            outbox_id="outbox-uncertain",
-            claim_token=claim["claim_token"],
-            fencing_token=claim["fencing_token"],
-            reason_code="PLATFORM_TIMEOUT",
-        )
-        record_id = result["outbox_id"]
+    _accept(store, max_attempts=3)
+    claim = store.claim_inbox(worker_id="worker", lease_ms=100)
+    assert claim is not None
+    store.mark_inbox_dispatch_started(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+    )
+    result = store.retry_inbox(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+        reason_code="HOST_TIMEOUT",
+        base_delay_ms=1_000,
+        max_delay_ms=60_000,
+    )
+
+    assert result["status"] == "RETRY_WAIT"
+    assert result["last_reason_code"] == "HOST_TIMEOUT"
+    assert result["next_attempt_at_ms"] == clock.value + 1_000
+    assert store.list_dlq(direction="INBOX") == []
+
+
+def test_outbox_retry_after_dispatch_started_is_quarantined(
+    tmp_path: Path,
+) -> None:
+    clock = FrozenClock()
+    store = SQLiteGatewayTransportStore(_migrated_db(tmp_path), clock=clock)
+    _enqueue(
+        store,
+        outbox_id="outbox-uncertain",
+        destination="qq:uncertain",
+        idempotency_key="outbox-uncertain",
+        payload=b"frozen-payload",
+        max_attempts=3,
+    )
+    claim = store.claim_outbox(worker_id="sender", lease_ms=100)
+    assert claim is not None
+    store.mark_outbox_dispatch_started(
+        outbox_id="outbox-uncertain",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+    )
+    result = store.retry_outbox(
+        outbox_id="outbox-uncertain",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+        reason_code="PLATFORM_TIMEOUT",
+    )
 
     assert result["status"] == "DLQ"
     assert result["last_reason_code"] == "GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN"
     assert result["next_attempt_at_ms"] == clock.value
-    assert store.list_dlq(direction=direction)[0][
-        "inbox_id" if direction == "INBOX" else "outbox_id"
-    ] == record_id
+    assert store.list_dlq(direction="OUTBOX")[0]["outbox_id"] == (
+        "outbox-uncertain"
+    )
     with pytest.raises(
         GatewayTransportStoreError,
         match="REPLAY_REQUIRES_RECONCILIATION",
     ):
-        if direction == "INBOX":
-            store.replay_inbox(
-                inbox_id=record_id,
-                operator_ref="operator://must-reconcile",
-            )
-        else:
-            store.replay_outbox(
-                outbox_id=record_id,
-                operator_ref="operator://must-reconcile",
-            )
+        store.replay_outbox(
+            outbox_id="outbox-uncertain",
+            operator_ref="operator://must-reconcile",
+        )
+
+
+def test_legacy_uncertain_inbox_can_use_exact_idempotent_replay(
+    tmp_path: Path,
+) -> None:
+    db_path = _migrated_db(tmp_path)
+    store = SQLiteGatewayTransportStore(db_path)
+    _accept(store, max_attempts=3)
+    claim = store.claim_inbox(worker_id="worker", lease_ms=100)
+    assert claim is not None
+    store.mark_inbox_dispatch_started(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+    )
+    store.retry_inbox(
+        inbox_id="inbox-1",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+        reason_code="INPUT_REPORT_DELIVERY_UNCERTAIN",
+    )
+    _force_legacy_uncertain_inbox(db_path)
+
+    replayed = store.replay_inbox(
+        inbox_id="inbox-1",
+        operator_ref="operator://exact-host-replay",
+    )
+
+    assert replayed["status"] == "READY"
+    assert replayed["attempt_count"] == 0
+    assert replayed["replay_count"] == 1
 
 
 def test_uncertain_inbox_reopens_only_after_canonical_no_effect_denial(
@@ -811,7 +884,8 @@ def test_uncertain_inbox_reopens_only_after_canonical_no_effect_denial(
         fencing_token=claim["fencing_token"],
         reason_code="HOST_REJECTED",
     )
-    assert uncertain["status"] == "DLQ"
+    assert uncertain["status"] == "RETRY_WAIT"
+    _force_legacy_uncertain_inbox(db_path)
 
     audit_ref = "secure-ingress-audit://credential-denied"
     _record_no_effect_denial(
@@ -903,6 +977,7 @@ def test_uncertain_inbox_reconciliation_rejects_unbound_or_unsafe_evidence(
         fencing_token=claim["fencing_token"],
         reason_code="HOST_REJECTED",
     )
+    _force_legacy_uncertain_inbox(db_path)
     audit_ref = "secure-ingress-audit://unsafe"
     _record_no_effect_denial(
         db_path,
@@ -924,7 +999,8 @@ def test_uncertain_inbox_reconciliation_requires_migration_0151(
     tmp_path: Path,
 ) -> None:
     clock = FrozenClock()
-    store = SQLiteGatewayTransportStore(_migrated_db(tmp_path), clock=clock)
+    db_path = _migrated_db(tmp_path)
+    store = SQLiteGatewayTransportStore(db_path, clock=clock)
     _accept(store, max_attempts=3)
     claim = store.claim_inbox(worker_id="worker", lease_ms=100)
     assert claim is not None
@@ -939,6 +1015,7 @@ def test_uncertain_inbox_reconciliation_requires_migration_0151(
         fencing_token=claim["fencing_token"],
         reason_code="HOST_REJECTED",
     )
+    _force_legacy_uncertain_inbox(db_path)
 
     with pytest.raises(
         GatewayTransportStoreError,
@@ -985,7 +1062,7 @@ def test_restart_recovers_expired_lease_and_rejects_stale_fence(tmp_path: Path) 
     )
 
 
-def test_expired_started_dispatch_is_quarantined_as_delivery_uncertain(
+def test_expired_started_inbox_dispatch_is_retried_with_exact_host_replay(
     tmp_path: Path,
 ) -> None:
     clock = FrozenClock()
@@ -1009,10 +1086,10 @@ def test_expired_started_dispatch_is_quarantined_as_delivery_uncertain(
 
     clock.advance(11)
     restarted = SQLiteGatewayTransportStore(db_path, clock=clock)
-    assert restarted.claim_inbox(worker_id="must-not-redeliver") is None
-    quarantined = restarted.get_inbox(inbox_id="inbox-1")
-    assert quarantined["status"] == "DLQ"
-    assert quarantined["last_reason_code"] == "GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN"
+    recovered = restarted.claim_inbox(worker_id="exact-redelivery", lease_ms=100)
+    assert recovered is not None
+    assert recovered["attempt_count"] == 2
+    assert recovered["fencing_token"] > claim["fencing_token"]
 
     with sqlite3.connect(str(db_path)) as conn:
         attempt = conn.execute(
@@ -1023,7 +1100,11 @@ def test_expired_started_dispatch_is_quarantined_as_delivery_uncertain(
             """,
             (claim["claim_token"],),
         ).fetchone()
-    assert attempt == ("DLQ", first_mark["dispatch_started_at_ms"], clock.value)
+    assert attempt == (
+        "LEASE_EXPIRED",
+        first_mark["dispatch_started_at_ms"],
+        clock.value,
+    )
 
     with pytest.raises(GatewayTransportStoreError, match="STALE_FENCE"):
         restarted.complete_inbox(
@@ -1032,6 +1113,38 @@ def test_expired_started_dispatch_is_quarantined_as_delivery_uncertain(
             fencing_token=claim["fencing_token"],
             receipt_ref="gateway-delivery-receipt://late",
         )
+
+
+def test_expired_started_outbox_dispatch_remains_uncertain(
+    tmp_path: Path,
+) -> None:
+    clock = FrozenClock()
+    db_path = _migrated_db(tmp_path)
+    store = SQLiteGatewayTransportStore(db_path, clock=clock)
+    _enqueue(
+        store,
+        outbox_id="outbox-expired",
+        destination="qq:uncertain",
+        idempotency_key="outbox-expired",
+        payload=b"frozen-payload",
+        max_attempts=3,
+    )
+    claim = store.claim_outbox(worker_id="sender", lease_ms=10)
+    assert claim is not None
+    store.mark_outbox_dispatch_started(
+        outbox_id="outbox-expired",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["fencing_token"],
+    )
+
+    clock.advance(11)
+    restarted = SQLiteGatewayTransportStore(db_path, clock=clock)
+    assert restarted.claim_outbox(worker_id="must-not-redeliver") is None
+    quarantined = restarted.get_outbox(outbox_id="outbox-expired")
+    assert quarantined["status"] == "DLQ"
+    assert quarantined["last_reason_code"] == (
+        "GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN"
+    )
 
 
 def test_claim_is_single_winner_and_ordering_key_is_serial(tmp_path: Path) -> None:

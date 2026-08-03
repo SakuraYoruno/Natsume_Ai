@@ -104,6 +104,7 @@ python -m pytest tests/unit/test_host_gateway_secure_ingress.py tests/unit/test_
 python -m pytest tests/unit/test_service_health_heartbeat.py tests/unit/test_aw07_health_device_projection.py tests/contract/test_health_endpoint_contract.py tests/unit/test_ne03_health_guardian_cutover.py -q
 python -m pytest tests/unit/test_runtime_startup_script_composition.py tests/unit/test_ne07_external_service_isolation.py -q
 python -m pytest tests/unit/test_ne01_host_startup_graph_continuation.py tests/integration/test_ne01_host_startup_graph_continuation.py -q
+python -m pytest tests/unit/test_gateway_transport_store.py tests/contract/test_gateway_contract.py tests/integration/test_task0488_gateway_transport_integration.py -q
 python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
@@ -119,3 +120,5 @@ git diff --check
 - `INCOMPLETE`／`FAIL`：存在代码、体验、恢复、安全或真实性缺口。
 
 远端 Edge 已完成真实服务预检，但 barge-in 关闭、VTS 情绪热键退化，Gateway 自动 Outbox 与 Obs 双端状态仍需基于当前提交重跑。整体不得标记 `PASS`。
+
+Gateway 传输的故障语义按方向验收：INBOX 使用冻结请求体、稳定 Host 幂等键和 canonical HostCommand 精确重放，Host 响应超时后进入有界重试；OUTBOX 已开始的平台发送仍视为未知外部副作用，只能隔离并对账，禁止盲目重放。

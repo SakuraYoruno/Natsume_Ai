@@ -1879,7 +1879,11 @@ class SQLiteGatewayTransportStore:
                 raise GatewayTransportStoreError(
                     "GATEWAY_TRANSPORT_ATTEMPT_CONFLICT"
                 )
-            delivery_uncertain = (
+            # Host inbox delivery is an exact, idempotent call: the frozen
+            # payload and idempotency key are replayed through Secure Ingress
+            # and the canonical HostCommand repository. Only platform OUTBOX
+            # dispatch can represent a non-repeatable external side effect.
+            delivery_uncertain = direction == "OUTBOX" and (
                 str(attempt["outcome"]) == "DISPATCHING"
                 or attempt["dispatch_started_at_ms"] is not None
             )
@@ -1968,7 +1972,9 @@ class SQLiteGatewayTransportStore:
             row = self._require_message(conn, direction, normalized_id)
             if str(row["status"]) != "DLQ":
                 raise GatewayTransportStoreError("GATEWAY_TRANSPORT_REPLAY_NOT_DLQ")
-            if str(row["last_reason_code"] or "").strip().upper() == (
+            if direction == "OUTBOX" and str(
+                row["last_reason_code"] or ""
+            ).strip().upper() == (
                 "GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN"
             ):
                 # A started external side effect may already have succeeded.
@@ -2035,7 +2041,7 @@ class SQLiteGatewayTransportStore:
                 raise GatewayTransportStoreError(
                     "GATEWAY_TRANSPORT_ATTEMPT_CONFLICT"
                 )
-            delivery_uncertain = (
+            delivery_uncertain = direction == "OUTBOX" and (
                 str(attempt["outcome"]) == "DISPATCHING"
                 or attempt["dispatch_started_at_ms"] is not None
             )
