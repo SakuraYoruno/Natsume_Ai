@@ -62,8 +62,6 @@ _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "edge.rpc.gateway":               "edge_rpc",
     "edge.rpc.asr":                   "asr",
     "edge.rpc.tts":                   "tts",
-    "edge.rpc.barge_in":              "audio_playback",
-    "edge.rpc.resource_gate":         "audio_playback",
 }
 
 _HEARTBEAT_SID_TO_CANONICAL_SID: Dict[str, str] = {

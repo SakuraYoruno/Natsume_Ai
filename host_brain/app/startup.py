@@ -292,7 +292,14 @@ def _build_edge_component_probe_status(
         detail_parts = [p for p in (component_detail, service_detail, gateway_detail) if p]
         if not detail_parts:
             detail_parts = ["edge component disabled by config"]
-        return {"available": True, "detail": "; ".join(dict.fromkeys(detail_parts))}
+        return {
+            "available": False,
+            "status": "NOT_TESTED",
+            "not_tested": True,
+            "unavailable_kind": "external_pending",
+            "reason_code": ACCEPTANCE_PENDING_EXTERNAL,
+            "detail": "; ".join(dict.fromkeys(detail_parts)),
+        }
 
     if service_probe and not bool(service_probe.get("available", False)):
         return {"available": False, "unavailable_kind": "dependency", "detail": service_detail or gateway_detail}

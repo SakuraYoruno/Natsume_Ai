@@ -56,7 +56,7 @@ def test_collect_dependency_probes_sync_uses_worker_thread_inside_running_loop(m
     assert asyncio.run(_run_inside_loop()) == expected
 
 
-def test_build_edge_dependency_probe_statuses_treats_config_disabled_component_as_healthy() -> None:
+def test_build_edge_dependency_probe_statuses_marks_config_disabled_component_not_tested() -> None:
     statuses = startup.build_edge_dependency_probe_statuses(
         {
             "available": True,
@@ -92,7 +92,10 @@ def test_build_edge_dependency_probe_statuses_treats_config_disabled_component_a
     )
 
     assert statuses["edge.rpc.gateway"]["available"] is True
-    assert statuses["edge.rpc.asr"]["available"] is True
+    assert statuses["edge.rpc.asr"]["available"] is False
+    assert statuses["edge.rpc.asr"]["status"] == "NOT_TESTED"
+    assert statuses["edge.rpc.asr"]["not_tested"] is True
+    assert statuses["edge.rpc.asr"]["reason_code"] == "ACCEPTANCE_PENDING_EXTERNAL"
     assert "disabled by config" in statuses["edge.rpc.asr"]["detail"]
 
 
