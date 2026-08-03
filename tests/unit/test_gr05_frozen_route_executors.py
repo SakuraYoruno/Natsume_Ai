@@ -883,15 +883,19 @@ async def test_chat_executor_preserves_only_supported_deferred_acceptance_effect
 
 
 @pytest.mark.asyncio
-async def test_chat_executor_blocks_guarded_approval_without_complete_model_measurement() -> None:
+async def test_chat_executor_accepts_provider_token_measurement_without_cost_claim() -> None:
     async def stream(**kwargs):  # noqa: ANN003
         trace = dict(kwargs["trace_stage_meta"])
         trace["surface_model_attempt"] = {
             "success": True,
             "attempt_ids": ["model-attempt://frozen-route/surface/partial"],
-            # A provider result with no canonical cost must not become an
-            # accepted chat response merely because it rendered text.
-            "budget_measurement": {"token_count": 18},
+            "budget_measurement": {
+                "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+                "measurement_ref": "model-budget://frozen-route/surface/token-only",
+                "attempt_count": 1,
+                "retry_count": 0,
+                "token_count": 18,
+            },
         }
         yield {
             "phase": "COMMIT",
@@ -902,19 +906,22 @@ async def test_chat_executor_blocks_guarded_approval_without_complete_model_meas
         }
 
     executor = FrozenChatRouteExecutor(ports=object(), stream_chat_with_context=stream)
-    with pytest.raises(GovernedRouteExecutorError) as raised:
-        _ = [
-            event
-            async for event in executor.execute_stream(
-                _frozen(
-                    route="chat",
-                    target_id="surface_reply",
-                    budget=_active_budget(),
-                )
+    events = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                budget=_active_budget(),
             )
-        ]
+        )
+    ]
 
-    assert raised.value.reason_code == GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED
+    assert events[0]["decision"] == "APPROVE"
+    assert events[0]["budget_usage"]["measurements"] == {
+        "retry_count": 0,
+        "token_count": 18,
+    }
 
 
 @pytest.mark.asyncio

@@ -1068,11 +1068,17 @@ class ModelAttemptService:
                 "provider responses exceeded the governed total token budget",
                 code="MODEL_TOKEN_BUDGET_EXCEEDED",
             )
-        model_cost_micros = sum(
-            int(item.get("model_cost_micros", 0)) for item in prior_measurements
-        )
-        model_cost_micros += int(measured["model_cost_micros"])
-        if model_cost_micros > guard.max_model_cost_micros:
+        measured_costs = [
+            int(item["model_cost_micros"])
+            for item in prior_measurements
+            if "model_cost_micros" in item
+        ]
+        if "model_cost_micros" in measured:
+            measured_costs.append(int(measured["model_cost_micros"]))
+        if (
+            measured_costs
+            and sum(measured_costs) > guard.max_model_cost_micros
+        ):
             raise ModelBudgetGuardViolation(
                 "provider responses exceeded the governed model cost budget",
                 code="MODEL_COST_BUDGET_EXCEEDED",

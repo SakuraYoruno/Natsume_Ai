@@ -619,6 +619,12 @@ def _governed_model_budget(frozen: FrozenNodeInput) -> dict[str, Any] | None:
             graph_revision=frozen.graph_revision,
             node_id=frozen.node_id,
             attempt_id=frozen.attempt_id,
+            # Ordinary personal conversation providers commonly attest exact
+            # token usage but do not return a per-request currency charge.
+            # Keep token/output/time enforcement on the critical path without
+            # fabricating a zero-cost provider fact.  Agent/Skill builders keep
+            # the strict default and still require model_cost_micros.
+            require_model_cost=False,
         )
     except GovernedModelBudgetError as exc:
         raise GovernedRouteExecutorError(
@@ -663,11 +669,11 @@ def _assert_guarded_chat_terminal(
         or not isinstance(attempt_ids, Sequence)
         or isinstance(attempt_ids, (str, bytes, bytearray))
         or not attempt_ids
-        or not {"token_count", "model_cost_micros"}.issubset(measurement)
+        or "token_count" not in measurement
     ):
         raise GovernedRouteExecutorError(
             GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
-            "guarded chat approval lacks a complete surface model measurement",
+            "guarded chat approval lacks a provider token measurement",
         )
 
 
