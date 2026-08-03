@@ -242,6 +242,32 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
             tribe_bridge=tribe_bridge,
         )
 
+    def test_playback_completion_observer_receives_exact_terminal_once(self) -> None:
+        pipeline = self._build_pipeline()
+        observed: list[SpeechQueueResult] = []
+        unsubscribe = pipeline.register_playback_completion_observer(observed.append)
+        queued = pipeline.enqueue_speak(
+            request_id="embodiment-command-1",
+            payload={
+                "session_id": "voice-session",
+                "utterance_id": "utterance-1",
+                "text": "hello",
+            },
+            auto_start=True,
+            background_start=False,
+        )
+        self.assertTrue(queued.success)
+
+        terminal = pipeline.complete_playback(ts_ms=2_000)
+        self.assertIsNotNone(terminal)
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0].event["request_id"], "embodiment-command-1")
+        self.assertEqual(observed[0].event["event_type"], EVENT_TTS_PLAYBACK_FINISHED)
+
+        unsubscribe()
+        self.assertIsNone(pipeline.complete_playback(ts_ms=2_001))
+        self.assertEqual(len(observed), 1)
+
     def test_on_asr_rpc_result_flushes_and_report_helpers_guard_missing_session(self) -> None:
         pipeline = self._build_pipeline()
         rpc_result = VoiceRpcResult(

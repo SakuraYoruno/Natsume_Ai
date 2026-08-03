@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 import json
 import os
 import socket
+import sys
 import threading
 import time
 from typing import Any, Mapping
@@ -74,6 +76,21 @@ def host_main_health_identity() -> dict[str, str]:
         "protocol_id": HOST_MAIN_PROTOCOL_ID,
         "protocol_version": HOST_MAIN_PROTOCOL_VERSION,
     }
+
+
+def host_candidate_loop_factory() -> asyncio.AbstractEventLoop:
+    """Return the loop factory used by the transferred Host listener.
+
+    Uvicorn selects ``ProactorEventLoop`` on Windows.  A reset client can make
+    its overlapped ``accept`` callback detach the pre-bound socket, after which
+    the otherwise healthy Service Catalog candidate silently loses its only
+    listener.  The selector loop owns ordinary TCP listeners reliably here;
+    blocking/subprocess work is already isolated behind Host adapters.
+    """
+
+    if sys.platform == "win32":
+        return asyncio.SelectorEventLoop()
+    return asyncio.new_event_loop()
 
 
 class HostHttpHealthProbe:
@@ -212,7 +229,10 @@ class HostUvicornCandidate:
         config = uvicorn.Config(
             self._app,
             log_level=self._log_level,
-            loop="asyncio",
+            loop=(
+                "host_brain.service_catalog.host_startup:"
+                "host_candidate_loop_factory"
+            ),
             access_log=self._access_log,
             headers=[
                 (HOST_CATALOG_OPERATION_DIGEST_HEADER, self._operation_id_digest),
@@ -610,6 +630,7 @@ __all__ = [
     "HostCatalogRuntime",
     "HostHttpHealthProbe",
     "HostUvicornCandidate",
+    "host_candidate_loop_factory",
     "host_main_health_identity",
     "start_host_through_service_catalog",
 ]

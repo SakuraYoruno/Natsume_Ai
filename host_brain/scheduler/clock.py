@@ -324,6 +324,7 @@ class SchedulerClock:
                             next_scheduled_at_ms=_next_scheduled_at_ms(
                                 definition,
                                 scheduled_at_ms=scheduled_at_ms,
+                                not_before_ms=received_at_ms,
                             ),
                             payload=payload,
                             authority=authority.to_dict(),
@@ -641,6 +642,7 @@ def _next_scheduled_at_ms(
     definition: SchedulerDefinitionSnapshot,
     *,
     scheduled_at_ms: int,
+    not_before_ms: int | None = None,
 ) -> int | None:
     trigger_mode = str(definition.definition.get("trigger_mode") or "").strip().lower()
     trigger_config = definition.definition.get("trigger_config")
@@ -663,9 +665,27 @@ def _next_scheduled_at_ms(
                     SCHEDULER_CLOCK_DEFINITION_INVALID,
                     "interval must be at least one millisecond",
                 )
-        return scheduled_at_ms + interval_ms
+        floor_ms = (
+            scheduled_at_ms
+            if not_before_ms is None
+            else max(scheduled_at_ms, int(not_before_ms))
+        )
+        # A disabled Host may miss thousands of short intervals.  One current
+        # occurrence represents that elapsed window; replaying every missed
+        # no-op would monopolize Task Runtime for hours.  Preserve the stable
+        # original cadence while jumping to the first boundary in the future.
+        elapsed_ms = max(0, floor_ms - scheduled_at_ms)
+        steps = max(1, (elapsed_ms // interval_ms) + 1)
+        return scheduled_at_ms + (steps * interval_ms)
     if trigger_mode == "cron":
-        return _next_daily_cron(config, scheduled_at_ms=scheduled_at_ms)
+        return _next_daily_cron(
+            config,
+            scheduled_at_ms=(
+                scheduled_at_ms
+                if not_before_ms is None
+                else max(scheduled_at_ms, int(not_before_ms))
+            ),
+        )
     raise SchedulerClockError(
         SCHEDULER_CLOCK_DEFINITION_INVALID,
         f"unsupported trigger mode: {trigger_mode or '<empty>'}",

@@ -87,6 +87,84 @@ def test_host_physical_command_is_durable_before_single_dispatch(tmp_path) -> No
     assert repository.get(ack.outbox_id)["status"] == "APPLIED"
 
 
+def test_edge_queue_ack_waits_for_terminal_receipt_without_replay(tmp_path) -> None:
+    db_path = tmp_path / "embodiment-queued.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw08-embodiment-queued",
+    )
+    assert migrated.success, migrated.as_dict()
+    repository = EmbodimentOutboxRepository(db_path)
+    submitted: list[str] = []
+    looked_up: list[str] = []
+
+    class _QueuedPort:
+        async def submit(self, command):  # noqa: ANN001, ANN201
+            submitted.append(command.command_id)
+            return EmbodimentReceipt(
+                command_id=command.command_id,
+                idempotency_key=command.idempotency_key,
+                accepted=True,
+                status="ACCEPTED",
+                reason_code=None,
+                detail="tts queued",
+                received_at_ms=command.issued_at_ms,
+                completed_at_ms=command.issued_at_ms,
+                event={"external_side_effects": "PENDING"},
+            )
+
+        async def query_receipt(self, command):  # noqa: ANN001, ANN201
+            looked_up.append(command.command_id)
+            return EmbodimentReceipt(
+                command_id=command.command_id,
+                idempotency_key=command.idempotency_key,
+                accepted=True,
+                status="APPLIED",
+                reason_code=None,
+                detail="tts playback completed",
+                received_at_ms=command.issued_at_ms,
+                completed_at_ms=command.issued_at_ms + 1,
+                event={"external_side_effects": True},
+            )
+
+    runtime = HostEmbodimentRuntime(
+        repository=repository,
+        worker_id="aw08-queued-dispatcher",
+        command_port=_QueuedPort(),
+    )
+    command = build_host_embodiment_command(
+        kind="avatar",
+        action="set_expression",
+        payload={"emotion_tag": "HAPPY"},
+        request_id="aw08-queued-request",
+        authority_ref="authority://task-node/aw08-queued-request",
+        grant_ref="governor-grant://preview-child/aw08-queued",
+    )
+    preview_service, scheduler_context = build_scheduler_action_preview(
+        tmp_path,
+        name="aw08-queued",
+    )
+    preview = issue_embodiment_action_preview(
+        service=preview_service,
+        scheduler_context=scheduler_context,
+        command=command,
+    )
+    ack = runtime.enqueue(
+        command,
+        **terminal_preview_kwargs(preview_service, preview),
+    )
+
+    dispatched = asyncio.run(runtime.dispatch_pending_async(limit=1))
+    assert dispatched.in_doubt == 1
+    assert dispatched.rejected == 0
+    assert repository.get(ack.outbox_id)["status"] == "IN_DOUBT"
+
+    reconciled = asyncio.run(runtime.reconcile_in_doubt_async(limit=1))
+    assert reconciled.applied == 1
+    assert submitted == [command.command_id]
+    assert looked_up == [command.command_id]
+    assert repository.get(ack.outbox_id)["status"] == "APPLIED"
+
+
 def test_sync_queue_has_no_fire_and_forget_edge_task() -> None:
     source = (ROOT / "host_brain/channels/embodiment.py").read_text(encoding="utf-8")
 

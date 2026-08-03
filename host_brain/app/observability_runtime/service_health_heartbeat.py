@@ -54,24 +54,33 @@ LOCAL_OLLAMA_KEEPALIVE_INITIAL_DELAY_SEC = 12.0
 # /health 使用 "host.audit.sqlite_ledger" 格式，心跳模块使用 "sqlite_ledger" 格式
 _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "host.audit.sqlite_ledger":       "sqlite_ledger",
-    "host.governor.decision":         "llm_gateway",       # governor 依赖 LLM，映射到 llm_gateway
-    "host.skills.loader":             "scheduler",          # skills loader 映射到 scheduler
+    "host.governor.decision":         "governor",
+    "host.skills.loader":             "skill_loader",
     "host.integrations.llm_gateway":  "llm_gateway",
     "host.retrieval.recall_fusion":   "recall_fusion",
+    "host.vision.screen_ocr":          "screen_ocr",
+    "host.vision.camera_recognizer":   "camera_recognizer",
     # Edge 侧映射
     "edge.rpc.gateway":               "edge_rpc",
     "edge.rpc.asr":                   "asr",
     "edge.rpc.tts":                   "tts",
+    "edge.rpc.barge_in":              "barge_in",
+    "edge.rpc.resource_gate":         "resource_gate",
 }
 
 _HEARTBEAT_SID_TO_CANONICAL_SID: Dict[str, str] = {
     "sqlite_ledger": "host.audit.sqlite_ledger",
+    "governor": "host.governor.decision",
+    "skill_loader": "host.skills.loader",
     "llm_gateway": "host.integrations.llm_gateway",
-    "scheduler": "host.skills.loader",
     "recall_fusion": "host.retrieval.recall_fusion",
+    "screen_ocr": "host.vision.screen_ocr",
+    "camera_recognizer": "host.vision.camera_recognizer",
     "edge_rpc": "edge.rpc.gateway",
     "asr": "edge.rpc.asr",
     "tts": "edge.rpc.tts",
+    "barge_in": "edge.rpc.barge_in",
+    "resource_gate": "edge.rpc.resource_gate",
     "vts": "edge.rpc.vts",
     "audio_playback": "edge.rpc.audio_playback",
 }
@@ -80,6 +89,8 @@ _EDGE_RPC_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "edge.rpc.gateway": "edge_rpc",
     "edge.rpc.asr": "asr",
     "edge.rpc.tts": "tts",
+    "edge.rpc.barge_in": "barge_in",
+    "edge.rpc.resource_gate": "resource_gate",
 }
 _EDGE_VTS_SERVICE_KEYS = ("edge.rpc.vts",)
 _EDGE_VTS_COMPONENT_KEYS = ("vts", "live2d", "vts_live2d")
@@ -592,9 +603,13 @@ async def _probe_llm_nodes(
 # Edge / Host 探测
 # ---------------------------------------------------------------------------
 
-def _edge_probe_row_status(row: Mapping[str, Any]) -> str:
+def _edge_probe_row_status(
+    row: Mapping[str, Any],
+    *,
+    configured: bool | None = None,
+) -> str:
     explicit = str(row.get("status") or "").strip().upper()
-    if bool(row.get("not_tested")) or explicit == "NOT_TESTED":
+    if configured is False or bool(row.get("not_tested")) or explicit == "NOT_TESTED":
         return "NOT_TESTED"
     return "UP" if bool(row.get("available")) else "DEGRADED"
 
@@ -610,7 +625,6 @@ def _resolve_edge_vts_sub_service(
     services = services_payload if isinstance(services_payload, Mapping) else {}
     components_payload = event.get("components")
     components = components_payload if isinstance(components_payload, Mapping) else {}
-
     service_probe: Mapping[str, Any] = {}
     for key in _EDGE_VTS_SERVICE_KEYS:
         row = services.get(key)
@@ -707,17 +721,33 @@ def _collect_edge_sub_services(
         if dependency_status_builder is not None
         else {}
     )
+    event_payload = probe.get("event")
+    event = event_payload if isinstance(event_payload, Mapping) else {}
+    config_payload = event.get("config_snapshot")
+    config = config_payload if isinstance(config_payload, Mapping) else {}
     sub_services: Dict[str, Dict[str, Any]] = {}
 
+    configured_fields = {
+        "edge.rpc.gateway": "rpc_gateway_enabled",
+        "edge.rpc.asr": "asr_enabled",
+        "edge.rpc.tts": "tts_enabled",
+        "edge.rpc.barge_in": "barge_in_enabled",
+        "edge.rpc.resource_gate": "resource_gate_enabled",
+    }
     for edge_sid, heartbeat_sid in _EDGE_RPC_SID_TO_HEARTBEAT_SID.items():
         row = dependency_rows.get(edge_sid)
         if not isinstance(row, Mapping):
             continue
+        configured_raw = config.get(configured_fields[edge_sid])
+        configured = bool(configured_raw) if configured_raw is not None else None
+        status = _edge_probe_row_status(row, configured=configured)
         sub_service = {
-            "status": _edge_probe_row_status(row),
+            "status": status,
             "detail": row.get("detail"),
         }
         reason_code = str(row.get("reason_code") or "").strip()
+        if status == "NOT_TESTED" and not reason_code:
+            reason_code = "ACCEPTANCE_PENDING_EXTERNAL"
         if reason_code:
             sub_service["reason_code"] = reason_code
         sub_services[heartbeat_sid] = sub_service
@@ -823,6 +853,8 @@ async def _probe_host(
                     sub_services[heartbeat_sid] = {
                         "status": svc_status,
                         "detail": svc.get("detail"),
+                        "reason_code": svc.get("reason_code"),
+                        "required": bool(svc.get("required", False)),
                     }
                 return {
                     "overall_status": "UP",
@@ -959,7 +991,10 @@ def _persist_probe_health_observations(
             "request_id": request_id,
             "service_id": canonical_id,
             "owner": side,
-            "required": int(service_id in {"edge_rpc", "asr", "tts", "sqlite_ledger"}),
+            "required": int(
+                bool(raw.get("required"))
+                or service_id in {"edge_rpc", "asr", "tts", "sqlite_ledger"}
+            ),
             "status": status,
             "reason_code": str(raw.get("reason_code") or "").strip() or None,
             "stage": "S_SERVICE_HEALTH",

@@ -179,16 +179,74 @@ def test_health_projection_rebuilds_remote_edge_not_tested_after_restart(
         for row in services["services"]
         if row["service_type"] == "edge"
     }
-    assert services["not_tested"] == 5
-    assert services["unknown"] >= 0
-    assert set(edge_rows) == {"asr", "tts", "vts", "audio_playback", "edge_rpc"}
-    assert {row["status"] for row in edge_rows.values()} == {"NOT_TESTED"}
+    assert services["not_tested"] == 7
+    assert services["unknown"] >= 1
+    assert set(edge_rows) == {
+        "asr",
+        "tts",
+        "vts",
+        "audio_playback",
+        "barge_in",
+        "resource_gate",
+        "edge_rpc",
+        "unified_gateway",
+    }
     assert {
-        row["reason_code"] for row in edge_rows.values()
+        row["status"]
+        for service_id, row in edge_rows.items()
+        if service_id != "unified_gateway"
+    } == {"NOT_TESTED"}
+    assert edge_rows["unified_gateway"]["status"] == "UNKNOWN"
+    assert {
+        row["reason_code"]
+        for service_id, row in edge_rows.items()
+        if service_id != "unified_gateway"
     } == {ACCEPTANCE_PENDING_EXTERNAL}
     assert edge_rows["vts"]["public_summary"] == (
         "remote Edge disabled by Host configuration"
     )
+
+
+def test_gateway_health_merge_uses_durable_live_source_without_unknown() -> None:
+    from types import SimpleNamespace
+
+    from host_brain.app.observability_runtime.health_device_projection import (
+        merge_gateway_health_projection,
+    )
+    from natsume_contracts.operator.v1 import ProjectionDegradedState
+
+    payload = {
+        "services": [
+            {
+                "service_id": "unified_gateway",
+                "service_type": "edge",
+                "display_name": "Unified Gateway",
+                "status": "UNKNOWN",
+            }
+        ],
+        "timestamp": 100,
+    }
+    document = SimpleNamespace(
+        degraded_state=ProjectionDegradedState.HEALTHY,
+        freshness_ts_ms=200,
+        payload={
+            "remote_gateway_health": {
+                "body": {
+                    "status": "ok",
+                    "outbound_ready": True,
+                    "transport": {"worker_alive": True, "delivery_enabled": True},
+                }
+            }
+        },
+    )
+
+    merged = merge_gateway_health_projection(payload, document)
+
+    assert merged["unknown"] == 0
+    assert merged["up"] == 1
+    assert merged["services"][0]["service_id"] == "unified_gateway"
+    assert merged["services"][0]["status"] == "UP"
+    assert merged["services"][0]["last_call_ts"] == 200
 
 
 def test_newer_voice_receipt_is_not_hidden_by_older_health_snapshot() -> None:

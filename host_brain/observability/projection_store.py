@@ -244,6 +244,31 @@ class QueryProjectionStore:
             expires,
         )
 
+    def renew_bound_leader_lease(
+        self,
+        *,
+        lease_ms: int = 30_000,
+    ) -> ProjectionLeaderLease | None:
+        """Renew the lease currently fencing a long-running projection job.
+
+        Most projection callbacks complete inside one lease period.  A trace
+        refresh can legitimately traverse hundreds of durable requests, so it
+        must periodically prove that it still owns the same fence instead of
+        either expiring mid-wave or silently writing without a lease.
+        """
+
+        lease = _BOUND_LEADER_LEASE.get()
+        if lease is None:
+            return None
+        renewed = self.renew_leader_lease(lease, lease_ms=lease_ms)
+        if renewed is None:
+            raise QueryProjectionError(
+                PROJECTION_LEASE_FENCED,
+                "projection daemon leader fence was lost during refresh",
+            )
+        _BOUND_LEADER_LEASE.set(renewed)
+        return renewed
+
     def holds_leader_lease(self, lease: ProjectionLeaderLease) -> bool:
         now = max(0, int(self._clock()))
         with self._connect() as conn:

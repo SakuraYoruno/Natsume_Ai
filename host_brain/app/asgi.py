@@ -44,6 +44,7 @@ from host_brain.app.host_life_scheduler_wiring import (
 from host_brain.app.asgi_authority_adapters import (
     command_ingress_hmac_secrets_for_host as _command_ingress_hmac_secrets,
     compose_life_command_authority_for_host as _compose_life_command_authority,
+    reconcile_life_tick_command_for_host as _reconcile_life_tick_command,
     reset_life_command_authority_for_host as _reset_life_command_authority,
     submit_life_tick_command_for_host as _submit_life_tick_command,
 )
@@ -285,6 +286,7 @@ def create_app(
     runtime_context_application: RuntimeContextApplicationService | None = None
     service_health_heartbeat: ServiceHealthHeartbeat | None = None
     catalog_rollout_guardian_task: asyncio.Task[None] | None = None
+    infrastructure_dispatch_tasks: tuple[asyncio.Task[None], ...] = ()
     startup_probe_statuses: dict[str, Any] = {}
 
     def capture_startup_probe_statuses(statuses: Mapping[str, Any]) -> None:
@@ -601,6 +603,7 @@ def create_app(
         nonlocal embodiment_runtime, embodiment_authority_task
         nonlocal runtime_context_composition, runtime_context_application
         nonlocal service_health_heartbeat, catalog_rollout_guardian_task
+        nonlocal infrastructure_dispatch_tasks
         nonlocal startup_probe_statuses
         async with runtime_lifespan(
             get_ledger=ledger_provider,
@@ -631,6 +634,7 @@ def create_app(
             task_runtime: ProcessTaskRuntimeContainer | None = None
             scheduler: ProcessSchedulerContainer | None = None
             canon: ProcessCanonContainer | None = None
+            catalog_observation: Any | None = None
 
             def withdraw_closed_process_references() -> None:
                 nonlocal security_container, command_ingress_container
@@ -935,10 +939,6 @@ def create_app(
                     application.state.service_catalog_rollout_observer = (
                         catalog_observation.observer
                     )
-                    catalog_rollout_guardian_task = asyncio.create_task(
-                        catalog_observation.observe_terminal_receipt(),
-                        name="host-service-catalog-rollout-guardian-observer",
-                    )
                 await asyncio.sleep(0)
                 application.state.runtime_context_composition = (
                     runtime_context_composition
@@ -1007,12 +1007,31 @@ def create_app(
                     task_store=task_runtime.task_store,
                 )
                 ingress_settings = get_input_settings()
+                scheduler_settings = get_scheduler_settings()
+                # The durable clock also owns essential Life and embodiment
+                # outbox delivery.  Optional cognitive/background producers
+                # may be disabled without stranding already accepted effects.
+                scheduler_clock_enabled = bool(scheduler_settings.clock_enabled)
                 command_ingress = build_process_command_ingress_container(
                     canonical_db_path=task_runtime.canonical_db_path,
                     mode=ingress_settings.secure_ingress_mode,
                     hmac_secrets=_command_ingress_hmac_secrets(),
                     gateway_principal_id="service.edge.gateway",
                     gateway_key_id=ingress_settings.edge_gateway_hmac_key_id,
+                    scheduler_clock_enabled=scheduler_clock_enabled,
+                    scheduler_principal_id=(
+                        getattr(scheduler_settings, "clock_principal_id", "")
+                    ),
+                    scheduler_tenant_id=getattr(
+                        scheduler_settings,
+                        "clock_tenant_id",
+                        "",
+                    ),
+                    scheduler_key_id=getattr(
+                        scheduler_settings,
+                        "clock_key_id",
+                        "",
+                    ),
                 )
                 _assert_graph_cancellation_operator_startup(
                     enabled=cancellation_operator_enabled,
@@ -1224,6 +1243,25 @@ def create_app(
                         life_snapshot_reader=life_snapshot_reader,
                     )
 
+                async def life_tick_scheduler_reconciler(
+                    *,
+                    occurrence: Any,
+                    definition: Any,
+                    command: Any,
+                    execution_context: Any,
+                ) -> dict[str, Any]:
+                    _life_service, life_snapshot_reader = (
+                        life_command_authority_provider(ledger)
+                    )
+                    return await asyncio.to_thread(
+                        _reconcile_life_tick_command,
+                        occurrence=occurrence,
+                        definition=definition,
+                        command=command,
+                        execution_context=execution_context,
+                        life_snapshot_reader=life_snapshot_reader,
+                    )
+
                 async def life_io_scheduler_handler(**_: Any) -> dict[str, Any]:
                     if life_dispatchers is None:
                         return {
@@ -1283,6 +1321,36 @@ def create_app(
                         result["reason_code"] = "EMBODIMENT_DISPATCH_UNAVAILABLE"
                     return result
 
+                async def run_infrastructure_dispatch_pump(
+                    *,
+                    name: str,
+                    handler: Callable[..., Any],
+                    interval_seconds: float,
+                ) -> None:
+                    """Drain one durable local outbox without a synthetic TaskGraph.
+
+                    The outbox row, claim fence and physical receipt remain the
+                    execution authority.  This loop merely replaces the old
+                    one-second Scheduler command that created a full graph even
+                    when no work existed.
+                    """
+
+                    try:
+                        while True:
+                            try:
+                                await handler()
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                logger.error(
+                                    "HOST_INFRASTRUCTURE_DISPATCH_PUMP_FAILED:%s",
+                                    name,
+                                    exc_info=True,
+                                )
+                            await asyncio.sleep(max(0.25, interval_seconds))
+                    except asyncio.CancelledError:
+                        raise
+
                 def scheduler_current_mode() -> str:
                     return str(host_lifecycle.get_hard_state().sys_mode)
 
@@ -1307,11 +1375,6 @@ def create_app(
                         reason="governed_scheduler",
                     )
 
-                scheduler_settings = get_scheduler_settings()
-                scheduler_clock_enabled = bool(
-                    scheduler_settings.clock_enabled
-                    and scheduler_settings.background_tasks_enabled
-                )
                 scheduler_clock_identity = None
                 if scheduler_clock_enabled:
                     scheduler_clock_identity = SchedulerClockIdentityConfig(
@@ -1345,6 +1408,9 @@ def create_app(
                         "security_immune": security_immune_scheduler_handler,
                         "agent_immune": agent_immune_scheduler_handler,
                     },
+                    task_reconcilers={
+                        "life_command": life_tick_scheduler_reconciler,
+                    },
                     seed_definitions=build_scheduler_seed_configs(
                         settings=get_scheduler_settings(),
                         security_immune_agent_provider=(
@@ -1354,8 +1420,6 @@ def create_app(
                     ),
                     seed_worker_keys={
                         "life_tick": "life_command",
-                        "life_io_dispatch_periodic": "life_io",
-                        "embodiment_outbox_periodic": "embodiment_io",
                         "distillation_engine_periodic": "distillation_engine",
                         "security_immune_periodic": "security_immune",
                         "agent_immune_auto_dispatch_tick": "agent_immune",
@@ -1407,7 +1471,48 @@ def create_app(
                     intent_engine_provider=intent_engine_provider,
                     runtime_group_factory=GovernedRuntimeGroup,
                     internal_command_service_factory=InternalAgentCommandService,
+                    # A Service Catalog candidate must expose its lightweight
+                    # health endpoint before periodic business effects begin.
+                    # The durable ACTIVATION_STARTED receipt below is the
+                    # promotion authority that opens the clock.
+                    activate_scheduler_clock=False,
                 )
+
+                async def activate_promoted_background_runtime() -> None:
+                    nonlocal infrastructure_dispatch_tasks
+                    await scheduler.activate_clock()
+                    if infrastructure_dispatch_tasks:
+                        return
+                    infrastructure_dispatch_tasks = (
+                        asyncio.create_task(
+                            run_infrastructure_dispatch_pump(
+                                name="life-io",
+                                handler=life_io_scheduler_handler,
+                                interval_seconds=1.0,
+                            ),
+                            name="host-life-io-dispatch-pump",
+                        ),
+                        asyncio.create_task(
+                            run_infrastructure_dispatch_pump(
+                                name="embodiment-io",
+                                handler=embodiment_io_scheduler_handler,
+                                interval_seconds=0.5,
+                            ),
+                            name="host-embodiment-io-dispatch-pump",
+                        ),
+                    )
+
+                if catalog_observation is not None:
+                    catalog_rollout_guardian_task = asyncio.create_task(
+                        catalog_observation.observe_terminal_receipt(
+                            on_activation_started=(
+                                activate_promoted_background_runtime
+                            ),
+                        ),
+                        name="host-service-catalog-rollout-guardian-observer",
+                    )
+                else:
+                    await activate_promoted_background_runtime()
                 task_runtime_container = task_runtime
                 governed_internal_runtime = internal_composition.internal_runtime
                 governed_operator_runtime = internal_composition.operator_runtime
@@ -1432,6 +1537,13 @@ def create_app(
                 application.state.service_health_heartbeat = None
                 for owned_task, task_name in (
                     (catalog_rollout_guardian_task, "catalog-rollout-guardian"),
+                    *tuple(
+                        (task, f"infrastructure-dispatch-{index}")
+                        for index, task in enumerate(
+                            infrastructure_dispatch_tasks,
+                            start=1,
+                        )
+                    ),
                 ):
                     if owned_task is None:
                         continue
@@ -1447,6 +1559,7 @@ def create_app(
                             exc_info=True,
                         )
                 catalog_rollout_guardian_task = None
+                infrastructure_dispatch_tasks = ()
                 await shutdown_host_runtime_authority(
                     application=application,
                     security=security,

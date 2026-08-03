@@ -43,10 +43,17 @@ ORGAN_TRIBE_MAX_AGE_MS = 120_000
 # an unregistered canonical service must never overwrite an unrelated card.
 _DURABLE_SERVICE_HEALTH_PUBLIC_IDS: Mapping[str, tuple[str, ...]] = {
     "host.audit.sqlite_ledger": ("sqlite_ledger",),
+    "host.governor.decision": ("governor",),
+    "host.skills.loader": ("skill_loader",),
     "host.integrations.llm_gateway": ("llm_gateway",),
+    "host.retrieval.recall_fusion": ("recall_fusion",),
+    "host.vision.screen_ocr": ("screen_ocr",),
+    "host.vision.camera_recognizer": ("camera_recognizer",),
     "edge.rpc.gateway": ("edge_rpc",),
     "edge.rpc.asr": ("asr",),
     "edge.rpc.tts": ("tts",),
+    "edge.rpc.barge_in": ("barge_in",),
+    "edge.rpc.resource_gate": ("resource_gate",),
     "edge.rpc.vts": ("vts",),
     "edge.rpc.audio_playback": ("audio_playback",),
 }
@@ -244,6 +251,112 @@ def _newer_explicit_health(
     if str(computed.get("status") or "UNKNOWN").upper() == "UNKNOWN" or explicit_ts >= computed_ts:
         return dict(explicit)
     return dict(computed)
+
+
+def merge_gateway_health_projection(
+    service_payload: Mapping[str, Any],
+    gateway_document: Any | None,
+) -> dict[str, Any]:
+    """Merge the durable Gateway live-source document into service health.
+
+    The health worker remains passive: it never performs a network request and
+    only consumes the document already materialized by ``operator-live-state``.
+    Missing, stale or invalid Gateway evidence is never rendered as ``UP``.
+    """
+
+    payload = dict(service_payload)
+    rows = [
+        dict(row)
+        for row in list(payload.get("services") or [])
+        if isinstance(row, Mapping)
+        and str(row.get("service_id") or "") != "unified_gateway"
+    ]
+    status = "DOWN"
+    reason_code = "GATEWAY_HEALTH_PROJECTION_MISSING"
+    public_summary = "durable Gateway health projection is unavailable"
+    observed_at_ms = 0
+
+    if gateway_document is not None:
+        observed_at_ms = max(
+            0,
+            _safe_int(getattr(gateway_document, "freshness_ts_ms", 0)),
+        )
+        document_payload = getattr(gateway_document, "payload", {})
+        source = document_payload if isinstance(document_payload, Mapping) else {}
+        degraded_raw = getattr(gateway_document, "degraded_state", "")
+        degraded_state = str(getattr(degraded_raw, "value", degraded_raw) or "").upper()
+        if degraded_state != "HEALTHY":
+            reason_code = str(source.get("reason_code") or "GATEWAY_HEALTH_SOURCE_UNAVAILABLE")
+            status = (
+                "NOT_TESTED"
+                if reason_code
+                in {
+                    "OBS_EDGE_GATEWAY_ENDPOINT_NOT_CONFIGURED",
+                    "OBS_EDGE_GATEWAY_SOURCE_PORT_NOT_INJECTED",
+                }
+                else "DOWN"
+            )
+            public_summary = "Gateway health source is unavailable"
+        else:
+            remote = source.get("remote_gateway_health")
+            remote = remote if isinstance(remote, Mapping) else {}
+            body = remote.get("body")
+            body = body if isinstance(body, Mapping) else {}
+            transport = body.get("transport")
+            transport = transport if isinstance(transport, Mapping) else {}
+            raw_status = str(body.get("status") or "").strip().lower()
+            outbound_ready = bool(body.get("outbound_ready"))
+            worker_alive = transport.get("worker_alive")
+            healthy_status = raw_status in {"ok", "up", "healthy", "accepted", "ready"}
+            hard_down = raw_status in {"down", "failed", "error", "unavailable", "stopped"}
+            if healthy_status and outbound_ready and worker_alive is not False:
+                status = "UP"
+                reason_code = ""
+                public_summary = "Gateway worker and durable outbound transport are ready"
+            elif hard_down:
+                status = "DOWN"
+                reason_code = "GATEWAY_RUNTIME_UNAVAILABLE"
+                public_summary = "Gateway runtime reported unavailable"
+            else:
+                status = "DEGRADED"
+                reason_code = "GATEWAY_OUTBOUND_NOT_READY"
+                public_summary = "Gateway answered but outbound delivery is not fully ready"
+
+    rows.append(
+        {
+            "service_id": "unified_gateway",
+            "service_type": "edge",
+            "display_name": "Unified Gateway",
+            "status": status,
+            "success_rate": None,
+            "p95_ms": None,
+            "last_call_ts": observed_at_ms or None,
+            "call_count": 0,
+            "reason_code": reason_code or None,
+            "detail": public_summary,
+            "public_summary": public_summary,
+        }
+    )
+    counts = {
+        key: 0
+        for key in ("UP", "DEGRADED", "DOWN", "NOT_TESTED", "UNKNOWN")
+    }
+    for row in rows:
+        row_status = str(row.get("status") or "UNKNOWN").upper()
+        counts[row_status if row_status in counts else "UNKNOWN"] += 1
+    payload.update(
+        {
+            "total": len(rows),
+            "up": counts["UP"],
+            "degraded": counts["DEGRADED"],
+            "down": counts["DOWN"],
+            "not_tested": counts["NOT_TESTED"],
+            "unknown": counts["UNKNOWN"],
+            "services": rows,
+            "timestamp": max(_safe_int(payload.get("timestamp")), observed_at_ms),
+        }
+    )
+    return payload
 
 
 def load_health_projection_sources(

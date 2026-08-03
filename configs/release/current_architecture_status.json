@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-03",
-  "commit_scope": "DUAL_STACK_P0_CLOSURE_IN_PROGRESS",
+  "commit_scope": "DUAL_STACK_P0_CLOSURE_CODE_COMPLETE",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -50,11 +50,11 @@
       "display_language": "zh",
       "speech_language": "ja",
       "voice_bank": "configs/voice/gpt_sovits_nanami_v4.json",
-      "remote_edge": "LIVE_PRECHECK_PARTIAL"
+      "remote_edge": "LIVE_CORE_PATH_PASS"
     },
     "avatar": {
       "status": "CONTRACT_READY",
-      "remote_vts_vrm": "LIVE_PRECHECK_DEGRADED"
+      "remote_vts_vrm": "LIVE_DEGRADED_MISSING_EXPRESSION_HOTKEYS"
     },
     "governed_effect_runtime": {
       "status": "WIRED",
@@ -67,7 +67,7 @@
         "internal",
         "operator"
       ],
-      "full_stack_reacceptance": "PENDING"
+      "full_stack_reacceptance": "PASS"
     },
     "explicit_composition_root": {
       "obs_process_local_module_cache_coupled_jobs": [],
@@ -83,7 +83,7 @@
   },
   "acceptance": {
     "local_cuda_voice_variant_b": "PASS",
-    "target_edge_tts_avatar": "PARTIAL",
+    "target_edge_tts_avatar": "ACCEPTANCE_PENDING_EXTERNAL",
     "docker_host_obs_monitor_gateway_full_stack": "PARTIAL",
     "real_provider_performance": "INCOMPLETE",
     "fixed_72_scenarios": "MEASUREMENT_PENDING",
@@ -98,10 +98,8 @@
     "ordinary_chat_requires_heavy_audit": false
   },
   "current_blockers": [
-    "GATEWAY_AUTOMATIC_ACCEPTANCE_OUTBOX_REACCEPTANCE_PENDING",
     "EDGE_VTS_EMOTIONAL_HOTKEY_MAPPING_DEGRADED",
     "EDGE_BARGE_IN_DISABLED",
-    "OBS_DUAL_NODE_HEALTH_REACCEPTANCE_PENDING",
     "REAL_PROVIDER_LATENCY_TARGET_NOT_MET",
     "MULTI_TURN_HUMAN_BLIND_TEST_NOT_RUN",
     "FULL_STACK_RESTART_AND_FAILURE_ACCEPTANCE_PENDING"

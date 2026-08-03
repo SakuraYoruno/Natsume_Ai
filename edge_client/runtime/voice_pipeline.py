@@ -8,11 +8,12 @@ import math
 import os
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from edge_client.actuators.speech import (
     EVENT_TTS_QUEUED,
     EVENT_TTS_PLAYBACK_FINISHED,
+    EVENT_TTS_PLAYBACK_INTERRUPTED,
     EVENT_TTS_PLAYBACK_STARTED,
     SpeechPlaybackQueue,
     SpeechQueueResult,
@@ -389,8 +390,41 @@ class EdgeVoicePipeline:
         }
         self._speech_background_lock = threading.Lock()
         self._speech_background_thread: threading.Thread | None = None
+        self._playback_completion_lock = threading.Lock()
+        self._playback_completion_observers: set[Callable[[SpeechQueueResult], Any]] = set()
         # 将 VTS 驱动注册为播放前钩子，确保表情/口型在音频播放前就绪
         self.speech_queue._before_playback_hook = self._vts_before_playback_hook
+
+    def register_playback_completion_observer(
+        self,
+        observer: Callable[[SpeechQueueResult], Any],
+    ) -> Callable[[], None]:
+        """Observe physical playback terminals without owning the audio queue."""
+
+        if not callable(observer):
+            raise TypeError("playback completion observer must be callable")
+        with self._playback_completion_lock:
+            self._playback_completion_observers.add(observer)
+
+        def unsubscribe() -> None:
+            with self._playback_completion_lock:
+                self._playback_completion_observers.discard(observer)
+
+        return unsubscribe
+
+    def _publish_playback_completion(self, result: SpeechQueueResult | None) -> None:
+        if result is None:
+            return
+        event_type = str(result.event.get("event_type") or "").strip().upper()
+        if event_type not in {EVENT_TTS_PLAYBACK_FINISHED, EVENT_TTS_PLAYBACK_INTERRUPTED}:
+            return
+        with self._playback_completion_lock:
+            observers = tuple(self._playback_completion_observers)
+        for observer in observers:
+            try:
+                observer(result)
+            except Exception as exc:  # physical audio completion must remain isolated
+                LOGGER.warning("playback completion observer failed: %s", exc)
 
     def startup(self) -> None:
         self.start_life_motion()
@@ -904,6 +938,7 @@ class EdgeVoicePipeline:
             request_id=str(result.event.get("request_id") or "") if result is not None else "",
             result=result,
         )
+        self._publish_playback_completion(result)
         if result is not None and self.speech_queue.queue_depth > 0:
             self._schedule_background_speech_start(
                 request_id=str(result.event.get("request_id") or "queued"),
@@ -975,6 +1010,7 @@ class EdgeVoicePipeline:
             payload=payload,
             ts_ms=event_ts,
         )
+        self._publish_playback_completion(barge_result)
         barge_event = dict(barge_result.event or {})
         LOGGER.info(
             "[EDGE_VOICE_MON][BARGE_IN] ts=%s req=%s session=%s seq=%s status=%s reason=%s stage=%s detail=%s text=\"%s\"",

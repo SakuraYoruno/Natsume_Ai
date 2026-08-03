@@ -53,17 +53,19 @@
 
 | 能力 | 主要实现 | 当前状态 |
 |---|---|---|
-| Edge RPC | `edge_client/rpc/` | 合同与本地入口可用，远端未验收 |
+| Edge RPC | `edge_client/rpc/` | 目标 Edge 真实运行并完成 session／lease／fence／receipt 查询与重连验证 |
 | ASR／voice pipeline | `edge_client/runtime/voice_pipeline.py` | 目标设备待实测 |
-| GPT-SoVITS TTS | Edge TTS adapter + V4 voice bank | 本机 CUDA `LOCAL_PASS` |
-| Avatar | `edge_client/actuators/`、gateway embodiment | 协议接线，目标 VTS/VRM `NOT_TESTED` |
-| Unified Gateway | `edge_client/gateway/` | 本地 transport 可测，真实平台按凭据验收 |
+| GPT-SoVITS TTS | Edge TTS adapter + V4 voice bank | 目标 Edge `UP`；物理播放完成后回写 terminal receipt |
+| Avatar | `edge_client/actuators/`、gateway embodiment | VTS 已认证，口型／身体动作可用；兼容情绪热键缺失，`DEGRADED` |
+| Unified Gateway | `edge_client/gateway/` | 真实平台入站、Host roundtrip、durable outbox、送达回执和重复抑制已通过 |
 
 ## 6. 观测与操作
 
 - `host_brain/app/obs_*`：OBS API、指标与读模型。
 - `host_brain/app/monitor_ui/`：Vite 前端。
 - Nginx Monitor Proxy：托管构建产物并代理 Host/OBS。
+- Gateway 页面将“进程／durable transport 可用”和“各平台通道状态已知”分开；平台详情全为 `UNKNOWN` 时显示未确认告警，不再显示空流量健康态。
+- Edge 组件按真实子能力投影：VTS、barge-in、播放设备和 resource gate 互不冒充。
 - Operator 命令：只提交合同化命令，成功以服务端 receipt 为准。
 
 ## 7. 配置、合同与迁移

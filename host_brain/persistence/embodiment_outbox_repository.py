@@ -819,6 +819,14 @@ def _receipt_status(receipt: Mapping[str, Any]) -> str:
     raw_status = str(receipt.get("status") or "").strip().upper()
     if accepted and raw_status in {"APPLIED", "COMPLETED", "SUCCEEDED"}:
         return "APPLIED"
+    # Edge may durably accept a queued TTS/Avatar command before the physical
+    # renderer has produced its terminal receipt.  Treating that acknowledgement
+    # as a rejection loses the only safe read-only reconciliation path and makes
+    # a successfully queued utterance look failed forever.  ``IN_DOUBT`` here
+    # means "accepted but not terminal yet"; the dispatcher never resubmits it
+    # and may only settle it through the exact Edge receipt query.
+    if accepted and raw_status in {"ACCEPTED", "QUEUED", "PENDING"}:
+        return "IN_DOUBT"
     if raw_status == "IN_DOUBT":
         return "IN_DOUBT"
     return "REJECTED"

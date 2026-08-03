@@ -25,6 +25,11 @@ export function securityRiskRank(value) {
   return SECURITY_RISK_RANK[normalizeSecurityRisk(value)] ?? 0
 }
 
+export function isSecurityProjectionAvailable(value) {
+  if (!value) return false
+  return value?.projection?.available !== false
+}
+
 export function getSecurityRiskCounts({ runtime, incidents } = {}) {
   return incidents?.risk_counts || runtime?.risk_counts || {}
 }
@@ -151,7 +156,7 @@ export function buildSecurityIncidentRows(incidents) {
 }
 
 export function buildSecurityRuntimeBadge(runtime) {
-  return runtime
+  return isSecurityProjectionAvailable(runtime)
     ? { status: 'healthy', label: 'connected' }
     : { status: 'degraded', label: 'degraded' }
 }
@@ -232,7 +237,10 @@ export function buildSecurityImmuneMission({
   const riskCounts = getSecurityRiskCounts({ runtime, incidents })
   const criticalCount = Number(riskCounts.critical || 0)
   const highCount = Number(riskCounts.high || 0)
-  const degraded = partialErrors.length > 0 || !runtime
+  const degraded = partialErrors.length > 0
+    || !isSecurityProjectionAvailable(runtime)
+    || !isSecurityProjectionAvailable(assets)
+    || !isSecurityProjectionAvailable(incidents)
 
   if (loading && !runtime) {
     return {
@@ -298,29 +306,38 @@ export function buildSecurityImmuneGateCards({
   const incidentCount = Number(incidents?.incident_count ?? runtime?.incident_count ?? 0)
   const riskCounts = getSecurityRiskCounts({ runtime, incidents })
   const criticalHighCount = Number(riskCounts.critical || 0) + Number(riskCounts.high || 0)
+  const runtimeAvailable = isSecurityProjectionAvailable(runtime)
+  const assetsAvailable = isSecurityProjectionAvailable(assets)
+  const incidentsAvailable = isSecurityProjectionAvailable(incidents)
   return [
     {
       key: 'runtime',
       label: 'Runtime',
-      value: runtime ? 'connected' : (loading ? 'syncing' : 'degraded'),
-      detail: runtime ? 'runtime state 可读' : '等待 /obs/security/runtime',
-      tone: runtime ? 'green' : (loading ? 'blue' : 'orange'),
+      value: runtimeAvailable ? 'connected' : (loading && !runtime ? 'syncing' : 'degraded'),
+      detail: runtimeAvailable ? 'runtime state 可读' : '安全免疫证据源当前不可用',
+      tone: runtimeAvailable ? 'green' : (loading && !runtime ? 'blue' : 'orange'),
       targetId: 'security-immune-runtime',
     },
     {
       key: 'assets',
       label: 'Assets',
       value: `${assetCount} assets`,
-      detail: assetCount > 0 ? '资产快照已接入' : '缺少 endpoint asset 样本',
-      tone: assetCount > 0 ? 'green' : 'orange',
+      detail: !assetsAvailable
+        ? '资产证据源当前不可用'
+        : (assetCount > 0 ? '资产快照已接入' : '缺少 endpoint asset 样本'),
+      tone: assetsAvailable && assetCount > 0 ? 'green' : 'orange',
       targetId: 'security-immune-assets',
     },
     {
       key: 'incidents',
       label: 'Incidents',
       value: `${incidentCount} open`,
-      detail: criticalHighCount > 0 ? `${criticalHighCount} 个 high+ 需要优先处理` : '当前阈值无 high+ 风险',
-      tone: criticalHighCount > 0 ? 'red' : (incidentCount > 0 ? 'amber' : 'green'),
+      detail: !incidentsAvailable
+        ? '事件证据源当前不可用'
+        : (criticalHighCount > 0 ? `${criticalHighCount} 个 high+ 需要优先处理` : '当前阈值无 high+ 风险'),
+      tone: !incidentsAvailable
+        ? 'orange'
+        : (criticalHighCount > 0 ? 'red' : (incidentCount > 0 ? 'amber' : 'green')),
       targetId: 'security-immune-incidents',
     },
     {

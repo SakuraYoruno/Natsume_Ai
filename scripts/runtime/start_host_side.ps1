@@ -302,6 +302,19 @@ function Test-SensitiveRuntimeEnvEntry {
   if (-not $normalizedName) {
     return $false
   }
+  # This setting contains only server-side SHA-256 token digests plus
+  # non-secret principal/scope metadata.  It must reach both detached Host
+  # and Obs processes so the same-origin Monitor session can authenticate;
+  # no raw operator session token is ever written to the runtime snapshot.
+  if (
+    [string]::Equals(
+      $normalizedName,
+      "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS",
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+  ) {
+    return $false
+  }
   # Neo4j direct auth is an indivisible runtime credential.  The password is
   # intentionally excluded below, so retaining only its username would create
   # an unusable half-credential when this snapshot is reused.  Persist the
@@ -363,6 +376,67 @@ function Write-RuntimeEnvFile {
   }
   Set-Content -Path $Path -Value $lines -Encoding UTF8
   return $snapshot
+}
+
+function Ensure-SchedulerClockSecretEnvFile {
+  param(
+    [string]$ResolvedRuntimeRoot,
+    [hashtable]$EnvValues,
+    [string]$ExistingSecretEnvFile = ""
+  )
+
+  if (-not [string]::IsNullOrWhiteSpace($ExistingSecretEnvFile)) {
+    return $ExistingSecretEnvFile
+  }
+  $clockEnabled = Parse-BoolValue `
+    -Value (Get-EnvSetting -Values $EnvValues -Name "HOST_SCHEDULER_CLOCK_ENABLED" -DefaultValue "false") `
+    -Default $false
+  if (-not $clockEnabled) {
+    return ""
+  }
+
+  $secretPath = Join-Path $ResolvedRuntimeRoot "host.scheduler-clock.secret.env"
+  if (Test-Path -LiteralPath $secretPath -PathType Leaf) {
+    $existing = Read-EnvFile -Path $secretPath
+    if (
+      $existing.ContainsKey("HOST_SCHEDULER_CLOCK_HMAC_SECRET") -and
+      -not [string]::IsNullOrWhiteSpace(
+        [string]$existing["HOST_SCHEDULER_CLOCK_HMAC_SECRET"]
+      )
+    ) {
+      return (Resolve-Path -LiteralPath $secretPath).Path
+    }
+    throw "HOST_SCHEDULER_CLOCK_SECRET_FILE_INVALID"
+  }
+
+  $secret = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_SCHEDULER_CLOCK_HMAC_SECRET" `
+    -DefaultValue ""
+  if ([string]::IsNullOrWhiteSpace($secret)) {
+    $bytes = New-Object byte[] 48
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+      $generator.GetBytes($bytes)
+    } finally {
+      $generator.Dispose()
+    }
+    $secret = [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+  }
+  $encoding = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText(
+    $secretPath,
+    "HOST_SCHEDULER_CLOCK_HMAC_SECRET=$secret`r`n",
+    $encoding
+  )
+  $principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $grant = "{0}:(F)" -f $principal
+  & icacls.exe $secretPath /inheritance:r /grant:r $grant | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Remove-Item -LiteralPath $secretPath -Force -ErrorAction SilentlyContinue
+    throw "HOST_SCHEDULER_CLOCK_SECRET_ACL_FAILED"
+  }
+  return (Resolve-Path -LiteralPath $secretPath).Path
 }
 
 function Get-ListeningPid {
@@ -1212,6 +1286,10 @@ if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
+$runtimeSecretEnvFile = Ensure-SchedulerClockSecretEnvFile `
+  -ResolvedRuntimeRoot $RuntimeRoot `
+  -EnvValues $envValues `
+  -ExistingSecretEnvFile $runtimeSecretEnvFile
 
 $configuredAuditDbPath = Get-EnvSetting `
   -Values $envValues `

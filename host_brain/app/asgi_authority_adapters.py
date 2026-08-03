@@ -8,6 +8,7 @@ from host_brain.app.host_life_scheduler_wiring import (
     LifeCommandServicePort,
     LifeSnapshotReaderPort,
     compose_life_command_authority,
+    reconcile_life_tick_command,
     reset_life_command_authority,
     submit_life_tick_command,
 )
@@ -63,6 +64,23 @@ def submit_life_tick_command_for_host(
     )
 
 
+def reconcile_life_tick_command_for_host(
+    *,
+    occurrence: Any,
+    definition: Any,
+    command: Any,
+    execution_context: Mapping[str, Any],
+    life_snapshot_reader: LifeSnapshotReaderPort,
+) -> dict[str, Any]:
+    return reconcile_life_tick_command(
+        occurrence=occurrence,
+        definition=definition,
+        command=command,
+        execution_context=execution_context,
+        life_snapshot_reader=life_snapshot_reader,
+    )
+
+
 def command_ingress_hmac_secrets_for_host() -> dict[str, str]:
     return command_ingress_hmac_secrets(
         input_settings=get_input_settings(),
@@ -73,6 +91,7 @@ def command_ingress_hmac_secrets_for_host() -> dict[str, str]:
 __all__ = [
     "command_ingress_hmac_secrets_for_host",
     "compose_life_command_authority_for_host",
+    "reconcile_life_tick_command_for_host",
     "reset_life_command_authority_for_host",
     "submit_life_tick_command_for_host",
 ]

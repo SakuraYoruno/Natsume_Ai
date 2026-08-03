@@ -264,7 +264,7 @@ def _runtime(tmp_path: Path):
         ts_ms=2_200_000_000_000,
     )
     assert migrated.success, migrated.as_dict()
-    assert migrated.summary["latest_version"] == 142
+    assert migrated.summary["latest_version"] == 152
     clock = _Clock()
     return (
         db,

@@ -553,6 +553,10 @@ def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:
         "detail": "edge rpc reachable",
         "latency_ms": 15,
         "event": {
+            "config_snapshot": {
+                "barge_in_enabled": False,
+                "resource_gate_enabled": True,
+            },
             "components": {
                 "vts": {
                     "enabled": True,
@@ -577,6 +581,10 @@ def test_collect_edge_sub_services_uses_playback_device_not_barge_in() -> None:
         "status": "ACCEPTED",
         "detail": "edge rpc reachable",
         "event": {
+            "config_snapshot": {
+                "barge_in_enabled": False,
+                "resource_gate_enabled": True,
+            },
             "components": {
                 "tts_playback_device": {
                     "enabled": True,
@@ -606,6 +614,9 @@ def test_collect_edge_sub_services_uses_playback_device_not_barge_in() -> None:
         "status": "UP",
         "detail": "output device ready",
     }
+    assert sub_services["barge_in"]["status"] == "NOT_TESTED"
+    assert sub_services["barge_in"]["reason_code"] == "ACCEPTANCE_PENDING_EXTERNAL"
+    assert sub_services["resource_gate"]["status"] == "UP"
 
 
 def test_persist_probe_health_observations_writes_only_explicit_facts() -> None:

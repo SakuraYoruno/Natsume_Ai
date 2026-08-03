@@ -13,6 +13,8 @@ from host_brain.secure_ingress import (
     CredentialVerifierRegistry,
     FileEmergencyAuditSink,
     HmacSha256CredentialVerifier,
+    IngressSurface,
+    SECURE_INGRESS_SURFACE_POLICIES,
     SecureIngressAuthorityEvaluator,
     SecureIngressMode,
     SecureIngressService,
@@ -55,6 +57,10 @@ def build_process_command_ingress_container(
     hmac_secrets: Mapping[str, str],
     gateway_principal_id: str | None = None,
     gateway_key_id: str | None = None,
+    scheduler_clock_enabled: bool = False,
+    scheduler_principal_id: str | None = None,
+    scheduler_tenant_id: str | None = None,
+    scheduler_key_id: str | None = None,
 ) -> ProcessCommandIngressContainer:
     raw_path = str(canonical_db_path or "").strip()
     if not raw_path or raw_path == ":memory:" or raw_path.lower().startswith("file:"):
@@ -92,6 +98,39 @@ def build_process_command_ingress_container(
             except Exception as exc:
                 raise CommandIngressCompositionError(
                     "configured Gateway Secure Ingress authority is invalid"
+                ) from exc
+        if scheduler_clock_enabled:
+            scheduler_principal = str(scheduler_principal_id or "").strip()
+            scheduler_tenant = str(scheduler_tenant_id or "").strip()
+            scheduler_key = str(scheduler_key_id or "").strip()
+            if not all(
+                (
+                    scheduler_principal,
+                    scheduler_tenant,
+                    scheduler_key,
+                    secrets.get(scheduler_key),
+                )
+            ):
+                raise CommandIngressCompositionError(
+                    "enabled SchedulerClock lacks an explicit service identity"
+                )
+            scheduler_policy = SECURE_INGRESS_SURFACE_POLICIES[
+                IngressSurface.SCHEDULER_ADMIN
+            ]
+            try:
+                store.ensure_hmac_service_authority(
+                    principal_id=scheduler_principal,
+                    key_id=scheduler_key,
+                    tenant_id=scheduler_tenant,
+                    granted_scopes=tuple(scheduler_policy.required_scopes),
+                    allowed_audiences=(scheduler_policy.audience,),
+                    allowed_actions=(scheduler_policy.action,),
+                    secret_ref="env://HOST_SCHEDULER_CLOCK_HMAC_SECRET",
+                    at_ms=int(time.time() * 1000),
+                )
+            except Exception as exc:
+                raise CommandIngressCompositionError(
+                    "configured SchedulerClock Secure Ingress authority is invalid"
                 ) from exc
         verifier = CredentialVerifierRegistry(
             {

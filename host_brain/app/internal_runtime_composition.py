@@ -217,6 +217,7 @@ async def activate_internal_runtime(
     intent_engine_provider: Callable[[], Any],
     runtime_group_factory: Callable[..., Any],
     internal_command_service_factory: Callable[..., Any],
+    activate_scheduler_clock: bool = True,
 ) -> ActivatedInternalRuntime:
     """Bind and activate the canonical group, then publish its app-local ports."""
 
@@ -275,7 +276,8 @@ async def activate_internal_runtime(
     await task_runtime.activate_runtime()
     await composition.host_runtime.recover_startup_graphs()
     await runtime_group.recover_startup_graphs()
-    await scheduler.activate_clock()
+    if activate_scheduler_clock:
+        await scheduler.activate_clock()
     internal_command_service = internal_command_service_factory(
         runtime=composition.internal_runtime,
         intent_engine=intent_engine_provider(),

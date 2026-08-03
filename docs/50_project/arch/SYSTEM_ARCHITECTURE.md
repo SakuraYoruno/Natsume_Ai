@@ -94,4 +94,8 @@ HostCommand → immutable TaskGraph → node attempt
 
 ## 8. 当前状态
 
-Tribe 的 23 个 Agent 已在 production composition 中完成 app-local 构造、端口绑定和订阅注册，canonical Life 仍是唯一长期自我。目标 Edge 已完成一次真实服务预检，ASR、TTS、VTS 主服务可达，但 barge-in 仍关闭、VTS 情绪热键映射仍退化；Gateway 自动 Acceptance Outbox、独立 Obs 双端健康投影和完整故障恢复正在重新验收，因此系统状态仍为 `INCOMPLETE`。
+Tribe 的 23 个 Agent 已在 production composition 中完成 app-local 构造、端口绑定和订阅注册，canonical Life 仍是唯一长期自我。目标 Edge 已真实运行：ASR、GPT-SoVITS TTS、音频播放、Edge RPC 和 Unified Gateway 为 `UP`；VTS 已认证且口型／身体动作可用，但缺兼容情绪热键而保持 `DEGRADED`，barge-in 关闭并保持 `NOT_TESTED`。
+
+真实消息平台入站已经贯通 Secure Ingress、canonical HostCommand、不可变单节点 TaskGraph、Attempt、Verification、Acceptance、Gateway Outbox 和平台回执；超时重试复用同一 command／graph，不重复创建任务或外发。Host 接受后的 TTS／Avatar intent 通过 Edge durable receipt 对账，排队中的物理动作先保持 `IN_DOUBT`，只在终端回执到达后变更为 `APPLIED`／`REJECTED`，不会把“已入队”冒充“已经播放”。
+
+OBS/Monitor 读取 Host、Edge 与 Gateway 的最新 canonical health projection，关闭能力不再因 RPC 可达而显示为 `UP`。本轮 P0 双端主链已通过真实网络验证，但 VTS 情绪热键、barge-in、长期多轮体验与完整性能门槛仍未完成，所以整体数字生命状态仍为 `INCOMPLETE`。

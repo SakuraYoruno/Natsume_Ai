@@ -46,6 +46,7 @@ from host_brain.app.observability_runtime.projection_runtime import (
     TRIBE_EVENTS_KIND,
     projection_meta,
     trace_source,
+    upsert_monotonic_projection,
 )
 from host_brain.app.obs_route_ports import require_obs_query_projection_store
 from natsume_contracts.operator.v1 import ProjectionDegradedState
@@ -247,7 +248,14 @@ def refresh_trace_query_projections(
         evidence_repository = GraphEvidenceRepository.from_ledger(ledger)
     except Exception:
         evidence_repository = None
-    for request_id, source_cursor in sorted(request_cursors.items()):
+    for request_index, (request_id, source_cursor) in enumerate(
+        sorted(request_cursors.items()),
+        start=1,
+    ):
+        if request_index == 1 or request_index % 64 == 0:
+            renew_bound_lease = getattr(store, "renew_bound_leader_lease", None)
+            if callable(renew_bound_lease):
+                renew_bound_lease()
         try:
             current = store.get(TRACE_KIND, request_id)
             if current is not None and current.source_cursor >= source_cursor:
@@ -261,12 +269,12 @@ def refresh_trace_query_projections(
                 )
             else:
                 source = trace_source(request_id, build_full(ledger, request_id))
-                store.upsert(
+                upsert_monotonic_projection(
+                    store,
                     TRACE_KIND,
                     request_id,
                     source.payload,
-                    source_cursor=source_cursor,
-                    source_digest=source.source_digest(),
+                    observed_cursor=source_cursor,
                     source_ref="trace-background-worker",
                 )
                 refreshed += 1
@@ -301,7 +309,8 @@ def refresh_trace_query_projections(
                 (int(event.get("ts_ms") or 0) for event in stream_events),
                 default=source_cursor,
             )
-            store.upsert(
+            upsert_monotonic_projection(
+                store,
                 TRACE_STREAM_KIND,
                 request_id,
                 {
@@ -310,7 +319,7 @@ def refresh_trace_query_projections(
                     "count": len(stream_events),
                     "timestamp": stream_cursor,
                 },
-                source_cursor=stream_cursor,
+                observed_cursor=stream_cursor,
                 source_ref="trace-stream-background-worker",
             )
 
@@ -337,11 +346,12 @@ def refresh_trace_query_projections(
         )
         if isinstance(feed_payload, dict):
             feed_payload["timestamp"] = feed_cursor
-            store.upsert(
+            upsert_monotonic_projection(
+                store,
                 TRACE_FEED_KIND,
                 TRACE_FEED_INDEX_KEY,
                 feed_payload,
-                source_cursor=feed_cursor,
+                observed_cursor=feed_cursor,
                 source_ref="trace-feed-background-worker",
             )
     except Exception as exc:
@@ -369,11 +379,12 @@ def refresh_trace_query_projections(
                 if isinstance(event, dict)
             ]
         tribe_cursor = max((int(row.get("ts_ms") or 0) for row in tribe_rows), default=0)
-        store.upsert(
+        upsert_monotonic_projection(
+            store,
             TRIBE_EVENTS_KIND,
             TRIBE_EVENTS_INDEX_KEY,
             {"items": tribe_rows, "total": len(tribe_rows), "timestamp": tribe_cursor},
-            source_cursor=tribe_cursor,
+            observed_cursor=tribe_cursor,
             source_ref="tribe-events-background-worker",
         )
     except Exception as exc:

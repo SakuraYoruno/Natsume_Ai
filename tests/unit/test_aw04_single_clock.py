@@ -13,6 +13,9 @@ from host_brain.app import (
     internal_runtime_composition,
 )
 from host_brain.app.asgi_runtime_helpers import build_scheduler_seed_configs
+from host_brain.app.host_runtime_context_wiring import (
+    ServiceCatalogGuardianObservation,
+)
 from host_brain.scheduler import scheduling_center
 from host_brain.tribe.tribe_state import TribeStateRegistry
 from host_brain.runtime.context_contracts import SceneDecisionV2
@@ -111,7 +114,8 @@ def test_scheduler_seed_has_exactly_one_life_tick_before_repository_registration
     )
 
     assert [config.task_id for config in configs].count("life_tick") == 1
-    assert [config.task_id for config in configs].count("life_io_dispatch_periodic") == 1
+    assert "life_io_dispatch_periodic" not in [config.task_id for config in configs]
+    assert "embodiment_outbox_periodic" not in [config.task_id for config in configs]
 
 
 def test_life_tick_handler_only_reads_version_and_submits_one_typed_command(
@@ -271,6 +275,36 @@ def test_life_tick_crash_gap_replays_receipt_without_a_second_command() -> None:
     assert service.submit_count == 1
 
 
+def test_life_tick_outer_receipt_reconciliation_is_read_only() -> None:
+    receipt = {
+        "status": "APPLIED",
+        "command_id": "life_tick::scheduleroccurrence://sha256/outer-gap",
+        "state_version": 9,
+    }
+
+    class Reader:
+        def get_receipt(self, command_id: str):
+            assert command_id == receipt["command_id"]
+            return dict(receipt)
+
+        def get_snapshot(self, _person_id: str):
+            raise AssertionError("read-only reconciliation must not read a snapshot")
+
+    result = host_life_scheduler_wiring.reconcile_life_tick_command(
+        occurrence=SimpleNamespace(
+            occurrence_id="scheduleroccurrence://sha256/outer-gap"
+        ),
+        definition=object(),
+        command=object(),
+        execution_context={},
+        life_snapshot_reader=Reader(),
+    )
+
+    assert result["status"] == "SUCCEEDED"
+    assert result["replayed"] is True
+    assert result["command_id"] == receipt["command_id"]
+
+
 def test_life_command_authority_adopts_legacy_projections_before_return(
     monkeypatch,
 ) -> None:
@@ -348,19 +382,94 @@ def test_life_periodic_side_effect_definitions_are_retired() -> None:
     }.isdisjoint(task_ids)
 
 
-def test_life_io_is_a_projection_drain_on_the_same_scheduler_clock() -> None:
+def test_life_io_is_a_lightweight_app_local_projection_drain() -> None:
     source = Path(asgi.__file__).read_text(encoding="utf-8")
-    activation_source = inspect.getsource(
-        internal_runtime_composition.activate_internal_runtime
-    )
     handler = source.split("async def life_io_scheduler_handler", 1)[1].split(
         "def scheduler_current_mode", 1
     )[0]
 
-    assert activation_source.count("await scheduler.activate_clock()") == 1
-    assert '"life_io_dispatch_periodic": "life_io"' in source
+    assert 'name="host-life-io-dispatch-pump"' in source
+    assert 'name="host-embodiment-io-dispatch-pump"' in source
+    assert '"life_io_dispatch_periodic": "life_io"' not in source
+    assert '"embodiment_outbox_periodic": "embodiment_io"' not in source
     assert "projection_dispatcher.dispatch_pending_async" in handler
     assert "outbox_dispatcher.dispatch_pending_async" in handler
     assert "LifeCommand(" not in handler
     assert "submit_next(" not in handler
     assert "build_life_tick_payload" not in handler
+
+
+def test_scheduler_clock_is_not_disabled_with_optional_background_work() -> None:
+    source = Path(asgi.__file__).read_text(encoding="utf-8")
+
+    assert "scheduler_clock_enabled = bool(scheduler_settings.clock_enabled)" in source
+    assert (
+        "scheduler_settings.clock_enabled\n"
+        "                    and scheduler_settings.background_tasks_enabled"
+    ) not in source
+
+
+def test_catalog_candidate_opens_scheduler_only_after_started_receipt() -> None:
+    events: list[str] = []
+
+    class Store:
+        def terminal_receipt(self, operation_id: str) -> dict[str, str]:
+            assert operation_id == "catalog-operation-1"
+            return {"event_type": "ACTIVATION_STARTED"}
+
+    observation = ServiceCatalogGuardianObservation(
+        store=Store(),
+        observer=SimpleNamespace(
+            observe_operation=lambda operation_id: events.append(
+                f"observed:{operation_id}"
+            )
+        ),
+        operation_id="catalog-operation-1",
+        logger=SimpleNamespace(error=lambda *_args, **_kwargs: None),
+    )
+
+    async def activate_clock() -> None:
+        events.append("clock-activated")
+
+    import asyncio
+
+    asyncio.run(
+        observation.observe_terminal_receipt(
+            on_activation_started=activate_clock,
+        )
+    )
+
+    assert events == ["observed:catalog-operation-1", "clock-activated"]
+
+
+def test_catalog_candidate_does_not_open_scheduler_after_rollback() -> None:
+    events: list[str] = []
+
+    class Store:
+        def terminal_receipt(self, operation_id: str) -> dict[str, str]:
+            assert operation_id == "catalog-operation-2"
+            return {"event_type": "ACTIVATION_ROLLED_BACK"}
+
+    observation = ServiceCatalogGuardianObservation(
+        store=Store(),
+        observer=SimpleNamespace(
+            observe_operation=lambda operation_id: events.append(
+                f"observed:{operation_id}"
+            )
+        ),
+        operation_id="catalog-operation-2",
+        logger=SimpleNamespace(error=lambda *_args, **_kwargs: None),
+    )
+
+    async def activate_clock() -> None:
+        events.append("clock-activated")
+
+    import asyncio
+
+    asyncio.run(
+        observation.observe_terminal_receipt(
+            on_activation_started=activate_clock,
+        )
+    )
+
+    assert events == ["observed:catalog-operation-2"]

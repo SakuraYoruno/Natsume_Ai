@@ -1969,7 +1969,25 @@ class VTubeStudioDriver:
 
     def health(self) -> dict[str, Any]:
         """Return VTS driver health snapshot."""
+        expression_hotkey_match_count = _expression_hotkey_match_count(
+            self._hotkey_catalog
+        )
+        authenticated = self._state == VtsState.AUTHENTICATED
+        expression_hotkey_ready = bool(
+            authenticated and expression_hotkey_match_count > 0
+        )
+        if authenticated and not expression_hotkey_ready:
+            capability_status = "degraded"
+            capability_detail = (
+                "VTS authenticated; mouth/body motion available; "
+                "compatible expression hotkeys unavailable"
+            )
+        else:
+            capability_status = self._state.value
+            capability_detail = f"VTS state: {self._state.value}"
         return {
+            "status": capability_status,
+            "detail": capability_detail,
             "state": self._state.value,
             "talking": self._talking,
             "current_expression": self._current_expression,
@@ -1996,6 +2014,8 @@ class VTubeStudioDriver:
             "last_model_move": dict(self._last_model_move),
             "emotion_map_size": len(EMOTION_TO_EXPRESSION_ID),
             "hotkey_catalog_size": len(self._hotkey_catalog),
+            "expression_hotkey_match_count": expression_hotkey_match_count,
+            "expression_hotkey_ready": expression_hotkey_ready,
             "expression_overrides": dict(self._expression_hotkey_overrides),
             "bad_expression_hotkeys": dict(self._bad_expression_hotkeys),
             "reconnect": {
@@ -2384,6 +2404,41 @@ def _list_vts_hotkeys(*, vts: Any, timeout_s: float) -> list[dict[str, str]]:
         return list(_run_in_vts_loop(_list(), timeout_s=timeout_s + 1.0) or [])
     except Exception:
         return []
+
+
+def _expression_hotkey_match_count(catalog: Any) -> int:
+    """Count safe model hotkeys that can satisfy a canonical emotion.
+
+    Authentication proves that VTS is reachable, not that the active model
+    implements the expression IDs assumed by the Host.  This local capability
+    check exposes only a count and never model-specific hotkey names.
+    """
+
+    if not isinstance(catalog, list):
+        return 0
+    known_ids = {
+        str(value or "").strip().lower()
+        for value in EMOTION_TO_EXPRESSION_ID.values()
+        if str(value or "").strip()
+    }
+    hints = {
+        str(value or "").strip().lower()
+        for values in EMOTION_HOTKEY_HINTS.values()
+        for value in values
+        if str(value or "").strip()
+    }
+    matches = 0
+    for raw in catalog:
+        if not isinstance(raw, dict):
+            continue
+        hotkey_id = str(raw.get("id") or "").strip()
+        name = str(raw.get("name") or "").strip()
+        if not hotkey_id or is_blocked_avatar_hotkey_id(hotkey_id, name=name):
+            continue
+        searchable = f"{hotkey_id} {name}".lower()
+        if hotkey_id.lower() in known_ids or any(hint in searchable for hint in hints):
+            matches += 1
+    return matches
 
 
 def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:

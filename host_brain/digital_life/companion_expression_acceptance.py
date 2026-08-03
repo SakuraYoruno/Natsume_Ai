@@ -32,7 +32,11 @@ COMPANION_EXPRESSION_EFFECT_SCHEMA = (
     "Natsume.companion_expression_acceptance_effect.v1"
 )
 _SPEECH_TTL_MS = 30_000
-_CONTROL_TTL_MS = 5_000
+# Release/cancel controls are compiled only after all sentence intents.  They
+# share the speech window so a bounded multi-sentence reply cannot consume the
+# old five-second TTL while Acceptance and the serial physical outbox are still
+# delivering the preceding Voice/Avatar commands.
+_CONTROL_TTL_MS = _SPEECH_TTL_MS
 
 
 class CompanionExpressionEffectError(ValueError):

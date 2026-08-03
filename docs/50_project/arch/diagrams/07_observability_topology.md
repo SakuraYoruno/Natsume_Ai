@@ -3,7 +3,7 @@
 
 # 图 07：Observability、Monitor 与 Operator 数据流
 
-核对日期：2026-08-02
+核对日期：2026-08-03
 
 OBS 是独立 ASGI 读面和 Operator BFF。Monitor UI 展示 OBS／Host 的真实读模型，不保存 Task、Life、Review 或外部服务的第二套真相。
 
@@ -105,7 +105,7 @@ stateDiagram-v2
     Draining --> Closed
 ```
 
-Host 健康不代表 OBS、Monitor、Gateway、Edge、模型、Neo4j、Chroma 和 Redis 全部健康。每个组件必须独立给出 `PASS`、`FAIL`、`DEGRADED` 或 `NOT_TESTED` 及 reason；远端 Edge 当前必须显示 `NOT_TESTED`。
+Host 健康不代表 OBS、Monitor、Gateway、Edge、模型、Neo4j、Chroma 和 Redis 全部健康。每个组件必须独立给出 `UP`、`FAIL`、`DEGRADED`、`NOT_TESTED` 或 `UNKNOWN` 及 reason。当前真实投影为 15 项：13 项 `UP`、VTS 1 项 `DEGRADED`、barge-in 1 项 `NOT_TESTED`，没有 `UNKNOWN`；Gateway 平台明细未上报时则在 Gateway 页面单独显示“未确认”，不能继承 Gateway 进程的绿色状态。
 
 ## 代码锚点
 
@@ -126,3 +126,4 @@ Host 健康不代表 OBS、Monitor、Gateway、Edge、模型、Neo4j、Chroma �
 4. Operator 成功必须由服务端 durable receipt 证明。
 5. component 状态独立，禁止用 Host health 代替完整服务栈验收。
 6. endpoint 数量是当前机器事实，不是永久公共合同。
+7. 跨节点 health observation 必须按 source cursor／freshness 单调推进，较新的 Host fallback 不得覆盖更具体的 Edge observation。

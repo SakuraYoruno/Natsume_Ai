@@ -143,6 +143,15 @@ _SECRET_KEY_PARTS = frozenset(
         "token",
     }
 )
+# These exact boolean policy flags describe whether a secret is required; they
+# never contain the secret itself.  Keeping the allowlist type-bound avoids
+# weakening the fail-closed token-field rule for strings, refs, or objects.
+_PUBLIC_SECRET_POLICY_BOOLEAN_FIELDS = frozenset(
+    {
+        "resume_requires_bound_token",
+        "resume_requires_token",
+    }
+)
 _SECRET_VALUE_RE = re.compile(
     r"(?i)(?:bearer\s+[A-Za-z0-9._~+/-]{8,}|"
     r"(?:approval|confirm|undo|review_resume|canon|credential|token)::[^\s,;]+)"
@@ -748,6 +757,8 @@ def _sanitize_value(
 
 
 def _field_is_private(normalized_key: str, value: Any) -> bool:
+    if normalized_key in _PUBLIC_SECRET_POLICY_BOOLEAN_FIELDS:
+        return not isinstance(value, bool)
     if normalized_key in DEFAULT_FORBIDDEN_PRIVATE_FIELDS:
         return True
     if normalized_key in _SECRET_FIELD_NAMES:

@@ -119,8 +119,10 @@ git diff --check
 - `NOT_RUN_ACCOUNT_QUOTA`：GitHub Actions 因额度未执行任何步骤。
 - `INCOMPLETE`／`FAIL`：存在代码、体验、恢复、安全或真实性缺口。
 
-远端 Edge 已完成真实服务预检，但 barge-in 关闭、VTS 情绪热键退化，Gateway 自动 Outbox 与 Obs 双端状态仍需基于当前提交重跑。整体不得标记 `PASS`。
+远端 Edge 与真实消息平台已基于当前代码完成双端核心链路：Gateway 自动 Outbox、canonical HostCommand／TaskGraph、Edge terminal receipt 与 Obs 双端状态均已重跑。barge-in 仍关闭，VTS 情绪热键仍退化；48 条多轮盲测和完整性能门槛未完成，整体不得标记 `PASS`。
 
 Gateway 传输的故障语义按方向验收：INBOX 使用冻结请求体、稳定 Host 幂等键和 canonical HostCommand 精确重放，Host 响应超时后进入有界重试；OUTBOX 已开始的平台发送仍视为未知外部副作用，只能隔离并对账，禁止盲目重放。
 
 重复 Gateway HTTP 请求若已绑定 HostCommand，应在执行任何反馈、Life 或路由逻辑前验证 canonical claim/command/body 绑定并立即确认 durable handoff；不得用重试请求的新 request/audit identity 重建 TaskGraph。首次完成响应和重复确认都必须返回 `host-input-result://` 收据，不能把内部 command ID 当成传输收据。
+
+具身验收必须区分“Edge 已接收入队”和“物理执行完成”：排队 TTS 先返回 `IN_DOUBT`，只有播放完成 callback 才能生成 `APPLIED` terminal receipt；缺失的 VTS expression hotkey 必须返回 `REJECTED`，不能因 VTS 已认证而伪造成功。

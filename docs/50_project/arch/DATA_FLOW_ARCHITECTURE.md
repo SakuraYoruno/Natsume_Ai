@@ -85,6 +85,24 @@ flowchart LR
 
 ## 4. 语音与 Avatar
 
+Acceptance 只代表 Host 已决定表达，不代表声音已经播放或动作已经执行。Host 为每个 TTS／Avatar effect 写入 durable intent；Edge 接收后，排队中的语音保持 `IN_DOUBT`，物理播放完成或失败时再写 terminal receipt。Host 只按同一 effect identity 对账，不盲目重放未知外部副作用。
+
+```mermaid
+sequenceDiagram
+    participant H as Host Acceptance
+    participant O as Embodiment Outbox
+    participant E as Edge Runtime
+    participant D as TTS / VTS Device
+
+    H->>O: append expression intent
+    O->>E: signed effect + idempotency identity
+    E-->>O: queued / IN_DOUBT
+    E->>D: execute physical effect
+    D-->>E: terminal result
+    E-->>O: APPLIED or REJECTED receipt
+    O-->>H: reconcile exact effect
+```
+
 ```mermaid
 flowchart LR
     P["ExpressionPlan revision R"] --> TXT["文本节奏"]
@@ -130,6 +148,8 @@ independent aftereffects
 ## 7. 观测流
 
 Host lifespan 心跳分别读取 Host 自身和真实 Edge 子服务，只把明确探测到的事实写入 canonical `service_health_log`；Host-only 自检不会再写一组较新的 Edge `NOT_TESTED` 覆盖远端事实。RPC 端口可达只作为缺失子服务结果时的 fallback，不能把关闭的 barge-in 或故障的播放设备标为 `UP`。OBS 从 canonical SQLite ledgers 生成只读 projection，Monitor 通过 OBS/Host API 展示状态。Monitor 的 React state、toast 或缓存不是业务成功证据。
+
+Gateway 页面同样区分服务进程、durable transport 与平台通道详情。Gateway 本身 `UP` 但平台详情尚未上报时，读模型保留 `UNKNOWN` 并显示未确认数量；只有具体平台 observation 才能改变对应状态。
 
 ## 8. 数据保留
 

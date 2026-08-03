@@ -128,6 +128,10 @@ def test_detached_host_uses_a_separate_runtime_secret_file() -> None:
     assert "HOST_RUNTIME_SECRET_ENV_FILE_MUST_BE_SEPARATE" in source
     assert 'set ""HOST_RUNTIME_SECRET_ENV_FILE=$runtimeSecretEnvFile""' in source
     assert "runtime_secret_env_configured = [bool]$runtimeSecretEnvFile" in source
+    assert "Ensure-SchedulerClockSecretEnvFile" in source
+    assert "host.scheduler-clock.secret.env" in source
+    assert "HOST_SCHEDULER_CLOCK_SECRET_ACL_FAILED" in source
+    assert "HOST_SCHEDULER_CLOCK_HMAC_SECRET=$secret" in source
     assert "Get-Content -LiteralPath $runtimeSecretEnvFile" not in source
     assert "Read-EnvFile -Path $runtimeSecretEnvFile" not in source
 
@@ -169,8 +173,10 @@ $env:OPENAI_API_KEY = 'must-not-be-written'
 $env:EDGE_HMAC_SHARED_KEY = 'must-not-be-written'
 $env:BOND_NEO4J_AUTH_REF = 'sec://neo4j/ne07'
 $env:NATSUME_AUDIT_DB = 'runtime/acceptance/canonical.sqlite3'
+$env:NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = '[{{"token_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","principal_id":"acceptance-operator","scopes":["obs:operator:read"]}}]'
 Write-RuntimeEnvFile -Path '{output.as_posix()}' -SeedValues @{{
   BOND_NEO4J_AUTH_REF = 'ignored'
+  NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = 'ignored'
 }} | Out-Null
 [ordered]@{{
   content = [string](Get-Content -Raw -LiteralPath '{output.as_posix()}')
@@ -197,3 +203,7 @@ Write-RuntimeEnvFile -Path '{output.as_posix()}' -SeedValues @{{
     assert "NATSUME_NEO4J_USER=" not in content
     assert "BOND_NEO4J_AUTH_REF=sec://neo4j/ne07" in content
     assert "NATSUME_AUDIT_DB=runtime/acceptance/canonical.sqlite3" in content
+    assert (
+        'NATSUME_OPERATOR_QUERY_AUTH_BINDINGS=[{"token_sha256":"aaaaaaaa'
+        in content
+    )

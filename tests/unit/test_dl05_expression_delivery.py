@@ -411,6 +411,10 @@ def test_governed_expression_acceptance_rebuilds_exact_host_outbox_commands() ->
         item["command"].authority_ref.startswith("authority://task-acceptance/sha256/")
         for item in parsed
     )
+    assert all(
+        item["command"].deadline_ms - item["command"].issued_at_ms == 30_000
+        for item in parsed
+    )
     assert COMPANION_EXPRESSION_ENQUEUE_EFFECT == "host.companion_expression_enqueue"
 
 

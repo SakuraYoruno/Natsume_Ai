@@ -8,7 +8,11 @@ from typing import Any
 
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
 
-from host_brain.observability.projection_store import QueryProjectionStore, digest_json
+from host_brain.observability.projection_store import (
+    QueryProjectionStore,
+    digest_json,
+    public_projection_payload,
+)
 from host_brain.observability.projection_worker import ProjectionSource, QueryProjectionWorker
 
 
@@ -23,6 +27,47 @@ TRIBE_EVENTS_KIND = "tribe_events"
 TRIBE_EVENTS_INDEX_KEY = "index"
 SESSION_KIND = "session"
 SESSION_INDEX_KEY = "index"
+DEFAULT_OPERATOR_PROJECTION_MAX_AGE_MS = 120_000
+
+
+def upsert_monotonic_projection(
+    store: QueryProjectionStore,
+    kind: str,
+    key: str,
+    payload: Mapping[str, Any],
+    *,
+    observed_cursor: int,
+    source_ref: str,
+) -> Any:
+    """Refresh a projection without rebinding one cursor to new content.
+
+    Source timestamps can stay unchanged while the public projection schema or
+    a same-millisecond aggregate changes.  In that case the materialized
+    cursor advances by one; unchanged content reuses the existing cursor and
+    only refreshes freshness.
+    """
+
+    public_payload = public_projection_payload(payload)
+    current = store.get(kind, key)
+    cursor = max(0, int(observed_cursor))
+    if current is not None:
+        if current.source_digest == digest_json(public_payload):
+            cursor = max(cursor, int(current.source_cursor))
+        else:
+            cursor = max(cursor, int(current.source_cursor) + 1)
+    # Pass the original payload to the store.  ``QueryProjectionStore.upsert``
+    # owns the single public-serialization boundary; sending the already
+    # serialized value through it again can change redaction markers and bind
+    # this cursor to a digest different from the one compared above.
+    return store.upsert(
+        kind,
+        key,
+        payload,
+        source_cursor=cursor,
+        source_ref=source_ref,
+    )
+
+
 def projection_meta(
     kind: str,
     key: str,
@@ -106,7 +151,7 @@ class ProjectionOperatorReadModelService:
         self,
         *,
         store: QueryProjectionStore,
-        max_age_ms: int = 15000,
+        max_age_ms: int = DEFAULT_OPERATOR_PROJECTION_MAX_AGE_MS,
     ) -> None:
         self._store = store
         self._max_age_ms = max(0, int(max_age_ms))
@@ -215,12 +260,12 @@ def refresh_task_projections(
     index_payload = _payload(source.list_executions(limit=500))
     index_cursor = _execution_cursor(index_payload)
     index_payload["generated_at_ms"] = index_cursor
-    worker.store.upsert(
+    upsert_monotonic_projection(
+        worker.store,
         TASK_EXECUTION_KIND,
         TASK_EXECUTION_INDEX_KEY,
         index_payload,
-        source_cursor=index_cursor,
-        source_digest=digest_json(index_payload),
+        observed_cursor=index_cursor,
         source_ref="task-runtime-background-worker",
     )
     execution_count = 0
@@ -235,12 +280,12 @@ def refresh_task_projections(
         value = _payload(source.get_execution(graph_id, revision, after_cursor=0, event_limit=1000))
         execution_cursor = _execution_cursor(value)
         value["generated_at_ms"] = execution_cursor
-        worker.store.upsert(
+        upsert_monotonic_projection(
+            worker.store,
             TASK_EXECUTION_KIND,
             f"{graph_id}@{revision}",
             value,
-            source_cursor=execution_cursor,
-            source_digest=digest_json(value),
+            observed_cursor=execution_cursor,
             source_ref="task-runtime-background-worker",
         )
         execution_count += 1
@@ -254,12 +299,12 @@ def refresh_task_projections(
             review = review_payload.get("review")
             review_cursor = int(review.get("updated_ts_ms") or 0) if isinstance(review, Mapping) else 0
             review_payload["generated_at_ms"] = review_cursor
-            worker.store.upsert(
+            upsert_monotonic_projection(
+                worker.store,
                 TASK_REVIEW_KIND,
                 review_id,
                 review_payload,
-                source_cursor=review_cursor,
-                source_digest=digest_json(review_payload),
+                observed_cursor=review_cursor,
                 source_ref="task-review-background-worker",
             )
             review_count += 1
@@ -296,6 +341,7 @@ __all__ = [
     "TRACE_STREAM_KIND",
     "TRACE_FEED_KIND",
     "TRACE_FEED_INDEX_KEY",
+    "upsert_monotonic_projection",
     "TRIBE_EVENTS_KIND",
     "TRIBE_EVENTS_INDEX_KEY",
     "trace_source",

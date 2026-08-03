@@ -39,6 +39,10 @@ NOW = 1_900_000_000_000
 SECRET = "task0488-host-gateway-unit-secret"
 PRINCIPAL_ID = "service.edge.gateway"
 KEY_ID = "edge.gateway.hmac.v1"
+SCHEDULER_SECRET = "host-scheduler-clock-unit-secret"
+SCHEDULER_PRINCIPAL_ID = "service.host.scheduler-clock"
+SCHEDULER_TENANT_ID = "local"
+SCHEDULER_KEY_ID = "host.scheduler.clock.hmac.v1"
 
 
 class _Request:
@@ -220,6 +224,79 @@ def test_command_ingress_composition_seeds_gateway_identity_idempotently(
         assert conn.execute(
             "SELECT COUNT(*) FROM secure_ingress_credential"
         ).fetchone()[0] == 1
+
+
+def test_command_ingress_composition_seeds_enabled_scheduler_clock_identity(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={SCHEDULER_KEY_ID: SCHEDULER_SECRET},
+        scheduler_clock_enabled=True,
+        scheduler_principal_id=SCHEDULER_PRINCIPAL_ID,
+        scheduler_tenant_id=SCHEDULER_TENANT_ID,
+        scheduler_key_id=SCHEDULER_KEY_ID,
+    )
+    authority = first.store.resolve(
+        principal_id=SCHEDULER_PRINCIPAL_ID,
+        key_id=SCHEDULER_KEY_ID,
+        at_ms=NOW,
+    )
+    assert authority is not None
+    assert authority.granted_scopes == ("scheduler:admin",)
+    assert authority.allowed_audiences == ("scheduler",)
+    assert authority.allowed_actions == ("scheduler:admin",)
+    first.close()
+
+    restarted = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={SCHEDULER_KEY_ID: SCHEDULER_SECRET},
+        scheduler_clock_enabled=True,
+        scheduler_principal_id=SCHEDULER_PRINCIPAL_ID,
+        scheduler_tenant_id=SCHEDULER_TENANT_ID,
+        scheduler_key_id=SCHEDULER_KEY_ID,
+    )
+    restarted.close()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_principal"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_credential"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            """
+            SELECT secret_ref FROM secure_ingress_credential
+            WHERE principal_id = ? AND key_id = ?
+            """,
+            (SCHEDULER_PRINCIPAL_ID, SCHEDULER_KEY_ID),
+        ).fetchone()[0] == "env://HOST_SCHEDULER_CLOCK_HMAC_SECRET"
+
+
+def test_command_ingress_composition_rejects_enabled_scheduler_without_secret(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+
+    with pytest.raises(
+        CommandIngressCompositionError,
+        match="SchedulerClock lacks an explicit service identity",
+    ):
+        build_process_command_ingress_container(
+            canonical_db_path=db_path,
+            mode="ENFORCE",
+            hmac_secrets={},
+            scheduler_clock_enabled=True,
+            scheduler_principal_id=SCHEDULER_PRINCIPAL_ID,
+            scheduler_tenant_id=SCHEDULER_TENANT_ID,
+            scheduler_key_id=SCHEDULER_KEY_ID,
+        )
 
 
 def test_command_ingress_composition_rejects_gateway_authority_drift(

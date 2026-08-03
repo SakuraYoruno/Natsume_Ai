@@ -173,7 +173,7 @@ def _component_snapshot(
         "enabled": True,
         "available": True,
         "status": component_status,
-        "detail": "component loaded",
+        "detail": str(health.get("detail") or "component loaded")[:300],
         "health": health,
     }
 

@@ -184,6 +184,30 @@ def test_projection_serializer_rejects_token_aliases_and_bare_secret_refs() -> N
     assert result.redacted_fields == 4
 
 
+def test_projection_serializer_preserves_only_typed_token_policy_flags() -> None:
+    gateway = OperatorQueryGateway(DigestOperatorQueryAuthenticator())
+
+    result = gateway.serialize_public(
+        {
+            "mutation_contract": {
+                "resume_requires_bound_token": True,
+            },
+            "actions": {
+                "resume_requires_token": True,
+            },
+            "resume_requires_token": "secret-shaped-value",
+            "resume_token_ref": "review_resume::abc123",
+        }
+    )
+    encoded = json.dumps(result.payload)
+
+    assert result.payload["mutation_contract"]["resume_requires_bound_token"] is True
+    assert result.payload["actions"]["resume_requires_token"] is True
+    assert "secret-shaped-value" not in encoded
+    assert "abc123" not in encoded
+    assert result.redacted_fields == 2
+
+
 def test_projection_serializer_normalizes_camel_case_private_aliases() -> None:
     gateway = OperatorQueryGateway(DigestOperatorQueryAuthenticator())
 
