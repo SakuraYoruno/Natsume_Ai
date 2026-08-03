@@ -53,6 +53,22 @@ class _FlakyRenewStore:
         return self._store.renew_leader_lease(lease, lease_ms=lease_ms)
 
 
+class _LeaseExpiresBetweenJobsStore:
+    def __init__(self, store: QueryProjectionStore) -> None:
+        self._store = store
+        self._renew_count = 0
+
+    def __getattr__(self, name: str):
+        return getattr(self._store, name)
+
+    def renew_leader_lease(self, lease, *, lease_ms: int):  # noqa: ANN001
+        self._renew_count += 1
+        if self._renew_count == 2:
+            self._store.release_leader_lease(lease)
+            return None
+        return self._store.renew_leader_lease(lease, lease_ms=lease_ms)
+
+
 def test_background_renew_failure_is_reported_and_recovers_without_thread_exit(
     tmp_path,
 ) -> None:
@@ -126,6 +142,26 @@ def test_process_control_exit_is_visible_and_requires_close_before_restart(
     stopped = daemon.health_snapshot()
     assert stopped["status"] == "STOPPED"
     assert stopped["last_failure"] == failed["last_failure"]
+
+
+def test_wave_reacquires_expired_lease_before_later_live_projection(tmp_path) -> None:
+    store = _LeaseExpiresBetweenJobsStore(_store(tmp_path, "lease-reacquire"))
+    calls: list[str] = []
+    daemon = ProjectionJobDaemon(owner_id="obs-supervision-reacquire")
+    daemon.register("slow-earlier-job", lambda: calls.append("slow"))
+    daemon.register("live-cockpit-job", lambda: calls.append("live"))
+
+    result = daemon.run_once(
+        store=store,
+        owner_id="obs-supervision-reacquire",
+        lease_ms=30_000,
+    )
+
+    assert result == {
+        "slow-earlier-job": "OK",
+        "live-cockpit-job": "OK",
+    }
+    assert calls == ["slow", "live"]
 
 
 def test_obs_health_exposes_secret_free_daemon_failure(tmp_path) -> None:

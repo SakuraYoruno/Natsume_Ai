@@ -131,6 +131,80 @@ $binding = @($bindings | Where-Object {{
     }
 
 
+def test_host_launcher_persists_obs_read_auth_as_protected_file_reference(
+    tmp_path: Path,
+) -> None:
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    runtime_root = tmp_path / "host-runtime"
+    runtime_root.mkdir()
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Ensure-Directory',
+  'Get-EnvSetting',
+  'New-OperatorSessionToken',
+  'Ensure-HostObsReadTokenFile',
+  'Test-SensitiveRuntimeEnvEntry'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$env:HOST_OBS_READ_TOKEN = $null
+$env:HOST_OBS_READ_TOKEN_FILE = $null
+$values = @{{}}
+$path = Ensure-HostObsReadTokenFile `
+  -ResolvedRuntimeRoot '{runtime_root}' `
+  -EnvValues $values
+$token = [System.IO.File]::ReadAllText($path).Trim()
+[ordered]@{{
+  exists = Test-Path -LiteralPath $path -PathType Leaf
+  token_length = $token.Length
+  file_reference = [string]$values['HOST_OBS_READ_TOKEN_FILE']
+  raw_token_persisted = $values.ContainsKey('HOST_OBS_READ_TOKEN')
+  file_reference_is_public = -not (Test-SensitiveRuntimeEnvEntry `
+    -Name 'HOST_OBS_READ_TOKEN_FILE' `
+    -Value $path)
+  raw_token_is_sensitive = Test-SensitiveRuntimeEnvEntry `
+    -Name 'HOST_OBS_READ_TOKEN' `
+    -Value $token
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    assert payload["exists"] is True
+    assert payload["token_length"] == 64
+    assert Path(payload["file_reference"]) == runtime_root / "host.obs-read.token"
+    assert payload["raw_token_persisted"] is False
+    assert payload["file_reference_is_public"] is True
+    assert payload["raw_token_is_sensitive"] is True
+
+
 def test_host_orchestrator_requires_post_sidecar_stability_before_success() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"

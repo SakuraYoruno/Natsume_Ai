@@ -80,6 +80,17 @@ class _Scorecards:
         return []
 
 
+class _ClockAdvancingScorecards:
+    def __init__(self, clock_values: list[int]) -> None:
+        self._clock_values = clock_values
+
+    def list_all(self):
+        # Mirrors the production scorecard provider, which reads the clock
+        # while materializing its read-only evidence.
+        self._clock_values.append(self._clock_values[-1] + 1)
+        return []
+
+
 class _Ledger:
     def get_latest_capability_forge_proposals(self, *, limit: int):
         assert limit == 200
@@ -336,3 +347,23 @@ def test_governance_input_provider_failure_degrades_without_503() -> None:
         headers={"X-Internal-Token": "dedicated-token"},
     )
     assert response.status_code == 200
+
+
+def test_governance_envelope_is_observed_after_live_providers_finish() -> None:
+    ticks = [NOW]
+
+    def clock_ms() -> int:
+        return ticks[-1]
+
+    ports = build_host_obs_read_ports(
+        _runtime(
+            clock_ms=clock_ms,
+            capability_scorecard_provider=lambda: _ClockAdvancingScorecards(ticks),
+        ),
+        environ={"HOST_OBS_READ_TOKEN": "dedicated-token"},
+    )
+
+    governance = ports.governance_source_reader()
+
+    assert governance.observed_at_ms == NOW + 1
+    assert governance.governance["generated_at_ms"] == NOW

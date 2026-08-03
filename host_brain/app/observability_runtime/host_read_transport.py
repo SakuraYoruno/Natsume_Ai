@@ -25,6 +25,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
+from host_brain.app.observability_runtime.host_read_credentials import (
+    resolve_host_obs_read_token,
+)
+
 
 HOST_READ_CONFIG: Final = "CONFIG"
 HOST_READ_AUTH: Final = "AUTH"
@@ -34,6 +38,7 @@ HOST_READ_INVALID_JSON: Final = "INVALID_JSON"
 HOST_READ_INVALID_PAYLOAD: Final = "INVALID_PAYLOAD"
 HOST_READ_RESPONSE_TOO_LARGE: Final = "RESPONSE_TOO_LARGE"
 HOST_READ_MAX_RESPONSE_BYTES: Final = 1_048_576
+HOST_READ_DEFAULT_TIMEOUT_S: Final = 5.0
 _HOST_READ_CHUNK_BYTES: Final = 64 * 1024
 
 HOST_READ_ALLOWED_PATHS: Final[frozenset[str]] = frozenset(
@@ -342,7 +347,10 @@ class HostReadTransport:
 
     base_url: str = field(repr=False)
     token: str = field(repr=False)
-    timeout_s: float = 1.5
+    # Capability/Governance are bounded read-model materializations rather
+    # than trivial liveness probes.  A 1.5 s deadline caused healthy sources
+    # to oscillate into STALE while the Host completed them in ~2.8 s.
+    timeout_s: float = HOST_READ_DEFAULT_TIMEOUT_S
     _configuration_valid: bool = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -367,7 +375,7 @@ class HostReadTransport:
         cls,
         environ: Mapping[str, str] | None = None,
         *,
-        timeout_s: float = 1.5,
+        timeout_s: float = HOST_READ_DEFAULT_TIMEOUT_S,
     ) -> HostReadTransport:
         """Capture environment configuration once and return a frozen client."""
 
@@ -378,7 +386,7 @@ class HostReadTransport:
             base_url = f"http://127.0.0.1:{port}"
         return cls(
             base_url=base_url,
-            token=str(source.get("HOST_OBS_READ_TOKEN") or ""),
+            token=resolve_host_obs_read_token(source),
             timeout_s=timeout_s,
         )
 

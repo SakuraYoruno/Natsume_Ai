@@ -129,6 +129,31 @@ def _runtime() -> HostRuntimeSourceSnapshot:
     )
 
 
+def test_runtime_contract_accepts_future_retry_boundary_but_not_future_evidence() -> None:
+    payload = {
+        "schema_version": HOST_RUNTIME_SOURCE_SCHEMA_VERSION,
+        "observed_at_ms": NOW,
+        "evidence_ts_ms": NOW - 3,
+        "source_instance_id": "host-test-epoch",
+        "source_revision": 1,
+        "organ_tribe": {"agents": [], "active_agents": 0},
+        "scheduler": {
+            "available": True,
+            "clock": {
+                "last_tick_ms": NOW - 3,
+                "next_retry_at_ms": NOW + 60_000,
+            },
+        },
+    }
+
+    snapshot = HostRuntimeSourceSnapshot.from_mapping(payload)
+    assert snapshot.scheduler["clock"]["next_retry_at_ms"] == NOW + 60_000
+
+    payload["scheduler"]["clock"]["last_tick_ms"] = NOW + 1
+    with pytest.raises(HostObsSourceContractError):
+        HostRuntimeSourceSnapshot.from_mapping(payload)
+
+
 def _semantic() -> HostSemanticRecallSourceSnapshot:
     return HostSemanticRecallSourceSnapshot.from_mapping(
         {
@@ -270,6 +295,26 @@ def test_environment_binding_uses_only_dedicated_obs_token() -> None:
 
     assert rejected.status_code == 401
     assert accepted.status_code == 200
+
+
+def test_environment_binding_accepts_shared_token_file(tmp_path) -> None:
+    token_file = tmp_path / "host.obs-read.token"
+    token_file.write_text("shared-file-token\n", encoding="utf-8")
+    ports = HostObsReadPorts.from_environment(
+        mode_source_reader=_mode,
+        capability_forge_source_reader=_capability,
+        semantic_recall_source_reader=_semantic,
+        governance_source_reader=_governance,
+        runtime_source_reader=_runtime,
+        environ={"HOST_OBS_READ_TOKEN_FILE": str(token_file)},
+    )
+
+    response = TestClient(_app(ports)).get(
+        "/internal/obs-sources/runtime",
+        headers={"X-Internal-Token": "shared-file-token"},
+    )
+
+    assert response.status_code == 200
 
 
 def test_host_app_factory_forwards_the_read_ports_to_the_router_registry(

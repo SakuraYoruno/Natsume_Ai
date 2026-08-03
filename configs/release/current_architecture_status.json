@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-03",
-  "commit_scope": "DUAL_STACK_P0_AND_MONITOR_RUNTIME_PROJECTION_CLOSURE",
+  "commit_scope": "DUAL_STACK_P0_AND_MONITOR_LIVE_PROJECTION_CLOSURE",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -92,9 +92,21 @@
       "canonical_runtime_direct_fallback": true,
       "trace_feed_required_for_runtime_visibility": false,
       "unchanged_trace_history_rewritten_each_wave": false,
-      "projection_wave_observed": "SUCCESS_NO_FAILED_JOBS",
+      "projection_wave_observed": "LIVE_COCKPIT_PROJECTIONS_HEALTHY",
       "projection_wave_not_due_jobs_are_skipped": true,
-      "normal_browser_pending_connection_labels": 0
+      "normal_browser_pending_connection_labels": 0,
+      "organ_tribe_total_agents": 23,
+      "scheduler_clock_active": true,
+      "empty_background_tick_labels": 0,
+      "main_chain_break_labels": 0
+    },
+    "monitor_capability_forge_projection": {
+      "status": "PASS_LOCAL_REAL_BACKEND",
+      "host_obs_credential_mode": "ACL_PROTECTED_RUNTIME_FILE",
+      "producer_min_interval_ms": 15000,
+      "reader_max_age_ms": 120000,
+      "raw_error_json_exposed": false,
+      "normal_browser_unavailable_labels": 0
     },
     "monitor_retired_write_surfaces": {
       "status": "READ_ONLY_TRUTHFUL",

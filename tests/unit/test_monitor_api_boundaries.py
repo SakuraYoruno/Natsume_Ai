@@ -4327,6 +4327,9 @@ def test_capability_forge_unavailable_is_visible_at_every_stats_consumer() -> No
     risk_bar = (
         OPERATIONS_COMPONENTS / "ForgeRiskActionBar.jsx"
     ).read_text(encoding="utf-8")
+    forge_error_model = (
+        MONITOR_SRC / "features" / "operations" / "forgeProjectionError.js"
+    ).read_text(encoding="utf-8")
     insights_section = (
         OBSERVABILITY_COMPONENTS
         / "insights"
@@ -4342,7 +4345,9 @@ def test_capability_forge_unavailable_is_visible_at_every_stats_consumer() -> No
 
     assert "queryError: capabilityGapError" in layout
     assert "capabilityGapError={capabilityGapError}" in layout
-    assert "Capability Forge unavailable" in risk_bar
+    assert "describeForgeProjectionError" in risk_bar
+    assert "能力演化投影暂不可用" in forge_error_model
+    assert "String(capabilityGapError" not in risk_bar
     assert "Capability Forge projection unavailable" in insights_section
     assert "capabilityGapError: capabilityGapResult.error" in alerts_queries
     assert "Capability Forge projection unavailable" in alerts_surface

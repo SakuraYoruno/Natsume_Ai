@@ -140,6 +140,21 @@ npx playwright test e2e/operator-session-live.spec.js
 
 最后一项必须连接真实 Nginx Monitor 与 OBS，不允许 Playwright route stub。断言同时覆盖页面状态、canonical Runtime Snapshot、HTTP Cookie authority 和健康 WebSocket；Life Body 健康时还必须内嵌同一 Runtime。聚合短暂重建或过期时，页面必须使用 direct Runtime，不能重新显示“待连接／Runtime 待恢复”。
 
+能力投影与主链状态还必须覆盖以下真实回归：
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_ne01_obs_d3_explicit_projection_ports.py `
+  tests/unit/test_ne01_obs_d4_host_read_transport.py `
+  tests/unit/test_ne01_obs_d5_host_source_routes.py `
+  tests/unit/test_ne01_obs_d5_host_source_composition.py `
+  tests/unit/test_ne01_obs_d7b_life_body_source.py `
+  tests/unit/test_ne01_obs_projection_supervision.py `
+  tests/unit/test_runtime_startup_script_composition.py
+```
+
+真实浏览器必须断言 Capability Forge 不出现原始 JSON 或过期横幅；`/obs/life-body` 的 `organTribeData` 必须包含正数 Agent、活跃 Host scheduler clock 和非零 `last_tick_ms`；数字生命主链不得显示“主链存在断点”或空的“后台 tick”。这些断言已写入 `e2e/operator-session-live.spec.js`，必须连接运行中的 Nginx／OBS 执行，不能使用 fixture。
+
 ## 9. 状态判定
 
 - `PASS`：全部强制测试和适用真实集成通过。

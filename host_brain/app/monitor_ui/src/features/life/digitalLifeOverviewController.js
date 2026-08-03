@@ -33,6 +33,7 @@ export function useDigitalLifeOverviewController() {
   const {
     vtsData,
     servicesData,
+    organTribeData,
     capabilityGapData,
     capabilityGapProjection,
     humanoidLoopData,
@@ -122,6 +123,7 @@ export function useDigitalLifeOverviewController() {
       lifeBodyModel,
       lifeBodyDerived,
       wallClockSoakData: wallClockSoakQuery.data,
+      organTribeData,
       hasRuntimeSnapshot,
       hasMemoryData,
       hasMemorySamples,
@@ -147,6 +149,7 @@ export function useDigitalLifeOverviewController() {
       lifeBodyDerived,
       lifeBodyModel,
       nonLiveSlots,
+      organTribeData,
       replyPosture,
       riskLevel,
       runtimeAlerts,

@@ -315,6 +315,18 @@ function Test-SensitiveRuntimeEnvEntry {
   ) {
     return $false
   }
+  # This value is an absolute path to an ACL-protected local credential, not
+  # the credential itself.  Detached Host and OBS processes need the same
+  # reference after restart; the raw token remains outside this snapshot.
+  if (
+    [string]::Equals(
+      $normalizedName,
+      "HOST_OBS_READ_TOKEN_FILE",
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+  ) {
+    return $false
+  }
   # Neo4j direct auth is an indivisible runtime credential.  The password is
   # intentionally excluded below, so retaining only its username would create
   # an unusable half-credential when this snapshot is reused.  Persist the
@@ -461,6 +473,59 @@ function New-OperatorSessionToken {
     $generator.Dispose()
   }
   return [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+}
+
+function Ensure-HostObsReadTokenFile {
+  param(
+    [string]$ResolvedRuntimeRoot,
+    [hashtable]$EnvValues
+  )
+
+  $configuredPath = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_OBS_READ_TOKEN_FILE" `
+    -DefaultValue (Join-Path $ResolvedRuntimeRoot "host.obs-read.token")
+  $candidate = [Environment]::ExpandEnvironmentVariables(([string]$configuredPath).Trim())
+  if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+    $candidate = Join-Path $ResolvedRuntimeRoot $candidate
+  }
+  $tokenPath = [System.IO.Path]::GetFullPath($candidate)
+  $parent = [System.IO.Path]::GetDirectoryName($tokenPath)
+  Ensure-Directory -Path $parent
+
+  if (Test-Path -LiteralPath $tokenPath -PathType Leaf) {
+    $token = [System.IO.File]::ReadAllText($tokenPath).Trim()
+  } else {
+    $token = Get-EnvSetting `
+      -Values $EnvValues `
+      -Name "HOST_OBS_READ_TOKEN" `
+      -DefaultValue ""
+    if ([string]::IsNullOrWhiteSpace($token)) {
+      $token = New-OperatorSessionToken
+    }
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tokenPath, "$token`r`n", $encoding)
+  }
+
+  if (
+    [string]::IsNullOrWhiteSpace($token) -or
+    $token.Length -gt 4096 -or
+    $token -match '\s'
+  ) {
+    throw "HOST_OBS_READ_TOKEN_FILE_INVALID"
+  }
+
+  $principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $grant = "{0}:(F)" -f $principal
+  & icacls.exe $tokenPath /inheritance:r /grant:r $grant | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "HOST_OBS_READ_TOKEN_FILE_ACL_FAILED"
+  }
+
+  $resolvedPath = (Resolve-Path -LiteralPath $tokenPath).Path
+  $env:HOST_OBS_READ_TOKEN_FILE = $resolvedPath
+  $EnvValues["HOST_OBS_READ_TOKEN_FILE"] = $resolvedPath
+  return $resolvedPath
 }
 
 function Ensure-LocalOperatorSession {
@@ -1440,6 +1505,9 @@ if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
+$hostObsReadTokenFile = Ensure-HostObsReadTokenFile `
+  -ResolvedRuntimeRoot $RuntimeRoot `
+  -EnvValues $envValues
 $runtimeSecretEnvFile = Ensure-SchedulerClockSecretEnvFile `
   -ResolvedRuntimeRoot $RuntimeRoot `
   -EnvValues $envValues `
@@ -2192,6 +2260,8 @@ $result = [ordered]@{
   runtime_root = $RuntimeRoot
   agent_workspace_root = $resolvedAgentWorkspaceRoot
   runtime_env_file = $runtimeEnvFile
+  host_obs_read_auth_configured = [bool]$hostObsReadTokenFile
+  host_obs_read_token_file = $hostObsReadTokenFile
   runtime_secret_env_configured = [bool]$runtimeSecretEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog

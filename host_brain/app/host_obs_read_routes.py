@@ -20,6 +20,9 @@ from natsume_contracts.operator import (
     HostSemanticRecallSourceSnapshot,
 )
 from host_brain.observability.projection_store import public_projection_payload
+from host_brain.app.observability_runtime.host_read_credentials import (
+    resolve_host_obs_read_token,
+)
 
 
 HOST_OBS_READ_AUTH_NOT_CONFIGURED = "HOST_OBS_READ_AUTH_NOT_CONFIGURED"
@@ -90,7 +93,7 @@ class HostObsReadPorts:
             semantic_recall_source_reader=semantic_recall_source_reader,
             governance_source_reader=governance_source_reader,
             runtime_source_reader=runtime_source_reader,
-            token_digest=_token_digest(str(source.get("HOST_OBS_READ_TOKEN") or "")),
+            token_digest=_token_digest(resolve_host_obs_read_token(source)),
         )
 
     @classmethod

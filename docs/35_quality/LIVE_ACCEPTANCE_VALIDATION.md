@@ -74,3 +74,18 @@ Gateway 的公开 `/v1/gateway/stats` 仍按合同返回 `GW_ADMIN_AUTH_UNAVAILA
 加载修复代码并重启真实 Host、OBS 与 Nginx Monitor 后，projection daemon 波次达到 22/22 成功；SQLite 中 `digital_life_runtime_snapshot`、`digital_life_overview_snapshot`、`insights_summary_snapshot` 和 `life_body_snapshot` 均为 `HEALTHY`。无预置 Cookie 的普通 Chrome 已验证：页面无“待连接”、无“Runtime 待恢复”，`/obs/life-body` 为 `available=true` 且包含真实 Runtime Snapshot，HTTP 与 WebSocket 仍使用同一 operator session。远端 Edge 未因本修复启动或重启。
 
 这是 Monitor 实时投影缺陷的闭环，不改变完整数字生命验收仍为 `INCOMPLETE` 的结论。
+
+## 2026-08-03 能力投影与数字生命主链复核
+
+再次以真实 Nginx 页面复核时发现两个后续问题：顶部直接展示 Capability Forge 503 的 JSON；数字生命主链仍只消费旧 soak 摘要，显示“主链存在断点、3/8、idle tick --”。根因不是远端 Edge，而是 Host→OBS 只读凭据未形成可重启的文件 authority、能力读模型 15 秒有效期短于完整串行投影波次，以及慢 Task Runtime 回调在 lease 到期后饿死排在后面的 Life Body 聚合。
+
+本轮完成以下收口：
+
+- `start_host_side.ps1` 在隔离 RuntimeRoot 生成／复用 ACL 保护的 Host→OBS Token 文件；公开 runtime env 只保留文件路径，Host route 与 Obs transport 同时支持文件读取和旧环境变量兼容。
+- Host 五条只读 source 的默认超时调整为 5 秒，并在全部 provider 返回后封装响应时钟；明确的未来边界字段可以晚于 observed time，普通 evidence timestamp 仍 fail-closed。
+- Capability Forge 继续按 15 秒尽力刷新，但读取 freshness 调整为 120 秒，覆盖一轮真实 22-job 串行投影；前端即使收到失败也只展示可读 reason，不再把原始 JSON 暴露到横幅。
+- Projection daemon 在无竞争 leader 时可以重新取得过期租约，且 Life Body／Overview／Insights 排在独立慢 Task Runtime 与 Trace 之前。`life_body_snapshot` 直接携带当前 `organ_tribe_status`；主链使用 23 个实时 Agent 和 Host scheduler clock，不再依赖旧 soak 推断。
+
+真实重启 Host、OBS 与 Nginx 后，Chroma、Neo4j、Redis 探针均为 ready；SQLite 中 `capability_forge_operator`、`organ_tribe_status`、`life_body_snapshot` 均为 `HEALTHY`。无预置 Cookie 的真实 Chrome 验证 `/obs/life-body` 返回 23 个 Agent、`clock_active=true`、`last_tick_ms>0`，页面不存在原始 `reason_code`、能力投影不可用横幅、“主链存在断点”或空后台 tick。远端 Edge 未启动或重启。
+
+定向回归覆盖 Python Host source／投影／Life Body／启动脚本、Monitor 27 项 read-model、生产构建和真实 Nginx Playwright。该结论只关闭截图中的两个 Monitor 问题；人格上下文样本、门控告警、VTS 热键、barge-in、多轮盲测和实时性能仍按各自状态处理，整体保持 `INCOMPLETE`。

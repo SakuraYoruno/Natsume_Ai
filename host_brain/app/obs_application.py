@@ -53,11 +53,11 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "semantic-recall-stats",
     "sessions",
     "skill-pack-catalog",
-    "task-runtime",
-    "trace",
     "digital-life-overview",
     "insights-summary",
     "life-body",
+    "task-runtime",
+    "trace",
 )
 
 @dataclass(frozen=True, slots=True)

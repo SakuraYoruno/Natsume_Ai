@@ -10,7 +10,14 @@ from .projection_runtime import projection_meta
 
 CAPABILITY_FORGE_OPERATOR_KIND = "capability_forge_operator"
 CAPABILITY_FORGE_OPERATOR_KEY = "current"
-CAPABILITY_FORGE_OPERATOR_MAX_AGE_MS = 15_000
+# The standalone Obs daemon refreshes all projections in one bounded,
+# sequential wave.  Capability Forge itself may take a few seconds and the
+# complete wave can legitimately take longer than its 15-second scheduling
+# interval.  A 15-second read TTL therefore marked a healthy projection stale
+# before the next wave reached it.  Keep the read window aligned with the
+# standard operator projection window while the producer cadence remains
+# 15 seconds (best effort).
+CAPABILITY_FORGE_OPERATOR_MAX_AGE_MS = 120_000
 
 
 def read_capability_forge_projection_from_store(

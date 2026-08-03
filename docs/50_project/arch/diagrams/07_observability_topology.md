@@ -30,6 +30,7 @@ flowchart LR
 
     OBS["OBS :18082"]
     HOST["Host query / command ports :18080"]
+    TOKEN["RuntimeRoot protected token file"]
     MON["Nginx Monitor :18180"]
     USER["Operator"]
 
@@ -50,11 +51,15 @@ flowchart LR
     USER --> MON
     MON --> OBS
     MON --> HOST
+    TOKEN --> HOST
+    TOKEN --> OBS
 ```
 
 Projection 可以重建、缓存或降级；其丢失不得导致 canonical event、Task、Review 或 receipt 丢失。当前 OBS 注册 22 个显式 projection job，路由不通过全局 query-projection locator 重新发现 store。
 
-实时生命状态与诊断聚合分层处理：`digital_life_runtime_snapshot` 是 Cockpit 的 canonical Runtime 读源；`life_body_snapshot` 是 Runtime、Overview、Insights 与可选 Trace Feed 组成的 360 分钟派生聚合。Monitor 并行读取两者，派生聚合重建时保留 direct Runtime，不把“诊断数据暂缺”显示成“生命体未连接”。投影波次先刷新 Runtime／Overview／Insights／Life Body，再处理历史 Trace；Trace 先聚合 cursor，只读取发生变化且进入本波限额的 request 明细。60／360 分钟聚合使用 180 秒 freshness，Runtime 仍使用 45 秒实时窗口。
+实时生命状态与诊断聚合分层处理：`digital_life_runtime_snapshot` 是 Cockpit 的 canonical Runtime 读源；`life_body_snapshot` 是 Runtime、Overview、Insights、当前 `organ_tribe_status` 与可选 Trace Feed 组成的 360 分钟派生聚合。Monitor 并行读取两者，派生聚合重建时保留 direct Runtime，不把“诊断数据暂缺”显示成“生命体未连接”。投影波次先刷新 Host-owned 能力／治理／器官投影，再刷新 Runtime／Overview／Insights／Life Body，最后处理独立且可能较慢的 Task Runtime 与历史 Trace；慢任务越过 lease 时仅在没有竞争 owner 的前提下重新取得同一租约，不能饿死后续实时投影。Trace 先聚合 cursor，只读取发生变化且进入本波限额的 request 明细。60／360 分钟聚合使用 180 秒 freshness，Runtime 仍使用 45 秒实时窗口；Capability Forge 的读取窗口为 120 秒，以覆盖完整串行波次，其生产调度仍按 15 秒尽力执行。
+
+Host→OBS 使用独立只读凭据。启动器在隔离 `RuntimeRoot` 写入受 ACL 保护的 Token 文件，两个进程只接收文件路径；旧的直接环境变量仍兼容，但不是默认交付方式。Host source 响应完成后重新捕获 envelope 时间，避免同一请求内较慢 provider 的 evidence timestamp 比 envelope 快几毫秒而被合同误判。
 
 ## Monitor Overview
 
@@ -132,3 +137,4 @@ Host 健康不代表 OBS、Monitor、Gateway、Edge、模型、Neo4j、Chroma �
 6. endpoint 数量是当前机器事实，不是永久公共合同。
 7. 跨节点 health observation 必须按 source cursor／freshness 单调推进，较新的 Host fallback 不得覆盖更具体的 Edge observation。
 8. Trace 是 Life Body 的可选诊断增强源；Trace 缺失或重建不得清空 canonical Runtime。
+9. Life Body 的器官数量和后台 tick 来自当前 `organ_tribe_status`，不得以历史 soak 文件或墙钟占位值冒充实时状态。

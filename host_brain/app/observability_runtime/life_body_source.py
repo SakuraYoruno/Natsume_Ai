@@ -14,6 +14,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.app.observability_runtime.health_device_projection import (
+    ORGAN_TRIBE_KEY,
+    ORGAN_TRIBE_KIND,
+    ORGAN_TRIBE_MAX_AGE_MS,
+)
 from host_brain.app.observability_runtime.process_state_projection import (
     DIGITAL_LIFE_MAX_AGE_MS,
     DIGITAL_LIFE_OVERVIEW_KIND,
@@ -141,6 +146,12 @@ _TRACE_FEED_ROOT = _RootSpec(
     TRACE_FEED_INDEX_KEY,
     TRACE_FEED_MAX_AGE_MS,
     allow_zero_timestamp=True,
+)
+_ORGAN_TRIBE_ROOT = _RootSpec(
+    "organ-tribe",
+    ORGAN_TRIBE_KIND,
+    ORGAN_TRIBE_KEY,
+    ORGAN_TRIBE_MAX_AGE_MS,
 )
 
 
@@ -863,10 +874,28 @@ class LifeBodySourceReader:
                 source_cursor=0,
                 freshness_ts_ms=0,
             )
+        organ_tribe_reason: str | None = None
+        try:
+            roots[_ORGAN_TRIBE_ROOT.name] = _root_read(
+                self.store,
+                _ORGAN_TRIBE_ROOT,
+                now_ms=now,
+            )
+        except LifeBodySourceUnavailable as exc:
+            # The body overview remains useful while Host runtime state is
+            # recovering, but the missing live organ/tick source must remain
+            # explicit instead of falling back to an old wall-clock artifact.
+            organ_tribe_reason = exc.reason_code
+            roots[_ORGAN_TRIBE_ROOT.name] = _RootRead(
+                payload={},
+                source_cursor=0,
+                freshness_ts_ms=0,
+            )
         runtime = roots["runtime-snapshot"].payload
         overview = roots["digital-life-overview"].payload
         insights = roots["insights-summary"].payload
         trace_feed = roots["trace-feed"].payload
+        organ_tribe = roots["organ-tribe"].payload
         start_ms = max(0, now - self.window_minutes * 60_000)
         lineage = _lineage_rows(
             self.query_repository,
@@ -924,6 +953,7 @@ class LifeBodySourceReader:
             _non_negative_int(overview.get("timestamp")),
             _non_negative_int(insights.get("timestamp")),
             _non_negative_int(trace_feed.get("timestamp")),
+            _non_negative_int(organ_tribe.get("timestamp")),
             *(
                 _row_timestamp(row)
                 for rows in lineage.values()
@@ -954,6 +984,7 @@ class LifeBodySourceReader:
             "memoryData": _mapping(overview.get("memoryData")) or None,
             "servicesData": _mapping(overview.get("servicesData")) or None,
             "subsystemsData": _mapping(overview.get("subsystemsData")) or None,
+            "organTribeData": _mapping(organ_tribe) or None,
             "capabilityGapData": _mapping(overview.get("capabilityGapData")) or None,
             "capabilityGapProjection": _mapping(overview.get("capabilityGapProjection")),
             "humanoidLoopData": _mapping(overview.get("humanoidLoopData")) or None,
@@ -1035,7 +1066,11 @@ class LifeBodySourceReader:
                     "trace-feed": {
                         "available": trace_feed_reason is None,
                         "reason_code": trace_feed_reason,
-                    }
+                    },
+                    "organ-tribe": {
+                        "available": organ_tribe_reason is None,
+                        "reason_code": organ_tribe_reason,
+                    },
                 },
                 "lineageLedger": {
                     "memoryRows": len(lineage["memory_ops_log"]),

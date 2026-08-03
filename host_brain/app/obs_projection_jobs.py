@@ -1412,10 +1412,14 @@ def build_explicit_obs_projection_callbacks(
         "semantic-recall-stats",
         "sessions",
         "skill-pack-catalog",
-        "task-runtime",
+        # The live cockpit projections must not sit behind the comparatively
+        # expensive Task Runtime materializer.  They do not consume its
+        # output and must remain fresh even when Task Runtime reconciliation
+        # is slow or fails independently.
         "digital-life-overview",
         "insights-summary",
         "life-body",
+        "task-runtime",
         # Trace history can be comparatively expensive.  It is enrichment,
         # not a prerequisite for the canonical Runtime/Life Body snapshot, so
         # keep it last to prevent historical reconciliation from starving the

@@ -15,6 +15,10 @@ from host_brain.app.observability_runtime.life_body_source import (
     LIFE_BODY_ROOT_NOT_READY,
     LIFE_BODY_ROOT_STALE,
 )
+from host_brain.app.observability_runtime.health_device_projection import (
+    ORGAN_TRIBE_KEY,
+    ORGAN_TRIBE_KIND,
+)
 from host_brain.app.observability_runtime.process_state_projection import (
     DIGITAL_LIFE_OVERVIEW_KIND,
     INSIGHTS_SUMMARY_KIND,
@@ -137,6 +141,25 @@ def _seed_roots(
             },
             now_ms,
         ),
+        "organ-tribe": (
+            ORGAN_TRIBE_KIND,
+            ORGAN_TRIBE_KEY,
+            {
+                "total_agents": 23,
+                "active_agents": 0,
+                "continuous_system_active": True,
+                "timestamp": now_ms,
+                "host_scheduler": {
+                    "clock_active": True,
+                    "clock": {
+                        "active": True,
+                        "last_tick_ms": now_ms,
+                        "next_retry_at_ms": now_ms + 60_000,
+                    },
+                },
+            },
+            now_ms,
+        ),
     }
     for offset, (name, (kind, key, payload, freshness)) in enumerate(
         roots.items(),
@@ -191,6 +214,7 @@ def test_two_obs_apps_cold_read_only_their_own_sqlite_roots(
         assert first_body.degraded_state is ProjectionDegradedState.HEALTHY
         assert first_body.payload["runtimeSnapshot"]["persona_user_id"] == "first"
         assert first_body.payload["memoryData"]["marker"] == "first"
+        assert first_body.payload["organTribeData"]["total_agents"] == 23
         assert second_body.payload["runtimeSnapshot"]["persona_user_id"] == "second"
         assert second_body.payload["memoryData"]["marker"] == "second"
         assert "second" not in json.dumps(first_body.payload, ensure_ascii=False)
@@ -399,6 +423,10 @@ def test_life_body_keeps_runtime_live_when_optional_trace_feed_is_missing(
             "available": False,
             "reason_code": LIFE_BODY_ROOT_NOT_READY,
         }
+        assert document.payload["meta"]["optionalSourceStatus"]["organ-tribe"] == {
+            "available": True,
+            "reason_code": None,
+        }
     finally:
         ports.close_owned_resources()
 
@@ -417,6 +445,7 @@ def test_life_body_runs_before_trace_after_its_required_prerequisites(
             "health-passive",
             "remaining-operator-queries",
             "operator-live-state",
+            "organ-tribe",
             "runtime-snapshot",
             "digital-life-overview",
             "insights-summary",

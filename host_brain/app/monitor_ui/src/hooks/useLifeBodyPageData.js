@@ -56,6 +56,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const memoryData = data.memoryData || null
   const servicesData = data.servicesData || null
   const subsystemsData = data.subsystemsData || null
+  const organTribeData = data.organTribeData || null
   const capabilityGapData = data.capabilityGapData || null
   const capabilityGapProjection = data.capabilityGapProjection || {}
   const humanoidLoopData = data.humanoidLoopData || null
@@ -289,6 +290,7 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
     memoryData,
     servicesData,
     subsystemsData,
+    organTribeData,
     capabilityGapData,
     capabilityGapProjection,
     humanoidLoopData,
