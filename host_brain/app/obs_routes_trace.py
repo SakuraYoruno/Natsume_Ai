@@ -73,6 +73,10 @@ _TRACE_BUILD_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_TIMEOUT_SEC", 3.5, minimu
 _TRACE_BUILD_FALLBACK_TIMEOUT_SEC = _env_float("OBS_TRACE_BUILD_FALLBACK_TIMEOUT_SEC", 1.5, minimum=0.5)
 _TRACE_OPTIONAL_STAGE_TIMEOUT_SEC = _env_float("OBS_TRACE_OPTIONAL_STAGE_TIMEOUT_SEC", 0.6, minimum=0.1)
 _TRACE_BUILD_SLOW_LOG_MS = int(_env_float("OBS_TRACE_BUILD_SLOW_LOG_MS", 1200.0, minimum=200.0))
+_TRACE_REFRESH_BATCH_LIMIT = int(
+    _env_float("OBS_TRACE_REFRESH_BATCH_LIMIT", 128.0, minimum=1.0)
+)
+TRACE_HISTORY_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000
 TRACE_FEED_DEFAULT_LIMIT = 6
 TRACE_FEED_DEFAULT_WINDOW_MINUTES = 1440
 TRACE_FEED_DEFAULT_ACTIVE_WITHIN_MS = 60_000
@@ -188,7 +192,15 @@ async def get_trace(request_id: str, request: Request):
         TRACE_KIND,
         request_id,
     )
-    meta = projection_meta(TRACE_KIND, request_id, document, max_age_ms=15000)
+    # Per-request traces are immutable history.  They do not become invalid
+    # merely because no new event arrived within fifteen seconds; only the
+    # separate live feed needs that short freshness contract.
+    meta = projection_meta(
+        TRACE_KIND,
+        request_id,
+        document,
+        max_age_ms=TRACE_HISTORY_MAX_AGE_MS,
+    )
     if document is None or not meta["available"]:
         return TraceResponse(
             request_id=request_id,
@@ -248,8 +260,41 @@ def refresh_trace_query_projections(
         evidence_repository = GraphEvidenceRepository.from_ledger(ledger)
     except Exception:
         evidence_repository = None
+    if evidence_repository is not None:
+        try:
+            stream_cursor_rows = evidence_repository.list_stream_event_cursors_by_time(
+                since_ms=since,
+                end_ms=now,
+            )
+        except Exception:
+            stream_cursor_rows = []
+        for row in stream_cursor_rows:
+            if not isinstance(row, dict):
+                continue
+            request_id = str(row.get("request_id") or "").strip()
+            if not request_id:
+                continue
+            request_cursors[request_id] = max(
+                request_cursors.get(request_id, 0),
+                int(row.get("ts_ms") or 0),
+            )
+
+    candidates: list[tuple[str, int]] = []
+    unchanged = 0
+    for request_id, source_cursor in request_cursors.items():
+        try:
+            current = store.get(TRACE_KIND, request_id)
+        except Exception:
+            current = None
+        if current is not None and current.source_cursor >= source_cursor:
+            unchanged += 1
+            continue
+        candidates.append((request_id, source_cursor))
+    candidates.sort(key=lambda item: (-int(item[1]), item[0]))
+    deferred = max(0, len(candidates) - _TRACE_REFRESH_BATCH_LIMIT)
+
     for request_index, (request_id, source_cursor) in enumerate(
-        sorted(request_cursors.items()),
+        candidates[:_TRACE_REFRESH_BATCH_LIMIT],
         start=1,
     ):
         if request_index == 1 or request_index % 64 == 0:
@@ -257,27 +302,16 @@ def refresh_trace_query_projections(
             if callable(renew_bound_lease):
                 renew_bound_lease()
         try:
-            current = store.get(TRACE_KIND, request_id)
-            if current is not None and current.source_cursor >= source_cursor:
-                store.upsert(
-                    TRACE_KIND,
-                    request_id,
-                    current.payload,
-                    source_cursor=current.source_cursor,
-                    source_digest=current.source_digest,
-                    source_ref="trace-background-reconcile",
-                )
-            else:
-                source = trace_source(request_id, build_full(ledger, request_id))
-                upsert_monotonic_projection(
-                    store,
-                    TRACE_KIND,
-                    request_id,
-                    source.payload,
-                    observed_cursor=source_cursor,
-                    source_ref="trace-background-worker",
-                )
-                refreshed += 1
+            source = trace_source(request_id, build_full(ledger, request_id))
+            upsert_monotonic_projection(
+                store,
+                TRACE_KIND,
+                request_id,
+                source.payload,
+                observed_cursor=source_cursor,
+                source_ref="trace-background-worker",
+            )
+            refreshed += 1
         except Exception as exc:
             failed += 1
             if store.get(TRACE_KIND, request_id) is not None:
@@ -289,7 +323,9 @@ def refresh_trace_query_projections(
                 )
         if evidence_repository is not None:
             try:
-                stream_rows = evidence_repository.list_stream_events(request_id=request_id)
+                stream_rows = evidence_repository.list_stream_events(
+                    request_id=request_id,
+                )
             except Exception:
                 stream_rows = []
             stream_events = [
@@ -396,7 +432,12 @@ def refresh_trace_query_projections(
                 state=ProjectionDegradedState.SOURCE_UNAVAILABLE,
                 detail=f"{type(exc).__name__}: {exc}",
             )
-    return {"refreshed_count": refreshed, "failed_count": failed}
+    return {
+        "refreshed_count": refreshed,
+        "unchanged_count": unchanged,
+        "deferred_count": deferred,
+        "failed_count": failed,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +451,12 @@ def get_trace_stream_events(request_id: str, request: Request):
         TRACE_STREAM_KIND,
         request_id,
     )
-    meta = projection_meta(TRACE_STREAM_KIND, request_id, document, max_age_ms=15000)
+    meta = projection_meta(
+        TRACE_STREAM_KIND,
+        request_id,
+        document,
+        max_age_ms=TRACE_HISTORY_MAX_AGE_MS,
+    )
     rows = list(document.payload.get("events") or []) if document is not None and meta["available"] else []
     events = [StreamEventItem(**dict(row)) for row in rows if isinstance(row, dict)]
     return TraceStreamEventsResponse(

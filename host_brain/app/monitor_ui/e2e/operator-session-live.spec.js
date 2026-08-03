@@ -18,6 +18,8 @@ test('普通本机浏览器自动建立 Monitor 会话并贯通 HTTP 与 WebSock
   expect(bootstrap.status()).toBe(200)
   await expect(page.getByRole('heading', { name: '现在先处理什么' })).toBeVisible()
   await expect(page.getByText('本机控制台尚未连接')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /待连接/ })).toHaveCount(0)
+  await expect(page.getByText('Runtime 待恢复', { exact: true })).toHaveCount(0)
 
   const cookies = await context.cookies(new URL(baseURL).origin)
   const sessionCookie = cookies.find((cookie) => cookie.name === 'natsume_operator_session')
@@ -32,17 +34,39 @@ test('普通本机浏览器自动建立 Monitor 会话并贯通 HTTP 与 WebSock
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
     })
+    const payload = await response.json()
     return {
       ok: response.ok,
       status: response.status,
       contentType: response.headers.get('content-type') || '',
+      hasRuntimeSnapshot: Boolean(payload && typeof payload === 'object'),
     }
   })
   expect(protectedQuery).toMatchObject({
     ok: true,
     status: 200,
+    hasRuntimeSnapshot: true,
   })
   expect(protectedQuery.contentType).toContain('application/json')
+
+  const lifeBodyQuery = await page.evaluate(async () => {
+    const response = await fetch('/obs/life-body?window_minutes=360', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    })
+    const payload = await response.json()
+    return {
+      ok: response.ok,
+      projectionAvailable: payload?.meta?.projection?.available === true,
+      hasRuntimeSnapshot: Boolean(payload?.runtimeSnapshot),
+      reasonCode: String(payload?.meta?.projection?.reason_code || ''),
+    }
+  })
+  expect(lifeBodyQuery.ok).toBe(true)
+  if (lifeBodyQuery.projectionAvailable) {
+    expect(lifeBodyQuery.hasRuntimeSnapshot).toBe(true)
+    expect(lifeBodyQuery.reasonCode).toBe('')
+  }
 
   const websocketResult = await page.evaluate(() => new Promise((resolve) => {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'

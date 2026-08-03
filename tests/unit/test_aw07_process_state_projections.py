@@ -114,6 +114,10 @@ def test_summary_runtime_resource_and_life_gets_never_call_sources(monkeypatch) 
     assert runtime.sys_mode == "normal"
     assert runtime.current_topic == ""
     assert body.meta["projection"]["source_cursor"] == 7
+    assert body.meta["projection"]["available"] is True
+    assert body.meta["projection"]["reason_code"] is None
+    assert projection.SUMMARY_MAX_AGE_MS >= 180_000
+    assert projection.LIFE_BODY_MAX_AGE_MS >= 180_000
     assert timeline.items == []
     assert resource["status"] == "OK"
     assert resource["projection"]["freshness_ts_ms"] > 0

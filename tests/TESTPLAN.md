@@ -125,6 +125,21 @@ $env:MONITOR_UI_SKIP_WEB_SERVER='1'
 npx playwright test e2e/operator-session-live.spec.js
 ```
 
+驾驶舱 Runtime/Life Body 投影回归：
+
+```powershell
+python -m pytest -q tests/unit/test_aw07_process_state_projections.py::test_summary_runtime_resource_and_life_gets_never_call_sources tests/unit/test_ne01_obs_d4_summary_sources.py::test_insights_callback_recovers_after_typed_unavailable_first_wave tests/unit/test_ne01_obs_d7b_life_body_source.py tests/unit/test_obs_trace_projection_incremental.py tests/unit/test_obs_fastapi_app.py::test_obs_fastapi_app_health_ok
+
+cd host_brain/app/monitor_ui
+npx eslint src/hooks/useLifeBodyPageData.js e2e/monitor-canonical-regression.spec.js e2e/operator-session-live.spec.js
+npx playwright test e2e/monitor-canonical-regression.spec.js --grep "Cockpit"
+$env:MONITOR_UI_BASE_URL='http://127.0.0.1:18180/monitor/'
+$env:MONITOR_UI_SKIP_WEB_SERVER='1'
+npx playwright test e2e/operator-session-live.spec.js
+```
+
+最后一项必须连接真实 Nginx Monitor 与 OBS，不允许 Playwright route stub。断言同时覆盖页面状态、canonical Runtime Snapshot、HTTP Cookie authority 和健康 WebSocket；Life Body 健康时还必须内嵌同一 Runtime。聚合短暂重建或过期时，页面必须使用 direct Runtime，不能重新显示“待连接／Runtime 待恢复”。
+
 ## 9. 状态判定
 
 - `PASS`：全部强制测试和适用真实集成通过。

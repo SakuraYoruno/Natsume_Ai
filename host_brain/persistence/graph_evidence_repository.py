@@ -722,7 +722,9 @@ class GraphEvidenceRepository:
         end_ms: int,
         event_types: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        normalized_types = tuple(str(item) for item in (event_types or ()) if str(item))
+        normalized_types = tuple(
+            str(item) for item in (event_types or ()) if str(item)
+        )
         parameters: tuple[Any, ...] = (int(since_ms), int(end_ms))
         sql = """
             SELECT request_id, graph_id, phase, event_type, node_id, chunk, ts_ms
@@ -733,6 +735,29 @@ class GraphEvidenceRepository:
             sql += f" AND event_type IN ({placeholders})"
             parameters += normalized_types
         sql += " ORDER BY ts_ms"
+        with self._connection() as conn:
+            return [dict(row) for row in conn.execute(sql, parameters).fetchall()]
+
+    def list_stream_event_cursors_by_time(
+        self,
+        *,
+        since_ms: int,
+        end_ms: int,
+        event_types: Sequence[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return one latest cursor per request without loading event bodies."""
+
+        normalized_types = tuple(str(item) for item in (event_types or ()) if str(item))
+        parameters: tuple[Any, ...] = (int(since_ms), int(end_ms))
+        sql = """
+            SELECT request_id, MAX(ts_ms) AS ts_ms, COUNT(*) AS event_count
+            FROM stream_events WHERE ts_ms >= ? AND ts_ms <= ?
+        """
+        if normalized_types:
+            placeholders = ",".join("?" for _ in normalized_types)
+            sql += f" AND event_type IN ({placeholders})"
+            parameters += normalized_types
+        sql += " GROUP BY request_id ORDER BY ts_ms"
         with self._connection() as conn:
             return [dict(row) for row in conn.execute(sql, parameters).fetchall()]
 

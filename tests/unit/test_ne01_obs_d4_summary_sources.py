@@ -306,9 +306,12 @@ def test_insights_callback_recovers_after_typed_unavailable_first_wave(
     assert unavailable.payload["source_scope"] == "app-local-query-projection"
     assert unavailable.degraded_state == ProjectionDegradedState.SOURCE_UNAVAILABLE
 
-    store.documents[(AGENT_LOOP_KIND, AGENT_LOOP_INDEX_KEY)] = _ProjectionDocument(
-        {"loops": [], "timestamp": 1}
-    )
+    agent_loop_document = _ProjectionDocument({"loops": [], "timestamp": 1})
+    # Projection waves are serial and routinely take longer than the
+    # route-level 15-second live TTL.  The 60-minute Insights aggregate must
+    # accept an input that is still within its own aggregate freshness budget.
+    agent_loop_document.freshness_ts_ms -= 30_000
+    store.documents[(AGENT_LOOP_KIND, AGENT_LOOP_INDEX_KEY)] = agent_loop_document
     second = callback()
     recovered = store.get(target.kind, target.key)
     assert second["unavailable_document_count"] == 0

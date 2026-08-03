@@ -113,7 +113,7 @@ class _RootRead:
     freshness_ts_ms: int
 
 
-_ROOTS = (
+_REQUIRED_ROOTS = (
     _RootSpec(
         "runtime-snapshot",
         RUNTIME_SNAPSHOT_KIND,
@@ -134,13 +134,13 @@ _ROOTS = (
         SUMMARY_MAX_AGE_MS,
         expected_window_minutes=INSIGHTS_WINDOW_MINUTES,
     ),
-    _RootSpec(
-        "trace-feed",
-        TRACE_FEED_KIND,
-        TRACE_FEED_INDEX_KEY,
-        TRACE_FEED_MAX_AGE_MS,
-        allow_zero_timestamp=True,
-    ),
+)
+_TRACE_FEED_ROOT = _RootSpec(
+    "trace-feed",
+    TRACE_FEED_KIND,
+    TRACE_FEED_INDEX_KEY,
+    TRACE_FEED_MAX_AGE_MS,
+    allow_zero_timestamp=True,
 )
 
 
@@ -844,8 +844,25 @@ class LifeBodySourceReader:
         now = _non_negative_int(self.clock_ms())
         roots = {
             spec.name: _root_read(self.store, spec, now_ms=now)
-            for spec in _ROOTS
+            for spec in _REQUIRED_ROOTS
         }
+        trace_feed_reason: str | None = None
+        try:
+            roots[_TRACE_FEED_ROOT.name] = _root_read(
+                self.store,
+                _TRACE_FEED_ROOT,
+                now_ms=now,
+            )
+        except LifeBodySourceUnavailable as exc:
+            # Trace is historical diagnostic enrichment, not the authority for
+            # whether the Digital Life runtime exists.  A slow trace rebuild
+            # must not blank an otherwise healthy self/runtime snapshot.
+            trace_feed_reason = exc.reason_code
+            roots[_TRACE_FEED_ROOT.name] = _RootRead(
+                payload={"items": [], "count": 0, "timestamp": 0},
+                source_cursor=0,
+                freshness_ts_ms=0,
+            )
         runtime = roots["runtime-snapshot"].payload
         overview = roots["digital-life-overview"].payload
         insights = roots["insights-summary"].payload
@@ -1013,6 +1030,12 @@ class LifeBodySourceReader:
                 "rootEvidenceTimestamp": {
                     name: _non_negative_int(root.payload.get("timestamp"))
                     for name, root in roots.items()
+                },
+                "optionalSourceStatus": {
+                    "trace-feed": {
+                        "available": trace_feed_reason is None,
+                        "reason_code": trace_feed_reason,
+                    }
                 },
                 "lineageLedger": {
                     "memoryRows": len(lineage["memory_ops_log"]),

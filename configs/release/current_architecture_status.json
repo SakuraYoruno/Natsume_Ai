@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-03",
-  "commit_scope": "DUAL_STACK_P0_AND_MONITOR_SESSION_CLOSURE",
+  "commit_scope": "DUAL_STACK_P0_AND_MONITOR_RUNTIME_PROJECTION_CLOSURE",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -87,6 +87,15 @@
       "http_query": "PASS",
       "health_websocket": "PASS"
     },
+    "monitor_life_body_projection": {
+      "status": "PASS_LOCAL_REAL_BACKEND",
+      "canonical_runtime_direct_fallback": true,
+      "trace_feed_required_for_runtime_visibility": false,
+      "unchanged_trace_history_rewritten_each_wave": false,
+      "projection_wave_observed": "SUCCESS_NO_FAILED_JOBS",
+      "projection_wave_not_due_jobs_are_skipped": true,
+      "normal_browser_pending_connection_labels": 0
+    },
     "monitor_retired_write_surfaces": {
       "status": "READ_ONLY_TRUTHFUL",
       "retired_commands_exposed_as_clickable": 0,
@@ -101,7 +110,7 @@
   "acceptance": {
     "dual_stack_p0_gateway_runtime_health": "PASS",
     "external_services_restart_persistence": "PASS",
-    "monitor_real_backend_e2e": "PASS_NORMAL_BROWSER_HTTP_AND_WEBSOCKET",
+    "monitor_real_backend_e2e": "PASS_NORMAL_BROWSER_RUNTIME_LIFE_BODY_HTTP_AND_WEBSOCKET",
     "local_cuda_voice_variant_b": "PASS",
     "target_edge_tts_avatar": "ACCEPTANCE_PENDING_EXTERNAL",
     "docker_host_obs_monitor_gateway_full_stack": "PASS_LOCAL_MANDATORY",
@@ -119,7 +128,9 @@
       "react_router": "UPSTREAM_SAFE_RELEASE_PENDING; LOOPBACK_CSR_NO_SSR_HYDRATION"
     },
     "cockpit_default_page_height_1440x1000_px": 5159,
-    "monitor_minimum_primary_interaction_target_px": 24
+    "monitor_minimum_primary_interaction_target_px": 24,
+    "trace_refresh_batch_limit": 128,
+    "trace_history_route_freshness_days": 30
   },
   "constraints": {
     "remote_edge_must_remain_off_until_user_authorizes": true,

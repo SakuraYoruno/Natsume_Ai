@@ -367,7 +367,43 @@ def test_life_body_missing_invalid_and_stale_roots_fail_closed(
         ports.close_owned_resources()
 
 
-def test_life_body_is_last_after_all_direct_and_transitive_prerequisites(
+def test_life_body_keeps_runtime_live_when_optional_trace_feed_is_missing(
+    tmp_path: Path,
+) -> None:
+    ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / "d7b-optional-trace.sqlite3",
+    )
+    now_ms = int(time.time() * 1000)
+    try:
+        _seed_roots(
+            ports.query_projection_store,
+            marker="optional-trace",
+            now_ms=now_ms,
+            omit="trace-feed",
+        )
+
+        result = _life_body_job(ports).callback()
+
+        assert result["unavailable_document_count"] == 0
+        document = ports.query_projection_store.get(
+            LIFE_BODY_KIND,
+            window_key(360),
+        )
+        assert document is not None
+        assert document.degraded_state is ProjectionDegradedState.HEALTHY
+        assert document.payload["runtimeSnapshot"]["persona_user_id"] == (
+            "optional-trace"
+        )
+        assert document.payload["derived"]["activeTraceFeedCount"] == 0
+        assert document.payload["meta"]["optionalSourceStatus"]["trace-feed"] == {
+            "available": False,
+            "reason_code": LIFE_BODY_ROOT_NOT_READY,
+        }
+    finally:
+        ports.close_owned_resources()
+
+
+def test_life_body_runs_before_trace_after_its_required_prerequisites(
     tmp_path: Path,
 ) -> None:
     ports = build_default_obs_application_ports(
@@ -376,13 +412,12 @@ def test_life_body_is_last_after_all_direct_and_transitive_prerequisites(
     try:
         names = [job.name for job in ports.projection_jobs]
         life_body_index = names.index("life-body")
-        assert life_body_index == len(names) - 1
+        assert life_body_index < names.index("trace")
         for prerequisite in (
             "health-passive",
             "remaining-operator-queries",
             "operator-live-state",
             "runtime-snapshot",
-            "trace",
             "digital-life-overview",
             "insights-summary",
         ):

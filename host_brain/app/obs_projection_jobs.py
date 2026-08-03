@@ -1413,10 +1413,14 @@ def build_explicit_obs_projection_callbacks(
         "sessions",
         "skill-pack-catalog",
         "task-runtime",
-        "trace",
         "digital-life-overview",
         "insights-summary",
         "life-body",
+        # Trace history can be comparatively expensive.  It is enrichment,
+        # not a prerequisite for the canonical Runtime/Life Body snapshot, so
+        # keep it last to prevent historical reconciliation from starving the
+        # live cockpit projections.
+        "trace",
     )
     if set(callbacks) != set(required_order):
         raise RuntimeError("OBS_EXPLICIT_PROJECTION_COVERAGE_INVALID")

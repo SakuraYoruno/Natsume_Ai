@@ -1109,6 +1109,45 @@ test.describe('Canonical monitor regression coverage', () => {
     await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
   })
 
+  test('Cockpit keeps a healthy direct Runtime visible while Life Body rebuilds', async ({ page, baseURL }) => {
+    await stubCockpitApis(page)
+    await page.unroute('**/obs/life-body**')
+    await page.route('**/obs/life-body**', (route) => fulfillJson(route, {
+      window_minutes: 360,
+      timestamp: '2026-08-03T14:00:00Z',
+      meta: {
+        projection: {
+          available: false,
+          degraded_state: 'SOURCE_UNAVAILABLE',
+          reason_code: 'OBS_LIFE_BODY_ROOT_STALE',
+        },
+      },
+    }))
+    await page.unroute('**/obs/runtime-snapshot**')
+    let runtimeReads = 0
+    await page.route('**/obs/runtime-snapshot**', (route) => {
+      runtimeReads += 1
+      return fulfillJson(route, {
+        timestamp: 1_785_766_400_000,
+        sys_mode: 'normal',
+        background_runtime: { status: 'healthy' },
+        emotion_context: { emotion_tag: 'CALM' },
+        slot_status: { hard_state: 'live' },
+        runtime_summary: {
+          headline: 'canonical runtime is live',
+          reply_posture: { style: 'steady' },
+        },
+      })
+    })
+
+    await page.goto(monitorUrl(baseURL, '/cockpit'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('canonical runtime is live', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /待连接/ })).toHaveCount(0)
+    await expect(page.getByText('Runtime 待恢复', { exact: true })).toHaveCount(0)
+    await expect.poll(() => runtimeReads).toBeGreaterThan(0)
+  })
+
   test('Life timeline command rail follows filters and clears scope', async ({ page, baseURL }) => {
     await stubLifeTimelineApis(page)
     await page.goto(monitorUrl(baseURL, '/life/timeline'), { waitUntil: 'domcontentloaded' })
