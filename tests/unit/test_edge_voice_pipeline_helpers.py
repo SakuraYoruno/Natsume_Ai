@@ -55,9 +55,20 @@ class _MockVtsDriver:
         self.mouth_motion_values: list[dict[str, float]] = []
         self.model_move_calls: list[dict[str, float | bool]] = []
         self.fail_probe = False
+        self.reconnect_calls = 0
 
     def connect(self) -> VtsDriverResult:
         return self.connect_result
+
+    def trigger_reconnect(self) -> VtsDriverResult:
+        self.reconnect_calls += 1
+        self.state = VtsState.RECONNECTING
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="reconnect started",
+            action="trigger_reconnect",
+        )
 
     def reset_to_neutral(self) -> VtsDriverResult:
         self.reset_calls += 1
@@ -890,6 +901,55 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         self.assertIn(health["life_motion"]["state"], {"running", "starting", "waiting_for_vts"})
         self.assertEqual("stopped", stopped["state"])
         self.assertFalse(pipeline.health()["life_motion_thread_alive"])
+
+    def test_life_motion_refreshes_vts_state_after_recovery(self) -> None:
+        class _OneFrameEvent:
+            def __init__(self) -> None:
+                self.stopped = False
+
+            def is_set(self) -> bool:
+                return self.stopped
+
+            def wait(self, _timeout: float) -> bool:
+                self.stopped = True
+                return True
+
+        vts = _MockVtsDriver()
+        pipeline = self._build_pipeline(vts_driver=vts)
+        pipeline._life_motion_debug["vts_state"] = "CONNECTING"
+        config = _life_motion_config()
+        config["model_move_enabled"] = False
+
+        pipeline._life_motion_loop(config, _OneFrameEvent())
+
+        self.assertEqual(
+            "AUTHENTICATED",
+            pipeline.health()["life_motion"]["vts_state"],
+        )
+
+    def test_life_motion_requests_bounded_reconnect_when_vts_starts_late(self) -> None:
+        class _OneWaitEvent:
+            def __init__(self) -> None:
+                self.stopped = False
+
+            def is_set(self) -> bool:
+                return self.stopped
+
+            def wait(self, _timeout: float) -> bool:
+                self.stopped = True
+                return True
+
+        vts = _MockVtsDriver()
+        vts.state = VtsState.ERROR
+        pipeline = self._build_pipeline(vts_driver=vts)
+
+        pipeline._life_motion_loop(_life_motion_config(), _OneWaitEvent())
+
+        health = pipeline.health()["life_motion"]
+        self.assertEqual(1, vts.reconnect_calls)
+        self.assertEqual("stopped", health["state"])
+        self.assertEqual("RECONNECTING", health["vts_state"])
+        self.assertTrue(health["reconnect_requested"])
 
     def test_coerce_audio_samples_covers_numpy_and_fallback_paths(self) -> None:
         class _FakeArray:

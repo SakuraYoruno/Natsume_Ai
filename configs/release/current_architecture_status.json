@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
-  "updated_at": "2026-08-03",
-  "commit_scope": "DUAL_STACK_P0_AND_MONITOR_LIVE_PROJECTION_CLOSURE",
+  "updated_at": "2026-08-04",
+  "commit_scope": "DUAL_STACK_P0_MONITOR_AND_VTS_TRANSPORT_RECOVERY",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -54,7 +54,11 @@
     },
     "avatar": {
       "status": "CONTRACT_READY",
-      "remote_vts_vrm": "LIVE_DEGRADED_MISSING_EXPRESSION_HOTKEYS"
+      "remote_vts_vrm": "LIVE_DEGRADED_MISSING_EXPRESSION_HOTKEYS",
+      "transport_recovery": "LIVE_PASS_VTS_PROCESS_RESTART_WITHOUT_EDGE_RESTART",
+      "websocket_1001_error_storm": "FIXED",
+      "stable_window_motion_frame_delta": 68,
+      "stable_window_error_delta": 0
     },
     "governed_effect_runtime": {
       "status": "WIRED",
@@ -124,6 +128,7 @@
     "external_services_restart_persistence": "PASS",
     "monitor_real_backend_e2e": "PASS_NORMAL_BROWSER_RUNTIME_LIFE_BODY_HTTP_AND_WEBSOCKET",
     "local_cuda_voice_variant_b": "PASS",
+    "target_edge_vts_transport_recovery": "PASS",
     "target_edge_tts_avatar": "ACCEPTANCE_PENDING_EXTERNAL",
     "docker_host_obs_monitor_gateway_full_stack": "PASS_LOCAL_MANDATORY",
     "real_provider_performance": "INCOMPLETE",

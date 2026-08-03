@@ -724,6 +724,9 @@ class VTubeStudioDriver:
             return False
         hints = (
             "protocol error",
+            "received 1001",
+            "sent 1001",
+            "going away",
             "received 1002",
             "sent 1002",
             "connectionclosed",

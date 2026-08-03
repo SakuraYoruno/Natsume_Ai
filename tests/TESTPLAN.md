@@ -169,3 +169,17 @@ Gateway 传输的故障语义按方向验收：INBOX 使用冻结请求体、稳
 重复 Gateway HTTP 请求若已绑定 HostCommand，应在执行任何反馈、Life 或路由逻辑前验证 canonical claim/command/body 绑定并立即确认 durable handoff；不得用重试请求的新 request/audit identity 重建 TaskGraph。首次完成响应和重复确认都必须返回 `host-input-result://` 收据，不能把内部 command ID 当成传输收据。
 
 具身验收必须区分“Edge 已接收入队”和“物理执行完成”：排队 TTS 先返回 `IN_DOUBT`，只有播放完成 callback 才能生成 `APPLIED` terminal receipt；缺失的 VTS expression hotkey 必须返回 `REJECTED`，不能因 VTS 已认证而伪造成功。
+
+VTS 断线恢复必须额外验证：WebSocket `1001 going away` 只能触发一次即时恢复并转入有界后台退避，禁止动作线程继续向失效连接逐帧发送；VTube Studio 晚启动或进程重启后，Edge 不重启也必须恢复 `AUTHENTICATED`，动作帧继续增加且稳定窗口错误增量为 0。定向回归命令：
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_edge_vts_mouth_sync_fix.py `
+  tests/unit/test_edge_voice_pipeline_helpers.py `
+  tests/unit/test_edge_runtime_health_playback_device.py `
+  tests/unit/test_gpt_sovits_edge_release.py `
+  tests/contract/test_vts_reconnect_contract.py `
+  tests/contract/test_edge_health_contract.py `
+  tests/contract/test_edge_voice_pipeline_contract.py `
+  tests/contract/test_voice_dual_chain_runtime_probe.py
+```

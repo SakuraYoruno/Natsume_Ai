@@ -1999,10 +1999,26 @@ class EdgeVoicePipeline:
                     }
                     break
                 if self.vts_driver.state != VtsState.AUTHENTICATED:
+                    reconnect_result = None
+                    if (
+                        self.vts_driver.state in (VtsState.DISCONNECTED, VtsState.ERROR)
+                        and hasattr(self.vts_driver, "trigger_reconnect")
+                    ):
+                        # A VTS cold start can finish after Edge has already
+                        # entered its motion loop.  Hand recovery to the
+                        # driver's bounded background backoff instead of
+                        # waiting forever or retrying every motion frame.
+                        reconnect_result = self.vts_driver.trigger_reconnect()
                     self._life_motion_debug = {
                         **self._life_motion_debug,
                         "state": "waiting_for_vts",
                         "vts_state": str(getattr(self.vts_driver.state, "value", self.vts_driver.state)),
+                        "reconnect_requested": bool(
+                            reconnect_result is not None and reconnect_result.success
+                        ),
+                        "reconnect_detail": (
+                            reconnect_result.detail if reconnect_result is not None else None
+                        ),
                     }
                     stop_event.wait(interval_s)
                     continue
@@ -2040,8 +2056,21 @@ class EdgeVoicePipeline:
                 debug.update(
                     {
                         "state": "running",
+                        # Refresh this on every attempted live frame.  Keeping
+                        # the last pre-recovery value made health report
+                        # CONNECTING even after the shared VTS driver had
+                        # authenticated a replacement WebSocket.
+                        "vts_state": str(
+                            getattr(
+                                self.vts_driver.state,
+                                "value",
+                                self.vts_driver.state,
+                            )
+                        ),
                         "paused_for_speech": False,
                         "paused_for_body_action": False,
+                        "reconnect_requested": False,
+                        "reconnect_detail": None,
                         "frames_sent": int(debug.get("frames_sent") or 0) + 1,
                         "last_phase": phase,
                         "last_emotion_tag": self._life_motion_emotion_tag,

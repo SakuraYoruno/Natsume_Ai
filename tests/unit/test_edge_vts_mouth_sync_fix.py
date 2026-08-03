@@ -666,6 +666,45 @@ def test_set_mouth_open_level_reconnects_once_on_protocol_error(monkeypatch) -> 
     assert calls[-1][0] == "fresh-conn"
 
 
+def test_set_mouth_open_level_reconnects_once_on_going_away_close(monkeypatch) -> None:
+    calls: list[str] = []
+    reconnect_calls: list[str] = []
+
+    def _fake_set(*, vts, param_name: str, value: float, timeout_s: float) -> None:
+        _ = (param_name, value, timeout_s)
+        calls.append(str(vts))
+        if str(vts) == "stale-conn":
+            raise RuntimeError(
+                "received 1001 (going away); then sent 1001 (going away)"
+            )
+
+    def _fake_connect(self) -> object:
+        reconnect_calls.append("connect")
+        self._state = VtsState.AUTHENTICATED
+        self._vts = "fresh-conn"
+        return type("ReconnectResult", (), {"success": True})()
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._set_vts_parameter", _fake_set)
+    monkeypatch.setattr(VTubeStudioDriver, "connect", _fake_connect)
+
+    driver = VTubeStudioDriver(
+        VtsConfig(
+            mouth_param_candidates=(VTS_MOUTH_PARAM,),
+            mouth_volume_param_candidates=(),
+            voice_silence_param_candidates=(),
+        )
+    )
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = "stale-conn"
+
+    result = driver.set_mouth_open_level(0.36)
+
+    assert result.success is True
+    assert reconnect_calls == ["connect"]
+    assert calls[0] == "stale-conn"
+    assert calls[-1] == "fresh-conn"
+
+
 def test_set_expression_reconnects_once_on_protocol_error(monkeypatch) -> None:
     calls: list[str] = []
     reconnect_calls: list[str] = []

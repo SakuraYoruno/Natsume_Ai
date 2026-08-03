@@ -89,3 +89,15 @@ Gateway 的公开 `/v1/gateway/stats` 仍按合同返回 `GW_ADMIN_AUTH_UNAVAILA
 真实重启 Host、OBS 与 Nginx 后，Chroma、Neo4j、Redis 探针均为 ready；SQLite 中 `capability_forge_operator`、`organ_tribe_status`、`life_body_snapshot` 均为 `HEALTHY`。无预置 Cookie 的真实 Chrome 验证 `/obs/life-body` 返回 23 个 Agent、`clock_active=true`、`last_tick_ms>0`，页面不存在原始 `reason_code`、能力投影不可用横幅、“主链存在断点”或空后台 tick。远端 Edge 未启动或重启。
 
 定向回归覆盖 Python Host source／投影／Life Body／启动脚本、Monitor 27 项 read-model、生产构建和真实 Nginx Playwright。该结论只关闭截图中的两个 Monitor 问题；人格上下文样本、门控告警、VTS 热键、barge-in、多轮盲测和实时性能仍按各自状态处理，整体保持 `INCOMPLETE`。
+
+## 2026-08-04 真实服务续测与 VTS 断线恢复
+
+在上一轮服务未替换为 mock 的前提下继续验收：固定版本 Neo4j、Chroma、Redis 再次完成真实写入、读取、容器重启、持久读取与 namespace 清理；提交 `be4e6d428` 对应脱敏回执 digest 为 `sha256:e61dca891d8d2a04409c443f0df682439e6c06695e10f3b06e089058f37365fe`。容器重启后 Host health／ready、OBS 和 Nginx Monitor 均恢复。真实 Nginx／OBS 浏览器路由与会话共 63 项通过，完整交互以单 worker 重跑 24 项通过；并行首轮出现的单个 Chrome `Page crashed` 隔离重跑通过，判定为浏览器资源抖动而非业务断言失败。后端真实 roundtrip、projection rebuild、Gateway transport 与 Host／Edge 合同集成 41 项通过。
+
+远端续测发现 VTS 顶层曾显示 `AUTHENTICATED`，但生命动作线程仍保留陈旧的 `CONNECTING`，并对已经收到 WebSocket `1001 going away` 的失效连接持续发帧，累计约 7.9 万次错误。修复后：
+
+- `1001 going away` 被识别为可恢复连接关闭；一次同步恢复失败后转交现有后台有界退避，不再按动作帧频率刷错。
+- 生命动作等待态会对 `ERROR／DISCONNECTED` 请求一次后台重连；`RECONNECTING` 期间不重复启动线程，恢复后的 health 使用共享 VTS driver 的当前状态。
+- 真实故障注入中强制结束 VTube Studio，Edge 未重启；VTS 再启动后，Edge 经 6 次退避自行恢复为 `AUTHENTICATED`，重连计数增加 1。恢复后 20 秒内动作帧增加 68，动作错误和 model-move 错误增量均为 0，ASR 与 GPT-SoVITS 继续为 `READY`。
+
+Edge 总体仍为 `DEGRADED`，原因只剩当前模型没有兼容的情绪 expression hotkey；barge-in 也仍关闭。此次只证明 VTS 传输断线恢复和状态真实性，不把表情热键、三模态同步、盲测或完整实时性能提升为通过。
