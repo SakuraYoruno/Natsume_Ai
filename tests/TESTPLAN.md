@@ -71,6 +71,8 @@
 
 Host 启停还必须验证监听身份：进程判定同时匹配配置的监听地址与端口。同一端口上的局域网端口代理不能被误认成 loopback Host，也不能导致误杀、错误 PID 文件或虚假稳定性失败。
 
+Host 启动续跑遇到已经持久化且仍在等待 Intent／节点 Review 的非终态 TaskGraph 时，必须报告 `DEFERRED` 并继续启动；未知异常仍须 fail-closed，不能用跳过恢复掩盖损坏。
+
 ## 6. 性能
 
 在真实 provider 与目标 Edge 上统计：
@@ -98,6 +100,7 @@ python -m pytest tests/unit/test_gr05_cortex_governed_cutover.py tests/integrati
 python -m pytest tests/unit/test_host_gateway_secure_ingress.py tests/unit/test_aw01_asgi_security_composition.py -q
 python -m pytest tests/unit/test_service_health_heartbeat.py tests/unit/test_aw07_health_device_projection.py tests/contract/test_health_endpoint_contract.py tests/unit/test_ne03_health_guardian_cutover.py -q
 python -m pytest tests/unit/test_runtime_startup_script_composition.py tests/unit/test_ne07_external_service_isolation.py -q
+python -m pytest tests/unit/test_ne01_host_startup_graph_continuation.py tests/integration/test_ne01_host_startup_graph_continuation.py -q
 python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
