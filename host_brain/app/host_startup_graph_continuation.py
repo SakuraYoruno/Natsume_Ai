@@ -16,6 +16,7 @@ from typing import Any
 
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.orchestration.node_grant_errors import NODE_GRANT_EXPIRED
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
@@ -41,6 +42,7 @@ _DEFERRED_REASON_CODES = frozenset(
         GOVERNED_EXECUTION_IN_PROGRESS,
         GOVERNED_REVIEW_REQUIRED,
         INTENT_ADMISSION_REVIEW_REQUIRED,
+        NODE_GRANT_EXPIRED,
     }
 )
 _PAGE_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_page.v1"

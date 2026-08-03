@@ -17,6 +17,10 @@ from host_brain.app.host_startup_graph_continuation import (
 from host_brain.orchestration.host_route_contracts import (
     build_direct_host_route_contracts,
 )
+from host_brain.orchestration.node_grant_errors import (
+    NODE_GRANT_EXPIRED,
+    NodeGrantDerivationError,
+)
 from host_brain.runtime.intent_admission_contracts import (
     INTENT_ADMISSION_REVIEW_REQUIRED,
 )
@@ -327,6 +331,39 @@ async def test_startup_continuation_defers_graph_waiting_for_intent_review() -> 
             "graph_revision": graph_revision,
             "status": "DEFERRED",
             "reason_code": INTENT_ADMISSION_REVIEW_REQUIRED,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_continuation_defers_graph_with_expired_execution_grant() -> None:
+    record, graph_record, snapshot = _contracts()
+    graph_id = graph_record["graph_id"]
+    graph_revision = graph_record["revision"]
+    store = _StartupStore(
+        snapshots={(graph_id, graph_revision): snapshot},
+    )
+
+    async def resume(*_args: Any) -> dict[str, Any]:
+        raise NodeGrantDerivationError(
+            NODE_GRANT_EXPIRED,
+            "durable parent grant expired",
+        )
+
+    continuation = HostStartupGraphContinuation(
+        task_store=store,
+        command_repository=_CommandRepository(record),
+        resume_admission=resume,
+    )
+
+    report = await continuation.recover()
+
+    assert report == (
+        {
+            "graph_id": graph_id,
+            "graph_revision": graph_revision,
+            "status": "DEFERRED",
+            "reason_code": NODE_GRANT_EXPIRED,
         },
     )
 

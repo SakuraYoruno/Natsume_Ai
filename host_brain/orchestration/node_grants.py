@@ -808,11 +808,15 @@ class NodeBoundGrantService:
             or str(binding.get("principal_id") or "").strip() != principal_id
             or str(binding.get("scope") or "").strip() == ""
             or seq < 0
-            or (expires_at_ms <= now_ms and not allow_expired)
         ):
             raise NodeGrantDerivationError(
                 NODE_GRANT_PARENT_INVALID,
-                "durable parent action/session/principal/scope/expiry binding mismatch",
+                "durable parent action/session/principal/scope binding mismatch",
+            )
+        if expires_at_ms <= now_ms and not allow_expired:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_EXPIRED,
+                "durable parent grant expired",
             )
         return decision
 

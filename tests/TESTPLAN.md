@@ -74,6 +74,8 @@ Host 启停还必须验证监听身份：进程判定同时匹配配置的监听
 
 Host 启动续跑遇到已经持久化且仍在等待 Intent／节点 Review 的非终态 TaskGraph 时，必须报告 `DEFERRED` 并继续启动；未知异常仍须 fail-closed，不能用跳过恢复掩盖损坏。
 
+恢复时已过期的执行 Grant 必须与身份／范围篡改分开分类：前者只延期对应 TaskGraph 并允许 Host 启动，后者仍须作为恢复损坏 fail-closed。
+
 ## 6. 性能
 
 在真实 provider 与目标 Edge 上统计：

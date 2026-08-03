@@ -253,6 +253,33 @@ def test_parent_binding_preflight_rejects_principal_drift_without_child_grants()
         ledger.close()
 
 
+def test_parent_binding_preflight_classifies_expiry_without_hiding_identity_drift() -> None:
+    ledger = SQLiteLedger(":memory:")
+    tokens = _CountingTokenService()
+    try:
+        parent_ref = _parent(ledger, tokens)
+        service = NodeBoundGrantService(
+            ledger=ledger,
+            token_service=tokens,
+            clock=lambda: NOW_MS + 100_001,
+            child_ttl_ms=60_000,
+        )
+
+        with pytest.raises(NodeGrantDerivationError) as expired:
+            service.validate_parent_binding(
+                parent_grant_ref=parent_ref,
+                request_id=REQUEST_ID,
+                session_id=SESSION_ID,
+                principal_id=PRINCIPAL_ID,
+            )
+
+        assert expired.value.reason_code == NODE_GRANT_EXPIRED
+        assert "expired" in expired.value.detail
+        assert tokens.child_issue_calls == 0
+    finally:
+        ledger.close()
+
+
 def _verification_kwargs(parent_ref: str, graph: TaskGraph, grant: Any) -> dict[str, Any]:
     return {
         "grant_ref": grant.grant_ref,
