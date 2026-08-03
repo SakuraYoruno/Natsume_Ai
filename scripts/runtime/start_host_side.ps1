@@ -439,6 +439,160 @@ function Ensure-SchedulerClockSecretEnvFile {
   return (Resolve-Path -LiteralPath $secretPath).Path
 }
 
+function Get-Sha256Hex {
+  param([Parameter(Mandatory = $true)][string]$Value)
+
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $digest = $sha.ComputeHash($bytes)
+  } finally {
+    $sha.Dispose()
+  }
+  return ([System.BitConverter]::ToString($digest).Replace("-", "").ToLowerInvariant())
+}
+
+function New-OperatorSessionToken {
+  $bytes = New-Object byte[] 48
+  $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $generator.GetBytes($bytes)
+  } finally {
+    $generator.Dispose()
+  }
+  return [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+}
+
+function Ensure-LocalOperatorSession {
+  param(
+    [string]$ResolvedRuntimeRoot,
+    [hashtable]$EnvValues,
+    [string]$MonitorHost,
+    [int]$MonitorPort,
+    [bool]$Enabled
+  )
+
+  $disabled = [ordered]@{
+    enabled = $false
+    mode = "disabled"
+    session_file = ""
+  }
+  if (-not $Enabled) {
+    $env:NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED = "false"
+    $EnvValues["NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED"] = "false"
+    return $disabled
+  }
+  $normalizedHost = ([string]$MonitorHost).Trim().Trim('[', ']').ToLowerInvariant()
+  if ($normalizedHost -notin @("127.0.0.1", "localhost", "::1")) {
+    $env:NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED = "false"
+    $EnvValues["NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED"] = "false"
+    return [ordered]@{
+      enabled = $false
+      mode = "explicit_session_required"
+      session_file = ""
+    }
+  }
+  if ($MonitorPort -lt 1 -or $MonitorPort -gt 65535) {
+    throw "MONITOR_OPERATOR_SESSION_PORT_INVALID"
+  }
+
+  $sessionPath = Join-Path $ResolvedRuntimeRoot "monitor.operator-session.token"
+  $explicitToken = [Environment]::GetEnvironmentVariable(
+    "MONITOR_UI_OPERATOR_SESSION_TOKEN",
+    "Process"
+  )
+  $token = ([string]$explicitToken).Trim()
+  [Environment]::SetEnvironmentVariable(
+    "MONITOR_UI_OPERATOR_SESSION_TOKEN",
+    $null,
+    "Process"
+  )
+  if ($EnvValues.ContainsKey("MONITOR_UI_OPERATOR_SESSION_TOKEN")) {
+    $EnvValues.Remove("MONITOR_UI_OPERATOR_SESSION_TOKEN")
+  }
+  if (-not $token -and (Test-Path -LiteralPath $sessionPath -PathType Leaf)) {
+    $token = ([System.IO.File]::ReadAllText($sessionPath)).Trim()
+  }
+  if (-not $token) {
+    $token = New-OperatorSessionToken
+  }
+  if (
+    $token.Length -lt 32 -or
+    $token.Length -gt 4096 -or
+    $token -match '\s'
+  ) {
+    throw "MONITOR_OPERATOR_SESSION_TOKEN_INVALID"
+  }
+
+  $encoding = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($sessionPath, $token, $encoding)
+  $principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $grant = "{0}:(F)" -f $principal
+  & icacls.exe $sessionPath /inheritance:r /grant:r $grant | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Remove-Item -LiteralPath $sessionPath -Force -ErrorAction SilentlyContinue
+    throw "MONITOR_OPERATOR_SESSION_ACL_FAILED"
+  }
+  $sessionPath = (Resolve-Path -LiteralPath $sessionPath).Path
+
+  $bindingText = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS" `
+    -DefaultValue ""
+  $bindings = @()
+  if (-not [string]::IsNullOrWhiteSpace($bindingText)) {
+    try {
+      $decoded = $bindingText | ConvertFrom-Json
+    } catch {
+      throw "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS_INVALID"
+    }
+    $bindings = @($decoded)
+  }
+  $tokenDigest = Get-Sha256Hex -Value $token
+  $hasBinding = @(
+    $bindings | Where-Object {
+      ([string]$_.token_sha256).Trim().ToLowerInvariant() -eq $tokenDigest
+    }
+  ).Count -gt 0
+  if (-not $hasBinding) {
+    $bindings += [ordered]@{
+      token_sha256 = $tokenDigest
+      principal_id = "local-monitor-owner"
+      tenant_id = "local"
+      principal_kind = "user"
+      scopes = @(
+        "obs:operator:read",
+        "obs:health:stream",
+        "obs:task-runtime:read",
+        "obs:session:read",
+        "obs:session:export",
+        "obs:trace:read",
+        "obs:checkpoint:read",
+        "obs:memory:read",
+        "obs:immune:read",
+        "obs:bio-ops:read",
+        "obs:ui:read",
+        "obs:capability-forge:read",
+        "obs:life-evolution:read",
+        "obs:agent-history:read"
+      )
+    }
+  }
+  $serializedBindings = ConvertTo-Json -InputObject @($bindings) -Compress -Depth 8
+  $env:NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = $serializedBindings
+  $EnvValues["NATSUME_OPERATOR_QUERY_AUTH_BINDINGS"] = $serializedBindings
+  $env:NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED = "true"
+  $EnvValues["NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED"] = "true"
+  $env:NATSUME_OPERATOR_SESSION_FILE = $sessionPath
+  $EnvValues["NATSUME_OPERATOR_SESSION_FILE"] = $sessionPath
+
+  return [ordered]@{
+    enabled = $true
+    mode = "loopback_http_only_cookie"
+    session_file = $sessionPath
+  }
+}
+
 function Get-ListeningPid {
   param(
     [int]$ProbePort,
@@ -1454,6 +1608,12 @@ $env:HOST_MONITOR_PROXY_PORT = [string]$MonitorProxyPort
 $env:HOST_MONITOR_PROXY_ENABLED = if ($monitorProxyEnabled) { "true" } else { "false" }
 $env:HOST_MAIN_OBS_REDIRECT_ENABLED = if ($obsEnabled) { "true" } else { "false" }
 $env:HOST_MAIN_MONITOR_REDIRECT_ENABLED = if ($monitorProxyEnabled) { "true" } else { "false" }
+$monitorOperatorSession = Ensure-LocalOperatorSession `
+  -ResolvedRuntimeRoot $RuntimeRoot `
+  -EnvValues $envValues `
+  -MonitorHost $MonitorProxyHost `
+  -MonitorPort $MonitorProxyPort `
+  -Enabled $monitorProxyEnabled
 
 $localServices = $null
 $localOllama = Ensure-LocalOllamaRuntime -RepoRoot $repoRoot -EnvValues $envValues
@@ -2048,6 +2208,7 @@ $result = [ordered]@{
   obs_process = $obsProcessResult
   monitor_proxy_status = [string]$(if ($monitorProxyResult.PSObject.Properties.Name -contains "status") { $monitorProxyResult.status } else { "" })
   monitor_proxy = $monitorProxyResult
+  monitor_operator_session = $monitorOperatorSession
   breakaway_from_console = $BreakawayFromConsole
   launcher_pid = [int]$proc.Id
   startup_warnings = $startupWarnings

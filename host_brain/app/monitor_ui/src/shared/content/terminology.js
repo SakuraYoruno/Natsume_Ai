@@ -212,9 +212,9 @@ export const GATEWAY_COPY = Object.freeze({
 export const EXECUTION_TOOLS_COPY = Object.freeze({
   heroEyebrow: 'Execution / Tools',
   heroTitle: '工具管理',
-  heroDescription: '把工具目录、只读/写入权限、Pentest 元信息和人工执行门禁放在同一个工作台。先判断能不能执行，再决定进入普通执行、审批令牌或安全证据复核。',
+  heroDescription: '把工具目录、只读/写入权限、Pentest 元信息和执行归属放在同一个工作台。目录保持只读，实际工具调用统一进入受治理 TaskGraph。',
   commandRailTitle: 'Tools Execution Gate',
-  commandRailDescription: '首屏先回答：工具目录是否可信、当前筛选是否影响样本、选中工具能否直接执行、写入或 Pentest 能力由哪条审批路径接管。',
+  commandRailDescription: '首屏先回答：工具目录是否可信、当前筛选是否影响样本，以及普通、写入或 Pentest 能力分别由哪条受治理路径接管。',
   gateTitle: '执行 Gate',
   focusTitle: '下一步动作',
   catalogTitle: 'Tool Catalog',
@@ -253,9 +253,9 @@ export const OPERATIONS_PROMPT_COPY = Object.freeze({
 export const INTEGRATIONS_COPY = Object.freeze({
   bodyTitle: '身体集成',
   bodyEyebrow: 'Integrations / Body Bridge',
-  bodyDescription: '把 MateEngine 能力、桥接健康、事件/动作目录和桌宠身体动作放在同一个显式控制台。写入动作只通过本页按钮触发。',
+  bodyDescription: '把 MateEngine 能力、桥接健康、事件/动作目录和桌宠身体动作放在同一个观测台。实际写入由受治理 TaskGraph 与 Edge command 下发。',
   commandRailTitle: 'Body Bridge Gate',
-  commandRailDescription: '首屏先确认四件事：MateEngine 是否在线、动作目录是否返回、事件桥是否有样本、当前动作是否可以安全发送。',
+  commandRailDescription: '首屏先确认四件事：MateEngine 是否在线、动作目录是否返回、事件桥是否有样本，以及动作写 authority 是否已进入受治理链路。',
   gateTitle: '发送 Gate',
   focusTitle: '建议动作',
   quickLinksTitle: '相关入口',
@@ -270,20 +270,20 @@ export const INTEGRATIONS_COPY = Object.freeze({
 export const SECURITY_IMMUNE_COPY = Object.freeze({
   heroTitle: '安全免疫',
   heroEyebrow: 'Security Lab / Immune',
-  heroDescription: '把安全运行态、资产样本、incident 队列和手动 hunt 收敛成一个值班台。先判断免疫链是否可信，再处理 High+ 事件。',
+  heroDescription: '把安全运行态、资产样本和 incident 队列收敛成一个只读值班台。先判断免疫链是否可信，再处理 High+ 事件。',
   commandRailTitle: 'Security Immune Gate',
-  commandRailDescription: '首屏先回答：安全 runtime 是否可读、资产样本是否足够、incident 是否需要人工处置、manual hunt 是否可执行。',
+  commandRailDescription: '首屏先回答：安全 runtime 是否可读、资产样本是否足够、incident 是否需要人工处置，以及主动巡检由哪条受治理任务接管。',
   triageTitle: 'Incident Triage Workbench',
   triageDescription: '按风险、资产、证据和建议动作复核 incident，优先处理 High+ 与缺少证据的异常。',
   runtimeTitle: 'Runtime Snapshot',
   assetsTitle: 'Asset Evidence',
   manualHuntTitle: 'Manual Hunt',
-  manualHuntDescription: '通过 internal gated route 触发一次安全巡检，结果写回当前页面和后端审计链。',
+  manualHuntDescription: '旧人工直推命令已退役；这里仅说明迁移状态，安全巡检由受治理 Internal/Scheduler 任务触发。',
   quickLinks: [
     { key: 'incidents', label: 'Incidents', targetId: 'security-immune-incidents', detail: '复核需要人工确认的安全事件。' },
     { key: 'runtime', label: 'Runtime', targetId: 'security-immune-runtime', detail: '确认 /obs/security/runtime 是否可信。' },
     { key: 'assets', label: 'Assets', targetId: 'security-immune-assets', detail: '核对 endpoint asset 快照。' },
-    { key: 'hunt', label: 'Manual Hunt', targetId: 'security-immune-hunt', detail: '触发一次 gated hunt run。' },
+    { key: 'hunt', label: 'Manual Hunt', targetId: 'security-immune-hunt', detail: '查看主动巡检写入口迁移状态。' },
   ],
 })
 

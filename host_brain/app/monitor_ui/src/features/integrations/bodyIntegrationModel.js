@@ -13,6 +13,7 @@ export function buildBodyIntegrationModel({
   result = null,
   sayText = '',
   sending = false,
+  dispatchAvailability = { available: true, replacementAuthority: '' },
 } = {}) {
   const health = bundle?.health || null
   const capabilities = bundle?.capabilities || null
@@ -22,7 +23,8 @@ export function buildBodyIntegrationModel({
   const healthReady = Boolean(health?.ok)
   const catalogReady = Boolean(capabilities) && actionCount > 0
   const sayReady = action !== 'say' || hasText(sayText)
-  const canSend = Boolean(healthReady && catalogReady && sayReady && !sending)
+  const dispatchAvailable = dispatchAvailability?.available !== false
+  const canSend = Boolean(dispatchAvailable && healthReady && catalogReady && sayReady && !sending)
   const degraded = errors.length > 0 || !healthReady || !catalogReady
   const dispatchFailed = Boolean(result && !result.ok)
 
@@ -66,6 +68,16 @@ export function buildBodyIntegrationModel({
       detail: '刷新动作和事件目录，避免向未知能力发送动作。',
       label: '刷新目录',
     }
+  } else if (!dispatchAvailable) {
+    headline = '身体桥在线，人工写入口已迁移'
+    description = `MateEngine 健康和动作目录仍可观测；实际动作由 ${dispatchAvailability?.replacementAuthority || '受治理 TaskGraph'} 下发，本页不再调用已退役直推命令。`
+    focus = {
+      kind: 'focusConsole',
+      tone: 'degraded',
+      title: '查看受治理动作说明',
+      detail: '这里保留能力和健康视图，不会再触发 mate.action.submit 或 mate.say.submit。',
+      label: '定位迁移说明',
+    }
   } else if (!sayReady) {
     headline = 'Say 动作需要先填写文本'
     description = '当前动作选择为 say。填写要播报的文本后，发送按钮才会开放。'
@@ -101,7 +113,7 @@ export function buildBodyIntegrationModel({
   }
 
   return {
-    status: degraded || dispatchFailed ? 'degraded' : 'ready',
+    status: degraded || dispatchFailed ? 'degraded' : dispatchAvailable ? 'ready' : 'read_only',
     canSend,
     headline,
     description,
@@ -131,9 +143,13 @@ export function buildBodyIntegrationModel({
       {
         key: 'intent',
         label: 'Current Intent',
-        value: action === 'say' ? (sayReady ? 'say text ready' : 'say text empty') : action,
-        detail: action === 'say' ? 'say 会调用文本播报接口。' : '非 say 动作会走显式 action 接口。',
-        state: sayReady ? 'ready' : 'blocked',
+        value: dispatchAvailable
+          ? (action === 'say' ? (sayReady ? 'say text ready' : 'say text empty') : action)
+          : 'governed only',
+        detail: dispatchAvailable
+          ? (action === 'say' ? 'say 会调用文本播报接口。' : '非 say 动作会走显式 action 接口。')
+          : '当前选择仅用于查看能力；实际意图由 TaskGraph 冻结后下发。',
+        state: dispatchAvailable ? (sayReady ? 'ready' : 'blocked') : 'warning',
       },
       {
         key: 'result',
@@ -144,17 +160,21 @@ export function buildBodyIntegrationModel({
             ? 'failed'
             : sending
               ? 'sending'
-              : canSend
+              : !dispatchAvailable
+                ? 'migrated'
+                : canSend
                 ? 'ready to send'
                 : 'locked',
         detail: result?.ok
           ? '最近一次写入已返回 accepted/request_id。'
           : result
             ? '最近一次写入失败，先查看错误再重试。'
-            : canSend
+            : !dispatchAvailable
+              ? '旧人工直推入口已退役，等待受治理任务产生真实动作回执。'
+              : canSend
               ? '发送按钮已开放，但尚未写入。'
               : 'gate 未满足时不会调用 MateEngine 写入接口。',
-        state: result?.ok ? 'ready' : result ? 'blocked' : canSend ? 'warning' : 'blocked',
+        state: result?.ok ? 'ready' : result ? 'blocked' : canSend || !dispatchAvailable ? 'warning' : 'blocked',
       },
     ],
     gates: [
@@ -174,16 +194,20 @@ export function buildBodyIntegrationModel({
         detail: eventCount > 0 ? `${eventCount} 个事件类型可见。` : '事件目录暂无样本。',
       },
       {
-        label: 'Input',
-        state: sayReady ? 'ready' : 'blocked',
-        detail: sayReady ? '当前动作输入可发送。' : 'Say 文本为空。',
+        label: 'Authority',
+        state: dispatchAvailable ? (sayReady ? 'ready' : 'blocked') : 'blocked',
+        detail: dispatchAvailable
+          ? (sayReady ? '当前动作输入可发送。' : 'Say 文本为空。')
+          : `人工直推已迁移到 ${dispatchAvailability?.replacementAuthority || '受治理 TaskGraph'}。`,
       },
     ],
     cards: [
       {
         label: 'Bridge',
         value: healthReady ? 'OK' : 'Degraded',
-        detail: healthReady ? 'MateEngine bridge 可以接收显式动作。' : '健康状态未确认。',
+        detail: healthReady
+          ? (dispatchAvailable ? 'MateEngine bridge 可以接收显式动作。' : 'Bridge 在线；本页只读，不直接写入。')
+          : '健康状态未确认。',
         tone: healthReady ? 'ready' : 'blocked',
       },
       {

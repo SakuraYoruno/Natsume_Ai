@@ -424,6 +424,23 @@ def test_same_origin_operator_session_cookie_authenticates_without_js_header(mon
     assert context.authority.auth_ref.startswith("operator-auth://sha256/")
 
 
+def test_operator_session_bootstrap_is_public_only_at_exact_post_path() -> None:
+    assert (
+        required_operator_query_scope(
+            method="POST",
+            path="/obs/operator-session/bootstrap",
+        )
+        is None
+    )
+    assert (
+        required_operator_query_scope(
+            method="GET",
+            path="/obs/operator-session/bootstrap",
+        )
+        == "obs:operator:read"
+    )
+
+
 @pytest.mark.parametrize(
     ("path", "scope"),
     [

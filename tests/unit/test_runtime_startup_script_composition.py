@@ -52,6 +52,85 @@ def test_host_orchestrator_isolates_child_script_process_control() -> None:
     assert "Start-Process -Wait" not in source
 
 
+def test_host_launcher_creates_loopback_operator_session_without_public_token(
+    tmp_path: Path,
+) -> None:
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    runtime_root = tmp_path / "host-runtime"
+    runtime_root.mkdir()
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Get-EnvSetting',
+  'Get-Sha256Hex',
+  'New-OperatorSessionToken',
+  'Ensure-LocalOperatorSession'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$values = @{{}}
+$env:MONITOR_UI_OPERATOR_SESSION_TOKEN = $null
+$result = Ensure-LocalOperatorSession `
+  -ResolvedRuntimeRoot '{runtime_root}' `
+  -EnvValues $values `
+  -MonitorHost '127.0.0.1' `
+  -MonitorPort 18180 `
+  -Enabled $true
+$token = [System.IO.File]::ReadAllText($result.session_file).Trim()
+$bindings = @($values['NATSUME_OPERATOR_QUERY_AUTH_BINDINGS'] | ConvertFrom-Json)
+$binding = @($bindings | Where-Object {{
+  ([string]$_.token_sha256).ToLowerInvariant() -eq (Get-Sha256Hex -Value $token)
+}})
+[ordered]@{{
+  enabled = [bool]$result.enabled
+  mode = [string]$result.mode
+  session_exists = Test-Path -LiteralPath $result.session_file -PathType Leaf
+  token_length = $token.Length
+  matching_binding_count = $binding.Count
+  raw_token_in_public_values = @($values.Values | Where-Object {{ [string]$_ -eq $token }}).Count
+  bootstrap_enabled = [string]$values['NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED']
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    assert payload == {
+        "enabled": True,
+        "mode": "loopback_http_only_cookie",
+        "session_exists": True,
+        "token_length": 64,
+        "matching_binding_count": 1,
+        "raw_token_in_public_values": 0,
+        "bootstrap_enabled": "true",
+    }
+
+
 def test_host_orchestrator_requires_post_sidecar_stability_before_success() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"

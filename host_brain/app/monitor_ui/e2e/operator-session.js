@@ -29,9 +29,25 @@ async function installOperatorSession(context, baseURL, token) {
 
 export async function installOptionalOperatorSession(context, baseURL) {
   const token = operatorSessionToken()
-  if (!token) return false
-  await installOperatorSession(context, baseURL, token)
-  return true
+  if (token) {
+    await installOperatorSession(context, baseURL, token)
+    return true
+  }
+  if (process.env.MONITOR_UI_SKIP_WEB_SERVER !== '1') {
+    await context.route('**/obs/operator-session/bootstrap', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          schema_version: 'Natsume.operator-session.bootstrap.v1',
+          status: 'AUTHENTICATED',
+          principal_id: 'playwright-fixture-owner',
+          query_schema_version: 'Natsume.operator-query.v1',
+        }),
+      })
+    })
+  }
+  return false
 }
 
 export async function installRequiredOperatorSession(context, baseURL) {

@@ -415,7 +415,7 @@ test.describe('Canonical monitor interactions', () => {
     await expect(mobileNav.getByText('渗透实验室')).toHaveCount(0)
   })
 
-  test('Security Immune reads projections and submits hunt through generated BFF', async ({ page, baseURL }) => {
+  test('Security Immune reads projections without exposing the retired hunt writer', async ({ page, baseURL }) => {
     const state = await stubSecurityImmuneApis(page)
     await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
 
@@ -425,15 +425,14 @@ test.describe('Canonical monitor interactions', () => {
     await page.getByLabel('Security Immune minimum risk').selectOption('high')
     await expect(incidents.getByText('Legacy SMB service exposed', { exact: true })).toBeHidden()
 
-    await page.getByRole('region', { name: 'Security Immune Gate' })
-      .getByRole('button', { name: 'Run Hunt' })
-      .click()
-    await expect(page.getByText('Hunt 已完成')).toBeVisible()
-    await expect.poll(() => state.huntCalls).toEqual([{ reason: 'manual_web_security_immune' }])
-    await expect(page.locator('pre').filter({ hasText: 'security.hunt.run_once' })).toBeVisible()
+    const retiredHunt = page.getByRole('region', { name: 'Security Immune Gate' })
+      .getByRole('button', { name: 'Hunt 已迁移' })
+    await expect(retiredHunt).toBeDisabled()
+    await expect(page.getByText('Manual Hunt 写入口已迁移')).toBeVisible()
+    await expect.poll(() => state.huntCalls).toEqual([])
   })
 
-  test('Tools preserves approval gate and accepts only a durable BFF receipt', async ({ page, baseURL }) => {
+  test('Tools keeps the catalog readable without exposing the retired direct writer', async ({ page, baseURL }) => {
     const state = await stubToolsApis(page)
     await page.goto(monitorUrl(baseURL, '/execution/tools'), { waitUntil: 'domcontentloaded' })
 
@@ -443,21 +442,11 @@ test.describe('Canonical monitor interactions', () => {
     await expect(page.getByText('Write Note')).toBeVisible()
     await expect(page.getByText('Read Echo')).toBeHidden()
     await page.getByRole('button', { name: /Write Note/ }).click()
-    await page.getByRole('button', { name: '执行该工具' }).click()
-
-    const submit = page.getByRole('button', { name: '执行', exact: true })
-    await expect(submit).toBeDisabled()
-    await page.getByPlaceholder('approval_token_ref').fill('approval://smoke')
-    await expect(submit).toBeEnabled()
-    await submit.click()
-
-    await expect(page.getByText('执行完成')).toBeVisible()
-    await expect.poll(() => state.executeCalls.length).toBe(1)
-    expect(state.executeCalls[0]).toMatchObject({
-      tool_id: 'write.note',
-      approval_token_ref: 'approval://smoke',
-    })
-    await expect(page.locator('pre').filter({ hasText: '"command_id": "tool.execute"' })).toBeVisible()
+    await page.getByRole('button', { name: '查看执行迁移说明' }).click()
+    await expect(page.getByText('工具执行已迁移：Write Note')).toBeVisible()
+    await expect(page.getByRole('link', { name: '打开执行审查' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '执行', exact: true })).toHaveCount(0)
+    await expect.poll(() => state.executeCalls).toEqual([])
   })
 
   test('Edge form validates locally and fails closed before any retired writer', async ({ page, baseURL }) => {
@@ -487,7 +476,7 @@ test.describe('Canonical monitor interactions', () => {
 
     await expect(page.getByRole('heading', { name: '统一消息网关' })).toBeVisible()
     const gate = page.getByRole('region', { name: 'Gateway Routing Gate' })
-    await expect(gate.getByText('3/3 active，1 down，1 degraded。')).toBeVisible()
+    await expect(gate.getByText('3/3 active，1 down，1 degraded，0 unknown。')).toBeVisible()
     await expect(page.locator('#gateway-wechat-detail').getByText('send_text')).toBeVisible()
     await expect(page.getByRole('button', { name: '重置频率限制' })).toHaveCount(0)
     await expect(page.getByText('adapter offline')).toBeVisible()

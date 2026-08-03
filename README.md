@@ -189,11 +189,13 @@ flowchart TB
 | 日语声线方案 B | 当前是 GPT-SoVITS V4 预训练权重配合七海参考音频的参考条件推理，不是七海专属微调模型。 |
 | Avatar 与多模态同步 | 目标 Edge 已真实运行：ASR、GPT-SoVITS TTS、音频播放和 Edge RPC 为 `UP`；VTS 已认证且口型／身体动作可用，但缺少兼容情绪热键，状态为 `DEGRADED`；barge-in 关闭并保持 `NOT_TESTED`。 |
 | Gateway 消息陪伴 | 真实 QQ 入站已贯通 Secure Ingress → 单节点 TaskGraph → Acceptance → durable Gateway Outbox → 平台送达；重复入站复用原任务且不重复外发。直接本地聊天仍保持低延迟实时链。 |
-| OBS 与 Monitor | Host、Edge 和 Gateway 组件状态持续写入只读投影；真实 Nginx 页面已用无拦截 Playwright 核对 TaskGraph、预算、验收、回执和服务状态。未知平台详情显示为“未确认”，不会伪装成健康。 |
+| OBS 与 Monitor | Host、Edge 和 Gateway 组件状态持续写入只读投影；本机 Nginx 页面会自动建立 HttpOnly owner 会话，普通浏览器无需手工注入 Token。真实页面已核对 TaskGraph、预算、验收、回执和服务状态；未知平台详情显示为“未确认”，不会伪装成健康。 |
 | 隔离全服务栈 | 固定镜像的 Neo4j、Chroma、Redis 已在隔离 acceptance project 完成真实写入、读取、容器重启与持久读取；Host、OBS、Monitor、Edge 和 Gateway 在重启后保持可达。 |
 | 整体数字生命体验 | `INCOMPLETE`，不能用单元测试、静态合同或生成几段样音冒充完整交付。 |
 
 更细的真实能力与缺口见 [能力与缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)，机器可读状态见 [current_architecture_status.json](configs/release/current_architecture_status.json)。
+
+Monitor 只负责观察与受治理操作入口。已经退役的 `security.hunt.run_once`、`tool.execute`、`mate.action.submit` 和 `mate.say.submit` 不再显示成可用按钮；安全巡检、工具调用与身体动作分别从 Internal/Scheduler TaskGraph、Skill/Tool TaskGraph 和 Edge command 主链进入，避免控制台诱导用户点击一个必然失败的旧接口。
 
 ## 在本机让 Host 运行起来
 

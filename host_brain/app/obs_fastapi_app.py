@@ -37,6 +37,9 @@ from host_brain.observability.operator_query_gateway import (
     OperatorQueryGateway,
     OperatorQueryMiddleware,
 )
+from host_brain.observability.operator_session_bootstrap import (
+    create_operator_session_bootstrap_router,
+)
 from host_brain.app.observability_runtime.projection_runtime import TRACE_KIND
 from host_brain.app.observability_runtime.projection_runtime import projection_meta
 from host_brain.app.settings import get_persistence_settings
@@ -315,6 +318,11 @@ def create_obs_app(
     # Every query response crosses one server-owned auth/privacy boundary.
     # This credential authority belongs to this app instance, not the module.
     application.state.operator_query_gateway = OperatorQueryGateway.from_environment()
+    application.include_router(
+        create_operator_session_bootstrap_router(
+            lambda: application.state.operator_query_gateway
+        )
+    )
     application.add_middleware(
         OperatorQueryMiddleware,
         gateway_provider=lambda: application.state.operator_query_gateway,

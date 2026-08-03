@@ -59,7 +59,7 @@ function NavPill({ to, icon: Icon, label, onClick, badge = null, compact = false
       onTouchStart={handlePrefetch}
       className={({ isActive }) =>
         `${block ? 'flex w-full justify-start' : 'inline-flex shrink-0'} min-w-0 items-center gap-1.5 whitespace-nowrap border font-medium transition-all ${
-          compact ? 'rounded-lg px-2 py-1 text-xs' : 'rounded-xl px-3 py-1.5 text-sm'
+          compact ? 'min-h-7 rounded-lg px-2 py-1 text-xs' : 'min-h-9 rounded-xl px-3 py-1.5 text-sm'
         } ${
           isActive
             ? 'border-primary-200 bg-gradient-to-r from-primary-50 to-cyan-50 text-primary shadow-sm'
@@ -87,7 +87,7 @@ function SectionTab({ section, active = false, badge = null }) {
       onFocus={handlePrefetch}
       onTouchStart={handlePrefetch}
       aria-label={`进入 ${section.title}`}
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all ${
+      className={`inline-flex min-h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-all ${
         active
           ? 'border-primary-200 bg-primary-50 text-primary shadow-sm'
           : 'border-transparent text-gray-500 hover:border-primary-100 hover:bg-white/80 hover:text-gray-800'

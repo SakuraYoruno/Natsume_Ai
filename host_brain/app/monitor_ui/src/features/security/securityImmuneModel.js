@@ -206,8 +206,8 @@ export function buildSecurityImmuneTriage({ incidentRows = [], loading = false, 
     return {
       tone: 'green',
       title: `${minRisk}+ 阈值下暂无 incident`,
-      detail: '可以保持监控，或运行一次 Manual Hunt 重新采样。',
-      action: '保持监控或运行 Hunt',
+      detail: '可以保持监控；需要重新采样时从受治理 Internal/Scheduler 任务发起。',
+      action: '保持监控',
       primaryIncident: null,
       highPlusCount: 0,
       needsEvidenceCount: 0,
@@ -255,7 +255,7 @@ export function buildSecurityImmuneMission({
     return {
       tone: 'orange',
       title: 'Security Immune 降级运行',
-      detail: '至少一个安全免疫接口暂不可用；页面保留最近可读数据和手动 hunt 入口。',
+      detail: '至少一个安全免疫接口暂不可用；页面仅保留最近可读数据。',
       action: '刷新或检查后端',
     }
   }
@@ -273,7 +273,7 @@ export function buildSecurityImmuneMission({
     return {
       tone: 'amber',
       title: '存在待确认 incident',
-      detail: `当前阈值下还有 ${incidentCount} 个事件，建议按风险过滤后再手动 hunt 复核。`,
+      detail: `当前阈值下还有 ${incidentCount} 个事件，建议按风险过滤并复核现有证据。`,
       action: '复核事件队列',
     }
   }
@@ -282,8 +282,8 @@ export function buildSecurityImmuneMission({
     return {
       tone: 'orange',
       title: '暂无资产样本',
-      detail: '未读取到 endpoint asset 快照；先运行 hunt 或接入 probe heartbeat，再看免疫结论。',
-      action: '运行一次 Hunt',
+      detail: '未读取到 endpoint asset 快照；先检查 probe heartbeat 或受治理巡检任务，再看免疫结论。',
+      action: '检查采样来源',
     }
   }
 
@@ -343,9 +343,9 @@ export function buildSecurityImmuneGateCards({
     {
       key: 'hunt',
       label: 'Manual Hunt',
-      value: partialErrors.length > 0 ? 'degraded' : 'gated action',
-      detail: '通过 internal gated route 触发一次巡检',
-      tone: partialErrors.length > 0 ? 'orange' : 'blue',
+      value: 'read-only',
+      detail: '旧人工写入口已迁移到受治理 Internal/Scheduler 任务',
+      tone: 'amber',
       targetId: 'security-immune-hunt',
     },
   ]

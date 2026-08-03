@@ -30,6 +30,8 @@
 - Edge 组件明确关闭时必须投影为 `NOT_TESTED`，不得因 Edge 传输可达而显示 `UP`；barge-in、resource gate 与实际播放设备也不得互相冒充。
 - Guardian 降级时，低风险陪伴 Chat 只能收紧到可用通道降级，不能触发人工 Review；风险三级以上的 Chat 以及其他高风险执行仍须 Review。
 - 普通 Chat 必须强制校验供应商返回的总 Token 与输出 Token；供应商未返回单次货币成本时保持该维度缺失且不得阻塞回复、伪造零成本或扩大到 Agent／Skill 路线。
+- Monitor owner session 必须仅允许 loopback、same-origin POST bootstrap；Token 只进入 ACL 文件和 HttpOnly Cookie，HTTP query 与 WebSocket 共用 digest authority，普通浏览器不得依赖 E2E 注入 Token。
+- 已退役的 Security Hunt、Tool Execute 与 MateEngine 直推必须在 UI 中只读呈现，点击路径和 BFF 请求次数均为 0；不能以复活旧 writer 修复前端失败。
 
 ## 3. 固定情感场景
 
@@ -102,7 +104,7 @@ python -m pytest tests/unit/test_doc_authority_gate.py tests/unit/test_doc_fresh
 python -m pytest tests/unit/test_gr05_cortex_governed_cutover.py tests/integration/test_gr05_universal_host_runtime.py tests/unit/test_input_routes_worker.py -q
 python -m pytest tests/unit/test_host_gateway_secure_ingress.py tests/unit/test_aw01_asgi_security_composition.py -q
 python -m pytest tests/unit/test_service_health_heartbeat.py tests/unit/test_aw07_health_device_projection.py tests/contract/test_health_endpoint_contract.py tests/unit/test_ne03_health_guardian_cutover.py -q
-python -m pytest tests/unit/test_runtime_startup_script_composition.py tests/unit/test_ne07_external_service_isolation.py -q
+python -m pytest tests/unit/test_aw07_operator_query_gateway.py tests/unit/test_operator_session_bootstrap.py tests/unit/test_runtime_startup_script_composition.py tests/unit/test_ne07_external_service_isolation.py tests/unit/test_monitor_route_manifest.py -q
 python -m pytest tests/unit/test_ne01_host_startup_graph_continuation.py tests/integration/test_ne01_host_startup_graph_continuation.py -q
 python -m pytest tests/unit/test_gateway_transport_store.py tests/contract/test_gateway_contract.py tests/integration/test_task0488_gateway_transport_integration.py -q
 python tools/doc_lint/doc_audience_lint.py --root .
@@ -110,6 +112,17 @@ python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
 python tools/doc_lint/doc_link_gate.py --root .
 git diff --check
+
+cd host_brain/app/monitor_ui
+npm run check:operator-client
+npm run lint
+npm run typecheck
+npm run test:read-model
+npm run build
+npm run test:e2e:interactions
+$env:MONITOR_UI_BASE_URL='http://127.0.0.1:18180/monitor/'
+$env:MONITOR_UI_SKIP_WEB_SERVER='1'
+npx playwright test e2e/operator-session-live.spec.js
 ```
 
 ## 9. 状态判定

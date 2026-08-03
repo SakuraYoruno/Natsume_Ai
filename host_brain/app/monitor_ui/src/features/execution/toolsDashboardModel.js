@@ -1,6 +1,7 @@
 import { LOAD_STATES, resolveLoadState } from '../../models/loadState.js'
 import { buildToolsOrganSystemModel } from '../../models/organSystemModel.js'
 import { EXECUTION_TOOLS_COPY } from '../../shared/content/terminology.js'
+import { getToolExecutionAvailability } from './api.js'
 import {
   buildToolExecutionGate,
   buildToolsHeroMetaItems,
@@ -107,6 +108,7 @@ function buildToolsMission({
   filter,
   query,
   catalogError,
+  executionAvailability,
 }) {
   if (catalogError || toolsLoadState === LOAD_STATES.ERROR) {
     return {
@@ -132,6 +134,15 @@ function buildToolsMission({
       title: '暂无可执行工具',
       detail: '工具目录接口没有返回普通工具；Pentest 能力仍只在 Security Lab 侧运行。',
       action: '检查 provider 状态',
+    }
+  }
+
+  if (!executionAvailability.available) {
+    return {
+      tone: 'amber',
+      title: '工具目录只读可用',
+      detail: `人工直执行入口已退役；实际工具调用由 ${executionAvailability.replacementAuthority || '受治理 TaskGraph'} 接管。`,
+      action: '从任务运行时复核工具执行',
     }
   }
 
@@ -186,6 +197,7 @@ export function buildToolsCommandRailView({
   pentestError = '',
   runtimeSnapshot = null,
 } = {}) {
+  const executionAvailability = getToolExecutionAvailability()
   const pentestMeta = getPentestToolMetadataView(pentestCapabilities)
   const selectedGate = buildToolExecutionGate(selectedTool)
   const runtimeReady = Boolean(runtimeSnapshot)
@@ -201,6 +213,7 @@ export function buildToolsCommandRailView({
       filter,
       query,
       catalogError,
+      executionAvailability,
     }),
     gateCards: [
       {
@@ -214,9 +227,11 @@ export function buildToolsCommandRailView({
       {
         key: 'detail',
         label: EXECUTION_TOOLS_COPY.detailTitle,
-        value: selectedTool?.name || '未选择',
-        detail: selectedTool ? selectedGate.detail : '选择工具后查看 schema、权限、标签和执行入口。',
-        tone: selectedTool ? selectedGate.tone : 'gray',
+        value: selectedTool?.name || (executionAvailability.available ? '未选择' : '只读元数据'),
+        detail: executionAvailability.available
+          ? (selectedTool ? selectedGate.detail : '选择工具后查看 schema、权限、标签和执行入口。')
+          : `旧命令 ${executionAvailability.commandId || 'tool.execute'} 已退役；详情页不再伪装成可直执行。`,
+        tone: executionAvailability.available ? (selectedTool ? selectedGate.tone : 'gray') : 'amber',
         targetId: 'tools-detail-panel',
       },
       {
@@ -236,6 +251,7 @@ export function buildToolsCommandRailView({
         targetId: 'tools-runtime-context',
       },
     ],
+    executionAvailability,
   }
 }
 

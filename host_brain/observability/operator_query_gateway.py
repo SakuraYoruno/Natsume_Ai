@@ -296,6 +296,11 @@ _OPERATOR_QUERY_NAMESPACES = (
     re.compile(r"/api/ui(?:/.*)?"),
     re.compile(r"/observability(?:/.*)?"),
 )
+_PUBLIC_QUERY_METHOD_ROUTES = frozenset(
+    {
+        ("POST", "/obs/operator-session/bootstrap"),
+    }
+)
 
 
 class OperatorQueryAuthStatus(str, Enum):
@@ -660,6 +665,8 @@ def require_operator_query_scope(request: Request, required_scope: str) -> Opera
 def required_operator_query_scope(*, method: str, path: str) -> str | None:
     normalized_method = str(method or "GET").strip().upper()
     normalized_path = str(path or "/").strip() or "/"
+    if (normalized_method, normalized_path) in _PUBLIC_QUERY_METHOD_ROUTES:
+        return None
     for policy in OPERATOR_QUERY_ROUTE_POLICIES:
         if policy.matches(method=normalized_method, path=normalized_path):
             return policy.required_scope

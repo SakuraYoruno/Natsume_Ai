@@ -3,6 +3,7 @@ import { HashRouter, Navigate, Route, Routes, useParams } from 'react-router-dom
 import { Toaster } from 'react-hot-toast'
 import ErrorBoundary from './shared/ui/ErrorBoundary.jsx'
 import Layout from './app/shell/Layout.jsx'
+import OperatorSessionGate from './app/session/OperatorSessionGate.jsx'
 import { legacyRedirects, routeManifest } from './app/routeManifest.jsx'
 
 function RouteLoading() {
@@ -59,25 +60,27 @@ function LegacyRedirect({ to }) {
 export default function App() {
   return (
     <ErrorBoundary>
-      <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/cockpit" replace />} />
-            {routeManifest.map((route) => (
-              <Route key={route.path} path={routePath(route.path)} element={withSuspense(route.element)} />
-            ))}
-            {legacyRedirects.map((redirect) => (
-              <Route
-                key={`${redirect.from}->${redirect.to}`}
-                path={routePath(redirect.from)}
-                element={<LegacyRedirect to={redirect.to} />}
-              />
-            ))}
-            <Route path="*" element={<Navigate to="/cockpit" replace />} />
-          </Route>
-        </Routes>
-        <Toaster position="top-right" toastOptions={{ duration: 4000, style: { fontSize: '13px' } }} />
-      </HashRouter>
+      <OperatorSessionGate>
+        <HashRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Routes>
+            <Route path="/" element={<Layout />}>
+              <Route index element={<Navigate to="/cockpit" replace />} />
+              {routeManifest.map((route) => (
+                <Route key={route.path} path={routePath(route.path)} element={withSuspense(route.element)} />
+              ))}
+              {legacyRedirects.map((redirect) => (
+                <Route
+                  key={`${redirect.from}->${redirect.to}`}
+                  path={routePath(redirect.from)}
+                  element={<LegacyRedirect to={redirect.to} />}
+                />
+              ))}
+              <Route path="*" element={<Navigate to="/cockpit" replace />} />
+            </Route>
+          </Routes>
+          <Toaster position="top-right" toastOptions={{ duration: 4000, style: { fontSize: '13px' } }} />
+        </HashRouter>
+      </OperatorSessionGate>
     </ErrorBoundary>
   )
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-03",
-  "commit_scope": "DUAL_STACK_P0_CLOSURE_ACCEPTED",
+  "commit_scope": "DUAL_STACK_P0_AND_MONITOR_SESSION_CLOSURE",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -79,12 +79,29 @@
       "obs_indirect_process_projection_locator": "REMOVED_EXPLICIT_STORE_PARAMETER",
       "obs_route_global_query_projection_helper_occurrences": 0,
       "obs_route_process_service_locator_occurrences": 0
+    },
+    "monitor_operator_session": {
+      "status": "PASS_LOCAL_LOOPBACK",
+      "bootstrap": "SAME_ORIGIN_POST_TO_HTTP_ONLY_COOKIE",
+      "raw_token_exposed_to_javascript_or_url": false,
+      "http_query": "PASS",
+      "health_websocket": "PASS"
+    },
+    "monitor_retired_write_surfaces": {
+      "status": "READ_ONLY_TRUTHFUL",
+      "retired_commands_exposed_as_clickable": 0,
+      "commands": [
+        "security.hunt.run_once",
+        "tool.execute",
+        "mate.action.submit",
+        "mate.say.submit"
+      ]
     }
   },
   "acceptance": {
     "dual_stack_p0_gateway_runtime_health": "PASS",
     "external_services_restart_persistence": "PASS",
-    "monitor_real_backend_e2e": "PASS",
+    "monitor_real_backend_e2e": "PASS_NORMAL_BROWSER_HTTP_AND_WEBSOCKET",
     "local_cuda_voice_variant_b": "PASS",
     "target_edge_tts_avatar": "ACCEPTANCE_PENDING_EXTERNAL",
     "docker_host_obs_monitor_gateway_full_stack": "PASS_LOCAL_MANDATORY",
@@ -92,6 +109,17 @@
     "fixed_72_scenarios": "MEASUREMENT_PENDING",
     "three_reviewer_blind_test": "NOT_RUN",
     "final_release": "INCOMPLETE"
+  },
+  "known_boundaries": {
+    "monitor_npm_audit": {
+      "high": 0,
+      "critical": 0,
+      "moderate": 2,
+      "brace_expansion_high": "FIXED_BY_LOCKED_OVERRIDE",
+      "react_router": "UPSTREAM_SAFE_RELEASE_PENDING; LOOPBACK_CSR_NO_SSR_HYDRATION"
+    },
+    "cockpit_default_page_height_1440x1000_px": 5159,
+    "monitor_minimum_primary_interaction_target_px": 24
   },
   "constraints": {
     "remote_edge_must_remain_off_until_user_authorizes": true,

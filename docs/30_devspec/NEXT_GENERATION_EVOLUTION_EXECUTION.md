@@ -20,6 +20,9 @@
 - 用户已授权并启动目标 Edge；ASR、GPT-SoVITS TTS、音频播放、Edge RPC、Unified Gateway 与真实消息平台核心往返已验证。
 - Gateway Chat 已贯通 canonical HostCommand／TaskGraph／Acceptance／Outbox；重复入站不会重复建图或外发。
 - OBS/Monitor 已如实投影双端状态；VTS 缺兼容情绪热键而 `DEGRADED`，barge-in 关闭并为 `NOT_TESTED`。
+- Monitor 的普通本机浏览器会话已接通：启动器生成 ACL 保护的 owner token，浏览器经 loopback/same-origin bootstrap 获得 HttpOnly Cookie，HTTP 与 WebSocket 不再显示伪“待连接”。
+- Security Hunt、Tool Execute 和 MateEngine 直推的退役按钮已改为只读迁移说明；不会为通过 UI 测试恢复第二套写 authority。
+- Cockpit 深层诊断默认折叠；依赖审计已消除 `brace-expansion` high，React Router 仍有 2 项仅适用于当前依赖边界的 moderate 待上游安全版本。
 - GitHub Actions 因账户额度不可用，远程状态为 `NOT_RUN_ACCOUNT_QUOTA`。
 - 整体状态保持 `INCOMPLETE`。
 
@@ -28,7 +31,7 @@
 ```mermaid
 flowchart LR
     A["仓库与文档收口：已完成"] --> B["Edge / Gateway 核心往返：已完成"]
-    B --> C["Host / OBS / Monitor 真实 UI：已完成"]
+    B --> C["Host / OBS / Monitor 真实 UI与本机会话：已完成"]
     C --> D["固定版本 Docker 重启持久性：已完成"]
     D --> E["VTS 热键与 barge-in：待外部配置"]
     E --> F["真实多轮盲测与性能"]
