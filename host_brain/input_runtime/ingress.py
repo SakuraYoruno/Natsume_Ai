@@ -122,9 +122,74 @@ async def receive_input(
                 status_code=409,
                 detail="host input previously completed without acceptance",
             )
+        if existing:
+            # A non-legacy result is the HostCommand atomically bound to this
+            # Secure Ingress claim. Duplicate HTTP attempts carry a new
+            # request/audit identity, so they must not rebuild or re-govern the
+            # command. Validate the exact durable handoff and acknowledge it;
+            # Task Runtime owns any remaining execution/recovery.
+            if governed_command_application_provider is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="governed Gateway admission validator is unavailable",
+                )
+            runtime = governed_command_application_provider()
+            require_admission = getattr(
+                runtime,
+                "require_gateway_ingress_admission",
+                None,
+            )
+            if not callable(require_admission):
+                raise HTTPException(
+                    status_code=503,
+                    detail="governed Gateway admission validator is unavailable",
+                )
+            try:
+                admission = dict(
+                    require_admission(
+                        command_id=existing,
+                        claim_ref=str(gateway_ingress.claim_ref or ""),
+                        principal_id=str(gateway_ingress.principal_id or ""),
+                        body_sha256=str(gateway_ingress.body_sha256 or ""),
+                    )
+                    or {}
+                )
+            except Exception as exc:
+                _logger.error(
+                    "input_routes: duplicate Gateway admission invalid "
+                    "request_id=%s error=%s",
+                    request_id,
+                    type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail="duplicate Gateway durable admission is invalid",
+                ) from exc
+            canonical_request_id = str(
+                admission.get("request_id") or ""
+            ).strip()
+            if not canonical_request_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="duplicate Gateway durable admission is incomplete",
+                )
+            return InputResponse(
+                success=True,
+                request_id=canonical_request_id,
+                source=source,
+                status="IGNORED",
+                detail="duplicate Gateway input already transferred to Task Runtime",
+                ts_ms=ts_ms,
+                **_host_input_receipt_fields(
+                    gateway_ingress,
+                    receipt_ref=_host_input_result_ref(
+                        request_id=canonical_request_id,
+                        status="ACCEPTED",
+                    ),
+                ),
+            )
         # A blank result means the first delivery has not yet reached atomic
-        # admission; a non-legacy result is a HostCommand id.  Both re-enter the
-        # governed application, whose repository owns exact replay semantics.
+        # admission, so it may safely run the ordinary admission path.
     if not gateway_ingress.allowed and not gateway_ingress.duplicate:
         raise HTTPException(
             status_code=_gateway_ingress_rejection_http_status(gateway_ingress.reason_code),
@@ -528,7 +593,14 @@ async def receive_input(
                 ts_ms=completed_ms,
                 **_host_input_receipt_fields(
                     gateway_ingress,
-                    receipt_ref=command_id,
+                    receipt_ref=_host_input_result_ref(
+                        request_id=request_id,
+                        status=(
+                            "COMPLETED"
+                            if decision == "APPROVE"
+                            else "REJECTED"
+                        ),
+                    ),
                 ),
             )
 

@@ -122,3 +122,5 @@ git diff --check
 远端 Edge 已完成真实服务预检，但 barge-in 关闭、VTS 情绪热键退化，Gateway 自动 Outbox 与 Obs 双端状态仍需基于当前提交重跑。整体不得标记 `PASS`。
 
 Gateway 传输的故障语义按方向验收：INBOX 使用冻结请求体、稳定 Host 幂等键和 canonical HostCommand 精确重放，Host 响应超时后进入有界重试；OUTBOX 已开始的平台发送仍视为未知外部副作用，只能隔离并对账，禁止盲目重放。
+
+重复 Gateway HTTP 请求若已绑定 HostCommand，应在执行任何反馈、Life 或路由逻辑前验证 canonical claim/command/body 绑定并立即确认 durable handoff；不得用重试请求的新 request/audit identity 重建 TaskGraph。首次完成响应和重复确认都必须返回 `host-input-result://` 收据，不能把内部 command ID 当成传输收据。

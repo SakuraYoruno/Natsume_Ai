@@ -318,7 +318,9 @@ def test_receive_input_returns_durable_command_receipt_without_legacy_overwrite(
 
     assert response.request_id == "request.gateway.aw02.input"
     assert response.status == "COMPLETED"
-    assert response.receipt_ref == "command::aw02::durable"
+    assert response.receipt_ref == (
+        "host-input-result://request.gateway.aw02.input/COMPLETED"
+    )
     legacy_complete.assert_not_called()
     authority = dispatch.await_args.kwargs["command_authority"]
     assert {key: authority[key] for key in (
@@ -337,6 +339,62 @@ def test_receive_input_returns_durable_command_receipt_without_legacy_overwrite(
     scope = authority["secure_gateway_conversation_scope_v1"]
     assert scope["workspace_id"] == "tenant:workspace-aw02"
     assert scope["relationship_subject_id"].startswith("subject-")
+
+
+def test_duplicate_gateway_command_is_acknowledged_without_rebuilding_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_receive_input(monkeypatch)
+    duplicate = HostGatewayIngressOutcome(
+        allowed=False,
+        duplicate=True,
+        reason_code="SECURE_INGRESS_IDEMPOTENCY_DUPLICATE",
+        claim_ref="secure-ingress-claim://aw02/input",
+        audit_ref="secure-ingress-audit://aw02/retry",
+        existing_result_ref="command::aw02::durable",
+        principal_id="service.edge.gateway",
+        tenant_id="workspace-aw02",
+        idempotency_key="aw02-input",
+        body_sha256="a" * 64,
+        request_id="request.gateway.aw02.retry",
+    )
+    monkeypatch.setattr(
+        input_ingress,
+        "_evaluate_host_gateway_ingress",
+        lambda **_kwargs: duplicate,
+    )
+    runtime = Mock()
+    runtime.require_gateway_ingress_admission.return_value = {
+        "command_id": "command::aw02::durable",
+        "request_id": "request.gateway.aw02.input",
+        "graph_id": "graph::aw02::durable",
+        "graph_revision": 1,
+    }
+    dispatch = AsyncMock(side_effect=AssertionError("must not rebuild graph"))
+    monkeypatch.setattr(input_ingress, "_dispatch_to_graph", dispatch)
+
+    response = _run(
+        input_ingress.receive_input(
+            _gateway_body(),
+            SimpleNamespace(),
+            governed_command_application_provider=lambda: runtime,
+            ports=build_input_runtime_application_ports(),
+        )
+    )
+
+    assert response.success is True
+    assert response.status == "IGNORED"
+    assert response.request_id == "request.gateway.aw02.input"
+    assert response.receipt_ref == (
+        "host-input-result://request.gateway.aw02.input/ACCEPTED"
+    )
+    runtime.require_gateway_ingress_admission.assert_called_once_with(
+        command_id="command::aw02::durable",
+        claim_ref="secure-ingress-claim://aw02/input",
+        principal_id="service.edge.gateway",
+        body_sha256="a" * 64,
+    )
+    dispatch.assert_not_awaited()
 
 
 def test_direct_skill_missing_receipt_fails_without_legacy_fallback(

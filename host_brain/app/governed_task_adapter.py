@@ -348,6 +348,70 @@ class GovernedHostRuntime:
             ).strip()
         )
 
+    def require_gateway_ingress_admission(
+        self,
+        *,
+        command_id: str,
+        claim_ref: str,
+        principal_id: str,
+        body_sha256: str,
+    ) -> dict[str, Any]:
+        """Validate a duplicate Gateway request against its durable admission.
+
+        Secure Ingress retries deliberately use a fresh request identity and
+        audit row while retaining the original idempotency claim. Rebuilding
+        a HostCommand from those fresh fields would create new command/graph
+        identities and falsely report payload drift. The Gateway transport
+        may acknowledge handoff once this method reopens the exact command
+        bound to the original claim; Task Runtime remains responsible for
+        finishing or recovering that graph.
+        """
+
+        command_ref = str(command_id or "").strip()
+        claim = str(claim_ref or "").strip()
+        principal = str(principal_id or "").strip()
+        input_digest = str(body_sha256 or "").strip().lower()
+        if input_digest and not input_digest.startswith("sha256:"):
+            input_digest = "sha256:" + input_digest
+        validate = getattr(
+            self._command_repository,
+            "validate_ingress_claim_result",
+            None,
+        )
+        if not command_ref or not claim or not principal or not input_digest:
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "duplicate Gateway ingress authority is incomplete",
+            )
+        if not callable(validate):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "canonical HostCommand claim validator is unavailable",
+            )
+        record = validate(command_ref)
+        command = record.get("command") if isinstance(record, Mapping) else None
+        if (
+            not isinstance(command, HostCommand)
+            or command.command_id != command_ref
+            or command.surface is not HostCommandSurface.GATEWAY
+            or command.ingress_claim_ref != claim
+            or command.principal_id != principal
+            or command.input_sha256 != input_digest
+            or not isinstance(record.get("work_order"), WorkOrderV3)
+            or record.get("assignment") is None
+            or record.get("graph") is None
+        ):
+            raise GovernedHostAdapterError(
+                GOVERNED_HOST_AUTHORITY_INVALID,
+                "duplicate Gateway ingress differs from its canonical admission",
+            )
+        return {
+            "command_id": command.command_id,
+            "request_id": command.request_id,
+            "graph_id": command.graph_id,
+            "graph_revision": command.graph_revision,
+        }
+
     async def replay_tool_stream(
         self,
         *,
