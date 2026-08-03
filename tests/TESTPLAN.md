@@ -67,6 +67,8 @@
 6. 注入 Host/Edge 崩溃、网络中断、Lease 过期、unknown effect 和 rollback failure。
 7. 停止本次服务，确认无遗留进程；默认不删除 acceptance volume。
 
+Host 启停还必须验证监听身份：进程判定同时匹配配置的监听地址与端口。同一端口上的局域网端口代理不能被误认成 loopback Host，也不能导致误杀、错误 PID 文件或虚假稳定性失败。
+
 ## 6. 性能
 
 在真实 provider 与目标 Edge 上统计：
@@ -93,6 +95,7 @@ python -m pytest tests/unit/test_doc_authority_gate.py tests/unit/test_doc_fresh
 python -m pytest tests/unit/test_gr05_cortex_governed_cutover.py tests/integration/test_gr05_universal_host_runtime.py tests/unit/test_input_routes_worker.py -q
 python -m pytest tests/unit/test_host_gateway_secure_ingress.py tests/unit/test_aw01_asgi_security_composition.py -q
 python -m pytest tests/unit/test_service_health_heartbeat.py tests/unit/test_aw07_health_device_projection.py tests/contract/test_health_endpoint_contract.py tests/unit/test_ne03_health_guardian_cutover.py -q
+python -m pytest tests/unit/test_runtime_startup_script_composition.py tests/unit/test_ne07_external_service_isolation.py -q
 python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all

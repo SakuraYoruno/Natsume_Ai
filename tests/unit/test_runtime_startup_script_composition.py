@@ -84,7 +84,7 @@ def test_host_stability_gate_checks_expected_listener_and_both_payload_identitie
 
     for required in (
         "Is-HostProcess -ProcessId $ExpectedPid",
-        "Get-ListeningPid -ProbePort $ProbePort",
+        "Get-ListeningPid -ProbePort $ProbePort -ProbeHost $ProbeHost",
         "[int]$listeningPid -eq $ExpectedPid",
         '-ExpectedCatalogStage $ExpectedCatalogStage',
         '-Kind "health"',
@@ -92,6 +92,21 @@ def test_host_stability_gate_checks_expected_listener_and_both_payload_identitie
         "$consecutive -ge $RequiredConsecutiveChecks",
     ):
         assert required in function_source
+
+
+def test_host_listener_lookup_is_scoped_to_the_configured_bind_address() -> None:
+    start_source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    stop_source = (ROOT / "scripts/runtime/stop_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for source in (start_source, stop_source):
+        assert '[string]$ProbeHost = ""' in source
+        assert "([string]$_.LocalAddress).ToLowerInvariant() -eq $normalizedHost" in source
+    assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in start_source
+    assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in stop_source
 
 
 def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() -> None:

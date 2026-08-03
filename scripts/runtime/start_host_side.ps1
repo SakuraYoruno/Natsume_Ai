@@ -366,11 +366,35 @@ function Write-RuntimeEnvFile {
 }
 
 function Get-ListeningPid {
-  param([int]$ProbePort)
-  $conn = Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($null -eq $conn) {
+  param(
+    [int]$ProbePort,
+    [string]$ProbeHost = ""
+  )
+  $connections = @(
+    Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue
+  )
+  if ($connections.Count -eq 0) {
     return $null
   }
+  if (-not [string]::IsNullOrWhiteSpace($ProbeHost)) {
+    $normalizedHost = $ProbeHost.Trim().TrimStart("[").TrimEnd("]").ToLowerInvariant()
+    if ($normalizedHost -eq "localhost") {
+      $normalizedHost = "127.0.0.1"
+    }
+    $conn = $connections |
+      Where-Object { ([string]$_.LocalAddress).ToLowerInvariant() -eq $normalizedHost } |
+      Select-Object -First 1
+    if ($null -eq $conn -and $normalizedHost -notin @("0.0.0.0", "::")) {
+      $conn = $connections |
+        Where-Object { ([string]$_.LocalAddress).ToLowerInvariant() -in @("0.0.0.0", "::") } |
+        Select-Object -First 1
+    }
+    if ($null -eq $conn) {
+      return $null
+    }
+    return [int]$conn.OwningProcess
+  }
+  $conn = $connections | Select-Object -First 1
   return [int]$conn.OwningProcess
 }
 
@@ -574,6 +598,7 @@ function Test-HostStartupStability {
   param(
     [int]$ExpectedPid,
     [int]$ProbePort,
+    [string]$ProbeHost,
     [string]$HealthUrl,
     [string]$ReadyUrl,
     [string]$ExpectedCatalogStage,
@@ -587,7 +612,7 @@ function Test-HostStartupStability {
       $null -ne (Get-Process -Id $ExpectedPid -ErrorAction SilentlyContinue) -and
       (Is-HostProcess -ProcessId $ExpectedPid)
     )
-    $listeningPid = Get-ListeningPid -ProbePort $ProbePort
+    $listeningPid = Get-ListeningPid -ProbePort $ProbePort -ProbeHost $ProbeHost
     $listenerMatches = (
       $null -ne $listeningPid -and
       [int]$listeningPid -eq $ExpectedPid
@@ -1076,7 +1101,7 @@ function Start-MateEngineBridgeRuntime {
     }
   }
 
-  $listeningBridgePid = Get-ListeningPid -ProbePort $portValue
+  $listeningBridgePid = Get-ListeningPid -ProbePort $portValue -ProbeHost $hostValue
   if ($null -ne $listeningBridgePid) {
     return [ordered]@{
       side = "mateengine_bridge"
@@ -1409,7 +1434,7 @@ if ($ForceRestart.IsPresent) {
       -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy") `
       -NginxExe $NginxExe `
       -Port $MonitorProxyPort
-    $remainingMonitorPid = Get-ListeningPid -ProbePort $MonitorProxyPort
+    $remainingMonitorPid = Get-ListeningPid -ProbePort $MonitorProxyPort -ProbeHost $MonitorProxyHost
     if ($null -ne $remainingMonitorPid) {
       throw (
         "failed to stop existing monitor proxy on port $MonitorProxyPort " +
@@ -1426,7 +1451,7 @@ if ($ForceRestart.IsPresent) {
       -EnvFile $EnvFile `
       -RuntimeRoot $RuntimeRoot `
       -Port $obsBindPort
-    $remainingObsPid = Get-ListeningPid -ProbePort $obsBindPort
+    $remainingObsPid = Get-ListeningPid -ProbePort $obsBindPort -ProbeHost $obsBindHost
     if ($null -ne $remainingObsPid) {
       throw (
         "failed to stop existing obs sidecar on port $obsBindPort " +
@@ -1472,7 +1497,7 @@ if (Test-Path -Path $pidFile) {
   }
 }
 
-$listeningPid = Get-ListeningPid -ProbePort $Port
+$listeningPid = Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost
 if ($null -ne $listeningPid) {
   if (-not $ForceRestart.IsPresent) {
     if (Is-HostProcess -ProcessId $listeningPid) {
@@ -1610,7 +1635,7 @@ if (-not $healthOk) {
 $hostPid = [int]$proc.Id
 $listeningPid = $null
 for ($i = 0; $i -lt 20; $i++) {
-  $candidatePid = Get-ListeningPid -ProbePort $Port
+  $candidatePid = Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost
   if ($null -ne $candidatePid -and [int]$candidatePid -gt 0) {
     $listeningPid = [int]$candidatePid
     break
@@ -1856,6 +1881,7 @@ if ($monitorProxyEnabled) {
 $hostStable = Test-HostStartupStability `
   -ExpectedPid $hostPid `
   -ProbePort $Port `
+  -ProbeHost $BindHost `
   -HealthUrl $healthUrl `
   -ReadyUrl "http://$probeHost`:$Port/ready" `
   -ExpectedCatalogStage $catalogTargetStage `
