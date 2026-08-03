@@ -7,6 +7,8 @@ import sqlite3
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from natsume_contracts.identity import (
     CredentialProof,
     CredentialProofKind,
@@ -19,6 +21,10 @@ from natsume_contracts.identity import (
 from host_brain.app.input_service_gateway import (
     complete_host_gateway_ingress,
     evaluate_host_gateway_ingress,
+)
+from host_brain.composition.command_ingress import (
+    CommandIngressCompositionError,
+    build_process_command_ingress_container,
 )
 from host_brain.persistence.secure_ingress_repository import SECURE_INGRESS_MIGRATION_SHA256
 from host_brain.secure_ingress import (
@@ -167,6 +173,86 @@ def _env() -> dict[str, str]:
         "HOST_EDGE_GATEWAY_HMAC_SECRET": SECRET,
         "HOST_EDGE_GATEWAY_HMAC_KEY_ID": KEY_ID,
     }
+
+
+def _remove_seeded_authority(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM secure_ingress_credential")
+        conn.execute("DELETE FROM secure_ingress_principal")
+
+
+def test_command_ingress_composition_seeds_gateway_identity_idempotently(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    authority = first.store.resolve(
+        principal_id=PRINCIPAL_ID,
+        key_id=KEY_ID,
+        at_ms=NOW,
+    )
+    assert authority is not None
+    assert authority.granted_scopes == ("host:write",)
+    assert authority.allowed_audiences == ("host",)
+    assert authority.allowed_actions == ("host:input",)
+    first.close()
+
+    restarted = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    restarted.close()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_principal"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_credential"
+        ).fetchone()[0] == 1
+
+
+def test_command_ingress_composition_rejects_gateway_authority_drift(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    first.close()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE secure_ingress_principal
+            SET granted_scopes_json = '["host:admin"]'
+            WHERE principal_id = ?
+            """,
+            (PRINCIPAL_ID,),
+        )
+
+    with pytest.raises(CommandIngressCompositionError):
+        build_process_command_ingress_container(
+            canonical_db_path=db_path,
+            mode="ENFORCE",
+            hmac_secrets={KEY_ID: SECRET},
+            gateway_principal_id=PRINCIPAL_ID,
+            gateway_key_id=KEY_ID,
+        )
 
 
 def test_valid_exact_raw_body_is_allowed_and_restart_duplicate_is_stable(tmp_path: Path) -> None:

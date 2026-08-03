@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import patch
+import asyncio
 
 import pytest
 from fastapi import FastAPI
@@ -132,3 +133,49 @@ class TestHealthEndpointEdgeProbeContract:
             response = client.get("/health?skip_dependency_probes=true")
 
         assert response.status_code == 200
+
+    def test_t_health_ep_04_real_component_status_beats_transport_reachability(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            health_routes,
+            "load_host_config",
+            lambda: SimpleNamespace(
+                success=True,
+                config=SimpleNamespace(cold_start_allowed=True),
+            ),
+        )
+        monkeypatch.setattr(
+            health_routes,
+            "build_host_runtime_statuses",
+            lambda _config: {},
+        )
+
+        async def dependency_probes() -> dict[str, object]:
+            return {
+                "edge.rpc.gateway": {
+                    "available": True,
+                    "detail": "transport reachable",
+                },
+                "edge.rpc.barge_in": {
+                    "available": False,
+                    "unavailable_kind": "dependency",
+                    "detail": "barge-in disabled by config",
+                },
+            }
+
+        report = asyncio.run(
+            health_routes.build_live_health_report(
+                ledger_provider=lambda: None,
+                dependency_probe_provider=dependency_probes,
+                degradation_state_provider=_guardian_state,
+            )
+        )
+        barge_in = next(
+            row
+            for row in report["services"]
+            if row["service_id"] == "edge.rpc.barge_in"
+        )
+        assert barge_in["status"] != "UP"
+        assert "disabled" in barge_in["detail"]

@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-03",
-  "commit_scope": "TRIBE_AGENT_ARCHITECTURE_DOCUMENTATION_REFRESH",
+  "commit_scope": "DUAL_STACK_P0_CLOSURE_IN_PROGRESS",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -25,7 +25,7 @@
     "realtime_companion_chat": {
       "status": "WIRED",
       "governance_mode": "LIGHTWEIGHT",
-      "note": "Ordinary no-effect chat does not require the heavyweight TaskGraph audit path."
+      "note": "Direct no-effect chat keeps the realtime path. Gateway chat uses a compact governed TaskGraph because its accepted reply is an external durable effect."
     },
     "user_self_affect_separation": {
       "status": "WIRED",
@@ -50,16 +50,17 @@
       "display_language": "zh",
       "speech_language": "ja",
       "voice_bank": "configs/voice/gpt_sovits_nanami_v4.json",
-      "remote_edge": "NOT_TESTED"
+      "remote_edge": "LIVE_PRECHECK_PARTIAL"
     },
     "avatar": {
       "status": "CONTRACT_READY",
-      "remote_vts_vrm": "NOT_TESTED"
+      "remote_vts_vrm": "LIVE_PRECHECK_DEGRADED"
     },
     "governed_effect_runtime": {
       "status": "WIRED",
       "routes": [
         "skill",
+        "gateway_chat",
         "delegate",
         "plan",
         "scheduler",
@@ -82,7 +83,7 @@
   },
   "acceptance": {
     "local_cuda_voice_variant_b": "PASS",
-    "target_edge_tts_avatar": "NOT_TESTED",
+    "target_edge_tts_avatar": "PARTIAL",
     "docker_host_obs_monitor_gateway_full_stack": "PARTIAL",
     "real_provider_performance": "INCOMPLETE",
     "fixed_72_scenarios": "MEASUREMENT_PENDING",
@@ -97,7 +98,10 @@
     "ordinary_chat_requires_heavy_audit": false
   },
   "current_blockers": [
-    "TARGET_EDGE_TTS_AVATAR_NOT_TESTED",
+    "GATEWAY_AUTOMATIC_ACCEPTANCE_OUTBOX_REACCEPTANCE_PENDING",
+    "EDGE_VTS_EMOTIONAL_HOTKEY_MAPPING_DEGRADED",
+    "EDGE_BARGE_IN_DISABLED",
+    "OBS_DUAL_NODE_HEALTH_REACCEPTANCE_PENDING",
     "REAL_PROVIDER_LATENCY_TARGET_NOT_MET",
     "MULTI_TURN_HUMAN_BLIND_TEST_NOT_RUN",
     "FULL_STACK_RESTART_AND_FAILURE_ACCEPTANCE_PENDING"

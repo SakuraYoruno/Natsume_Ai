@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import time
 from typing import Mapping
 
 from natsume_contracts.identity import CredentialProofKind
@@ -52,6 +53,8 @@ def build_process_command_ingress_container(
     canonical_db_path: str | Path,
     mode: str | SecureIngressMode,
     hmac_secrets: Mapping[str, str],
+    gateway_principal_id: str | None = None,
+    gateway_key_id: str | None = None,
 ) -> ProcessCommandIngressContainer:
     raw_path = str(canonical_db_path or "").strip()
     if not raw_path or raw_path == ":memory:" or raw_path.lower().startswith("file:"):
@@ -72,6 +75,24 @@ def build_process_command_ingress_container(
 
     store = SQLiteSecureIngressStore(canonical)
     try:
+        gateway_principal = str(gateway_principal_id or "").strip()
+        gateway_key = str(gateway_key_id or "").strip()
+        if gateway_principal and gateway_key and gateway_key in secrets:
+            try:
+                store.ensure_hmac_service_authority(
+                    principal_id=gateway_principal,
+                    key_id=gateway_key,
+                    tenant_id="local",
+                    granted_scopes=("host:write",),
+                    allowed_audiences=("host",),
+                    allowed_actions=("host:input",),
+                    secret_ref="env://HOST_EDGE_GATEWAY_HMAC_SECRET",
+                    at_ms=int(time.time() * 1000),
+                )
+            except Exception as exc:
+                raise CommandIngressCompositionError(
+                    "configured Gateway Secure Ingress authority is invalid"
+                ) from exc
         verifier = CredentialVerifierRegistry(
             {
                 CredentialProofKind.HMAC_SHA256: HmacSha256CredentialVerifier(

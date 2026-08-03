@@ -465,7 +465,13 @@ async def build_live_health_report(
             )
             _runtime_statuses.update(_dep_probes)
             _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
-            _runtime_statuses.update(_project_edge_transport_statuses(_edge_gateway))
+            for service_id, transport_status in _project_edge_transport_statuses(
+                _edge_gateway
+            ).items():
+                # Transport reachability is only a fallback.  A real ASR/TTS/
+                # barge-in/resource-gate probe must never be overwritten by
+                # the fact that the Edge HTTP port itself answered.
+                _runtime_statuses.setdefault(service_id, transport_status)
         except HealthRuntimeDependencyUnavailable:
             raise
         except Exception as _edge_exc:
@@ -479,7 +485,10 @@ async def build_live_health_report(
     health_report = build_service_health_report(
         runtime_statuses=_runtime_statuses,
         request_id=req_id,
-        ledger=ledger,
+        # The lifespan heartbeat owns durable service observations.  Its
+        # Host-only self-read sets skip_dependency_probes and must not append a
+        # newer NOT_TESTED Edge report every 30 seconds.
+        ledger=None if skip_dependency_probes else ledger,
         ts_ms=ts_value,
     )
     workspace_cleanup = _read_workspace_cleanup_health(

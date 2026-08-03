@@ -37,6 +37,10 @@ class DegradationObserver(Protocol):
         observed_at_ms: int,
     ) -> Sequence[Mapping[str, Any]] | None: ...
 
+
+class ServiceHealthWriter(Protocol):
+    def __call__(self, row: dict[str, Any]) -> None: ...
+
 # 缓存：service_id -> { "status", "latency_ms", "last_check_ts", "name", "side" }
 _cache: Dict[str, Dict[str, Any]] = {}
 _cache_lock = threading.Lock()
@@ -62,12 +66,22 @@ _HEALTH_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "edge.rpc.resource_gate":         "audio_playback",
 }
 
+_HEARTBEAT_SID_TO_CANONICAL_SID: Dict[str, str] = {
+    "sqlite_ledger": "host.audit.sqlite_ledger",
+    "llm_gateway": "host.integrations.llm_gateway",
+    "scheduler": "host.skills.loader",
+    "recall_fusion": "host.retrieval.recall_fusion",
+    "edge_rpc": "edge.rpc.gateway",
+    "asr": "edge.rpc.asr",
+    "tts": "edge.rpc.tts",
+    "vts": "edge.rpc.vts",
+    "audio_playback": "edge.rpc.audio_playback",
+}
+
 _EDGE_RPC_SID_TO_HEARTBEAT_SID: Dict[str, str] = {
     "edge.rpc.gateway": "edge_rpc",
     "edge.rpc.asr": "asr",
     "edge.rpc.tts": "tts",
-    "edge.rpc.barge_in": "audio_playback",
-    "edge.rpc.resource_gate": "audio_playback",
 }
 _EDGE_VTS_SERVICE_KEYS = ("edge.rpc.vts",)
 _EDGE_VTS_COMPONENT_KEYS = ("vts", "live2d", "vts_live2d")
@@ -657,6 +671,31 @@ def _resolve_edge_vts_sub_service(
     }
 
 
+def _resolve_edge_audio_playback_sub_service(
+    *,
+    probe: Mapping[str, Any],
+    gateway_detail: str,
+) -> Optional[Dict[str, Any]]:
+    event_payload = probe.get("event")
+    event = event_payload if isinstance(event_payload, Mapping) else {}
+    components_payload = event.get("components")
+    components = components_payload if isinstance(components_payload, Mapping) else {}
+    row = components.get("tts_playback_device")
+    if not isinstance(row, Mapping):
+        return None
+    enabled = bool(row.get("enabled", True))
+    available = bool(row.get("available", False))
+    component_status = str(row.get("status") or "").strip().lower()
+    detail = str(row.get("detail") or "").strip() or gateway_detail
+    if not enabled:
+        return {"status": "NOT_TESTED", "detail": detail or "audio playback disabled"}
+    if not available or component_status in {"down", "error", "unavailable", "shutdown"}:
+        return {"status": "DEGRADED", "detail": detail or "audio playback unavailable"}
+    if component_status in {"degraded", "loading", "recovering", "warning"}:
+        return {"status": "DEGRADED", "detail": detail or "audio playback degraded"}
+    return {"status": "UP", "detail": detail or "audio playback ready"}
+
+
 def _collect_edge_sub_services(
     probe: Mapping[str, Any],
     *,
@@ -689,6 +728,12 @@ def _collect_edge_sub_services(
     vts_status = _resolve_edge_vts_sub_service(probe=probe, gateway_detail=gateway_detail)
     if vts_status:
         sub_services["vts"] = vts_status
+    playback_status = _resolve_edge_audio_playback_sub_service(
+        probe=probe,
+        gateway_detail=gateway_detail,
+    )
+    if playback_status:
+        sub_services["audio_playback"] = playback_status
 
     return sub_services
 
@@ -864,6 +909,70 @@ def _write_core_service_cache(
             }
 
 
+def _persist_probe_health_observations(
+    *,
+    now_ts: int,
+    edge_result: Mapping[str, Any],
+    host_result: Mapping[str, Any],
+    service_health_writer: ServiceHealthWriter | None,
+) -> tuple[dict[str, Any], ...]:
+    """Persist only explicit heartbeat facts for the standalone Obs reader."""
+
+    if service_health_writer is None:
+        return ()
+    request_id = f"service-heartbeat:{int(now_ts)}"
+    candidates: list[tuple[str, str, Mapping[str, Any]]] = []
+    host_sub_services = host_result.get("sub_services")
+    if isinstance(host_sub_services, Mapping):
+        candidates.extend(
+            (str(service_id), "host", row)
+            for service_id, row in host_sub_services.items()
+            if isinstance(row, Mapping)
+        )
+    edge_sub_services = edge_result.get("sub_services")
+    if isinstance(edge_sub_services, Mapping):
+        candidates.extend(
+            (str(service_id), "edge", row)
+            for service_id, row in edge_sub_services.items()
+            if isinstance(row, Mapping)
+        )
+    if not any(service_id == "edge_rpc" for service_id, _side, _row in candidates):
+        candidates.append(
+            (
+                "edge_rpc",
+                "edge",
+                {
+                    "status": edge_result.get("status") or "UNKNOWN",
+                    "detail": edge_result.get("detail"),
+                    "reason_code": edge_result.get("reason_code"),
+                },
+            )
+        )
+
+    persisted: list[dict[str, Any]] = []
+    for service_id, side, raw in candidates:
+        canonical_id = _HEARTBEAT_SID_TO_CANONICAL_SID.get(service_id)
+        if not canonical_id:
+            continue
+        status = str(raw.get("status") or "UNKNOWN").strip().upper()
+        if status not in {"UP", "DEGRADED", "DOWN", "NOT_TESTED", "UNKNOWN"}:
+            status = "UNKNOWN"
+        row = {
+            "request_id": request_id,
+            "service_id": canonical_id,
+            "owner": side,
+            "required": int(service_id in {"edge_rpc", "asr", "tts", "sqlite_ledger"}),
+            "status": status,
+            "reason_code": str(raw.get("reason_code") or "").strip() or None,
+            "stage": "S_SERVICE_HEALTH",
+            "detail": str(raw.get("detail") or "").strip()[:1000] or "heartbeat probe",
+            "ts_ms": int(now_ts),
+        }
+        service_health_writer(row)
+        persisted.append(row)
+    return tuple(persisted)
+
+
 def has_fresh_core_service_cache(
     *,
     probe_state: ServiceHealthProbeState | None = None,
@@ -1037,6 +1146,7 @@ async def run_once(
     degradation_observer: DegradationObserver | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
     probe_state: ServiceHealthProbeState | None = None,
+    service_health_writer: ServiceHealthWriter | None = None,
 ) -> None:
     """执行一轮心跳探测并更新缓存。
 
@@ -1082,6 +1192,12 @@ async def run_once(
         edge_result=edge_result,
         host_result=host_result,
         probe_state=probe_state,
+    )
+    _persist_probe_health_observations(
+        now_ts=now_ts,
+        edge_result=edge_result,
+        host_result=host_result,
+        service_health_writer=service_health_writer,
     )
     host_overall = host_result.get("overall_status", "DOWN")
 
@@ -1151,6 +1267,7 @@ async def heartbeat_loop(
     degradation_observer: DegradationObserver | None = None,
     resource_manager_provider: Callable[..., Any] | None = None,
     probe_state: ServiceHealthProbeState | None = None,
+    service_health_writer: ServiceHealthWriter | None = None,
 ) -> None:
     """后台循环：每 interval_sec 执行一次 run_once()，直到任务被取消。"""
     logger.info("Service health heartbeat started (interval=%.0fs, initial_delay=%.0fs)", interval_sec, HEARTBEAT_INITIAL_DELAY_SEC)
@@ -1163,6 +1280,8 @@ async def heartbeat_loop(
             }
             if probe_state is not None:
                 kwargs["probe_state"] = probe_state
+            if service_health_writer is not None:
+                kwargs["service_health_writer"] = service_health_writer
             await run_once(
                 **kwargs,
             )
@@ -1224,6 +1343,7 @@ class ServiceHealthHeartbeat:
             [Mapping[str, Any]], Mapping[str, Any]
         ]
         | None = None,
+        service_health_writer: ServiceHealthWriter | None = None,
     ) -> None:
         if not callable(degradation_observer):
             raise TypeError("degradation_observer must be an app-local callable")
@@ -1231,8 +1351,11 @@ class ServiceHealthHeartbeat:
             resource_manager_provider
         ):
             raise TypeError("resource_manager_provider must be callable or None")
+        if service_health_writer is not None and not callable(service_health_writer):
+            raise TypeError("service_health_writer must be callable or None")
         self._degradation_observer = degradation_observer
         self._resource_manager_provider = resource_manager_provider
+        self._service_health_writer = service_health_writer
         self._probe_state = ServiceHealthProbeState(
             http_client_factory=http_client_factory,
             edge_probe=edge_probe,
@@ -1265,13 +1388,15 @@ class ServiceHealthHeartbeat:
         task = self._heartbeat_task
         if task is not None and not task.done():
             return task
+        heartbeat_kwargs: dict[str, Any] = {
+            "degradation_observer": self._degradation_observer,
+            "resource_manager_provider": self._resource_manager_provider,
+            "probe_state": self._probe_state,
+        }
+        if self._service_health_writer is not None:
+            heartbeat_kwargs["service_health_writer"] = self._service_health_writer
         self._heartbeat_task = asyncio.create_task(
-            heartbeat_loop(
-                interval_sec,
-                degradation_observer=self._degradation_observer,
-                resource_manager_provider=self._resource_manager_provider,
-                probe_state=self._probe_state,
-            ),
+            heartbeat_loop(interval_sec, **heartbeat_kwargs),
             name="host-service-health-heartbeat",
         )
         keepalive_task = self._keepalive_task

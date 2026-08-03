@@ -148,8 +148,20 @@ async def _cortex_orchestrator_sse_generator_impl(
     )
     workspace_id = str(getattr(request_body, "workspace_id", "") or "").strip()
     canonical_route = str((intent_draft or {}).get("route") or "").strip().lower()
-    canonical_realtime_route = canonical_route == "chat"
-    canonical_governed_route = canonical_route in {"skill", "delegate", "plan"}
+    input_source = str(
+        getattr(request_body, "input_source", "") or ""
+    ).strip().upper()
+    canonical_chat_route = canonical_route == "chat"
+    # Gateway replies are externally visible effects.  They must be compiled
+    # into the immutable TaskGraph so Acceptance owns the durable delivery
+    # intent and its ActionPreview authority.  Local/direct companion chat
+    # deliberately keeps the low-latency realtime path.
+    governed_gateway_chat = canonical_chat_route and input_source == "GATEWAY"
+    canonical_realtime_route = canonical_chat_route and not governed_gateway_chat
+    canonical_governed_route = (
+        canonical_route in {"skill", "delegate", "plan"}
+        or governed_gateway_chat
+    )
     canonical_read_route = canonical_route in {"task_progress", "recent_turn"}
     realtime_chat_port = getattr(application_ports, "stream_realtime_chat", None)
     governed_supported = bool(

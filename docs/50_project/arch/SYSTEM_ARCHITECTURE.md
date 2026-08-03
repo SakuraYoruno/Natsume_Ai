@@ -67,7 +67,7 @@ Ingress → observation/fusion → appraisal/fold → AffectiveTurnPlan
        → model streaming → text/TTS/avatar delivery → aftereffect
 ```
 
-该链只保留幂等交付、关系连续性和必要的错误证据。普通闲聊不创建复杂 TaskGraph。
+该链只保留幂等交付、关系连续性和必要的错误证据。本地／HTTP 普通闲聊不创建复杂 TaskGraph；来自 Gateway 的聊天因为需要产生可恢复的外部回信，会编译为单节点受管图，由 Acceptance 生成唯一 delivery intent。它不会把整段日常对话升级成多节点任务规划。
 
 ### 受管执行主链
 
@@ -77,7 +77,7 @@ HostCommand → immutable TaskGraph → node attempt
            → acceptance → outbox → durable receipt
 ```
 
-该链用于 Skill、Delegate、Plan、Scheduler、Internal、Operator 和设备副作用。
+该链用于 Skill、Delegate、Plan、Scheduler、Internal、Operator、Gateway 回信和设备副作用。Gateway Secure Ingress 在 Host composition 启动时按已配置 HMAC key 幂等注册最小权限 service principal；数据库中只保存 secret ref，不保存密钥值，已有 authority 不一致时启动失败而不是覆盖。
 
 ## 6. 故障模型
 
@@ -94,4 +94,4 @@ HostCommand → immutable TaskGraph → node attempt
 
 ## 8. 当前状态
 
-Tribe 的 23 个 Agent 已在 production composition 中完成 app-local 构造、端口绑定和订阅注册，canonical Life 仍是唯一长期自我。目标 Edge、真实三模态、长期人工体验和全栈故障恢复尚未共同通过，因此系统状态为 `INCOMPLETE`。
+Tribe 的 23 个 Agent 已在 production composition 中完成 app-local 构造、端口绑定和订阅注册，canonical Life 仍是唯一长期自我。目标 Edge 已完成一次真实服务预检，ASR、TTS、VTS 主服务可达，但 barge-in 仍关闭、VTS 情绪热键映射仍退化；Gateway 自动 Acceptance Outbox、独立 Obs 双端健康投影和完整故障恢复正在重新验收，因此系统状态仍为 `INCOMPLETE`。

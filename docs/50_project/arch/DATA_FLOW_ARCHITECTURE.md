@@ -66,6 +66,19 @@ flowchart LR
 
 节点失败、取消、重试和未知副作用在 Task Runtime 内恢复。只有 accepted effect 才进入外部交付。
 
+Gateway 入站聊天属于“实时生成 + 有副作用交付”的交界：消息经 Secure Ingress 后编译为紧凑单节点 TaskGraph，聊天生成仍只执行一次，Acceptance 再原子写入可见对话和 Gateway Outbox。直接网页／本地聊天继续走低延迟实时链，不承担这层外部投递账本。
+
+```mermaid
+flowchart LR
+    GW["Gateway webhook"] --> SI["Secure Ingress"]
+    SI --> HC["HostCommand / one-node TaskGraph"]
+    HC --> CHAT["Affective chat generation"]
+    CHAT --> AC["Verification / Acceptance"]
+    AC --> OUT["Gateway Outbox"]
+    OUT --> SEND["Idempotent platform delivery"]
+    SEND --> REC["Delivery receipt"]
+```
+
 ## 4. 语音与 Avatar
 
 ```mermaid
@@ -112,7 +125,7 @@ independent aftereffects
 
 ## 7. 观测流
 
-canonical SQLite ledgers 生成只读 projection，OBS 注册并刷新 projection jobs，Monitor 通过 OBS/Host API 展示状态。Monitor 的 React state、toast 或缓存不是业务成功证据。
+Host lifespan 心跳分别读取 Host 自身和真实 Edge 子服务，只把明确探测到的事实写入 canonical `service_health_log`；Host-only 自检不会再写一组较新的 Edge `NOT_TESTED` 覆盖远端事实。RPC 端口可达只作为缺失子服务结果时的 fallback，不能把关闭的 barge-in 或故障的播放设备标为 `UP`。OBS 从 canonical SQLite ledgers 生成只读 projection，Monitor 通过 OBS/Host API 展示状态。Monitor 的 React state、toast 或缓存不是业务成功证据。
 
 ## 8. 数据保留
 

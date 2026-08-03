@@ -90,6 +90,9 @@
 
 ```powershell
 python -m pytest tests/unit/test_doc_authority_gate.py tests/unit/test_doc_freshness_gate.py tests/unit/test_ne01_obs_d3_explicit_projection_ports.py -q
+python -m pytest tests/unit/test_gr05_cortex_governed_cutover.py tests/integration/test_gr05_universal_host_runtime.py tests/unit/test_input_routes_worker.py -q
+python -m pytest tests/unit/test_host_gateway_secure_ingress.py tests/unit/test_aw01_asgi_security_composition.py -q
+python -m pytest tests/unit/test_service_health_heartbeat.py tests/unit/test_aw07_health_device_projection.py tests/contract/test_health_endpoint_contract.py tests/unit/test_ne03_health_guardian_cutover.py -q
 python tools/doc_lint/doc_audience_lint.py --root .
 python tools/doc_lint/doc_authority_gate.py --root .
 python tools/doc_lint/doc_freshness_gate.py --root . --check-all
@@ -104,4 +107,4 @@ git diff --check
 - `NOT_RUN_ACCOUNT_QUOTA`：GitHub Actions 因额度未执行任何步骤。
 - `INCOMPLETE`／`FAIL`：存在代码、体验、恢复、安全或真实性缺口。
 
-远端 Edge 当前为 `NOT_TESTED`，整体不得标记 `PASS`。
+远端 Edge 已完成真实服务预检，但 barge-in 关闭、VTS 情绪热键退化，Gateway 自动 Outbox 与 Obs 双端状态仍需基于当前提交重跑。整体不得标记 `PASS`。

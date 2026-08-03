@@ -187,7 +187,8 @@ flowchart TB
 | 主动陪伴 | 已有场景、权限、冷却和安静时段策略；长期频率与接受度仍待实测。 |
 | 文本表达 | 本地可运行；需要真实 Provider，长期人格一致性仍在迭代。 |
 | 日语声线方案 B | 当前是 GPT-SoVITS V4 预训练权重配合七海参考音频的参考条件推理，不是七海专属微调模型。 |
-| Avatar 与多模态同步 | Host 合同和接线已推进；另一台电脑上的真实 Edge、TTS、VTS/VRM 和打断链尚未联合验收。 |
+| Avatar 与多模态同步 | 双机真实预检已确认 Edge、ASR、TTS、VTS 主服务可达；barge-in 当前关闭，VTS 情绪热键映射退化，完整动作与打断验收尚未通过。 |
+| Gateway 消息陪伴 | 入站消息使用 Secure Ingress；Gateway Chat 进入紧凑单节点 TaskGraph，由 Acceptance/Outbox 负责自动回信。直接本地聊天仍保持低延迟实时链。 |
 | 整体数字生命体验 | `INCOMPLETE`，不能用单元测试、静态合同或生成几段样音冒充完整交付。 |
 
 更细的真实能力与缺口见 [能力与缺口矩阵](docs/50_project/arch/ARCHITECTURE_GAP_MATRIX.md)，机器可读状态见 [current_architecture_status.json](configs/release/current_architecture_status.json)。
@@ -265,7 +266,7 @@ pwsh scripts/runtime/stop_docker_services.ps1
 pwsh scripts/runtime/start_edge_side.ps1
 ```
 
-声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发与非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。远端 Edge 未连接时，Host 的生命状态和文字入口可以独立运行，但不能宣称语音与 Avatar 已通过真实验收。
+声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发与非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。当前远端已完成真实连通预检，但这不等于三模态验收通过；Host 的生命状态和文字入口仍可在 Edge 断开时独立运行。
 
 ## 从哪里读代码
 

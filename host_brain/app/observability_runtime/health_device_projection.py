@@ -47,8 +47,8 @@ _DURABLE_SERVICE_HEALTH_PUBLIC_IDS: Mapping[str, tuple[str, ...]] = {
     "edge.rpc.gateway": ("edge_rpc",),
     "edge.rpc.asr": ("asr",),
     "edge.rpc.tts": ("tts",),
-    "edge.rpc.barge_in": ("audio_playback",),
-    "edge.rpc.resource_gate": ("audio_playback",),
+    "edge.rpc.vts": ("vts",),
+    "edge.rpc.audio_playback": ("audio_playback",),
 }
 _EXPLICIT_HEALTH_STATUSES = frozenset(
     {"UP", "DEGRADED", "DOWN", "NOT_TESTED", "UNKNOWN"}
@@ -208,9 +208,10 @@ def _explicit_health_overrides(
     # fill this gap; an ordinary TTS/ASR failure must never be generalized to
     # VTS.
     if gateway_not_tested is not None:
-        previous = selected.get("vts")
-        if previous is None or gateway_not_tested[0] > previous[0]:
-            selected["vts"] = gateway_not_tested
+        for public_id in ("vts", "audio_playback"):
+            previous = selected.get(public_id)
+            if previous is None or gateway_not_tested[0] > previous[0]:
+                selected[public_id] = gateway_not_tested
 
     projected: dict[str, dict[str, Any]] = {}
     for public_id, (rank, row) in selected.items():

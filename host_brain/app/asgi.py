@@ -909,6 +909,11 @@ def create_app(
                     edge_dependency_status_builder=(
                         host_lifecycle.ports.build_edge_dependency_probe_statuses
                     ),
+                    service_health_writer=getattr(
+                        ledger,
+                        "log_service_health",
+                        None,
+                    ),
                 )
                 service_health_heartbeat.start(interval_sec=30.0)
                 application.state.service_health_heartbeat = service_health_heartbeat
@@ -1006,6 +1011,8 @@ def create_app(
                     canonical_db_path=task_runtime.canonical_db_path,
                     mode=ingress_settings.secure_ingress_mode,
                     hmac_secrets=_command_ingress_hmac_secrets(),
+                    gateway_principal_id="service.edge.gateway",
+                    gateway_key_id=ingress_settings.edge_gateway_hmac_key_id,
                 )
                 _assert_graph_cancellation_operator_startup(
                     enabled=cancellation_operator_enabled,

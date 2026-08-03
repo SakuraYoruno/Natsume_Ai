@@ -86,7 +86,7 @@ def _ports() -> SimpleNamespace:
     )
 
 
-def _request_body() -> SimpleNamespace:
+def _request_body(*, input_source: str = "GATEWAY") -> SimpleNamespace:
     return SimpleNamespace(
         message="请根据检索证据给出完整技术结论",
         thread_id=None,
@@ -95,7 +95,7 @@ def _request_body() -> SimpleNamespace:
         reply_channel="gateway",
         reply_target="device-gr05",
         render_target_lang="zh",
-        input_source="GATEWAY",
+        input_source=input_source,
         response_form="text",
         render_policy={"mode": "default"},
         attachments=[],
@@ -121,7 +121,7 @@ def _intent(route: str = "chat") -> dict[str, Any]:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", ["chat", "skill", "delegate", "plan"])
-async def test_chat_uses_realtime_surface_while_task_routes_remain_governed(
+async def test_gateway_routes_use_governed_runtime(
     route: str,
 ) -> None:
     governed = _GovernedRuntime()
@@ -155,16 +155,10 @@ async def test_chat_uses_realtime_surface_while_task_routes_remain_governed(
         )
     ]
 
-    expected_narrative = (
-        "realtime companion result" if route == "chat" else "governed result"
-    )
-    assert events[-1]["narrative"] == expected_narrative
-    calls = ports.realtime_calls if route == "chat" else governed.calls
+    assert events[-1]["narrative"] == "governed result"
+    assert ports.realtime_calls == []
+    calls = governed.calls
     assert len(calls) == 1
-    if route == "chat":
-        assert governed.calls == []
-    else:
-        assert len(governed.calls) == 1
     call = calls[0]
     assert call["bond_summary"] == {"stage": "trusted"}
     assert prefetch_args["workspace_id"] == "workspace-gr05-cortex"
@@ -173,11 +167,8 @@ async def test_chat_uses_realtime_surface_while_task_routes_remain_governed(
         {"evidence_ref": "memory://governed/context"}
     ]
     assert call["llm_runtime"]["available"] is False
-    if route == "chat":
-        assert call["trace_stage_meta"]["runtime_path"] == "realtime_companion"
-        assert "command_authority" not in call
-    else:
-        assert call["motive_state"] == {"dominant_motive": "help"}
+    assert call["motive_state"] == {"dominant_motive": "help"}
+    assert "command_authority" in call
     assert all(
         event.get("audit_refs", {}).get("path")
         not in {
@@ -219,8 +210,8 @@ async def test_canonical_route_fails_closed_when_governed_runtime_cannot_support
 
 
 @pytest.mark.asyncio
-async def test_chat_never_enters_the_governed_terminal_runtime() -> None:
-    """Ordinary text stays off the TaskGraph even when one is injected."""
+async def test_gateway_chat_projects_governed_terminal_rejection() -> None:
+    """Gateway text stays on the TaskGraph through terminal projection."""
 
     governed = _RejectedGovernedChatRuntime()
     ports = _ports()
@@ -248,10 +239,10 @@ async def test_chat_never_enters_the_governed_terminal_runtime() -> None:
     terminal = events[-1]
     assert terminal["phase"] == "COMMIT"
     assert terminal["done"] is True
-    assert terminal["decision"] == "APPROVE"
-    assert terminal["narrative"] == "realtime companion result"
-    assert len(ports.realtime_calls) == 1
-    assert governed.calls == []
+    assert terminal["decision"] == "REJECT"
+    assert terminal["reason_code"] == "SURFACE_REPLY_RUNTIME_FAILED"
+    assert ports.realtime_calls == []
+    assert len(governed.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -262,7 +253,7 @@ async def test_chat_fails_closed_when_realtime_surface_is_not_composed() -> None
         event
         async for event in _cortex_orchestrator_sse_generator_impl(
             application_ports=ports,
-            request_body=_request_body(),
+            request_body=_request_body(input_source="HTTP"),
             request_id="request-gr05-realtime-missing",
             session_id="session-gr05-cortex",
             ts_ms=1_000,
@@ -281,6 +272,65 @@ async def test_chat_fails_closed_when_realtime_surface_is_not_composed() -> None
 
     assert events[-1]["decision"] == "REJECT"
     assert events[-1]["reason_code"] == "REALTIME_COMPANION_RUNTIME_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_direct_chat_keeps_low_latency_realtime_surface() -> None:
+    governed = _GovernedRuntime()
+    ports = _ports()
+    events = [
+        event
+        async for event in _cortex_orchestrator_sse_generator_impl(
+            application_ports=ports,
+            request_body=_request_body(input_source="HTTP"),
+            request_id="request-gr05-direct-chat",
+            session_id="session-gr05-cortex",
+            ts_ms=1_000,
+            intent_draft=_intent("chat"),
+            emotion_context={},
+            emotion_snapshot={},
+            governor_result={"decision": "APPROVE"},
+            intent_id="intent-gr05-cortex",
+            metrics=object(),
+            sse_fn=lambda value: dict(value),
+            airlock_sanitize_input_fn=lambda value: (value, True),
+            resolve_person_id_fn=lambda *_args, **_kwargs: "person-gr05-cortex",
+            governed_command_application=governed,
+        )
+    ]
+
+    assert events[-1]["narrative"] == "realtime companion result"
+    assert len(ports.realtime_calls) == 1
+    assert governed.calls == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_chat_fails_closed_without_governed_support() -> None:
+    governed = _GovernedRuntime(supported=False)
+    events = [
+        event
+        async for event in _cortex_orchestrator_sse_generator_impl(
+            application_ports=_ports(),
+            request_body=_request_body(),
+            request_id="request-gr05-gateway-chat-unsupported",
+            session_id="session-gr05-cortex",
+            ts_ms=1_000,
+            intent_draft=_intent("chat"),
+            emotion_context={},
+            emotion_snapshot={},
+            governor_result={"decision": "APPROVE"},
+            intent_id="intent-gr05-cortex",
+            metrics=object(),
+            sse_fn=lambda value: dict(value),
+            airlock_sanitize_input_fn=lambda value: (value, True),
+            resolve_person_id_fn=lambda *_args, **_kwargs: "person-gr05-cortex",
+            governed_command_application=governed,
+        )
+    ]
+
+    assert events[-1]["decision"] == "REJECT"
+    assert events[-1]["reason_code"] == "GOVERNED_ROUTE_UNSUPPORTED"
+    assert governed.calls == []
 
 
 def test_cortex_runtime_has_no_direct_chat_or_postprocess_compatibility_hooks() -> None:
