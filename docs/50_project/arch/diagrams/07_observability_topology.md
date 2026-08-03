@@ -58,6 +58,8 @@ Projection 可以重建、缓存或降级；其丢失不得导致 canonical even
 
 Overview 的 service card 同时展示 Host、OBS、Gateway、Edge、模型与外部依赖的真实状态。前端 `overviewModel` 只归一服务端返回的 status、reason 和 evidence；不能把网络请求成功、toast 或默认绿色样式当成服务健康。
 
+Gateway 统计由 OBS 读取 durable transport ledger 后投影；公开 Gateway `/v1/gateway/stats` 未安装 authenticated admin surface 时会 fail-closed，不是 Monitor 的数据源。这样既不暴露平台细节，也不会用公共 liveness 猜测通道状态。
+
 ```mermaid
 sequenceDiagram
     participant M as Monitor UI

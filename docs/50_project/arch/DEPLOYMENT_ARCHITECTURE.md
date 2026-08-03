@@ -67,4 +67,6 @@ Host 默认将中文文本映射为日语 TTS 请求。Edge 启动脚本在启�
 
 目标 Edge、Unified Gateway 和真实消息平台已运行并完成核心往返；ASR、GPT-SoVITS TTS、音频播放、Edge RPC 和 Gateway 为 `UP`。VTS 已认证且口型／身体动作可用，但缺兼容情绪热键，状态为 `DEGRADED`；barge-in 关闭，状态为 `NOT_TESTED`。
 
-Host、OBS 与 Nginx Monitor 已在隔离 acceptance 数据根启动，真实后端 Playwright 验证通过。固定版本 Neo4j、Chroma 与 Redis 已启动；最终提交仍需绑定 commit SHA 重跑写入、读取和容器重启持久性收口。GitHub Actions 未运行的原因为账户额度，状态为 `NOT_RUN_ACCOUNT_QUOTA`。
+Host、OBS 与 Nginx Monitor 已在隔离 acceptance 数据根启动，真实后端 Playwright 验证通过。提交 `cdaa4ea54` 已绑定固定版本 Neo4j、Chroma 与 Redis 的真实写入、读取、容器重启和持久读取回执，状态为 `PASS`；重启后 Host、OBS、Monitor、Edge 与 Gateway health 仍可达。GitHub Actions 未运行的原因为账户额度，状态为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+Gateway 公共 health 只提供无敏感信息的常量规模存活视图。详细 `/v1/gateway/stats` 在没有 authenticated admin surface 时按合同 fail-closed；生产 Monitor 从 OBS 的 durable Gateway projection 查询统计，不直接依赖该未安装管理面。

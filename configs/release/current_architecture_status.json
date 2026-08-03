@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-03",
-  "commit_scope": "DUAL_STACK_P0_CLOSURE_CODE_COMPLETE",
+  "commit_scope": "DUAL_STACK_P0_CLOSURE_ACCEPTED",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -82,9 +82,12 @@
     }
   },
   "acceptance": {
+    "dual_stack_p0_gateway_runtime_health": "PASS",
+    "external_services_restart_persistence": "PASS",
+    "monitor_real_backend_e2e": "PASS",
     "local_cuda_voice_variant_b": "PASS",
     "target_edge_tts_avatar": "ACCEPTANCE_PENDING_EXTERNAL",
-    "docker_host_obs_monitor_gateway_full_stack": "PARTIAL",
+    "docker_host_obs_monitor_gateway_full_stack": "PASS_LOCAL_MANDATORY",
     "real_provider_performance": "INCOMPLETE",
     "fixed_72_scenarios": "MEASUREMENT_PENDING",
     "three_reviewer_blind_test": "NOT_RUN",
@@ -102,6 +105,6 @@
     "EDGE_BARGE_IN_DISABLED",
     "REAL_PROVIDER_LATENCY_TARGET_NOT_MET",
     "MULTI_TURN_HUMAN_BLIND_TEST_NOT_RUN",
-    "FULL_STACK_RESTART_AND_FAILURE_ACCEPTANCE_PENDING"
+    "FULL_DIGITAL_LIFE_FAILURE_MATRIX_PENDING"
   ]
 }
