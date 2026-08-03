@@ -99,5 +99,6 @@ Gateway 的公开 `/v1/gateway/stats` 仍按合同返回 `GW_ADMIN_AUTH_UNAVAILA
 - `1001 going away` 被识别为可恢复连接关闭；一次同步恢复失败后转交现有后台有界退避，不再按动作帧频率刷错。
 - 生命动作等待态会对 `ERROR／DISCONNECTED` 请求一次后台重连；`RECONNECTING` 期间不重复启动线程，恢复后的 health 使用共享 VTS driver 的当前状态。
 - 真实故障注入中强制结束 VTube Studio，Edge 未重启；VTS 再启动后，Edge 经 6 次退避自行恢复为 `AUTHENTICATED`，重连计数增加 1。恢复后 20 秒内动作帧增加 68，动作错误和 model-move 错误增量均为 0，ASR 与 GPT-SoVITS 继续为 `READY`。
+- 恢复后通过真实 HMAC Edge RPC 合成并播放一条日语 GPT-SoVITS 语音：请求与播放启动均为 `ACCEPTED`，物理播放完成且无 playback error；VTS 口型同步完成 26 帧、0 错误，同期生命动作增加 19 帧、0 错误。expression hotkey 仍如实为不可用。
 
 Edge 总体仍为 `DEGRADED`，原因只剩当前模型没有兼容的情绪 expression hotkey；barge-in 也仍关闭。此次只证明 VTS 传输断线恢复和状态真实性，不把表情热键、三模态同步、盲测或完整实时性能提升为通过。
