@@ -140,6 +140,7 @@ from host_brain.persistence.task_record_codec import (
     build_acceptance_effect_payload_digest,
 )
 from host_brain.persistence.task_decision_integrity import (
+    _assert_graph_cancellation_decision_bindings,
     _assert_parallel_budget_usage_lineage,
     _assert_parallel_settlement_decision_outbox_binding,
     _assert_parallel_success_decision_bindings,
