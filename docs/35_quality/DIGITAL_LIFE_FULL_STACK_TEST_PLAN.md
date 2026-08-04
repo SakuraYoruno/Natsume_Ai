@@ -734,10 +734,10 @@ pwsh scripts/runtime/stop_docker_services.ps1 -ProjectName $DockerProject
 - 故障矩阵：
 
 ## 未完成边界
-- 
+- （无则写“无”）
 
 ## P0／P1 缺陷
-- 
+- （无则写“无”）
 ```
 
 ## 21. 当前已知待验项
