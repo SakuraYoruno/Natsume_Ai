@@ -288,10 +288,8 @@ def test_task0489_query_only_secure_command_restart_wave(
     with TestClient(_http_app(first_composition)) as client:
         first = client.post(path, content=raw_body, headers=first_headers)
         assert first.status_code == 503, first.text
-        assert first.json()["status"] == "unavailable"
-        assert first.json()["reason_code"] == (
-            "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-        )
+        assert first.json()["status"] == "uncertain"
+        assert first.json()["reason_code"] == "OBS_COMMAND_EXECUTION_UNCERTAIN"
         assert captured == []
 
         duplicate_headers = _signed_headers(
@@ -306,9 +304,7 @@ def test_task0489_query_only_secure_command_restart_wave(
         duplicate = client.post(path, content=raw_body, headers=duplicate_headers)
         assert duplicate.status_code == 503, duplicate.text
         assert duplicate.json()["duplicate"] is True
-        assert duplicate.json()["reason_code"] == (
-            "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-        )
+        assert duplicate.json()["reason_code"] == "OBS_COMMAND_EXECUTION_UNCERTAIN"
         assert duplicate.json()["result_ref"] == first.json()["result_ref"]
         assert captured == []
 
@@ -337,9 +333,7 @@ def test_task0489_query_only_secure_command_restart_wave(
             after_restart = client.post(path, content=raw_body, headers=restart_headers)
         assert after_restart.status_code == 503, after_restart.text
         assert after_restart.json()["duplicate"] is True
-        assert after_restart.json()["reason_code"] == (
-            "ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED"
-        )
+        assert after_restart.json()["reason_code"] == "OBS_COMMAND_EXECUTION_UNCERTAIN"
         assert after_restart.json()["result_ref"] == first_result_ref
         assert captured == []
     finally:
@@ -388,17 +382,17 @@ def test_task0489_query_only_secure_command_restart_wave(
         if record.key.command_id == COMMAND_ID
         and record.state in {
             ObsCommandOutcomeState.EXECUTING,
-            ObsCommandOutcomeState.REJECTED,
+            ObsCommandOutcomeState.UNCERTAIN,
         }
     ]
     assert len(outcome_records) == 2
     assert [record.state for record in command_records] == [
         ObsCommandOutcomeState.EXECUTING,
-        ObsCommandOutcomeState.REJECTED,
+        ObsCommandOutcomeState.UNCERTAIN,
     ]
     assert (
         command_records[-1].side_effect_certainty
-        is SideEffectCertainty.NOT_EXECUTED
+        is SideEffectCertainty.MAY_HAVE_EXECUTED
     )
     assert command_records[-1].receipt_ref == first_result_ref
     wal_text = outcome_path.read_text(encoding="utf-8")

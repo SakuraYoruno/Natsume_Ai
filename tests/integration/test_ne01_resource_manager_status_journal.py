@@ -30,6 +30,14 @@ from host_brain.persistence.embodiment_outbox_repository import (
 )
 
 
+MIGRATIONS = (
+    Path(__file__).resolve().parents[2] / "host_brain" / "audit" / "migrations"
+)
+CURRENT_MIGRATION = max(
+    int(path.name.split("_", 1)[0]) for path in MIGRATIONS.glob("*.sql")
+)
+
+
 def _migrated_database(tmp_path: Path) -> Path:
     database = tmp_path / "resource-manager-status.sqlite3"
     result = SQLiteMigrationRunner(db_path=database).apply_migrations(
@@ -37,7 +45,7 @@ def _migrated_database(tmp_path: Path) -> Path:
         ts_ms=int(time.time() * 1000),
     )
     assert result.success, result.as_dict()
-    assert result.summary["current_version"] == 123
+    assert result.summary["current_version"] == CURRENT_MIGRATION
     return database
 
 

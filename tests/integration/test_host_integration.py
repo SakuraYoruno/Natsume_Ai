@@ -138,6 +138,12 @@ def test_client(mem_ledger):
                 "HOST_MODEL_ROUTE_SCENE_CHAT_SURFACE_PROVIDER": "openai",
                 "HOST_OPENAI_MODEL_ID": "test-openai-model",
                 "HOST_AGENT_WORKSPACE_HMAC_SECRET": "test-workspace-secret-at-least-32-bytes",
+                # Do not combine the fixture's direct secret with a developer
+                # .env secret reference. Production correctly rejects that
+                # ambiguous authority source.
+                "HOST_AGENT_WORKSPACE_HMAC_SECRET_REF": "",
+                "HOST_SCHEDULER_CLOCK_ENABLED": "0",
+                "HOST_BACKGROUND_TASKS_ENABLED": "0",
             },
             clear=False,
         ),
@@ -150,6 +156,9 @@ def test_client(mem_ledger):
             new=_mock_attested_stream,
         ),
     ):
+        from host_brain.app.settings.scheduler import get_scheduler_settings
+
+        get_scheduler_settings.cache_clear()
         from host_brain.app.asgi import app
         # ``TestClient`` only enters the ASGI lifespan when used as a context
         # manager.  Host readiness/startup endpoints deliberately depend on
@@ -159,6 +168,7 @@ def test_client(mem_ledger):
         with TestClient(app, raise_server_exceptions=False) as client:
             client.app.state.test_attested_stream_calls = attested_stream_calls
             yield client
+        get_scheduler_settings.cache_clear()
 
     # 清理单例，避免跨测试污染
     _deps.get_process_service_container().ledger = None
@@ -242,7 +252,13 @@ class TestReadinessEndpoint:
         """T-INT-READY-03: /ready status 为合法值。"""
         resp = test_client.get("/ready")
         data = resp.json()
-        assert data["status"] in {"READY", "DEGRADED", "FAILED", "NOT_READY"}
+        assert data["status"] in {
+            "READY",
+            "DEGRADED",
+            "FAILED",
+            "NOT_READY",
+            "ACCEPTANCE_PENDING_EXTERNAL",
+        }
 
     def test_ready_summary_is_dict(self, test_client):
         """T-INT-READY-04: /ready summary 字段为字典。"""
@@ -472,11 +488,11 @@ class TestChatEndpoint:
         assert commit is not None
         assert "request_id" in commit
 
-    def test_chat_governed_stream_stages_sentence_before_acceptance(
+    def test_chat_realtime_stream_uses_frozen_affect_without_taskgraph(
         self,
         test_client,
     ):
-        """T-INT-CHAT-04A: 当前 ModelAttempt 流先持久暂存句子再接受任务。"""
+        """T-INT-CHAT-04A: 普通陪伴对话流式输出且不创建重型 TaskGraph。"""
         resp = test_client.post(
             "/v1/chat",
             json={"message": "你好，夏目"},
@@ -489,44 +505,23 @@ class TestChatEndpoint:
             if event.get("phase") == "SENTENCE"
         ]
         terminal_event = next(event for event in events if event.get("done"))
-        command_id = terminal_event["execution_receipt"]["command_id"]
-        runtime_container = test_client.app.state.task_runtime_container_provider()
-        assert runtime_container is not None
-        admitted = runtime_container.command_repository.get(command_id)
-        assert admitted is not None
-        input_pack = admitted["work_order"].input_pack
-        assert input_pack["emotion_context"].get(
-            "_affective_life_internal"
-        ) is True
-        from host_brain.digital_life.affective_turn_planner import (  # noqa: PLC0415
-            build_affective_turn_guidance,
-        )
-
-        guidance = build_affective_turn_guidance(
-            emotion_context=input_pack["emotion_context"],
-            request_id=str(terminal_event["request_id"]),
-            workspace_id=str(input_pack["workspace_id"]),
-            relationship_subject_id=str(input_pack["subject_id"]),
-            session_id=str(admitted["command"].session_id),
-        )
-        assert guidance is not None
+        assert "execution_receipt" not in terminal_event
+        trace_stage_meta = terminal_event["audit_refs"]["trace_stage_meta"]
+        turn_plan = trace_stage_meta["affective_turn_plan"]
+        guidance = trace_stage_meta["affective_turn_guidance"]
+        assert turn_plan["self_id"] == "natsume_ai"
+        assert guidance["plan_id"] == turn_plan["plan_id"]
+        assert guidance["self_affect_revision"] == turn_plan["self_affect_revision"]
         assert len(sentence_indexes) == 1
         assert len(test_client.app.state.test_attested_stream_calls) == 1
         sentence = events[sentence_indexes[0]]
         assert sentence["sentence"] == "你好，我是夏目。"
-        for field in (
-            "delivery_id",
-            "graph_id",
-            "node_id",
-            "attempt_id",
-            "self_id",
-            "relationship_subject_id",
-            "workspace_id",
-        ):
-            assert sentence.get(field), field
-        # Revision zero is the valid initial canonical Life snapshot; do not
-        # mistake it for a missing authority binding.
-        assert sentence.get("self_affect_revision") is not None
+        assert sentence["affective_turn_plan_id"] == turn_plan["plan_id"]
+        assert sentence["synchronization_id"] == turn_plan["expression_plan"][
+            "synchronization_id"
+        ]
+        for field in ("graph_id", "node_id", "attempt_id", "execution_receipt"):
+            assert field not in sentence
 
         commit_index, commit = next(
             (index, event)
@@ -535,8 +530,7 @@ class TestChatEndpoint:
         )
         assert sentence_indexes[0] < commit_index
         assert commit["decision"] == "APPROVE"
-        assert commit["execution_receipt"]["accepted"] is True
-        assert commit["execution_receipt"]["status"] == "ACCEPTED"
+        assert commit["audit_refs"]["path"] == "surface_reply:native_affective_stream"
 
     def test_chat_with_session_id(self, test_client):
         """T-INT-CHAT-05: /v1/chat 支持 session_id 参数。"""
@@ -634,28 +628,26 @@ class TestBondAPIIntegration:
     """T-INT-BOND: Bond API 路由集成测试。"""
 
     def test_bond_health(self, test_client):
-        """T-INT-BOND-01: GET /bond/health 返回 OK 或 DEGRADED。"""
+        """T-INT-BOND-01: 旧 Bond health 读投影已明确退役。"""
         resp = test_client.get("/bond/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] in {"OK", "DEGRADED"}
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_stage_new_user(self, test_client):
-        """T-INT-BOND-02: GET /bond/stage/{user_id} 新用户初始为 FRIEND。"""
+        """T-INT-BOND-02: 旧 Bond stage 不能冒充 canonical 关系状态。"""
         resp = test_client.get("/bond/stage/integration_test_user_001")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["current_stage"] == "FRIEND"
-        assert data["total_score"] >= 0
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_stage_response_fields(self, test_client):
-        """T-INT-BOND-03: GET /bond/stage 响应包含所有必要字段。"""
+        """T-INT-BOND-03: 旧 Bond 读入口返回稳定的退役合同。"""
         resp = test_client.get("/bond/stage/integration_test_user_002")
+        assert resp.status_code == 410
         data = resp.json()
-        required = ["user_id", "current_stage", "stage_index", "total_score",
-                    "event_count", "trend", "capability_hint", "request_id", "timestamp"]
+        required = ["status", "reason_code", "detail", "request_id", "timestamp"]
         for field in required:
             assert field in data, f"missing field: {field}"
+        assert data["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_submit_event_interaction(self, test_client):
         """T-INT-BOND-04: POST /bond/event 拒绝旧积分写入。"""
@@ -699,12 +691,10 @@ class TestBondAPIIntegration:
         assert resp.json()["reason_code"] == "LEGACY_BOND_WRITE_RETIRED"
 
     def test_bond_summary_no_numeric(self, test_client):
-        """T-INT-BOND-07: GET /bond/summary 返回不含数值的摘要。"""
+        """T-INT-BOND-07: 旧 Bond summary 读投影已退役。"""
         resp = test_client.get("/bond/summary/integration_test_user_006")
-        assert resp.status_code == 200
-        data = resp.json()
-        for key in ("stage", "trend", "capability_hint"):
-            assert isinstance(data[key], str), f"summary[{key}] should be string"
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_users_list(self, test_client):
         """T-INT-BOND-08: 被拒绝的旧写入不会创建历史投影用户。"""
@@ -718,10 +708,8 @@ class TestBondAPIIntegration:
         )
         assert write_response.status_code == 410
         resp = test_client.get("/bond/users")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 0
-        assert data["users"] == []
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
     def test_bond_event_with_emotion_fields(self, test_client):
         """T-INT-BOND-09: 旧 emotion 字段不能写入七海关系或自我状态。"""
@@ -767,9 +755,8 @@ class TestBondAPIIntegration:
             )
             assert event_resp.status_code == 410
         resp = test_client.get(f"/bond/stage/{user_id}")
-        data = resp.json()
-        assert data["current_stage"] == "FRIEND"
-        assert data["total_score"] == 0
+        assert resp.status_code == 410
+        assert resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
 
 # ---------------------------------------------------------------------------
@@ -912,7 +899,7 @@ class TestEndToEndPipeline:
         """T-INT-E2E-04: Bond stage 和 summary 阶段字段一致。"""
         user_id = "e2e_consistency_user_001"
 
-        # 旧写入被拒绝；读投影仍保持可查询。
+        # 旧写入和旧读投影都已退役，关系状态只从 Digital Life 读取。
         write_response = test_client.post(
             "/bond/event",
             json={
@@ -926,15 +913,10 @@ class TestEndToEndPipeline:
         stage_resp = test_client.get(f"/bond/stage/{user_id}")
         summary_resp = test_client.get(f"/bond/summary/{user_id}")
 
-        assert stage_resp.status_code == 200
-        assert summary_resp.status_code == 200
-
-        stage_data = stage_resp.json()
-        summary_data = summary_resp.json()
-
-        # stage 和 summary 都应有阶段信息
-        assert stage_data["current_stage"] is not None
-        assert summary_data["stage"] is not None
+        assert stage_resp.status_code == 410
+        assert summary_resp.status_code == 410
+        assert stage_resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
+        assert summary_resp.json()["reason_code"] == "LEGACY_BOND_READ_RETIRED"
 
 
 # ---------------------------------------------------------------------------

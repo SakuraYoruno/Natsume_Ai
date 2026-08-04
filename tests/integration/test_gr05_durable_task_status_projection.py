@@ -57,7 +57,7 @@ def _admit(db_path: Path) -> None:
                 dependencies=(),
                 route="delegate:research_agent",
                 input_refs=(),
-                output_contract={},
+                output_contract={"type": "object"},
                 retry_policy={"max_attempts": 1},
                 risk_level=1,
                 acceptance_criteria=("return one durable result",),

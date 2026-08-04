@@ -2,10 +2,25 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from host_brain.app.asgi import app as host_app
 from host_brain.app.input_service_gateway import HostGatewayIngressOutcome
+from host_brain.runtime.conversation_scope import SecureGatewayConversationScopeV1
+
+
+@pytest.fixture(autouse=True)
+def _isolate_scheduler_clock(monkeypatch):  # noqa: ANN001
+    from host_brain.app.settings.scheduler import get_scheduler_settings
+
+    monkeypatch.setenv("HOST_SCHEDULER_CLOCK_ENABLED", "0")
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "0")
+    get_scheduler_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_scheduler_settings.cache_clear()
 
 
 def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
@@ -15,6 +30,18 @@ def _allow_input_immune_gate(**_kwargs) -> dict[str, object]:  # noqa: ANN003
         "reason_codes": [],
         "score": 0.0,
     }
+
+
+def _expected_gateway_scope(
+    *, conversation_id: str, from_id: str
+) -> SecureGatewayConversationScopeV1:
+    return SecureGatewayConversationScopeV1.derive(
+        principal_id="service.edge.gateway.test",
+        tenant_id="workspace-host-input-test",
+        platform="qq",
+        from_id=from_id,
+        conversation_id=conversation_id,
+    )
 
 
 def _build_client(monkeypatch) -> TestClient:  # noqa: ANN001
@@ -55,19 +82,27 @@ def test_v1_host_input_gateway_http_accepts_and_dispatches(monkeypatch) -> None:
                 "source": "GATEWAY",
                 "platform": "qq",
                 "conversation_id": "qq_dm_http_001",
+                "from_id": "person_http_001",
                 "content": "请帮我整理一下今天的执行结果",
                 "msg_type": "text",
             },
         )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["success"] is True
+    assert payload["success"] is True, payload
     assert payload["status"] == "COMPLETED"
     assert payload["source"] == "GATEWAY"
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
     assert kwargs["source"] == "GATEWAY"
-    assert kwargs["session_id"] == "qq_dm_http_001"
+    expected_scope = _expected_gateway_scope(
+        conversation_id="qq_dm_http_001",
+        from_id="person_http_001",
+    )
+    assert kwargs["session_id"] == expected_scope.session_id
+    assert kwargs["command_authority"]["secure_gateway_conversation_scope_v1"] == (
+        expected_scope.to_dict()
+    )
     assert kwargs["text"] == "请帮我整理一下今天的执行结果"
 
 
@@ -81,6 +116,7 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
             json={
                 "source": "QQ",
                 "conversation_id": "qq_dm_http_alias",
+                "from_id": "person_http_alias",
                 "content": "怎么了",
                 "msg_type": "text",
             },
@@ -93,7 +129,11 @@ def test_v1_host_input_qq_source_alias_maps_to_gateway(monkeypatch) -> None:
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
     assert kwargs["source"] == "GATEWAY"
-    assert kwargs["session_id"] == "qq_dm_http_alias"
+    expected_scope = _expected_gateway_scope(
+        conversation_id="qq_dm_http_alias",
+        from_id="person_http_alias",
+    )
+    assert kwargs["session_id"] == expected_scope.session_id
     assert kwargs["text"] == "怎么了"
     assert kwargs["payload"]["source"] == "GATEWAY"
     assert kwargs["payload"]["platform"] == "qq"
@@ -110,6 +150,7 @@ def test_v1_host_input_gateway_progress_query_uses_governed_admission(monkeypatc
                 "source": "GATEWAY",
                 "platform": "qq",
                 "conversation_id": "qq_dm_http_002",
+                "from_id": "person_http_002",
                 "content": "现在进度怎么样了？",
                 "msg_type": "text",
             },

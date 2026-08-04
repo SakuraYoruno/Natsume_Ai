@@ -13,6 +13,8 @@ Unit 无 coverage 预检已在 `02a24e4b8` 上稳定完成：930 个 Unit 文件
 
 Contract 无 coverage 全量预检已在 `ebd25de95d` 上完成：4 个分片共 1949 项，1947 passed、2 failed、0 skipped／error。两个尾部失败均为确定性合同维护问题：Canon 安全临时文件修复后静态边界策略仍引用旧行号，以及 NE-04 stdlib worker 使用裸 `print` 输出机器回执。本切片已同步扫描策略与精确合同，并把 worker 输出改为显式、单行 canonical stdout 协议；两项失败定向复验 2 passed，Evolution Lab 相邻回归 12 passed。全量 Contract 在最终冻结 SHA 统一重跑前仍记为 `REMEDIATED_PENDING_FROZEN_RERUN`，不得把父提交的 1947/1949 或本切片定向结果冒充总体 PASS。
 
+Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文件，排除 `e2e/prod_env/runtime_probe/real_docker/ci_unstable` 后以 6 个隔离进程执行，共收集 849 项：730 passed、50 failed、67 errors、2 个 Redis 环境 skip。67 个 setup error 来自测试夹具同时继承本机 workspace secret ref 与直接 secret；其余大面积漂移包括测试 lifespan 继承本机 SchedulerClock、migration head 固定在 0123/0125、空 TaskGraph output contract、旧 Bond 读投影和普通 Chat 重型 TaskGraph 假设。第一批修复已用 3 组整文件/定向组合证据关闭其中 90 个红项：Host 原 67 个 setup error 及其后暴露的 9 个退役/实时合同断言、HTTP Host Input 5 项、HTTP Skill 4 项、TaskGraph/migration/OBS 14 项均通过；尚余 27 个运行时、恢复和 Review 语义红项，状态为 `REMEDIATION_IN_PROGRESS`，不是 Integration PASS。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：

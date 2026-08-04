@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-04",
-  "commit_scope": "SYSTEM_V2_CONTRACT_PREFLIGHT_REMEDIATION",
+  "commit_scope": "SYSTEM_V2_INTEGRATION_PREFLIGHT_REMEDIATION",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -178,6 +178,23 @@
       "targeted_remediation": "PASS_2",
       "evolution_lab_adjacent_regression": "PASS_12",
       "whole_contract_current_sha": "NOT_RERUN_UNTIL_FINAL_FREEZE"
+    },
+    "integration_shard_preflight": {
+      "status": "REMEDIATION_IN_PROGRESS",
+      "evidence_commit_sha": "1d68ecb1ce",
+      "selected_files": 155,
+      "junit_shards": 6,
+      "selected_tests": 849,
+      "passed": 730,
+      "failed": 50,
+      "errors": 67,
+      "classified_redis_skips": 2,
+      "first_pass_red_items": 117,
+      "first_remediation_closed_red_items": 90,
+      "remaining_red_items": 27,
+      "ordinary_chat_taskgraph_expectation": "REMOVED_REALTIME_COMPANION_PATH_CONFIRMED",
+      "legacy_bond_read_write_contract": "RETIRED_410_CONFIRMED",
+      "whole_integration_current_sha": "NOT_RERUN_UNTIL_REMEDIATION_COMPLETE"
     },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,
