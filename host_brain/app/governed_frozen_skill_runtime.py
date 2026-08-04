@@ -165,6 +165,69 @@ def _frozen_node_executor_payload(
     return payload
 
 
+def _prepare_frozen_skill_input(
+    *,
+    command: HostCommand,
+    work_order: WorkOrderV3,
+    node_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Resolve and validate immutable Skill input without executing effects."""
+
+    if str(command.route_type or "").strip().lower() == "skill":
+        _require_fail_closed_direct_skill_work_order(work_order)
+        _assert_work_order_command_binding(work_order, command)
+    else:
+        _require_fail_closed_governed_work_order(work_order, command=command)
+    pack = dict(work_order.input_pack or {})
+    binding = _planning_node_binding(work_order, node_id=node_id)
+    target = str(binding.get("target_id") or "").strip()
+    route = str(binding.get("worker_route") or "").strip().lower()
+    direct_intent = _mapping(pack.get("intent_draft"))
+    if (
+        route == "skill"
+        and str(direct_intent.get("route") or "").strip().lower() == "skill"
+    ):
+        intent_draft = direct_intent
+    else:
+        approved_inputs = _mapping(pack.get("approved_candidate_inputs"))
+        candidate_id = str(binding.get("candidate_id") or "").strip()
+        candidate_input = _mapping(approved_inputs.get(candidate_id))
+        intent_draft = {
+            "route": route,
+            "target_id": target,
+            "task": str(
+                candidate_input.get("objective")
+                or binding.get("objective")
+                or ""
+            ).strip(),
+            "args": _mapping(candidate_input.get("args")),
+        }
+    if str(intent_draft.get("route") or "").strip().lower() != "skill":
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_ROUTE_UNSUPPORTED,
+            "frozen worker accepts only a direct skill intent",
+        )
+    if not target or str(intent_draft.get("target_id") or "").strip() != target:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_ROUTE_UNSUPPORTED,
+            "durable skill intent target differs from its frozen TaskNode binding",
+        )
+    if target.startswith("mcp::"):
+        # Stale durable graphs must fail before Preview issuance, grant
+        # reopening or registry/handler access. MCP provider execution is
+        # legal only as a governed Tool node with an immutable binding.
+        raise GovernedHostAdapterError(
+            MCP_TASK_AUTHORITY_REQUIRED,
+            "retired MCP Skill target requires a governed Tool Task node",
+        )
+    if target not in set(work_order.capability_requirements):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "direct skill target is absent from WorkOrderV3 capability lineage",
+        )
+    return target, _mapping(intent_draft.get("args"))
+
+
 class _FrozenSkillWorker:
     def __init__(
         self,
@@ -183,6 +246,38 @@ class _FrozenSkillWorker:
         self._action_preview_service = action_preview_service
         self._review_store = review_store
 
+    def prepare_execution(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        node_id: str,
+    ) -> None:
+        """Fail deterministic Skill preparation before Operation reservation.
+
+        Dependency availability and frozen production payload validation are
+        side-effect-free.  Running them after reserving the external Operation
+        incorrectly turns a known local configuration error into an unknown
+        effect that requires reconciliation.
+        """
+
+        target, execution_args = _prepare_frozen_skill_input(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+        )
+        _require_frozen_skill_dependencies(
+            ports=self._execution_ports,
+            target=target,
+            args=execution_args,
+        )
+        _frozen_node_executor_payload(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+            target_id=target,
+        )
+
     async def execute_stream(
         self,
         *,
@@ -190,54 +285,28 @@ class _FrozenSkillWorker:
         work_order: WorkOrderV3,
         execution_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        if str(command.route_type or "").strip().lower() == "skill":
-            _require_fail_closed_direct_skill_work_order(work_order)
-            _assert_work_order_command_binding(work_order, command)
-        else:
-            _require_fail_closed_governed_work_order(work_order, command=command)
-        pack = dict(work_order.input_pack or {})
         node_id = str(execution_context.get("node_id") or "").strip()
+        target, execution_args = _prepare_frozen_skill_input(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+        )
+        pack = dict(work_order.input_pack or {})
         binding = _planning_node_binding(work_order, node_id=node_id)
-        target = str(binding.get("target_id") or "").strip()
-        route = str(binding.get("worker_route") or "").strip().lower()
         execution_context = dict(execution_context)
         direct_intent = _mapping(pack.get("intent_draft"))
-        if route == "skill" and str(direct_intent.get("route") or "").strip().lower() == "skill":
+        if str(direct_intent.get("route") or "").strip().lower() == "skill":
             intent_draft = direct_intent
         else:
             approved_inputs = _mapping(pack.get("approved_candidate_inputs"))
             candidate_id = str(binding.get("candidate_id") or "").strip()
             candidate_input = _mapping(approved_inputs.get(candidate_id))
             intent_draft = {
-                "route": route,
+                "route": "skill",
                 "target_id": target,
                 "task": str(candidate_input.get("objective") or binding.get("objective") or "").strip(),
                 "args": _mapping(candidate_input.get("args")),
             }
-        if str(intent_draft.get("route") or "").strip().lower() != "skill":
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_ROUTE_UNSUPPORTED,
-                "frozen worker accepts only a direct skill intent",
-            )
-        if not target or str(intent_draft.get("target_id") or "").strip() != target:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_ROUTE_UNSUPPORTED,
-                "durable skill intent target differs from its frozen TaskNode binding",
-            )
-        if target.startswith("mcp::"):
-            # Stale durable graphs must fail before Preview issuance, grant
-            # reopening or registry/handler access. MCP provider execution is
-            # legal only as a governed Tool node with an immutable binding.
-            raise GovernedHostAdapterError(
-                MCP_TASK_AUTHORITY_REQUIRED,
-                "retired MCP Skill target requires a governed Tool Task node",
-            )
-        if target not in set(work_order.capability_requirements):
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_AUTHORITY_INVALID,
-                "direct skill target is absent from WorkOrderV3 capability lineage",
-            )
-        execution_args = _mapping(intent_draft.get("args"))
         node_grant_ref = str(execution_context.get("node_grant_ref") or "").strip()
         if not node_grant_ref:
             raise GovernedHostAdapterError(

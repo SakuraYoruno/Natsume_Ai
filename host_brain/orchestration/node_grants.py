@@ -329,6 +329,12 @@ class NodeBoundGrantService:
             session_id=session,
             principal_id=principal,
             now_ms=now_ms,
+            # Derivation may be reopening an already-durable batch solely to
+            # project a terminal exact replay.  An expired parent cannot mint
+            # new authority because the new-child expiry check below remains
+            # fail-closed; worker claim verification independently enforces
+            # liveness before any nonterminal execution mutation.
+            allow_expired=True,
         )
         parent_binding = durable_governor_binding(parent)
         specs, batch_id = _compile_specs(
@@ -902,8 +908,10 @@ class NodeBoundGrantService:
                 )
             ):
                 raise NodeGrantDerivationError(NODE_GRANT_REPLAY_DRIFT, f"durable child drifted: {spec.node_id}")
-            if expires_at_ms <= now_ms:
-                raise NodeGrantDerivationError(NODE_GRANT_EXPIRED, f"durable child expired: {spec.node_id}")
+            # Reopen the immutable child identity even after expiry so a
+            # terminal Task receipt can be replayed exactly.  This is not
+            # execution authority: DurableNodeGrantVerifier still rejects an
+            # expired child before claim/worker mutation.
             ref = governor_grant_ref(request_id, row)
             if ref == parent_ref:
                 raise NodeGrantDerivationError(NODE_GRANT_REPLAY_DRIFT, "child reused parent grant")

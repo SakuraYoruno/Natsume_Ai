@@ -348,6 +348,45 @@ def test_gr05b_skill_nodes_receive_unique_durable_child_grants_and_replay_stably
         ledger.close()
 
 
+def test_gr05b_expired_batch_reopens_identity_but_cannot_authorize_execution() -> None:
+    ledger = SQLiteLedger(":memory:")
+    tokens = _CountingTokenService()
+    try:
+        parent_ref = _parent(ledger, tokens)
+        graph, order = _graph_and_order(parent_ref)
+        first = _derive(_service(ledger, tokens), parent_ref, graph, order)
+        expired_now = max(grant.expires_at_ms for grant in first.grants) + 1
+        replay = _derive(
+            NodeBoundGrantService(
+                ledger=ledger,
+                token_service=tokens,
+                clock=lambda: expired_now,
+                child_ttl_ms=60_000,
+            ),
+            parent_ref,
+            graph,
+            order,
+        )
+
+        assert replay.replayed is True
+        assert replay.grant_refs == first.grant_refs
+        assert tokens.child_issue_calls == len(first.grants)
+        with pytest.raises(NodeGrantVerificationError) as expired:
+            DurableNodeGrantVerifier(
+                ledger=ledger,
+                clock=lambda: expired_now,
+            ).verify(
+                **_verification_kwargs(
+                    parent_ref,
+                    graph,
+                    replay.grants[0],
+                )
+            )
+        assert expired.value.reason_code == NODE_GRANT_EXPIRED
+    finally:
+        ledger.close()
+
+
 def test_gr05b_missing_binding_fails_whole_graph_before_token_or_ledger_side_effect() -> None:
     ledger = SQLiteLedger(":memory:")
     tokens = _CountingTokenService()

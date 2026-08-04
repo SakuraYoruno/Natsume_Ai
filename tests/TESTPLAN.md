@@ -19,6 +19,8 @@ Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文
 
 第三批关闭 2 项真实 migration receipt-loss replay 缺陷：当前物理库保留 `0148/0149` schema、但 migration catalog 从 `0105/0106` 起丢失时，runner 过去会在 companion profile 列与 Chat delivery trigger 上重复执行失败。修复只接受精确 frozen checksum，并完整验证目标列、约束、索引和 trigger；任一 trigger 被篡改或缺失均拒绝兼容。两项原集成回归与一项 tamper 单测合计 3 passed，稳定红项降至 10；这仍不是全量 Integration PASS。
 
+第四批关闭 3 项执行边界缺陷或夹具漂移。Skill 的 side-effect-free 依赖与 frozen payload 预检现在发生在 Operation reservation 之前，缺失 Memory backend 会稳定落成 `FAILED / GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE`，不会伪造 Skill receipt，也不会误标 unknown effect；Node grant 的 durable batch 在过期后只允许重开不可变身份以投影终态，实际 claim/worker 仍由 verifier fail-closed，因此 Operator／Scheduler 历史成功不会被当前时钟改判；安全取消集成夹具改走当前 `governed_operator_runtime` 端口，不再注入已退役 service 字段。相邻回归 23 passed，包含五次 exact replay 的完整 Operator 流程另以 149.17 秒通过，稳定红项降至 7；仍须清零并冻结 SHA 全量复跑。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：

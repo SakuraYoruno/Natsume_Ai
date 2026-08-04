@@ -197,7 +197,10 @@
       "second_remediation_closed_red_items": 7,
       "third_remediation_migration_receipt_replay": "PASS_2_WITH_TAMPER_GUARD",
       "third_remediation_closed_red_items": 2,
-      "stable_remaining_red_items": 10,
+      "fourth_remediation_preoperation_and_exact_replay": "PASS_23_PLUS_OPERATOR_FULL_FLOW_1",
+      "fourth_remediation_operator_full_flow_seconds": 149.17,
+      "fourth_remediation_closed_red_items": 3,
+      "stable_remaining_red_items": 7,
       "ordinary_chat_taskgraph_expectation": "REMOVED_REALTIME_COMPANION_PATH_CONFIRMED",
       "legacy_bond_read_write_contract": "RETIRED_410_CONFIRMED",
       "whole_integration_current_sha": "NOT_RERUN_UNTIL_REMEDIATION_COMPLETE"
