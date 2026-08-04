@@ -9,7 +9,7 @@
 
 首次 Monitor read-model 覆盖采集为 line 61.31%、branch 52.78%、function 53.59%，27 项测试全部通过，但低于系统 2.0 目标 80%/70%。Python 7 项 smoke 将 274596 条生产语句纳入分母并得到 line 7.87%，只证明配置能扫描完整源树，不能作为 Python 全系统覆盖率；完整稳定测试分片正在生成正式 baseline。
 
-Unit 首轮采用六分片 `--maxfail=1` 定位 6 个首失败，第二轮在保留 1160 个通过后继续定位 21 个失败。第三轮中 4 个完整分片累计 5605 passed／12 failed／3 skipped，另外 2 个分片在 20 分钟超时前另暴露 15 个失败。当前 27 个失败已按共同根因收敛，126 项根因回归与 334 项顺序邻接回归通过；包括冻结历史 migration catalog、补齐当前 Scheduler control-policy／Budget／Worker Projection、清除模型路由环境污染、修正 OBS freshness fixture，以及删除无消费者的 Capability Forge route provider。细分片还确认 foreground interaction 进程缓存会跨模块污染 Inner World／Silence 用例；增加逐用例隔离后，原失败顺序的 223 项已通过。完整无 coverage Unit 将在新 SHA 上用更细独立进程重跑，因此当前仍只记 `UNIT_PREFLIGHT_REMEDIATED`，不得写成全量 Unit PASS；昂贵 coverage 采集只在无 coverage 分片稳定后执行一次。
+Unit 首轮采用六分片 `--maxfail=1` 定位 6 个首失败，第二轮在保留 1160 个通过后继续定位 21 个失败。第三轮中 4 个完整分片累计 5605 passed／12 failed／3 skipped，另外 2 个分片在 20 分钟超时前另暴露 15 个失败。当前 27 个失败已按共同根因收敛，126 项根因回归与 334 项顺序邻接回归通过；包括冻结历史 migration catalog、补齐当前 Scheduler control-policy／Budget／Worker Projection、清除模型路由环境污染、修正 OBS freshness fixture，以及删除无消费者的 Capability Forge route provider。细分片还确认 foreground interaction 进程缓存会跨模块污染 Inner World／Silence 用例；增加逐用例隔离后，原失败顺序的 223 项已通过。首批 4 个细分片得到 1929 passed／4 failed／3 skipped；4 项真实失败来自错时问候触发硬门禁后没有自然 fallback，修复为按明确 day phase 返回非臆测纠正，并把无关用例固定到 morning 后，Surface 全文件 56 项通过。完整无 coverage Unit 将在新 SHA 上用更细独立进程重跑，因此当前仍只记 `UNIT_PREFLIGHT_REMEDIATED`，不得写成全量 Unit PASS；昂贵 coverage 采集只在无 coverage 分片稳定后执行一次。
 
 ## 1. 原则
 

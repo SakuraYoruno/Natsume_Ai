@@ -38,7 +38,10 @@ def _payload(**overrides):
             "relationship_distance": "familiar",
             "information_budget": "short",
             "question_budget": 0,
-            "facts": ["上一轮摘要：已建议先看输入和输出，不急着改全段。"],
+            "facts": [
+                "当前时段是 morning。",
+                "上一轮摘要：已建议先看输入和输出，不急着改全段。",
+            ],
             "style_anchor": ["短句", "熟人私聊"],
         },
     }
@@ -833,6 +836,36 @@ def test_surface_runtime_falls_back_when_low_info_retry_still_overreads() -> Non
     assert len(calls) == 2
     assert result.selected_text == "阿晓，早～"
     assert "LOW_INFO_SCENE_STATE_GUESS" not in result.observation_codes
+
+
+def test_surface_runtime_falls_back_naturally_for_mistimed_morning_greeting() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        return _candidate_payload(["老哥早上好～今天慢慢来。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="早",
+                reply_control_packet={
+                    "response_move": "ack_with_topic_hook",
+                    "task_mode": "short_ack",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["当前时段是 afternoon。"],
+                    "style_anchor": ["短句", "熟人私聊"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "阿晓，都下午啦。"
+    assert result.observation_codes == ()
 
 
 @pytest.mark.parametrize(

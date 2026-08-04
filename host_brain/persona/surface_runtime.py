@@ -2342,6 +2342,16 @@ def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
 
 def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]) -> str:
     codes = set(str(code or "") for code in violations)
+    if codes.intersection(
+        {
+            "DEICTIC_TIME_SCENE_MISMATCH",
+            "TEMPORAL_MISMATCH_MISSING_GROUNDING",
+            "TEMPORAL_MISMATCH_USER_STATE_GUESS",
+        }
+    ):
+        temporal = _temporal_mismatch_fallback(request)
+        if temporal:
+            return temporal
     low_info = _low_info_scene_fallback(request)
     if low_info and codes:
         return low_info
@@ -2376,6 +2386,23 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     ):
         return _memory_followup_fallback(request)
     return ""
+
+
+def _temporal_mismatch_fallback(request: IsolatedSurfaceInput) -> str:
+    """Keep a mistimed greeting warm without inventing the user's state."""
+
+    _phase, family = _current_phase_family_from_facts(request)
+    address = _current_soul_address()
+    prefix = f"{address}，" if address else ""
+    if family == "late_morning":
+        return f"{prefix}都快中午啦。"
+    if family == "noon":
+        return f"{prefix}已经中午啦。"
+    if family == "afternoon":
+        return f"{prefix}都下午啦。"
+    if family in {"evening", "night"}:
+        return f"{prefix}都晚上啦。"
+    return f"{prefix}这个点说早呀？"
 
 
 def _memory_followup_fallback(request: IsolatedSurfaceInput) -> str:
