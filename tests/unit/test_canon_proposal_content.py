@@ -16,6 +16,9 @@ from host_brain.observability.degradation_state import (
     DegradationStateMachine,
     set_global_degradation_state_machine,
 )
+from host_brain.runtime.degradation_authority import (
+    LegacyModuleGlobalDegradationAdapter,
+)
 from tests.fakes.canon_runtime import compose_canon_test_runtime
 
 
@@ -108,6 +111,7 @@ def test_canon_approve_route_uses_stored_proposal_content(tmp_path) -> None:
             db_path=runtime.db_path,
             trusted_approval_keys={"unit-key": key.public_key()},
             repository=runtime.container.apply_repository,
+            degradation_capability_port=LegacyModuleGlobalDegradationAdapter(),
         )
         service = CanonApplicationService(
             repository=runtime.container.repository,

@@ -8,6 +8,7 @@ from host_brain.app import (
     asgi,
     asgi_authority_adapters,
     host_life_scheduler_wiring,
+    host_scheduler_runtime_handlers,
     host_runtime_shutdown,
     http_hooks,
     internal_runtime_composition,
@@ -383,15 +384,18 @@ def test_life_periodic_side_effect_definitions_are_retired() -> None:
 
 
 def test_life_io_is_a_lightweight_app_local_projection_drain() -> None:
-    source = Path(asgi.__file__).read_text(encoding="utf-8")
-    handler = source.split("async def life_io_scheduler_handler", 1)[1].split(
-        "def scheduler_current_mode", 1
+    asgi_source = Path(asgi.__file__).read_text(encoding="utf-8")
+    source = Path(host_scheduler_runtime_handlers.__file__).read_text(
+        encoding="utf-8"
+    )
+    handler = source.split("async def life_io", 1)[1].split(
+        "async def embodiment_io", 1
     )[0]
 
     assert 'name="host-life-io-dispatch-pump"' in source
     assert 'name="host-embodiment-io-dispatch-pump"' in source
-    assert '"life_io_dispatch_periodic": "life_io"' not in source
-    assert '"embodiment_outbox_periodic": "embodiment_io"' not in source
+    assert '"life_io_dispatch_periodic": "life_io"' not in asgi_source
+    assert '"embodiment_outbox_periodic": "embodiment_io"' not in asgi_source
     assert "projection_dispatcher.dispatch_pending_async" in handler
     assert "outbox_dispatcher.dispatch_pending_async" in handler
     assert "LifeCommand(" not in handler

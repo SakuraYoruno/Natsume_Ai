@@ -14,9 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from host_brain.app.app_factory import create_host_fastapi_app
 from host_brain.app.asgi_endpoint_helpers import root_endpoint
-from host_brain.app.agent_runtime_composition import (
-    AgentRuntimeApplicationScope,
-)
+from host_brain.app.agent_runtime_composition import AgentRuntimeApplicationScope
 from host_brain.app.chat_handler import handle_chat
 from host_brain.app.chat_immune_gate import evaluate_immune_gate_for_chat, schedule_chat_immune_gate_event
 from host_brain.app.chat_routes import handle_v1_chat_route
@@ -25,14 +23,9 @@ from host_brain.app.asgi_runtime_helpers import (
     dispatch_edge_events,
 )
 from host_brain.app.http_hooks import runtime_lifespan
-from host_brain.app.startup import collect_dependency_probes
-from host_brain.app.lifecycle_runtime_composition import (
-    build_lifecycle_runtime_application_ports,
-)
-from host_brain.app.host_lifecycle_composition import (
-    build_host_lifecycle_container,
-)
-from host_brain.app import host_life_scheduler_wiring as _scheduler_result_wiring
+from host_brain.app.lifecycle_runtime_composition import build_lifecycle_runtime_application_ports
+from host_brain.app.host_lifecycle_composition import build_host_lifecycle_container
+from host_brain.app.host_scheduler_runtime_handlers import HostSchedulerRuntimeHandlers
 from host_brain.app.input_runtime_composition import build_input_runtime_application_ports
 from host_brain.app.host_route_ports import HostRoutePorts
 from host_brain.app.host_life_route_authority import HostLifeRouteAuthority
@@ -68,19 +61,14 @@ from host_brain.app.host_runtime_shutdown import (
     shutdown_host_runtime_authority,
     withdraw_published_runtime_state,
 )
-from host_brain.app.observability_runtime.service_health_heartbeat import (
-    ServiceHealthHeartbeat,
-)
+from host_brain.app.observability_runtime.service_health_heartbeat import ServiceHealthHeartbeat
 from host_brain.app.obs_route_ports import ObsRoutePorts
 from host_brain.app.host_obs_source_composition import (
     HostObsSourceEpoch,
     HostObsSourceRuntimePorts,
     build_host_obs_read_ports,
 )
-from host_brain.app.application_port_wiring import (
-    build_process_application_ports,
-)
-from host_brain.lifecycle_runtime.proactive_dispatch import run_proactive_intent_dispatch
+from host_brain.app.application_port_wiring import build_process_application_ports
 from host_brain.input_runtime.ports import InputRuntimeApplicationPorts
 from host_brain.app.runtime_metrics import RuntimeMetrics
 from host_brain.app.schemas import ChatRequest, EdgeEventsRequest, EdgeEventsResponse
@@ -286,7 +274,6 @@ def create_app(
     runtime_context_application: RuntimeContextApplicationService | None = None
     service_health_heartbeat: ServiceHealthHeartbeat | None = None
     catalog_rollout_guardian_task: asyncio.Task[None] | None = None
-    infrastructure_dispatch_tasks: tuple[asyncio.Task[None], ...] = ()
     startup_probe_statuses: dict[str, Any] = {}
 
     def capture_startup_probe_statuses(statuses: Mapping[str, Any]) -> None:
@@ -603,7 +590,6 @@ def create_app(
         nonlocal embodiment_runtime, embodiment_authority_task
         nonlocal runtime_context_composition, runtime_context_application
         nonlocal service_health_heartbeat, catalog_rollout_guardian_task
-        nonlocal infrastructure_dispatch_tasks
         nonlocal startup_probe_statuses
         async with runtime_lifespan(
             get_ledger=ledger_provider,
@@ -633,6 +619,7 @@ def create_app(
             memory: ProcessMemoryContainer | None = None
             task_runtime: ProcessTaskRuntimeContainer | None = None
             scheduler: ProcessSchedulerContainer | None = None
+            scheduler_handlers: HostSchedulerRuntimeHandlers | None = None
             canon: ProcessCanonContainer | None = None
             catalog_observation: Any | None = None
 
@@ -1137,243 +1124,27 @@ def create_app(
                     internal_composition.acceptance_effect_dispatcher
                 )
 
-                try:
-                    from host_brain.app.vision.proactive_push_client import (  # noqa: PLC0415
-                        build_proactive_push_client,
-                    )
-
-                    proactive_client = build_proactive_push_client()
-                    proactive_push_detail = ""
-                except Exception as exc:
-                    proactive_client = None
-                    proactive_push_detail = str(exc)[:300]
-                    logger.warning("SCHEDULER_PROACTIVE_PUSH_DEGRADED:%s", exc)
-
-                def scheduler_ui_pusher(
-                    message: dict[str, Any],
-                    *,
-                    preview_proof: Any,
-                ) -> dict[str, Any]:
-                    if proactive_client is None:
-                        return {
-                            "status": "SKIPPED",
-                            "success": False,
-                            "detail": proactive_push_detail,
-                        }
-                    return dict(
-                        proactive_client.push(
-                            message,
-                            preview_proof=preview_proof,
-                        )
-                        or {}
-                    )
-
-                async def scheduler_production_handler(
-                    *,
-                    occurrence: Any,
-                    definition: Any,
-                    command: Any,
-                    execution_context: Any,
-                ) -> dict[str, Any]:
-                    intent = dict(definition.intent_template)
-                    args = dict(intent.get("args") or {})
-                    args.update(dict(occurrence.payload or {}))
-                    intent["args"] = args
-                    intent["request_id"] = command.request_id
-                    result = await asyncio.to_thread(
-                        run_proactive_intent_dispatch,
-                        intent,
-                        ports=lifecycle_runtime_ports,
-                        logger=logger,
-                        get_ledger=ledger_provider,
-                        life_snapshot_reader=life_snapshot_reader_provider,
-                        retention_policy=None,
-                        ui_pusher=scheduler_ui_pusher,
-                        execution_context=execution_context,
-                        runtime_context_application=runtime_context_application,
-                        action_preview_service=action_preview_service,
-                    )
-                    return _scheduler_result_wiring.proactive_scheduler_handler_result(result)
-
-                async def distillation_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    report = await host_services.distillation_engine().run_batch()
-                    return _scheduler_result_wiring.distillation_scheduler_handler_result(report)
-
-                async def security_immune_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    result = await application_ports.security_immune_agent().run_once(
-                        reason="scheduled"
-                    )
-                    return _scheduler_result_wiring.security_immune_scheduler_handler_result(result)
-
-                agent_immune_scheduler_handler = (
-                    _scheduler_result_wiring.build_agent_immune_scheduler_handler(
-                        degradation_state_provider=(
-                            runtime_context_composition.guardian.read_degradation_state
-                            if runtime_context_composition is not None
-                            else None
-                        ),
-                        ledger_provider=lambda: ledger,
-                        dependency_probe_provider=collect_dependency_probes,
-                        workspace_cleanup_health_provider_resolver=lambda: getattr(
-                            application.state,
-                            "health_workspace_cleanup_provider",
-                            None,
-                        ),
-                    )
+                scheduler_handlers = HostSchedulerRuntimeHandlers(
+                    application=application,
+                    application_ports=application_ports,
+                    host_services=host_services,
+                    host_lifecycle=host_lifecycle,
+                    lifecycle_runtime_ports=lifecycle_runtime_ports,
+                    ledger=ledger,
+                    ledger_provider=ledger_provider,
+                    life_command_authority_provider=(
+                        life_command_authority_provider
+                    ),
+                    life_snapshot_reader_provider=(
+                        life_snapshot_reader_provider
+                    ),
+                    life_dispatchers=life_dispatchers,
+                    embodiment_runtime=embodiment_runtime,
+                    runtime_context_application=runtime_context_application,
+                    runtime_context_composition=runtime_context_composition,
+                    action_preview_service=action_preview_service,
+                    logger=logger,
                 )
-
-                async def life_tick_scheduler_handler(
-                    *,
-                    occurrence: Any,
-                    definition: Any,
-                    command: Any,
-                    execution_context: Any,
-                ) -> dict[str, Any]:
-                    life_command_service, life_snapshot_reader = (
-                        life_command_authority_provider(ledger)
-                    )
-                    return await asyncio.to_thread(
-                        _submit_life_tick_command,
-                        occurrence=occurrence,
-                        definition=definition,
-                        command=command,
-                        execution_context=execution_context,
-                        runtime_context_application=runtime_context_application,
-                        life_command_service=life_command_service,
-                        life_snapshot_reader=life_snapshot_reader,
-                    )
-
-                async def life_tick_scheduler_reconciler(
-                    *,
-                    occurrence: Any,
-                    definition: Any,
-                    command: Any,
-                    execution_context: Any,
-                ) -> dict[str, Any]:
-                    _life_service, life_snapshot_reader = (
-                        life_command_authority_provider(ledger)
-                    )
-                    return await asyncio.to_thread(
-                        _reconcile_life_tick_command,
-                        occurrence=occurrence,
-                        definition=definition,
-                        command=command,
-                        execution_context=execution_context,
-                        life_snapshot_reader=life_snapshot_reader,
-                    )
-
-                async def life_io_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    if life_dispatchers is None:
-                        return {
-                            "status": "FAILED",
-                            "reason_code": "LIFE_DISPATCHERS_UNAVAILABLE",
-                        }
-                    projection_dispatcher, outbox_dispatcher = life_dispatchers
-                    projection = await projection_dispatcher.dispatch_pending_async(
-                        limit=100
-                    )
-                    delivery = await outbox_dispatcher.dispatch_pending_async(limit=100)
-                    failed = int(projection.failed) + int(delivery.failed)
-                    return {
-                        "status": "SUCCEEDED" if failed == 0 else "DEGRADED",
-                        "reason_code": (
-                            None if failed == 0 else "LIFE_IO_DISPATCH_PARTIAL_FAILURE"
-                        ),
-                        "projection": projection.as_dict(),
-                        "delivery": delivery.as_dict(),
-                    }
-
-                async def embodiment_io_scheduler_handler(**_: Any) -> dict[str, Any]:
-                    if embodiment_runtime is None:
-                        return {
-                            "status": "FAILED",
-                            "reason_code": "EMBODIMENT_DISPATCHER_UNAVAILABLE",
-                        }
-                    # An uncertain command must never be replayed by a later
-                    # scheduler tick.  Run normal pending delivery and the
-                    # independent read-only reconciliation pass separately so
-                    # one transient dispatch failure cannot prevent recovery
-                    # of an older ``IN_DOUBT`` command.
-                    dispatch_error: Exception | None = None
-                    try:
-                        batch = await embodiment_runtime.dispatch_pending_async(limit=100)
-                        dispatch = batch.as_dict()
-                    except Exception as exc:  # durable claim expires to IN_DOUBT
-                        dispatch_error = exc
-                        dispatch = {
-                            "status": "DEGRADED",
-                            "reason_code": "EMBODIMENT_DISPATCH_UNAVAILABLE",
-                        }
-                    reconciliation = await embodiment_runtime.reconcile_in_doubt_async(
-                        limit=100
-                    )
-                    result = {
-                        "status": (
-                            "SUCCEEDED"
-                            if dispatch.get("status") == "SUCCEEDED"
-                            and reconciliation.as_dict().get("status") == "SUCCEEDED"
-                            else "DEGRADED"
-                        ),
-                        "dispatch": dispatch,
-                        "reconciliation": reconciliation.as_dict(),
-                    }
-                    if dispatch_error is not None:
-                        result["reason_code"] = "EMBODIMENT_DISPATCH_UNAVAILABLE"
-                    return result
-
-                async def run_infrastructure_dispatch_pump(
-                    *,
-                    name: str,
-                    handler: Callable[..., Any],
-                    interval_seconds: float,
-                ) -> None:
-                    """Drain one durable local outbox without a synthetic TaskGraph.
-
-                    The outbox row, claim fence and physical receipt remain the
-                    execution authority.  This loop merely replaces the old
-                    one-second Scheduler command that created a full graph even
-                    when no work existed.
-                    """
-
-                    try:
-                        while True:
-                            try:
-                                await handler()
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception:
-                                logger.error(
-                                    "HOST_INFRASTRUCTURE_DISPATCH_PUMP_FAILED:%s",
-                                    name,
-                                    exc_info=True,
-                                )
-                            await asyncio.sleep(max(0.25, interval_seconds))
-                    except asyncio.CancelledError:
-                        raise
-
-                def scheduler_current_mode() -> str:
-                    return str(host_lifecycle.get_hard_state().sys_mode)
-
-                def scheduler_resource_gate(definition: Any, mode: str) -> Any:
-                    del mode
-                    manager = host_lifecycle.get_resource_manager(
-                        create_if_missing=False
-                    )
-                    if manager is None or not callable(
-                        getattr(manager, "assess_background_task", None)
-                    ):
-                        return True
-                    profile = dict(definition.resource_profile)
-                    return manager.assess_background_task(
-                        task_id=definition.task_id,
-                        priority=definition.priority,
-                        task_type=str(
-                            profile.get("resource_class") or "host_scheduler"
-                        ),
-                        uses_llm=bool(profile.get("uses_llm", False)),
-                        uses_gpu=bool(profile.get("uses_gpu", False)),
-                        reason="governed_scheduler",
-                    )
 
                 scheduler_clock_identity = None
                 if scheduler_clock_enabled:
@@ -1397,20 +1168,11 @@ def create_app(
                     intent_engine=intent_engine_provider(),
                     runtime_router=CanonicalRuntimeRouter(),
                     owner_id=canonical_owner,
-                    current_mode=scheduler_current_mode,
-                    resource_gate=scheduler_resource_gate,
-                    default_handler=scheduler_production_handler,
-                    task_handlers={
-                        "life_command": life_tick_scheduler_handler,
-                        "life_io": life_io_scheduler_handler,
-                        "embodiment_io": embodiment_io_scheduler_handler,
-                        "distillation_engine": distillation_scheduler_handler,
-                        "security_immune": security_immune_scheduler_handler,
-                        "agent_immune": agent_immune_scheduler_handler,
-                    },
-                    task_reconcilers={
-                        "life_command": life_tick_scheduler_reconciler,
-                    },
+                    current_mode=scheduler_handlers.current_mode,
+                    resource_gate=scheduler_handlers.resource_gate,
+                    default_handler=scheduler_handlers.proactive,
+                    task_handlers=scheduler_handlers.task_handlers,
+                    task_reconcilers=scheduler_handlers.task_reconcilers,
                     seed_definitions=build_scheduler_seed_configs(
                         settings=get_scheduler_settings(),
                         security_immune_agent_provider=(
@@ -1424,9 +1186,7 @@ def create_app(
                         "security_immune_periodic": "security_immune",
                         "agent_immune_auto_dispatch_tick": "agent_immune",
                     },
-                    retired_task_ids=(
-                        _scheduler_result_wiring.RETIRED_LEGACY_SCHEDULER_TASK_IDS
-                    ),
+                    retired_task_ids=scheduler_handlers.retired_task_ids,
                     clock_enabled=scheduler_clock_enabled,
                     clock_identity=scheduler_clock_identity,
                     clock_poll_interval_seconds=(
@@ -1478,41 +1238,20 @@ def create_app(
                     activate_scheduler_clock=False,
                 )
 
-                async def activate_promoted_background_runtime() -> None:
-                    nonlocal infrastructure_dispatch_tasks
-                    await scheduler.activate_clock()
-                    if infrastructure_dispatch_tasks:
-                        return
-                    infrastructure_dispatch_tasks = (
-                        asyncio.create_task(
-                            run_infrastructure_dispatch_pump(
-                                name="life-io",
-                                handler=life_io_scheduler_handler,
-                                interval_seconds=1.0,
-                            ),
-                            name="host-life-io-dispatch-pump",
-                        ),
-                        asyncio.create_task(
-                            run_infrastructure_dispatch_pump(
-                                name="embodiment-io",
-                                handler=embodiment_io_scheduler_handler,
-                                interval_seconds=0.5,
-                            ),
-                            name="host-embodiment-io-dispatch-pump",
-                        ),
-                    )
-
                 if catalog_observation is not None:
                     catalog_rollout_guardian_task = asyncio.create_task(
                         catalog_observation.observe_terminal_receipt(
-                            on_activation_started=(
-                                activate_promoted_background_runtime
+                            on_activation_started=partial(
+                                scheduler_handlers.activate_promoted_background_runtime,
+                                scheduler,
                             ),
                         ),
                         name="host-service-catalog-rollout-guardian-observer",
                     )
                 else:
-                    await activate_promoted_background_runtime()
+                    await scheduler_handlers.activate_promoted_background_runtime(
+                        scheduler
+                    )
                 task_runtime_container = task_runtime
                 governed_internal_runtime = internal_composition.internal_runtime
                 governed_operator_runtime = internal_composition.operator_runtime
@@ -1535,31 +1274,20 @@ def create_app(
                         )
                 service_health_heartbeat = None
                 application.state.service_health_heartbeat = None
-                for owned_task, task_name in (
-                    (catalog_rollout_guardian_task, "catalog-rollout-guardian"),
-                    *tuple(
-                        (task, f"infrastructure-dispatch-{index}")
-                        for index, task in enumerate(
-                            infrastructure_dispatch_tasks,
-                            start=1,
-                        )
-                    ),
-                ):
-                    if owned_task is None:
-                        continue
-                    owned_task.cancel()
+                if catalog_rollout_guardian_task is not None:
+                    catalog_rollout_guardian_task.cancel()
                     try:
-                        await owned_task
+                        await catalog_rollout_guardian_task
                     except asyncio.CancelledError:
                         pass
                     except Exception:
                         logger.error(
-                            "HOST_OWNED_TASK_CLOSE_FAILED:%s",
-                            task_name,
+                            "HOST_OWNED_TASK_CLOSE_FAILED:catalog-rollout-guardian",
                             exc_info=True,
                         )
                 catalog_rollout_guardian_task = None
-                infrastructure_dispatch_tasks = ()
+                if scheduler_handlers is not None:
+                    await scheduler_handlers.aclose()
                 await shutdown_host_runtime_authority(
                     application=application,
                     security=security,

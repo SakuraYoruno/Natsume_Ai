@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from host_brain.app.emotion_context import (
+    HostEmotionRuntime,
     build_chat_emotion_snapshot,
     build_chat_governance_snapshot,
     resolve_chat_emotion_context,
@@ -151,6 +152,7 @@ def _input_runtime_ports() -> InputRuntimeApplicationPorts:
     def _unused(*_args: Any, **_kwargs: Any) -> Any:
         return None
 
+    emotion_runtime = HostEmotionRuntime()
     return InputRuntimeApplicationPorts(
         get_intent_engine=lambda: object(),
         get_ledger=lambda: object(),
@@ -162,7 +164,10 @@ def _input_runtime_ports() -> InputRuntimeApplicationPorts:
         evaluate_governor_with_timing=_unused,
         build_chat_emotion_snapshot=build_chat_emotion_snapshot,
         build_chat_governance_snapshot=build_chat_governance_snapshot,
-        resolve_chat_emotion_context=resolve_chat_emotion_context,
+        resolve_chat_emotion_context=lambda **kwargs: resolve_chat_emotion_context(
+            runtime=emotion_runtime,
+            **kwargs,
+        ),
         chat_request_factory=object,
         cortex_orchestrator_sse_generator=_unused,
         create_multimodal_job=_unused,

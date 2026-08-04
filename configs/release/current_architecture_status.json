@@ -138,6 +138,11 @@
       "root_failure_count": 6,
       "targeted_regression": "PASS_14",
       "adjacent_contract_regression": "PASS_50",
+      "second_pass_observed_failures": 21,
+      "second_pass_root_cause_groups": 8,
+      "aggregated_remediation_regression": "PASS_219",
+      "governed_host_facade_lines": 1454,
+      "host_asgi_composition_lines": 1396,
       "full_unit_shards": "PENDING_RERUN"
     },
     "monitor_read_model_coverage": {
