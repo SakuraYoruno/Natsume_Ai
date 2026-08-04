@@ -42,8 +42,8 @@ flowchart LR
 | 生产 Python 文件 | 1650 | 物理文件数量 |
 | 生产 Python 物理行 | 728539 | 含空行、注释和生成内容，不等于有效 SLOC |
 | Monitor 测试文件 | 22 | Node unit 与 Playwright 资产 |
-| Python line coverage | `BASELINE_RUNNING` | `.coveragerc` 已覆盖三大生产包；7 项 smoke 的 7.87% 不具总体代表性 |
-| Python branch coverage | `BASELINE_RUNNING` | branch instrumentation 已验证，完整稳定分片尚未合并 |
+| Python line coverage | `UNIT_DATA_REMEDIATION_PENDING` | Unit 18 分片数据已采集；4 项红项已定向修复，受影响分片尚待重采样，不能提前合并百分比 |
+| Python branch coverage | `UNIT_DATA_REMEDIATION_PENDING` | branch instrumentation 已运行；Contract／Integration coverage 尚未采集 |
 | Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
 | Unit 分片预检 | `02a24e4b8` 上 18/18 JUnit：8310 passed／8 skipped／0 failed／0 errors | 930 个 Unit 文件均进入固定分片；记 `PASS_WITH_8_CLASSIFIED_SKIPS`，不代表 Contract／Integration／E2E 或覆盖率通过 |
 | Contract 分片预检 | `4724af2f9` 上 4/4 JUnit：1949 passed／0 skipped／failed／errors | 当前稳定 Contract 全绿；不代表真实服务、覆盖率或体验验收 |

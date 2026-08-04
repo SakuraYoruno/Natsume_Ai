@@ -150,12 +150,23 @@ def test_stale_mcp_skill_is_rejected_before_registry_lookup() -> None:
     )
     assert "MCP_TASK_AUTHORITY_REQUIRED" in source
 
+    frozen_input_source = inspect.getsource(
+        governed_frozen_skill_runtime._prepare_frozen_skill_input
+    )
+    worker_guard = 'target.startswith("mcp::")'
+    assert worker_guard in frozen_input_source
+
+    preparation_source = inspect.getsource(
+        governed_frozen_skill_runtime._FrozenSkillWorker.prepare_execution
+    )
+    assert preparation_source.index("_prepare_frozen_skill_input(") < (
+        preparation_source.index("_require_frozen_skill_dependencies(")
+    )
+
     worker_source = inspect.getsource(
         governed_frozen_skill_runtime._FrozenSkillWorker.execute_stream
     )
-    worker_guard = 'target.startswith("mcp::")'
-    assert worker_guard in worker_source
-    assert worker_source.index(worker_guard) < worker_source.index(
+    assert worker_source.index("_prepare_frozen_skill_input(") < worker_source.index(
         "_preview_effectful_skill("
     )
 

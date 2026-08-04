@@ -131,7 +131,7 @@
     "whole_system_python_line_coverage": "UNKNOWN",
     "whole_system_python_branch_coverage": "UNKNOWN",
     "pytest_collection": "PASS_11881_ITEMS",
-    "coverage_instrumentation": "WIRED_UNIT_PASS_COVERAGE_PENDING",
+    "coverage_instrumentation": "UNIT_DATA_CAPTURED_AFFECTED_SHARDS_PENDING",
     "unit_shard_preflight": {
       "status": "PASS_WITH_8_CLASSIFIED_SKIPS",
       "first_pass": "SIX_SHARDS_STOPPED_AT_ONE_FAILURE_EACH",
@@ -156,14 +156,22 @@
       "obs_order_and_migration_head_regression": "PASS_21",
       "governed_host_facade_lines": 1454,
       "host_asgi_composition_lines": 1396,
-      "node_grants_lines": 1498,
+      "node_grants_lines": 1499,
       "full_unit_shards": "PASS_8310_SKIP_8_FAIL_0_ERROR_0",
       "evidence_commit_sha": "02a24e4b8226d16ee864af5dd921379b43734757",
       "junit_shards": 18,
       "selected_unit_files": 930,
       "selected_tests": 8318,
       "windows_symlink_permission_skips": 4,
-      "retired_legacy_route_skips": 4
+      "retired_legacy_route_skips": 4,
+      "coverage_initial_evidence_commit_sha": "4a232d5fc",
+      "coverage_initial_junit_tests": 8320,
+      "coverage_initial_result": "PASS_8308_FAIL_4_SKIP_8_ERROR_0",
+      "coverage_load_sensitive_failures": 1,
+      "coverage_static_contract_drift_failures": 2,
+      "coverage_line_ceiling_failures": 1,
+      "coverage_targeted_regression": "PASS_28",
+      "coverage_affected_shards_pending": [2, 5, 6, 9]
     },
     "contract_shard_preflight": {
       "status": "PASS",
