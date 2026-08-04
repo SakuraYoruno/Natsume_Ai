@@ -166,7 +166,7 @@
       "retired_legacy_route_skips": 4
     },
     "contract_shard_preflight": {
-      "status": "REMEDIATED_PENDING_AFFECTED_SHARD_RERUN",
+      "status": "PASS_WITH_4_CLASSIFIED_SKIPS",
       "evidence_commit_sha": "ebd25de95d",
       "junit_shards": 4,
       "selected_tests": 1949,
@@ -209,9 +209,12 @@
       "frozen_rerun_result": "PASS_849_FAIL_3_SKIP_4_ERROR_0",
       "frozen_rerun_classified_load_sensitive_fixtures": 3,
       "load_sensitive_fixture_targeted_remediation": "PASS_3",
+      "affected_shard_rerun_commit_sha": "8fbb6a833dbe03104ec22b68beda0f8b6d0c68f3",
+      "affected_shard_rerun_result": "PASS_302_FAIL_0_SKIP_0_ERROR_0",
+      "composite_current_tree_result": "PASS_852_SKIP_4_FAIL_0_ERROR_0",
       "ordinary_chat_taskgraph_expectation": "REMOVED_REALTIME_COMPANION_PATH_CONFIRMED",
       "legacy_bond_read_write_contract": "RETIRED_410_CONFIRMED",
-      "whole_integration_current_sha": "AFFECTED_SHARDS_PENDING_AFTER_TEST_FIXTURE_REMEDIATION"
+      "whole_integration_current_sha": "PASS_WITH_4_CLASSIFIED_SKIPS"
     },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,
