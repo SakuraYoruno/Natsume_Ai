@@ -130,7 +130,15 @@
     "digital_life_human_likeness": "NOT_RUN",
     "whole_system_python_line_coverage": "UNKNOWN",
     "whole_system_python_branch_coverage": "UNKNOWN",
-    "pytest_collection": "FAIL_ONE_STALE_IMPORT_AFTER_AT_LEAST_11874_COLLECTED_ITEMS",
+    "pytest_collection": "PASS_11881_ITEMS",
+    "coverage_instrumentation": "WIRED_BASELINE_RUNNING",
+    "monitor_read_model_coverage": {
+      "line_percent": 61.31,
+      "branch_percent": 52.78,
+      "function_percent": 53.59,
+      "test_count": 27,
+      "status": "BELOW_SYSTEM_V2_TARGET"
+    },
     "dual_stack_p0_gateway_runtime_health": "PASS",
     "external_services_restart_persistence": "PASS",
     "monitor_real_backend_e2e": "PASS_NORMAL_BROWSER_RUNTIME_LIFE_BODY_HTTP_AND_WEBSOCKET",
@@ -165,7 +173,6 @@
     "ordinary_chat_requires_heavy_audit": false
   },
   "current_blockers": [
-    "PYTEST_COLLECTION_STALE_LONG_MEMORY_IMPORT",
     "WHOLE_SYSTEM_LINE_AND_BRANCH_COVERAGE_UNKNOWN",
     "ARCHITECTURE_V2_CURRENT_SHA_ACCEPTANCE_NOT_RUN",
     "PLANNING_SEARCH_THREE_DOMAIN_BENEFIT_UNPROVEN",

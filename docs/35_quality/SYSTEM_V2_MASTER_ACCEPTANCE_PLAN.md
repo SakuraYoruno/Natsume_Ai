@@ -28,7 +28,7 @@ flowchart LR
 
 ## 1. 2026-08-04 基线盘点
 
-本节绑定审计基线 `aad3627311`。它描述当前已知事实，不是未来放行回执。
+本节从审计基线 `aad3627311` 开始，并随 S0 修复更新。它描述当前已知事实，不是未来放行回执。
 
 ### 1.1 测试与代码规模
 
@@ -36,19 +36,19 @@ flowchart LR
 |---|---:|---|
 | Python 测试文件 | 1363 | 只有资产规模，不是覆盖率 |
 | Python `test_*` 函数定义 | 10180 | 未展开参数化，仍不是执行数或通过数 |
-| pytest 收集 | 至少 11874 项后失败 | 当前全仓测试尚不能完整收集 |
-| 收集错误 | 1 | `test_long_memory_quality_regressions.py` 导入已删除符号 |
+| pytest 收集 | 11881 项，退出 0 | S0 已恢复完整收集 |
+| 收集错误 | 0 | 失效 Executive helper 依赖已删除，未复活旧 authority |
 | Unit／Contract／Integration／E2E／Security 函数定义 | 7274／1796／811／67／232 | 测试分层资产盘点 |
 | 生产 Python 文件 | 1650 | 物理文件数量 |
 | 生产 Python 物理行 | 728539 | 含空行、注释和生成内容，不等于有效 SLOC |
 | Monitor 测试文件 | 22 | Node unit 与 Playwright 资产 |
-| Python line coverage | `UNKNOWN` | 仓库无当前 `.coverage` 或 `coverage.xml` |
-| Python branch coverage | `UNKNOWN` | pytest 配置未启用 branch coverage |
-| Monitor line／branch coverage | `UNKNOWN` | 当前 `node --test` 没有持久覆盖率报告 |
+| Python line coverage | `BASELINE_RUNNING` | `.coveragerc` 已覆盖三大生产包；7 项 smoke 的 7.87% 不具总体代表性 |
+| Python branch coverage | `BASELINE_RUNNING` | branch instrumentation 已验证，完整稳定分片尚未合并 |
+| Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
 
-当前不能回答“全系统覆盖率是百分之多少”。准确表述是：
+当前仍不能回答“全系统覆盖率是百分之多少”。准确表述是：
 
-> 测试资产很多，但整个系统的 line／branch coverage 尚未被测量；全仓测试当前还存在 collection error。
+> 测试资产很多且 11881 项已可完整收集，但整个系统的 line／branch coverage 尚未完成首次测量。
 
 测试数、历史 PASS、静态类和 fixture 均不得推导出覆盖率百分比。
 
@@ -138,9 +138,9 @@ artifacts/local-gates/<commit-sha>/coverage/
 
 正式总验收前先完成：
 
-1. 修复 `tests/unit/test_long_memory_quality_regressions.py` 的失效导入或删除已失去产品价值的测试；不得 monkeypatch 一个已退役实现骗过收集。
-2. `python -m pytest --collect-only -q` 退出 0，并保存完整 collected item 数。
-3. 为 Python 启用 source 与 branch coverage；为 Monitor 的 Node tests 建立 V8/c8 覆盖输出。
+1. `DONE`：删除 `tests/unit/test_long_memory_quality_regressions.py` 对退役 helper 的失效导入；没有 monkeypatch 或复活旧实现。
+2. `DONE`：`python -m pytest --collect-only -q` 退出 0，完整 collected item 数为 11881。
+3. `DONE`：Python source／branch coverage 已纳入三大生产包；Monitor Node tests 已生成 V8/LCOV 输出。
 4. 固定测试排除清单和活跃生产源清单，避免 `node_modules`、模型、缓存、运行 DB 和归档文档进入分母。
 5. 从当前 migration catalog 获取 schema head；全新安装、逐版本升级和已验收数据副本分别校验。
 6. 清理机器状态中的历史切片冲突：历史字段保留 scope，但当前结论只能由同一 SHA 的聚合器生成。
@@ -433,7 +433,7 @@ Secure Ingress
 | C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `MEASUREMENT_PENDING` |
 | D 真实全栈 | 本地强制服务、路线、故障、恢复、性能和回滚通过 | `RETEST_REQUIRED_FINAL_SHA` |
 | 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `UNKNOWN` |
-| pytest 收集 | 0 error | `FAIL_1_COLLECTION_ERROR` |
+| pytest 收集 | 0 error | `PASS_11881_ITEMS` |
 
 当前唯一诚实结论：
 
@@ -442,5 +442,5 @@ SYSTEM_V2 = INCOMPLETE
 ARCHITECTURE_V2_ACCEPTANCE = NOT_RUN_CURRENT_SHA
 PLANNING_SEARCH_BENEFIT = UNPROVEN
 DIGITAL_LIFE_HUMAN_LIKENESS = NOT_RUN
-WHOLE_SYSTEM_LINE_BRANCH_COVERAGE = UNKNOWN
+WHOLE_SYSTEM_LINE_BRANCH_COVERAGE = BASELINE_RUNNING
 ```

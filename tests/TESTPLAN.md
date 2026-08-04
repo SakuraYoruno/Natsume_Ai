@@ -5,7 +5,9 @@
 
 本文件定义日常稳定测试政策与最低门槛。整个 Natsume AI 2.0 的代码覆盖、十五项架构 Gate、七条生产路线、PlanningSearch 三域收益和最终放行规则见 [系统 2.0 总验收方案](../docs/35_quality/SYSTEM_V2_MASTER_ACCEPTANCE_PLAN.md)；双机环境、逐阶段命令、72 条情感场景、故障矩阵、性能采样和人工盲测的可执行步骤见 [七海数字生命双机全栈详细测试方案](../docs/35_quality/DIGITAL_LIFE_FULL_STACK_TEST_PLAN.md)。
 
-当前全系统 line／branch coverage 为 `UNKNOWN`，不是 0%，也不是测试文件数量推算出的百分比。审计基线 `aad3627311` 有 1363 个 Python 测试文件和 10180 个 `test_*` 函数定义；pytest 在收集至少 11874 个 case 后因 1 个失效导入退出 2。该错误修复、全套收集退出 0 且生成 commit-bound coverage 报告前，不得声明全仓覆盖率或 Architecture 2.0 验收通过。
+当前全系统 line／branch coverage 仍为 `UNKNOWN`，不是 0%，也不是测试文件数量推算出的百分比。S0 已删除测试对退役 Executive helper 的失效依赖，定向 7 项通过；全仓现可完整收集 11881 个 case、0 error。`.coveragerc` 已将 `host_brain`、`edge_client`、`natsume_contracts` 纳入 branch coverage，Monitor 也提供 V8/LCOV read-model 入口；首次完整报告生成前仍不得声明覆盖率或 Architecture 2.0 验收通过。
+
+首次 Monitor read-model 覆盖采集为 line 61.31%、branch 52.78%、function 53.59%，27 项测试全部通过，但低于系统 2.0 目标 80%/70%。Python 7 项 smoke 将 274596 条生产语句纳入分母并得到 line 7.87%，只证明配置能扫描完整源树，不能作为 Python 全系统覆盖率；完整稳定测试分片正在生成正式 baseline。
 
 ## 1. 原则
 
@@ -104,6 +106,9 @@ Host 启动续跑遇到已经持久化且仍在等待 Intent／节点 Review 的
 ## 8. 当前提交的定向命令
 
 ```powershell
+python -m pytest --collect-only -q
+python -m pytest tests/unit/test_long_memory_quality_regressions.py -q
+python -m pytest tests/unit/test_long_memory_quality_regressions.py --cov=host_brain --cov=edge_client --cov=natsume_contracts --cov-config=.coveragerc --cov-report=term-missing --cov-report=json:coverage-smoke.json -q
 python -m pytest tests/unit/test_doc_authority_gate.py tests/unit/test_doc_freshness_gate.py tests/unit/test_ne01_obs_d3_explicit_projection_ports.py -q
 python -m pytest tests/unit/test_gr05_cortex_governed_cutover.py tests/integration/test_gr05_universal_host_runtime.py tests/unit/test_input_routes_worker.py -q
 python -m pytest tests/unit/test_host_gateway_secure_ingress.py tests/unit/test_aw01_asgi_security_composition.py -q
@@ -122,6 +127,7 @@ npm run check:operator-client
 npm run lint
 npm run typecheck
 npm run test:read-model
+npm run test:coverage:read-model
 npm run build
 npm run test:e2e:interactions
 $env:MONITOR_UI_BASE_URL='http://127.0.0.1:18180/monitor/'

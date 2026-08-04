@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 from host_brain.agent_runtime.contextual_answers import _memory_recall_plan_should_bypass_direct_status_fastlane
-from host_brain.executive_runtime._shared import _message_requests_memory_recall
 from host_brain.surface_runtime.life_context import _surface_memory_acceptance_must_include
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -48,7 +47,6 @@ def test_project_fact_seed_does_not_route_to_open_app() -> None:
 def test_memory_acceptance_bypasses_status_fastlane() -> None:
     message = "最终同会话验收：请列出当前测试代号、海边灯塔到底指什么、app-server预热指标、轻小说推荐格式。"
 
-    assert _message_requests_memory_recall(message)
     assert _memory_recall_plan_should_bypass_direct_status_fastlane(message, task_mode="task_progress")
 
 
