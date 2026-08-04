@@ -17,6 +17,8 @@ Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文
 
 上述 27 项随后在 `a829f97de3` 上按 4 个低负载隔离进程精确复跑：8 项独立通过，确认其首轮失败来自并行负载或进程内顺序污染；19 项稳定复现。第二批先收口其中 7 项旧入口/夹具漂移：Worker 与 Self-heal 自然语言请求必须进入 `GOV_AIRLOCK_REVIEW` 且 dispatch 次数为 0；调用方提供的 `planned_steps`/多 Skill Plan 必须在 admission 前拒绝；Skill 成功以 canonical execution receipt 为真相，不再要求兼容 triptych 账本完成；Self-evolve 直接调用先由 governed-admission 门禁拒绝；对话连续性通过 app-local typed read ports 从真实 SQLite conversation window 注入 2 个 turn。组合定向复验为 7 passed，稳定红项降至 12；全量 Integration 仍待生产恢复问题清零后在冻结 SHA 重跑。
 
+第三批关闭 2 项真实 migration receipt-loss replay 缺陷：当前物理库保留 `0148/0149` schema、但 migration catalog 从 `0105/0106` 起丢失时，runner 过去会在 companion profile 列与 Chat delivery trigger 上重复执行失败。修复只接受精确 frozen checksum，并完整验证目标列、约束、索引和 trigger；任一 trigger 被篡改或缺失均拒绝兼容。两项原集成回归与一项 tamper 单测合计 3 passed，稳定红项降至 10；这仍不是全量 Integration PASS。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：

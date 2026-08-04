@@ -695,6 +695,55 @@ def test_0095_receipt_loss_replay_requires_complete_revision_schema(tmp_path) ->
         assert checksum_bound_schema_replay_postcondition_holds(conn, asset) is False
 
 
+def test_0148_and_0149_receipt_repair_requires_complete_frozen_schema(tmp_path) -> None:
+    db_path = tmp_path / "affective-delivery-receipt-loss.sqlite3"
+    seeded = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="0148-0149-receipt-loss",
+        ts_ms=26,
+    )
+    assert seeded.success is True, seeded.as_dict()
+
+    companion_asset = _asset(
+        "0148_companion_profile_control_audit.sql",
+        "a94d26ee6d86e941e03132411b00cb97caf698abc4af115ebd1f4cc7471c56f0",
+    )
+    delivery_asset = _asset(
+        "0149_task_runtime_chat_delivery.sql",
+        "c6e3377f9678aaaab136755e9c7ff7c4caa52d672993bfeba828640c055e6cc7",
+    )
+    assert is_exact_checksum_bound_schema_replay_failure(
+        companion_asset,
+        sqlite3.OperationalError("duplicate column name: source_control_ref"),
+    ) is True
+    assert is_exact_checksum_bound_schema_replay_failure(
+        delivery_asset,
+        sqlite3.OperationalError(
+            "trigger trg_task_runtime_chat_delivery_identity_guard already exists"
+        ),
+    ) is True
+
+    with sqlite3.connect(db_path) as conn:
+        assert checksum_bound_schema_replay_postcondition_holds(
+            conn, companion_asset
+        ) is True
+        assert checksum_bound_schema_replay_postcondition_holds(
+            conn, delivery_asset
+        ) is True
+
+        conn.execute("DROP TRIGGER companion_profile_life_event_v1_insert_guard")
+        assert checksum_bound_schema_replay_postcondition_holds(
+            conn, companion_asset
+        ) is False
+        assert checksum_bound_schema_replay_postcondition_holds(
+            conn, delivery_asset
+        ) is True
+
+        conn.execute("DROP TRIGGER trg_task_runtime_chat_delivery_identity_guard")
+        assert checksum_bound_schema_replay_postcondition_holds(
+            conn, delivery_asset
+        ) is False
+
+
 def test_0095_receipt_loss_postcondition_keeps_pre_0098_trigger_epoch(
     tmp_path,
 ) -> None:
