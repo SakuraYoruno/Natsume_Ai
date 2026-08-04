@@ -131,7 +131,15 @@
     "whole_system_python_line_coverage": "UNKNOWN",
     "whole_system_python_branch_coverage": "UNKNOWN",
     "pytest_collection": "PASS_11881_ITEMS",
-    "coverage_instrumentation": "WIRED_BASELINE_RUNNING",
+    "coverage_instrumentation": "WIRED_UNIT_PREFLIGHT_REMEDIATED",
+    "unit_shard_preflight": {
+      "status": "REMEDIATION_TARGETS_PASS",
+      "first_pass": "SIX_SHARDS_STOPPED_AT_ONE_FAILURE_EACH",
+      "root_failure_count": 6,
+      "targeted_regression": "PASS_14",
+      "adjacent_contract_regression": "PASS_50",
+      "full_unit_shards": "PENDING_RERUN"
+    },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,
       "branch_percent": 52.78,

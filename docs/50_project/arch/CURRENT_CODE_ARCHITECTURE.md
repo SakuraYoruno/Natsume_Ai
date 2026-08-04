@@ -79,6 +79,8 @@ flowchart TB
 - verification、acceptance、effect、outbox 与 receipt；
 - cancel、retry、checkpoint、unknown effect reconciliation 和 restart recovery。
 
+Host 侧 `GovernedHostRuntime` 只保留生命周期与应用 facade；直接 Skill policy、Delegate target 校验和 Review continuation reduction 位于无状态 `governed_host_admission_helpers.py`。当前 facade 为 1454 行，仍受 `<1500` 结构 Gate 约束，不能靠扩大巨石白名单通过。
+
 这些机制不得被重新加到无副作用的普通闲聊首字路径中。
 
 ## 6. Host、OBS 与 Composition

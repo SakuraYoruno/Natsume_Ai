@@ -155,6 +155,8 @@ def test_broker_adapter_injects_request_bound_read_only_authority_snapshot(
         "lease_owner_id": "",
         "business_scope": "",
         "operation_fingerprint": "",
+        "node_risk_level": 1,
+        "pre_execution_review_ref": "",
         "expires_at_ms": 2_000_000_000_000,
     }
     for key, value in values.items():

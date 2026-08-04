@@ -344,7 +344,7 @@ def _select_buffered_affective_candidate(
     expected_candidate_count: int,
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> str:
-    """Select one safe local winner from a frozen two-candidate affective turn.
+    """Choose one safe local winner among a frozen two-candidate affective turn.
 
     Candidate generation is deliberately not an authority to choose a
     relationship repair or emotional expression.  The ModelAttempt retry gate

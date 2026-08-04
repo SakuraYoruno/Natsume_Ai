@@ -9,8 +9,7 @@ worker or during graph execution.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
-import inspect
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import Any
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
@@ -59,9 +58,6 @@ from host_brain.app.governed_tool_runtime import (
     FrozenToolRouteExecutor,
     ToolHostRequest,
 )
-from host_brain.app.governed_delegate_dispatch import (
-    GovernedDelegateDispatchError,
-)
 from host_brain.app.governed_plan_execution_policy import (
     GovernedPlanExecutionPolicyError,
     bind_governed_plan_execution_policy,
@@ -101,11 +97,13 @@ from host_brain.app.governed_task_authority import (
     assert_work_order_command_binding as _assert_work_order_command_binding,
     require_fail_closed_direct_skill_work_order as _require_fail_closed_direct_skill_work_order,  # noqa: F401
 )
+from host_brain.app.governed_host_admission_helpers import (
+    resolve_direct_skill_execution_policy,
+    review_continuation_result,
+    validate_delegate_target,
+)
 from host_brain.app.governed_skill_execution_ports import (
     build_governed_skill_execution_ports,
-)
-from host_brain.skills.execution_policy_validation import (
-    governed_skill_policy_error,
 )
 from host_brain.task_runtime import GovernedTaskCoordinator
 from host_brain.task_runtime.governed_workers import GovernedFrozenNodeWorker
@@ -877,40 +875,9 @@ class GovernedHostRuntime:
         self,
         intent_draft: Mapping[str, Any],
     ) -> tuple[int, bool]:
-        registry = self._planning_skill_registry
-        require = getattr(registry, "require", None)
-        target = str(
-            intent_draft.get("target_id") or intent_draft.get("skill_id") or ""
-        ).strip()
-        if not callable(require) or not target:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_AUTHORITY_INVALID,
-                "direct Skill admission has no app-local SkillRegistry policy",
-            )
-        try:
-            metadata = require(target)
-            risk_level = int(getattr(metadata, "risk_level"))
-        except Exception as exc:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_AUTHORITY_INVALID,
-                "direct Skill admission could not freeze canonical risk metadata",
-            ) from exc
-        policy_error = governed_skill_policy_error(target, metadata)
-        if policy_error is not None:
-            raise GovernedHostAdapterError(
-                policy_error,
-                (
-                    "direct Skill execution policy is not eligible for "
-                    "governed Task admission"
-                ),
-            )
-        if not 1 <= risk_level <= 5:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_AUTHORITY_INVALID,
-                "direct Skill canonical risk level is invalid",
-            )
-        return risk_level, bool(
-            getattr(metadata, "require_confirm", False) or risk_level >= 4
+        return resolve_direct_skill_execution_policy(
+            intent_draft,
+            skill_registry=self._planning_skill_registry,
         )
 
     async def continue_review_admission(
@@ -965,7 +932,7 @@ class GovernedHostRuntime:
                 graph=graph,
                 continuation_claim=dict(claim or {}),
             )
-            return await _review_continuation_result(
+            return await review_continuation_result(
                 operation,
                 transform=self._dispatch_accepted_effects,
             )
@@ -1216,56 +1183,11 @@ class GovernedHostRuntime:
         *,
         immutable_policy_required: bool,
     ) -> dict[str, Any] | None:
-        validator = self._delegate_target_validator
-        target_id = str(
-            intent_draft.get("target_id")
-            or intent_draft.get("agent_id")
-            or ""
-        ).strip()
-        if not target_id:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
-                "delegate route has no target_id",
-            )
-        if validator is None:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
-                "delegate target registry is not composed",
-            )
-        try:
-            result = validator(target_id)
-        except GovernedDelegateDispatchError as exc:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
-                exc.detail,
-            ) from exc
-        except Exception as exc:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
-                "delegate target validation failed",
-            ) from exc
-        if inspect.isawaitable(result):
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
-                "delegate target validator must be synchronous before admission",
-            )
-        if not isinstance(result, Mapping):
-            if (
-                not immutable_policy_required
-                and str(result or "").strip() == target_id
-            ):
-                # Operator and Scheduler commands reuse the direct ``delegate``
-                # worker route as an internal control transport.  Their exact
-                # target allowlist is already frozen by the app-local control
-                # composition, and they carry a finite non-zero graph budget.
-                # They are not child-agent Delegates and therefore must not be
-                # forced into the pentest target-policy contract.
-                return None
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE,
-                "delegate target validator returned no immutable policy",
-            )
-        return dict(result)
+        return validate_delegate_target(
+            intent_draft,
+            validator=self._delegate_target_validator,
+            immutable_policy_required=immutable_policy_required,
+        )
 
     async def _dispatch_accepted_effects(
         self,
@@ -1517,37 +1439,6 @@ def build_governed_host_runtime(
         planning_skill_registry=skill_registry,
         runtime_context_application=runtime_context_application,
     )
-
-
-async def _review_continuation_result(
-    operation: Any,
-    *,
-    transform: Callable[[Mapping[str, Any]], Awaitable[dict[str, Any]]],
-) -> dict[str, Any]:
-    current = await operation if inspect.isawaitable(operation) else operation
-    if isinstance(current, Mapping):
-        return await transform(dict(current))
-    if not hasattr(current, "__aiter__"):
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "Review continuation returned no durable Host result",
-        )
-    terminal: dict[str, Any] | None = None
-    async for raw_event in current:
-        if not isinstance(raw_event, Mapping):
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_AUTHORITY_INVALID,
-                "Review continuation emitted a non-mapping Host event",
-            )
-        event = await transform(dict(raw_event))
-        if bool(event.get("done")):
-            terminal = event
-    if terminal is None:
-        raise GovernedHostAdapterError(
-            GOVERNED_HOST_AUTHORITY_INVALID,
-            "Review continuation emitted no durable Host terminal result",
-        )
-    return terminal
 
 
 __all__ = [

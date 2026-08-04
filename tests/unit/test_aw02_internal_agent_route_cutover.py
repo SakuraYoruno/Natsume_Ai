@@ -11,6 +11,7 @@ from host_brain.app.internal_agent_routes import (
     get_runtime_drain_report,
 )
 from host_brain.app.internal_task_runtime import InternalAgentCommandService
+from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
 
 
 class _IntentEngine:
@@ -30,14 +31,16 @@ class _Runtime:
     def __init__(self) -> None:
         self.orders = []
         self.command = None
+        self.work_order = None
 
     def existing_command(self, *, request_id: str):
         if self.command is None or self.command.request_id != request_id:
             return None
-        return {"command": self.command}
+        return {"command": self.command, "work_order": self.work_order}
 
     async def execute_stream(self, **kwargs):
         self.orders.append(kwargs["work_order"])
+        self.work_order = WorkOrderV3.from_v2_mapping(kwargs["work_order"].to_dict())
         authority = kwargs["command_authority"]
         self.command = build_host_command(
             surface=HostCommandSurface.INTERNAL,
@@ -72,8 +75,25 @@ class _Runtime:
                 "status": "ACCEPTED",
                 "receipt_ref": "agent-execution://internal/route",
             },
+            "internal_agent_effect_status": "COMMITTED",
+            "internal_agent_result_receipt_ref": "agent-execution://internal/route",
             "replayed": False,
         }
+
+    async def exact_budget_rejection_claim_result_ref(self, **_kwargs):  # noqa: ANN003, ANN201
+        return None
+
+    async def exact_nonacceptance_checkpoint_claim_result_ref(self, **_kwargs):  # noqa: ANN003, ANN201
+        return None
+
+    async def exact_accepted_result_receipt(  # noqa: ANN201
+        self,
+        *,
+        command_id: str,
+        expected_receipt_ref: str,
+    ):
+        assert command_id
+        return expected_receipt_ref
 
 
 class _ClaimStore:

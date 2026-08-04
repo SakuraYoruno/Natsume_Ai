@@ -69,5 +69,8 @@ def test_surface_and_thalamus_have_no_legacy_pool_or_private_fallback_authority(
     assert "ports.model_attempt_service()" in surface
     assert "get_model_attempt_service" not in surface
     assert "host_brain.composition.process_services" not in surface
-    assert 'require("model_attempt_service")' in thalamus
+    assert "model_attempt_service" not in thalamus
+    assert "complete_tribe" not in thalamus
+    assert "must not call a model" in thalamus
+    assert "application_ports.require(" in thalamus
     assert "host_brain.app" not in thalamus

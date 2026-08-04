@@ -5,6 +5,7 @@ import inspect
 from pathlib import Path
 
 import host_brain.app.governed_frozen_skill_runtime as frozen_skill_runtime
+import host_brain.app.governed_host_admission_helpers as admission_helpers
 import host_brain.app.governed_host_contracts as host_contracts
 import host_brain.app.governed_task_adapter as governed_task_adapter
 
@@ -26,7 +27,23 @@ def test_governed_host_adapter_is_a_focused_application_facade() -> None:
     assert owned_names == {
         "GovernedHostRuntime",
         "build_governed_host_runtime",
-        "_review_continuation_result",
+    }
+
+
+def test_admission_helpers_are_small_and_stateless() -> None:
+    source = inspect.getsource(admission_helpers)
+    tree = ast.parse(source)
+    owned_names = {
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+    assert len(source.splitlines()) < 180
+    assert owned_names == {
+        "resolve_direct_skill_execution_policy",
+        "review_continuation_result",
+        "validate_delegate_target",
     }
 
 

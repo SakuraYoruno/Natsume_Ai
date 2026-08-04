@@ -9,6 +9,8 @@
 
 首次 Monitor read-model 覆盖采集为 line 61.31%、branch 52.78%、function 53.59%，27 项测试全部通过，但低于系统 2.0 目标 80%/70%。Python 7 项 smoke 将 274596 条生产语句纳入分母并得到 line 7.87%，只证明配置能扫描完整源树，不能作为 Python 全系统覆盖率；完整稳定测试分片正在生成正式 baseline。
 
+Unit 六分片第一次预检采用 `--maxfail=1`，共定位 6 个首失败。修复后，首失败定向集 14 项与相邻合同集 50 项均通过；完整无 coverage 六分片尚未重跑，因此当前仍只记 `UNIT_PREFLIGHT_REMEDIATED`，不得写成全量 Unit PASS。昂贵 coverage 采集要等无 coverage 分片稳定后只运行一次。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：
