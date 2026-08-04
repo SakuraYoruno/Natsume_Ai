@@ -45,7 +45,7 @@ flowchart LR
 | Python line coverage | `BASELINE_RUNNING` | `.coveragerc` 已覆盖三大生产包；7 项 smoke 的 7.87% 不具总体代表性 |
 | Python branch coverage | `BASELINE_RUNNING` | branch instrumentation 已验证，完整稳定分片尚未合并 |
 | Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
-| Unit 分片预检 | 第三轮 4 个完整分片累计 5605 passed／12 failed／3 skipped，2 个分片超时前另暴露 15 个失败 | 27 个失败已按根因修复，126 项根因回归与 334 项顺序邻接回归通过；完整细分片仍待重跑，不能记 Unit PASS |
+| Unit 分片预检 | `02a24e4b8` 上 18/18 JUnit：8310 passed／8 skipped／0 failed／0 errors | 930 个 Unit 文件均进入固定分片；记 `PASS_WITH_8_CLASSIFIED_SKIPS`，不代表 Contract／Integration／E2E 或覆盖率通过 |
 
 当前仍不能回答“全系统覆盖率是百分之多少”。准确表述是：
 
@@ -142,7 +142,7 @@ artifacts/local-gates/<commit-sha>/coverage/
 1. `DONE`：删除 `tests/unit/test_long_memory_quality_regressions.py` 对退役 helper 的失效导入；没有 monkeypatch 或复活旧实现。
 2. `DONE`：`python -m pytest --collect-only -q` 退出 0，完整 collected item 数为 11881。
 3. `DONE`：Python source／branch coverage 已纳入三大生产包；Monitor Node tests 已生成 V8/LCOV 输出。
-4. `IN_PROGRESS`：Unit 前两轮完成收集与首批合同修复；第三轮 4 个完整分片累计 5605 passed／12 failed／3 skipped，另 2 个分片在 20 分钟超时前暴露 15 个失败。已进一步冻结历史迁移测试到 0102 catalog、补齐 Scheduler control-policy／Budget／0127 投影合同、隔离模型路由环境、在 OBS lifespan 就绪后刷新测试投影、删除 HostRoutePorts 中无消费者的 Capability Forge provider，并刷新当前 Runtime Outbox 调用矩阵。126 项根因回归和 334 项顺序邻接回归通过；细分片又发现前序聊天测试遗留的 foreground cooldown 会误抑制后续 Inner World／Silence 测试，隔离该进程缓存后按原顺序重放 223 项通过。首批 4 个细分片随后得到 1929 passed／4 failed／3 skipped，4 项均指向 Surface 在错时问候硬门禁后产生空回复；现已增加基于真实 day phase 的自然纠正回退，并把通用低信息合同固定到 morning 场景，Surface 全文件 56 项通过。扩大到 6 片后另发现 provider-scoped route 环境未隔离、测试 basetemp 误入 `artifacts/` 排除区，以及 Terminal snapshot 用例在新版 fixture 上重复创建 graph budget；修正环境、移出 basetemp 并复用唯一 canonical budget 后，原整片 349 passed／1 skipped。后续 12 个细分片累计到 5484 passed／8 skipped 时又发现 `task_repository` 漏导出 graph-cancellation 的只读 decision-integrity 兼容别名；补回同一函数对象后定向合同通过。完整 18 片诊断最终为 8308 passed／2 failed／8 skipped；余下两项是 Obs job 顺序清单落后和 current migration head 硬编码为 127，改为真实注册顺序与 `current_version == latest_version && >= 127` 后相关 21 项通过。下一步在新 SHA 上重跑完整无 coverage Unit，仍不得写 Unit PASS。
+4. `DONE_WITH_CLASSIFIED_SKIPS`：在 `02a24e4b8` 上以 18 个独立进程、系统 `%TEMP%` basetemp 和固定 marker 完成 930 个 Unit 文件预检；独立聚合 18 个 JUnit 得到 8318 tests、8310 passed、8 skipped、0 failed、0 errors。4 项 skipped 因当前 Windows 未授予符号链接创建权限，另 4 项是明确退役的 legacy recent-turn direct route；二者均不冒充覆盖。诊断期间修复了历史 migration fixture、Scheduler／Budget 合同、route 环境污染、foreground cooldown 泄漏、错时问候空回复、Terminal snapshot fixture、decision-integrity 只读 alias、Obs 注册顺序及动态 migration head。
 5. 固定测试排除清单和活跃生产源清单，避免 `node_modules`、模型、缓存、运行 DB 和归档文档进入分母。
 6. 从当前 migration catalog 获取 schema head；全新安装、逐版本升级和已验收数据副本分别校验。
 7. 清理机器状态中的历史切片冲突：历史字段保留 scope，但当前结论只能由同一 SHA 的聚合器生成。

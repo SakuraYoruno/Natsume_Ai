@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-04",
-  "commit_scope": "SYSTEM_V2_UNIT_FINAL_DIAGNOSTIC_REMEDIATION",
+  "commit_scope": "SYSTEM_V2_UNIT_PREFLIGHT_COMPLETE",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -131,9 +131,9 @@
     "whole_system_python_line_coverage": "UNKNOWN",
     "whole_system_python_branch_coverage": "UNKNOWN",
     "pytest_collection": "PASS_11881_ITEMS",
-    "coverage_instrumentation": "WIRED_UNIT_PREFLIGHT_REMEDIATED",
+    "coverage_instrumentation": "WIRED_UNIT_PASS_COVERAGE_PENDING",
     "unit_shard_preflight": {
-      "status": "REMEDIATION_TARGETS_PASS",
+      "status": "PASS_WITH_8_CLASSIFIED_SKIPS",
       "first_pass": "SIX_SHARDS_STOPPED_AT_ONE_FAILURE_EACH",
       "root_failure_count": 6,
       "targeted_regression": "PASS_14",
@@ -157,7 +157,13 @@
       "governed_host_facade_lines": 1454,
       "host_asgi_composition_lines": 1396,
       "node_grants_lines": 1498,
-      "full_unit_shards": "PENDING_FINE_GRAIN_RERUN"
+      "full_unit_shards": "PASS_8310_SKIP_8_FAIL_0_ERROR_0",
+      "evidence_commit_sha": "02a24e4b8226d16ee864af5dd921379b43734757",
+      "junit_shards": 18,
+      "selected_unit_files": 930,
+      "selected_tests": 8318,
+      "windows_symlink_permission_skips": 4,
+      "retired_legacy_route_skips": 4
     },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,
