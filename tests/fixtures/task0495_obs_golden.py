@@ -203,9 +203,28 @@ def _build_recording_composition(
         MutableMapping[str, Callable[[Mapping[str, Any], str], Any]],
         domain_command_ports._HANDLERS,  # noqa: SLF001 - explicit test seam
     )
+    route_handlers = cast(
+        MutableMapping[str, Callable[..., Any]],
+        domain_command_ports._ROUTE_PORT_HANDLERS,  # noqa: SLF001 - explicit test seam
+    )
+
+    def _recording_route_handler(
+        payload: Mapping[str, Any],
+        request_id: str,
+        *,
+        route_ports: Any,
+    ) -> Any:
+        # Production binds sys_mode.switch through the canonical route-port
+        # overlay.  The no-real-I/O golden must replace that exact owner too;
+        # patching only the legacy handler map no longer reaches execution.
+        del route_ports
+        return handler(payload, request_id)
+
     with _HANDLER_INSTALL_LOCK:
         original = handlers[_COMMAND_ID]
+        original_route = route_handlers[_COMMAND_ID]
         handlers[_COMMAND_ID] = handler
+        route_handlers[_COMMAND_ID] = _recording_route_handler
         try:
             return build_obs_command_composition(
                 env=env,
@@ -215,6 +234,7 @@ def _build_recording_composition(
             )
         finally:
             handlers[_COMMAND_ID] = original
+            route_handlers[_COMMAND_ID] = original_route
 
 
 def _execute(

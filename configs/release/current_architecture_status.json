@@ -246,6 +246,26 @@
       "legacy_bond_read_write_contract": "RETIRED_410_CONFIRMED",
       "whole_integration_current_sha": "PASS_WITH_4_CLASSIFIED_SKIPS"
     },
+    "security_coverage_preflight": {
+      "status": "PASS_WITH_2_CLASSIFIED_SKIPS",
+      "evidence_commit_sha": "d0a0adb65",
+      "junit_shards": 2,
+      "selected_tests": 379,
+      "passed": 377,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 2,
+      "windows_symlink_permission_skips": 2
+    },
+    "local_e2e_coverage_preflight": {
+      "status": "REMEDIATED_PENDING_COMMIT_BOUND_RERUN",
+      "initial_evidence_commit_sha": "d0a0adb65",
+      "initial_selected_tests": 69,
+      "initial_result": "PASS_68_FAIL_1_SKIP_0_ERROR_0",
+      "root_cause": "OBS_GOLDEN_PATCHED_LEGACY_HANDLER_MAP_INSTEAD_OF_CANONICAL_ROUTE_HANDLER_OVERLAY",
+      "production_runtime_changed": false,
+      "targeted_worktree_regression": "PASS_NO_COVERAGE_1_AND_COVERAGE_1"
+    },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,
       "branch_percent": 52.78,

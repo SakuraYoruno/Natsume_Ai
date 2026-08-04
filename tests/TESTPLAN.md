@@ -27,6 +27,8 @@ Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文
 
 首次冻结重跑已在 `15cebc540` 上完成 6 个隔离 JUnit：稳定 marker 范围共 856 项，849 passed、3 failed、4 skipped、0 errors。4 项 skip 中 2 项是明确 opt-in 的 real Docker Golden Suite，2 项缺少 `NASTUME_TEST_REDIS_URL`；3 项失败低负载组合复跑为 3 passed。根因均为测试夹具的墙钟假设：Long-term Goal 在 migration 前采样时间，重负载迁移超过 120 秒后才签发已经过期的 runtime lease；Heartbeat-loss 用 120ms TTL，可能在进入待测心跳阶段前自然过期。修复只把 Lease 时间移到 migration 后采样，并复用已稳定的 2s TTL／2.5s worker 比例，不改生产 fencing 或触发器；定向复验 3 passed。`8fbb6a833` 随后只改动这两个受影响夹具及文档，生产代码和其余四片测试文件未变化；shard-0 重跑 176 passed，shard-2 重跑 126 passed。合并未变化四片的原 JUnit 后，当前代码树稳定 Integration 结论为 852 passed、4 classified skips、0 failed／error，状态 `PASS_WITH_4_CLASSIFIED_SKIPS`。该结论仍不包含真实 Docker／Redis、E2E、Security、覆盖率或数字生命体验验收。
 
+`d0a0adb65` 的 Security coverage 两片共 379 项：377 passed、2 项因当前 Windows 无符号链接权限分类跳过、0 failed／error。本地可执行 E2E coverage 首轮 69 项中 68 passed、1 failed；稳定复现确认旧 M48-B OBS Golden 只替换 `_HANDLERS`，而 `sys_mode.switch` 已由 canonical `_ROUTE_PORT_HANDLERS` overlay 接管，录制端口未进入执行并被正确标为 `OBS_COMMAND_EXECUTION_UNCERTAIN`。夹具现同时替换并恢复当前 route-handler test seam，不改生产路由或授权；无 coverage 与 coverage 定向复验各 1 passed，尚待提交绑定后重采受影响 E2E 分片。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：
