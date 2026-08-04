@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-04",
-  "commit_scope": "SYSTEM_V2_UNIT_PREFLIGHT_REMEDIATION",
+  "commit_scope": "SYSTEM_V2_UNIT_PREFLIGHT_ORDER_ISOLATION",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -146,6 +146,7 @@
       "third_pass_total_observed_failures": 27,
       "third_pass_root_cause_regression": "PASS_126",
       "third_pass_order_adjacent_regression": "PASS_334",
+      "foreground_guard_order_regression": "PASS_223",
       "governed_host_facade_lines": 1454,
       "host_asgi_composition_lines": 1396,
       "node_grants_lines": 1498,

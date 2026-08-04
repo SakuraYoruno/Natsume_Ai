@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import pytest
+
 from host_brain.skills.impl.silence_skill import (
     execute_silence_add_resistance,
     execute_silence_tick,
     execute_silence_update_emotion,
 )
+from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction
+
+
+@pytest.fixture(autouse=True)
+def _isolate_foreground_interaction_guard() -> None:
+    """Keep the process-local foreground cache from leaking across test modules."""
+
+    mark_recent_foreground_interaction(ts_ms=1)
+    yield
+    mark_recent_foreground_interaction(ts_ms=1)
 
 
 class _FakeLimbicAgent:

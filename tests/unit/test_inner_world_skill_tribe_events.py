@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 from host_brain.skills.impl.inner_world_skill import (
     execute_inner_world_awaken,
     execute_inner_world_monologue_tick,
@@ -9,6 +11,16 @@ from host_brain.skills.impl.inner_world_skill import (
     execute_inner_world_session_end,
     execute_inner_world_tick,
 )
+from host_brain.tribe.default_mode_agent import mark_recent_foreground_interaction
+
+
+@pytest.fixture(autouse=True)
+def _isolate_foreground_interaction_guard() -> None:
+    """Do not let another test's foreground turn suppress this module's ticks."""
+
+    mark_recent_foreground_interaction(ts_ms=1)
+    yield
+    mark_recent_foreground_interaction(ts_ms=1)
 
 
 class _FakeLimbicAgent:
