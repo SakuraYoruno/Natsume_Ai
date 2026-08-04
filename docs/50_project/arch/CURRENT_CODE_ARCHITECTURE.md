@@ -52,6 +52,7 @@ flowchart TB
 
 | 模块 | 当前职责 |
 |---|---|
+| `text_affect_observer.py` | 纯领域、低置信的用户文本情绪观察；不依赖 Host app，也不能写七海 self affect |
 | `affect_fusion.py` | 合并文本、声学等用户观察，保留低置信与冲突 |
 | `affective_turn_planner.py` | 生成本轮 appraisal、self affect、companion act 与表达引用 |
 | `domain_reducer.py` / `reducer.py` | 确定性折叠 Life 事件和有界状态 |

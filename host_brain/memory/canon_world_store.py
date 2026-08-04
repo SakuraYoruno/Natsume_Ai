@@ -380,8 +380,14 @@ class WorldCanonStore:
                 expected_version=int(expected_version),
                 expected_hash=expected_hash,
             )
+            temp_identity = hashlib.sha256(
+                f"{path.name}\0{_safe_file_token(apply_id)}".encode("utf-8")
+            ).hexdigest()[:20]
+            # Do not repeat the user-controlled document/apply identifiers in
+            # the temporary filename.  Deep Windows workspaces otherwise hit
+            # MAX_PATH before the atomic replace can start.
             temp_path = path.with_name(
-                f".{path.name}.{_safe_file_token(apply_id)}.{uuid.uuid4().hex}.tmp"
+                f".canon-{temp_identity}-{uuid.uuid4().hex}.tmp"
             )
             try:
                 encoded = (

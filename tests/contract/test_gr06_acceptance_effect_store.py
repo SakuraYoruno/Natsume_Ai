@@ -423,6 +423,7 @@ def _prepare_node_acceptance(store: DurableTaskStore):
         acceptance_criteria=("effect staged",),
         task_graph_id="graph-gr06",
         task_node_id="node-gr06",
+        attempt_id="attempt-gr06",
     )
     return judgement
 

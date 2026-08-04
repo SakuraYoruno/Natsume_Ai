@@ -28,7 +28,7 @@ def test_coverage_reports_actual_incomplete_routes_and_architecture_controls() -
 
     assert report.status == PROGRAM_INCOMPLETE
     assert report.evaluated_commit_sha == receipt["commit_sha"]
-    assert report.migration_head == "0143_affective_life_kernel.sql"
+    assert report.migration_head == "0152_evolution_policy_digest_scope.sql"
     assert report.accepted_migration_head == "0142_evolution_activation_authority.sql"
     assert tuple(report.route_statuses) == REQUIRED_ROUTES
     assert report.route_statuses == {

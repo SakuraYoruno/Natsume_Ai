@@ -27,6 +27,7 @@ EXPECTED_PURE_QUERY_POSTS = {
     HttpRouteKey("POST", "/obs/capability-gaps/forge-proposals/preview"),
     HttpRouteKey("POST", "/obs/life-evolution/action-preview"),
     HttpRouteKey("POST", "/observability/trace"),
+    HttpRouteKey("POST", "/obs/operator-session/bootstrap"),
 }
 EXPECTED_PURE_QUERY_ENDPOINTS = {
     (
@@ -38,6 +39,10 @@ EXPECTED_PURE_QUERY_ENDPOINTS = {
         "post_life_evolution_action_preview",
     ),
     ("host_brain.app.obs_fastapi_app", "request_trace"),
+    (
+        "host_brain.observability.operator_session_bootstrap",
+        "bootstrap_operator_session",
+    ),
 }
 
 EXPECTED_BASELINE_MUTATION_ROUTES = {
@@ -89,7 +94,7 @@ def test_task0489_baseline_manifest_covers_all_18_observed_mutation_handlers() -
     assert OBS_BASELINE_MUTATION_ROUTES == frozenset(EXPECTED_BASELINE_MUTATION_ROUTES)
     assert len(OBS_BASELINE_MUTATION_ENDPOINTS) == 18
     assert OBS_BASELINE_MUTATION_ROUTES.isdisjoint(OBS_PURE_QUERY_NON_GET_ROUTES)
-    assert len(OBS_PURE_QUERY_NON_GET_SPECS) == 3
+    assert len(OBS_PURE_QUERY_NON_GET_SPECS) == 4
     assert OBS_PURE_QUERY_NON_GET_ENDPOINTS == frozenset(EXPECTED_PURE_QUERY_ENDPOINTS)
 
 
@@ -97,8 +102,8 @@ def test_actual_obs_fastapi_route_entries_are_query_only_after_writer_detach() -
     audit = audit_fastapi_route_entries(obs_app)
 
     # Each query route has one canonical owner after the split-router cutover.
-    assert audit.entry_count == 112
-    assert audit.unique_route_count == 112
+    assert audit.entry_count == 114
+    assert audit.unique_route_count == 114
     assert EXPECTED_EFFECT_RECONCILIATION_QUERY_ROUTES <= {
         entry.key for entry in audit.entries
     }

@@ -11,6 +11,8 @@
 
 Unit 无 coverage 预检已在 `02a24e4b8` 上稳定完成：930 个 Unit 文件按 18 个独立进程分片，固定排除 `e2e/hw/prod_env/runtime_probe/docker/ci_unstable`，独立聚合 18 个 JUnit 得到 8318 tests、8310 passed、8 skipped、0 failed、0 errors。4 项 skipped 是当前 Windows 无符号链接创建权限，4 项是明确退役的 legacy recent-turn direct route；状态记为 `PASS_WITH_8_CLASSIFIED_SKIPS`，不能外推为 Contract／Integration／E2E 或 Architecture 2.0 PASS。JUnit 位于忽略目录 `artifacts/local-gates/02a24e4b8/unit-fine-preflight/`；昂贵 coverage 采集从该稳定测试基线开始，只执行一次。
 
+Contract 首轮 coverage 预检暴露了近期切流后的合同漂移：测试夹具未绑定 exact Attempt、HTTP 合同未进入 lifespan、历史 catalog head 未跟随当前 `0152`、OBS 新增只读 bootstrap POST 未登记，以及 Digital Life 文本观察反向依赖 app 层。修复切片保持生产 fail-closed 语义，不放宽 Attempt、Scheduler 身份或 migration 校验；定向结果为 GR-06 17 项、HTTP 12 项、Canon／Acceptance／Affect Fusion 146 项、OBS query-only 6 项及其余静态合同 32 项通过。完整 Contract 分片与合并 coverage 仍在重采，本段不得解释为 Contract 总体 PASS。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：

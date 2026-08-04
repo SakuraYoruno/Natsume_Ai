@@ -35,6 +35,24 @@ requires_test_client = pytest.mark.skipif(
 )
 
 
+@pytest.fixture()
+def client(monkeypatch):
+    """Run every request against the real lifespan-owned Host composition."""
+
+    from host_brain.app.settings.scheduler import get_scheduler_settings
+
+    # Do not inherit a developer .env that enables SchedulerClock without the
+    # runtime-only HMAC secret injected by the production start script.
+    monkeypatch.setenv("HOST_SCHEDULER_CLOCK_ENABLED", "0")
+    monkeypatch.setenv("HOST_BACKGROUND_TASKS_ENABLED", "0")
+    get_scheduler_settings.cache_clear()
+    try:
+        with TestClient(app) as value:
+            yield value
+    finally:
+        get_scheduler_settings.cache_clear()
+
+
 # ============================================================================
 # T-HTTP-01: 路由可达性与响应结构
 # ============================================================================
@@ -42,9 +60,8 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
     """T-HTTP-01: 核心路由可达、响应结构稳定（单JSON、必要字段存在）。"""
 
     @requires_test_client
-    def test_health_endpoint_reachable(self):
+    def test_health_endpoint_reachable(self, client):
         """GET /health 返回200且含 status/version/timestamp。"""
-        client = TestClient(app)
         resp = client.get("/health")
         assert resp.status_code == 200
         body = resp.json()
@@ -54,9 +71,8 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
         assert isinstance(body["timestamp"], int)
 
     @requires_test_client
-    def test_ready_endpoint_reachable(self):
+    def test_ready_endpoint_reachable(self, client):
         """GET /ready 返回200或503且含 status/timestamp（降级也是稳定结构）。"""
-        client = TestClient(app)
         resp = client.get("/ready")
         # 测试环境依赖可能不可用，503也是合法降级
         assert resp.status_code in (200, 503)
@@ -67,9 +83,8 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
             assert "status" in body
 
     @requires_test_client
-    def test_metrics_endpoint_reachable(self):
+    def test_metrics_endpoint_reachable(self, client):
         """GET /metrics 返回200且含关键指标字段。"""
-        client = TestClient(app)
         resp = client.get("/metrics")
         assert resp.status_code == 200
         body = resp.json()
@@ -81,9 +96,8 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
         assert "timestamp" in body
 
     @requires_test_client
-    def test_chat_endpoint_reachable_and_returns_stable_structure(self):
+    def test_chat_endpoint_reachable_and_returns_stable_structure(self, client):
         """POST /v1/chat 正常请求返回200且SSE流含COMMIT事件。"""
-        client = TestClient(app)
         payload = {
             "message": "你好，最近怎么样？",
             "session_id": "test-session-001",
@@ -107,9 +121,8 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
         assert "decision" in commit_event
 
     @requires_test_client
-    def test_chat_with_intent_draft_passes_governor(self):
+    def test_chat_with_intent_draft_passes_governor(self, client):
         """POST /v1/chat 携带合法 intent_draft 经 Governor 裁决后返回稳定结构。"""
-        client = TestClient(app)
         ts_ms = int(time.time() * 1000)
         payload = {
             "message": "查看状态",
@@ -144,10 +157,9 @@ class TestHTTP01RouteReachabilityAndResponseStructure:
         assert commit_event["decision"] in ("APPROVE", "REJECT")
 
     @requires_test_client
-    def test_root_redirects_to_docs(self):
+    def test_root_redirects_to_docs(self, client):
         """GET / 重定向到 /docs。"""
-        client = TestClient(app, follow_redirects=False)
-        resp = client.get("/")
+        resp = client.get("/", follow_redirects=False)
         assert resp.status_code == 307
         assert "/docs" in resp.headers.get("location", "")
 
@@ -159,9 +171,8 @@ class TestHTTP02ErrorHandlingAndDegradation:
     """T-HTTP-02: 缺字段/无效输入/内部错误均返回可解析JSON + reason_code。"""
 
     @requires_test_client
-    def test_chat_missing_message_returns_422(self):
+    def test_chat_missing_message_returns_422(self, client):
         """POST /v1/chat 缺少 message 字段返回422（Pydantic校验）。"""
-        client = TestClient(app)
         payload = {"session_id": "bad-session"}
         resp = client.post("/v1/chat", json=payload)
         assert resp.status_code == 422
@@ -170,9 +181,8 @@ class TestHTTP02ErrorHandlingAndDegradation:
         assert "detail" in body
 
     @requires_test_client
-    def test_chat_invalid_intent_draft_returns_reject(self):
+    def test_chat_invalid_intent_draft_returns_reject(self, client):
         """POST /v1/chat 带无效 intent_draft 被 Governor 拒绝并返回稳定结构。"""
-        client = TestClient(app)
         ts_ms = int(time.time() * 1000)
         payload = {
             "message": "测试无效intent",
@@ -208,9 +218,8 @@ class TestHTTP02ErrorHandlingAndDegradation:
         assert commit_event.get("reason_code") is not None
 
     @requires_test_client
-    def test_chat_empty_message_returns_stable_structure(self):
+    def test_chat_empty_message_returns_stable_structure(self, client):
         """POST /v1/chat 空消息仍返回可解析SSE流。"""
-        client = TestClient(app)
         payload = {"message": ""}
         resp = client.post("/v1/chat", json=payload)
         # 即使空消息也返回可解析结构（可能被Governor拒绝或产出空叙事）
@@ -223,18 +232,16 @@ class TestHTTP02ErrorHandlingAndDegradation:
             assert isinstance(body, dict)
 
     @requires_test_client
-    def test_nonexistent_route_returns_json_404(self):
+    def test_nonexistent_route_returns_json_404(self, client):
         """访问不存在的路由返回JSON格式404。"""
-        client = TestClient(app)
         resp = client.get("/v1/nonexistent")
         assert resp.status_code == 404
         body = resp.json()
         assert isinstance(body, dict)
 
     @requires_test_client
-    def test_metrics_after_chat_reflects_counts(self):
+    def test_metrics_after_chat_reflects_counts(self, client):
         """发送chat请求后 /metrics 中计数递增。"""
-        client = TestClient(app)
         # 先获取初始指标
         resp0 = client.get("/metrics")
         initial = resp0.json()
@@ -248,9 +255,8 @@ class TestHTTP02ErrorHandlingAndDegradation:
         assert after["total_chat_requests"] >= initial["total_chat_requests"]
 
     @requires_test_client
-    def test_observability_trace_returns_stable_structure(self):
+    def test_observability_trace_returns_stable_structure(self, client):
         """POST /observability/trace 返回稳定结构（200或500均为可解析JSON）。"""
-        client = TestClient(app)
         resp = client.post(
             "/observability/trace",
             json={"request_id": "nonexistent-req-id"},

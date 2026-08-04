@@ -23,7 +23,7 @@
 
 | 能力 | 主要实现 | 状态 |
 |---|---|---|
-| 用户情绪观察 | `host_brain/digital_life/affect_fusion.py`、Edge emotion inference | `WIRED` |
+| 用户情绪观察 | `host_brain/digital_life/text_affect_observer.py`、`affect_fusion.py`、Edge emotion inference | `WIRED` |
 | Event Appraisal | `host_brain/digital_life/affective_turn_planner.py` | `WIRED / PARTIAL` |
 | Self Affect reducer | `host_brain/digital_life/domain_reducer.py`、`reducer.py` | `WIRED` |
 | Life journal／projection | `service.py`、`repository_port.py`、`projection.py` | `WIRED` |
