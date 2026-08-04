@@ -8,6 +8,7 @@
 | 内容 | 入口 | 状态语义 |
 |---|---|---|
 | 情感生命与全栈测试计划 | [TESTPLAN](../../tests/TESTPLAN.md) | 当前 |
+| 双机全栈详细执行方案 | [DIGITAL_LIFE_FULL_STACK_TEST_PLAN](../35_quality/DIGITAL_LIFE_FULL_STACK_TEST_PLAN.md) | 当前 |
 | Governed Runtime 固定收据 | [test_reports](test_reports/index.md) | 历史、scope-bound |
 | Pentest 验收说明 | [pentest](pentest.md) | 当前边界 |
 | 脆弱靶场清单 | [pentest_vulnerable_labs](pentest_vulnerable_labs.md) | 本地授权测试参考 |

@@ -3,6 +3,8 @@
 
 # 测试计划
 
+本文件定义稳定测试政策与最低门槛。双机环境、逐阶段命令、72 条情感场景、故障矩阵、性能采样和人工盲测的可执行步骤见 [七海数字生命双机全栈详细测试方案](../docs/35_quality/DIGITAL_LIFE_FULL_STACK_TEST_PLAN.md)。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：
@@ -181,5 +183,5 @@ python -m pytest -q `
   tests/contract/test_vts_reconnect_contract.py `
   tests/contract/test_edge_health_contract.py `
   tests/contract/test_edge_voice_pipeline_contract.py `
-  tests/contract/test_voice_dual_chain_runtime_probe.py
+  tests/integration/test_voice_dual_chain_runtime_probe.py
 ```

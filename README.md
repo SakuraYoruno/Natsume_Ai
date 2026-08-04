@@ -301,6 +301,7 @@ pwsh scripts/runtime/start_edge_side.ps1
 - [数据流](docs/50_project/arch/DATA_FLOW_ARCHITECTURE.md)
 - [当前任务](docs/30_devspec/DevTasks.md)
 - [测试计划](tests/TESTPLAN.md)
+- [双机全栈详细测试方案](docs/35_quality/DIGITAL_LIFE_FULL_STACK_TEST_PLAN.md)
 
 常用文档检查：
 
