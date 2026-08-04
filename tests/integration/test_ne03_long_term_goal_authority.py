@@ -19,13 +19,14 @@ from host_brain.persistence.long_term_goal_repository import (
 
 
 def _authority(tmp_path: Path):
-    now = int(datetime.now().astimezone().timestamp() * 1000)
+    migration_ts_ms = int(datetime.now().astimezone().timestamp() * 1000)
     db_path = tmp_path / "long-term-goal.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="ne03-long-term-goal",
-        ts_ms=now,
+        ts_ms=migration_ts_ms,
     )
     assert migrated.success is True, migrated.as_dict()
+    now = int(datetime.now().astimezone().timestamp() * 1000)
     runtime_scope_id = "runtime-scope-long-term-goal"
     owner_id = "runtime-owner-long-term-goal"
     leases = EmbodimentOutboxRepository(

@@ -46,7 +46,7 @@ flowchart LR
 | Python branch coverage | `BASELINE_RUNNING` | branch instrumentation 已验证，完整稳定分片尚未合并 |
 | Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
 | Unit 分片预检 | `02a24e4b8` 上 18/18 JUnit：8310 passed／8 skipped／0 failed／0 errors | 930 个 Unit 文件均进入固定分片；记 `PASS_WITH_8_CLASSIFIED_SKIPS`，不代表 Contract／Integration／E2E 或覆盖率通过 |
-| Integration 修复进度 | 首轮 117 红项；90 + 7 + 2 + 3 + 7 已定向关闭，8 项确认为并行/顺序污染，当前已知稳定红项为 0 | `REMEDIATED_PENDING_FROZEN_RERUN`；Internal Workspace 预算终态、GR-03 Node Budget／Review／Outbox 合同及前述恢复边界已定向验证，但尚未冻结 SHA 全量重跑 |
+| Integration 修复进度 | `15cebc540` 冻结重跑 856 项：849 passed／3 failed／4 skipped／0 errors；3 项低负载复跑通过并确认为 Lease 墙钟夹具漂移 | `REMEDIATED_PENDING_AFFECTED_SHARD_RERUN`；稳定代码红项为 0，夹具已定向修复，但受影响分片尚未重跑，不记 Integration PASS |
 
 当前仍不能回答“全系统覆盖率是百分之多少”。准确表述是：
 

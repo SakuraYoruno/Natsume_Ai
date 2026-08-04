@@ -23,6 +23,8 @@ Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文
 
 第五批已把剩余 7 项稳定红项定向清零。两项 Internal artifact 用例在同进程复跑时确认属于旧负载／顺序假红；四项 GR-03 DAG 用例改为消费正式 Node Budget Reservation、真实 ReviewStore，并按当前 Attempt／Lease／Node Budget Outbox 合同验证精确重放；最后一项真实缺陷是预算拒绝后的 Internal Agent 单节点 `delegate:agent_runtime` 终态仍被 Workspace 的 Plan 专用校验拒绝。修复后 Workspace abandonment 同时精确绑定 Graph terminal Outbox、Node Budget、Worker Projection 与 Secure Ingress result digest，篡改终态保持 fail-closed。7 项组合复验为 7 passed，当前已知稳定红项为 0；状态仅提升为 `REMEDIATED_PENDING_FROZEN_RERUN`，完整 Integration 尚未在冻结 SHA 重跑，仍不是 Integration PASS。
 
+首次冻结重跑已在 `15cebc540` 上完成 6 个隔离 JUnit：稳定 marker 范围共 856 项，849 passed、3 failed、4 skipped、0 errors。4 项 skip 中 2 项是明确 opt-in 的 real Docker Golden Suite，2 项缺少 `NASTUME_TEST_REDIS_URL`；3 项失败低负载组合复跑为 3 passed。根因均为测试夹具的墙钟假设：Long-term Goal 在 migration 前采样时间，重负载迁移超过 120 秒后才签发已经过期的 runtime lease；Heartbeat-loss 用 120ms TTL，可能在进入待测心跳阶段前自然过期。修复只把 Lease 时间移到 migration 后采样，并复用已稳定的 2s TTL／2.5s worker 比例，不改生产 fencing 或触发器；定向复验 3 passed。受影响 shard 尚须基于该夹具修复重跑，当前状态为 `REMEDIATED_PENDING_AFFECTED_SHARD_RERUN`，仍不记 Integration PASS。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：

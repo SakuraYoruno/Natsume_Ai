@@ -4164,10 +4164,10 @@ async def test_ne01_coordinator_heartbeat_loss_blocks_operation_commit(
             clock=clock,
             task_store=failing_store,
             worker_resolver=_StaticResolver(
-                _SlowWorker(calls, delay_seconds=0.25)
+                _SlowWorker(calls, delay_seconds=2.5)
             ),
-            lease_ttl_ms=120,
-            operation_ttl_ms=120,
+            lease_ttl_ms=2_000,
+            operation_ttl_ms=2_000,
         ),
     )
 
