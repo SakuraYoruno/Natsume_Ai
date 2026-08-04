@@ -171,6 +171,7 @@
       "coverage_static_contract_drift_failures": 2,
       "coverage_line_ceiling_failures": 1,
       "coverage_targeted_regression": "PASS_28",
+      "coverage_nonblocking_timing_fixture": "DETERMINISTIC_WORKER_THREAD_ASSERTION_PENDING_SHARD_2",
       "coverage_affected_shards_pending": [2, 5, 6, 9]
     },
     "contract_shard_preflight": {
