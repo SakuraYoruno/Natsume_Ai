@@ -5,6 +5,8 @@ from pathlib import Path
 import sqlite3
 import sys
 
+from edge_client.gateway.webhook_security import build_internal_signature
+
 
 def _load_module():
     module_path = (
@@ -26,6 +28,120 @@ def _load_module():
 
 
 probe = _load_module()
+
+
+def test_live_probe_signature_matches_gateway_contract() -> None:
+    body = '{"msg_id":"live-1","text":"你好"}'.encode("utf-8")
+    values = {
+        "shared_secret": "acceptance-secret-with-at-least-32-bytes",
+        "platform": "wechat",
+        "method": "POST",
+        "path": "/v1/gateway/wechat/webhook",
+        "timestamp": "1785872000",
+        "nonce": "live-probe-nonce",
+        "raw_body": body,
+    }
+
+    assert probe._build_internal_webhook_signature(**values) == build_internal_signature(**values)
+
+
+def test_live_probe_rejects_short_webhook_secret() -> None:
+    try:
+        probe._build_internal_webhook_signature(
+            shared_secret="too-short",
+            platform="wechat",
+            method="POST",
+            path="/v1/gateway/wechat/webhook",
+            timestamp="1785872000",
+            nonce="live-probe-nonce",
+            raw_body=b"{}",
+        )
+    except ValueError as exc:
+        assert "at least 32 bytes" in str(exc)
+    else:
+        raise AssertionError("short webhook secret must be rejected")
+
+
+def test_live_probe_reads_canonical_task_graph_without_legacy_trace(tmp_path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE host_command_journal (
+            request_id TEXT,
+            session_id TEXT,
+            route_type TEXT,
+            target_id TEXT,
+            graph_id TEXT,
+            graph_revision INTEGER,
+            created_at_ms INTEGER
+        );
+        CREATE TABLE task_runtime_graph (
+            graph_id TEXT,
+            revision INTEGER,
+            status TEXT,
+            created_ts_ms INTEGER,
+            updated_ts_ms INTEGER
+        );
+        CREATE TABLE task_runtime_node (
+            graph_id TEXT,
+            graph_revision INTEGER,
+            node_id TEXT,
+            status TEXT,
+            created_ts_ms INTEGER,
+            updated_ts_ms INTEGER
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO host_command_journal VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            "req-canonical",
+            "session-canonical",
+            "delegate",
+            "translate_agent",
+            "graph-canonical",
+            2,
+            2_000,
+        ),
+    )
+    conn.execute(
+        "INSERT INTO task_runtime_graph VALUES (?, ?, ?, ?, ?)",
+        ("graph-canonical", 2, "COMPLETED", 2_010, 2_090),
+    )
+    conn.executemany(
+        "INSERT INTO task_runtime_node VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            ("graph-canonical", 2, "delegate:translate_agent", "COMPLETED", 2_020, 2_070),
+            ("graph-canonical", 2, "surface_reply", "COMPLETED", 2_030, 2_080),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    graph = probe._fetch_graph_by_request_id(
+        db_path=db_path,
+        request_id="req-canonical",
+        min_ts_ms=1_500,
+    )
+
+    assert graph is not None
+    assert graph["authority"] == "canonical_task_runtime"
+    assert graph["target_id"] == "translate_agent"
+    assert graph["node_ids"] == ["delegate:translate_agent", "surface_reply"]
+    assert graph["node_count"] == 2
+    assert graph["total_latency_ms"] == 80
+
+
+def test_live_probe_missing_graph_returns_none_without_legacy_table(tmp_path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    sqlite3.connect(str(db_path)).close()
+
+    assert probe._fetch_graph_by_request_id(
+        db_path=db_path,
+        request_id="req-missing",
+        min_ts_ms=1_500,
+    ) is None
 
 
 def test_evaluate_case_passes_when_target_and_output_match() -> None:
@@ -172,6 +288,19 @@ def test_extract_request_id_returns_none_when_conversation_id_has_no_bound_lines
     )
 
     assert probe._extract_request_id(log_chunk, conversation_id="case_999") is None
+
+
+def test_extract_request_id_accepts_canonical_secure_ingress_separator() -> None:
+    log_chunk = (
+        "input_routes: received source=GATEWAY "
+        "request_id=req:08eaf1a01e7e4aa5a379f7c17886c805 "
+        "conversation_id=case-canonical"
+    )
+
+    assert probe._extract_request_id(
+        log_chunk,
+        conversation_id="case-canonical",
+    ) == "req:08eaf1a01e7e4aa5a379f7c17886c805"
 
 
 def test_fetch_input_completed_event_falls_back_to_conversation_id(tmp_path) -> None:

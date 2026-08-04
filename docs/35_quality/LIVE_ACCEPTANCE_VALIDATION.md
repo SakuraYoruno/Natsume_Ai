@@ -102,3 +102,11 @@ Gateway 的公开 `/v1/gateway/stats` 仍按合同返回 `GW_ADMIN_AUTH_UNAVAILA
 - 恢复后通过真实 HMAC Edge RPC 合成并播放一条日语 GPT-SoVITS 语音：请求与播放启动均为 `ACCEPTED`，物理播放完成且无 playback error；VTS 口型同步完成 26 帧、0 错误，同期生命动作增加 19 帧、0 错误。expression hotkey 仍如实为不可用。
 
 Edge 总体仍为 `DEGRADED`，原因只剩当前模型没有兼容的情绪 expression hotkey；barge-in 也仍关闭。此次只证明 VTS 传输断线恢复和状态真实性，不把表情热键、三模态同步、盲测或完整实时性能提升为通过。
+
+## 2026-08-04 Gateway 真实探针纠偏
+
+继续使用隔离 Host 数据库与远端 Gateway 做真实请求时，原 `test_gateway_live_matrix.py` 暴露出两项测试基础设施漂移和一项生产路由缺陷：探针仍发送安全加固前的未签名 webhook、仍读取已退役的 `graph_run_trace`；真实翻译请求在 Thalamus 注入 `pragmatic_frame`／`conversation_understanding` 后，又被 `work_translate` 的旧参数白名单以 `INTENT_ARGS_INVALID` 拒绝。
+
+本切片将探针改为独立计算 Gateway HMAC，密钥只从指定运行时环境变量读取且不进入报告；图证据优先读取 `host_command_journal`、`task_runtime_graph` 与 `task_runtime_node`，仅对历史数据库保留只读 fallback。`work_code`／`work_translate` 只新增三个由 Host 构造的 typed context 参数，未知扩展仍 fail-closed。定向复验为 19 passed。
+
+首轮真实失败证据被保留：webhook 以 200 写入 Durable inbox，但隔离 Host 与远端 Gateway 使用了不同代密钥，Host 连续八次在 Credential Gate 拒绝，inbox 最终进入 DLQ。对齐密钥后同一路线在约 2 秒内完成 Secure Ingress `ALLOW`，随后准确暴露上述 `INTENT_ARGS_INVALID`，证明探针不是端口占位。完整 Gateway→TaskGraph→模型→Edge 终态仍须在加载本切片后重跑，因此本节状态为 `RETEST_REQUIRED`，不提升总体结论。

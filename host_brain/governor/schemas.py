@@ -272,8 +272,26 @@ ACTION_ARGS_RULES: dict[str, dict[str, dict[str, type]]] = {
             "constraints": list,
         },
     },
-    "work_code": {"required": {"text": str}, "optional": {}},
-    "work_translate": {"required": {"text": str}, "optional": {}},
+    # Thalamus adds the same server-owned conversational context used by
+    # narrative_only/exec_intent before Governor validation.  These fields
+    # remain typed and bounded by their upstream builders; rejecting them here
+    # made the real code/translation routes fail before TaskGraph admission.
+    "work_code": {
+        "required": {"text": str},
+        "optional": {
+            "semantic_intent": dict,
+            "pragmatic_frame": dict,
+            "conversation_understanding": dict,
+        },
+    },
+    "work_translate": {
+        "required": {"text": str},
+        "optional": {
+            "semantic_intent": dict,
+            "pragmatic_frame": dict,
+            "conversation_understanding": dict,
+        },
+    },
 }
 
 DECISION_APPROVE = "APPROVE"

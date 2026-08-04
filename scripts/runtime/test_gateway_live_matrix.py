@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
 import re
+import secrets
 import sqlite3
 import sys
 import time
@@ -31,7 +34,11 @@ DEFAULT_EDGE_BASE_URL = str(
 ).rstrip("/")
 DEFAULT_HOST_LOG_PATH = ROOT / "runtime" / "host" / "logs" / "host.stdout.log"
 DEFAULT_REPORT_DIR = ROOT / "artifacts" / "release" / "reports"
-REQUEST_ID_RE = re.compile(r"request_id=(req_[0-9a-f]+(?:::[^\\s]+)?)")
+REQUEST_ID_RE = re.compile(r"request_id=(req[:_][0-9a-f]+(?:::[^\s]+)?)")
+DEFAULT_WEBHOOK_HMAC_ENV = "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET"
+INTERNAL_TIMESTAMP_HEADER = "X-Natsume-Webhook-Timestamp"
+INTERNAL_NONCE_HEADER = "X-Natsume-Webhook-Nonce"
+INTERNAL_SIGNATURE_HEADER = "X-Natsume-Webhook-Signature"
 
 
 @dataclass(frozen=True)
@@ -170,6 +177,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Edge health HTTP timeout in seconds while waiting for idle (default: 8)",
     )
     parser.add_argument(
+        "--webhook-hmac-env",
+        default=DEFAULT_WEBHOOK_HMAC_ENV,
+        help=(
+            "Environment variable containing the WeChat callback HMAC secret "
+            f"(default: {DEFAULT_WEBHOOK_HMAC_ENV})"
+        ),
+    )
+    parser.add_argument(
         "--case",
         action="append",
         default=[],
@@ -180,6 +195,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _build_internal_webhook_signature(
+    *,
+    shared_secret: str,
+    platform: str,
+    method: str,
+    path: str,
+    timestamp: str,
+    nonce: str,
+    raw_body: bytes,
+) -> str:
+    """Build a Gateway webhook signature without importing its verifier."""
+
+    secret = str(shared_secret or "").encode("utf-8")
+    if len(secret) < 32:
+        raise ValueError("webhook HMAC secret must contain at least 32 bytes")
+    canonical = (
+        "natsume-webhook-v1\n"
+        f"{str(platform).strip().lower()}\n"
+        f"{str(method).strip().upper()}\n"
+        f"{str(path).strip()}\n"
+        f"{timestamp}\n"
+        f"{nonce}\n"
+    ).encode("utf-8") + bytes(raw_body)
+    return hmac.new(secret, canonical, hashlib.sha256).hexdigest()
 
 
 def _read_log_chunk(path: Path, start_offset: int) -> str:
@@ -193,6 +234,7 @@ def _read_log_chunk(path: Path, start_offset: int) -> str:
 def _send_gateway_webhook(
     *,
     gateway_base_url: str,
+    webhook_hmac_secret: str,
     case: LiveCase,
     conversation_id: str,
     timeout_s: int,
@@ -219,10 +261,32 @@ def _send_gateway_webhook(
         payload["wait_voice_reply_result"] = True
     if case.allow_voice_reply_on_primary_failure:
         payload["allow_voice_reply_on_primary_failure"] = True
+    raw_request_body = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    path = "/v1/gateway/wechat/webhook"
+    timestamp_s = str(int(time.time()))
+    nonce = f"live-{case.case_id}-{ts_ms}-{secrets.token_hex(8)}"
+    signature = _build_internal_webhook_signature(
+        shared_secret=webhook_hmac_secret,
+        platform="wechat",
+        method="POST",
+        path=path,
+        timestamp=timestamp_s,
+        nonce=nonce,
+        raw_body=raw_request_body,
+    )
     request = urllib.request.Request(
-        f"{gateway_base_url}/v1/gateway/wechat/webhook",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json; charset=utf-8"},
+        f"{gateway_base_url}{path}",
+        data=raw_request_body,
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+            INTERNAL_TIMESTAMP_HEADER: timestamp_s,
+            INTERNAL_NONCE_HEADER: nonce,
+            INTERNAL_SIGNATURE_HEADER: signature,
+        },
         method="POST",
     )
     started_at = time.time()
@@ -364,28 +428,20 @@ def _fetch_graph_by_session(
 ) -> dict[str, Any] | None:
     connection = _connect_db(db_path)
     try:
-        cursor = connection.cursor()
-        cursor.execute(
-            """
-            SELECT request_id, session_id, total_latency_ms, status, reason_code, node_count, nodes_json, ts_ms
-            FROM graph_run_trace
-            WHERE session_id = ? AND ts_ms >= ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (session_id, min_ts_ms - 1000),
+        canonical = _fetch_canonical_graph(
+            connection,
+            predicate="command.session_id = ?",
+            value=session_id,
+            min_ts_ms=min_ts_ms,
         )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        record = dict(row)
-        try:
-            nodes = json.loads(record.get("nodes_json") or "[]")
-        except json.JSONDecodeError:
-            nodes = []
-        record["node_ids"] = [str(node.get("node_id")) for node in nodes if node.get("node_id")]
-        record.pop("nodes_json", None)
-        return record
+        if canonical is not None:
+            return canonical
+        return _fetch_legacy_graph(
+            connection,
+            predicate="session_id = ?",
+            value=session_id,
+            min_ts_ms=min_ts_ms,
+        )
     finally:
         connection.close()
 
@@ -400,30 +456,130 @@ def _fetch_graph_by_request_id(
         return None
     connection = _connect_db(db_path)
     try:
-        cursor = connection.cursor()
-        cursor.execute(
-            """
-            SELECT request_id, session_id, total_latency_ms, status, reason_code, node_count, nodes_json, ts_ms
-            FROM graph_run_trace
-            WHERE request_id = ? AND ts_ms >= ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (request_id, min_ts_ms - 1000),
+        canonical = _fetch_canonical_graph(
+            connection,
+            predicate="command.request_id = ?",
+            value=request_id,
+            min_ts_ms=min_ts_ms,
         )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        record = dict(row)
-        try:
-            nodes = json.loads(record.get("nodes_json") or "[]")
-        except json.JSONDecodeError:
-            nodes = []
-        record["node_ids"] = [str(node.get("node_id")) for node in nodes if node.get("node_id")]
-        record.pop("nodes_json", None)
-        return record
+        if canonical is not None:
+            return canonical
+        return _fetch_legacy_graph(
+            connection,
+            predicate="request_id = ?",
+            value=request_id,
+            min_ts_ms=min_ts_ms,
+        )
     finally:
         connection.close()
+
+
+def _table_exists(connection: sqlite3.Connection, table_name: str) -> bool:
+    row = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
+def _fetch_canonical_graph(
+    connection: sqlite3.Connection,
+    *,
+    predicate: str,
+    value: str,
+    min_ts_ms: int,
+) -> dict[str, Any] | None:
+    required_tables = (
+        "host_command_journal",
+        "task_runtime_graph",
+        "task_runtime_node",
+    )
+    if not all(_table_exists(connection, table) for table in required_tables):
+        return None
+    row = connection.execute(
+        f"""
+        SELECT
+            command.request_id,
+            command.session_id,
+            command.route_type,
+            command.target_id,
+            command.graph_id,
+            command.graph_revision,
+            graph.status,
+            graph.created_ts_ms,
+            graph.updated_ts_ms
+        FROM host_command_journal AS command
+        JOIN task_runtime_graph AS graph
+          ON graph.graph_id = command.graph_id
+         AND graph.revision = command.graph_revision
+        WHERE {predicate} AND command.created_at_ms >= ?
+        ORDER BY command.created_at_ms DESC
+        LIMIT 1
+        """,
+        (value, int(min_ts_ms) - 1000),
+    ).fetchone()
+    if row is None:
+        return None
+    record = dict(row)
+    nodes = connection.execute(
+        """
+        SELECT node_id, status, updated_ts_ms
+        FROM task_runtime_node
+        WHERE graph_id = ? AND graph_revision = ?
+        ORDER BY created_ts_ms, node_id
+        """,
+        (record["graph_id"], record["graph_revision"]),
+    ).fetchall()
+    record["node_ids"] = [str(node["node_id"]) for node in nodes]
+    record["node_statuses"] = {
+        str(node["node_id"]): str(node["status"])
+        for node in nodes
+    }
+    record["node_count"] = len(nodes)
+    created_ts_ms = int(record.pop("created_ts_ms") or 0)
+    updated_ts_ms = int(record.pop("updated_ts_ms") or created_ts_ms)
+    record["total_latency_ms"] = max(0, updated_ts_ms - created_ts_ms)
+    record["ts_ms"] = updated_ts_ms
+    record["reason_code"] = None
+    record["authority"] = "canonical_task_runtime"
+    return record
+
+
+def _fetch_legacy_graph(
+    connection: sqlite3.Connection,
+    *,
+    predicate: str,
+    value: str,
+    min_ts_ms: int,
+) -> dict[str, Any] | None:
+    if not _table_exists(connection, "graph_run_trace"):
+        return None
+    row = connection.execute(
+        f"""
+        SELECT request_id, session_id, total_latency_ms, status, reason_code,
+               node_count, nodes_json, ts_ms
+        FROM graph_run_trace
+        WHERE {predicate} AND ts_ms >= ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (value, int(min_ts_ms) - 1000),
+    ).fetchone()
+    if row is None:
+        return None
+    record = dict(row)
+    try:
+        nodes = json.loads(record.get("nodes_json") or "[]")
+    except json.JSONDecodeError:
+        nodes = []
+    record["node_ids"] = [
+        str(node.get("node_id"))
+        for node in nodes
+        if isinstance(node, dict) and node.get("node_id")
+    ]
+    record.pop("nodes_json", None)
+    record["authority"] = "legacy_graph_run_trace"
+    return record
 
 
 def _fetch_related_rows(db_path: Path, request_id: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -583,7 +739,7 @@ def _fetch_gateway_event_by_conversation(
 
 
 def _extract_request_id(log_chunk: str, *, conversation_id: str | None = None) -> str | None:
-    lines = [line for line in log_chunk.splitlines() if "request_id=req_" in line]
+    lines = [line for line in log_chunk.splitlines() if REQUEST_ID_RE.search(line)]
     if conversation_id:
         bound_lines = [line for line in lines if conversation_id in line]
         if bound_lines:
@@ -631,6 +787,10 @@ def _targets_seen(skill_rows: list[dict[str, Any]], graph_row: dict[str, Any] | 
             )
         ):
             seen.append(target)
+    graph_target = str((graph_row or {}).get("target_id") or "").strip()
+    graph_route = str((graph_row or {}).get("route_type") or "").strip().lower()
+    if graph_target and graph_route in {"skill", "delegate"} and graph_target not in seen:
+        seen.append(graph_target)
     return seen
 
 
@@ -663,8 +823,11 @@ def _evaluate_case(
         return "FAIL", "没有抓到 request_id，说明入口证据不完整。", targets
     if dispatch_failed:
         return "FAIL", "Host 日志里出现 dispatch failed。", targets
+    if governor_rows and str(governor_rows[0].get("decision") or "").upper() != "APPROVE":
+        reason_code = str(governor_rows[0].get("reason_code") or "GOVERNOR_REJECTED")
+        return "FAIL", f"Governor 拒绝执行，reason_code={reason_code}.", targets
     if graph_row is None and not skill_rows:
-        return "FAIL", "没有 graph_run_trace，也没有 skill_exec 证据。", targets
+        return "FAIL", "没有 canonical TaskGraph，也没有 skill_exec 证据。", targets
     if not target_match:
         return "FAIL", f"目标路由不符合预期，实际 targets={targets}.", targets
     if failed_skill_rows:
@@ -686,14 +849,13 @@ def _evaluate_case(
             return "FAIL", "语音链路已发起，但 VTS 联动标记缺失，说明表情链路没有启动。", targets
     if case.required_patterns and not patterns_ok:
         return "WARN", "命中了目标能力，但产出内容没有满足关键判定模式。", targets
-    if governor_rows and str(governor_rows[0].get("decision") or "").upper() != "APPROVE":
-        return "WARN", f"Governor 决策不是 APPROVE: {governor_rows[0]}.", targets
     return "PASS", "链路命中预期目标，并拿到了可用执行证据。", targets
 
 
 def _run_case(
     *,
     gateway_base_url: str,
+    webhook_hmac_secret: str,
     db_path: Path,
     host_log_path: Path,
     timeout_s: int,
@@ -704,6 +866,7 @@ def _run_case(
     log_offset = host_log_path.stat().st_size if host_log_path.exists() else 0
     webhook = _send_gateway_webhook(
         gateway_base_url=gateway_base_url,
+        webhook_hmac_secret=webhook_hmac_secret,
         case=case,
         conversation_id=conversation_id,
         timeout_s=timeout_s,
@@ -817,6 +980,14 @@ def _build_report(
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    webhook_hmac_env = str(args.webhook_hmac_env or "").strip()
+    webhook_hmac_secret = str(os.environ.get(webhook_hmac_env) or "")
+    if len(webhook_hmac_secret.encode("utf-8")) < 32:
+        print(
+            f"Missing or too-short webhook HMAC secret in environment variable: {webhook_hmac_env}",
+            file=sys.stderr,
+        )
+        return 2
     db_path = Path(args.db_path)
     host_log_path = Path(args.host_log_path)
     report_dir = Path(args.report_dir)
@@ -838,6 +1009,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{index}/{len(cases)}] {case.case_id}: {case.prompt}", flush=True)
         outcome = _run_case(
             gateway_base_url=args.gateway_base_url,
+            webhook_hmac_secret=webhook_hmac_secret,
             db_path=db_path,
             host_log_path=host_log_path,
             timeout_s=int(args.timeout_s),

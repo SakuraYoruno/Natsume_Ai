@@ -198,6 +198,8 @@ python -m pytest -q `
 
 Gateway 传输的故障语义按方向验收：INBOX 使用冻结请求体、稳定 Host 幂等键和 canonical HostCommand 精确重放，Host 响应超时后进入有界重试；OUTBOX 已开始的平台发送仍视为未知外部副作用，只能隔离并对账，禁止盲目重放。
 
+真实 Gateway live matrix 必须使用生产 HMAC 边界，密钥只从运行时 secret env 读取且不得写入报告。图证据以 `host_command_journal` → `task_runtime_graph` → `task_runtime_node` 为权威；`graph_run_trace` 只允许作为历史数据库兼容读取，不能再作为当前通过依据。探针若因 schema 漂移崩溃、Host Credential Gate 拒绝或 Governor 拒绝，均记为 `FAIL` 并保留对应 DLQ／audit 事实。
+
 重复 Gateway HTTP 请求若已绑定 HostCommand，应在执行任何反馈、Life 或路由逻辑前验证 canonical claim/command/body 绑定并立即确认 durable handoff；不得用重试请求的新 request/audit identity 重建 TaskGraph。首次完成响应和重复确认都必须返回 `host-input-result://` 收据，不能把内部 command ID 当成传输收据。
 
 具身验收必须区分“Edge 已接收入队”和“物理执行完成”：排队 TTS 先返回 `IN_DOUBT`，只有播放完成 callback 才能生成 `APPLIED` terminal receipt；缺失的 VTS expression hotkey 必须返回 `REJECTED`，不能因 VTS 已认证而伪造成功。
