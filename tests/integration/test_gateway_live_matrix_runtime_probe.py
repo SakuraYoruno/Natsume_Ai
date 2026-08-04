@@ -398,6 +398,86 @@ def test_fetch_input_completed_event_returns_none_when_no_conversation_match(tmp
     assert event is None
 
 
+def test_fetch_input_terminal_event_returns_bound_failure_without_waiting_for_completion(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE voice_event_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT,
+            event_type TEXT,
+            status TEXT,
+            reason_code TEXT,
+            detail TEXT,
+            payload TEXT,
+            ts_ms INTEGER
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO voice_event_log (request_id, event_type, status, reason_code, detail, payload, ts_ms)
+        VALUES (?, 'INPUT_FAILED', 'FAILED', 'INPUT_GRAPH_ERROR', ?, ?, ?)
+        """,
+        (
+            "req:failed",
+            "RuntimeError: delegate target unavailable",
+            '{"source":"GATEWAY","conversation_id":"translate_failed"}',
+            2000,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    event = probe._fetch_input_terminal_event(
+        db_path,
+        None,
+        conversation_id="translate_failed",
+        min_ts_ms=1500,
+    )
+
+    assert event is not None
+    assert event["request_id"] == "req:failed"
+    assert event["event_type"] == "INPUT_FAILED"
+    assert probe._fetch_input_completed_event(
+        db_path,
+        None,
+        conversation_id="translate_failed",
+        min_ts_ms=1500,
+    ) is None
+
+
+def test_evaluate_case_reports_input_terminal_failure_reason() -> None:
+    case = probe.LiveCase(
+        case_id="translate_delegate",
+        prompt="translate this",
+        expected_targets=("translate_agent",),
+    )
+
+    verdict, summary, targets = probe._evaluate_case(
+        case,
+        request_id="req:failed",
+        governor_rows=[{"decision": "APPROVE"}],
+        skill_rows=[],
+        graph_row=None,
+        log_lines=[],
+        input_terminal={
+            "event_type": "INPUT_FAILED",
+            "status": "FAILED",
+            "reason_code": "INPUT_GRAPH_ERROR",
+            "detail": "RuntimeError: delegate target unavailable",
+        },
+    )
+
+    assert verdict == "FAIL"
+    assert "INPUT_GRAPH_ERROR" in summary
+    assert "delegate target unavailable" in summary
+    assert targets == []
+
+
 def test_fetch_gateway_event_by_conversation_returns_bound_route_decided(tmp_path) -> None:
     db_path = tmp_path / "audit.sqlite3"
     conn = sqlite3.connect(str(db_path))

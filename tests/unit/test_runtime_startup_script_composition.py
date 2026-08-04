@@ -28,6 +28,18 @@ def test_child_startup_scripts_return_control_to_host_orchestrator(
     assert not re.search(r"(?m)^\s*exit\s+0\s*$", source)
 
 
+def test_edge_side_stop_wrapper_uses_named_parameter_splatting() -> None:
+    source = (ROOT / "scripts/runtime/stop_edge_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "$invokeArgs = @{}" in source
+    assert '$invokeArgs["PidFile"] = $PidFile' in source
+    assert '$invokeArgs["Port"] = $Port' in source
+    assert "& $stopEdgeScript @invokeArgs" in source
+    assert "$invokeArgs = @()" not in source
+
+
 def test_host_orchestrator_isolates_child_script_process_control() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"

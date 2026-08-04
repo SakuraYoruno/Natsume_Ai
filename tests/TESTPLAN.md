@@ -200,6 +200,8 @@ Gateway 传输的故障语义按方向验收：INBOX 使用冻结请求体、稳
 
 真实 Gateway live matrix 必须使用生产 HMAC 边界，密钥只从运行时 secret env 读取且不得写入报告。图证据以 `host_command_journal` → `task_runtime_graph` → `task_runtime_node` 为权威；`graph_run_trace` 只允许作为历史数据库兼容读取，不能再作为当前通过依据。探针若因 schema 漂移崩溃、Host Credential Gate 拒绝或 Governor 拒绝，均记为 `FAIL` 并保留对应 DLQ／audit 事实。
 
+探针轮询必须把 `INPUT_COMPLETED` 与 `INPUT_FAILED` 都视为终态：失败时立即结束等待并报告 durable `reason_code`／detail；只有 `INPUT_COMPLETED` 可以进入语音成功断言。终态后必须重新读取 Host 日志，避免用 admission 前的旧日志片段漏掉 `dispatch failed`。远端启停脚本必须用命名参数 splatting 调用 `stop_edge.ps1`，并在真实停止／重启演练中验证 PID 文件与监听端口都指向本轮隔离运行根。2026-08-04 最新翻译实测已在入口与 Governor 通过后暴露 `GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE`，同时常驻 ASR 噪声会破坏 Host 启动稳定性；两项均保持 `FAIL／REMEDIATION_REQUIRED`，不得由 Gateway health 或禁用 ASR 后的稳定运行替代。
+
 重复 Gateway HTTP 请求若已绑定 HostCommand，应在执行任何反馈、Life 或路由逻辑前验证 canonical claim/command/body 绑定并立即确认 durable handoff；不得用重试请求的新 request/audit identity 重建 TaskGraph。首次完成响应和重复确认都必须返回 `host-input-result://` 收据，不能把内部 command ID 当成传输收据。
 
 具身验收必须区分“Edge 已接收入队”和“物理执行完成”：排队 TTS 先返回 `IN_DOUBT`，只有播放完成 callback 才能生成 `APPLIED` terminal receipt；缺失的 VTS expression hotkey 必须返回 `REJECTED`，不能因 VTS 已认证而伪造成功。

@@ -65,6 +65,7 @@ class CaseOutcome:
     governor: list[dict[str, Any]]
     skills: list[dict[str, Any]]
     graph: dict[str, Any] | None
+    input_terminal: dict[str, Any] | None
     input_completed: dict[str, Any] | None
     log_excerpt: list[str]
     targets_seen: list[str]
@@ -615,7 +616,7 @@ def _fetch_related_rows(db_path: Path, request_id: str | None) -> tuple[list[dic
         connection.close()
 
 
-def _fetch_input_completed_event(
+def _fetch_input_terminal_event(
     db_path: Path,
     request_id: str | None,
     *,
@@ -645,7 +646,8 @@ def _fetch_input_completed_event(
                 """
                 SELECT request_id, event_type, status, reason_code, detail, payload, ts_ms
                 FROM voice_event_log
-                WHERE request_id = ? AND event_type = 'INPUT_COMPLETED'
+                WHERE request_id = ?
+                  AND event_type IN ('INPUT_COMPLETED', 'INPUT_FAILED')
                 ORDER BY id DESC
                 LIMIT 1
                 """,
@@ -664,7 +666,8 @@ def _fetch_input_completed_event(
                 """
                 SELECT request_id, event_type, status, reason_code, detail, payload, ts_ms
                 FROM voice_event_log
-                WHERE event_type = 'INPUT_COMPLETED' AND ts_ms >= ?
+                WHERE event_type IN ('INPUT_COMPLETED', 'INPUT_FAILED')
+                  AND ts_ms >= ?
                 ORDER BY id DESC
                 LIMIT 80
                 """,
@@ -688,6 +691,26 @@ def _fetch_input_completed_event(
         return normalized_rows[0]
     finally:
         connection.close()
+
+
+def _fetch_input_completed_event(
+    db_path: Path,
+    request_id: str | None,
+    *,
+    conversation_id: str | None = None,
+    min_ts_ms: int | None = None,
+) -> dict[str, Any] | None:
+    """Compatibility reader that excludes failed terminal input events."""
+
+    event = _fetch_input_terminal_event(
+        db_path,
+        request_id,
+        conversation_id=conversation_id,
+        min_ts_ms=min_ts_ms,
+    )
+    if str((event or {}).get("event_type") or "").upper() != "INPUT_COMPLETED":
+        return None
+    return event
 
 
 def _fetch_gateway_event_by_conversation(
@@ -807,6 +830,7 @@ def _evaluate_case(
     skill_rows: list[dict[str, Any]],
     graph_row: dict[str, Any] | None,
     log_lines: list[str],
+    input_terminal: dict[str, Any] | None = None,
     input_completed: dict[str, Any] | None = None,
 ) -> tuple[str, str, list[str]]:
     targets = _targets_seen(skill_rows, graph_row)
@@ -821,6 +845,15 @@ def _evaluate_case(
 
     if request_id is None:
         return "FAIL", "没有抓到 request_id，说明入口证据不完整。", targets
+    terminal_type = str((input_terminal or {}).get("event_type") or "").upper()
+    terminal_status = str((input_terminal or {}).get("status") or "").upper()
+    if terminal_type == "INPUT_FAILED" or terminal_status == "FAILED":
+        reason_code = str(
+            (input_terminal or {}).get("reason_code") or "INPUT_FAILED"
+        )
+        detail = str((input_terminal or {}).get("detail") or "").strip()
+        suffix = f"，detail={detail}" if detail else ""
+        return "FAIL", f"Host 输入主链失败，reason_code={reason_code}{suffix}。", targets
     if dispatch_failed:
         return "FAIL", "Host 日志里出现 dispatch failed。", targets
     if governor_rows and str(governor_rows[0].get("decision") or "").upper() != "APPROVE":
@@ -909,19 +942,25 @@ def _run_case(
             request_id=request_id,
             min_ts_ms=sent_ts_ms,
         )
+    input_terminal = None
     input_completed = None
     if request_id or conversation_id:
         while time.time() < deadline:
-            input_completed = _fetch_input_completed_event(
+            input_terminal = _fetch_input_terminal_event(
                 db_path,
                 request_id,
                 conversation_id=conversation_id,
                 min_ts_ms=sent_ts_ms,
             )
-            if input_completed is not None:
-                request_id = str(input_completed.get("request_id") or "").strip() or request_id
+            if input_terminal is not None:
+                request_id = str(input_terminal.get("request_id") or "").strip() or request_id
+                if str(input_terminal.get("event_type") or "").upper() == "INPUT_COMPLETED":
+                    input_completed = input_terminal
                 break
             time.sleep(1)
+    # The terminal poll may have consumed most of the timeout. Re-read the log
+    # so the report contains the failure/completion line written after admission.
+    log_chunk = _read_log_chunk(host_log_path, log_offset)
     governor_rows, skill_rows = _fetch_related_rows(db_path, request_id)
     log_lines = _extract_request_lines(log_chunk, request_id)
     verdict, summary, targets = _evaluate_case(
@@ -931,6 +970,7 @@ def _run_case(
         skill_rows=skill_rows,
         graph_row=graph_row,
         log_lines=log_lines,
+        input_terminal=input_terminal,
         input_completed=input_completed,
     )
     return CaseOutcome(
@@ -943,6 +983,7 @@ def _run_case(
         governor=governor_rows,
         skills=skill_rows,
         graph=graph_row,
+        input_terminal=input_terminal,
         input_completed=input_completed,
         log_excerpt=log_lines,
         targets_seen=targets,

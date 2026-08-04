@@ -11,14 +11,12 @@ if (-not (Test-Path -Path $stopEdgeScript)) {
   throw "stop_edge.ps1 not found: $stopEdgeScript"
 }
 
-$invokeArgs = @()
+$invokeArgs = @{}
 if ($PidFile) {
-  $invokeArgs += "-PidFile"
-  $invokeArgs += $PidFile
+  $invokeArgs["PidFile"] = $PidFile
 }
 if ($Port -gt 0) {
-  $invokeArgs += "-Port"
-  $invokeArgs += $Port
+  $invokeArgs["Port"] = $Port
 }
 
 $edgeRaw = & $stopEdgeScript @invokeArgs
