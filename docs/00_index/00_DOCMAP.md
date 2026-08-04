@@ -23,7 +23,7 @@
 | 还差什么 | [缺口矩阵](../50_project/arch/ARCHITECTURE_GAP_MATRIX.md) | 未完成项与优先级 |
 | 如何部署 | [部署架构](../50_project/arch/DEPLOYMENT_ARCHITECTURE.md) | 服务、端口、配置和启停 |
 | Monitor 如何工作 | [Monitor UI 架构](../50_project/arch/MONITOR_UI_ARCHITECTURE.md) | Operator 读写边界 |
-| 如何验证 | [测试计划](../../tests/TESTPLAN.md) | 测试层次和真实验收 |
+| 如何验证 | [测试计划](../../tests/TESTPLAN.md)／[系统 2.0 总验收](../35_quality/SYSTEM_V2_MASTER_ACCEPTANCE_PLAN.md) | 日常测试层次、架构 Gate、搜索收益、人感和真实验收 |
 | 需求证据在哪里 | [需求追溯](../60_trace/requirements_trace.md) | 需求到代码／测试／状态映射 |
 | 机器如何判断状态 | [机器状态](../../configs/release/current_architecture_status.json) | 可机读的唯一当前状态摘要 |
 

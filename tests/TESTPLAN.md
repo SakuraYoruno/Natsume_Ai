@@ -3,7 +3,9 @@
 
 # 测试计划
 
-本文件定义稳定测试政策与最低门槛。双机环境、逐阶段命令、72 条情感场景、故障矩阵、性能采样和人工盲测的可执行步骤见 [七海数字生命双机全栈详细测试方案](../docs/35_quality/DIGITAL_LIFE_FULL_STACK_TEST_PLAN.md)。
+本文件定义日常稳定测试政策与最低门槛。整个 Natsume AI 2.0 的代码覆盖、十五项架构 Gate、七条生产路线、PlanningSearch 三域收益和最终放行规则见 [系统 2.0 总验收方案](../docs/35_quality/SYSTEM_V2_MASTER_ACCEPTANCE_PLAN.md)；双机环境、逐阶段命令、72 条情感场景、故障矩阵、性能采样和人工盲测的可执行步骤见 [七海数字生命双机全栈详细测试方案](../docs/35_quality/DIGITAL_LIFE_FULL_STACK_TEST_PLAN.md)。
+
+当前全系统 line／branch coverage 为 `UNKNOWN`，不是 0%，也不是测试文件数量推算出的百分比。审计基线 `aad3627311` 有 1363 个 Python 测试文件和 10180 个 `test_*` 函数定义；pytest 在收集至少 11874 个 case 后因 1 个失效导入退出 2。该错误修复、全套收集退出 0 且生成 commit-bound coverage 报告前，不得声明全仓覆盖率或 Architecture 2.0 验收通过。
 
 ## 1. 原则
 
