@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -143,7 +144,7 @@ def main() -> int:
         expected_dataset_digest=args.dataset_digest,
     )
     output_path.write_text(_canonical(output), encoding="utf-8")
-    print(
+    sys.stdout.write(
         _canonical(
             {
                 "status": "PASS",
@@ -151,6 +152,7 @@ def main() -> int:
                 "output_digest": _digest({"output": output}),
             }
         )
+        + "\n"
     )
     return 0
 

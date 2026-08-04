@@ -80,22 +80,22 @@ def test_t_nle_01_world_canon_trusted_sites_are_exact_apply_authority() -> None:
         (
             "host_brain/memory/canon_world_store.py",
             "CanonFile.open",
-            390,
+            396,
         ),
         (
             "host_brain/memory/canon_world_store.py",
             "CanonFile.replace",
-            394,
+            400,
         ),
         (
             "host_brain/memory/canon_world_store.py",
             "CanonFile.unlink",
-            397,
+            403,
         ),
         (
             "host_brain/memory/canon_world_store.py",
             "CanonFile.unlink",
-            423,
+            429,
         ),
         (
             "host_brain/app/observability_runtime/domain_command_ports.py",

@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-04",
-  "commit_scope": "SYSTEM_V2_UNIT_PREFLIGHT_COMPLETE",
+  "commit_scope": "SYSTEM_V2_CONTRACT_PREFLIGHT_REMEDIATION",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -164,6 +164,20 @@
       "selected_tests": 8318,
       "windows_symlink_permission_skips": 4,
       "retired_legacy_route_skips": 4
+    },
+    "contract_shard_preflight": {
+      "status": "REMEDIATED_PENDING_FROZEN_RERUN",
+      "evidence_commit_sha": "ebd25de95d",
+      "junit_shards": 4,
+      "selected_tests": 1949,
+      "passed": 1947,
+      "failed": 2,
+      "skipped": 0,
+      "errors": 0,
+      "root_cause_groups": 2,
+      "targeted_remediation": "PASS_2",
+      "evolution_lab_adjacent_regression": "PASS_12",
+      "whole_contract_current_sha": "NOT_RERUN_UNTIL_FINAL_FREEZE"
     },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,

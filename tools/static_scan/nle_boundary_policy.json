@@ -86,22 +86,22 @@
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.open",
-          "line": 390
+          "line": 396
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.replace",
-          "line": 394
+          "line": 400
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.unlink",
-          "line": 397
+          "line": 403
         },
         {
           "path": "host_brain/memory/canon_world_store.py",
           "symbol": "CanonFile.unlink",
-          "line": 423
+          "line": 429
         },
         {
           "path": "host_brain/app/observability_runtime/domain_command_ports.py",
