@@ -15,6 +15,8 @@ Contract 无 coverage 全量预检已在 `ebd25de95d` 上完成：4 个分片共
 
 Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文件，排除 `e2e/prod_env/runtime_probe/real_docker/ci_unstable` 后以 6 个隔离进程执行，共收集 849 项：730 passed、50 failed、67 errors、2 个 Redis 环境 skip。67 个 setup error 来自测试夹具同时继承本机 workspace secret ref 与直接 secret；其余大面积漂移包括测试 lifespan 继承本机 SchedulerClock、migration head 固定在 0123/0125、空 TaskGraph output contract、旧 Bond 读投影和普通 Chat 重型 TaskGraph 假设。第一批修复已用 3 组整文件/定向组合证据关闭其中 90 个红项：Host 原 67 个 setup error 及其后暴露的 9 个退役/实时合同断言、HTTP Host Input 5 项、HTTP Skill 4 项、TaskGraph/migration/OBS 14 项均通过；尚余 27 个运行时、恢复和 Review 语义红项，状态为 `REMEDIATION_IN_PROGRESS`，不是 Integration PASS。
 
+上述 27 项随后在 `a829f97de3` 上按 4 个低负载隔离进程精确复跑：8 项独立通过，确认其首轮失败来自并行负载或进程内顺序污染；19 项稳定复现。第二批先收口其中 7 项旧入口/夹具漂移：Worker 与 Self-heal 自然语言请求必须进入 `GOV_AIRLOCK_REVIEW` 且 dispatch 次数为 0；调用方提供的 `planned_steps`/多 Skill Plan 必须在 admission 前拒绝；Skill 成功以 canonical execution receipt 为真相，不再要求兼容 triptych 账本完成；Self-evolve 直接调用先由 governed-admission 门禁拒绝；对话连续性通过 app-local typed read ports 从真实 SQLite conversation window 注入 2 个 turn。组合定向复验为 7 passed，稳定红项降至 12；全量 Integration 仍待生产恢复问题清零后在冻结 SHA 重跑。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：

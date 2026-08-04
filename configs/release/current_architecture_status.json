@@ -192,6 +192,10 @@
       "first_pass_red_items": 117,
       "first_remediation_closed_red_items": 90,
       "remaining_red_items": 27,
+      "remaining_low_load_isolation": "PASS_8_FAIL_19",
+      "second_remediation_route_and_context": "PASS_7",
+      "second_remediation_closed_red_items": 7,
+      "stable_remaining_red_items": 12,
       "ordinary_chat_taskgraph_expectation": "REMOVED_REALTIME_COMPANION_PATH_CONFIRMED",
       "legacy_bond_read_write_contract": "RETIRED_410_CONFIRMED",
       "whole_integration_current_sha": "NOT_RERUN_UNTIL_REMEDIATION_COMPLETE"

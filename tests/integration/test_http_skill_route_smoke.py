@@ -248,7 +248,7 @@ def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatc
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_pauses_inferred_agent_worker_for_review(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
@@ -277,21 +277,13 @@ def test_http_chat_route_infers_agent_worker_from_code_request(monkeypatch, tmp_
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        commit_event = _governed_commit(events)
+        commit_event = [event for event in events if event.get("phase") == "COMMIT"][-1]
 
-        assert commit_event["route_type"] == "skill"
-        assert commit_event["target_id"] == "agent_worker"
-        assert commit_event["decision"] == "APPROVE"
-        assert "print('fixed')" in str(commit_event.get("narrative") or "")
-        assert captured["payload"]["tool"] == "codex_runtime"
-        work_order = captured["payload"]["work_order"]
-        assert work_order["workspace"] == {"strategy": "runtime_repo"}
-        assert work_order["run_mode"] == "worker"
-        assert work_order["approval_policy"]["confirmed"] is True
-
-        request_id = str(commit_event["request_id"])
-        trace = ledger.trace_request(request_id)
-        assert trace["skill_exec_log"] == []
+        assert commit_event["decision"] == "PAUSE"
+        assert commit_event["execution_state"] == "PAUSED_REVIEW"
+        assert commit_event["reason_code"] == "GOV_AIRLOCK_REVIEW"
+        assert commit_event["committed_route_token"] == "GOV_AIRLOCK_REVIEW"
+        assert captured == {}
     finally:
         _close_client(client, ledger)
 
@@ -338,7 +330,7 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         _close_client(client, ledger)
 
 
-def test_http_chat_route_infers_agent_self_heal_task(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_pauses_inferred_agent_self_heal_for_review(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
@@ -367,20 +359,18 @@ def test_http_chat_route_infers_agent_self_heal_task(monkeypatch, tmp_path: Path
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        commit_event = _governed_commit(events)
+        commit_event = [event for event in events if event.get("phase") == "COMMIT"][-1]
 
-        assert commit_event["route_type"] == "skill"
-        assert commit_event["target_id"] == "agent_self_heal"
-        work_order = captured["payload"]["work_order"]
-        assert work_order["domain"] == "immune"
-        assert work_order["run_mode"] == "self_heal"
-        assert work_order["workspace"] == {"strategy": "runtime_repo"}
-        assert work_order["approval_policy"]["confirmed"] is True
+        assert commit_event["decision"] == "PAUSE"
+        assert commit_event["execution_state"] == "PAUSED_REVIEW"
+        assert commit_event["reason_code"] == "GOV_AIRLOCK_REVIEW"
+        assert commit_event["committed_route_token"] == "GOV_AIRLOCK_REVIEW"
+        assert captured == {}
     finally:
         _close_client(client, ledger)
 
 
-def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_real_governor_uses_canonical_execution_receipt(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     try:
         now_ms = int(time.time() * 1000)
@@ -417,12 +407,12 @@ def test_http_chat_route_real_governor_completes_skill_triptych(monkeypatch, tmp
         assert commit_event["decision"] == "APPROVE"
         assert "session_summary" in str(commit_event.get("narrative") or "")
 
-        request_id = str(commit_event["request_id"])
-        trace = ledger.trace_request(request_id)
-        assert trace["status"] == "COMPLETE"
-        assert len(trace["intent_log"]) == 1
-        assert len(trace["governor_log"]) == 1
-        assert trace["skill_exec_log"] == []
+        receipt = dict(commit_event["execution_receipt"])
+        assert receipt["status"] == "ACCEPTED"
+        assert receipt["accepted"] is True
+        assert receipt["graph_id"]
+        assert receipt["attempt_id"]
+        assert ledger.trace_request(str(commit_event["request_id"]))["skill_exec_log"] == []
     finally:
         _close_client(client, ledger)
 
@@ -507,7 +497,7 @@ def test_http_chat_route_rejects_caller_provided_skill_plan(monkeypatch, tmp_pat
         _close_client(client, ledger)
 
 
-def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_rejects_caller_provided_skill_plan(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
     deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: list[dict[str, Any]] = []
@@ -566,17 +556,11 @@ def test_http_chat_route_skill_plan_preserves_codex_workspace_strategy(monkeypat
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        commit_event = _governed_commit(events)
+        commit_event = [event for event in events if event.get("phase") == "COMMIT"][-1]
 
-        assert commit_event["execution_receipt"]["graph_revision"] == 1
-        assert commit_event["decision"] == "APPROVE"
-        worker_payload = next(payload for payload in captured if "work_order" in payload)
-        assert worker_payload["work_order"]["workspace"] == {"strategy": "runtime_repo"}
-        assert worker_payload["work_order"]["objective"] == "fix the failing test"
-
-        request_id = str(commit_event["request_id"])
-        trace = ledger.trace_request(request_id)
-        assert trace["skill_exec_log"] == []
+        assert commit_event["decision"] == "REJECT"
+        assert commit_event["reason_code"] == "GOVERNED_ROUTE_UNSUPPORTED"
+        assert captured == []
     finally:
         _close_client(client, ledger)
 
