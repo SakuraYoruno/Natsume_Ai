@@ -20,12 +20,20 @@ from host_brain.model_runtime.production_composition import (
 
 _ROUTE_ENV_PREFIXES = (
     "HOST_MODEL_ROUTE_",
+    "HOST_OPENAI_",
+    "HOST_GEMINI_",
+    "HOST_DEEPSEEK_",
+    "HOST_CODEX_",
+    "HOST_MINIMAX_",
     "HOST_CHAT_LOCAL_LLM_",
     "HOST_CHAT_HOST_14B_",
+    "HOST_CHAT_AGENT_",
     "HOST_REALTIME_COMPANION_",
     "HOST_SURFACE_REPLY_",
     "HOST_SUBAGENT_",
     "HOST_EXECUTIVE_ROUTER_",
+    "HOST_DISPATCH_AGENT_",
+    "HOST_VISION_LLM_",
 )
 _ROUTE_ENV_KEYS = frozenset(
     {
