@@ -404,9 +404,6 @@ def create_app(
         ledger_provider=ledger_provider,
         life_command_authority_provider=life_route_authority_provider,
         life_memory_store_provider=host_services.life_memory_store,
-        capability_forge_service_provider=(
-            application_ports.capability_forge_service
-        ),
         canon_service_provider=canon_service_provider,
         tool_broker_provider=tool_composition.provide_tool_broker,
         tool_catalog_provider=host_services.tool_catalog,

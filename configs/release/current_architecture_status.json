@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-04",
-  "commit_scope": "SYSTEM_V2_ACCEPTANCE_PLAN_AND_COVERAGE_BASELINE",
+  "commit_scope": "SYSTEM_V2_UNIT_PREFLIGHT_REMEDIATION",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -72,7 +72,7 @@
         "internal",
         "operator"
       ],
-      "full_stack_reacceptance": "PASS"
+      "full_stack_reacceptance": "RETEST_REQUIRED_FINAL_SHA"
     },
     "explicit_composition_root": {
       "obs_process_local_module_cache_coupled_jobs": [],
@@ -141,9 +141,15 @@
       "second_pass_observed_failures": 21,
       "second_pass_root_cause_groups": 8,
       "aggregated_remediation_regression": "PASS_219",
+      "third_pass_completed_shards": "5605_PASSED_12_FAILED_3_SKIPPED_89_DESELECTED",
+      "third_pass_timed_out_shard_observed_failures": 15,
+      "third_pass_total_observed_failures": 27,
+      "third_pass_root_cause_regression": "PASS_126",
+      "third_pass_order_adjacent_regression": "PASS_334",
       "governed_host_facade_lines": 1454,
       "host_asgi_composition_lines": 1396,
-      "full_unit_shards": "PENDING_RERUN"
+      "node_grants_lines": 1498,
+      "full_unit_shards": "PENDING_FINE_GRAIN_RERUN"
     },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,
@@ -159,7 +165,7 @@
     "target_edge_vts_transport_recovery": "PASS",
     "target_edge_tts_mouth_sync": "PASS",
     "target_edge_tts_avatar": "ACCEPTANCE_PENDING_EXTERNAL",
-    "docker_host_obs_monitor_gateway_full_stack": "PASS_LOCAL_MANDATORY",
+    "docker_host_obs_monitor_gateway_full_stack": "RETEST_REQUIRED_FINAL_SHA",
     "real_provider_performance": "INCOMPLETE",
     "fixed_72_scenarios": "MEASUREMENT_PENDING",
     "three_reviewer_blind_test": "NOT_RUN",

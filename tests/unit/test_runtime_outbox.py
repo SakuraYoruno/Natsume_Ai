@@ -541,8 +541,8 @@ def test_every_runtime_outbox_call_uses_the_shared_instance_and_explicit_command
     ]
     builds = [node for node in calls if node.func.attr == "build"]
     publishes = [node for node in calls if node.func.attr == "publish_pending"]
-    assert len(builds) == 29
-    assert len(publishes) == 34
+    assert len(builds) == 31
+    assert len(publishes) == 33
     assert not [node for node in calls if node.func.attr not in {"build", "publish_pending"}]
     assert all(not node.args for node in builds)
     for build in builds:
@@ -590,8 +590,8 @@ def test_runtime_outbox_call_matrix_is_frozen() -> None:
                 ):
                     best_effort_count += 1
 
-    assert len(rows) == 63
-    assert best_effort_count == 8
+    assert len(rows) == 64
+    assert best_effort_count == 7
     assert hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest() == (
-        "0e90542ce684f1281e514a3f6dda50d34765babe87a0d7ce84f9bde7e4007772"
+        "4e532d0fcb33b6293caa8466e300dc647228d41a3889fbfd64bc4994a9bd91cd"
     )

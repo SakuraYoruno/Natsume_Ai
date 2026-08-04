@@ -18,6 +18,7 @@ from tests.contract.test_ne01_graph_cancellation_store import (
     _stage_effect,
     _store,
 )
+from tests.support.migration_catalog import migration_catalog_through
 
 
 _0098_TRIGGERS = (
@@ -58,7 +59,10 @@ def _remove_0098_physical_receipt(store) -> None:
 
 
 def _apply_0098(store, *, request_id: str) -> None:
-    result = SQLiteMigrationRunner(db_path=store.db_path).apply_migrations(
+    result = SQLiteMigrationRunner(
+        db_path=store.db_path,
+        migrations_dir=migration_catalog_through(Path(store.db_path).parent, 102),
+    ).apply_migrations(
         request_id=request_id,
         ts_ms=NOW,
     )

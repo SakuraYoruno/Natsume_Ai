@@ -73,6 +73,7 @@ def test_receive_input_smoke_gateway_dispatches_to_graph():
                     source="GATEWAY",
                     platform="wechat",
                     conversation_id="wxid_user_a",
+                    from_id="wxid_user_a",
                     content="hello",
                     msg_type="text",
                 ),
@@ -87,7 +88,9 @@ def test_receive_input_smoke_gateway_dispatches_to_graph():
     assert dispatch_mock.await_count == 1
     kwargs = dispatch_mock.await_args.kwargs
     assert kwargs["source"] == "GATEWAY"
-    assert kwargs["session_id"] == "wxid_user_a"
+    scope = kwargs["payload"]["secure_gateway_conversation_scope_v1"]
+    assert kwargs["session_id"] == scope["session_id"]
+    assert kwargs["session_id"] != "wxid_user_a"
     assert kwargs["text"] == "hello"
 
 

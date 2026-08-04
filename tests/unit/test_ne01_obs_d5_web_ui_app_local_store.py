@@ -24,20 +24,25 @@ from host_brain.observability.operator_query_gateway import (
 )
 
 
-def _seed_isolated_ports(
+def _isolated_ports(
     path: Path,
+) -> ObsApplicationPorts:
+    base_ports = build_default_obs_application_ports(canonical_db_path=path)
+    return replace(
+        base_ports,
+        projection_jobs=(),
+        projection_coverage="TEST_WEB_UI_APP_LOCAL_STORE",
+    )
+
+
+def _seed_projection(
+    ports: ObsApplicationPorts,
     *,
     label: str,
     status: str,
     channel: str,
     now_ms: int,
-) -> ObsApplicationPorts:
-    base_ports = build_default_obs_application_ports(canonical_db_path=path)
-    ports = replace(
-        base_ports,
-        projection_jobs=(),
-        projection_coverage="TEST_WEB_UI_APP_LOCAL_STORE",
-    )
+) -> None:
     request_id = f"req-{label}"
     ports.query_projection_store.upsert(
         SESSION_KIND,
@@ -74,7 +79,6 @@ def _seed_isolated_ports(
         source_cursor=2,
         freshness_ts_ms=now_ms,
     )
-    return ports
 
 
 def test_five_web_ui_gets_read_only_their_create_obs_app_sqlite_store(
@@ -94,34 +98,43 @@ def test_five_web_ui_gets_read_only_their_create_obs_app_sqlite_store(
             ]
         ),
     )
-    now_ms = int(time.time() * 1000)
-    ports_one = _seed_isolated_ports(
-        tmp_path / "web-ui-one.sqlite3",
-        label="one",
-        status="OK",
-        channel="chat",
-        now_ms=now_ms,
-    )
-    ports_two = _seed_isolated_ports(
-        tmp_path / "web-ui-two.sqlite3",
-        label="two",
-        status="FAILED",
-        channel="delegate",
-        now_ms=now_ms,
-    )
+    ports_one = _isolated_ports(tmp_path / "web-ui-one.sqlite3")
+    ports_two = _isolated_ports(tmp_path / "web-ui-two.sqlite3")
     assert ports_one.query_projection_store.db_path != ports_two.query_projection_store.db_path
 
     app_one = create_obs_app(ports=ports_one)
     app_two = create_obs_app(ports=ports_two)
     headers = {"Authorization": f"Bearer {token}"}
-    start = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc) - timedelta(minutes=1)
-    end = start + timedelta(minutes=2)
-    time_params = {"start_time": start.isoformat(), "end_time": end.isoformat()}
-
     with TestClient(app_one, headers=headers) as client_one, TestClient(
         app_two,
         headers=headers,
     ) as client_two:
+        # Seed after both lifespans are ready.  App startup may legitimately
+        # exceed the projection freshness window on a loaded Windows runner.
+        now_ms = int(time.time() * 1000)
+        _seed_projection(
+            ports_one,
+            label="one",
+            status="OK",
+            channel="chat",
+            now_ms=now_ms,
+        )
+        _seed_projection(
+            ports_two,
+            label="two",
+            status="FAILED",
+            channel="delegate",
+            now_ms=now_ms,
+        )
+        start = datetime.fromtimestamp(
+            now_ms / 1000,
+            tz=timezone.utc,
+        ) - timedelta(minutes=1)
+        end = start + timedelta(minutes=2)
+        time_params = {
+            "start_time": start.isoformat(),
+            "end_time": end.isoformat(),
+        }
         timeline_one = client_one.get(
             "/api/ui/timeline",
             params={**time_params, "interval": "1m"},

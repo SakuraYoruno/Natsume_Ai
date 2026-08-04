@@ -1,10 +1,4 @@
-"""TaskGraph-driven, node-bound child Governor grants.
-
-The service deliberately has no dependency on Executive planning types.  It
-accepts only the canonical ``TaskGraph``/``WorkOrderV3`` pair and returns
-opaque durable grant references; bearer approval tokens remain confined to
-the Governor ledger.
-"""
+"""TaskGraph child grants; only canonical inputs cross the Governor boundary."""
 
 from __future__ import annotations
 

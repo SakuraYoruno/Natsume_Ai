@@ -45,7 +45,7 @@ flowchart LR
 | Python line coverage | `BASELINE_RUNNING` | `.coveragerc` 已覆盖三大生产包；7 项 smoke 的 7.87% 不具总体代表性 |
 | Python branch coverage | `BASELINE_RUNNING` | branch instrumentation 已验证，完整稳定分片尚未合并 |
 | Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
-| Unit 六分片预检 | 首轮 6 个失败；第二轮保留 1160 个通过并定位 21 个失败；修复后聚合定向 219 项通过 | 完整无 coverage 分片尚待重跑，不能记 Unit PASS |
+| Unit 分片预检 | 第三轮 4 个完整分片累计 5605 passed／12 failed／3 skipped，2 个分片超时前另暴露 15 个失败 | 27 个失败已按根因修复，126 项根因回归与 334 项顺序邻接回归通过；完整细分片仍待重跑，不能记 Unit PASS |
 
 当前仍不能回答“全系统覆盖率是百分之多少”。准确表述是：
 
@@ -142,7 +142,7 @@ artifacts/local-gates/<commit-sha>/coverage/
 1. `DONE`：删除 `tests/unit/test_long_memory_quality_regressions.py` 对退役 helper 的失效导入；没有 monkeypatch 或复活旧实现。
 2. `DONE`：`python -m pytest --collect-only -q` 退出 0，完整 collected item 数为 11881。
 3. `DONE`：Python source／branch coverage 已纳入三大生产包；Monitor Node tests 已生成 V8/LCOV 输出。
-4. `IN_PROGRESS`：Unit 六分片首轮发现 6 个失败，第二轮在 1160 个通过后继续定位 21 个失败。已修正 M48 manifest 元数据、当前授权字段、app-local Tribe/Emotion fixture、显式 Life persistence port、退役 Monitor/Scheduler 合同、动态 migration head、Worker Projection migration fixture 和 Delegate policy；Governed Host facade 由 1563 降至 1454 行，ASGI composition root 由 1668 降至 1396 行。相关聚合定向回归 219 项通过；下一步重跑完整无 coverage 六分片。
+4. `IN_PROGRESS`：Unit 前两轮完成收集与首批合同修复；第三轮 4 个完整分片累计 5605 passed／12 failed／3 skipped，另 2 个分片在 20 分钟超时前暴露 15 个失败。已进一步冻结历史迁移测试到 0102 catalog、补齐 Scheduler control-policy／Budget／0127 投影合同、隔离模型路由环境、在 OBS lifespan 就绪后刷新测试投影、删除 HostRoutePorts 中无消费者的 Capability Forge provider，并刷新当前 Runtime Outbox 调用矩阵。126 项根因回归和 334 项顺序邻接回归通过；下一步改用更细独立进程重跑完整无 coverage Unit，仍不得写 Unit PASS。
 5. 固定测试排除清单和活跃生产源清单，避免 `node_modules`、模型、缓存、运行 DB 和归档文档进入分母。
 6. 从当前 migration catalog 获取 schema head；全新安装、逐版本升级和已验收数据副本分别校验。
 7. 清理机器状态中的历史切片冲突：历史字段保留 scope，但当前结论只能由同一 SHA 的聚合器生成。

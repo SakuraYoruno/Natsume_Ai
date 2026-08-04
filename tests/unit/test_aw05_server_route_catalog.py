@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import inspect
+import os
+
+import pytest
 
 from host_brain.composition.process_services import get_model_route_catalog
 import host_brain.app.route_catalog_runtime as route_runtime
@@ -13,6 +16,38 @@ from host_brain.model_runtime.route_catalog import ServerRouteCatalog
 from host_brain.model_runtime.production_composition import (
     get_default_production_route_catalog,
 )
+
+
+_ROUTE_ENV_PREFIXES = (
+    "HOST_MODEL_ROUTE_",
+    "HOST_CHAT_LOCAL_LLM_",
+    "HOST_CHAT_HOST_14B_",
+    "HOST_REALTIME_COMPANION_",
+    "HOST_SURFACE_REPLY_",
+    "HOST_SUBAGENT_",
+    "HOST_EXECUTIVE_ROUTER_",
+)
+_ROUTE_ENV_KEYS = frozenset(
+    {
+        "HOST_LLM_PROVIDER",
+        "HOST_LLM_TIMEOUT_MS",
+        "HOST_OPENAI_MODEL_ID",
+        "HOST_GEMINI_MODEL_ID",
+        "HOST_DEEPSEEK_MODEL_ID",
+        "HOST_CODEX_MODEL_ID",
+        "HOST_MINIMAX_MODEL_ID",
+        "HOST_CHAT_FORCE_CLOUD",
+    }
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_route_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep higher-precedence route lanes from leaking across test modules."""
+
+    for name in tuple(os.environ):
+        if name in _ROUTE_ENV_KEYS or name.startswith(_ROUTE_ENV_PREFIXES):
+            monkeypatch.delenv(name, raising=False)
 
 
 def test_route_catalog_is_secret_free_and_credential_independent(monkeypatch) -> None:  # noqa: ANN001
