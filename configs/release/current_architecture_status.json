@@ -180,7 +180,7 @@
       "whole_contract_current_sha": "NOT_RERUN_UNTIL_FINAL_FREEZE"
     },
     "integration_shard_preflight": {
-      "status": "REMEDIATION_IN_PROGRESS",
+      "status": "REMEDIATED_PENDING_FROZEN_RERUN",
       "evidence_commit_sha": "1d68ecb1ce",
       "selected_files": 155,
       "junit_shards": 6,
@@ -200,10 +200,12 @@
       "fourth_remediation_preoperation_and_exact_replay": "PASS_23_PLUS_OPERATOR_FULL_FLOW_1",
       "fourth_remediation_operator_full_flow_seconds": 149.17,
       "fourth_remediation_closed_red_items": 3,
-      "stable_remaining_red_items": 7,
+      "fifth_remediation_internal_workspace_and_dag": "PASS_7_WITH_TAMPER_GUARD",
+      "fifth_remediation_closed_red_items": 7,
+      "stable_remaining_red_items": 0,
       "ordinary_chat_taskgraph_expectation": "REMOVED_REALTIME_COMPANION_PATH_CONFIRMED",
       "legacy_bond_read_write_contract": "RETIRED_410_CONFIRMED",
-      "whole_integration_current_sha": "NOT_RERUN_UNTIL_REMEDIATION_COMPLETE"
+      "whole_integration_current_sha": "PENDING_FROZEN_SHA_RERUN"
     },
     "monitor_read_model_coverage": {
       "line_percent": 61.31,

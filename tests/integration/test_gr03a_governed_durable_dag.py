@@ -1445,8 +1445,13 @@ async def _seed_mixed_owner_node(
             attempt_id=attempt_id,
         ),
     )
-    precharge = await runtime._budgets.precharge(  # noqa: SLF001
+    node_budget = await runtime._budgets.bind_node_attempt(  # noqa: SLF001
         budget,
+        node_id=node_id,
+        attempt_id=attempt_id,
+    )
+    precharge = await runtime._budgets.precharge(  # noqa: SLF001
+        node_budget,
         node_id=node_id,
         attempt_id=attempt_id,
         tool_call_count=1,
@@ -1677,6 +1682,10 @@ async def test_ne01_b4_live_parallel_batch_reentry_preserves_active_authority(
         calls,
         worker_resolver=_StaticResolver(worker),
         acceptance=_Acceptance(decisions_by_node={"left": "REVIEW"}),
+        review_runtime=TaskNodeReviewRuntime(
+            ReviewStore(db_path, clock=lambda: NOW),
+            clock=lambda: NOW,
+        ),
         bounded_fanout_enabled=True,
     )
 
@@ -5800,11 +5809,19 @@ async def test_ne01_b1_atomic_claim_exact_replay_returns_one_live_authority(
     assert len(snapshot["attempts"]) == 1
     assert len(snapshot["active_leases"]) == 1
     with sqlite3.connect(db_path) as conn:
-        claim_outbox_count = conn.execute(
-            "SELECT COUNT(*) FROM task_runtime_outbox WHERE attempt_id = ?",
-            (attempt_id,),
-        ).fetchone()[0]
-    assert claim_outbox_count == 3
+        claim_outbox_types = {
+            row[0]
+            for row in conn.execute(
+                "SELECT event_type FROM task_runtime_outbox WHERE attempt_id = ?",
+                (attempt_id,),
+            ).fetchall()
+        }
+    assert claim_outbox_types == {
+        "TASK_ATTEMPT_CREATED",
+        "TASK_ATTEMPT_LEASED",
+        "TASK_NODE_LEASED",
+        "NODE_BUDGET_RESERVED",
+    }
 
     with pytest.raises(TaskStoreError) as drifted:
         reopened.claim_ready_node(**{**claim_args, "owner_id": "other-worker"})

@@ -21,6 +21,8 @@ Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文
 
 第四批关闭 3 项执行边界缺陷或夹具漂移。Skill 的 side-effect-free 依赖与 frozen payload 预检现在发生在 Operation reservation 之前，缺失 Memory backend 会稳定落成 `FAILED / GOVERNED_HOST_SKILL_DEPENDENCY_UNAVAILABLE`，不会伪造 Skill receipt，也不会误标 unknown effect；Node grant 的 durable batch 在过期后只允许重开不可变身份以投影终态，实际 claim/worker 仍由 verifier fail-closed，因此 Operator／Scheduler 历史成功不会被当前时钟改判；安全取消集成夹具改走当前 `governed_operator_runtime` 端口，不再注入已退役 service 字段。相邻回归 23 passed，包含五次 exact replay 的完整 Operator 流程另以 149.17 秒通过，稳定红项降至 7；仍须清零并冻结 SHA 全量复跑。
 
+第五批已把剩余 7 项稳定红项定向清零。两项 Internal artifact 用例在同进程复跑时确认属于旧负载／顺序假红；四项 GR-03 DAG 用例改为消费正式 Node Budget Reservation、真实 ReviewStore，并按当前 Attempt／Lease／Node Budget Outbox 合同验证精确重放；最后一项真实缺陷是预算拒绝后的 Internal Agent 单节点 `delegate:agent_runtime` 终态仍被 Workspace 的 Plan 专用校验拒绝。修复后 Workspace abandonment 同时精确绑定 Graph terminal Outbox、Node Budget、Worker Projection 与 Secure Ingress result digest，篡改终态保持 fail-closed。7 项组合复验为 7 passed，当前已知稳定红项为 0；状态仅提升为 `REMEDIATED_PENDING_FROZEN_RERUN`，完整 Integration 尚未在冻结 SHA 重跑，仍不是 Integration PASS。
+
 ## 1. 原则
 
 测试按风险分层，避免每个小改动反复拉起完整系统：
