@@ -83,7 +83,8 @@ def test_current_catalog_preserves_0114_worker_projection_readiness(
         request_id="ne01-tool-projection-through-current-head"
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 127
+    assert result.summary["current_version"] == result.summary["latest_version"]
+    assert result.summary["current_version"] >= 127
     WorkerProjectionStore(db_path).assert_schema_ready()
 
 
