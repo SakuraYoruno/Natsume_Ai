@@ -46,6 +46,7 @@ flowchart LR
 | Python branch coverage | `BASELINE_RUNNING` | branch instrumentation 已验证，完整稳定分片尚未合并 |
 | Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
 | Unit 分片预检 | `02a24e4b8` 上 18/18 JUnit：8310 passed／8 skipped／0 failed／0 errors | 930 个 Unit 文件均进入固定分片；记 `PASS_WITH_8_CLASSIFIED_SKIPS`，不代表 Contract／Integration／E2E 或覆盖率通过 |
+| Contract 分片预检 | `4724af2f9` 上 4/4 JUnit：1949 passed／0 skipped／failed／errors | 当前稳定 Contract 全绿；不代表真实服务、覆盖率或体验验收 |
 | Integration 稳定预检 | `15cebc540` 六片首跑 849 passed／3 failed／4 skipped；`8fbb6a833` 只修复两项时间夹具后重跑受影响 shard-0／2 为 302 passed | 合并未变化四片后为 852 passed／4 classified skips／0 failed／error，记 `PASS_WITH_4_CLASSIFIED_SKIPS`；不包含真实 Docker／Redis、E2E、Security、覆盖率或体验验收 |
 
 当前仍不能回答“全系统覆盖率是百分之多少”。准确表述是：
