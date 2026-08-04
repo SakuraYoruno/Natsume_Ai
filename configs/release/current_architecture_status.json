@@ -131,7 +131,7 @@
     "whole_system_python_line_coverage": "UNKNOWN",
     "whole_system_python_branch_coverage": "UNKNOWN",
     "pytest_collection": "PASS_11881_ITEMS",
-    "coverage_instrumentation": "UNIT_DATA_CAPTURED_AFFECTED_SHARDS_PENDING",
+    "coverage_instrumentation": "UNIT_COMPLETE_CONTRACT_AND_INTEGRATION_PENDING",
     "unit_shard_preflight": {
       "status": "PASS_WITH_8_CLASSIFIED_SKIPS",
       "first_pass": "SIX_SHARDS_STOPPED_AT_ONE_FAILURE_EACH",
@@ -171,8 +171,19 @@
       "coverage_static_contract_drift_failures": 2,
       "coverage_line_ceiling_failures": 1,
       "coverage_targeted_regression": "PASS_28",
-      "coverage_nonblocking_timing_fixture": "DETERMINISTIC_WORKER_THREAD_ASSERTION_PENDING_SHARD_2",
-      "coverage_affected_shards_pending": [2, 5, 6, 9]
+      "coverage_nonblocking_timing_fixture": "PASS_DETERMINISTIC_WORKER_THREAD_ASSERTION",
+      "coverage_affected_shards_pending": [],
+      "coverage_final_evidence_commit_sha": "e8a288363",
+      "coverage_final_junit_tests": 8320,
+      "coverage_final_result": "PASS_8312_SKIP_8_FAIL_0_ERROR_0",
+      "coverage_python_covered_lines": 168945,
+      "coverage_python_statements": 276262,
+      "coverage_python_line_percent": 61.15,
+      "coverage_python_covered_branches": 39228,
+      "coverage_python_branches": 90738,
+      "coverage_python_branch_percent": 43.23,
+      "coverage_python_combined_percent": 56.72,
+      "coverage_evidence_path": "artifacts/local-gates/e8a288363/python-coverage/unit-composite"
     },
     "contract_shard_preflight": {
       "status": "PASS",
