@@ -3,7 +3,9 @@
 The outer Task Runtime already owns durable graph admission, attempts, leases
 and node grants.  This module is the *inner* delegate boundary: it receives
 only an immutable projection of that authority, verifies it again immediately
-before dispatch, and invokes an explicitly registered, read-only adapter.
+before dispatch, and invokes an explicitly registered, read-only adapter.  A
+target may either be completely port-free or receive the one canonical model
+port under the frozen Task budget; neither profile receives tools or effects.
 
 It deliberately does not call the legacy ``SubAgentDispatcher``.  That
 dispatcher owns a global handler registry, creates runtime gateways and writes
@@ -16,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 import hashlib
+import inspect
 import json
 import re
 from typing import Any, Protocol
@@ -34,6 +37,10 @@ from host_brain.contracts.agent_runtime.delegate_target_policy import (
     GOVERNED_DELEGATE_EFFECT_MODE,
     GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION,
     GOVERNED_DELEGATE_REVIEW_MODE,
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+    GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+    GOVERNED_MODEL_DELEGATE_POLICY_SCHEMA_VERSION,
+    GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
     freeze_governed_delegate_target_policy,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
@@ -82,7 +89,7 @@ class NodeGrantVerifierPort(Protocol):
     def verify(self, **kwargs: Any) -> Any: ...
 
 
-ReadOnlyDelegateHandler = Callable[[dict[str, Any], dict[str, Any]], Mapping[str, Any]]
+ReadOnlyDelegateHandler = Callable[[dict[str, Any], dict[str, Any]], Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +115,7 @@ class GovernedDelegateInvocation:
     objective: str
     user_message: str
     input_refs: tuple[str, ...]
+    _budget_json: str = field(repr=False)
     _context_json: str = field(repr=False)
 
     @classmethod
@@ -154,6 +162,10 @@ class GovernedDelegateInvocation:
             input_refs=tuple(
                 _required_ref(item, "input_ref") for item in tuple(frozen.input_refs)
             ),
+            _budget_json=_json_copy_text(
+                dict(frozen.budget),
+                field_name="budget",
+            ),
             _context_json=_json_copy_text(safe_context, field_name="context"),
         )
         if invocation.work_order_id != invocation.root_work_order_id:
@@ -174,6 +186,11 @@ class GovernedDelegateInvocation:
         return dict(loaded) if isinstance(loaded, Mapping) else {}
 
     @property
+    def budget(self) -> dict[str, Any]:
+        loaded = json.loads(self._budget_json)
+        return dict(loaded) if isinstance(loaded, Mapping) else {}
+
+    @property
     def invocation_ref(self) -> str:
         return "governed-delegate://sha256/" + hashlib.sha256(
             json.dumps(
@@ -189,6 +206,7 @@ class GovernedDelegateInvocation:
                     "node_grant_ref": self.node_grant_ref,
                     "target_id": self.target_id,
                     "input_refs": list(self.input_refs),
+                    "budget": self.budget,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -222,9 +240,14 @@ class GovernedDelegateTarget:
     effect_mode: str = GOVERNED_DELEGATE_EFFECT_MODE
 
     def policy_projection(self) -> dict[str, Any]:
+        schema_version = (
+            GOVERNED_MODEL_DELEGATE_POLICY_SCHEMA_VERSION
+            if self.execution_mode == GOVERNED_MODEL_DELEGATE_EXECUTION_MODE
+            else GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION
+        )
         return freeze_governed_delegate_target_policy(
             {
-                "schema_version": GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION,
+                "schema_version": schema_version,
                 "target_id": _required_identifier(
                     self.target_id,
                     "delegate target_id",
@@ -259,19 +282,25 @@ class GovernedDelegateDispatcher:
                 raise ValueError("delegate target registry values must be GovernedDelegateTarget")
             if target.target_id != resolved or not callable(target.handler):
                 raise ValueError("delegate target registry binding is invalid")
-            if target.execution_mode != READONLY_DELEGATE_EXECUTION_MODE:
-                raise ValueError(
-                    "delegate target must declare the port-free read-only execution mode"
-                )
             policy = target.policy_projection()
-            if (
-                policy["review_mode"] != GOVERNED_DELEGATE_REVIEW_MODE
-                or policy["budget_mode"] != GOVERNED_DELEGATE_BUDGET_MODE
-                or policy["effect_mode"] != GOVERNED_DELEGATE_EFFECT_MODE
-            ):
+            supported_profile = (
+                (
+                    policy["execution_mode"] == READONLY_DELEGATE_EXECUTION_MODE
+                    and policy["review_mode"] == GOVERNED_DELEGATE_REVIEW_MODE
+                    and policy["budget_mode"] == GOVERNED_DELEGATE_BUDGET_MODE
+                )
+                or (
+                    policy["execution_mode"]
+                    == GOVERNED_MODEL_DELEGATE_EXECUTION_MODE
+                    and policy["review_mode"]
+                    == GOVERNED_MODEL_DELEGATE_REVIEW_MODE
+                    and policy["budget_mode"]
+                    == GOVERNED_MODEL_DELEGATE_BUDGET_MODE
+                )
+            )
+            if not supported_profile or policy["effect_mode"] != GOVERNED_DELEGATE_EFFECT_MODE:
                 raise ValueError(
-                    "delegate target must declare durable Review, exact-zero "
-                    "Budget and graph-Acceptance-only effects"
+                    "delegate target must declare one supported read-only execution profile"
                 )
             normalized[resolved] = target
         self._node_grants = node_grants
@@ -297,16 +326,26 @@ class GovernedDelegateDispatcher:
         self.require_target(invocation.target_id)
         target = self._targets[invocation.target_id]
         _verify_node_authority(self._node_grants, invocation=invocation)
-        result = target.handler(
-            _handler_payload(invocation),
-            _handler_context(invocation),
-        )
+        handler_context = _handler_context(invocation)
+        if target.execution_mode == GOVERNED_MODEL_DELEGATE_EXECUTION_MODE:
+            # The model-backed adapter receives only this immutable Task
+            # projection.  Port-free targets never see it.
+            handler_context["delegate_invocation"] = invocation
+        result = target.handler(_handler_payload(invocation), handler_context)
+        if inspect.isawaitable(result):
+            result = await result
         if not isinstance(result, Mapping):
             raise GovernedDelegateDispatchError(
                 GOVERNED_DELEGATE_OUTPUT_INVALID,
                 "read-only delegate adapter must return a mapping",
             )
-        return _project_readonly_outcome(
+        if target.execution_mode == READONLY_DELEGATE_EXECUTION_MODE:
+            return _project_readonly_outcome(
+                target=target,
+                invocation=invocation,
+                result=result,
+            )
+        return _project_model_backed_outcome(
             target=target,
             invocation=invocation,
             result=result,
@@ -316,25 +355,170 @@ class GovernedDelegateDispatcher:
 def build_governed_delegate_dispatcher(
     *,
     node_grants: NodeGrantVerifierPort,
+    model_attempt_service: Any | None = None,
 ) -> GovernedDelegateDispatcher:
-    """Compose the initial safe target set without a legacy dispatcher."""
+    """Compose explicit Delegate targets without the legacy dispatcher."""
 
     from host_brain.app.handlers.pentest_agent_handler import (  # noqa: PLC0415
         AGENT_ID_PENTEST,
         pentest_agent_handler,
     )
+    from host_brain.agent_runtime.agent_registry import (  # noqa: PLC0415
+        AGENT_ID_TRANSLATE,
+    )
+
+    targets = {
+        AGENT_ID_PENTEST: GovernedDelegateTarget(
+            target_id=AGENT_ID_PENTEST,
+            handler=pentest_agent_handler,
+            adapter_id="readonly_pentest_domain_handoff.v1",
+            execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+        )
+    }
+    if callable(getattr(model_attempt_service, "complete", None)):
+        targets[AGENT_ID_TRANSLATE] = GovernedDelegateTarget(
+            target_id=AGENT_ID_TRANSLATE,
+            handler=_build_translate_delegate_handler(model_attempt_service),
+            adapter_id="model_backed_translate.v1",
+            execution_mode=GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+            review_mode=GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+            budget_mode=GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+        )
 
     return GovernedDelegateDispatcher(
         node_grants=node_grants,
-        targets={
-            AGENT_ID_PENTEST: GovernedDelegateTarget(
-                target_id=AGENT_ID_PENTEST,
-                handler=pentest_agent_handler,
-                adapter_id="readonly_pentest_domain_handoff.v1",
-                execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
-            )
-        },
+        targets=targets,
     )
+
+
+def _build_translate_delegate_handler(model_attempt_service: Any) -> ReadOnlyDelegateHandler:
+    """Bind TranslateAgent to one canonical, Task-budgeted model call."""
+
+    async def _handler(
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> Mapping[str, Any]:
+        from host_brain.app.handlers.agent_boundary import (  # noqa: PLC0415
+            first_public_text,
+        )
+        from host_brain.app.handlers.translate_agent_handler import (  # noqa: PLC0415
+            TRANSLATE_MODEL_NODE_ID,
+            translate_agent_handler,
+        )
+        from host_brain.model_runtime.governed_budget import (  # noqa: PLC0415
+            GovernedModelBudgetError,
+            build_governed_model_budget_guard,
+        )
+        from host_brain.model_runtime.graph_semantics import (  # noqa: PLC0415
+            graph_model_semantic,
+        )
+        from host_brain.model_runtime.invocation import (  # noqa: PLC0415
+            complete_compiled_prompt,
+        )
+        from host_brain.model_runtime.json_parser import (  # noqa: PLC0415
+            extract_json_object,
+        )
+        from host_brain.model_runtime.trace import (  # noqa: PLC0415
+            model_attempt_result_trace,
+        )
+
+        invocation = context.get("delegate_invocation")
+        if not isinstance(invocation, GovernedDelegateInvocation):
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_INVOCATION_INVALID,
+                "model-backed delegate requires its frozen invocation",
+            )
+        try:
+            guard = build_governed_model_budget_guard(
+                budget=invocation.budget,
+                graph_id=invocation.graph_id,
+                graph_revision=invocation.graph_revision,
+                node_id=invocation.node_id,
+                attempt_id=invocation.attempt_id,
+                require_model_cost=False,
+            )
+        except GovernedModelBudgetError as exc:
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_AUTHORITY_INVALID,
+                exc.detail,
+            ) from exc
+
+        semantic = graph_model_semantic(TRANSLATE_MODEL_NODE_ID)
+        result = await complete_compiled_prompt(
+            attempt_service=model_attempt_service,
+            prompt_id=semantic.prompt_id,
+            messages=(
+                {
+                    "role": "system",
+                    "content": (
+                        "Translate the user's requested text while preserving meaning, "
+                        "tone, names and technical terms. Return exactly one JSON object "
+                        'with a non-empty "translated_text" string and no control fields.'
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"translation_request": invocation.user_message},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ),
+                },
+            ),
+            request_id=(
+                f"{invocation.request_id}:delegate-model:{invocation.attempt_id}"
+            ),
+            scene_type=semantic.scene_type,
+            cognitive_tier=semantic.cognitive_tier,
+            deadline_ms=guard.deadline_ms,
+            foreground=True,
+            metadata={
+                "caller": "governed_translate_delegate",
+                "graph_id": invocation.graph_id,
+                "graph_revision": invocation.graph_revision,
+                "node_id": invocation.node_id,
+                "model_node_id": semantic.model_node_id,
+            },
+            model_budget_guard=guard,
+        )
+        model_trace = model_attempt_result_trace(result)
+        if not result.success:
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_OUTPUT_INVALID,
+                "translation model attempt failed: "
+                + str(result.error_code or "MODEL_ATTEMPT_FAILED"),
+            )
+        try:
+            translated_payload = extract_json_object(result.content)
+        except ValueError as exc:
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_OUTPUT_INVALID,
+                "translation model returned no valid JSON object",
+            ) from exc
+        translated_text = first_public_text(translated_payload).strip()
+        if not translated_text:
+            raise GovernedDelegateDispatchError(
+                GOVERNED_DELEGATE_OUTPUT_INVALID,
+                "translation model returned no public translated text",
+            )
+        handler_result = translate_agent_handler(
+            {
+                **dict(payload),
+                TRANSLATE_MODEL_NODE_ID: {
+                    "gateway_status": "OK",
+                    "payload": {
+                        **translated_payload,
+                        "translated_text": translated_text,
+                    },
+                },
+            },
+            context,
+        )
+        handler_result["delegate_model_attempt"] = model_trace
+        handler_result["delegate_model_budget_guard"] = guard.as_dict()
+        return handler_result
+
+    return _handler
 
 
 def _verify_node_authority(
@@ -481,6 +665,58 @@ def _project_readonly_outcome(
                 "capability_id": audit.get("capability_id"),
                 "secure_run_surface": audit.get("secure_run_surface"),
             },
+        },
+    )
+
+
+def _project_model_backed_outcome(
+    *,
+    target: GovernedDelegateTarget,
+    invocation: GovernedDelegateInvocation,
+    result: Mapping[str, Any],
+) -> GovernedDelegateOutcome:
+    payload = dict(result)
+    _require_effect_free_result_payload(payload)
+    trace = payload.get("translate_agent_trace")
+    model_attempt = payload.get("delegate_model_attempt")
+    model_guard = payload.get("delegate_model_budget_guard")
+    if (
+        target.target_id != "translate_agent"
+        or not isinstance(trace, Mapping)
+        or str(trace.get("agent_id") or "") != target.target_id
+        or trace.get("side_effects_executed") is not False
+        or not isinstance(model_attempt, Mapping)
+        or model_attempt.get("success") is not True
+        or not isinstance(model_attempt.get("budget_measurement"), Mapping)
+        or not isinstance(model_guard, Mapping)
+    ):
+        raise GovernedDelegateDispatchError(
+            GOVERNED_DELEGATE_OUTPUT_INVALID,
+            "model-backed delegate did not return a measured effect-free result",
+        )
+    narrative = _public_result_text(payload)
+    if not narrative:
+        raise GovernedDelegateDispatchError(
+            GOVERNED_DELEGATE_OUTPUT_INVALID,
+            "model-backed delegate returned no public result",
+        )
+    return GovernedDelegateOutcome(
+        success=True,
+        target_id=target.target_id,
+        result_text=narrative,
+        error_text="",
+        audit_refs={
+            "delegate_invocation_ref": invocation.invocation_ref,
+            "delegate_adapter": target.adapter_id,
+            "delegate_execution_mode": target.execution_mode,
+            "delegate_target_policy_ref": target.policy_projection()["policy_ref"],
+            "delegate_review_mode": target.review_mode,
+            "delegate_budget_mode": target.budget_mode,
+            "delegate_effect_mode": target.effect_mode,
+            "side_effects_executed": False,
+            "delegate_model_attempt": dict(model_attempt),
+            "delegate_model_budget_guard": dict(model_guard),
+            "handler_reason_code": str(trace.get("reason_code") or "").strip(),
         },
     )
 

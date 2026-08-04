@@ -30,6 +30,8 @@ from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     validate_readonly_delegate_usage_attestation,
 )
 from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_DELEGATE_BUDGET_MODE,
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
     GovernedDelegateTargetPolicyError,
     validate_governed_delegate_target_policy,
 )
@@ -129,7 +131,7 @@ class FrozenDelegateRouteExecutor:
         narrative = _outcome_narrative(projected, decision=decision)
         reason_code = _outcome_reason_code(projected, decision=decision)
         audit_refs = _outcome_audit_refs(projected)
-        _assert_delegate_target_policy(
+        target_policy = _assert_delegate_target_policy(
             frozen=frozen,
             input_pack=input_pack,
             audit_refs=audit_refs,
@@ -140,8 +142,9 @@ class FrozenDelegateRouteExecutor:
             narrative=narrative,
             reason_code=reason_code,
             audit_refs=audit_refs,
-            budget_usage=_readonly_delegate_budget_payload(
+            budget_usage=_delegate_budget_payload(
                 frozen,
+                target_policy=target_policy,
                 audit_refs=audit_refs,
             ),
         )
@@ -807,7 +810,7 @@ def _assert_delegate_target_policy(
     frozen: FrozenNodeInput,
     input_pack: Mapping[str, Any],
     audit_refs: Mapping[str, Any],
-) -> None:
+) -> dict[str, Any]:
     try:
         policy = validate_governed_delegate_target_policy(
             _safe_mapping(input_pack.get("delegate_target_policy"))
@@ -836,6 +839,7 @@ def _assert_delegate_target_policy(
             GOVERNED_ROUTE_ROUTE_DRIFT,
             "Delegate execution evidence differs from its admitted target policy",
         )
+    return policy
 
 
 def _terminal_commit(
@@ -908,6 +912,29 @@ def _chat_budget_observations(terminal: Mapping[str, Any]) -> dict[str, Any]:
     return {"model_budget_measurements": measurements}
 
 
+def _delegate_budget_payload(
+    frozen: FrozenNodeInput,
+    *,
+    target_policy: Mapping[str, Any],
+    audit_refs: Mapping[str, Any],
+) -> dict[str, Any]:
+    budget_mode = str(target_policy.get("budget_mode") or "").strip()
+    if budget_mode == GOVERNED_DELEGATE_BUDGET_MODE:
+        return _readonly_delegate_budget_payload(
+            frozen,
+            audit_refs=audit_refs,
+        )
+    if budget_mode == GOVERNED_MODEL_DELEGATE_BUDGET_MODE:
+        return _model_backed_delegate_budget_payload(
+            frozen,
+            audit_refs=audit_refs,
+        )
+    raise GovernedRouteExecutorError(
+        GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+        "Delegate target policy has no supported budget measurement mode",
+    )
+
+
 def _readonly_delegate_budget_payload(
     frozen: FrozenNodeInput,
     *,
@@ -966,6 +993,42 @@ def _readonly_delegate_budget_payload(
         },
         evidence_refs=(str(attestation["attestation_ref"]),),
     ).to_payload()
+
+
+def _model_backed_delegate_budget_payload(
+    frozen: FrozenNodeInput,
+    *,
+    audit_refs: Mapping[str, Any],
+) -> dict[str, Any]:
+    expected_guard = _governed_model_budget(frozen)
+    actual_guard = _mapping_child(audit_refs, "delegate_model_budget_guard")
+    if expected_guard is None or dict(actual_guard) != expected_guard:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "model-backed Delegate did not preserve its frozen Task budget guard",
+        )
+    model_attempt = _mapping_child(audit_refs, "delegate_model_attempt")
+    measurement = _mapping_child(model_attempt, "budget_measurement")
+    if (
+        model_attempt.get("success") is not True
+        or not measurement
+        or "token_count" not in measurement
+    ):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "model-backed Delegate lacks a successful provider token measurement",
+        )
+    usage = _worker_budget_payload(
+        frozen,
+        observations={"model_budget_measurements": [dict(measurement)]},
+        include_agent_tool_calls=False,
+    )
+    if usage is None:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "model-backed Delegate produced no billable budget dimensions",
+        )
+    return usage
 
 
 def _append_model_budget_measurement(

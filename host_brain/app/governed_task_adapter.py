@@ -1262,6 +1262,7 @@ def build_governed_host_runtime(
     )
     delegate_dispatcher = build_governed_delegate_dispatcher(
         node_grants=node_grant_verifier,
+        model_attempt_service=model_attempt_service,
     )
     skill_execution_ports = build_governed_skill_execution_ports(
         skill_registry=skill_registry,

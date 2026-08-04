@@ -82,6 +82,8 @@ flowchart TB
 
 Host 侧 `GovernedHostRuntime` 只保留生命周期与应用 facade；直接 Skill policy、Delegate target 校验和 Review continuation reduction 位于无状态 `governed_host_admission_helpers.py`。当前 facade 为 1454 行，仍受 `<1500` 结构 Gate 约束，不能靠扩大巨石白名单通过。
 
+Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Dispatcher。`pentest_agent` 保持 `PORT_FREE_READ_ONLY`、零模型／工具用量证明和执行前 Review；低风险 `translate_agent` 使用 `MODEL_BACKED_READ_ONLY`，只获得 canonical `ModelAttemptService`，模型调用受当前 TaskNode 的 Token／时间／重试／成本预算 guard 约束，不获得工具、嵌套路由或副作用端口，也不要求用户为普通翻译手工审批。两者的结果都必须回到同一 Node Verification／Acceptance。
+
 这些机制不得被重新加到无副作用的普通闲聊首字路径中。
 
 ## 6. Host、OBS 与 Composition
@@ -111,6 +113,6 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 
 - 真实 provider 的端到端首字延迟尚未达最终门槛。
 - Tribe event bus 与部分器官投影仍为进程内状态；只有 canonical Life 结果具备持久重放语义。
-- 远端 Edge、VTS/VRM、barge-in 和三模态同步尚未真实验收。
+- 远端 Edge RPC、TTS、VTS 传输与口型已有局部实测；常驻 ASR 噪声门控、情绪热键、barge-in 和完整三模态同步仍未通过。
 - 真实多轮盲测、长期关系自然度和兼容 writer 运行清零仍待完成。
 - 完整 Docker／Host／OBS／Monitor／Gateway 故障验收尚未在当前 commit 集中执行。

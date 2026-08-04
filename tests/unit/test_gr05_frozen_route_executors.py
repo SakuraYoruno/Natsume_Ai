@@ -20,6 +20,14 @@ from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     READONLY_DELEGATE_EXECUTION_MODE,
     build_readonly_delegate_usage_attestation,
 )
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+    GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+    GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+)
+from host_brain.model_runtime.governed_budget import (
+    build_governed_model_budget_guard,
+)
 from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
 from host_brain.contracts.agent_runtime.node_input_attestation import (
     build_node_input_artifact_attestation,
@@ -152,6 +160,51 @@ def _readonly_delegate_audit(
     }
 
 
+def _model_delegate_policy(target_id: str = "translate_agent") -> dict[str, Any]:
+    return GovernedDelegateTarget(
+        target_id=target_id,
+        handler=lambda _payload, _context: {},
+        adapter_id="model-backed-translate.v1",
+        execution_mode=GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+        review_mode=GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+        budget_mode=GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+    ).policy_projection()
+
+
+def _model_delegate_audit(frozen: FrozenNodeInput) -> dict[str, Any]:
+    policy = dict(frozen.input_pack["delegate_target_policy"])
+    guard = build_governed_model_budget_guard(
+        budget=frozen.budget,
+        graph_id=frozen.graph_id,
+        graph_revision=frozen.graph_revision,
+        node_id=frozen.node_id,
+        attempt_id=frozen.attempt_id,
+        require_model_cost=False,
+    )
+    return {
+        "delegate_invocation_ref": "governed-delegate://sha256/" + "e" * 64,
+        "delegate_adapter": "model-backed-translate.v1",
+        "delegate_execution_mode": GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+        "delegate_target_policy_ref": policy["policy_ref"],
+        "delegate_review_mode": policy["review_mode"],
+        "delegate_budget_mode": policy["budget_mode"],
+        "delegate_effect_mode": policy["effect_mode"],
+        "side_effects_executed": False,
+        "delegate_model_budget_guard": guard.as_dict(),
+        "delegate_model_attempt": {
+            "success": True,
+            "attempt_ids": ["model-attempt-translate"],
+            "budget_measurement": {
+                "schema_version": "Natsume.model_runtime.budget_measurement.v1",
+                "measurement_ref": "model-budget://delegate/translate/1",
+                "attempt_count": 1,
+                "retry_count": 0,
+                "token_count": 24,
+            },
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit() -> None:
     calls: list[dict[str, Any]] = []
@@ -227,6 +280,47 @@ async def test_delegate_executor_calls_only_frozen_target_and_emits_one_commit()
     assert "route_type" not in calls[0]["context"]
     assert "target_id" not in calls[0]["context"]
     assert "delivery_authorization" not in calls[0]["context"]
+
+
+@pytest.mark.asyncio
+async def test_model_backed_delegate_settles_provider_usage_against_frozen_budget() -> None:
+    async def dispatch(**kwargs):  # noqa: ANN003
+        return {
+            "route_type": "delegate",
+            "target_id": "translate_agent",
+            "success": True,
+            "result_text": "You worked hard today. Get some rest.",
+            "audit_refs": _model_delegate_audit(kwargs["frozen"]),
+        }
+
+    input_pack = {
+        "user_message": "把今天辛苦了，早点休息翻译成英文。",
+        "context": {"skill_family": "translation"},
+        "delegate_target_policy": _model_delegate_policy(),
+    }
+    frozen = _frozen(
+        route="delegate",
+        target_id="translate_agent",
+        input_pack=input_pack,
+        budget=_active_budget(),
+    )
+    executor = FrozenDelegateRouteExecutor(
+        ports=object(),
+        dispatch_to_sub_agent=dispatch,
+    )
+
+    events = [event async for event in executor.execute_stream(frozen)]
+
+    assert len(events) == 1
+    assert events[0]["decision"] == "APPROVE"
+    assert events[0]["narrative"] == "You worked hard today. Get some rest."
+    assert events[0]["budget_usage"]["measurements"] == {
+        "retry_count": 0,
+        "token_count": 24,
+    }
+    assert events[0]["budget_usage"]["evidence_refs"] == [
+        "model-budget://delegate/translate/1"
+    ]
 
 
 @pytest.mark.asyncio

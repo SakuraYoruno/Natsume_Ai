@@ -24,8 +24,19 @@ from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     validate_readonly_delegate_usage_attestation,
 )
 from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+    GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+    GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
     GovernedDelegateTargetPolicyError,
     validate_governed_delegate_target_policy,
+)
+from host_brain.model_runtime import (
+    AttemptStatus,
+    ModelAttemptRecord,
+    ModelAttemptResult,
+    ProviderResponse,
+    ProviderTarget,
+    RouteDecision,
 )
 from host_brain.task_runtime.governed_workers import FrozenNodeInput
 
@@ -33,7 +44,11 @@ from host_brain.task_runtime.governed_workers import FrozenNodeInput
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _frozen(*, target_id: str = "pentest_agent") -> FrozenNodeInput:
+def _frozen(
+    *,
+    target_id: str = "pentest_agent",
+    budget: dict | None = None,
+) -> FrozenNodeInput:
     return FrozenNodeInput(
         command_id="command-governed-delegate",
         request_id="request-governed-delegate",
@@ -57,6 +72,67 @@ def _frozen(*, target_id: str = "pentest_agent") -> FrozenNodeInput:
         _input_artifacts_json="[]",
         node_grant_ref="governor-grant://child/governed-delegate",
         parent_grant_ref="governor-grant://parent/governed-delegate",
+        _budget_json=json.dumps(budget or {}, sort_keys=True),
+    )
+
+
+def _active_model_budget() -> dict:
+    return {
+        "budget_id": "budget://delegate/translate",
+        "status": "ACTIVE",
+        "status_version": 2,
+        "remaining": {
+            "token_count": 320,
+            "time_ms": 8_000,
+            "retry_count": 0,
+            "model_cost_micros": 20_000,
+        },
+    }
+
+
+def _translation_model_result(request_id: str) -> ModelAttemptResult:
+    target = ProviderTarget("delegate-test", "provider", "translate-model")
+    decision = RouteDecision(
+        "route-translate-delegate",
+        (target,),
+        "unit-test",
+        max_attempts=1,
+    )
+    response = ProviderResponse(
+        content='{"translated_text":"You worked hard today. Get some rest."}',
+        usage={"token_count": 24, "completion_tokens": 10},
+    )
+    attempt = ModelAttemptRecord(
+        attempt_id="model-attempt-translate-delegate",
+        request_id=request_id,
+        route_decision_id=decision.decision_id,
+        attempt_index=1,
+        status=AttemptStatus.SUCCEEDED,
+        retry_reason="initial",
+        adapter_id=target.adapter_id,
+        provider=target.provider,
+        model_id=target.model_id,
+        prompt_id="graph.workbench.translate.json",
+        prompt_version="1",
+        prompt_digest="a" * 64,
+        started_at_ms=1,
+        ended_at_ms=3,
+        latency_ms=2,
+        output_digest="b" * 64,
+        metadata={
+            "provider_budget_measurements": {
+                "token_count": 24,
+                "completion_tokens": 10,
+            }
+        },
+    )
+    return ModelAttemptResult(
+        request_id=request_id,
+        success=True,
+        route_decision=decision,
+        attempts=(attempt,),
+        response=response,
+        final_target=target,
     )
 
 
@@ -148,6 +224,62 @@ async def test_readonly_pentest_delegate_revalidates_the_full_frozen_authority_t
         "lease_owner_id": invocation.lease_owner_id,
         "fencing_token": invocation.fencing_token,
     }
+
+
+@pytest.mark.asyncio
+async def test_translate_delegate_uses_one_task_budgeted_canonical_model_call() -> None:
+    verifier = _Verifier()
+
+    class _ModelService:
+        def __init__(self) -> None:
+            self.requests = []
+
+        async def complete(self, request):  # noqa: ANN001, ANN201
+            self.requests.append(request)
+            return _translation_model_result(request.request_id)
+
+    model_service = _ModelService()
+    dispatcher = build_governed_delegate_dispatcher(
+        node_grants=verifier,
+        model_attempt_service=model_service,
+    )
+    frozen = _frozen(
+        target_id="translate_agent",
+        budget=_active_model_budget(),
+    )
+    invocation = GovernedDelegateInvocation.from_frozen(
+        frozen=frozen,
+        user_message="把今天辛苦了，早点休息翻译成英文。",
+        context={"skill_family": "translation"},
+    )
+
+    outcome = await dispatcher.dispatch(invocation)
+
+    assert outcome.success is True
+    assert outcome.target_id == "translate_agent"
+    assert outcome.result_text == "You worked hard today. Get some rest."
+    assert len(model_service.requests) == 1
+    request = model_service.requests[0]
+    assert request.prompt.prompt_id == "graph.workbench.translate.json"
+    assert request.scene_type == "GRAPH_TRANSLATE"
+    assert request.cognitive_tier == "A"
+    assert request.model_budget_guard is not None
+    assert request.model_budget_guard.budget_id == "budget://delegate/translate"
+    assert request.model_budget_guard.node_id == frozen.node_id
+    assert request.model_budget_guard.required_usage_dimensions == (
+        "token_count",
+        "completion_tokens",
+    )
+    policy = dispatcher.require_target("translate_agent")
+    assert validate_governed_delegate_target_policy(policy) == policy
+    assert policy["execution_mode"] == GOVERNED_MODEL_DELEGATE_EXECUTION_MODE
+    assert policy["review_mode"] == GOVERNED_MODEL_DELEGATE_REVIEW_MODE
+    assert policy["budget_mode"] == GOVERNED_MODEL_DELEGATE_BUDGET_MODE
+    assert outcome.audit_refs["delegate_model_attempt"]["success"] is True
+    assert outcome.audit_refs["delegate_model_attempt"]["budget_measurement"][
+        "token_count"
+    ] == 24
+    assert outcome.audit_refs["side_effects_executed"] is False
 
 
 @pytest.mark.asyncio

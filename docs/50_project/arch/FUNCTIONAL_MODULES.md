@@ -47,6 +47,8 @@
 
 `host_brain/task_runtime/` 负责 TaskGraph 调度、Attempt、Lease、Budget、Review、Verification、Acceptance、Effect、Outbox、Receipt、取消和恢复。`host_brain/agent_runtime/` 负责受管 Delegate／Skill 工作单和 Workspace 接线。
 
+`host_brain/app/governed_delegate_dispatch.py` 是当前 Delegate 目标注册边界：Pentest 为无端口只读 handoff；Translate 为单次 canonical model 调用。翻译只消费冻结 Node Budget，不持有工具、Provider 配置、嵌套规划或交付权限。未登记 Delegate 在持久建图前拒绝。
+
 该模块不应进入普通无副作用聊天的同步热路径。
 
 ## 5. 身体与外部通道
@@ -54,7 +56,7 @@
 | 能力 | 主要实现 | 当前状态 |
 |---|---|---|
 | Edge RPC | `edge_client/rpc/` | 目标 Edge 真实运行并完成 session／lease／fence／receipt 查询与重连验证 |
-| ASR／voice pipeline | `edge_client/runtime/voice_pipeline.py` | 目标设备待实测 |
+| ASR／voice pipeline | `edge_client/runtime/voice_pipeline.py` | 目标设备已暴露低置信噪声洪泛，当前 `FAIL／REMEDIATION_REQUIRED` |
 | GPT-SoVITS TTS | Edge TTS adapter + V4 voice bank | 目标 Edge `UP`；物理播放完成后回写 terminal receipt |
 | Avatar | `edge_client/actuators/`、gateway embodiment | VTS 已认证，口型／身体动作可用；兼容情绪热键缺失，`DEGRADED` |
 | Unified Gateway | `edge_client/gateway/` | 真实平台入站、Host roundtrip、durable outbox、送达回执和重复抑制已通过 |

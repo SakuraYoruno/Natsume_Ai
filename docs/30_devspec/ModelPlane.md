@@ -14,7 +14,7 @@ Model Plane 为不同认知角色选择真实模型，同时保证普通陪伴�
 | `surface_reply` | 普通聊天和情感表达 | 低首字延迟、流式、人格一致 |
 | `deep_affective` | 混合情绪、冲突、修复和边界 | 最多两个候选、一次重试 |
 | `task_planning` | 有副作用任务的计划草案 | 输出可编译结构，不直接执行 |
-| `subagent` | 受管 Delegate | 最小上下文、预算和 grant |
+| `subagent` | 受管 Delegate | 显式目标策略、最小上下文、Node Budget 和 grant；当前仅 Translate 可持有单一模型端口 |
 | `research` | 研究与引用 | 来源可核验、usage 完整 |
 
 路由按角色和 capability 选择 provider/model，不再把固定厂商或旧 A/B/C/D 档位写成稳定架构合同。
@@ -42,6 +42,8 @@ AffectiveTurnPlan
 - 记录 provider/model、usage、成本、provider latency、总耗时和 transport identity。
 - 模型失败按角色策略降级；规则 fallback 不能伪装成真实模型成功。
 - 选择备用 provider 时保留用户可见语义，不重复外发已经展示的分句。
+
+受管翻译不再依赖旧 Graph Executor 或全局 SubAgent Dispatcher。`translate_agent` 的唯一模型调用使用 `graph.workbench.translate.json` 的 server-owned semantic，预算 guard 由冻结的 TaskNode remaining projection 派生，provider/model/credential 仍由 Model Plane 决定。模型只返回翻译 JSON 工件；工具调用、动态 reroute 和直接 Gateway delivery 均不可用。
 
 ## 6. 隐私
 

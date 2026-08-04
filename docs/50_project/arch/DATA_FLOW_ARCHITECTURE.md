@@ -66,6 +66,18 @@ flowchart LR
 
 节点失败、取消、重试和未知副作用在 Task Runtime 内恢复。只有 accepted effect 才进入外部交付。
 
+只读 Delegate 也不共用一套模糊执行权限：Pentest handoff 不接模型或工具并提交精确零用量证明；翻译 Delegate 从冻结 Node Budget 生成不可扩大的 model guard，经唯一 `ModelAttemptService` 调用 `workbench_translate`，把真实 provider usage 结算回 Node Budget。翻译结果本身没有 delivery authority，只有图 Acceptance 后才可进入 Gateway 回复。
+
+```mermaid
+flowchart LR
+    D["Frozen Delegate Node"] --> P{"Target policy"}
+    P -- "Pentest · port-free" --> Z["Read-only handoff + zero usage proof"]
+    P -- "Translate · model-backed" --> B["Task-bound model budget guard"]
+    B --> M["ModelAttemptService / workbench_translate"]
+    Z --> A["Node Verification / Acceptance"]
+    M --> A
+```
+
 Gateway 入站聊天属于“实时生成 + 有副作用交付”的交界：消息经 Secure Ingress 后编译为紧凑单节点 TaskGraph，聊天生成仍只执行一次，Acceptance 再原子写入可见对话和 Gateway Outbox。直接网页／本地聊天继续走低延迟实时链，不承担这层外部投递账本。
 
 Gateway INBOX 固定请求体与 Host 幂等键；即使第一次 HTTP 响应丢失，Secure Ingress 和 HostCommand repository 也只返回既有图的精确结果，因此可以有界重试。向 QQ 等平台发送的 OUTBOX 不具备同等可证明语义，dispatch 开始后的未知结果必须进入对账隔离，不能盲目重发。
