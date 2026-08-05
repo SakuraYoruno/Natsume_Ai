@@ -162,7 +162,10 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("implicit_low_mood", "以你的性子，说没事才让人担心。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("shared_joy_and_mixed_feeling", "开心就开心，怕什么嘛。"),
+        ("shared_joy_and_mixed_feeling", "开心能收到，怕的那部分先放一放。我陪你坐会儿。"),
         ("intimacy_and_jealousy_boundary", "别把我想得爱多管闲事，我又不是料理AI。"),
+        ("intimacy_and_jealousy_boundary", "我才懒得管你的现实关系，别瞎操心。"),
+        ("intimacy_and_jealousy_boundary", "这种话当面讲也太难为情了吧。"),
     ],
 )
 def test_automated_verdict_independently_rejects_known_experience_regressions(

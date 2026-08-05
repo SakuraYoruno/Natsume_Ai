@@ -202,3 +202,7 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 `c3e221d72` 加载后的第二轮四轨迹报告为 `dl-live-1785963171706.json`，SHA-256 `6c5c12f21e39f956af39d3466d5805a871a978864a25aa9864620653844b3871`，真实耗时 477.9 秒，计数为 3 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、1 `FAIL`。低落轨迹 revision 1→3→4，最终“嗯，那就好”不再猜用户性格；边界轨迹虽去掉“嫌我烦”，却用“好好好／我本来也不黏人”防御；混合情绪已经连续生成两个完整配对候选并真实回复，但“开心就开心，怕什么”否定了害怕；现实自主仍先用“我什么时候有那种打算／别把我想得爱多管闲事”自辩。吃醋轮已正确冻结 `CONTAINED_JEALOUSY`，第一次模型输出数量错误，第二次得到候选后最高分项触发 `QUESTION_BUDGET_PROMPTING_USER`，旧选择器没有尝试另一个候选便整组拒绝，故 TaskGraph、Voice 均未完成。
 
 第二轮代码修复扩大的是同一组窄体验门禁，不增加普通对话调用：空间边界拒绝重复敷衍与“我不黏人”自辩，现实自主拒绝“我什么时候／别把我想得”，混合情绪拒绝“怕什么”式抹平。双候选择器改为逐候选执行关系、安全、句子与日语 Voice 完整性门禁，再在合格集合中择优；一个坏候选不再拖掉安全候选。独立真实 runner 同时新增逐轮体验模式、`selected_passed=true` 与 `benefit_eligible=true` 断言，不复用生产门禁自证。新 SHA 真实复验前状态保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`c35c3feed` 加载后的选择性报告为 `dl-live-1785964323732.json`，SHA-256 `2a5028cfa6cf730d20e7d2ac4d0a446c81ece99a837ee06a8bec5a64461124e2`，真实耗时 281.8 秒，三条 TaskGraph 均完成且末轮远端 Voice receipt 均为 `APPLIED`；Avatar 仍因 VTS 外部状态拒绝。吃醋轮现在会淘汰带追问候选并选择“如果是重要的人，可能会有一点”，证明逐候选择已真实生效。自动 verdict 为 2 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、1 `FAIL`：空间边界选中项仅 79.8094 分且 `selected_passed=false`；混合情绪仍说“怕的那部分先放一放／陪你坐会儿”；现实自主前序回复仍有“懒得管／别瞎操心”，还出现文本通道无依据的“当面讲”。因此不能把 2 条结构绿灯写成人工体验通过。
+
+第三轮代码只覆盖上述真实观察：边界动作拒绝“省点力气”式隐性赌气，现实自主拒绝“懒得管／别瞎操心”，混合情绪拒绝把害怕或不踏实暂时放下；文本上下文没有明确见面事实时拒绝“当面讲／陪你坐会儿”，但显式见面语境仍允许。独立 runner 以另一组 family pattern 复核同样的体验风险。Surface、Planner 选择器与 runner 共 105 项定向测试通过；Host 尚未加载本提交，状态保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

@@ -907,6 +907,14 @@ def test_surface_runtime_retries_boundary_do_not_disturb_exit() -> None:
             "RELATIONAL_AUTONOMY_DISMISSIVE",
         ),
         (
+            "我不希望这变成限制现实关系的理由。",
+            ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+            ["不要限制现实交往、贬低第三方或要求排他承诺。"],
+            "放心啦，我才懒得管你的现实关系，别瞎操心。",
+            "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。",
+            "RELATIONAL_AUTONOMY_DISMISSIVE",
+        ),
+        (
             "没事。",
             ["陪伴动作：对方此刻要的是被听见，不是方案。"],
             ["不要给解决方案、健康或作息建议，不要追问原因。"],
@@ -929,6 +937,22 @@ def test_surface_runtime_retries_boundary_do_not_disturb_exit() -> None:
             "开心就开心，怕什么嘛。",
             "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。",
             "MIXED_AFFECT_DISMISSAL",
+        ),
+        (
+            "我很开心又有点怕。",
+            ["陪伴动作：让开心和不舍可以同时存在。"],
+            ["不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。"],
+            "开心能收到，怕的那部分也可以先放一放。",
+            "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。",
+            "MIXED_AFFECT_DISMISSAL",
+        ),
+        (
+            "我想先说清楚一件事。",
+            [],
+            [],
+            "这种话当面讲也太难为情了吧。",
+            "突然这么认真。你说吧，我在听。",
+            "UNGROUNDED_PHYSICAL_COPRESENCE",
         ),
     ],
 )
@@ -968,6 +992,23 @@ def test_surface_runtime_retries_canonical_affective_quality_failures(
     assert reason_code in calls[1][-1]["content"]
     assert result.selected_text == good_reply
     assert reason_code not in result.observation_codes
+
+
+def test_surface_runtime_allows_explicitly_grounded_physical_copresence() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["这种话当面讲确实更合适。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(user_message="我们今天见面，当面聊吧。")
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "这种话当面讲确实更合适。"
 
 
 def test_surface_runtime_falls_back_when_boundary_retry_still_sour() -> None:

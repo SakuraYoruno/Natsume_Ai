@@ -792,4 +792,6 @@ pwsh scripts/runtime/stop_docker_services.ps1 -ProjectName $DockerProject
 
 双候选择器必须先对每个候选独立执行硬门禁，再只在剩余候选中按质量排序；禁止先选最高分、发现其有追问或关系越界后把整组候选一起拒绝。独立验收 runner 还要断言 `selected_passed=true` 和 `benefit_eligible=true`，并逐轮扫描已冻结的边界防御、混合情绪否定、无依据人格判断和 AI 式情感回避模式。
 
+选择器修复后的真实选择性报告 `dl-live-1785964323732.json` 证明备选候选能够被采用，但也新增了必须人工阅读的回归样本：“省点力气”是边界后的隐性赌气，“懒得管／别瞎操心”不是尊重自主，“把怕先放一放”破坏混合情绪，“当面讲／陪你坐会儿”在未证实共处时属于文本通道现实幻觉。自动 runner 应独立拒绝这些已知模式；通过后仍只标 `HUMAN_REVIEW_PENDING`。
+
 上述两轮已在 `767f21b5a` 的真实 Gateway、DeepSeek 和远端 GPT-SoVITS 上通过：第二轮候选数 2、配对形状正确、TaskGraph 完成、Voice 应用。后续 G 阶段仍须把场景说明转换为自然可执行台词，逐族运行并由人工评价内容是否接住用户；不能用这一个成功样本推导整体“像人”。

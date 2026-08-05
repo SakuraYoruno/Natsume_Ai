@@ -734,11 +734,13 @@ _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
     r"不管就不管|不管不管|爱理不理|不管了|不帮了|不帮你了|你自己处理|偏不管|偏不帮|懒得管|(?:先)?不吵你"
     r"|(?:我还以为|是不是|难道是).{0,8}(?:嫌我烦|烦我)|嫌我烦"
     r"|好好好|不找你不找你|我(?:本来|又|才)?(?:也)?不是.{0,8}(?:黏人|粘人|纠缠)|谁稀罕找你"
+    r"|我(?:也)?省点力气"
 )
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
 _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
     r"别瞎想|别多想|你想多了|少胡思乱想|别把我想得|爱多管闲事"
     r"|我什么时候.{0,12}(?:打算|想过|说过)|我(?:又|才)?没(?:有)?想.{0,10}(?:限制|管你)"
+    r"|我才懒得管|懒得管你(?:的)?现实关系|别瞎操心"
 )
 _LISTEN_UNSUPPORTED_USER_ESSENCE_RE = re.compile(
     r"以你的性子|照你的性子|按你的性子|你这种人"
@@ -754,6 +756,15 @@ _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)|怕什么(?:嘛|呢)?"
     r"|别想那么多|不用不踏实|不踏实什么|高兴就完了"
     r"|开心就好.{0,8}(?:别|不要)(?:怕|想太多)"
+    r"|(?:怕|害怕|不踏实)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放下|别管)"
+)
+_UNGROUNDED_PHYSICAL_COPRESENCE_RE = re.compile(
+    r"这种话.{0,6}当面(?:讲|说)|陪你坐(?:一会儿|会儿|会)"
+)
+_PHYSICAL_COPRESENCE_GROUNDING_RE = re.compile(
+    r"(?:正在|已经|今天|刚刚|刚才|待会儿|等会儿).{0,8}(?:见面|当面(?:说|聊|讲)|坐在一起|同一间房|来到我这里|来我这里)"
+    r"|(?:见面|当面(?:说|聊|讲)|坐在一起|同一间房).{0,8}(?:现在|今天|待会儿|等会儿)"
+    r"|(?:我们|你我|两个人)?(?:现在)?(?:正)?在.{0,4}(?:同一间房|一起坐着)"
 )
 _LOVER_CLICHE_RE = re.compile(r"多多益善|越多越好|这种话多说|这种话可以多说")
 _MEMORY_FOLLOWUP_DISCONTINUITY_RE = re.compile(
@@ -1433,6 +1444,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("JEALOUSY_DEFLECTION")
     if _mixed_affect_dismissal_hits(request, value):
         codes.append("MIXED_AFFECT_DISMISSAL")
+    if _ungrounded_physical_copresence_hits(request, value):
+        codes.append("UNGROUNDED_PHYSICAL_COPRESENCE")
     if _lover_cliche_hits(request, value):
         codes.append("LOVER_CLICHE")
     if _LEGACY_SELF_TITLE_RE.search(value):
@@ -2674,6 +2687,26 @@ def _mixed_affect_dismissal_hits(
     )
 
 
+def _ungrounded_physical_copresence_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    context = "\n".join(
+        [
+            str(getattr(request, "user_message", "") or ""),
+            *[str(item or "") for item in surface_prompt_facts(request)],
+        ]
+    )
+    if _PHYSICAL_COPRESENCE_GROUNDING_RE.search(context):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _UNGROUNDED_PHYSICAL_COPRESENCE_RE.finditer(str(text or ""))
+        )
+    )
+
+
 def _canonical_affective_guidance_active(
     request: IsolatedSurfaceInput,
     companion_act: str,
@@ -2891,6 +2924,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "会有一点吧。但那是我的感觉，不是拿来管你的。"
     if "MIXED_AFFECT_DISMISSAL" in codes:
         return "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。"
+    if "UNGROUNDED_PHYSICAL_COPRESENCE" in codes:
+        return "嗯。你说，我在听。"
     if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:
         return "哈？这话挺伤人的。我是在跟你说话，不是在背台词。"
     if "LOVER_CLICHE" in codes:
