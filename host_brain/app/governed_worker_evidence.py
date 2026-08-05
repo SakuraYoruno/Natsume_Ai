@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 from typing import Any
 
 from host_brain.app.governed_host_contracts import _ACCEPTANCE_CRITERION
@@ -53,6 +54,7 @@ GOVERNED_WORKER_PROJECTION_UNAVAILABLE = (
 )
 GOVERNED_WORKER_PROJECTION_INVALID = "GOVERNED_WORKER_PROJECTION_INVALID"
 GOVERNED_WORKER_COMMIT_DRIFT = "GOVERNED_WORKER_COMMIT_DRIFT"
+GOVERNED_WORKER_REJECTED = "GOVERNED_WORKER_REJECTED"
 GOVERNED_WORKER_AUTHORITY_DRIFT = "GOVERNED_WORKER_AUTHORITY_DRIFT"
 GOVERNED_WORKER_VERIFICATION_POLICY_INVALID = (
     "GOVERNED_WORKER_VERIFICATION_POLICY_INVALID"
@@ -566,13 +568,19 @@ def _assert_commit_binding(
             GOVERNED_WORKER_COMMIT_DRIFT,
             "worker COMMIT audit differs from the durable projection",
         )
-    if (
-        canonical.get("decision") != "APPROVE"
-        or not str(canonical.get("narrative") or "").strip()
-    ):
+    narrative = str(canonical.get("narrative") or "").strip()
+    if not narrative:
         _blocked(
             GOVERNED_WORKER_COMMIT_DRIFT,
             "only an approved non-empty durable projection can be verified",
+        )
+    if canonical.get("decision") != "APPROVE":
+        durable_reason = str(canonical.get("reason_code") or "").strip().upper()
+        if re.fullmatch(r"[A-Z][A-Z0-9_]{1,127}", durable_reason) is None:
+            durable_reason = GOVERNED_WORKER_REJECTED
+        _blocked(
+            durable_reason,
+            f"durable worker rejected its output: {narrative}",
         )
 
 
@@ -938,6 +946,7 @@ __all__ = [
     "GOVERNED_ACCEPTANCE_CRITERION_UNPROVEN",
     "GOVERNED_WORKER_AUTHORITY_DRIFT",
     "GOVERNED_WORKER_COMMIT_DRIFT",
+    "GOVERNED_WORKER_REJECTED",
     "GOVERNED_WORKER_OUTPUT_CONTRACT_INVALID",
     "GOVERNED_WORKER_PROJECTION_INVALID",
     "GOVERNED_WORKER_PROJECTION_NOT_FOUND",

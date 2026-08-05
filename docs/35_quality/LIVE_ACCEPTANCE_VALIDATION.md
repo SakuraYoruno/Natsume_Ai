@@ -172,3 +172,7 @@ VTube Studio 当前仍返回 API 51：设备端授权窗口已打开但未确认
 VTS 方面，API 51 表示设备端授权窗口已经打开。旧自动重连虽限制并发，仍会按退避周期创建连接并缓慢增加句柄；现在该状态进入硬暂停，只有 Edge 重启或显式 forced reconnect 才重新尝试。真实 health 为 `authentication_pending=true`、`reconnect_attempts=0`、`total_reconnect_failures=0`、`thread_alive=false`，因此不再制造后台请求风暴。因为用户尚未确认授权且没有加载模型，可见 Avatar 仍是 `ACCEPTANCE_PENDING_EXTERNAL`，不能记 PASS。
 
 同轮 Gateway 实测还暴露 Host 配对缺陷：中文正文触发问题预算修复时，Surface 删除结尾追问并清空 `tts_text_ja`，Acceptance 随后错误生成 `lang_hint=zh` 的 Voice intent，日语 Edge 正确以 `VOICE_SCHEMA_INVALID` 拒绝。代码现规定首个模型尝试遇到正文修复时必须重新生成中日配对；最终仍无合法日语时显式抑制 `VOICE`，只保留同一 `AffectiveTurnPlan` 的 Avatar transition／release。受影响单元与合同回归 177 项通过；提交后真实 Gateway→Host→Edge 重测前，该项为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`686a8835f` 加载后的真实新请求已经把上述配对缺陷推进到物理链路：`intent_planning` 的 `voice.speak` 在远端 GPT-SoVITS 返回 `APPLIED`，`avatar.set_expression` 仅因 VTS API 51 等待人工授权而拒绝，没有再次出现中文 `lang_hint=zh` 进入日语模型。该证据关闭“中文误送日语模型”，但不关闭可见 Avatar 外部条件。
+
+同轮 `code_generation` 暴露的是另一条延迟与诊断缺陷。首个 DeepSeek 外部请求在 16,219 ms 返回并记录 2,808 tokens 与 transport identity，但中文正文包含无证据的共同历史措辞；第二次语义修复请求在 43,672 ms 超时，durable worker 正确写入 `MODEL_PROVIDER_USAGE_UNPROVEN`，独立 verifier 却将 REJECT 投影误报为 `GOVERNED_WORKER_COMMIT_DRIFT`。修复后，只有完整 fenced code、唯一违规为共同历史且现有日语摘要不含对应历史声称时，才本地删除违规叙述并保留代码与日语摘要；其余正文变化仍要求中日成对重生成。代码修复提示不再复制整套生命上下文，verifier 在确认 COMMIT 与 durable projection 一致后保留 worker 原始 REJECT reason。定向单元回归 74 项通过；真实新请求前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

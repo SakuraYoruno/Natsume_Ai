@@ -245,6 +245,16 @@ def evaluate_surface_model_response_for_retry(
     candidate = str(structured.get("reply_text") or "").strip()
     if candidate:
         violations = list(_surface_hard_gate_violations(request, candidate))
+        paired_repair = _paired_direct_code_history_repair(
+            request,
+            structured=structured,
+            violation_codes=violations,
+        )
+        if paired_repair is not None:
+            return SurfaceModelRetryEvaluation(
+                retry=False,
+                reason="paired_deterministic_repair_available",
+            )
         japanese_voice = japanese_companion_voice_enabled()
         if (
             japanese_voice
@@ -362,10 +372,36 @@ def _compact_surface_hard_gate_retry_messages(
     previous_text: str,
     violation_codes: Sequence[str],
 ) -> list[dict[str, str]]:
-    facts = "\n".join(f"- {str(item).strip()}" for item in _surface_runtime_prompt_facts(request) if str(item).strip())
-    must_not = "\n".join(f"- {str(item).strip()}" for item in _surface_runtime_must_not_do(request) if str(item).strip())
     output_contract = _surface_output_contract()
     direct_code_answer = _direct_code_answer_active(request)
+    if direct_code_answer:
+        # A code repair already receives the prior answer. Repeating the full
+        # life/persona context here made the retry larger than the first call
+        # and could consume the entire live-model deadline.
+        facts = "\n".join(
+            (
+                "- 当前请求是自包含代码回答，不需要共享历史或现实感知。",
+                "- 必须直接交付完整、可复制运行的 Markdown 代码块。",
+            )
+        )
+        must_not = "\n".join(
+            (
+                "- 不得提及 Codex、模型、代理或内部工具。",
+                "- 不得虚构过去共同经历、长期陪伴或用户现实状态。",
+                "- 不得删掉代码主体后只给摘要。",
+            )
+        )
+    else:
+        facts = "\n".join(
+            f"- {str(item).strip()}"
+            for item in _surface_runtime_prompt_facts(request)
+            if str(item).strip()
+        )
+        must_not = "\n".join(
+            f"- {str(item).strip()}"
+            for item in _surface_runtime_must_not_do(request)
+            if str(item).strip()
+        )
     accepted_task_results_block = _accepted_task_results_prompt_block(request)
     if output_contract == "json":
         if japanese_companion_voice_enabled():
@@ -680,6 +716,10 @@ _UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"不是第一次|每次(?:都|总)|以前(?:也|就|说过|见过)|上次|之前(?:也|就|说过|见过)"
     r"|老是这样|总是这样|又(?:这样|来了|说这种话|是这种)"
     r"|陪你聊这么久|聊这么久|这么久|一直在这|一直陪|一直跟你"
+)
+_JAPANESE_UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
+    r"(?:初めてじゃない|前にも|以前も|この前も|何度も|長い間|"
+    r"ずっと(?:ここ|一緒|そば)|いつも(?:こう|同じ))"
 )
 _SURFACE_INTERNAL_AUTHORSHIP_RE = re.compile(
     r"(?:(?:交给|让|叫).{0,6})?(?:Codex|ChatGPT|DeepSeek|Qwen|GPT[-\w]*)"
@@ -2416,7 +2456,7 @@ def _zero_question_budget_prompt_hits(request: IsolatedSurfaceInput, text: str) 
 
 
 def _unsupported_shared_history_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
-    value = str(text or "")
+    value = _surface_prose_without_fenced_code(text)
     hits = tuple(dict.fromkeys(match.group(0) for match in _UNSUPPORTED_SHARED_HISTORY_RE.finditer(value)))
     if not hits:
         return ()
@@ -2428,6 +2468,72 @@ def _unsupported_shared_history_hits(request: IsolatedSurfaceInput, text: str) -
         ]
     )
     return tuple(hit for hit in hits if hit not in evidence)
+
+
+def _surface_prose_without_fenced_code(text: Any) -> str:
+    """Return visible prose while ignoring literal fenced-code content."""
+
+    return re.sub(r"```[\s\S]*?```", "\n", str(text or ""))
+
+
+def _repair_unsupported_shared_history_prose(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> str:
+    """Drop only unsupported-history prose while preserving runnable code."""
+
+    parts = re.split(r"(```[\s\S]*?```)", str(text or ""))
+    repaired: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.startswith("```"):
+            repaired.append(part)
+            continue
+        sentences = re.split(r"(?<=[。！？!?])", part)
+        repaired.extend(
+            sentence
+            for sentence in sentences
+            if not _unsupported_shared_history_hits(request, sentence)
+        )
+    return "".join(repaired).strip()
+
+
+def _paired_direct_code_history_repair(
+    request: IsolatedSurfaceInput,
+    *,
+    structured: Mapping[str, Any],
+    violation_codes: Sequence[str],
+) -> tuple[str, str] | None:
+    """Repair one narrow paired code response without another model call.
+
+    The Japanese summary is retained only when the visible response has
+    exactly one unsupported-history defect and the speech summary contains no
+    corresponding Japanese history claim. Other edits still regenerate the
+    Chinese/Japanese pair together.
+    """
+
+    if (
+        not _direct_code_answer_active(request)
+        or set(violation_codes) != {"UNSUPPORTED_SHARED_HISTORY"}
+    ):
+        return None
+    reply_text = str(structured.get("reply_text") or "").strip()
+    tts_text_ja = str(structured.get("tts_text_ja") or "").strip()
+    if (
+        not reply_text
+        or not tts_text_ja
+        or _JAPANESE_UNSUPPORTED_SHARED_HISTORY_RE.search(tts_text_ja)
+    ):
+        return None
+    repaired = _repair_unsupported_shared_history_prose(request, reply_text)
+    if (
+        not repaired
+        or not _FENCED_CODE_BLOCK_RE.search(repaired)
+        or _surface_hard_gate_violations(request, repaired)
+    ):
+        return None
+    return repaired, tts_text_ja
 
 
 def _surface_internal_authorship_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
@@ -2603,6 +2709,16 @@ def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
     if not value:
         return ""
     violations = _surface_hard_gate_violations(request, value)
+    if set(violations) == {"UNSUPPORTED_SHARED_HISTORY"}:
+        repaired_history = _repair_unsupported_shared_history_prose(
+            request,
+            value,
+        )
+        if repaired_history and not _surface_hard_gate_violations(
+            request,
+            repaired_history,
+        ):
+            return repaired_history
     fallback = _hard_gate_fallback(request, violations)
     if fallback and not _surface_hard_gate_violations(request, fallback):
         return fallback
@@ -2966,6 +3082,20 @@ class SurfaceRuntime:
                         "codes": list(hard_gate_observations),
                     }
                 )
+        paired_history_repair = _paired_direct_code_history_repair(
+            request,
+            structured=structured,
+            violation_codes=hard_gate_observations,
+        )
+        if paired_history_repair is not None:
+            repaired_text, repaired_tts_text_ja = paired_history_repair
+            structured = {
+                **structured,
+                "reply_text": repaired_text,
+                "tts_text_ja": repaired_tts_text_ja,
+            }
+            candidate_texts = [repaired_text]
+            hard_gate_observations = ()
         hard_gate_retry_enabled = _surface_hard_gate_retry_enabled()
         hard_gate_retry_performed = False
         force_contract_retry = any(

@@ -35,6 +35,9 @@ def _fixture(
     *,
     criteria: tuple[str, ...] = (_ACCEPTANCE_CRITERION,),
     output_contract: dict[str, object] | None = None,
+    decision: str = "APPROVE",
+    reason_code: str | None = None,
+    narrative: str = "已生成受治理的 Pentest 交接结果",
 ):
     command = SimpleNamespace(
         command_id="host-command://internal/request-worker-evidence",
@@ -74,11 +77,11 @@ def _fixture(
     body = {
         "phase": "COMMIT",
         "done": True,
-        "decision": "APPROVE",
-        "reason_code": None,
+        "decision": decision,
+        "reason_code": reason_code,
         "command_id": command.command_id,
         "request_id": command.request_id,
-        "narrative": "已生成受治理的 Pentest 交接结果",
+        "narrative": narrative,
         "route_type": "delegate",
         "target_id": "pentest_agent",
         "graph_id": context["graph_id"],
@@ -256,6 +259,27 @@ def test_verifier_rejects_missing_projection() -> None:
 
     assert result["status"] == "FAIL"
     assert result["reason_code"] == GOVERNED_WORKER_PROJECTION_NOT_FOUND
+
+
+def test_verifier_preserves_durable_worker_rejection_reason() -> None:
+    command, order, context, projection, commit, refs = _fixture(
+        decision="REJECT",
+        reason_code="MODEL_PROVIDER_USAGE_UNPROVEN",
+        narrative="受治理的模型调用超时，无法证明本次用量。",
+    )
+
+    result = DurableWorkerCommitVerifier(
+        projection_reader=_Reader(projection)
+    ).verify(
+        command=command,
+        work_order=order,
+        execution_context=context,
+        worker_commit=commit,
+        evidence_refs=refs,
+    )
+
+    assert result["status"] == "FAIL"
+    assert result["reason_code"] == "MODEL_PROVIDER_USAGE_UNPROVEN"
 
 
 def test_verifier_checks_task_node_output_contract_before_acceptance() -> None:

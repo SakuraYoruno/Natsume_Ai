@@ -494,9 +494,67 @@ def test_direct_code_answer_retries_summary_and_internal_authorship_leak(monkeyp
     assert "DIRECT_CODE_MISSING_RUNNABLE_SNIPPET" in retry_prompt
     assert "SURFACE_INTERNAL_AUTHORSHIP_LEAK" in retry_prompt
     assert "tts_text_ja" in retry_prompt
+    assert "生命导演" not in retry_prompt
+    assert len(retry_prompt) < 3_000
     assert "def dedup_by_freq" in result.selected_text
     assert "Codex" not in result.selected_text
     assert result.tts_text_ja == "出現回数を数えて、多い順に返す形にしたよ。"
+
+
+def test_direct_code_answer_repairs_unsupported_history_without_second_model_call(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    calls: list[list[dict[str, str]]] = []
+    raw = json.dumps(
+        {
+            "reply_text": (
+                "这种小函数也不是第一次写了。直接用这个：\n"
+                "```python\n"
+                "from collections import Counter\n\n"
+                "def dedup_by_freq(items):\n"
+                "    return [item for item, _ in Counter(items).most_common()]\n"
+                "```"
+            ),
+            "tts_text_ja": "出現回数を数えて、多い順に返す関数だよ。",
+            "natsume_emotion_tag": "CALM",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.4,
+        },
+        ensure_ascii=False,
+    )
+    payload = _payload(
+        user_message="写一个 Python 函数，统计列表元素频次并按频次降序返回。",
+        reply_control_packet={
+            "response_move": "direct_code_answer",
+            "task_mode": "technical_help",
+            "emotional_tone": "steady_helpful",
+            "relationship_distance": "familiar",
+            "information_budget": "normal",
+            "question_budget": 0,
+            "facts": [],
+            "style_anchor": [],
+        },
+    )
+    request = surface_runtime_module._coerce_surface_request(payload)  # noqa: SLF001
+    evaluation = evaluate_surface_model_response_for_retry(
+        request,
+        raw_output=raw,
+        current_messages=(),
+    )
+
+    def generate(messages):
+        calls.append(messages)
+        return raw
+
+    result = asyncio.run(SurfaceRuntime(generate).run(payload))
+
+    assert evaluation.retry is False
+    assert evaluation.reason == "paired_deterministic_repair_available"
+    assert len(calls) == 1
+    assert "不是第一次" not in result.selected_text
+    assert "def dedup_by_freq" in result.selected_text
+    assert result.tts_text_ja == "出現回数を数えて、多い順に返す関数だよ。"
 
 
 def test_japanese_companion_voice_discards_non_japanese_speech_text() -> None:
