@@ -122,7 +122,10 @@ test('Core Release validates live health contracts and canonical production navi
     const hostHealth = await hostResponse.json()
     expect(['OK', 'ACCEPTANCE_PENDING_EXTERNAL']).toContain(hostHealth.status)
     expect(hostHealth.version).toBeTruthy()
-    expect(hostHealth.details?.summary?.overall_status).toBe(hostHealth.status)
+    const expectedRuntimeStatus = hostHealth.status === 'OK'
+      ? 'UP'
+      : hostHealth.status
+    expect(hostHealth.details?.summary?.overall_status).toBe(expectedRuntimeStatus)
     expect(hostHealth.details?.summary?.required_unavailable).toBe(0)
   }
 
