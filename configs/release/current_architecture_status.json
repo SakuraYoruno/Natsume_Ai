@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_NATURAL_AFFECT_AND_MULTITURN_IDENTITY_REMEDIATED_REAL_RETEST_PENDING",
+  "commit_scope": "A15_STABLE_SUBJECT_REAL_COHORT_2_OF_4_STRUCTURAL_PASS_QUALITY_REMEDIATED_RETEST_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -39,7 +39,9 @@
     },
     "affective_streaming": {
       "status": "WIRED_PARTIAL",
-      "real_provider_latency": "INCOMPLETE"
+      "real_provider_latency": "INCOMPLETE",
+      "high_ambiguity_primary_path": "EXACT_TWO_PAIRED_TEXT_VOICE_CANDIDATES",
+      "second_attempt_safe_single_fallback": "WIRED_NOT_BENEFIT_ELIGIBLE_REAL_RETEST_PENDING"
     },
     "voice": {
       "status": "REMOTE_EDGE_REAL_PASS_PARTIAL",
@@ -365,7 +367,10 @@
     "gateway_live_code_generation": "PASS_REAL_GATEWAY_HOST_TASKGRAPH_EDGE_VOICE_AVATAR_PENDING_EXTERNAL",
     "governed_worker_rejection_diagnostics": "UNIT_PASS_SEMANTIC_RETRY_REASON_FIXED_REAL_SUCCESS_PATH_CONFIRMED_FAILURE_INJECTION_PENDING",
     "gateway_live_probe_terminal_diagnostics": "PASS_EXACT_MESSAGE_BOUND_REAL_TWO_TURN",
-    "digital_life_real_multiturn_smoke": "CALIBRATION_FOUND_NEUTRAL_APPRAISAL_COLLAPSE_CODE_REMEDIATED_REAL_RETEST_PENDING",
+    "digital_life_real_multiturn_smoke": "REAL_STABLE_SUBJECT_4_CASE_2_STRUCTURAL_PASS_2_FAIL_HUMAN_QUALITY_FAILURES_FOUND_CODE_REMEDIATED_RETEST_PENDING",
+    "digital_life_real_multiturn_report_sha256": "c246275def1c2884296df01d792d525fe931cfeae95e39537ec50580af0cedda",
+    "digital_life_real_multiturn_invalid_report": "dl-live-1785960669932.json_INVALID_PER_TURN_SENDER_OLD_PROCESS",
+    "digital_life_affective_quality_regression": "PASS_119",
     "docker_host_obs_monitor_gateway_full_stack": "RUNNING_CURRENT_SHA_DOCKER_MONITOR_TEXT_VOICE_PASS_VTS_PENDING_EXTERNAL",
     "real_provider_performance": "INCOMPLETE",
     "fixed_72_scenarios": "EXECUTION_SPEC_READY_STABLE_SUBJECT_ASSERTED_48_GATEWAY_TEXT_24_REAL_DRIVER_REQUIRED_MEASUREMENT_PENDING",
@@ -405,7 +410,7 @@
     "REAL_PROVIDER_LATENCY_TARGET_NOT_MET",
     "MULTI_TURN_HUMAN_BLIND_TEST_NOT_RUN",
     "FULL_DIGITAL_LIFE_FAILURE_MATRIX_PENDING",
-    "NATURAL_TEXT_AFFECT_APPRAISAL_REAL_RETEST_PENDING",
-    "DIGITAL_LIFE_LIVE_COHORT_STABLE_SUBJECT_REAL_RETEST_PENDING"
+    "DIGITAL_LIFE_LIVE_COHORT_REAL_RESULT_2_OF_4_STRUCTURAL_PASS_HUMAN_REVIEW_NOT_PASSED",
+    "DIGITAL_LIFE_BOUNDARY_JEALOUSY_MIXED_AFFECT_REMEDIATION_REAL_RETEST_PENDING"
   ]
 }

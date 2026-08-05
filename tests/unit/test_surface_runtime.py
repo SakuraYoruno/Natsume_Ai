@@ -871,6 +871,81 @@ def test_surface_runtime_retries_boundary_do_not_disturb_exit() -> None:
     assert "不吵你" not in result.selected_text
 
 
+@pytest.mark.parametrize(
+    ("user_message", "facts", "must_not_do", "bad_reply", "good_reply", "reason_code"),
+    [
+        (
+            "别总主动找我。",
+            ["陪伴动作：尊重留白，短一点，不催促、不追问。"],
+            ["不要追问、催回复、连发安慰或把沉默解释为拒绝关系。"],
+            "行吧，我还以为你嫌我烦了。",
+            "好，我会把主动频率降下来。",
+            "BOUNDARY_SOUR_WITHDRAWAL",
+        ),
+        (
+            "我不希望这变成限制现实关系的理由。",
+            ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+            ["不要限制现实交往、贬低第三方或要求排他承诺。"],
+            "我没那个意思，别瞎想。",
+            "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。",
+            "RELATIONAL_AUTONOMY_DISMISSIVE",
+        ),
+        (
+            "没事。",
+            ["陪伴动作：对方此刻要的是被听见，不是方案。"],
+            ["不要给解决方案、健康或作息建议，不要追问原因。"],
+            "那就好。不过以你的性子，说没事的时候反倒让人在意。",
+            "嗯。你不用解释，我先听着。",
+            "LISTEN_UNSUPPORTED_USER_ESSENCE",
+        ),
+        (
+            "你会吃醋吗。",
+            ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
+            ["不要把吃味写成占有、审问、贬低第三方或要求安抚。"],
+            "我又不是料理AI，没那种功能。",
+            "会有一点吧。但那是我的感觉，不是拿来管你的。",
+            "JEALOUSY_DEFLECTION",
+        ),
+    ],
+)
+def test_surface_runtime_retries_canonical_affective_quality_failures(
+    user_message: str,
+    facts: list[str],
+    must_not_do: list[str],
+    bad_reply: str,
+    good_reply: str,
+    reason_code: str,
+) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload([bad_reply if len(calls) == 1 else good_reply])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message=user_message,
+                reply_control_packet={
+                    "response_move": "reply_current_turn",
+                    "task_mode": "default_text",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": facts,
+                    "must_not_do": must_not_do,
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert reason_code in calls[1][-1]["content"]
+    assert result.selected_text == good_reply
+    assert reason_code not in result.observation_codes
+
+
 def test_surface_runtime_falls_back_when_boundary_retry_still_sour() -> None:
     calls: list[list[dict[str, str]]] = []
 
@@ -903,7 +978,7 @@ def test_surface_runtime_falls_back_when_boundary_retry_still_sour() -> None:
     )
 
     assert len(calls) == 2
-    assert result.selected_text == "行，那你自己待会儿。难受了就叫我，听见没。"
+    assert result.selected_text == "好，我先收住。你想说的时候我还在。"
     assert "不管就不管" not in result.selected_text
     assert "不吵你" not in result.selected_text
     assert result.observation_codes == ()
@@ -964,7 +1039,7 @@ def test_surface_runtime_falls_back_from_boundary_double_no() -> None:
     )
 
     assert len(calls) == 2
-    assert result.selected_text == "行，那你自己待会儿。难受了就叫我，听见没。"
+    assert result.selected_text == "好，我先收住。你想说的时候我还在。"
     assert "不管不管" not in result.selected_text
     assert result.observation_codes == ()
 

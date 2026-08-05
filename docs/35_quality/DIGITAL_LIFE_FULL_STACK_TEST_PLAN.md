@@ -788,4 +788,6 @@ pwsh scripts/runtime/stop_docker_services.ps1 -ProjectName $DockerProject
 
 高歧义多轮探针必须同时检查候选 cardinality 与中日语字段配对。若模型返回单回复或候选缺少 `tts_text_ja`，允许一次成对重试；最终失败必须报告语义重试原因，不能归类为预算超限。真实重放还要同时核对文本、Voice、TaskGraph 和 aftereffect，不能只看模型返回。
 
+为避免输出格式波动让私人陪伴直接断话，唯一一次重试后的单候选可在同时满足“非空中文、自然日语、关系边界、非操控门禁和本地文本门禁”时以 `DEGRADED_SINGLE_AFTER_RETRY` 送达。它只证明可用性降级，不满足本节双候选 cardinality，自动报告必须写入 `benefit_eligible=false`。没有日语字段、被安全门禁拒绝或无法解析时仍 fail-closed。
+
 上述两轮已在 `767f21b5a` 的真实 Gateway、DeepSeek 和远端 GPT-SoVITS 上通过：第二轮候选数 2、配对形状正确、TaskGraph 完成、Voice 应用。后续 G 阶段仍须把场景说明转换为自然可执行台词，逐族运行并由人工评价内容是否接住用户；不能用这一个成功样本推导整体“像人”。

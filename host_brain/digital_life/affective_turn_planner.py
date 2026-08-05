@@ -49,6 +49,7 @@ _APPRAISAL_CANDIDATE_SELECTION_KINDS = frozenset(
         "DIRECTED_RELATIONAL_THREAT",
         "DIRECTED_RELATIONAL_COMPARISON",
         "USER_RELATIONAL_AUTONOMY",
+        "USER_INVITES_JEALOUSY_DISCLOSURE",
     }
 )
 _DIRECT_REPAIRABLE_APPRAISALS = frozenset(
@@ -572,6 +573,8 @@ def _select_companion_act(
         return "LISTEN"
     if appraisal_kind == "USER_RELATIONAL_AUTONOMY":
         return "RESPECT_AUTONOMY"
+    if appraisal_kind == "USER_INVITES_JEALOUSY_DISCLOSURE":
+        return "CONTAINED_JEALOUSY"
     if appraisal_kind == "USER_DISTRESS":
         return "COMFORT"
     if appraisal_kind == "SHARED_POSITIVE_MOMENT":

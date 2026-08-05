@@ -5,6 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from host_brain.app.surface_affective_native_stream import (
+    _buffered_affective_candidate_records,
+)
 from host_brain.app.surface_main_chain_adapter import (
     _buffered_affective_candidate_messages,
     _select_buffered_affective_candidate,
@@ -290,6 +293,14 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert len(selection["candidate_digests"]) == 2
     assert "刚刚" not in str(selection)
 
+    labeled_records = _buffered_affective_candidate_records(
+        "候选1：我先把距离收住。\n候选2：好，你想说的时候我还在。"
+    )
+    assert [item["reply_text"] for item in labeled_records] == [
+        "我先把距离收住。",
+        "好，你想说的时候我还在。",
+    ]
+
     monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
     paired_messages = _buffered_affective_candidate_messages(
         [
@@ -359,6 +370,29 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
             compiled_request=compiled,
             expected_candidate_count=2,
         )
+
+    single_after_retry = {
+        "reply_text": "我会先把距离收住。你想说的时候，我还在。",
+        "tts_text_ja": "少し距離を置くね。話したくなったら、私はここにいるよ。",
+        "natsume_emotion_tag": "CALM",
+        "user_emotion_tag": "NEUTRAL",
+        "emotion_confidence": 0.4,
+    }
+    degraded_trace: dict[str, object] = {}
+    degraded_output = _select_buffered_affective_candidate(
+        raw_output=json.dumps(single_after_retry, ensure_ascii=False),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=degraded_trace,
+        allow_single_degradation=True,
+    )
+    assert json.loads(degraded_output)["reply_text"] == single_after_retry["reply_text"]
+    degraded_selection = degraded_trace["affective_candidate_selection"]
+    assert degraded_selection["candidate_count"] == 1
+    assert degraded_selection["required_candidate_count"] == 2
+    assert degraded_selection["selection_status"] == "DEGRADED_SINGLE_AFTER_RETRY"
+    assert degraded_selection["benefit_eligible"] is False
+    assert degraded_selection["selected_output_shape"] == "SINGLE_TEXT_VOICE_DEGRADED"
 
 
 def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection() -> None:

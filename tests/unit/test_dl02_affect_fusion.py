@@ -249,6 +249,33 @@ def test_natural_space_and_relationship_autonomy_phrases_take_distinct_paths(
     assert any("不要限制现实交往" in item for item in autonomy_guidance.must_not_do)
 
 
+def test_direct_jealousy_question_becomes_owned_contained_disclosure(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-direct-jealousy-question"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="你会吃醋吗。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == (
+        "user_invites_jealousy_disclosure"
+    )
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "CARE",
+        "JEALOUSY",
+    }
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "CONTAINED_JEALOUSY"
+    assert guidance.plan.candidate_count == 2
+    assert guidance.plan.expression_plan.voice_style == "CONTAINED_JEALOUSY"
+    assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
+
+
 def test_low_mood_does_not_take_over_an_explicit_technical_task(
     tmp_path: Path,
 ) -> None:

@@ -97,6 +97,11 @@ _RELATIONAL_AUTONOMY_MARKERS = (
     "不能变成排他",
     "不希望变成排他",
 )
+_JEALOUSY_DISCLOSURE_MARKERS = (
+    "你会吃醋吗",
+    "你吃醋吗",
+    "你会不会吃醋",
+)
 # These are deliberately narrow, direct-address patterns. They are appraisal
 # triggers only: original utterances remain outside the Life journal. A request
 # for space, a boundary, or a repair signal always takes priority below.
@@ -1344,13 +1349,36 @@ def _build_appraisal_candidates(
 def _direct_relational_candidate(message: str) -> _AppraisalCandidate | None:
     """Return one high-precision, self-owned relational appraisal.
 
-    This detector deliberately recognises only direct threats, denigration and
-    explicit comparison.  It neither infers relationship permission nor turns
-    ordinary negative mood into a grievance.  Jealousy is held at low
-    intensity and always regulated as ``CONTAIN`` so it cannot become an
-    exclusive, comparative or reply-seeking move.
+    This detector deliberately recognises only direct disclosure invitations,
+    threats, denigration and explicit comparison.  It neither infers
+    relationship permission nor turns ordinary negative mood into a
+    grievance.  Jealousy is held at low intensity and always regulated as
+    ``CONTAIN`` so it cannot become an exclusive, comparative or reply-seeking
+    move.
     """
 
+    if any(marker in message for marker in _JEALOUSY_DISCLOSURE_MARKERS):
+        return _candidate(
+            kind="user_invites_jealousy_disclosure",
+            score=0.74,
+            goal=0.04,
+            significance=0.62,
+            boundary=0.12,
+            risk=0.08,
+            uncertainty=0.28,
+            responsibility=0.0,
+            controllability=0.78,
+            components=(
+                # This is Natsume's own small relational reaction to a direct
+                # question, not a claim of exclusivity and not a copy of the
+                # user's state.  CONTAIN keeps the disclosure honest without
+                # turning it into control, comparison, or a demand for care.
+                EmotionComponentV1("JEALOUSY", 0.28, -0.1, 0.24, "contain"),
+                EmotionComponentV1("CARE", 0.22, 0.24, 0.12, "respect_choice"),
+            ),
+            action="contain_jealousy",
+            regulation_mode="CONTAIN",
+        )
     if any(marker in message for marker in _DIRECTED_THREAT_MARKERS):
         return _candidate(
             kind="directed_relational_threat",

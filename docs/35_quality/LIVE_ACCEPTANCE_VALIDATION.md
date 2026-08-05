@@ -194,3 +194,7 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 代码现以不增加模型调用的本地快路径修复该断点：TEXT observer 保存最多四个低置信情绪分量；隐晦不顺、好消息、不踏实、拒绝建议、安静／主动联系边界和现实关系自主均能进入对应 Appraisal。新增 `LISTEN` 与 `RESPECT_AUTONOMY` 两个陪伴动作；前者禁止方案、作息建议与追问，后者禁止排他、限制现实交往和赌气退出。共同历史门同时移除过宽的裸 `这么久` 命中，仍拦截 `陪你聊这么久` 等真正无依据的共同经历。AffectFusion、Planner、Surface 和重启相邻集 124 项通过；真实四组重测前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`，人感仍为 `NOT_RUN`。
 
 `9827a026d` 加载后的首段真实复验已经看到低落 `COMFORT`、拒绝方案 `LISTEN` 和空间边界 `GIVE_SPACE`；但第三句又回到 revision 0。检查终态 payload 发现旧 runner 把 turn index 拼入 `from_id`，导致 Host 每轮生成不同 `relationship_subject_id`，这轮因此被主动终止且不能算多轮证据。runner 现固定整条轨迹的发送者，只让 `msg_id` 随回合变化，并把跨回合 subject/session identity 加为强制断言；重新运行前保持 `RETEST_REQUIRED`。
+
+固定 sender 后的有效报告为 `dl-live-1785961076715.json`，SHA-256 `c246275def1c2884296df01d792d525fe931cfeae95e39537ec50580af0cedda`，耗时 541.9 秒。四条轨迹只有 2 条自动结构通过、2 条失败，而且结构通过不能覆盖人工质量：低落轨迹 revision 为 1→3→4 且保持 `LISTEN`，但“以你的性子”是无来源的人格判断；空间轨迹回复“我还以为你嫌我烦了”形成负罪暗示；喜忧轨迹已以 `PLAY` 接住好消息，却在“我很开心又有点怕”连续两次得到 `AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID`；现实自主轨迹出现“别瞎想”，吃醋问题则被“料理AI”回避。旧进程在终止后写出的 `dl-live-1785960669932.json` 使用逐轮 sender，明确标记 `INVALID`，不得计入证据。
+
+当前修复把“你会吃醋吗”识别为七海自身低强度 `JEALOUSY + CARE` 的 `user_invites_jealousy_disclosure`，冻结为 `CONTAINED_JEALOUSY`，不推导排他或现实关系权限；Surface 在 canonical `GIVE_SPACE`、`RESPECT_AUTONOMY`、`LISTEN` 和 `CONTAINED_JEALOUSY` 指引下分别拒绝负罪暗示、防御性否定、无证据人格判断和 AI／功能式回避。双候选仍是目标路径且首轮失败只允许一次修复；第二轮若只有一个完整、安全的中日对象则以 `DEGRADED_SINGLE_AFTER_RETRY` 发送，`benefit_eligible=false`，避免格式波动造成整轮沉默但不伪造双候选成功。相关 119 项单元回归通过；Host 尚未加载本提交，真实选择性复验状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

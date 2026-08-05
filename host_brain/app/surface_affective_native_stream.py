@@ -321,15 +321,47 @@ def _buffered_affective_candidate_records(raw_output: str) -> list[dict[str, Any
                     )
     if records:
         return records[:5]
+    legacy_candidates = [
+        candidate
+        for candidate in parse_surface_candidates(raw)
+        if str(candidate or "").strip()
+    ][:5]
+    if len(legacy_candidates) >= 2:
+        return [
+            {
+                "reply_text": candidate,
+                "structured_payload": None,
+                "normalized_payload": {},
+            }
+            for candidate in legacy_candidates
+        ]
+    # A provider may still obey the base single-reply JSON contract after the
+    # high-ambiguity override.  Keep that response as one *explicit* record so
+    # the caller can request one repair and, only after the repair is spent,
+    # make a fail-soft decision without treating raw JSON as visible prose.
+    normalized_single = parse_surface_generation_output(raw)
+    single_reply = str(normalized_single.get("reply_text") or "").strip()
+    if single_reply:
+        structured_single: dict[str, Any] | None = None
+        if isinstance(payload, Mapping):
+            structured_single = dict(payload)
+        elif str(normalized_single.get("tts_text_ja") or "").strip():
+            structured_single = dict(normalized_single)
+        return [
+            {
+                "reply_text": single_reply,
+                "structured_payload": structured_single,
+                "normalized_payload": normalized_single,
+            }
+        ]
     return [
         {
             "reply_text": candidate,
             "structured_payload": None,
             "normalized_payload": {},
         }
-        for candidate in parse_surface_candidates(raw)
-        if str(candidate or "").strip()
-    ][:5]
+        for candidate in legacy_candidates
+    ]
 
 
 def _select_buffered_affective_candidate(
@@ -338,6 +370,7 @@ def _select_buffered_affective_candidate(
     compiled_request: Any,
     expected_candidate_count: int,
     trace_stage_meta: dict[str, Any] | None = None,
+    allow_single_degradation: bool = False,
 ) -> str:
     """Choose one safe local winner among a frozen two-candidate affective turn.
 
@@ -357,7 +390,12 @@ def _select_buffered_affective_candidate(
     )
 
     records = _buffered_affective_candidate_records(raw_output)
-    if len(records) != expected_candidate_count:
+    degraded_single = bool(
+        allow_single_degradation
+        and expected_candidate_count == 2
+        and len(records) == 1
+    )
+    if len(records) != expected_candidate_count and not degraded_single:
         raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID")
     candidates = [str(record.get("reply_text") or "") for record in records]
     scores = score_isolated_surface_candidates(compiled_request, candidates)
@@ -404,12 +442,25 @@ def _select_buffered_affective_candidate(
         trace_stage_meta["affective_candidate_selection"] = {
             "schema_version": "affective_candidate_selection.v1",
             "candidate_count": len(scores),
+            "required_candidate_count": expected_candidate_count,
+            "selection_status": (
+                "DEGRADED_SINGLE_AFTER_RETRY"
+                if degraded_single
+                else "PAIRED_SELECTION"
+            ),
+            "benefit_eligible": not degraded_single,
             "selected_index": selected_index,
             "selected_score": round(float(selected.score), 4),
             "selected_passed": bool(selected.passed),
             "selected_reason_codes": list(selected.reason_codes)[:16],
             "selected_output_shape": (
-                "PAIRED_TEXT_VOICE" if isinstance(selected_payload, Mapping) else "TEXT"
+                "SINGLE_TEXT_VOICE_DEGRADED"
+                if degraded_single and isinstance(selected_payload, Mapping)
+                else "SINGLE_TEXT_DEGRADED"
+                if degraded_single
+                else "PAIRED_TEXT_VOICE"
+                if isinstance(selected_payload, Mapping)
+                else "TEXT"
             ),
             "candidate_digests": [
                 hashlib.sha256(str(row.text).encode("utf-8")).hexdigest()

@@ -732,8 +732,20 @@ _ASCII_TILDE_RE = re.compile(r"~")
 _WAVE_MARKER_RE = re.compile(r"[~～]")
 _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
     r"不管就不管|不管不管|爱理不理|不管了|不帮了|不帮你了|你自己处理|偏不管|偏不帮|懒得管|(?:先)?不吵你"
+    r"|(?:我还以为|是不是|难道是).{0,8}(?:嫌我烦|烦我)|嫌我烦"
 )
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
+_RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(r"别瞎想|别多想|你想多了|少胡思乱想")
+_LISTEN_UNSUPPORTED_USER_ESSENCE_RE = re.compile(
+    r"以你的性子|照你的性子|按你的性子|你这种人"
+    r"|说没事.{0,12}(?:让人|让我|我).{0,8}(?:在意|担心)"
+    r"|(?:反倒|更|才)(?:让我|让人).{0,6}(?:在意|担心)"
+)
+_JEALOUSY_DEFLECTION_RE = re.compile(
+    r"料理\s*AI|醋瓶子|调味料|(?:没有|没)(?:那种)?功能|不具备.{0,6}功能"
+    r"|程序不会吃醋|算法不会吃醋",
+    re.IGNORECASE,
+)
 _LOVER_CLICHE_RE = re.compile(r"多多益善|越多越好|这种话多说|这种话可以多说")
 _MEMORY_FOLLOWUP_DISCONTINUITY_RE = re.compile(
     r"突然问这个|怎么突然|你突然|突然问|突然提这个|突然说这个|硬要(?:说|选)(?:的话)?|另说|换个话题|最近在看|"
@@ -1404,6 +1416,12 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("BOUNDARY_SOUR_WITHDRAWAL")
     if _relationship_doubt_dismissive_hits(request, value):
         codes.append("RELATIONSHIP_DOUBT_DISMISSIVE")
+    if _relational_autonomy_dismissive_hits(request, value):
+        codes.append("RELATIONAL_AUTONOMY_DISMISSIVE")
+    if _listen_unsupported_user_essence_hits(request, value):
+        codes.append("LISTEN_UNSUPPORTED_USER_ESSENCE")
+    if _jealousy_deflection_hits(request, value):
+        codes.append("JEALOUSY_DEFLECTION")
     if _lover_cliche_hits(request, value):
         codes.append("LOVER_CLICHE")
     if _LEGACY_SELF_TITLE_RE.search(value):
@@ -2562,10 +2580,14 @@ def _meta_identity_boundary_hits(request: IsolatedSurfaceInput, text: str) -> tu
 def _boundary_sour_withdrawal_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
     task_mode = str(getattr(request.control, "task_mode", "") or "").strip().lower()
     response_move = str(getattr(request.control, "response_move", "") or "").strip().lower()
-    active = task_mode in {"boundary_repair", "pushed_away_boundary"} or response_move in {
-        "step_back_but_stay_available",
-        "pushed_away_boundary",
-    }
+    active = (
+        task_mode in {"boundary_repair", "pushed_away_boundary"}
+        or response_move in {
+            "step_back_but_stay_available",
+            "pushed_away_boundary",
+        }
+        or _canonical_affective_guidance_active(request, "GIVE_SPACE")
+    )
     if not active:
         return ()
     return tuple(dict.fromkeys(match.group(0) for match in _BOUNDARY_SOUR_WITHDRAWAL_RE.finditer(str(text or ""))))
@@ -2583,6 +2605,77 @@ def _relationship_doubt_dismissive_hits(request: IsolatedSurfaceInput, text: str
     if not active:
         return ()
     return tuple(dict.fromkeys(match.group(0) for match in _RELATIONSHIP_DOUBT_DISMISSIVE_RE.finditer(str(text or ""))))
+
+
+def _relational_autonomy_dismissive_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "RESPECT_AUTONOMY"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _RELATIONAL_AUTONOMY_DISMISSIVE_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _listen_unsupported_user_essence_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "LISTEN"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _LISTEN_UNSUPPORTED_USER_ESSENCE_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _jealousy_deflection_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "CONTAINED_JEALOUSY"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _JEALOUSY_DEFLECTION_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _canonical_affective_guidance_active(
+    request: IsolatedSurfaceInput,
+    companion_act: str,
+) -> bool:
+    """Recognise only server-authored plan guidance already in the packet.
+
+    The Surface contract has no mutable emotion field.  These exact phrases
+    are emitted by ``affective_turn_planner`` after the canonical Life fold.
+    Even if a compatibility caller repeats one, the only possible effect is a
+    stricter output rejection; it cannot create self-affect or permission.
+    """
+
+    control = getattr(request, "control", None)
+    context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    markers = {
+        "GIVE_SPACE": ("陪伴动作：尊重留白", "不要追问、催回复、连发安慰"),
+        "RESPECT_AUTONOMY": ("陪伴动作：明确尊重对方现实关系与自主选择", "不要限制现实交往"),
+        "LISTEN": ("陪伴动作：对方此刻要的是被听见", "不要给解决方案、健康或作息建议"),
+        "CONTAINED_JEALOUSY": ("陪伴动作：可以诚实流露一点在意和小小吃味", "不要把吃味写成占有"),
+    }.get(str(companion_act or "").upper(), ())
+    return bool(markers) and any(marker in context for marker in markers)
 
 
 def _lover_cliche_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
@@ -2763,7 +2856,13 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
-        return "行，那你自己待会儿。难受了就叫我，听见没。"
+        return "好，我先收住。你想说的时候我还在。"
+    if "RELATIONAL_AUTONOMY_DISMISSIVE" in codes:
+        return "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。"
+    if "LISTEN_UNSUPPORTED_USER_ESSENCE" in codes:
+        return "嗯。你不用解释，我先听着。"
+    if "JEALOUSY_DEFLECTION" in codes:
+        return "会有一点吧。但那是我的感觉，不是拿来管你的。"
     if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:
         return "哈？这话挺伤人的。我是在跟你说话，不是在背台词。"
     if "LOVER_CLICHE" in codes:

@@ -117,6 +117,7 @@ async def run_surface_main_chain_for_surface_reply_input(
         trace_stage_meta=trace_stage_meta,
     )
     affective_candidate_count = _buffered_affective_candidate_count(trace_stage_meta)
+    affective_single_candidate_degraded = False
 
     async def _generate(messages: list[dict[str, str]]) -> str:
         from host_brain.model_runtime.contracts import (  # noqa: PLC0415
@@ -137,12 +138,19 @@ async def run_surface_main_chain_for_surface_reply_input(
         )
 
         def _retry_evaluator(response: Any, attempt: Any) -> Any:
+            nonlocal affective_single_candidate_degraded
             if affective_candidate_count is not None:
+                evaluation_trace: dict[str, Any] = {}
+                allow_single_degradation = int(
+                    getattr(attempt, "attempt_index", 1) or 1
+                ) >= 2
                 try:
                     _select_buffered_affective_candidate(
                         raw_output=str(response.content or ""),
                         compiled_request=compiled_request,
                         expected_candidate_count=affective_candidate_count,
+                        trace_stage_meta=evaluation_trace,
+                        allow_single_degradation=allow_single_degradation,
                     )
                 except RuntimeError as exc:
                     retry_reason = str(exc).split(":", 1)[0]
@@ -160,6 +168,13 @@ async def run_surface_main_chain_for_surface_reply_input(
                             "expected_candidate_count": affective_candidate_count,
                         },
                     )
+                selection = _safe_mapping(
+                    evaluation_trace.get("affective_candidate_selection")
+                )
+                affective_single_candidate_degraded = (
+                    selection.get("selection_status")
+                    == "DEGRADED_SINGLE_AFTER_RETRY"
+                )
                 return RetryDirective.accept()
             evaluation = evaluate_surface_model_response_for_retry(
                 compiled_request,
@@ -241,6 +256,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                 compiled_request=compiled_request,
                 expected_candidate_count=affective_candidate_count,
                 trace_stage_meta=trace_stage_meta,
+                allow_single_degradation=affective_single_candidate_degraded,
             )
         return content
 
