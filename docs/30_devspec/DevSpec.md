@@ -58,6 +58,7 @@ flowchart TD
 - 周期恢复只记录稳定 reason code 和异常类型，同一失败在恢复前最多记录一次；日志不得包含用户正文、secret 或异常原文。
 - A15 的真实模型故障注入已验证该边界：旧 Lease 过期后由 fencing token 2 接管同一 Attempt，接管时 Node Grant 仍有 57.211 秒有效期；最终只存在一条 HostCommand、一张 TaskGraph、一个 Attempt 和一组 exact-once Acceptance Effect。
 - 如果进程终止时 operation reservation 已存在但没有 committed receipt，恢复器不得再次调用 worker。它必须把同一 Attempt 标为 `RECOVERABLE`、operation 标为 `RECOVERY_REQUIRED`，持久化 `UNKNOWN_SIDE_EFFECT` hold，并等待有签名的 reconciliation 结论；普通聊天快路径不承担这套外部副作用恢复成本。
+- Task Runtime 激活后的回滚关闭如果失败，Container 必须保留 bound runtime 和全部 Store，设置 lifecycle retry fence，并拒绝再次 activate；只有协调器、continuation 和 outbox 都证明静默后才允许关闭基础设施。成功重试后的重复 close 必须是 no-op。
 - 兼容模块只能读取 canonical projection；兼容写调用必须计量并最终归零。
 
 ## 5. 实时执行

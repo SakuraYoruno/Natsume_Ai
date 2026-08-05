@@ -292,3 +292,14 @@ python -m pytest -q tests/unit/test_runtime_startup_script_composition.py
 ```
 
 除静态断言外，A15 Sidecar 还要用故意冲突的进程环境 `127.0.0.1:19999` 与显式参数 `0.0.0.0:18083` 启动，确认 runtime snapshot、Service Catalog candidate 和实际 listener 都采用显式值。
+
+Task Runtime rollback failure 的独立命令为：
+
+```powershell
+python -m pytest -q tests/integration/test_ne01_task_runtime_rollback_failure_canary.py
+python scripts/runtime/run_task_runtime_rollback_failure_canary.py `
+  --run-id <acceptance-run-id> `
+  --receipt <isolated-evidence-path>
+```
+
+必须断言激活失败后 rollback close 失败不会把 Container 标成 closed，第二次 activate 以 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED` 阻断，第一次全容器 close 保留 Store，故障解除后的重试关闭成功，终态重复 close 为 no-op。Canary 使用完整迁移后的真实临时 SQLite，但不等价于远端设备或外部 provider 回滚。
