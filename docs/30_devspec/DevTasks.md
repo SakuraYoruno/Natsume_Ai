@@ -51,6 +51,7 @@
 
 ## P0：真实对话体验
 
+- [x] 将 72 条覆盖说明与自然可执行 setup 分离；无真实多模态／主动／重启／Edge fault driver 时 fail-honest 为 `NOT_RUN`。
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。

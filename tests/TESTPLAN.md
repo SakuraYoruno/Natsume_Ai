@@ -65,6 +65,19 @@ Integration 无 coverage 首轮稳定预检在 `1d68ecb1ce` 上选择 155 个文
 
 场景至少包括：隐晦低落、“没事”、文字与声学冲突、被用户误伤、七海误解用户、拒绝建议、关系裂痕、修复未接受、久别重逢、混合喜忧、吃醋但不占有、要求空间、低落时处理技术任务、主动消息被忽略、ASR 错误、TTS/Avatar 断线、播放中打断。
 
+冻结覆盖定义为 `tests/fixtures/emotional_companion/dl00_multiturn_baseline_v1.json`，真实执行映射为 `tests/fixtures/emotional_companion/dl07_live_execution_v1.json`。前者的 `context_turns` 允许描述测试前提，禁止原样作为用户台词；后者只为 `gateway_text` 家族提供自然 setup。真实校准示例：
+
+```powershell
+python scripts/runtime/test_digital_life_live_cohort.py `
+  --case implicit_low_mood:1 `
+  --case user_angry_at_natsume:1 `
+  --db-path <acceptance-audit.sqlite3> `
+  --report-dir <acceptance-evidence-dir> `
+  --require-voice
+```
+
+脚本始终以 `conversation_id + msg_id` 绑定每轮终态。多模态、主动、跨重启或 Edge 故障场景缺少真实驱动时必须为 `NOT_RUN_REQUIRED_DRIVER`；自动结构通过仍固定为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，不能替代盲测。
+
 工程断言：
 
 - 用户情绪误写为七海情绪：0。

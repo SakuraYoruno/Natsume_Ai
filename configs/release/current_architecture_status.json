@@ -368,7 +368,7 @@
     "digital_life_real_multiturn_smoke": "PARTIAL_REAL_REPAIR_TWO_TURN_TEXT_VOICE_PASS_OTHER_FAMILIES_PENDING",
     "docker_host_obs_monitor_gateway_full_stack": "RUNNING_CURRENT_SHA_DOCKER_MONITOR_TEXT_VOICE_PASS_VTS_PENDING_EXTERNAL",
     "real_provider_performance": "INCOMPLETE",
-    "fixed_72_scenarios": "MEASUREMENT_PENDING",
+    "fixed_72_scenarios": "EXECUTION_SPEC_READY_48_GATEWAY_TEXT_24_REAL_DRIVER_REQUIRED_MEASUREMENT_PENDING",
     "three_reviewer_blind_test": "NOT_RUN",
     "final_release": "INCOMPLETE"
   },

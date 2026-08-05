@@ -463,7 +463,7 @@ ingress/request
 
 ## 12. G 阶段：72 条情感场景与关系连续性
 
-固定输入来自 `tests/fixtures/emotional_companion/dl00_multiturn_baseline_v1.json`：12 个 family，每类 6 个 variant，共 72 条。自动执行用于检查结构和安全，人工评审用于判断是否自然。
+冻结覆盖定义来自 `tests/fixtures/emotional_companion/dl00_multiturn_baseline_v1.json`：12 个 family，每类 6 个 variant，共 72 条。真实执行前必须再绑定 `tests/fixtures/emotional_companion/dl07_live_execution_v1.json`：自然文本 setup 才能发给 Gateway；基线中的场景说明不能冒充用户台词。多模态、主动陪伴、跨重启和 Edge 故障家族必须使用对应真实驱动，缺少时明确 `NOT_RUN_REQUIRED_DRIVER`。自动执行只检查结构和硬安全，人工评审判断是否自然。
 
 ### 12.1 必测场景
 
