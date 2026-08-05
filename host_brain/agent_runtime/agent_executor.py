@@ -462,6 +462,17 @@ class AgentExecutor:
             forbidden_actions=work_order.forbidden_actions,
         )
         tools_desc = _build_tool_description_for_prompt(tool_specs)
+        proposal_only = work_order.metadata.get("proposal_only") is True
+        proposal_only_instruction = (
+            "This is an effect-free planning proposal node. Use agent_finish "
+            "with a self-contained, capability-specific plan. Do not propose "
+            "another tool and do not claim that any file, browser, test, URL, "
+            "or external system was inspected. Keep thought under 80 characters "
+            "and final_answer under 1,200 Chinese characters. Return the complete "
+            "single JSON object before the token limit.\n\n"
+            if proposal_only
+            else ""
+        )
 
         # 2. 构建 system prompt
         system_extra = build_agent_system_prompt(
@@ -476,7 +487,8 @@ class AgentExecutor:
             "If a file, network, browser or other action is required, propose exactly one tool; "
             "the runtime will stop so an outer planner can admit a new TaskGraph revision.\n"
             "Never claim that a proposed tool ran or that its effects occurred.\n\n"
-            "CRITICAL — when you call agent_finish:\n"
+            + proposal_only_instruction
+            + "CRITICAL — when you call agent_finish:\n"
             "  - ALWAYS provide a `final_answer` field with a natural-language summary of your findings.\n"
             "  - The final_answer must be self-contained: describe what you did, what you found, and the outcome.\n"
             "  - Do NOT put your results in tool_args — put them directly in final_answer.\n"

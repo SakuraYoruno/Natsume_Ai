@@ -125,6 +125,7 @@ def _graph_and_order(
     *,
     routes: tuple[tuple[str, str], ...] = (("skill", "code-check"), ("skill", "report-build")),
     bindings: list[dict[str, Any]] | None = None,
+    budget_time_ms: int = 60_000,
 ) -> tuple[TaskGraph, WorkOrderV3]:
     nodes = tuple(
         TaskNode(
@@ -167,7 +168,7 @@ def _graph_and_order(
         "limits": {
             "token_count": 2_000,
             "tool_call_count": 4,
-            "time_ms": 60_000,
+            "time_ms": budget_time_ms,
             "concurrency": 1,
             "retry_count": 1,
             "model_cost_micros": 100_000,
@@ -382,6 +383,47 @@ def test_gr05b_expired_batch_reopens_identity_but_cannot_authorize_execution() -
                     replay.grants[0],
                 )
             )
+        assert expired.value.reason_code == NODE_GRANT_EXPIRED
+    finally:
+        ledger.close()
+
+
+def test_gr05b_node_grant_uses_bounded_task_budget_after_parent_window_closes() -> None:
+    ledger = SQLiteLedger(":memory:")
+    tokens = _CountingTokenService()
+    try:
+        parent_ref = _parent(ledger, tokens)
+        graph, order = _graph_and_order(
+            parent_ref,
+            routes=(("skill", "long-running-agent"),),
+            budget_time_ms=360_000,
+        )
+        grant = _derive(_service(ledger, tokens), parent_ref, graph, order).grants[0]
+
+        assert grant.expires_at_ms == NOW_MS + 360_000
+        assert grant.expires_at_ms > NOW_MS + 100_000
+        child_row = next(
+            row
+            for row in ledger.trace_request(REQUEST_ID)["governor_log"]
+            if row.get("stage") == "S_TASK_GRAPH_NODE_GRANT"
+        )
+        child_token_ref = child_row["tokens"]["approval_token_ref"]
+        assert (
+            tokens.export_snapshot()[child_token_ref]["expiry_ts_ms"]
+            == grant.expires_at_ms
+        )
+
+        verified_after_parent_expiry = DurableNodeGrantVerifier(
+            ledger=ledger,
+            clock=lambda: NOW_MS + 100_001,
+        ).verify(**_verification_kwargs(parent_ref, graph, grant))
+        assert verified_after_parent_expiry.grant_ref == grant.grant_ref
+
+        with pytest.raises(NodeGrantVerificationError) as expired:
+            DurableNodeGrantVerifier(
+                ledger=ledger,
+                clock=lambda: grant.expires_at_ms,
+            ).verify(**_verification_kwargs(parent_ref, graph, grant))
         assert expired.value.reason_code == NODE_GRANT_EXPIRED
     finally:
         ledger.close()

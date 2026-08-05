@@ -140,5 +140,5 @@ def test_advice_only_plan_does_not_gain_capability_execution_authority() -> None
     decision = classify_task_intent_by_rules("请给我前端可用性调研方案，不要调用工具")
 
     assert decision is not None
-    assert decision["route"] == "delegate"
-    assert decision["target_id"] == "intent_agent"
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""

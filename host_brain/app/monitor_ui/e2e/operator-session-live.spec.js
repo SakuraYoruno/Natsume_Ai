@@ -63,6 +63,7 @@ test('普通本机浏览器自动建立 Monitor 会话并贯通 HTTP 与 WebSock
       totalAgents: Number(payload?.organTribeData?.total_agents || 0),
       clockActive: payload?.organTribeData?.host_scheduler?.clock_active === true,
       lastTickMs: Number(payload?.organTribeData?.host_scheduler?.clock?.last_tick_ms || 0),
+      currentEmotion: String(payload?.derived?.currentEmotion || ''),
     }
   })
   expect(lifeBodyQuery.ok).toBe(true)
@@ -73,6 +74,7 @@ test('普通本机浏览器自动建立 Monitor 会话并贯通 HTTP 与 WebSock
   expect(lifeBodyQuery.totalAgents).toBeGreaterThan(0)
   expect(lifeBodyQuery.clockActive).toBe(true)
   expect(lifeBodyQuery.lastTickMs).toBeGreaterThan(0)
+  expect(lifeBodyQuery.currentEmotion).toBe('NEUTRAL')
 
   const cockpitBody = page.locator('body')
   await expect(cockpitBody).not.toContainText('Capability Forge unavailable:')
@@ -85,6 +87,7 @@ test('普通本机浏览器自动建立 Monitor 会话并贯通 HTTP 与 WebSock
   await expect(mainChainPanel).toBeVisible()
   await expect(mainChainPanel).not.toContainText('主链存在断点')
   await expect(mainChainPanel).toContainText('主链重塑已接上')
+  await expect(mainChainPanel).toContainText('情绪 平静')
   await expect(mainChainPanel).toContainText('后台 tick')
   await expect(mainChainPanel).not.toContainText('后台 tick--')
   await expect(mainChainPanel).not.toContainText('后台 tick --')

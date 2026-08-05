@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import logging
 from dataclasses import asdict, dataclass, is_dataclass
 from functools import partial
 from typing import Any, Callable, Mapping
@@ -40,6 +41,7 @@ from natsume_contracts.task import HostCommandSurface
 
 
 OBS_DOMAIN_RESULT_SCHEMA = "natsume.obs-domain-command-result.v1"
+_LOGGER = logging.getLogger(__name__)
 
 
 class ObsDomainCommandError(RuntimeError):
@@ -300,7 +302,10 @@ async def _task_graph_cancel(payload: Mapping[str, Any], request_id: str) -> Any
     if operator_runtime_value(
         "task_graph_cancellation_operator_enabled"
     ) is not True:
-        raise ObsDomainCommandError("OBS_TASK_GRAPH_CANCELLATION_DISABLED")
+        raise ObsCommandPortExecutionError(
+            "OBS_TASK_GRAPH_CANCELLATION_DISABLED",
+            side_effects_may_have_run=False,
+        )
     return await _execute_governed_operator_control(payload, request_id)
 
 
@@ -416,9 +421,25 @@ async def _execute_governed_operator_control(
     execute = getattr(runtime, "execute_operator_control", None)
     if not callable(execute):
         raise ObsDomainCommandError("OBS_TASK_CONTROL_RUNTIME_UNAVAILABLE")
-    result = execute(payload, request_id)
-    if inspect.isawaitable(result):
-        result = await result
+    try:
+        result = execute(payload, request_id)
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception as exc:
+        # Operator payloads can contain private review context, so diagnostics
+        # emit only code-owned exception metadata and never the payload/body.
+        reason_code = str(getattr(exc, "reason_code", "") or "").strip()
+        detail = str(getattr(exc, "detail", "") or "").strip()
+        if len(detail) > 240 or any(ord(char) < 32 for char in detail):
+            detail = ""
+        _LOGGER.error(
+            "governed Operator control failed before OBS result binding: "
+            "exception_type=%s reason_code=%s detail=%s",
+            type(exc).__name__,
+            reason_code or "UNCLASSIFIED",
+            detail or "UNAVAILABLE",
+        )
+        raise
     if not isinstance(result, Mapping):
         raise ObsDomainCommandError("OBS_TASK_CONTROL_RESULT_INVALID")
     return dict(result)

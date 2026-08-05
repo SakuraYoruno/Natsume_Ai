@@ -116,6 +116,7 @@ _PRE_ACCEPTANCE_PROPOSAL_ONLY = frozenset(
         "agent_workbench_brief",
         "codex_organ_scan",
         "codex_persona_drift_audit",
+        "memory_store",
     }
 )
 
@@ -155,7 +156,6 @@ _BLOCKED_PENDING_ACCEPTANCE_EFFECT = frozenset(
         "focus_mode",
         "http_request",
         "memory_forget",
-        "memory_store",
         "notify_desktop",
         "notify_schedule_reminder",
         "notify_tts_speak",

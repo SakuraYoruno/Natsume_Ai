@@ -33,6 +33,8 @@ _FORBIDDEN_DURABLE_KEYS = re.compile(
     re.IGNORECASE,
 )
 _MAX_DURABLE_TEXT = 32_000
+_CAPABILITY_PLANNING_MODE = "CAPABILITY_SEARCH_V1"
+_PLANNING_PROPOSAL_EXECUTION_POLICY = "PRE_ACCEPTANCE_PROPOSAL_ONLY"
 
 
 def build_governed_production_executor_payload(
@@ -68,6 +70,21 @@ def build_governed_production_executor_payload(
     args.setdefault("confirmed", True)
     adapter_order = build_production_work_order(args, skill_id=target)
     metadata = dict(adapter_order.get("metadata") or {})
+    if str(args.get("planning_mode") or "").strip().upper() == _CAPABILITY_PLANNING_MODE:
+        # A selected capability is already one immutable TaskGraph node.  Its
+        # inner Agent may contribute analysis, but it may not dynamically add
+        # file/browser/tool work that has no independent node authority.
+        adapter_order["allowed_actions"] = ["generate_report"]
+        metadata["proposal_only"] = True
+        metadata["execution_policy"] = _PLANNING_PROPOSAL_EXECUTION_POLICY
+        input_pack = dict(adapter_order.get("input_pack") or {})
+        input_pack["context"] = (
+            "This is an effect-free planning proposal node. Produce a "
+            "capability-specific, actionable plan from the supplied objective. "
+            "Do not request tools and do not claim that files, browsers, URLs, "
+            "tests, or external systems were inspected."
+        )
+        adapter_order["input_pack"] = input_pack
     metadata["governed_lineage"] = {
         "root_work_order_id": str(work_order_id),
         "task_graph_id": str(graph_id),

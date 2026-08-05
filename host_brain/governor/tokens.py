@@ -126,14 +126,20 @@ class TokenService:
         session_id: str,
         seq: int,
         now_ts_ms: int | None = None,
+        ttl_ms: int | None = None,
     ) -> str:
+        effective_ttl_ms = self.approval_ttl_ms if ttl_ms is None else ttl_ms
+        if isinstance(effective_ttl_ms, bool) or not isinstance(effective_ttl_ms, int):
+            raise TypeError("approval token ttl_ms must be an integer")
+        if effective_ttl_ms <= 0:
+            raise ValueError("approval token ttl_ms must be positive")
         return self._issue(
             token_type=TOKEN_TYPE_APPROVAL,
             intent_id=intent_id,
             skill_name=skill_name,
             session_id=session_id,
             seq=seq,
-            ttl_ms=self.approval_ttl_ms,
+            ttl_ms=effective_ttl_ms,
             now_ts_ms=now_ts_ms,
         )
 

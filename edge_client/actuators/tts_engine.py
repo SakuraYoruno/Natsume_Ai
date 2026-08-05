@@ -1059,6 +1059,21 @@ class SoVITSModelManager:
                 reason_code=VOICE_SCHEMA_INVALID,
                 detail="unsupported tts language; supported values: zh, ja, auto",
             )
+        configured_language = _normalize_tts_language(self._config.language)
+        if (
+            configured_language not in {None, "auto"}
+            and normalized_language != "auto"
+            and normalized_language != configured_language
+            and not _allow_tts_language_mismatch()
+        ):
+            return TtsSynthResult(
+                success=False,
+                reason_code=VOICE_SCHEMA_INVALID,
+                detail=(
+                    "utterance language does not match the selected voice model: "
+                    f"configured={configured_language}, requested={normalized_language}"
+                ),
+            )
 
         if self._state != TtsState.READY or self._model is None:
             load_result = self.load()
@@ -2264,16 +2279,25 @@ class _PersistentProcessSoVITSAdapter:
                 assert process.stdin is not None
                 process.stdin.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
                 process.stdin.flush()
-                response = self._read_message(
-                    expected_event="synth_result",
-                    request_id=request_id,
-                    timeout_s=_env_float(
-                        "EDGE_TTS_WORKER_SYNTH_TIMEOUT_S",
-                        max(float(self._config.synth_timeout_s) + 15.0, 45.0),
-                        min_value=5.0,
-                        max_value=300.0,
-                    ),
-                )
+                try:
+                    response = self._read_message(
+                        expected_event="synth_result",
+                        request_id=request_id,
+                        timeout_s=_env_float(
+                            "EDGE_TTS_WORKER_SYNTH_TIMEOUT_S",
+                            max(float(self._config.synth_timeout_s) + 15.0, 45.0),
+                            min_value=5.0,
+                            max_value=300.0,
+                        ),
+                    )
+                except TimeoutError:
+                    # The worker is single-threaded and may still be rendering
+                    # this timed-out request.  Reusing it would queue every
+                    # later utterance behind an unobservable result and create
+                    # a cascade of false timeouts.  Terminate it now; the next
+                    # request starts one clean worker.
+                    self.close()
+                    raise
                 if not bool(response.get("success")):
                     raise RuntimeError(str(response.get("detail") or "persistent worker synth failed"))
                 with np.load(output_path) as data:
@@ -3105,12 +3129,7 @@ def _validate_tts_manifest_language(*, manifest: dict[str, Any], requested_langu
     requested = _normalize_tts_language(requested_language)
     if not voice_language or not requested or requested == "auto":
         return
-    allow_mismatch = str(os.environ.get("EDGE_TTS_ALLOW_LANGUAGE_MISMATCH") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+    allow_mismatch = _allow_tts_language_mismatch()
     if allow_mismatch or voice_language == requested:
         return
     model_id = str(manifest.get("model_id") or manifest.get("project") or "unknown").strip()
@@ -3119,6 +3138,15 @@ def _validate_tts_manifest_language(*, manifest: dict[str, Any], requested_langu
         f"model={model_id!r} voice_language={voice_language!r}, requested={requested!r}. "
         "Train/package the matching voice model on the host node, or set EDGE_TTS_LANGUAGE correctly."
     )
+
+
+def _allow_tts_language_mismatch() -> bool:
+    return str(os.environ.get("EDGE_TTS_ALLOW_LANGUAGE_MISMATCH") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _load_tts_manifest_references(

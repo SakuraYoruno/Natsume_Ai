@@ -16,6 +16,9 @@ from host_brain.model_runtime.route_catalog import ServerRouteCatalog
 from host_brain.model_runtime.production_composition import (
     get_default_production_route_catalog,
 )
+from host_brain.model_runtime.production_route_policy import (
+    build_production_server_route_catalog,
+)
 
 
 _ROUTE_ENV_PREFIXES = (
@@ -31,6 +34,7 @@ _ROUTE_ENV_PREFIXES = (
     "HOST_REALTIME_COMPANION_",
     "HOST_SURFACE_REPLY_",
     "HOST_SUBAGENT_",
+    "HOST_NATSUME_AGENT_",
     "HOST_EXECUTIVE_ROUTER_",
     "HOST_DISPATCH_AGENT_",
     "HOST_VISION_LLM_",
@@ -184,6 +188,32 @@ def test_realtime_companion_accepts_dedicated_provider_lane(monkeypatch) -> None
     assert route["provider_name"] == "gemini"
     assert route["model_id"] == "gemini-2.5-flash-lite"
     assert route["route_lane"] == "realtime_companion"
+
+
+def test_natsume_agent_has_independent_model_timeout_lane(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_LLM_TIMEOUT_MS", "8000")
+
+    route = build_production_server_route_catalog().resolve(
+        scene_type="NATSUME_AGENT",
+        cognitive_tier="B",
+        prompt_id="agent.react.v1",
+    )
+
+    assert route["route_lane"] == "agent"
+    assert route["model_id"] == "deepseek-v4-pro"
+    assert route["timeout_ms"] == 45000
+    assert route["generation_parameters"]["max_tokens"] == 2400
+
+    monkeypatch.setenv("HOST_NATSUME_AGENT_MODEL_ID", "deepseek-v4-flash")
+    monkeypatch.setenv("HOST_NATSUME_AGENT_MODEL_TIMEOUT_MS", "61000")
+    overridden = build_production_server_route_catalog().resolve(
+        scene_type="NATSUME_AGENT",
+        cognitive_tier="B",
+        prompt_id="agent.react.v1",
+    )
+    assert overridden["model_id"] == "deepseek-v4-flash"
+    assert overridden["timeout_ms"] == 61000
 
 
 def test_cross_provider_role_models_are_ignored_for_selected_provider(monkeypatch) -> None:  # noqa: ANN001

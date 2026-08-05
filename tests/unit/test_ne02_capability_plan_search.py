@@ -11,6 +11,9 @@ from host_brain.app.governed_plan_execution_policy import (
     bind_governed_plan_execution_policy,
     require_governed_plan_execution_policy,
 )
+from host_brain.app.governed_frozen_skill_runtime import (
+    _skill_companion_presentation_allowed,
+)
 from host_brain.contracts.agent_runtime.plan_execution_policy import (
     PLAN_EXECUTION_POLICY_METADATA_KEY,
     PLAN_NODE_WORKSPACE_EFFECT_MODE,
@@ -53,6 +56,9 @@ from host_brain.task_runtime.acceptance_effects import (
 from host_brain.agent_runtime.workspace_artifact_effect import (
     AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
     AGENT_WORKSPACE_ARTIFACT_PROPOSAL_SCHEMA,
+)
+from host_brain.agent_runtime.governed_production_payload import (
+    build_governed_production_executor_payload,
 )
 from host_brain.task_runtime.plan_workspace_acceptance_effect import (
     compile_plan_node_acceptance_effects,
@@ -175,6 +181,37 @@ def _intent() -> tuple[dict, dict]:
         "ts_ms": 1_000,
     }
     return intent, governor
+
+
+def test_selected_production_capability_is_frozen_as_effect_free_proposal() -> None:
+    payload = build_governed_production_executor_payload(
+        target_id="agent_frontend_acceptance",
+        intent_args={
+            "planning_mode": CAPABILITY_PLANNING_MODE,
+            "capability_id": "agent_frontend_acceptance",
+        },
+        request_id="request-plan-proposal",
+        session_id="session-plan-proposal",
+        person_id="person-plan-proposal",
+        user_message="给出前端可用性审查方案",
+        work_order_id="work-order-plan-proposal",
+        graph_id="graph-plan-proposal",
+        node_id="node-plan-proposal",
+        graph_revision=1,
+        business_scope="plan-proposal",
+        operation_fingerprint="sha256:" + "a" * 64,
+        approval_ref="governor-decision://plan-proposal",
+        review_ref="review-waiver://plan-proposal",
+    )
+
+    order = payload["work_order"]
+    assert order["allowed_actions"] == ["generate_report"]
+    assert order["metadata"]["proposal_only"] is True
+    assert (
+        order["metadata"]["execution_policy"]
+        == "PRE_ACCEPTANCE_PROPOSAL_ONLY"
+    )
+    assert "Do not request tools" in order["input_pack"]["context"]
 
 
 def _write_registry(*, two_writers: bool = False) -> SkillRegistry:
@@ -307,7 +344,8 @@ def test_registry_capability_search_generates_competing_paths_without_planned_st
     assert compiled.work_order.input_pack["capability_planning"]["catalog_ref"] == (
         adapter.snapshot.catalog_ref
     )
-    assert "intent_draft" not in compiled.work_order.input_pack
+    assert compiled.work_order.input_pack["intent_draft"] == intent
+    assert compiled.work_order.input_pack["intent_draft"] is not intent
     assert set(compiled.work_order.input_pack["approved_candidate_inputs"]) == {
         item.candidate_id for item in result.selected_path
     }
@@ -377,6 +415,13 @@ def test_capability_plan_freezes_and_reopens_execution_budget_and_effect_owner()
     assert all(
         node["execution_policy"] == "INLINE_READ_ONLY"
         for node in policy["nodes"][:-1]
+    )
+    assert _skill_companion_presentation_allowed(command) is False
+    assert (
+        _skill_companion_presentation_allowed(
+            replace(command, route_type="skill", target_id="research_fast")
+        )
+        is True
     )
 
     tampered_metadata = dict(order.metadata)
@@ -587,6 +632,25 @@ def test_plan_workspace_proposal_compiles_only_at_graph_acceptance() -> None:
     assert effects[0].node_id == workspace_policy["node_id"]
     assert effects[0].payload["target_id"] == "agent_worker"
     assert effects[0].commit_scope.value == "GRAPH"
+    assert compile_plan_node_acceptance_effects(
+        command=command,
+        work_order=order,
+        node_id=speculative_policy["node_id"],
+        attempt_id="attempt-plan-speculative-foreground",
+        worker_commit={
+            **worker_commit,
+            "acceptance_effect_intents": [
+                {
+                    "effect_type": "life.foreground_completed",
+                    "commit_scope": "NODE",
+                    "payload": {
+                        "command_type": "foreground_completed",
+                        "payload": {"assistant_reply": "internal only"},
+                    },
+                }
+            ],
+        },
+    ) == ()
     with pytest.raises(
         AcceptanceEffectCompileError,
         match="speculative Plan node",

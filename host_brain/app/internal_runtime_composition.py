@@ -140,6 +140,7 @@ def compose_internal_runtime(
         internal_agent_artifact_store=artifact_store,
         internal_agent_workspace_runtime=workspace_runtime,
         embodiment_runtime_provider=embodiment_runtime_provider,
+        episodic_store=episodic_projection_store,
     )
     acceptance_effect_dispatcher = operator_composition.acceptance_effect_dispatcher
     host_runtime = tool_composition.activate(

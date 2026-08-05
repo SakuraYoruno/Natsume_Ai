@@ -369,6 +369,48 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         self.assertTrue(report.success)
         flush_mock.assert_called_once()
 
+    def test_background_speech_start_skips_failed_segment_and_drains_next(self) -> None:
+        synth_calls: list[str] = []
+
+        def synthesize(event):  # noqa: ANN001
+            text = str(event.get("text") or "")
+            synth_calls.append(text)
+            if text == "first fails":
+                raise RuntimeError("synth timeout")
+            return {"audio_ref": "mem://second"}
+
+        queue = SpeechPlaybackQueue(
+            rpc=self.rpc,
+            synthesizer=synthesize,
+            playback_starter=lambda _s, _a: None,
+        )
+        pipeline = EdgeVoicePipeline(
+            voice_rpc=self.rpc,
+            speech_queue=queue,
+            event_reporter=self.reporter,
+        )
+        for request_id, text in (
+            ("req-first", "first fails"),
+            ("req-second", "second starts"),
+        ):
+            queued = pipeline.enqueue_speak(
+                request_id=request_id,
+                payload={
+                    "session_id": "sess-drain",
+                    "utterance_id": f"utt-{request_id}",
+                    "text": text,
+                },
+                auto_start=False,
+                background_start=False,
+            )
+            self.assertTrue(queued.success)
+
+        pipeline._run_background_speech_start(request_id="req-first")
+
+        self.assertEqual(synth_calls, ["first fails", "second starts"])
+        self.assertEqual(queue.queue_depth, 0)
+        self.assertEqual(queue.active_playback["request_id"], "req-second")
+
     def test_enqueue_speak_uses_manual_vts_hook_when_queue_start_skips_hook(self) -> None:
         pipeline = self._build_pipeline(vts_driver=_MockVtsDriver())
         pipeline.speech_queue.enqueue_speak = MagicMock(

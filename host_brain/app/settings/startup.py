@@ -71,7 +71,7 @@ class StartupSettings(BaseSettings):
         alias="HOST_STARTUP_RETRIEVAL_WARMUP_RESOURCE_GATE_ENABLED",
     )
     retrieval_warmup_embedding_enabled: bool = Field(
-        default=False,
+        default=True,
         alias="HOST_STARTUP_RETRIEVAL_WARMUP_EMBEDDING",
     )
 

@@ -974,6 +974,12 @@ class LifeBodySourceReader:
             if alerts
             else "stable"
         )
+        hard_state = _mapping(runtime.get("hard_state"))
+        emotion_context = _mapping(runtime.get("emotion_context"))
+        bond_state = _mapping(runtime.get("bond_state"))
+        motive_state = _mapping(runtime.get("motive_state"))
+        runtime_summary = _mapping(runtime.get("runtime_summary"))
+        reply_posture = _mapping(runtime_summary.get("reply_posture"))
         payload = {
             "schema_version": LIFE_BODY_SCHEMA_VERSION,
             "window_minutes": self.window_minutes,
@@ -1013,6 +1019,18 @@ class LifeBodySourceReader:
                 "hasCapabilityGapData": bool(_mapping(overview.get("capabilityGapData"))),
                 "overviewUpdatedAt": overview_updated,
                 "runtimeUpdatedAt": runtime_updated,
+                "currentEmotion": str(
+                    emotion_context.get("emotion_tag")
+                    or hard_state.get("emotion_tag")
+                    or ""
+                ).strip(),
+                "currentBondStage": str(
+                    bond_state.get("current_stage") or ""
+                ).strip(),
+                "dominantMotive": str(
+                    motive_state.get("dominant_motive") or ""
+                ).strip(),
+                "replyPosture": str(reply_posture.get("style") or "").strip(),
                 "activeTraceFeedCount": len(list(trace_feed.get("items") or [])),
                 "memoryLineageCount": len(lineage["memory_ops_log"]),
                 "bondLineageCount": len(lineage["bond_update_log"]),

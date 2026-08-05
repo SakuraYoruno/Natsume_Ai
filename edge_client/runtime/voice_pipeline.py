@@ -915,13 +915,34 @@ class EdgeVoicePipeline:
         ).start()
 
     def _run_background_speech_start(self, *, request_id: str) -> None:
-        event_ts = int(now_ms())
         try:
-            self._pending_vts_result = {}
-            start_result = self.speech_queue.start_next(ts_ms=event_ts)
-            self._report_voice_queue_result(request_id=request_id, result=start_result)
+            while True:
+                event_ts = int(now_ms())
+                self._pending_vts_result = {}
+                start_result = self.speech_queue.start_next(ts_ms=event_ts)
+                self._report_voice_queue_result(request_id=request_id, result=start_result)
+                if start_result is None or start_result.success:
+                    return
+                if self._is_waiting_for_active_playback(start_result):
+                    return
+                # ``start_next`` removes a failed synth item before returning.
+                # Keep draining so one timeout cannot strand every later
+                # sentence (and every later conversational turn) in memory.
+                if self.speech_queue.queue_depth <= 0:
+                    return
         except Exception as exc:  # pragma: no cover - background safety net
             LOGGER.warning("background TTS start failed request_id=%s: %s", request_id, exc)
+        finally:
+            with self._speech_background_lock:
+                if self._speech_background_thread is threading.current_thread():
+                    self._speech_background_thread = None
+            # Close the enqueue/worker-exit race: an item can arrive after the
+            # loop observes an empty queue but before this thread terminates.
+            if (
+                self.speech_queue.active_playback is None
+                and self.speech_queue.queue_depth > 0
+            ):
+                self._schedule_background_speech_start(request_id=request_id)
 
     @staticmethod
     def _is_waiting_for_active_playback(result: SpeechQueueResult | None) -> bool:

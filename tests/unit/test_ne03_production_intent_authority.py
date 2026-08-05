@@ -360,6 +360,30 @@ def test_high_risk_intent_uses_context_pack_workspace_for_review_constraint() ->
     assert constraint.source_ref == "risk-policy://workspace-a/host-runtime-v1"
 
 
+def test_parent_grant_risk_is_a_ceiling_not_selected_node_risk() -> None:
+    record, scene, binding, _ledger = _authority_fixture(risk_level=5)
+    original_graph = record["graph"]
+    original_order = record["work_order"]
+    assert isinstance(original_graph, TaskGraph)
+    assert isinstance(original_order, WorkOrderV3)
+    selected_node = replace(original_graph.nodes[0], risk_level=2)
+    graph = replace(original_graph, nodes=(selected_node,))
+    work_order = replace(original_order, risk_level=2)
+
+    frame = build_canonical_intent_frame(
+        command=record["command"],  # type: ignore[arg-type]
+        work_order=work_order,
+        graph=graph,
+        task_node_id=selected_node.node_id,
+        canonical_scene=scene,
+        approved_action_binding=binding,
+        policy_identity=POLICY,
+        now_ms=NOW_MS,
+    )
+
+    assert frame.risk_constraints == ()
+
+
 def test_production_intent_authority_rejects_cross_workspace_query() -> None:
     record, scene, _binding, ledger = _authority_fixture()
     port = ProductionIntentAuthorityPort(
@@ -959,6 +983,22 @@ def test_intent_admission_persists_non_executable_decision_before_failing_closed
     assert len(events) == 1
     assert events[0]["payload"]["decision"] == disposition
     assert events[0]["payload"]["proceed_allowed"] is False
+    terminal_block = verifier.resolve_terminal_intent_block(
+        command=record["command"],  # type: ignore[arg-type]
+        work_order=record["work_order"],  # type: ignore[arg-type]
+        graph=record["graph"],  # type: ignore[arg-type]
+    )
+    if disposition == "BLOCK":
+        assert terminal_block is not None
+        assert terminal_block["task_graph_id"] == "graph-a"
+        assert terminal_block["graph_revision"] == 1
+        assert terminal_block["blocked_node_ids"] == ["node-a"]
+        assert terminal_block["reason_code"] == INTENT_ADMISSION_BLOCKED
+        assert terminal_block["request_identity"].startswith(
+            "intent-block://sha256/"
+        )
+    else:
+        assert terminal_block is None
 
     clock[0] = 20_000
     replay, _, _ = _intent_admission_verifier(

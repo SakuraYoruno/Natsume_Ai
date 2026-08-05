@@ -210,8 +210,11 @@ async def test_canonical_route_fails_closed_when_governed_runtime_cannot_support
 
 
 @pytest.mark.asyncio
-async def test_gateway_chat_projects_governed_terminal_rejection() -> None:
-    """Gateway text stays on the TaskGraph through terminal projection."""
+@pytest.mark.parametrize("route", ["chat", "skill", "delegate", "plan"])
+async def test_gateway_routes_project_governed_terminal_rejection(
+    route: str,
+) -> None:
+    """Every public Cortex route receives one finite COMMIT projection."""
 
     governed = _RejectedGovernedChatRuntime()
     ports = _ports()
@@ -220,10 +223,10 @@ async def test_gateway_chat_projects_governed_terminal_rejection() -> None:
         async for event in _cortex_orchestrator_sse_generator_impl(
             application_ports=ports,
             request_body=_request_body(),
-            request_id="request-gr05-terminal-chat",
+            request_id=f"request-gr05-terminal-{route}",
             session_id="session-gr05-cortex",
             ts_ms=1_000,
-            intent_draft=_intent("chat"),
+            intent_draft=_intent(route),
             emotion_context={},
             emotion_snapshot={},
             governor_result={"decision": "APPROVE"},

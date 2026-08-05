@@ -317,6 +317,7 @@ def compile_surface_input(
     necessary_facts: Sequence[Any] | None = None,
     must_not_do: Sequence[Any] | None = None,
     style_anchor: Sequence[Any] | None = None,
+    accepted_task_results: Sequence[Any] | None = None,
     max_facts: int = 8,
     max_style_anchors: int = 10,
     max_must_not_do: int = 12,
@@ -355,6 +356,13 @@ def compile_surface_input(
             "soul_md": soul_md,
             "user_message": user_message,
             "reply_control_packet": compiled.packet,
+            # Accepted Task outputs are bounded, transient synthesis material.
+            # They never enter ReplyControlPacket facts or memory projections.
+            "accepted_task_results": _clean_list(
+                _coerce_sequence(accepted_task_results),
+                limit=4,
+                max_chars=2_400,
+            ),
             # Life-feel: pass-through inner-state to IsolatedSurfaceInput
             "inner_weather": inner_weather,
             "body_state_hint": body_state_hint,

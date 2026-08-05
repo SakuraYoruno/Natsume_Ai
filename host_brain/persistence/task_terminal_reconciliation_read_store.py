@@ -11,6 +11,9 @@ from host_brain.persistence.task_record_codec import (
     _dumps,
     _graph_record,
 )
+from host_brain.contracts.agent_runtime.terminal_reconciliation import (
+    is_signed_prebudget_cancellation_classifier_correction,
+)
 from host_brain.persistence.task_budget_usage_store import (
     _assert_terminal_budget_authority,
 )
@@ -394,7 +397,7 @@ class TaskTerminalReconciliationReadMixin:
         classification: str | None = None,
         limit: int = 100,
     ) -> tuple[dict[str, Any], ...]:
-        """Return persisted, non-quarantined cases with exact signing subjects."""
+        """Return persisted signable cases with exact current subjects."""
 
         self.assert_terminal_reconciliation_ready()
         bounded = _bounded_limit(limit, ceiling=1_000)
@@ -407,7 +410,11 @@ class TaskTerminalReconciliationReadMixin:
                 "graph_revision requires a graph_id and a positive integer",
             )
         clauses = [
-            "classification <> 'QUARANTINED_STRUCTURAL'",
+            "(classification <> 'QUARANTINED_STRUCTURAL' OR ("
+            "case_kind = 'TERMINAL_STRUCTURAL_ANOMALY' AND "
+            "reason_code = 'TERMINAL_GRAPH_BUDGET_BINDING_AMBIGUOUS' AND "
+            "graph_status = 'CANCELLED' AND budget_id IS NULL AND "
+            "recommended_action = 'NONE'))",
             "NOT EXISTS ("
             "SELECT 1 FROM task_runtime_terminal_reconciliation_proof AS proof "
             "WHERE proof.case_id = task_runtime_terminal_reconciliation_case.case_id"
@@ -450,6 +457,15 @@ class TaskTerminalReconciliationReadMixin:
             candidates: list[dict[str, Any]] = []
             for row in rows:
                 case = _terminal_reconciliation_case_record(row)
+                if is_signed_prebudget_cancellation_classifier_correction(case):
+                    try:
+                        self._assert_current_terminal_reconciliation_case(conn, case)
+                    except TaskStoreError:
+                        continue
+                    candidates.append(self._case_aggregate(conn, row))
+                    if len(candidates) >= bounded:
+                        break
+                    continue
                 current = self._current_terminal_reconciliation_case(conn, case)
                 if current is None or current["case_id"] != case["case_id"]:
                     continue
@@ -526,14 +542,20 @@ class TaskTerminalReconciliationReadMixin:
                     "terminal reconciliation case was superseded",
                 )
             try:
-                if case["classification"] != "QUARANTINED_STRUCTURAL":
+                if (
+                    case["classification"] != "QUARANTINED_STRUCTURAL"
+                    or is_signed_prebudget_cancellation_classifier_correction(case)
+                ):
                     self._assert_current_terminal_reconciliation_case(
                         conn,
                         case,
                     )
                 subject = self._terminal_reconciliation_subject(conn, case)
             except TaskStoreError:
-                if case["classification"] != "QUARANTINED_STRUCTURAL":
+                if (
+                    case["classification"] != "QUARANTINED_STRUCTURAL"
+                    or is_signed_prebudget_cancellation_classifier_correction(case)
+                ):
                     raise
                 payload = {
                     "schema_version": (
@@ -565,6 +587,19 @@ class TaskTerminalReconciliationReadMixin:
 
         current = self._current_terminal_reconciliation_case(conn, case)
         if current is None:
+            if is_signed_prebudget_cancellation_classifier_correction(case):
+                graph = conn.execute(
+                    "SELECT * FROM task_runtime_graph WHERE graph_id = ? AND revision = ?",
+                    (str(case["graph_id"]), int(case["graph_revision"])),
+                ).fetchone()
+                if graph is not None:
+                    observation = self._terminal_observation(conn, graph)
+                    if (
+                        dict(case["snapshot"].get("observation") or {})
+                        == dict(observation)
+                        and self._classify_terminal_observation(conn, observation) is None
+                    ):
+                        return
             raise TaskStoreError(
                 TASK_STORE_DURABLE_DATA_INVALID,
                 "terminal reconciliation case is no longer a current anomaly",
@@ -812,10 +847,60 @@ class TaskTerminalReconciliationReadMixin:
         reviews = list(observation["reviews"])
         effects = list(observation["effects"])
         failure_nodes = [row for row in nodes if row["status"] in _FAILURE_NODE_STATUSES]
-        if child_budgets or len(graph_budgets) != 1:
+        terminal_lineage_valid = _terminal_execution_lineage_valid(
+            attempts,
+            leases,
+        )
+        if child_budgets or len(graph_budgets) > 1:
             return _quarantine(
                 "TERMINAL_GRAPH_BUDGET_BINDING_AMBIGUOUS",
                 selected_budget=_only_or_none(child_budgets or graph_budgets),
+                selected_node=_only_or_none(failure_nodes),
+                selected_attempt=None,
+            )
+        if not graph_budgets:
+            cancellation_rows = list(observation["cancellations"])
+            cancellation_authority_valid = (
+                status == "CANCELLED"
+                and len(cancellation_rows) == 1
+                and str(cancellation_rows[0].get("status") or "") == "FINALIZED"
+                and graph_cancellation_authority_valid(
+                    self,
+                    conn,
+                    graph,
+                    None,
+                )
+            )
+            prebudget_cancellation_exact = bool(
+                cancellation_authority_valid
+                and nodes
+                and all(str(row.get("status") or "") == "CANCELLED" for row in nodes)
+                and not attempts
+                and not leases
+                and not operations
+                and not reviews
+                and not effects
+                and not observation["parallel_decisions"]
+                and not observation["success_decisions"]
+                and terminal_lineage_valid
+                and cancelled_effects_are_exactly_fenced(
+                    conn,
+                    graph_id=str(graph["graph_id"]),
+                    graph_revision=int(graph["revision"]),
+                    intent_ref=str(cancellation_rows[0]["intent_ref"]),
+                )
+                and cancelled_parallel_predecessor_is_exact(
+                    conn,
+                    graph_id=str(graph["graph_id"]),
+                    graph_revision=int(graph["revision"]),
+                    intent_ref=str(cancellation_rows[0]["intent_ref"]),
+                )
+            )
+            if prebudget_cancellation_exact:
+                return None
+            return _quarantine(
+                "TERMINAL_GRAPH_BUDGET_BINDING_AMBIGUOUS",
+                selected_budget=None,
                 selected_node=_only_or_none(failure_nodes),
                 selected_attempt=None,
             )
@@ -839,11 +924,6 @@ class TaskTerminalReconciliationReadMixin:
             or observation["cancellations"]
         )
         parallel_decision = canonical_parallel_terminal_decision(conn, graph)
-        terminal_lineage_valid = _terminal_execution_lineage_valid(
-            attempts,
-            leases,
-        )
-
         if status == "BLOCKED":
             if parallel_decision is not None:
                 if (

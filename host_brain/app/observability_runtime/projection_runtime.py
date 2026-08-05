@@ -27,7 +27,9 @@ TRIBE_EVENTS_KIND = "tribe_events"
 TRIBE_EVENTS_INDEX_KEY = "index"
 SESSION_KIND = "session"
 SESSION_INDEX_KEY = "index"
-DEFAULT_OPERATOR_PROJECTION_MAX_AGE_MS = 120_000
+DEFAULT_OPERATOR_PROJECTION_MAX_AGE_MS = 300_000
+_TASK_PROJECTION_LEASE_RENEWAL_BATCH = 16
+_TASK_PROJECTION_REFRESH_BATCH_LIMIT = 64
 
 
 def upsert_monotonic_projection(
@@ -257,6 +259,13 @@ def refresh_task_projections(
 ) -> dict[str, int]:
     """Independent worker entry; never invoked by a query service."""
 
+    renew_bound_lease = getattr(worker.store, "renew_bound_leader_lease", None)
+
+    def renew_lease() -> None:
+        if callable(renew_bound_lease):
+            renew_bound_lease()
+
+    renew_lease()
     index_payload = _payload(source.list_executions(limit=500))
     index_cursor = _execution_cursor(index_payload)
     index_payload["generated_at_ms"] = index_cursor
@@ -270,14 +279,44 @@ def refresh_task_projections(
     )
     execution_count = 0
     review_count = 0
-    for execution in list(index_payload.get("executions") or []):
+    candidates: list[tuple[int, int, int, Mapping[str, Any]]] = []
+    indexed_executions = list(index_payload.get("executions") or [])
+    for position, execution in enumerate(indexed_executions):
         if not isinstance(execution, Mapping):
             continue
         graph_id = str(execution.get("graph_id") or "").strip()
         revision = int(execution.get("revision") or 1)
         if not graph_id:
             continue
+        current = worker.store.get(
+            TASK_EXECUTION_KIND,
+            f"{graph_id}@{revision}",
+        )
+        # Missing documents are always materialized first.  Afterwards the
+        # least-fresh execution is selected, which gives a deterministic,
+        # restart-safe round robin without another mutable scheduler cursor.
+        candidates.append(
+            (
+                0 if current is None else 1,
+                int(current.freshness_ts_ms) if current is not None else 0,
+                position,
+                execution,
+            )
+        )
+
+    candidates.sort(key=lambda item: item[:3])
+    selected = candidates[:_TASK_PROJECTION_REFRESH_BATCH_LIMIT]
+    for execution_index, (_, _, _, execution) in enumerate(selected, start=1):
+        graph_id = str(execution.get("graph_id") or "").strip()
+        revision = int(execution.get("revision") or 1)
+        if execution_index == 1 or execution_index % _TASK_PROJECTION_LEASE_RENEWAL_BATCH == 0:
+            renew_lease()
         value = _payload(source.get_execution(graph_id, revision, after_cursor=0, event_limit=1000))
+        if execution_index % _TASK_PROJECTION_LEASE_RENEWAL_BATCH == 0:
+            # Reading one execution can itself be comparatively expensive.  Renew
+            # again before the fenced write so a valid long-running materializer
+            # never writes through an expired lease.
+            renew_lease()
         execution_cursor = _execution_cursor(value)
         value["generated_at_ms"] = execution_cursor
         upsert_monotonic_projection(
@@ -308,7 +347,13 @@ def refresh_task_projections(
                 source_ref="task-review-background-worker",
             )
             review_count += 1
-    return {"index_count": 1, "execution_count": execution_count, "review_count": review_count}
+    return {
+        "index_count": 1,
+        "indexed_execution_count": len(candidates),
+        "execution_count": execution_count,
+        "deferred_execution_count": max(0, len(candidates) - len(selected)),
+        "review_count": review_count,
+    }
 
 
 def trace_source(request_id: str, value: Any) -> ProjectionSource:

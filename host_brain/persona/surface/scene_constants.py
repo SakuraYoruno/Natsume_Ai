@@ -53,6 +53,7 @@ _FORBIDDEN_KEY_HINTS = (
     "module_advice",
 )
 _ALLOWED_TOP_LEVEL_KEYS = {
+    "accepted_task_results",
     "active_loops",
     "body_state_hint",
     "care_signal",

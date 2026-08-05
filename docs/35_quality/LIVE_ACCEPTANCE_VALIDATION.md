@@ -116,3 +116,19 @@ Edge 总体仍为 `DEGRADED`，原因只剩当前模型没有兼容的情绪 exp
 同轮运行还发现两个测试运行问题：远端 resident ASR 持续产生低置信噪声请求时，Host 启动稳定性检查两次失败；改用保留 RPC／TTS／VTS、关闭常驻麦克风采集的 Gateway voice ASR 模式后，Host、OBS、Monitor、Edge 与 Gateway 才同时稳定可达，因此常驻 ASR 噪声门控仍是未关闭缺陷。`stop_edge_side.ps1` 还把命名参数拼成字符串数组，导致 `PidFile` 被错误绑定到整数 `Port`；现已改用 PowerShell hashtable splatting。Gateway live matrix 现在读取 `INPUT_COMPLETED`／`INPUT_FAILED` 任一终态并在失败时立即保留 `reason_code`／detail，同时在终态后刷新 Host 日志，不再对已经明确失败的请求空等 180 秒。脚本与探针定向回归 36 passed；这些修改只提高诊断与启停可靠性，不把翻译或 ASR 生产缺陷标记为通过。
 
 翻译断链的代码修复现已接入生产 Composition：`translate_agent` 作为低风险 `MODEL_BACKED_READ_ONLY` target 注册，直接使用现有 `ModelAttemptService` 和 `workbench_translate` prompt semantic；模型 guard 精确绑定 Task graph/node/attempt 的剩余预算，provider usage 回写 worker budget。它不持有工具、动态规划、嵌套 Delegate 或 delivery authority，普通翻译使用 Governor 低风险 waiver，不进入人工 Review。Pentest 原有 port-free、精确零用量和执行前 Review 保持不变。Delegate／Host／Input 相邻回归合计 158 passed；真实 Gateway→Provider→Acceptance→Edge 重跑前，状态只从 `FAIL_DELEGATE_TARGET_UNAVAILABLE` 提升为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+## 2026-08-04 Gateway Reply Outbox 与 Life Body 真实复验
+
+修复代码加载到隔离 Host 后，使用远端 Unified Gateway、生产 HMAC、真实模型路由和同一真实服务栈重新提交三条新请求：
+
+| 场景 | 实际路由 | 结果 |
+|---|---|---|
+| `translate_delegate` | `translate_agent` | `INPUT_COMPLETED`，Acceptance Reply Outbox 已提交 |
+| `memory_store` | `memory_store` | `INPUT_COMPLETED`，Acceptance Reply Outbox 已提交 |
+| `multi_skill_plan` | `agent_frontend_review`、`agent_frontend_acceptance`、`planning_search` | `INPUT_COMPLETED`，Acceptance Reply Outbox 已提交 |
+
+三条完成事件均携带精确安全枚举 `gateway_delivery_authority=acceptance_effect_outbox` 与 `gateway_delivery_state=OUTBOX_COMMITTED`。最新 30 分钟有效桶样本数为 3，Reply Commit、Closed Loop、Completion 均为 100%，告警为空。360 分钟窗口仍保留此前失败／不完整探针，因此历史汇总闭环率没有被重写为 100%。报告位于忽略的隔离验收目录 `artifacts/gateway-live/after-loop-metric-fix/`，不含密钥。
+
+同次真实 SQLite 检查确认 `digital_life_runtime_snapshot` 的当前结构以 `hard_state.emotion_tag` 保存 canonical self affect。Sidecar 重启后 `/obs/life-body` 为 `HEALTHY` 且 `derived.currentEmotion=NEUTRAL`；真实 Nginx Monitor Playwright 同时验证页面无“待连接”、“Runtime 待恢复”、Capability Forge 原始错误横幅或“主链存在断点”，并显示人格上下文“情绪 平静”。
+
+本地回归证据为：受影响 Python 30 passed，Monitor read-model 27 passed，Vite 生产构建通过，真实 `operator-session-live` 与 `core-release-real-interaction` 各 1 passed。这里的 Outbox commit 只证明 Host 已接受并持久提交 Gateway 回复，不能冒充外部平台物理 ACK。VTS 情绪热键、barge-in、常驻 ASR 噪声、长期盲测、PlanningSearch 三域收益和最终 commit 全栈故障矩阵仍未完成，整体保持 `INCOMPLETE`。

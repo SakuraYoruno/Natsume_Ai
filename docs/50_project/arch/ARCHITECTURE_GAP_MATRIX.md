@@ -8,7 +8,7 @@
 | 优先级 | 能力 | 当前状态 | 剩余缺口 | 完成证据 |
 |---|---|---|---|---|
 | P0 | 仓库与文档收口 | `CLOSED` | 无；#194 与 #209 已合入，临时分支已清理 | clean `dev` + PR #209 + 文档 Gate |
-| P0 | 日语情感语音 | `REFERENCE_SELECTED` | V4 B 当前是预训练权重加参考音频推理；专属微调 checkpoint 与目标 Edge 真实链路均未验收 | Edge CUDA receipt + 音频试听 |
+| P0 | 日语情感语音 | `EDGE_LIVE_REFERENCE_CONDITIONED` | V4 B 已在远端 CUDA Edge 完成真实合成与播放；仍缺专属微调 checkpoint 和完整情绪覆盖 | Edge terminal receipt + 音频试听 |
 | P0 | Voice／Avatar 同步 | `NOT_TESTED` | VTS/VRM、barge-in、断线与时间偏差 | 真实 synchronization receipt |
 | P0 | 真实对话延迟 | `PARTIAL` | Provider 首字和首段 TTS 指标待优化 | 非缓存 provider performance run |
 | P0 | 人工体验 | `NOT_RUN` | 48 条轨迹、3 人盲测未完成 | 冻结样本与匿名评分 |
@@ -19,6 +19,14 @@
 | P1 | 故障恢复 | `PARTIAL` | Edge／网络／未知 effect／回滚故障联合注入 | restart and reconciliation receipt |
 | P1 | 隐私与隔离 | `CONTRACT_READY` | 真实数据和多 session 检查待执行 | leak/tamper/delete tests |
 | P2 | 外部消息平台 | `OPTIONAL` | 凭据可用时逐项测试 | platform-specific receipt |
+
+## 2026-08-04 已关闭的真实观测缺口
+
+| 能力 | 状态 | 真实证据 | 仍不代表 |
+|---|---|---|---|
+| Life Body 人格上下文 | `CLOSED_LOCAL_REAL_STACK` | SQLite canonical `hard_state` → OBS Sidecar → Nginx Monitor；真实浏览器无“待连接／待恢复” | 长期人格自然度已通过 |
+| Gateway 当前闭环指标 | `CLOSED_LOCAL_REAL_STACK` | 三条签名真实请求最新有效桶 Reply Outbox／Closed Loop／Completion 均为 100% | 外部平台物理 ACK 或全历史无失败 |
+| Capability Forge 顶部错误横幅 | `CLOSED_LOCAL_REAL_STACK` | 真实 backend browser E2E 与生产构建通过 | 通用 Skill/Lab 全部完成 |
 
 ## 已经收敛的关键方向
 

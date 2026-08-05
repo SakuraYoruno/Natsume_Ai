@@ -1731,6 +1731,11 @@ async def run_surface_main_chain_for_surface_reply_input(
                 compiled_request,
                 raw_output=str(response.content or ""),
                 current_messages=attempt.prompt.messages,
+                # Missing Japanese speech must earn one repair attempt, but it
+                # never blocks the visible Chinese reply after that attempt.
+                # The delivery layer then degrades voice explicitly instead of
+                # feeding Chinese text into a Japanese acoustic model.
+                allow_voice_degradation=int(attempt.attempt_index) > 1,
             )
             if not evaluation.retry:
                 return RetryDirective.accept()

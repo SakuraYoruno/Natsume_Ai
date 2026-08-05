@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import hashlib
 import json
@@ -35,9 +36,7 @@ from host_brain.persistence.task_repository import (
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     ACCEPTANCE_EFFECT_HANDLER_FAILED,
     ACCEPTANCE_EFFECT_HANDLER_MISSING,
-    ACCEPTANCE_EFFECT_RECOVERY_PENDING,
     ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED,
-    AcceptanceEffectDispatchError,
     AcceptanceEffectDispatcher,
     AcceptanceEffectOutcomeUnknown,
     AcceptanceEffectRuntime,
@@ -369,17 +368,17 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
 
     assert [row[1] for row in calls] == [
         "conversation.user_turn",
-        "conversation.preference_signal",
         "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
+        "conversation.preference_signal",
     ]
     assert [row["effect_type"] for row in results] == [
         "conversation.user_turn",
-        "conversation.preference_signal",
         "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
+        "conversation.preference_signal",
         "unknown.audit",
     ]
     assert [row["status"] for row in results] == [
@@ -409,6 +408,148 @@ async def test_dispatch_graph_uses_semantic_order_and_exact_replay(
         str(effects["conversation.user_turn"]["effect_id"])
     ) is None
     assert len(calls) == 5
+
+
+@pytest.mark.asyncio
+async def test_interactive_dispatch_commits_reply_before_preference_projection(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    _stage_semantic_chain(store, "graph-interactive-cutoff")
+    calls: list[tuple[str, str]] = []
+    dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers=_handlers(calls),
+        owner_id="dispatcher-interactive-cutoff",
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+
+    snapshot = await dispatcher.dispatch_interactive_graph(
+        graph_id="graph-interactive-cutoff",
+        graph_revision=1,
+    )
+
+    assert [row[1] for row in calls] == [
+        "conversation.user_turn",
+        "life.conversation_turn_recorded",
+        "life.foreground_completed",
+        "surface.reply_delivery",
+    ]
+    assert [row["effect_type"] for row in snapshot] == [
+        "conversation.user_turn",
+        "life.conversation_turn_recorded",
+        "life.foreground_completed",
+        "surface.reply_delivery",
+        "conversation.preference_signal",
+    ]
+    assert [row["status"] for row in snapshot] == [
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "COMMITTED",
+        "PENDING",
+    ]
+
+    drained = await dispatcher.drain_ready(limit=100)
+    assert [row["effect_type"] for row in drained] == [
+        "conversation.preference_signal",
+    ]
+    assert all(row["status"] == "COMMITTED" for row in drained)
+
+
+@pytest.mark.asyncio
+async def test_unrelated_effects_do_not_share_one_process_lock(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    effects_a = _stage_semantic_chain(store, "graph-concurrent-a")
+    effects_b = _stage_semantic_chain(store, "graph-concurrent-b")
+    both_started = asyncio.Event()
+    release = asyncio.Event()
+    started: list[str] = []
+
+    async def handle(payload: dict[str, Any]) -> str:
+        started.append(str(payload["graph_id"]))
+        if len(started) == 2:
+            both_started.set()
+        await release.wait()
+        return f"effect-receipt://dispatcher/{payload['graph_id']}/concurrent"
+
+    dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"conversation.user_turn": handle},
+        owner_id="dispatcher-per-effect-locks",
+        action_preview_service=_TestActionPreviewAuthority(),
+    )
+    tasks = (
+        asyncio.create_task(
+            dispatcher.dispatch_effect(
+                str(effects_a["conversation.user_turn"]["effect_id"])
+            )
+        ),
+        asyncio.create_task(
+            dispatcher.dispatch_effect(
+                str(effects_b["conversation.user_turn"]["effect_id"])
+            )
+        ),
+    )
+    try:
+        await asyncio.wait_for(both_started.wait(), timeout=1.0)
+        release.set()
+        results = await asyncio.gather(*tasks)
+    finally:
+        release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert set(started) == {"graph-concurrent-a", "graph-concurrent-b"}
+    assert all(
+        result is not None and result["status"] == "COMMITTED"
+        for result in results
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_acceptance_projection_reuses_node_lineage_without_terminal_preview(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    node_id, attempt_id = _seed_completed_graph(store, "graph-local-projection")
+    effect = _stage_effect(
+        store,
+        graph_id="graph-local-projection",
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="conversation.user_turn",
+        opaque_order="local",
+    )
+
+    class ForbiddenPreview:
+        def issue_receipt(self, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("passive local projection must not issue Preview")
+
+        def require_execution(self, **_kwargs: Any) -> None:
+            raise AssertionError("passive local projection must not reopen Preview")
+
+    dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={
+            "conversation.user_turn": lambda payload: (
+                "effect-receipt://dispatcher/local-projection"
+                if payload["graph_id"] == "graph-local-projection"
+                else ""
+            )
+        },
+        owner_id="dispatcher-local-projection",
+        action_preview_service=ForbiddenPreview(),
+    )
+
+    settled = await dispatcher.dispatch_effect(str(effect["effect_id"]))
+
+    assert settled is not None
+    assert settled["status"] == AcceptanceEffectStatus.COMMITTED.value
 
 
 @pytest.mark.asyncio
@@ -522,10 +663,10 @@ async def test_transient_handler_failure_is_rescheduled_then_commits_chain(
     assert calls == [
         "conversation.user_turn",
         "conversation.user_turn",
-        "conversation.preference_signal",
         "life.conversation_turn_recorded",
         "life.foreground_completed",
         "surface.reply_delivery",
+        "conversation.preference_signal",
     ]
     conversation = store.get_acceptance_effect_intent(
         str(effects["conversation.user_turn"]["effect_id"])
@@ -619,12 +760,16 @@ async def test_unknown_handler_outcome_survives_retry_limit_and_restart_reconcil
     assert durable_pending["attempt_count"] == 1
     assert durable_hard_state_events[event_id] == frozen_business_payload
 
-    # Before the durable retry time, startup must not admit new governed work.
-    blocked_runtime = AcceptanceEffectRuntime(dispatcher=first_dispatcher)
-    with pytest.raises(AcceptanceEffectDispatchError) as blocked:
-        await blocked_runtime.activate()
-    assert blocked.value.reason_code == ACCEPTANCE_EFFECT_RECOVERY_PENDING
-    assert blocked_runtime.active is False
+    # Before the durable retry time the exact effect stays quarantined, while
+    # the rest of the personal Host remains available and recovery continues
+    # in the single background owner.
+    pending_runtime = AcceptanceEffectRuntime(
+        dispatcher=first_dispatcher,
+        poll_seconds=0.01,
+    )
+    await pending_runtime.activate()
+    assert pending_runtime.active is True
+    await pending_runtime.aclose()
 
     clock.advance(10)
     restarted_store = DurableTaskStore(store.db_path, clock=clock)
@@ -846,25 +991,25 @@ async def test_drain_ready_preserves_each_graph_chain_and_limit(
     assert len(first) == 4
     assert calls == [
         ("graph-drain-a", "conversation.user_turn"),
-        ("graph-drain-a", "conversation.preference_signal"),
         ("graph-drain-a", "life.conversation_turn_recorded"),
         ("graph-drain-a", "life.foreground_completed"),
+        ("graph-drain-a", "surface.reply_delivery"),
     ]
 
     second = await dispatcher.drain_ready(limit=4)
     assert len(second) == 4
     assert calls[-4:] == [
-        ("graph-drain-a", "surface.reply_delivery"),
+        ("graph-drain-a", "conversation.preference_signal"),
         ("graph-drain-b", "conversation.user_turn"),
-        ("graph-drain-b", "conversation.preference_signal"),
         ("graph-drain-b", "life.conversation_turn_recorded"),
+        ("graph-drain-b", "life.foreground_completed"),
     ]
 
     third = await dispatcher.drain_ready(limit=4)
     assert len(third) == 2
     assert calls[-2:] == [
-        ("graph-drain-b", "life.foreground_completed"),
         ("graph-drain-b", "surface.reply_delivery"),
+        ("graph-drain-b", "conversation.preference_signal"),
     ]
     assert await dispatcher.drain_ready(limit=4) == ()
     assert len(calls) == 10

@@ -58,19 +58,19 @@ from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPo
 from host_brain.agent_runtime.read_routes import build_read_projection
 
 
-def _project_governed_chat_terminal_event(
+def _project_governed_terminal_event(
     event: Mapping[str, Any],
     *,
     request_id: str,
 ) -> dict[str, Any]:
-    """Render one durable Chat terminal result as the public Chat contract.
+    """Render one durable terminal result as the public Cortex contract.
 
     Task Runtime deliberately uses ``TERMINAL`` for an unaccepted node: the
     durable receipt remains the authority for recovery, review, or diagnosis.
-    The public Chat SSE protocol, however, has always completed every request
-    with exactly one ``COMMIT`` frame.  Forwarding the internal phase leaked a
-    scheduler detail to clients and left the chat handler waiting forever for
-    its terminal frame.
+    The public Cortex SSE protocol completes every route with exactly one
+    ``COMMIT`` frame.  Forwarding the internal ``TERMINAL`` phase for Skill,
+    Delegate or Plan leaked a Task Runtime detail and left the Host input
+    adapter waiting forever for a terminal frame.
 
     This is a presentation-only projection.  It does not turn a rejected
     TaskGraph into an acceptance, alter its receipt, or invent a narrative.
@@ -93,7 +93,7 @@ def _project_governed_chat_terminal_event(
             "reason_code": (
                 str(projected.get("reason_code") or "").strip()
                 or str(receipt.get("reason_code") or "").strip()
-                or "GOVERNED_CHAT_TERMINAL_REJECTED"
+                or "GOVERNED_RUNTIME_TERMINAL_REJECTED"
             ),
             "request_id": request_id,
         }
@@ -602,8 +602,8 @@ async def _cortex_orchestrator_sse_generator_impl(
         render_target_lang=render_target_lang,
         command_authority=dict(command_authority or {}),
     ):
-        public_event = _project_governed_chat_terminal_event(
+        public_event = _project_governed_terminal_event(
             governed_event,
             request_id=request_id,
-        ) if canonical_route == "chat" else dict(governed_event)
+        )
         yield _emit_sse(public_event)

@@ -443,8 +443,18 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 """,
                 (request_id,),
             ).fetchone()[0]
-        assert assistant_turn_count == 1
-        assert memory_receipt_count == 1
+            projection_intent_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM life_projection_intent
+                WHERE target = 'surface.post_process'
+                  AND json_extract(payload_json, '$.request_id') = ?
+                """,
+                (request_id,),
+            ).fetchone()[0]
+        # The canonical Life command and exact projection intent must exist
+        # before Gateway intake.  Derived conversation/memory rows are allowed
+        # to settle asynchronously and therefore do not extend reply latency.
+        assert projection_intent_count == 1
         delivered_replies.append(
             {
                 "request_id": request_id,
@@ -453,6 +463,9 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 "timeout_ms": timeout_ms,
                 "assistant_turn_count_before_delivery": assistant_turn_count,
                 "memory_receipt_count_before_delivery": memory_receipt_count,
+                "projection_intent_count_before_delivery": (
+                    projection_intent_count
+                ),
             }
         )
         surface_value = {
@@ -924,23 +937,34 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         assert (
             delivered_replies[0]["assistant_turn_count_before_delivery"],
             delivered_replies[0]["memory_receipt_count_before_delivery"],
-        ) == (1, 1)
+            delivered_replies[0]["projection_intent_count_before_delivery"],
+        ) == (0, 0, 1)
         assert all(
             attempt.model_budget_guard is not None
             for attempt in provider_calls
         )
 
-        # Each accepted Life effect now drains only its own exact local
-        # projection intents before the dispatcher may advance to outward
-        # reply delivery.  The ordinary background worker must therefore find
-        # no stranded local projection after all three graphs complete.
+        # The interactive path commits accepted memory/Life state, expression
+        # intents, and the visible reply without waiting for preference
+        # learning.  Exercise the same durable background pass owned by the
+        # app-local Acceptance Effect recovery Runtime.
+        background_effects = await acceptance_effect_dispatcher.drain_ready(
+            limit=100
+        )
+        assert [row["effect_type"] for row in background_effects] == [
+            "conversation.preference_signal"
+        ]
+        assert await acceptance_effect_dispatcher.drain_ready(limit=100) == ()
+
+        # Derived Memory and visible-conversation projections are drained by
+        # their ordinary app-local worker after Gateway intake.
         projection = await projection_dispatcher.dispatch_pending_async(limit=100)
         projection_replay = await projection_dispatcher.dispatch_pending_async(
             limit=100
         )
         assert projection.failed == 0
-        assert projection.claimed == 0
-        assert projection.delivered == 0
+        assert projection.claimed > 0
+        assert projection.delivered == projection.claimed
         assert projection_replay.claimed == 0
 
         with sqlite3.connect(db_path) as conn:
@@ -1349,22 +1373,23 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         assert acceptance_effects == [
             ("conversation.preference_signal", "GRAPH", "COMMITTED", 4),
             ("conversation.user_turn", "GRAPH", "COMMITTED", 4),
-            # DL-05 freezes two stable sentences and one terminal release
-            # for both Voice and Avatar before Gateway delivery.  They are
-            # Host-staged protocol receipts here, not a claim that a remote
-            # Edge device physically played or applied them.
-            ("host.companion_expression_enqueue", "GRAPH", "COMMITTED", 6),
+            # One accepted aggregate freezes two stable sentences and one
+            # terminal release for both Voice and Avatar.  The expression
+            # delivery ledger below expands it into six protocol intents.
+            ("host.companion_expression_enqueue", "GRAPH", "COMMITTED", 1),
             ("life.conversation_turn_recorded", "GRAPH", "COMMITTED", 4),
             ("life.foreground_completed", "GRAPH", "COMMITTED", 4),
             ("surface.reply_delivery", "GRAPH", "COMMITTED", 1),
         ]
         assert results["chat"][-1]["audit_refs"]["acceptance_effects"] == {
-            "count": 11,
-            "committed": 11,
+            "count": 6,
+            "committed": 5,
             "failed": 0,
-            "pending": 0,
+            "pending": 1,
             "recovery_pending": 0,
-            "dispatch_status": "COMMITTED",
+            "dispatch_status": "DELIVERY_COMMITTED_BACKGROUND_PENDING",
+            "delivery_committed": True,
+            "background_pending": 1,
         }
         assert all(
             results[route][-1]["audit_refs"]["acceptance_effects"]

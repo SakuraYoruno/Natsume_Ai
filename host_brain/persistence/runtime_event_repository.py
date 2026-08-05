@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 import secrets
 import sqlite3
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 from host_brain.core.ids import now_ms
 
@@ -660,6 +660,52 @@ class RuntimeEventRepository:
             return dict(row) if row is not None else None
         finally:
             conn.close()
+
+    def get_journals_by_event_ids(
+        self,
+        *,
+        event_ids: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        """Return exact canonical rows with one bounded connection."""
+
+        identities: list[str] = []
+        for event_id in event_ids:
+            if not isinstance(event_id, str):
+                raise RuntimeEventRepositoryError(
+                    RUNTIME_EVENT_REPOSITORY_INVALID,
+                    "event_id must be a string",
+                )
+            identity = _required_text(event_id, "event_id")
+            if event_id != identity:
+                raise RuntimeEventRepositoryError(
+                    RUNTIME_EVENT_REPOSITORY_INVALID,
+                    "event_id must use its exact canonical form",
+                )
+            if identity not in identities:
+                identities.append(identity)
+        if len(identities) > 2_000:
+            raise RuntimeEventRepositoryError(
+                RUNTIME_EVENT_REPOSITORY_INVALID,
+                "event_id batch exceeds 2000 identities",
+            )
+        if not identities:
+            return []
+
+        found: dict[str, dict[str, Any]] = {}
+        conn = self._connect()
+        try:
+            for offset in range(0, len(identities), 400):
+                chunk = identities[offset : offset + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"SELECT * FROM runtime_event_timeline WHERE event_id IN ({placeholders})",
+                    tuple(chunk),
+                ).fetchall()
+                for row in rows:
+                    found[str(row["event_id"])] = dict(row)
+        finally:
+            conn.close()
+        return [found[event_id] for event_id in identities if event_id in found]
 
     def get_latest_journal_for_aggregate(
         self,

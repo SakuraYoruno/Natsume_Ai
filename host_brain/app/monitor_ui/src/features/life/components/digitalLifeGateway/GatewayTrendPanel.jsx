@@ -6,8 +6,8 @@ export default function GatewayTrendPanel({ view, hasAlertsData }) {
   const {
     humanoidTrendLabels,
     humanoidClosedLoopRateSeries,
-    humanoidAckTouchRateSeries,
-    humanoidProgressTouchRateSeries,
+    humanoidReplyCommitRateSeries,
+    humanoidCompletionRateSeries,
     humanoidTrendRequestTotal,
     humanoidTrendIntervalMinutes,
     humanoidAlertStatus,
@@ -22,14 +22,14 @@ export default function GatewayTrendPanel({ view, hasAlertsData }) {
   return (
     <div className="mt-4 card p-4">
       <LineChart
-        title="闭环触达趋势（Closed Loop / ACK / Progress）"
+        title="回复闭环趋势（Closed Loop / Reply Outbox / Terminal）"
         xData={humanoidTrendLabels}
         yUnit="%"
         height={260}
         series={[
           { name: 'Closed Loop', data: humanoidClosedLoopRateSeries, color: humanoidTrendClosedLoopColor },
-          { name: 'ACK Touch', data: humanoidAckTouchRateSeries, color: '#2970FF' },
-          { name: 'Progress Touch', data: humanoidProgressTouchRateSeries, color: '#6366F1' },
+          { name: 'Reply Outbox', data: humanoidReplyCommitRateSeries, color: '#2970FF' },
+          { name: 'Terminal', data: humanoidCompletionRateSeries, color: '#6366F1' },
         ]}
       />
       <div className="mt-2 text-xs text-gray-400">

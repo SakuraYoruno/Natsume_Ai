@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import inspect
 import json
 import re
+import time
 from typing import Any, Protocol
 
 from host_brain.model_runtime.governed_budget import (
@@ -42,6 +43,10 @@ from host_brain.contracts.agent_runtime.node_input_attestation import (
 from host_brain.persistence.task_chat_delivery_store import TaskChatDeliveryStore
 from host_brain.task_runtime.chat_delivery_authority import (
     TaskBoundChatDeliveryAuthority,
+)
+from host_brain.digital_life.governed_companion_presentation import (
+    GovernedCompanionPresentationError,
+    build_governed_companion_expression_intents,
 )
 
 
@@ -136,12 +141,19 @@ class FrozenDelegateRouteExecutor:
             input_pack=input_pack,
             audit_refs=audit_refs,
         )
+        acceptance_effect_intents = _delegate_companion_expression_intents(
+            frozen=frozen,
+            input_pack=input_pack,
+            narrative=narrative,
+            decision=decision,
+        )
         yield _terminal_commit(
             frozen=frozen,
             decision=decision,
             narrative=narrative,
             reason_code=reason_code,
             audit_refs=audit_refs,
+            acceptance_effect_intents=acceptance_effect_intents,
             budget_usage=_delegate_budget_payload(
                 frozen,
                 target_policy=target_policy,
@@ -697,6 +709,65 @@ def _delegate_context(input_pack: Mapping[str, Any], *, frozen: FrozenNodeInput)
         }
     )
     return raw_context
+
+
+def _delegate_companion_expression_intents(
+    *,
+    frozen: FrozenNodeInput,
+    input_pack: Mapping[str, Any],
+    narrative: str,
+    decision: str,
+) -> tuple[dict[str, Any], ...]:
+    """Freeze the companion presentation for an accepted user-facing Delegate.
+
+    Delegate targets remain read-only and never receive delivery authority.
+    Their accepted text still needs the same Digital Life presentation boundary
+    as native Chat, otherwise a governed translation or research answer silently
+    drops TTS and Avatar.  The plan is derived only from the immutable canonical
+    AffectFusion hand-off already stored in the WorkOrder; caller emotion fields
+    and the delegate result cannot rewrite Natsume's self-affect.
+    """
+
+    if decision != "APPROVE" or not narrative:
+        return ()
+    request_body = _safe_mapping(input_pack.get("request_body"))
+    source = str(request_body.get("input_source") or "").strip().upper()
+    if source not in {"CHAT", "GATEWAY", "HOST_INPUT", "WEB"}:
+        return ()
+    if bool(request_body.get("suppress_edge_tts")) or bool(
+        request_body.get("suppress_edge_vts")
+    ):
+        return ()
+    context_schema = str(input_pack.get("runtime_context_schema") or "").strip()
+    if context_schema != "natsume.runtime-context.request.v1":
+        return ()
+    workspace_id = str(input_pack.get("workspace_id") or "").strip()
+    relationship_subject_id = _frozen_relationship_subject_id(frozen)
+    try:
+        return build_governed_companion_expression_intents(
+            request_id=frozen.request_id,
+            session_id=frozen.session_id,
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+            runtime_context_schema=context_schema,
+            input_source=str(request_body.get("input_source") or ""),
+            suppress_edge_tts=bool(request_body.get("suppress_edge_tts")),
+            suppress_edge_vts=bool(request_body.get("suppress_edge_vts")),
+            emotion_context=_safe_mapping(
+                input_pack.get("prepared_emotion_context")
+                or input_pack.get("emotion_context")
+            ),
+            narrative=narrative,
+            decision=decision,
+            task_mode="technical_help",
+            created_at_ms=max(0, int(time.time() * 1000)),
+            metadata_source="governed_delegate_companion_presentation",
+        )
+    except GovernedCompanionPresentationError as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_INPUT_INVALID,
+            str(exc),
+        ) from exc
 
 
 def _project_outcome(value: Any) -> dict[str, Any]:

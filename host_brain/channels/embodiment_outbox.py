@@ -47,6 +47,27 @@ class DurableEmbodimentOutbox:
             reason_code=(str(row["reason_code"]) if row.get("reason_code") else None),
         )
 
+    def enqueue_many(
+        self,
+        commands: tuple[EmbodimentCommand, ...],
+    ) -> tuple[EmbodimentOutboxAck, ...]:
+        rows = self._repository.enqueue_many(
+            tuple(command.as_dict() for command in commands),
+            authority=self._authority_provider(),
+        )
+        return tuple(
+            EmbodimentOutboxAck(
+                outbox_id=str(row["outbox_id"]),
+                command_id=str(row["command_id"]),
+                idempotency_key=str(row["idempotency_key"]),
+                status=str(row["status"]),
+                reason_code=(
+                    str(row["reason_code"]) if row.get("reason_code") else None
+                ),
+            )
+            for row in rows
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentDispatchBatch:

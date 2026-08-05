@@ -80,6 +80,7 @@ def _seed_roots(
                 "persona_user_id": marker,
                 "sys_mode": "normal",
                 "slot_status": {"hard_state": "live"},
+                "hard_state": {"emotion_tag": "CALM"},
                 "private_body": f"PRIVATE_RUNTIME_{marker}",
                 "timestamp": (
                     now_ms
@@ -213,6 +214,7 @@ def test_two_obs_apps_cold_read_only_their_own_sqlite_roots(
         assert first_body is not None and second_body is not None
         assert first_body.degraded_state is ProjectionDegradedState.HEALTHY
         assert first_body.payload["runtimeSnapshot"]["persona_user_id"] == "first"
+        assert first_body.payload["derived"]["currentEmotion"] == "CALM"
         assert first_body.payload["memoryData"]["marker"] == "first"
         assert first_body.payload["organTribeData"]["total_agents"] == 23
         assert second_body.payload["runtimeSnapshot"]["persona_user_id"] == "second"

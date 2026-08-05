@@ -3,6 +3,7 @@ param(
   [string]$EnvFile = "",
   [string]$SecretEnvFile = "",
   [string]$RuntimeRoot = "",
+  [string]$AuditDbPath = "",
   [string]$LogDir = "",
   [string]$AgentWorkspaceRoot = "",
   [string]$BindHost = "",
@@ -393,13 +394,9 @@ function Write-RuntimeEnvFile {
 function Ensure-SchedulerClockSecretEnvFile {
   param(
     [string]$ResolvedRuntimeRoot,
-    [hashtable]$EnvValues,
-    [string]$ExistingSecretEnvFile = ""
+    [hashtable]$EnvValues
   )
 
-  if (-not [string]::IsNullOrWhiteSpace($ExistingSecretEnvFile)) {
-    return $ExistingSecretEnvFile
-  }
   $clockEnabled = Parse-BoolValue `
     -Value (Get-EnvSetting -Values $EnvValues -Name "HOST_SCHEDULER_CLOCK_ENABLED" -DefaultValue "false") `
     -Default $false
@@ -613,35 +610,72 @@ function Ensure-LocalOperatorSession {
     }
     $bindings = @($decoded)
   }
+  $operatorKeyId = (Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_OPERATOR_BFF_HMAC_KEY_ID" `
+    -DefaultValue "").Trim()
+  $hmacSecretsText = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON" `
+    -DefaultValue ""
+  try {
+    $hmacSecrets = $hmacSecretsText | ConvertFrom-Json
+    $hmacKeys = @($hmacSecrets.PSObject.Properties)
+  } catch {
+    throw "MONITOR_OPERATOR_HMAC_AUTHORITY_INVALID"
+  }
+  if (-not $operatorKeyId) {
+    if ($hmacKeys.Count -ne 1) {
+      throw "MONITOR_OPERATOR_HMAC_KEY_ID_REQUIRED"
+    }
+    $operatorKeyId = ([string]$hmacKeys[0].Name).Trim()
+  }
+  $matchingHmacKey = @(
+    $hmacKeys | Where-Object {
+      ([string]$_.Name).Trim() -eq $operatorKeyId -and
+      -not [string]::IsNullOrWhiteSpace([string]$_.Value)
+    }
+  )
+  if ($matchingHmacKey.Count -ne 1) {
+    throw "MONITOR_OPERATOR_HMAC_AUTHORITY_INVALID"
+  }
+
   $tokenDigest = Get-Sha256Hex -Value $token
-  $hasBinding = @(
+  $bindings = @(
     $bindings | Where-Object {
-      ([string]$_.token_sha256).Trim().ToLowerInvariant() -eq $tokenDigest
+      ([string]$_.token_sha256).Trim().ToLowerInvariant() -ne $tokenDigest
     }
-  ).Count -gt 0
-  if (-not $hasBinding) {
-    $bindings += [ordered]@{
-      token_sha256 = $tokenDigest
-      principal_id = "local-monitor-owner"
-      tenant_id = "local"
-      principal_kind = "user"
-      scopes = @(
-        "obs:operator:read",
-        "obs:health:stream",
-        "obs:task-runtime:read",
-        "obs:session:read",
-        "obs:session:export",
-        "obs:trace:read",
-        "obs:checkpoint:read",
-        "obs:memory:read",
-        "obs:immune:read",
-        "obs:bio-ops:read",
-        "obs:ui:read",
-        "obs:capability-forge:read",
-        "obs:life-evolution:read",
-        "obs:agent-history:read"
-      )
-    }
+  )
+  $bindings += [ordered]@{
+    token_sha256 = $tokenDigest
+    principal_id = "local-monitor-owner"
+    tenant_id = "local"
+    key_id = $operatorKeyId
+    principal_kind = "user"
+    scopes = @(
+      "obs:operator:read",
+      "obs:health:stream",
+      "obs:task-runtime:read",
+      "obs:session:read",
+      "obs:session:export",
+      "obs:trace:read",
+      "obs:checkpoint:read",
+      "obs:memory:read",
+      "obs:immune:read",
+      "obs:bio-ops:read",
+      "obs:ui:read",
+      "obs:capability-forge:read",
+      "obs:life-evolution:read",
+      "obs:agent-history:read",
+      "obs:write",
+      "obs:sys-mode:write",
+      "obs:long-term-goal:write",
+      "scheduler:write",
+      "device:edge:write",
+      "task-runtime:cancel",
+      "task-runtime:reconcile",
+      "task-review:write"
+    )
   }
   $serializedBindings = ConvertTo-Json -InputObject @($bindings) -Compress -Depth 8
   $env:NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = $serializedBindings
@@ -878,7 +912,7 @@ function Wait-HostCatalogStage {
         -Url $Url `
         -Kind "health" `
         -ExpectedCatalogStage $ExpectedCatalogStage `
-        -TimeoutSec 3
+        -TimeoutSec 12
     ) {
       return $true
     }
@@ -898,8 +932,9 @@ function Test-HostStartupStability {
     [ValidateRange(2, 10)]
     [int]$RequiredConsecutiveChecks = 5
   )
+  $script:HostStartupStabilityDiagnostics = @()
   $consecutive = 0
-  $maxChecks = $RequiredConsecutiveChecks + 5
+  $maxChecks = $RequiredConsecutiveChecks + 10
   for ($attempt = 0; $attempt -lt $maxChecks; $attempt++) {
     $processAlive = (
       $null -ne (Get-Process -Id $ExpectedPid -ErrorAction SilentlyContinue) -and
@@ -915,7 +950,7 @@ function Test-HostStartupStability {
         -Url $HealthUrl `
         -Kind "health" `
         -ExpectedCatalogStage $ExpectedCatalogStage `
-        -TimeoutSec 3
+        -TimeoutSec 12
     } else {
       $false
     }
@@ -924,17 +959,32 @@ function Test-HostStartupStability {
         -Url $ReadyUrl `
         -Kind "readiness" `
         -ExpectedCatalogStage $ExpectedCatalogStage `
-        -TimeoutSec 3
+        -TimeoutSec 12
     } else {
       $false
     }
-    if ($processAlive -and $listenerMatches -and $healthIdentity -and $readyIdentity) {
+    $sampleSucceeded = (
+      $processAlive -and
+      $listenerMatches -and
+      $healthIdentity -and
+      $readyIdentity
+    )
+    if ($sampleSucceeded) {
       $consecutive += 1
-      if ($consecutive -ge $RequiredConsecutiveChecks) {
-        return $true
-      }
     } else {
       $consecutive = 0
+    }
+    $script:HostStartupStabilityDiagnostics += [ordered]@{
+      attempt = $attempt + 1
+      process_alive = [bool]$processAlive
+      listening_pid = if ($null -eq $listeningPid) { $null } else { [int]$listeningPid }
+      listener_matches = [bool]$listenerMatches
+      health_identity = [bool]$healthIdentity
+      readiness_identity = [bool]$readyIdentity
+      consecutive = [int]$consecutive
+    }
+    if ($consecutive -ge $RequiredConsecutiveChecks) {
+      return $true
     }
     Start-Sleep -Seconds 1
   }
@@ -1480,6 +1530,19 @@ $stdoutLog = Join-Path $LogDir "host.stdout.log"
 $stderrLog = Join-Path $LogDir "host.stderr.log"
 $runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 $runtimeSecretEnvFile = ""
+$runtimeAuxiliarySecretEnvFile = ""
+$resolvedEnvFile = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+  (Resolve-Path -LiteralPath $EnvFile).Path
+} else {
+  [System.IO.Path]::GetFullPath($EnvFile)
+}
+if ([string]::Equals(
+    $resolvedEnvFile,
+    [System.IO.Path]::GetFullPath($runtimeEnvFile),
+    [System.StringComparison]::OrdinalIgnoreCase
+  )) {
+  throw "HOST_RUNTIME_ENV_FILE_MUST_BE_SEPARATE_FROM_SOURCE"
+}
 
 if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
   $secretCandidate = [Environment]::ExpandEnvironmentVariables($SecretEnvFile.Trim())
@@ -1490,11 +1553,6 @@ if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
     throw "HOST_RUNTIME_SECRET_ENV_FILE_NOT_FOUND: $secretCandidate"
   }
   $runtimeSecretEnvFile = (Resolve-Path -LiteralPath $secretCandidate).Path
-  $resolvedEnvFile = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
-    (Resolve-Path -LiteralPath $EnvFile).Path
-  } else {
-    [System.IO.Path]::GetFullPath($EnvFile)
-  }
   if (
     [string]::Equals($runtimeSecretEnvFile, $resolvedEnvFile, [System.StringComparison]::OrdinalIgnoreCase) -or
     [string]::Equals($runtimeSecretEnvFile, $runtimeEnvFile, [System.StringComparison]::OrdinalIgnoreCase)
@@ -1508,15 +1566,29 @@ Set-ProcessEnv -Values $envValues
 $hostObsReadTokenFile = Ensure-HostObsReadTokenFile `
   -ResolvedRuntimeRoot $RuntimeRoot `
   -EnvValues $envValues
-$runtimeSecretEnvFile = Ensure-SchedulerClockSecretEnvFile `
+$schedulerClockSecretEnvFile = Ensure-SchedulerClockSecretEnvFile `
   -ResolvedRuntimeRoot $RuntimeRoot `
-  -EnvValues $envValues `
-  -ExistingSecretEnvFile $runtimeSecretEnvFile
+  -EnvValues $envValues
+if (-not [string]::IsNullOrWhiteSpace($schedulerClockSecretEnvFile)) {
+  if ([string]::IsNullOrWhiteSpace($runtimeSecretEnvFile)) {
+    $runtimeSecretEnvFile = $schedulerClockSecretEnvFile
+  } elseif (-not [string]::Equals(
+      $runtimeSecretEnvFile,
+      $schedulerClockSecretEnvFile,
+      [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+    $runtimeAuxiliarySecretEnvFile = $schedulerClockSecretEnvFile
+  }
+}
 
-$configuredAuditDbPath = Get-EnvSetting `
-  -Values $envValues `
-  -Name "NATSUME_AUDIT_DB" `
-  -DefaultValue (Join-Path $RuntimeRoot "audit.sqlite3")
+$configuredAuditDbPath = if (-not [string]::IsNullOrWhiteSpace($AuditDbPath)) {
+  [string]$AuditDbPath
+} else {
+  Get-EnvSetting `
+    -Values $envValues `
+    -Name "NATSUME_AUDIT_DB" `
+    -DefaultValue (Join-Path $RuntimeRoot "audit.sqlite3")
+}
 if (-not [System.IO.Path]::IsPathRooted($configuredAuditDbPath)) {
   $configuredAuditDbPath = Join-Path $repoRoot $configuredAuditDbPath
 }
@@ -1524,6 +1596,14 @@ $auditDbPath = [System.IO.Path]::GetFullPath($configuredAuditDbPath)
 Ensure-Directory -Path ([System.IO.Path]::GetDirectoryName($auditDbPath))
 $env:NATSUME_AUDIT_DB = $auditDbPath
 $envValues["NATSUME_AUDIT_DB"] = $auditDbPath
+if (-not $envValues.ContainsKey("HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S") -and -not $env:HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S) {
+  # The inner Uvicorn candidate must not time out before this launcher's
+  # explicit readiness window. Durable Task recovery can legitimately take
+  # longer than the old fixed 45-second candidate limit.
+  $candidateStartupTimeout = [string]([Math]::Max(15, [Math]::Min(600, $WaitSeconds)))
+  $envValues["HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S"] = $candidateStartupTimeout
+  $env:HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S = $candidateStartupTimeout
+}
 
 $configuredAgentWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceRoot)) {
   [string]$AgentWorkspaceRoot
@@ -1904,6 +1984,12 @@ if ($runtimeSecretEnvFile) {
     "&&"
   )
 }
+if ($runtimeAuxiliarySecretEnvFile) {
+  $hostCommandParts += @(
+    "set ""HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE=$runtimeAuxiliarySecretEnvFile""",
+    "&&"
+  )
+}
 $hostCommandParts += @(
   (ConvertTo-CmdArgument -Value $pythonExe),
   (Join-CmdArguments -Arguments $hostArgs),
@@ -1976,6 +2062,12 @@ if ($obsEnabled) {
         BindHost = $obsBindHost
         Port = $obsBindPort
         WaitSeconds = $WaitSeconds
+      }
+      if (-not [string]::IsNullOrWhiteSpace($runtimeSecretEnvFile)) {
+        $obsArgs["SecretEnvFile"] = $runtimeSecretEnvFile
+      }
+      if (-not [string]::IsNullOrWhiteSpace($runtimeAuxiliarySecretEnvFile)) {
+        $obsArgs["AuxiliarySecretEnvFile"] = $runtimeAuxiliarySecretEnvFile
       }
       if ($ForceRestart.IsPresent) {
         $obsArgs["ForceRestart"] = $true
@@ -2189,7 +2281,7 @@ $hostStable = Test-HostStartupStability `
   -ProbePort $Port `
   -ProbeHost $BindHost `
   -HealthUrl $healthUrl `
-  -ReadyUrl "http://$probeHost`:$Port/ready" `
+  -ReadyUrl "http://$probeHost`:$Port/ready?skip_dependency_probes=1" `
   -ExpectedCatalogStage $catalogTargetStage `
   -RequiredConsecutiveChecks 5
 $obsProcessStatus = [string]$(
@@ -2241,9 +2333,12 @@ if (-not $hostStable -or -not $obsStable -or -not $monitorStable) {
   Stop-ProcessTree -ProcessId $hostPid | Out-Null
   Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
   $stderrTail = Get-SanitizedLogTail -Path $stderrLog -Lines 80
+  $stabilityDiagnostics = @($script:HostStartupStabilityDiagnostics) |
+    ConvertTo-Json -Depth 4 -Compress
   throw (
     "HOST_STACK_STARTUP_STABILITY_FAILED: host=$hostStable; " +
-    "obs=$obsStable; monitor=$monitorStable.`n$stderrTail"
+    "obs=$obsStable; monitor=$monitorStable; " +
+    "diagnostics=$stabilityDiagnostics.`n$stderrTail"
   )
 }
 
@@ -2263,6 +2358,7 @@ $result = [ordered]@{
   host_obs_read_auth_configured = [bool]$hostObsReadTokenFile
   host_obs_read_token_file = $hostObsReadTokenFile
   runtime_secret_env_configured = [bool]$runtimeSecretEnvFile
+  runtime_auxiliary_secret_env_configured = [bool]$runtimeAuxiliarySecretEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices

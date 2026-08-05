@@ -1050,6 +1050,7 @@ def build_governed_operator_composition(
     agent_runtime_ports: AgentRuntimeApplicationPorts | None = None,
     embodiment_runtime_provider: Any | None = None,
     scheduler_command_service_provider: Any | None = None,
+    episodic_store: Any | None = None,
 ) -> GovernedOperatorComposition:
     """Build one dispatcher/recovery owner shared by Host and Operator."""
 
@@ -1141,6 +1142,9 @@ def build_governed_operator_composition(
             task_store=task_runtime_container.task_store,
             review_command_service=review_command_service,
             review_store=task_runtime_container.review_store,
+            episodic_store_provider=(
+                (lambda: episodic_store) if episodic_store is not None else None
+            ),
         ),
         owner_id=f"{runtime_owner_id}::acceptance-effects",
         action_preview_service=action_preview_service,

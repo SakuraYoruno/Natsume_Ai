@@ -80,3 +80,15 @@
 ## 8. 模块完成规则
 
 “类存在”或“测试夹具通过”不等于模块完成。模块状态至少需要生产调用点、真实输入、持久恢复、失败边界、目标环境证据和对应文档一致。
+
+## 9. 当前闭环模块边界
+
+| 模块 | 当前 authority | 对外含义 |
+|---|---|---|
+| Self Affect | `digital_life_runtime_snapshot.hard_state` | 七海当前自身情绪；不是用户情绪镜像 |
+| Life Body Source | `observability_runtime/life_body_source.py` | 派生安全枚举给 OBS／Monitor，不拥有情绪写权限 |
+| Reply Acceptance | `surface.reply_delivery` acceptance effect | 形成唯一可恢复的 Gateway 回复意图 |
+| Gateway Loop Projection | `INPUT_COMPLETED` 中的 Outbox commit marker | 证明 Host 已提交回复 Outbox，不证明平台物理送达 |
+| External Delivery | Gateway terminal／平台 ACK | 在存在真实平台证据时证明传输或送达终态 |
+
+Monitor 的 Closed Loop、Reply Outbox、Terminal 三组指标分别展示上述边界，禁止继续把 legacy ACK touch 当作当前主链的必要生产事件。

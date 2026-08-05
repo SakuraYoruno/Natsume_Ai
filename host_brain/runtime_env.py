@@ -9,14 +9,41 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import secrets
 
 
 HOST_RUNTIME_ENV_FILE = "HOST_RUNTIME_ENV_FILE"
 HOST_RUNTIME_SECRET_ENV_FILE = "HOST_RUNTIME_SECRET_ENV_FILE"
+HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE = (
+    "HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE"
+)
 
 
 class RuntimeEnvironmentError(RuntimeError):
     """Raised when an explicitly configured runtime environment is unsafe."""
+
+
+_DUAL_RUNTIME_SECRET_PAIRS = (
+    ("EDGE_HMAC_SHARED_KEY", "HOST_EDGE_RPC_SHARED_KEY"),
+    ("EDGE_GATEWAY_HOST_HMAC_SECRET", "HOST_EDGE_GATEWAY_HMAC_SECRET"),
+    ("EDGE_GATEWAY_REPLY_HMAC_SECRET", "HOST_GATEWAY_REPLY_HMAC_SECRET"),
+)
+
+
+def _assert_dual_runtime_secret_pairs() -> None:
+    """Reject a combined Host/Edge secret file whose paired keys drifted."""
+
+    for edge_name, host_name in _DUAL_RUNTIME_SECRET_PAIRS:
+        edge_value = str(os.environ.get(edge_name) or "")
+        host_value = str(os.environ.get(host_name) or "")
+        if edge_value and host_value and not secrets.compare_digest(
+            edge_value,
+            host_value,
+        ):
+            raise RuntimeEnvironmentError(
+                "HOST_RUNTIME_SECRET_PAIR_MISMATCH: "
+                f"{edge_name}<->{host_name}"
+            )
 
 
 def _resolve_path(raw_path: str, *, repo_root: Path) -> Path:
@@ -69,6 +96,9 @@ def load_host_runtime_environment(*, repo_root: Path) -> None:
     launcher_secret_raw = str(
         os.environ.get(HOST_RUNTIME_SECRET_ENV_FILE) or ""
     ).strip()
+    launcher_auxiliary_secret_raw = str(
+        os.environ.get(HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE) or ""
+    ).strip()
 
     load_env_file(resolved_root / ".env", override=False)
 
@@ -79,28 +109,37 @@ def load_host_runtime_environment(*, repo_root: Path) -> None:
     )
     load_env_file(runtime_env_path, override=True)
 
-    if not launcher_secret_raw:
-        os.environ.pop(HOST_RUNTIME_SECRET_ENV_FILE, None)
-        return
-
-    secret_env_path = _resolve_path(
-        launcher_secret_raw,
-        repo_root=resolved_root,
+    selected_secret_files = (
+        (HOST_RUNTIME_SECRET_ENV_FILE, launcher_secret_raw),
+        (
+            HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE,
+            launcher_auxiliary_secret_raw,
+        ),
     )
-    if secret_env_path == runtime_env_path or secret_env_path == (
-        resolved_root / ".env"
-    ).resolve(strict=False):
-        raise RuntimeEnvironmentError(
-            "HOST_RUNTIME_SECRET_ENV_FILE_MUST_BE_SEPARATE"
-        )
-
-    os.environ[HOST_RUNTIME_SECRET_ENV_FILE] = str(secret_env_path)
-    load_env_file(secret_env_path, override=True, required=True)
-    os.environ[HOST_RUNTIME_SECRET_ENV_FILE] = str(secret_env_path)
+    forbidden_paths = {
+        runtime_env_path,
+        (resolved_root / ".env").resolve(strict=False),
+    }
+    loaded_paths: set[Path] = set()
+    for variable_name, raw_path in selected_secret_files:
+        if not raw_path:
+            os.environ.pop(variable_name, None)
+            continue
+        secret_env_path = _resolve_path(raw_path, repo_root=resolved_root)
+        if secret_env_path in forbidden_paths or secret_env_path in loaded_paths:
+            raise RuntimeEnvironmentError(
+                "HOST_RUNTIME_SECRET_ENV_FILE_MUST_BE_SEPARATE"
+            )
+        os.environ[variable_name] = str(secret_env_path)
+        load_env_file(secret_env_path, override=True, required=True)
+        os.environ[variable_name] = str(secret_env_path)
+        loaded_paths.add(secret_env_path)
+    _assert_dual_runtime_secret_pairs()
 
 
 __all__ = [
     "HOST_RUNTIME_ENV_FILE",
+    "HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE",
     "HOST_RUNTIME_SECRET_ENV_FILE",
     "RuntimeEnvironmentError",
     "load_env_file",

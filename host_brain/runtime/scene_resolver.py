@@ -191,26 +191,31 @@ def _derive_scene(
             )
         )
     if guardian_status in {"DEGRADED", "RECOVERY_PENDING", "SLO_BREACH"}:
-        low_risk_companion_chat = (
-            task_kind in {"CHAT", "CONVERSATION"}
-            and context.risk_level <= 2
-        )
+        # Guardian degradation must not turn every low-risk personal request
+        # into a manual approval workflow.  Risk is already frozen from the
+        # selected TaskGraph; at levels 1-2 we preserve the text/read-only path
+        # with an explicit restriction, regardless of whether the task is
+        # Chat, Skill, Research or another foreground capability.  Higher-risk
+        # work still requires Review.
+        low_risk_foreground_request = context.risk_level <= 2
         derived.append(
             ContextConstraintV1(
                 code=(
                     "GUARDIAN_DEGRADED_RESTRICTION"
-                    if low_risk_companion_chat
+                    if low_risk_foreground_request
                     else "GUARDIAN_DEGRADED_REVIEW"
                 ),
-                disposition="RESTRICT" if low_risk_companion_chat else "REVIEW",
+                disposition=(
+                    "RESTRICT" if low_risk_foreground_request else "REVIEW"
+                ),
                 origin="GUARDIAN",
                 source_ref=(
                     "guardian://snapshot/sha256/"
                     f"{guardian.snapshot_digest}"
                 ),
                 reason=(
-                    "低风险陪伴对话按可用通道降级，不阻塞文字回复"
-                    if low_risk_companion_chat
+                    "低风险前台请求按可用通道降级，不阻塞文字结果"
+                    if low_risk_foreground_request
                     else "运行期降级或 SLO 故障时必须复核效果"
                 ),
             )
@@ -758,10 +763,14 @@ class SceneResolver:
             raise SceneResolverError("scene identity lookup is invalid")
         scope = (workspace, subject)
         with self._lock:
-            if self._event_store is None:
-                self._restore_scope(workspace, subject)
-            else:
-                self._reload_scope(workspace, subject)
+            # The first read after process start validates the complete durable
+            # chain.  Later reads reopen only the cursor tail.  Clearing the
+            # verified projection here used to rescan and deep-validate every
+            # historical RuntimeEvent for every frozen-context read, turning
+            # routine chat and Scheduler recovery into multi-second CPU work.
+            # Runtime events remain append-only; an explicit append conflict
+            # still uses ``_reload_scope`` to recover from another writer.
+            self._restore_scope(workspace, subject)
             decision = self._decisions.get(scope, {}).get(revision)
             if (
                 decision is None

@@ -11,6 +11,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from host_brain.contracts.agent_runtime.terminal_reconciliation import (
+    is_signed_prebudget_cancellation_classifier_correction,
+)
+
 
 TERMINAL_RECONCILIATION_SUBJECT_SCHEMA = (
     "Natsume.task_runtime.terminal_reconciliation.subject.v1"
@@ -209,8 +213,12 @@ def terminal_proof_matrix_valid(
         }
     elif classification == "SIGNED_REPAIR_REQUIRED":
         authority_valid = authority == "SIGNED_OPERATOR"
+    elif is_signed_prebudget_cancellation_classifier_correction(case):
+        # One historical classifier false-positive may receive a signed no-op;
+        # this never authorizes a Graph or Budget mutation.
+        authority_valid = authority == "SIGNED_OPERATOR"
     else:
-        # Quarantine is evidence to preserve, never a directly provable case.
+        # Every other quarantine is evidence to preserve, never a provable case.
         return False
     expected = {
         "RELEASE_BUDGET": (
@@ -236,6 +244,7 @@ def terminal_proof_matrix_valid(
         and (
             action != "NONE"
             or str(case.get("case_kind") or "") == "TERMINAL_HEALTHY_CLOSURE"
+            or is_signed_prebudget_cancellation_classifier_correction(case)
         )
     )
 

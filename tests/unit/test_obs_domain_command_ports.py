@@ -14,6 +14,7 @@ from host_brain.observability.command_ports import (
     ObsCommandAuthority,
     ObsCommandContractError,
     ObsCommandEnvelope,
+    ObsCommandPortExecutionError,
     bind_server_authority,
 )
 from host_brain.observability.operator_command_gateway import (
@@ -427,10 +428,11 @@ def test_task_graph_cancel_disabled_fails_before_governed_admission() -> None:
         task_graph_cancellation_operator_enabled=False,
     )
     with bind_operator_command_runtime(state, raw_body=b"trusted-body"):
-        with pytest.raises(ObsDomainCommandError) as raised:
+        with pytest.raises(ObsCommandPortExecutionError) as raised:
             asyncio.run(port.execute(envelope))
 
     assert raised.value.reason_code == "OBS_TASK_GRAPH_CANCELLATION_DISABLED"
+    assert raised.value.side_effects_may_have_run is False
 
 
 def test_task_operation_reconcile_binds_actor_and_forwards_signed_proof() -> None:

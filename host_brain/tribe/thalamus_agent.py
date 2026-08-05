@@ -1067,6 +1067,51 @@ def _build_simple_technical_chat_seed(text: str, *, route_source: str) -> dict[s
     }
 
 
+def _build_planning_advice_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any]:
+    """Keep advice generation on the conversational companion path.
+
+    Advice does not itself authorize tool execution.  Routing it through the
+    retired IntentAgent delegate added Task/Review latency and failed in
+    production even though the user only needed a natural, contextual answer.
+    """
+
+    return _build_semantic_chat_seed(
+        text,
+        route_source=route_source,
+        reason_code="THALAMUS_RULE_PLANNING_ADVICE_CHAT",
+        semantic_type="planning_advice",
+        dialogue_act="request_prioritized_advice",
+        context_binding="conversation_and_user_goal",
+        answer_strategy="concise_prioritized_steps",
+        confidence=0.97,
+        domain="companion_advice",
+    )
+
+
+def _build_inline_code_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any]:
+    """Answer self-contained snippets directly without opening a Workspace."""
+
+    return _build_semantic_chat_seed(
+        text,
+        route_source=route_source,
+        reason_code="THALAMUS_RULE_INLINE_CODE_CHAT",
+        semantic_type="inline_code_generation",
+        dialogue_act="request_code_answer",
+        context_binding="none",
+        answer_strategy="direct_runnable_snippet_with_brief_explanation",
+        confidence=0.97,
+        domain="technical_chat",
+    )
+
+
 def _contains_any(text: str, markers: tuple[str, ...]) -> bool:
     normalized = _normalize_match_text(text)
     return any(marker in normalized for marker in markers)
@@ -2453,6 +2498,9 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if _looks_like_simple_technical_advice(cleaned):
         return _build_simple_technical_chat_seed(cleaned, route_source="thalamus.rule")
 
+    if _looks_like_lightweight_codex_request(cleaned):
+        return _build_inline_code_chat_seed(cleaned, route_source="thalamus.rule")
+
     if _looks_like_contextual_chat_followup(cleaned):
         return _build_contextual_chat_followup_seed(cleaned, route_source="thalamus.rule")
 
@@ -2492,38 +2540,29 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
         }
 
     if _TASK_CONTEXT_CONTINUATION_RE.match(cleaned):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": cleaned,
-            "reason_code": "RULE_CONTEXT_CONTINUATION",
-            "confidence": 0.88,
-            "route_source": "thalamus.rule",
-            "args": {
-                "text": cleaned,
-                "user_message": cleaned,
-            },
-        }
+        return _build_semantic_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+            reason_code="THALAMUS_RULE_CONTEXT_CONTINUATION_CHAT",
+            semantic_type="context_continuation",
+            dialogue_act="continue_previous_context",
+            context_binding="recent_conversation",
+            answer_strategy="continue_without_inventing_execution_authority",
+            confidence=0.94,
+            domain="companion_chat",
+        )
 
     if _TASK_INTENT_PLANNING_RE.search(cleaned):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": cleaned,
-            "reason_code": "RULE_FORCE_INTENT_AGENT",
-            "confidence": 0.94,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+        )
 
     if _TASK_PLAN_REQUEST_RE.search(cleaned):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": cleaned,
-            "reason_code": "RULE_ACTION_INTENT",
-            "confidence": 0.86,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+        )
 
     step_segments = _split_explicit_step_segments(cleaned)
     if len(step_segments) > 1:
@@ -2719,24 +2758,16 @@ def classify_task_intent_by_rules(text: str) -> dict[str, Any] | None:
         }
 
     if _TASK_INTENT_PLANNING_RE.search(normalized):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": normalized,
-            "reason_code": "RULE_FORCE_INTENT_AGENT",
-            "confidence": 0.94,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            normalized,
+            route_source="rule",
+        )
 
     if _TASK_PLAN_REQUEST_RE.search(normalized):
-        return {
-            "route": "delegate",
-            "target_id": "intent_agent",
-            "task": normalized,
-            "reason_code": "RULE_ACTION_INTENT",
-            "confidence": 0.86,
-            "route_source": "rule",
-        }
+        return _build_planning_advice_chat_seed(
+            normalized,
+            route_source="rule",
+        )
 
     if _TASK_MEMORY_RE.search(normalized):
         return {
@@ -2964,6 +2995,21 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
     workspace_seed = _build_codex_workspace_route_seed(normalized)
     if workspace_seed is not None:
         return workspace_seed
+
+    if _looks_like_lightweight_codex_request(normalized):
+        return _build_inline_code_chat_seed(
+            normalized,
+            route_source="rule.fastpath",
+        )
+
+    if (
+        _TASK_INTENT_PLANNING_RE.search(normalized)
+        or _TASK_PLAN_REQUEST_RE.search(normalized)
+    ):
+        return _build_planning_advice_chat_seed(
+            normalized,
+            route_source="rule.fastpath",
+        )
 
     semantic_chat_seed = _build_structured_chat_semantic_seed(normalized, route_source="rule.fastpath")
     if semantic_chat_seed is not None:

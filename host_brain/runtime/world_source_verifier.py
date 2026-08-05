@@ -15,7 +15,11 @@ from host_brain.integrations.runtime_events import (
     validate_runtime_event_record_envelope,
 )
 
-from .context_contracts import WorldFactExpiryV1, WorldFactV2
+from .context_contracts import (
+    WorldFactExpiryV1,
+    WorldFactV2,
+    WorldObservationBatchV1,
+)
 
 
 _SHA256_DIGEST_PATTERN = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
@@ -315,6 +319,12 @@ class RuntimeEventReader(Protocol):
 
     def get_event_by_id(self, *, event_id: str) -> Mapping[str, Any] | None: ...
 
+    def get_events_by_ids(
+        self,
+        *,
+        event_ids: Sequence[str],
+    ) -> Mapping[str, Mapping[str, Any]]: ...
+
 
 def _exact_text(value: Any) -> str | None:
     if not isinstance(value, str) or not value or value != value.strip():
@@ -458,6 +468,86 @@ class RuntimeEventWorldSourceVerifier:
         record = self._event_reader.get_event_by_id(event_id=event_id)
         if record is None:
             return False
+        return self._verify_record(
+            workspace=workspace,
+            subject=subject,
+            event_id=event_id,
+            expected_digest=expected_digest,
+            observed_at_ms=observed_at_ms,
+            upserts=upserts,
+            expiries=expiries,
+            record=record,
+        )
+
+    def verify_batch(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        batches: Sequence[WorldObservationBatchV1],
+    ) -> bool:
+        """Fully verify one journal page after one bounded event read."""
+
+        page = tuple(batches)
+        if any(not isinstance(batch, WorldObservationBatchV1) for batch in page):
+            return False
+        batch_reader = getattr(self._event_reader, "get_events_by_ids", None)
+        if not callable(batch_reader):
+            return all(
+                self(
+                    workspace_id,
+                    subject_id,
+                    batch.source_event_ref,
+                    batch.source_event_digest,
+                    batch.observed_at_ms,
+                    batch.upserts,
+                    batch.expiries,
+                )
+                for batch in page
+            )
+        records = batch_reader(
+            event_ids=tuple(batch.source_event_ref for batch in page),
+        )
+        if not isinstance(records, Mapping) or len(records) != len(page):
+            return False
+        for batch in page:
+            workspace = _exact_text(workspace_id)
+            subject = _exact_text(subject_id)
+            event_id = _exact_text(batch.source_event_ref)
+            expected_digest = _normalize_digest(batch.source_event_digest)
+            record = records.get(str(event_id or ""))
+            if (
+                workspace is None
+                or subject is None
+                or event_id is None
+                or expected_digest is None
+                or not isinstance(record, Mapping)
+                or not self._verify_record(
+                    workspace=workspace,
+                    subject=subject,
+                    event_id=event_id,
+                    expected_digest=expected_digest,
+                    observed_at_ms=batch.observed_at_ms,
+                    upserts=batch.upserts,
+                    expiries=batch.expiries,
+                    record=record,
+                )
+            ):
+                return False
+        return True
+
+    def _verify_record(
+        self,
+        *,
+        workspace: str,
+        subject: str,
+        event_id: str,
+        expected_digest: str,
+        observed_at_ms: int,
+        upserts: Sequence[WorldFactV2],
+        expiries: Sequence[WorldFactExpiryV1],
+        record: Mapping[str, Any],
+    ) -> bool:
         payload = record.get("payload")
         if not isinstance(payload, Mapping):
             return False

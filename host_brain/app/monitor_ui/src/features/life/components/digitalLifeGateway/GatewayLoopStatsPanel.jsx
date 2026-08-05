@@ -33,8 +33,8 @@ export default function GatewayLoopStatsPanel({
           <KeyValueRow label="总 Gateway 请求" value={humanoidTotalRequests} />
           <KeyValueRow label="已进入终态" value={humanoidLoopData?.completed_requests ?? 0} />
           <KeyValueRow label="失败请求" value={humanoidFailedRequests} valueClassName={humanoidFailedRequests > 0 ? 'text-red-600' : 'text-gray-700'} />
-          <KeyValueRow label="ACK 已确认" value={humanoidLoopData?.ack_confirmed_requests ?? 0} />
-          <KeyValueRow label="进度触达请求" value={humanoidLoopData?.progress_touched_requests ?? 0} />
+          <KeyValueRow label="回复 Outbox 已提交" value={humanoidLoopData?.reply_committed_requests ?? 0} />
+          <KeyValueRow label="兼容 ACK 已确认（旧路径）" value={humanoidLoopData?.ack_confirmed_requests ?? 0} />
           <KeyValueRow
             label="偏航恢复"
             value={`${humanoidLoopData?.deviation_recovered_requests ?? 0}/${humanoidDeviationDetected}`}

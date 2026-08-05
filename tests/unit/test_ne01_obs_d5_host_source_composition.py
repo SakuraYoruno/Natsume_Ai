@@ -6,7 +6,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from host_brain.app import host_obs_source_composition as source_composition
 from host_brain.app.host_obs_read_routes import (
     HostObsReadSourceUnavailable,
     create_host_obs_read_router,
@@ -195,9 +194,6 @@ def test_build_is_lazy_and_each_reader_uses_only_explicit_runtime_ports() -> Non
         "forge",
         "ledger",
         "semantic",
-        "scorecards",
-        "degradation",
-        "pentest",
         "scheduler",
         "tribe",
     ]
@@ -275,21 +271,16 @@ def test_forge_failure_does_not_block_semantic_or_governance_sources() -> None:
     ).status_code == 200
 
 
-def test_child_failures_degrade_compat_fields_without_blocking_capability(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_child_failures_degrade_or_delegate_without_blocking_capability() -> None:
     def raise_child_failure():
         raise RuntimeError("child authority failed")
-
-    monkeypatch.setattr(
-        source_composition,
-        "_governance_snapshot",
-        lambda *_args, **_kwargs: raise_child_failure(),
-    )
 
     ports = build_host_obs_read_ports(
         _runtime(
             semantic_recaller_provider=raise_child_failure,
+            capability_scorecard_provider=raise_child_failure,
+            degradation_state_provider=raise_child_failure,
+            pentest_environment_provider=raise_child_failure,
         ),
         environ={"HOST_OBS_READ_TOKEN": "dedicated-token"},
     )
@@ -305,9 +296,9 @@ def test_child_failures_degrade_compat_fields_without_blocking_capability(
         "timestamp": NOW,
     }
     assert capability.governance == {
-        "available": False,
-        "reason_code": "HOST_OBS_GOVERNANCE_RUNTIME_NOT_READY",
-        "status": "SOURCE_UNAVAILABLE",
+        "available": True,
+        "status": "DELEGATED",
+        "source_path": "/internal/obs-sources/governance",
         "timestamp": NOW,
     }
 
@@ -319,7 +310,7 @@ def test_child_failures_degrade_compat_fields_without_blocking_capability(
     )
     assert response.status_code == 200
     assert response.json()["semantic_recall"]["status"] == "SOURCE_UNAVAILABLE"
-    assert response.json()["governance"]["status"] == "SOURCE_UNAVAILABLE"
+    assert response.json()["governance"]["status"] == "DELEGATED"
 
 
 def test_governance_input_provider_failure_degrades_without_503() -> None:

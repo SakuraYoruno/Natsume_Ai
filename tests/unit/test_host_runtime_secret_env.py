@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from host_brain.runtime_env import (
+    HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE,
     HOST_RUNTIME_ENV_FILE,
     HOST_RUNTIME_SECRET_ENV_FILE,
     RuntimeEnvironmentError,
@@ -42,6 +43,74 @@ def test_detached_host_loads_separate_secret_file_last(
     assert os.environ[HOST_RUNTIME_SECRET_ENV_FILE] == str(secret.resolve())
 
 
+def test_detached_host_loads_launcher_selected_auxiliary_secret_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    public = _write(
+        tmp_path / "runtime.env",
+        "HOST_APP_PORT=28080\n",
+    )
+    primary = _write(
+        tmp_path / "gateway.secrets.env",
+        "HOST_GATEWAY_REPLY_HMAC_SECRET=gateway-secret\n",
+    )
+    auxiliary = _write(
+        tmp_path / "scheduler.secrets.env",
+        "HOST_SCHEDULER_CLOCK_HMAC_SECRET=scheduler-secret\n",
+    )
+    monkeypatch.setenv(HOST_RUNTIME_ENV_FILE, str(public))
+    monkeypatch.setenv(HOST_RUNTIME_SECRET_ENV_FILE, str(primary))
+    monkeypatch.setenv(
+        HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE,
+        str(auxiliary),
+    )
+
+    load_host_runtime_environment(repo_root=tmp_path)
+
+    assert os.environ["HOST_GATEWAY_REPLY_HMAC_SECRET"] == "gateway-secret"
+    assert os.environ["HOST_SCHEDULER_CLOCK_HMAC_SECRET"] == "scheduler-secret"
+    assert os.environ[HOST_RUNTIME_SECRET_ENV_FILE] == str(primary.resolve())
+    assert os.environ[HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE] == str(
+        auxiliary.resolve()
+    )
+
+
+def test_combined_secret_file_rejects_drifted_host_edge_pair(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    secret = _write(
+        tmp_path / "drifted.env",
+        "EDGE_GATEWAY_HOST_HMAC_SECRET=" + ("e" * 32) + "\n"
+        "HOST_EDGE_GATEWAY_HMAC_SECRET=" + ("h" * 32) + "\n",
+    )
+    monkeypatch.setenv(HOST_RUNTIME_SECRET_ENV_FILE, str(secret))
+
+    with pytest.raises(
+        RuntimeEnvironmentError,
+        match="HOST_RUNTIME_SECRET_PAIR_MISMATCH",
+    ):
+        load_host_runtime_environment(repo_root=tmp_path)
+
+
+def test_combined_secret_file_accepts_matching_host_edge_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    shared = "s" * 32
+    secret = _write(
+        tmp_path / "paired.env",
+        f"EDGE_GATEWAY_HOST_HMAC_SECRET={shared}\n"
+        f"HOST_EDGE_GATEWAY_HMAC_SECRET={shared}\n",
+    )
+    monkeypatch.setenv(HOST_RUNTIME_SECRET_ENV_FILE, str(secret))
+
+    load_host_runtime_environment(repo_root=tmp_path)
+
+    assert os.environ["HOST_EDGE_GATEWAY_HMAC_SECRET"] == shared
+
+
 def test_windows_utf8_bom_does_not_corrupt_first_runtime_setting(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -76,6 +145,27 @@ def test_public_runtime_file_cannot_redirect_secret_file(
 
     assert os.environ["TEST_RUNTIME_SECRET"] == "trusted"
     assert os.environ[HOST_RUNTIME_SECRET_ENV_FILE] == str(trusted.resolve())
+
+
+def test_public_runtime_file_cannot_redirect_auxiliary_secret_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    trusted = _write(tmp_path / "trusted.env", "TEST_AUX_SECRET=trusted\n")
+    untrusted = _write(tmp_path / "untrusted.env", "TEST_AUX_SECRET=wrong\n")
+    public = _write(
+        tmp_path / "public.env",
+        f"{HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE}={untrusted}\n",
+    )
+    monkeypatch.setenv(HOST_RUNTIME_ENV_FILE, str(public))
+    monkeypatch.setenv(HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE, str(trusted))
+
+    load_host_runtime_environment(repo_root=tmp_path)
+
+    assert os.environ["TEST_AUX_SECRET"] == "trusted"
+    assert os.environ[HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE] == str(
+        trusted.resolve()
+    )
 
 
 def test_explicit_missing_secret_file_fails_closed(

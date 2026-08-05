@@ -208,6 +208,7 @@ def test_dispatch_worker_never_redelivers_a_governed_acceptance_receipt() -> Non
                                 "committed": 3,
                                 "failed": 0,
                                 "pending": 0,
+                                "delivery_committed": True,
                             }
                         },
                     },
@@ -242,6 +243,9 @@ def test_dispatch_worker_never_redelivers_a_governed_acceptance_receipt() -> Non
         assert "gateway_delivery_authority=acceptance_effect_outbox" in str(
             completed.get("detail") or ""
         )
+        completed_payload = dict(completed.get("payload") or {})
+        assert completed_payload["gateway_delivery_authority"] == "acceptance_effect_outbox"
+        assert completed_payload["gateway_delivery_state"] == "OUTBOX_COMMITTED"
     finally:
         ledger.close()
 
@@ -668,7 +672,7 @@ def test_dispatch_worker_logs_route_decided_event_with_route_payload() -> None:
         ledger.close()
 
 
-def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> None:
+def test_dispatch_worker_accepts_delegate_without_legacy_skill_exec() -> None:
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     try:
         with patch(
@@ -677,13 +681,13 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
                 return_value={
                     "decision": "APPROVE",
                     "reason_code": None,
-                    "narrative": "delegate done",
+                    "narrative": "translation done",
                     "commit_event": {"phase": "COMMIT", "decision": "APPROVE"},
                     "route_decision": {
-                        "route": "skill",
-                        "target_id": "agent_worker",
-                        "task": "fix code",
-                        "reason_code": "LLM_ROUTE_agent_worker",
+                        "route": "delegate",
+                        "target_id": "translate_agent",
+                        "task": "translate text",
+                        "reason_code": "LLM_ROUTE_translate_agent",
                         "source": "llm",
                         "confidence": 0.95,
                         "llm_route_used": True,
@@ -699,7 +703,7 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
                     request_id="req_worker_quality_missing_exec",
                     session_id="qq_dm_quality_missing_exec",
                     source="GATEWAY",
-                    text="please fix this bug",
+                    text="please translate this text",
                     payload={
                         "platform": "qq",
                         "conversation_id": "qq_dm_quality_missing_exec",
@@ -714,11 +718,11 @@ def test_dispatch_worker_degrades_when_delegate_route_missing_skill_exec() -> No
             )
 
         completed = next(row for row in ledger.voice_event_log if row["event_type"] == "INPUT_COMPLETED")
-        assert completed["status"] == "DEGRADED"
-        assert completed["reason_code"] == "SKILL_EXEC_MISSING"
+        assert completed["status"] == "OK"
+        assert completed["reason_code"] is None
         completed_payload = dict(completed.get("payload") or {})
-        assert completed_payload.get("exec_quality_degraded") is True
-        assert completed_payload.get("exec_quality_reason_code") == "SKILL_EXEC_MISSING"
+        assert completed_payload.get("exec_quality_degraded") is False
+        assert completed_payload.get("exec_quality_reason_code") is None
     finally:
         ledger.close()
 
@@ -1006,7 +1010,7 @@ def test_run_cortex_orchestrator_pipeline_routes_gateway_samples_through_thalamu
         yield 'data: {"phase":"COMMIT","decision":"APPROVE","reason_code":null,"narrative":"收到。"}'
 
     cases = [
-        ("开始吧", "delegate", "intent_agent"),
+        ("开始吧", "chat", ""),
         ("使用无头浏览器验证前端效果", "skill", "agent_frontend_acceptance"),
         ("帮我翻译这段话", "delegate", "translate_agent"),
         ("有没有更好的方案", "chat", ""),

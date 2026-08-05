@@ -97,6 +97,32 @@ class TerminalReconciliationStoreRejected(RuntimeError):
         super().__init__(f"{self.reason_code}: {self.detail}")
 
 
+def is_signed_prebudget_cancellation_classifier_correction(
+    case: Mapping[str, Any],
+) -> bool:
+    """Identify the one historical false-positive eligible for a signed no-op.
+
+    Older terminal discovery required every terminal Graph to own one graph-level
+    Budget. A Graph durably cancelled before Budget admission was therefore
+    quarantined before its complete cancellation authority could be checked.
+    The Store must still re-read and validate the current cancellation facts.
+    """
+
+    return bool(
+        isinstance(case, Mapping)
+        and case.get("schema_version")
+        == TERMINAL_RECONCILIATION_CASE_SCHEMA_VERSION
+        and case.get("case_kind") == "TERMINAL_STRUCTURAL_ANOMALY"
+        and case.get("classification") == "QUARANTINED_STRUCTURAL"
+        and case.get("reason_code") == "TERMINAL_GRAPH_BUDGET_BINDING_AMBIGUOUS"
+        and case.get("graph_status") == "CANCELLED"
+        and case.get("budget_id") is None
+        and case.get("budget_status") is None
+        and case.get("budget_status_version") is None
+        and case.get("recommended_action") == "NONE"
+    )
+
+
 def build_terminal_reconciliation_binding(value: Mapping[str, Any]) -> bytes:
     """Return canonical, exact-field bytes for Ed25519 verification."""
 
@@ -234,4 +260,5 @@ __all__ = [
     "TerminalReconciliationStoreRejected",
     "build_terminal_reconciliation_attestation_binding",
     "build_terminal_reconciliation_binding",
+    "is_signed_prebudget_cancellation_classifier_correction",
 ]

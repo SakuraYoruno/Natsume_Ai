@@ -82,11 +82,14 @@ export default function useLifeBodyPageData({ windowMinutes = 360 } = {}) {
   const hasMemoryData = derived.hasMemoryData ?? Boolean(memoryData)
   const hasMemorySamples = derived.hasMemorySamples ?? (avgMemorySuccessRate != null)
 
-  const topEmotion = runtimeSnapshot?.emotion_context?.emotion_tag || vtsData?.top_emotions?.[0]?.emotion_tag || vtsData?.top_emotions?.[0]?.tag
-  const currentBondStage = derived.currentBondStage || formatStage(runtimeSnapshot?.bond_state?.current_stage)
-  const currentEmotion = derived.currentEmotion || formatEmotionTag(topEmotion)
-  const dominantMotive = derived.dominantMotive || formatDominantMotive(runtimeSnapshot?.motive_state?.dominant_motive)
-  const replyPosture = derived.replyPosture || formatReplyPosture(runtimeSnapshot?.runtime_summary?.reply_posture?.style)
+  const topEmotion = runtimeSnapshot?.emotion_context?.emotion_tag
+    || runtimeSnapshot?.hard_state?.emotion_tag
+    || vtsData?.top_emotions?.[0]?.emotion_tag
+    || vtsData?.top_emotions?.[0]?.tag
+  const currentBondStage = formatStage(derived.currentBondStage || runtimeSnapshot?.bond_state?.current_stage)
+  const currentEmotion = formatEmotionTag(derived.currentEmotion || topEmotion)
+  const dominantMotive = formatDominantMotive(derived.dominantMotive || runtimeSnapshot?.motive_state?.dominant_motive)
+  const replyPosture = formatReplyPosture(derived.replyPosture || runtimeSnapshot?.runtime_summary?.reply_posture?.style)
   const riskLevel = derived.riskLevel || formatRiskLevel(runtimeSnapshot?.self_reflection_pulse?.narrative_guardrails?.risk_level)
   const absenceBand = derived.absenceBand || formatAbsenceBand(runtimeSnapshot?.offline_state?.absence_band)
   const runtimeAlerts = Array.isArray(data.runtimeAlerts) && data.runtimeAlerts.length > 0

@@ -320,6 +320,21 @@ async def _dispatch_to_graph_worker(
         gateway_delivery: dict[str, Any] | None = None
         commit_event = dict(pipeline_result.get("commit_event") or {})
         governed_delivery = isinstance(commit_event.get("execution_receipt"), dict)
+        commit_audit_refs = commit_event.get("audit_refs")
+        acceptance_effects_raw = (
+            commit_audit_refs.get("acceptance_effects")
+            if isinstance(commit_audit_refs, dict)
+            else None
+        )
+        acceptance_effects = (
+            dict(acceptance_effects_raw)
+            if isinstance(acceptance_effects_raw, dict)
+            else {}
+        )
+        gateway_reply_committed = bool(
+            governed_delivery
+            and acceptance_effects.get("delivery_committed") is True
+        )
         if source_upper == "GATEWAY" and not governed_delivery:
             # Phase XV P4：从 pipeline_result 提取情感和 Bond 上下文
             audit_refs = commit_event.get("audit_refs") or {}
@@ -372,6 +387,8 @@ async def _dispatch_to_graph_worker(
         ]
         if governed_delivery:
             detail_parts.append("gateway_delivery_authority=acceptance_effect_outbox")
+        if gateway_reply_committed:
+            detail_parts.append("gateway_delivery_state=OUTBOX_COMMITTED")
         if reason_code:
             detail_parts.append(f"reason_code={reason_code}")
         detail_parts.append(f"route_type={route_type}")
@@ -519,6 +536,11 @@ async def _dispatch_to_graph_worker(
         completed_payload["exec_quality_skill_exec_count"] = int(execution_quality.get("skill_exec_count") or 0)
         if governed_delivery:
             completed_payload["gateway_delivery_authority"] = "acceptance_effect_outbox"
+        if gateway_reply_committed:
+            # This is a durable Host-side outbox commit.  It intentionally
+            # does not claim that the external platform has acknowledged the
+            # physical delivery.
+            completed_payload["gateway_delivery_state"] = "OUTBOX_COMMITTED"
         if isinstance(deviation_meta, dict):
             completed_payload["deviation_reason"] = deviation_meta.get("reason_code")
             completed_payload["deviation_overlap_ratio"] = deviation_meta.get("overlap_ratio")

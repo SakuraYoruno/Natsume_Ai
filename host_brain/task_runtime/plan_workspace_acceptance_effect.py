@@ -82,7 +82,16 @@ def compile_plan_node_acceptance_effects(
         _invalid(str(exc))
 
     if node_policy["effect_mode"] == PLAN_SPECULATIVE_EFFECT_MODE:
-        if descriptors:
+        # The result Chat node is the sole owner of visible conversation/Life
+        # effects.  A pre-result Skill's foreground proposal is therefore safe
+        # to discard (and keeps already-accepted projections recoverable), but
+        # every other effect remains an authority violation.
+        unauthorized = tuple(
+            descriptor
+            for descriptor in descriptors
+            if descriptor["effect_type"] != "life.foreground_completed"
+        )
+        if unauthorized:
             _invalid("speculative Plan node proposed an Acceptance Effect")
         return ()
     if node_policy["effect_mode"] != PLAN_NODE_WORKSPACE_EFFECT_MODE:

@@ -10,7 +10,7 @@ from host_brain.integrations.runtime_events import (
     RuntimeEvent,
     runtime_event_payload_digest,
 )
-from host_brain.runtime.context_contracts import WorldFactV2
+from host_brain.runtime.context_contracts import WorldFactV2, WorldObservationBatchV1
 from host_brain.runtime.world_source_verifier import (
     RuntimeEventWorldSourceVerifier,
     WorldObservationAuthorityProjectionV1,
@@ -43,6 +43,29 @@ class MultiEventReader:
 
     def get_event_by_id(self, *, event_id: str) -> dict[str, Any] | None:
         return self.records.get(event_id)
+
+
+class CountingBatchEventReader(MultiEventReader):
+    def __init__(self, records: tuple[dict[str, Any], ...]) -> None:
+        super().__init__(records)
+        self.individual_reads = 0
+        self.batch_reads: list[tuple[str, ...]] = []
+
+    def get_event_by_id(self, *, event_id: str) -> dict[str, Any] | None:
+        self.individual_reads += 1
+        return super().get_event_by_id(event_id=event_id)
+
+    def get_events_by_ids(
+        self,
+        *,
+        event_ids: tuple[str, ...],
+    ) -> dict[str, dict[str, Any]]:
+        self.batch_reads.append(tuple(event_ids))
+        return {
+            event_id: self.records[event_id]
+            for event_id in event_ids
+            if event_id in self.records
+        }
 
 
 def _evidence(
@@ -207,6 +230,34 @@ def test_world_source_verifier_accepts_exact_event_scope_transition_and_digest()
         (fact,),
         (),
     ) is True
+
+
+def test_world_source_verifier_batch_reopens_page_with_one_bounded_read() -> None:
+    record, fact = _evidence()
+    reader = CountingBatchEventReader((record,))
+    verifier = RuntimeEventWorldSourceVerifier(reader)
+    batch = WorldObservationBatchV1(
+        workspace_id=WORKSPACE_ID,
+        subject_id=SUBJECT_ID,
+        runtime_scope_id="runtime-scope-ne03",
+        runtime_owner_id="runtime-owner-ne03",
+        runtime_lease_id="runtime-lease-ne03",
+        fencing_token=1,
+        revision=1,
+        previous_batch_digest="",
+        source_event_ref=str(record["event_id"]),
+        source_event_digest=str(record["payload_digest"]).removeprefix("sha256:"),
+        observed_at_ms=NOW,
+        upserts=(fact,),
+    )
+
+    assert verifier.verify_batch(
+        workspace_id=WORKSPACE_ID,
+        subject_id=SUBJECT_ID,
+        batches=(batch,),
+    ) is True
+    assert reader.batch_reads == [(str(record["event_id"]),)]
+    assert reader.individual_reads == 0
 
 
 def test_world_source_verifier_rejects_scope_digest_and_transition_drift() -> None:

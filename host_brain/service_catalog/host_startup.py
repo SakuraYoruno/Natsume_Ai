@@ -10,7 +10,7 @@ import socket
 import sys
 import threading
 import time
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from uuid import uuid4
@@ -57,8 +57,12 @@ HOST_SERVICE_CATALOG_ROLLBACK_REF_ENV = "HOST_SERVICE_CATALOG_ROLLBACK_REF"
 HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS_ENV = (
     "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS"
 )
+HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S_ENV = (
+    "HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S"
+)
 DEFAULT_HOST_SERVICE_CATALOG_TARGET_MODE = CatalogMode.ENFORCE
 DEFAULT_HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS = 60_000
+DEFAULT_HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S = 180.0
 _ROLLOUT_STAGES = (
     CatalogMode.AUDIT,
     CatalogMode.SHADOW,
@@ -196,6 +200,8 @@ class HostUvicornCandidate:
         access_log: bool,
         app: Any = "host_brain.app.asgi:app",
         startup_timeout_s: float = 45.0,
+        startup_heartbeat: Callable[[], None] | None = None,
+        startup_heartbeat_interval_s: float = 20.0,
     ) -> None:
         self._endpoint = endpoint
         self._reservation_probe = reservation_probe
@@ -210,6 +216,11 @@ class HostUvicornCandidate:
         self._access_log = bool(access_log)
         self._app = app
         self._startup_timeout_s = float(startup_timeout_s)
+        self._startup_heartbeat = startup_heartbeat
+        self._startup_heartbeat_interval_s = max(
+            1.0,
+            float(startup_heartbeat_interval_s),
+        )
         self._server: Any = None
         self._thread: threading.Thread | None = None
         self._sockets: tuple[socket.socket, ...] = ()
@@ -255,6 +266,7 @@ class HostUvicornCandidate:
         self._thread = thread
         thread.start()
         deadline = time.monotonic() + self._startup_timeout_s
+        next_heartbeat = time.monotonic() + self._startup_heartbeat_interval_s
         while time.monotonic() < deadline:
             if server.started:
                 self.candidate_handle = self
@@ -262,6 +274,20 @@ class HostUvicornCandidate:
             if self._failure is not None or not thread.is_alive():
                 self.stop()
                 raise ServiceCatalogRolloutError("Uvicorn candidate failed before startup") from self._failure
+            if (
+                self._startup_heartbeat is not None
+                and time.monotonic() >= next_heartbeat
+            ):
+                try:
+                    self._startup_heartbeat()
+                except BaseException as exc:
+                    self.stop()
+                    raise ServiceCatalogRolloutError(
+                        "Service Catalog coordinator authority was lost during candidate startup"
+                    ) from exc
+                next_heartbeat = (
+                    time.monotonic() + self._startup_heartbeat_interval_s
+                )
             time.sleep(0.025)
         self.stop()
         raise ServiceCatalogRolloutError("Uvicorn candidate startup timed out")
@@ -361,6 +387,24 @@ def _coordinator_lease_ms(source: Mapping[str, str]) -> int:
     return value
 
 
+def _candidate_startup_timeout_s(source: Mapping[str, str]) -> float:
+    raw = str(
+        source.get(HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S_ENV)
+        or DEFAULT_HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S
+    ).strip()
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ServiceCatalogRolloutError(
+            "HOST Service Catalog candidate startup timeout is invalid"
+        ) from exc
+    if value < 15.0 or value > 600.0:
+        raise ServiceCatalogRolloutError(
+            "HOST Service Catalog candidate startup timeout must be between 15 and 600 seconds"
+        )
+    return value
+
+
 def _stage_operation_id(base_operation_id: str, stage: CatalogMode) -> str:
     operation_id = f"{base_operation_id}:{stage.value.lower()}"
     if len(operation_id) > 512:
@@ -440,6 +484,7 @@ def start_host_through_service_catalog(
     target_stage = _host_catalog_target_mode(source)
     configured_rollback_ref = _configured_rollback_ref(source)
     coordinator_lease_ms = _coordinator_lease_ms(source)
+    candidate_startup_timeout_s = _candidate_startup_timeout_s(source)
     source[HOST_SERVICE_CATALOG_TARGET_MODE_ENV] = target_stage.value
     if env is None:
         os.environ[HOST_SERVICE_CATALOG_TARGET_MODE_ENV] = target_stage.value
@@ -523,6 +568,19 @@ def start_host_through_service_catalog(
                 bind_probe=reservation_probe,
                 health_probe=health_probe,
             )
+
+            def renew_candidate_authority() -> None:
+                nonlocal authority
+                renewed_authority = store.renew_authority(
+                    authority,
+                    lease_ms=coordinator_lease_ms,
+                )
+                if renewed_authority is None:
+                    raise ServiceCatalogRolloutError(
+                        "Service Catalog coordinator authority was lost during candidate startup"
+                    )
+                authority = renewed_authority
+
             candidate = HostUvicornCandidate(
                 endpoint=endpoint,
                 reservation_probe=reservation_probe,
@@ -533,6 +591,12 @@ def start_host_through_service_catalog(
                 log_level=log_level,
                 access_log=access_log,
                 app=app,
+                startup_timeout_s=candidate_startup_timeout_s,
+                startup_heartbeat=renew_candidate_authority,
+                startup_heartbeat_interval_s=max(
+                    1.0,
+                    min(30.0, coordinator_lease_ms / 3_000.0),
+                ),
             )
             active_candidate = candidate
             runner = DurableServiceCatalogActivationRunner(

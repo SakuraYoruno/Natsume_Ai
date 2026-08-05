@@ -52,6 +52,184 @@ def test_production_authority_verifier_fails_closed_when_provider_raises() -> No
     assert result == "AGENT_PRODUCTION_DURABLE_AUTHORITY_INVALID"
 
 
+def test_production_authority_verifier_accepts_bound_planning_skill_node(
+    monkeypatch,
+) -> None:
+    authority = {
+        "command_id": "command-plan",
+        "request_id": "request-plan",
+        "principal_id": "service.edge.gateway",
+        "target_id": "agent_frontend_acceptance",
+        "work_order_id": "work-order-plan",
+        "graph_id": "graph-plan",
+        "graph_revision": "1",
+        "node_id": "node-plan-1",
+        "attempt_id": "attempt-plan-1",
+        "lease_id": "lease-plan-1",
+        "fencing_token": "7",
+    }
+
+    class CommandRepository:
+        def __init__(self, _db_path) -> None:  # noqa: ANN001
+            pass
+
+        def get(self, _command_id):  # noqa: ANN001, ANN201
+            return {
+                "request_id": "request-plan",
+                "principal_id": "service.edge.gateway",
+                "target_id": "planning_search",
+                "root_work_order_id": "work-order-plan",
+                "graph_id": "graph-plan",
+                "graph_revision": 1,
+                "route_type": "plan",
+                "governor_grant_ref": "governor-decision://plan",
+            }
+
+    class TaskStore:
+        def __init__(self, _db_path) -> None:  # noqa: ANN001
+            pass
+
+        def get_attempt(self, _attempt_id):  # noqa: ANN001, ANN201
+            return {
+                "graph_id": "graph-plan",
+                "graph_revision": 1,
+                "node_id": "node-plan-1",
+                "status": "RUNNING",
+            }
+
+        def get_node(self, _graph_id, _revision, _node_id):  # noqa: ANN001, ANN201
+            return {
+                "graph_id": "graph-plan",
+                "graph_revision": 1,
+                "node_id": "node-plan-1",
+                "status": "RUNNING",
+                "node": {"route": "skill:agent_frontend_acceptance"},
+            }
+
+        def get_active_lease(self, _attempt_id):  # noqa: ANN001, ANN201
+            return {
+                "lease_id": "lease-plan-1",
+                "attempt_id": "attempt-plan-1",
+                "fencing_token": 7,
+                "status": "ACTIVE",
+                "expires_ts_ms": 2_000,
+            }
+
+    class GrantResolver:
+        def __init__(self, _ledger) -> None:  # noqa: ANN001
+            pass
+
+        def require(self, *, request_id, expected_ref):  # noqa: ANN001, ANN201
+            assert request_id == "request-plan"
+            assert expected_ref == "governor-decision://plan"
+            return {}
+
+    monkeypatch.setattr(
+        "host_brain.persistence.host_command_repository.HostCommandRepository",
+        CommandRepository,
+    )
+    monkeypatch.setattr(
+        "host_brain.persistence.task_repository.DurableTaskStore",
+        TaskStore,
+    )
+    monkeypatch.setattr(
+        "host_brain.orchestration.DurableGovernorGrantResolver",
+        GrantResolver,
+    )
+    verifier = build_durable_production_authority_verifier(
+        ledger_provider=lambda: SimpleNamespace(canonical_db_path="task.sqlite3"),
+        clock_ms=lambda: 1_000,
+    )
+    order = SimpleNamespace(
+        metadata={
+            "request_id": "request-plan",
+            "skill_id": "agent_frontend_acceptance",
+        },
+        work_order_id="work-order-plan",
+    )
+
+    assert verifier(authority, order) is None
+
+
+def test_production_authority_verifier_rejects_planning_node_target_drift(
+    monkeypatch,
+) -> None:
+    class CommandRepository:
+        def __init__(self, _db_path) -> None:  # noqa: ANN001
+            pass
+
+        def get(self, _command_id):  # noqa: ANN001, ANN201
+            return {
+                "request_id": "request-plan",
+                "principal_id": "service.edge.gateway",
+                "target_id": "planning_search",
+                "root_work_order_id": "work-order-plan",
+                "graph_id": "graph-plan",
+                "graph_revision": 1,
+                "route_type": "plan",
+                "governor_grant_ref": "governor-decision://plan",
+            }
+
+    class TaskStore:
+        def __init__(self, _db_path) -> None:  # noqa: ANN001
+            pass
+
+        def get_attempt(self, _attempt_id):  # noqa: ANN001, ANN201
+            return {
+                "graph_id": "graph-plan",
+                "graph_revision": 1,
+                "node_id": "node-plan-1",
+                "status": "RUNNING",
+            }
+
+        def get_node(self, _graph_id, _revision, _node_id):  # noqa: ANN001, ANN201
+            return {
+                "graph_id": "graph-plan",
+                "graph_revision": 1,
+                "node_id": "node-plan-1",
+                "status": "RUNNING",
+                "node": {"route": "skill:agent_frontend_review"},
+            }
+
+    monkeypatch.setattr(
+        "host_brain.persistence.host_command_repository.HostCommandRepository",
+        CommandRepository,
+    )
+    monkeypatch.setattr(
+        "host_brain.persistence.task_repository.DurableTaskStore",
+        TaskStore,
+    )
+    verifier = build_durable_production_authority_verifier(
+        ledger_provider=lambda: SimpleNamespace(canonical_db_path="task.sqlite3"),
+        clock_ms=lambda: 1_000,
+    )
+    order = SimpleNamespace(
+        metadata={
+            "request_id": "request-plan",
+            "skill_id": "agent_frontend_acceptance",
+        },
+        work_order_id="work-order-plan",
+    )
+    authority = {
+        "command_id": "command-plan",
+        "request_id": "request-plan",
+        "principal_id": "service.edge.gateway",
+        "target_id": "agent_frontend_acceptance",
+        "work_order_id": "work-order-plan",
+        "graph_id": "graph-plan",
+        "graph_revision": "1",
+        "node_id": "node-plan-1",
+        "attempt_id": "attempt-plan-1",
+        "lease_id": "lease-plan-1",
+        "fencing_token": "7",
+    }
+
+    assert (
+        verifier(authority, order)
+        == "AGENT_PRODUCTION_DURABLE_NODE_BINDING_MISMATCH"
+    )
+
+
 def test_production_authority_module_has_no_process_service_locator() -> None:
     source = (
         Path(__file__).resolve().parents[2]

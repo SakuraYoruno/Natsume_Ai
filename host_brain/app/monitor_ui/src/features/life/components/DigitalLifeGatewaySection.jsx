@@ -22,15 +22,13 @@ export default function DigitalLifeGatewaySection({ model }) {
   const view = buildDigitalLifeGatewayView(model)
   const {
     humanoidClosedLoopRate,
-    humanoidAckTouchRate,
-    humanoidProgressTouchRate,
+    humanoidReplyCommitRate,
     humanoidDeviationRecoveryRate,
     humanoidTotalRequests,
     humanoidFailedRequests,
     humanoidDeviationDetected,
     humanoidClosedLoopHint,
-    humanoidAckHint,
-    humanoidProgressHint,
+    humanoidReplyCommitHint,
     humanoidDeviationHint,
     humanoidFailureBannerVariant,
     humanoidCompletionRate,
@@ -38,8 +36,8 @@ export default function DigitalLifeGatewaySection({ model }) {
 
   return (
     <LifeSection
-      title="人体闭环健康（Gateway）"
-      hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
+      title="Gateway 回复闭环健康"
+      hint="展示请求从 Acceptance Reply Outbox 提交、终态收束到偏航修复的健康度。"
       actionTo="/execution/gateway"
       actionLabel="查看通道详情"
     >
@@ -51,7 +49,7 @@ export default function DigitalLifeGatewaySection({ model }) {
           sampleLabel="gateway request"
           updatedAt={updatedAt}
           source="/obs/input/humanoid-loop-stats"
-          definition="终态收束、ACK 触达、进度触达与偏航恢复都以当前窗口中的 gateway request 为统一统计口径。"
+          definition="终态、Acceptance Reply Outbox 提交与偏航恢复都以当前窗口中的 gateway request 为统一口径；Outbox 提交不等于外部平台物理 ACK。"
         />
       </div>
 
@@ -63,15 +61,15 @@ export default function DigitalLifeGatewaySection({ model }) {
           tone="text-emerald-600"
         />
         <MetricCard
-          label="ACK 触达率"
-          value={humanoidAckTouchRate}
-          hint={humanoidAckHint}
+          label="回复入 Outbox"
+          value={humanoidReplyCommitRate}
+          hint={humanoidReplyCommitHint}
           tone="text-blue-600"
         />
         <MetricCard
-          label="进度触达率"
-          value={humanoidProgressTouchRate}
-          hint={humanoidProgressHint}
+          label="终态率"
+          value={humanoidCompletionRate}
+          hint={`完成 ${humanoidLoopData?.completed_requests ?? 0}`}
           tone="text-indigo-600"
         />
         <MetricCard
@@ -88,7 +86,7 @@ export default function DigitalLifeGatewaySection({ model }) {
         <div className="mt-4">
           <EmptyStateCard
             title="暂无人体闭环采样"
-            hint="等待 Gateway 请求进入后，这里会显示 ACK、进度触达和偏航恢复指标。"
+            hint="等待 Gateway 请求进入后，这里会显示回复 Outbox、终态和偏航恢复指标。"
             className="p-4"
           />
         </div>

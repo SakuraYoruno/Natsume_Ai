@@ -99,3 +99,19 @@ Tribe 的 23 个 Agent 已在 production composition 中完成 app-local 构造�
 真实消息平台入站已经贯通 Secure Ingress、canonical HostCommand、不可变单节点 TaskGraph、Attempt、Verification、Acceptance、Gateway Outbox 和平台回执；超时重试复用同一 command／graph，不重复创建任务或外发。Host 接受后的 TTS／Avatar intent 通过 Edge durable receipt 对账，排队中的物理动作先保持 `IN_DOUBT`，只在终端回执到达后变更为 `APPLIED`／`REJECTED`，不会把“已入队”冒充“已经播放”。
 
 OBS/Monitor 读取 Host、Edge 与 Gateway 的最新 canonical health projection，关闭能力不再因 RPC 可达而显示为 `UP`。本轮 P0 双端主链已通过真实网络验证，但 VTS 情绪热键、barge-in、长期多轮体验与完整性能门槛仍未完成，所以整体数字生命状态仍为 `INCOMPLETE`。
+
+## 9. 当前观测闭环
+
+```mermaid
+flowchart LR
+    A["TaskGraph Acceptance"] --> B["surface.reply_delivery"]
+    B --> C["Gateway Reply Outbox COMMITTED"]
+    C --> D["INPUT_COMPLETED 安全枚举投影"]
+    D --> E["OBS Gateway 闭环读模型"]
+    E --> F["Monitor"]
+    C -. "不等同于" .-> G["外部平台物理 ACK"]
+    H["Digital Life hard_state.emotion_tag"] --> I["life_body_source"]
+    I --> F
+```
+
+`worker_dispatch` 只把 `gateway_delivery_authority=acceptance_effect_outbox` 与 `gateway_delivery_state=OUTBOX_COMMITTED` 两个无正文枚举写入完成事件。OBS 用它们判断当前请求是否已完成 Host→Gateway 的可恢复提交；平台物理送达仍由独立 terminal/ACK 证据负责。Life Body 则直接从 canonical runtime snapshot 的 `hard_state` 派生当前情绪，旧 `emotion_context` 仅作历史兼容读取。

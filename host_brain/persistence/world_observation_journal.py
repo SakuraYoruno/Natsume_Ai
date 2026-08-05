@@ -677,26 +677,96 @@ class SQLiteWorldObservationJournal:
                 raise WorldObservationJournalError(
                     "WORLD_OBSERVATION_PHYSICAL_ROW_DRIFT"
                 )
-            try:
-                source_verified = self._source_event_verifier(
-                    workspace,
-                    subject,
-                    batch.source_event_ref,
-                    batch.source_event_digest,
-                    batch.observed_at_ms,
-                    batch.upserts,
-                    batch.expiries,
-                )
-            except Exception as exc:
-                raise WorldObservationJournalError(
-                    "WORLD_OBSERVATION_SOURCE_AUTHORITY_UNAVAILABLE"
-                ) from exc
-            if source_verified is not True:
-                raise WorldObservationJournalError(
-                    "WORLD_OBSERVATION_SOURCE_AUTHORITY_REJECTED"
-                )
             batches.append(batch)
+        batch_verifier = getattr(self._source_event_verifier, "verify_batch", None)
+        try:
+            if callable(batch_verifier):
+                source_verified = batch_verifier(
+                    workspace_id=workspace,
+                    subject_id=subject,
+                    batches=tuple(batches),
+                )
+            else:
+                source_verified = all(
+                    self._source_event_verifier(
+                        workspace,
+                        subject,
+                        batch.source_event_ref,
+                        batch.source_event_digest,
+                        batch.observed_at_ms,
+                        batch.upserts,
+                        batch.expiries,
+                    )
+                    is True
+                    for batch in batches
+                )
+        except Exception as exc:
+            raise WorldObservationJournalError(
+                "WORLD_OBSERVATION_SOURCE_AUTHORITY_UNAVAILABLE"
+            ) from exc
+        if source_verified is not True:
+            raise WorldObservationJournalError(
+                "WORLD_OBSERVATION_SOURCE_AUTHORITY_REJECTED"
+            )
         return tuple(batches)
+
+    def verify_cached_source_events(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        source_events: Mapping[str, str],
+    ) -> bool:
+        """Revalidate cached source bindings without replaying private payloads.
+
+        Normal runtime reads already verified each full RuntimeEvent envelope on
+        first use.  Cache hits only need to prove that the physical World row and
+        its RuntimeEvent payload digest still carry the exact binding that was
+        verified before.  This keeps tamper detection while replacing thousands
+        of per-event SQLite opens with a few bounded joins.
+        """
+
+        workspace = str(workspace_id or "").strip()
+        subject = str(subject_id or "").strip()
+        if not workspace or not subject or not isinstance(source_events, Mapping):
+            return False
+        expected = {
+            str(source_ref or "").strip(): str(source_digest or "").strip().lower()
+            for source_ref, source_digest in source_events.items()
+        }
+        if any(
+            not source_ref or not source_digest
+            for source_ref, source_digest in expected.items()
+        ):
+            return False
+        if not expected:
+            return True
+
+        scope = _scope_id(workspace, subject)
+        observed: dict[str, tuple[str, str | None]] = {}
+        event_refs = tuple(expected)
+        with self._connection() as conn:
+            for offset in range(0, len(event_refs), 400):
+                chunk = event_refs[offset : offset + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    "SELECT batch.source_event_ref, batch.source_event_digest, "
+                    "event.payload_digest "
+                    "FROM world_observation_batch AS batch "
+                    "LEFT JOIN runtime_event_timeline AS event "
+                    "ON event.event_id = batch.source_event_ref "
+                    f"WHERE batch.scope_id = ? AND batch.source_event_ref IN ({placeholders})",
+                    (scope, *chunk),
+                ).fetchall()
+                for row in rows:
+                    observed[str(row[0])] = (
+                        str(row[1]).strip().lower(),
+                        str(row[2]).strip().lower() if row[2] is not None else None,
+                    )
+        return len(observed) == len(expected) and all(
+            observed.get(source_ref) == (source_digest, source_digest)
+            for source_ref, source_digest in expected.items()
+        )
 
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:

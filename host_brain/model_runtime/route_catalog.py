@@ -28,6 +28,14 @@ _TIER_MODEL_DEFAULTS: dict[str, dict[str, str]] = {
         "D": "deepseek-v4-flash",
     },
 }
+_NATSUME_AGENT_MODEL_DEFAULTS = {
+    # Structured proposal JSON is materially less reliable on the reasoning-
+    # heavy Flash route: it can spend the whole completion budget in
+    # ``reasoning_content`` and return an empty answer.  The Agent lane prefers
+    # the stable model; explicit scene/tier/provider overrides still win.
+    "deepseek": "deepseek-v4-pro",
+    "gemini": "gemini-2.5-pro",
+}
 _PROVIDER_MODEL_ENV = {
     "openai": "HOST_OPENAI_MODEL_ID",
     "openai_compatible": "HOST_OPENAI_MODEL_ID",
@@ -247,6 +255,14 @@ class ServerRouteCatalog:
                 role_timeout_names = ("HOST_SUBAGENT_TIMEOUT_MS",)
                 default_timeout = 30_000
                 lane = "subagent"
+            elif scene == "NATSUME_AGENT":
+                role_model_names = ("HOST_NATSUME_AGENT_MODEL_ID",)
+                provider_role_model_name = (
+                    f"HOST_{_env_token(provider)}_NATSUME_AGENT_MODEL_ID"
+                )
+                role_timeout_names = ("HOST_NATSUME_AGENT_MODEL_TIMEOUT_MS",)
+                default_timeout = 45_000
+                lane = "agent"
             elif scene in {"EXEC_INTENT", "THALAMUS_INTENT"}:
                 role_model_names = ("HOST_EXECUTIVE_ROUTER_MODEL_ID", "HOST_DISPATCH_AGENT_MODEL_ID")
                 provider_role_model_name = (
@@ -268,11 +284,19 @@ class ServerRouteCatalog:
                 or scene == "CHAT_SURFACE_REALTIME"
                 or scene.startswith("GRAPH_")
             )
-            provider_fallback = (
-                tier_default or provider_model_override or provider_model
-                if tier_driven_scene
-                else provider_model_override or tier_default or provider_model
-            )
+            if scene == "NATSUME_AGENT":
+                provider_fallback = (
+                    _NATSUME_AGENT_MODEL_DEFAULTS.get(provider, "")
+                    or tier_default
+                    or provider_model_override
+                    or provider_model
+                )
+            else:
+                provider_fallback = (
+                    tier_default or provider_model_override or provider_model
+                    if tier_driven_scene
+                    else provider_model_override or tier_default or provider_model
+                )
             candidate_names = (
                 f"HOST_MODEL_ROUTE_SCENE_{scene_token}_TIER_{_env_token(tier)}_MODEL_ID",
                 f"HOST_MODEL_ROUTE_TIER_{_env_token(tier)}_MODEL_ID",
@@ -305,7 +329,7 @@ class ServerRouteCatalog:
             # silently turns a healthy provider response into ``NO_REPLY``.
             # The lane therefore owns its deadline, while every other route
             # retains the legacy global fallback for compatibility.
-            if scene != "CHAT_SURFACE_REALTIME":
+            if scene not in {"CHAT_SURFACE_REALTIME", "NATSUME_AGENT"}:
                 timeout_env_names = (*timeout_env_names, "HOST_LLM_TIMEOUT_MS")
             timeout_ms = _timeout_env(
                 *timeout_env_names,

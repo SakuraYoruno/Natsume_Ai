@@ -262,7 +262,7 @@ async def test_translate_delegate_uses_one_task_budgeted_canonical_model_call() 
     request = model_service.requests[0]
     assert request.prompt.prompt_id == "graph.workbench.translate.json"
     assert request.scene_type == "GRAPH_TRANSLATE"
-    assert request.cognitive_tier == "A"
+    assert request.cognitive_tier == "B"
     assert request.model_budget_guard is not None
     assert request.model_budget_guard.budget_id == "budget://delegate/translate"
     assert request.model_budget_guard.node_id == frozen.node_id

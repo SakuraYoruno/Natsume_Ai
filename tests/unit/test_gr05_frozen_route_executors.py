@@ -28,6 +28,9 @@ from host_brain.contracts.agent_runtime.delegate_target_policy import (
 from host_brain.model_runtime.governed_budget import (
     build_governed_model_budget_guard,
 )
+from host_brain.digital_life.governed_companion_presentation import (
+    build_governed_companion_expression_intents,
+)
 from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
 from host_brain.contracts.agent_runtime.node_input_attestation import (
     build_node_input_artifact_attestation,
@@ -321,6 +324,147 @@ async def test_model_backed_delegate_settles_provider_usage_against_frozen_budge
     assert events[0]["budget_usage"]["evidence_refs"] == [
         "model-budget://delegate/translate/1"
     ]
+
+
+@pytest.mark.asyncio
+async def test_user_facing_delegate_freezes_companion_expression_from_canonical_affect() -> None:
+    async def dispatch(**kwargs):  # noqa: ANN003
+        return {
+            "route_type": "delegate",
+            "target_id": "translate_agent",
+            "success": True,
+            "result_text": "You worked hard today. Get some rest.",
+            "audit_refs": _model_delegate_audit(kwargs["frozen"]),
+        }
+
+    subject_id = "person-frozen-route"
+    workspace_id = "workspace-frozen-route"
+    input_pack = {
+        "user_message": "把今天辛苦了，早点休息翻译成英文。",
+        "context": {"skill_family": "translation"},
+        "delegate_target_policy": _model_delegate_policy(),
+        "runtime_context_schema": "natsume.runtime-context.request.v1",
+        "workspace_id": workspace_id,
+        "subject_id": subject_id,
+        "request_body": {
+            "input_source": "GATEWAY",
+            "relationship_subject_id": subject_id,
+            "suppress_edge_tts": False,
+            "suppress_edge_vts": False,
+        },
+        "prepared_emotion_context": {
+            "_affective_life_internal": True,
+            "affective_life": {
+                "schema_version": "affective_turn_context.v1",
+                "self_id": "natsume_ai",
+                "workspace_id": workspace_id,
+                "relationship_subject_id": subject_id,
+                "session_id": "session-frozen-route",
+                "self_affect": {
+                    "schema_version": "self_affect_state.v2",
+                    "self_id": "natsume_ai",
+                    "relationship_subject_id": subject_id,
+                    "revision": 7,
+                    "components": [{"emotion": "CARE", "intensity": 0.58}],
+                    "last_regulation": {},
+                },
+                "user_observations": [],
+                "relationship_life": {
+                    "schema_version": "relationship_turn_context.v1",
+                    "workspace_id": workspace_id,
+                    "relationship_subject_id": subject_id,
+                    "state": {"revision": 3},
+                    "aftereffect": {},
+                },
+            },
+        },
+    }
+    frozen = _frozen(
+        route="delegate",
+        target_id="translate_agent",
+        input_pack=input_pack,
+        budget=_active_budget(),
+    )
+    executor = FrozenDelegateRouteExecutor(
+        ports=object(),
+        dispatch_to_sub_agent=dispatch,
+    )
+
+    events = [event async for event in executor.execute_stream(frozen)]
+
+    descriptor = events[0]["acceptance_effect_intents"][0]
+    assert descriptor["effect_type"] == "life.foreground_completed"
+    foreground = descriptor["payload"]
+    assert foreground["person_id"] == subject_id
+    assert foreground["payload"]["workspace_id"] == workspace_id
+    plan = foreground["payload"]["affective_turn_plan"]
+    assert plan["self_id"] == "natsume_ai"
+    assert plan["self_affect_revision"] == 7
+    assert plan["relationship_subject_id"] == subject_id
+    assert plan["expression_plan"]["synchronization_id"]
+    expression_intents = foreground["payload"]["expression_delivery_intents"]
+    assert [item["channel"] for item in expression_intents] == ["VOICE", "AVATAR"]
+    assert {
+        item["synchronization_id"] for item in expression_intents
+    } == {plan["expression_plan"]["synchronization_id"]}
+
+
+def test_governed_delegate_presentation_is_text_only_without_japanese_speech(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    subject_id = "person-frozen-route"
+    workspace_id = "workspace-frozen-route"
+
+    descriptors = build_governed_companion_expression_intents(
+        request_id="request-ja-delegate",
+        session_id="session-frozen-route",
+        workspace_id=workspace_id,
+        relationship_subject_id=subject_id,
+        runtime_context_schema="natsume.runtime-context.request.v1",
+        input_source="GATEWAY",
+        suppress_edge_tts=False,
+        suppress_edge_vts=False,
+        emotion_context={
+            "_affective_life_internal": True,
+            "affective_life": {
+                "schema_version": "affective_turn_context.v1",
+                "self_id": "natsume_ai",
+                "workspace_id": workspace_id,
+                "relationship_subject_id": subject_id,
+                "session_id": "session-frozen-route",
+                "self_affect": {
+                    "schema_version": "self_affect_state.v2",
+                    "self_id": "natsume_ai",
+                    "relationship_subject_id": subject_id,
+                    "revision": 7,
+                    "components": [{"emotion": "CARE", "intensity": 0.58}],
+                    "last_regulation": {},
+                },
+                "user_observations": [],
+                "relationship_life": {
+                    "schema_version": "relationship_turn_context.v1",
+                    "workspace_id": workspace_id,
+                    "relationship_subject_id": subject_id,
+                    "state": {"revision": 3},
+                    "aftereffect": {},
+                },
+            },
+        },
+        narrative="You worked hard today. Get some rest.",
+        decision="APPROVE",
+        task_mode="technical_help",
+        created_at_ms=1_000,
+        metadata_source="test",
+    )
+
+    foreground = descriptors[0]["payload"]["payload"]
+    assert foreground["expression_delivery_intents"] == []
+    assert foreground["expression_delivery_controls"] == []
+    assert (
+        foreground["expression_delivery_suppressed_reason"]
+        == "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
+    )
 
 
 @pytest.mark.asyncio

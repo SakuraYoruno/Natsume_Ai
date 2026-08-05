@@ -23,6 +23,7 @@ from natsume_contracts.edge.v1 import (
     AVATAR_TAG_INVALID,
     VTS_API_ERROR,
     VTS_CONNECTION_FAILED,
+    VTS_EXPRESSION_UNAVAILABLE,
     VTS_EXPRESSION_TIMEOUT,
     VTS_RECONNECTED,
     VTS_RECONNECT_EXHAUSTED,
@@ -1281,12 +1282,30 @@ class VTubeStudioDriver:
         ):
             self._expression_hotkey_overrides.pop(normalized, None)
             override_hotkey = ""
+        # A VTS API connection is not proof that an active model exposes an
+        # expression.  Refresh once so a model loaded after Edge startup is
+        # discovered, then fail immediately when no compatible hotkey exists.
+        # Sending an invented legacy ID in that state makes VTS wait for the
+        # full API timeout and incorrectly turns a deterministic capability
+        # gap into an unknown physical side effect.
         discovered_hotkey = self._resolve_hotkey_for_emotion(
             emotion_tag=normalized,
             preferred_hotkey=expression_id,
-            include_preferred=False,
+            include_preferred=True,
         )
-        hotkey_id = override_hotkey or discovered_hotkey or expression_id
+        hotkey_id = override_hotkey or discovered_hotkey or ""
+        if not hotkey_id:
+            return VtsDriverResult(
+                success=False,
+                reason_code=VTS_EXPRESSION_UNAVAILABLE,
+                detail=(
+                    "active VTS model exposes no compatible expression hotkey "
+                    f"for {normalized}"
+                ),
+                action="set_expression",
+                expression_id=expression_id,
+                emotion_tag=normalized,
+            )
         try:
             _trigger_vts_hotkey(
                 vts=self._vts,
@@ -1982,9 +2001,11 @@ class VTubeStudioDriver:
         if authenticated and not expression_hotkey_ready:
             capability_status = "degraded"
             capability_detail = (
-                "VTS authenticated; mouth/body motion available; "
-                "compatible expression hotkeys unavailable"
+                "VTS authenticated; compatible expression hotkeys unavailable"
             )
+        elif self._connection_error:
+            capability_status = "degraded"
+            capability_detail = f"VTS connection unavailable; state={self._state.value}"
         else:
             capability_status = self._state.value
             capability_detail = f"VTS state: {self._state.value}"

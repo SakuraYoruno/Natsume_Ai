@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.app.governed_skill_execution import (
+    GOVERNED_MEMORY_ACCEPTANCE_EFFECT_REQUIRED,
     GOVERNED_SKILL_TASK_AUTHORITY_REQUIRED,
     execute_governed_skill,
     record_governed_skill_execution,
@@ -98,6 +99,43 @@ def test_governed_executor_rejects_before_registry_without_node_authority() -> N
             governed_execution_context={},
             execution_args={},
             verified_node_grant={},
+        )
+
+
+def test_memory_store_cannot_bypass_graph_acceptance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ForbiddenPorts:
+        @property
+        def skill_registry(self) -> None:
+            raise AssertionError("memory proposal reached the eager Skill writer")
+
+    monkeypatch.setattr(
+        "host_brain.app.governed_skill_execution._governed_node_grant_error",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        PermissionError,
+        match=GOVERNED_MEMORY_ACCEPTANCE_EFFECT_REQUIRED,
+    ):
+        execute_governed_skill(
+            ports=_ForbiddenPorts(),
+            durable_authority_ledger=object(),
+            request_id="request-memory-acceptance-boundary",
+            session_id="session-memory-acceptance-boundary",
+            person_id="person-memory-acceptance-boundary",
+            intent_id="intent-memory-acceptance-boundary",
+            skill_id="memory_store",
+            task_text="记住我喜欢蓝色",
+            user_message="记住我喜欢蓝色",
+            governor_result={"decision": "APPROVE"},
+            intent_draft={"route": "skill", "target_id": "memory_store"},
+            emotion_context={},
+            render_target_lang="zh",
+            governed_execution_context={"node_id": "node-memory-store"},
+            execution_args={"content": "我喜欢蓝色"},
+            verified_node_grant={"grant_ref": "grant://memory-store"},
         )
 
 

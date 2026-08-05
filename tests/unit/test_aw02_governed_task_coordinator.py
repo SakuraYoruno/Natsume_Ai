@@ -1141,6 +1141,102 @@ async def test_intent_block_fails_closed_before_worker_or_budget_mutation() -> N
 
 
 @pytest.mark.asyncio
+async def test_direct_intent_block_is_durably_cancelled_and_replay_is_terminal() -> None:
+    command, work_order, assignment, graph = _contracts(
+        executor=TaskExecutor.CANONICAL
+    )
+    calls: list[str] = []
+
+    class _Blocked(RuntimeError):
+        reason_code = "INTENT_ADMISSION_BLOCKED"
+        detail = "canonical node is directly blocked"
+
+    class _DirectBlockVerifier(_IntentAdmissionVerifier):
+        def resolve_terminal_intent_block(self, **kwargs: Any) -> dict[str, Any]:
+            calls.append("intent-block-proof")
+            assert kwargs["command"] is command
+            assert kwargs["work_order"] is work_order
+            assert kwargs["graph"] is graph
+            return {
+                "command_id": command.command_id,
+                "task_graph_id": graph.graph_id,
+                "graph_revision": graph.revision,
+                "blocked_node_ids": [graph.nodes[0].node_id],
+                "request_id": "intent-block-terminal-request",
+                "request_identity": "intent-block://sha256/" + "a" * 64,
+                "reason_code": "INTENT_ADMISSION_BLOCKED",
+            }
+
+    class _TerminalCoordinator:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, Any]] = []
+
+        async def request_graph_cancellation(
+            self,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.requests.append(dict(kwargs))
+            calls.append("intent-block-cancelled")
+            return {
+                "done": True,
+                "decision": "CANCELLED",
+                "reason_code": "INTENT_ADMISSION_BLOCKED",
+                "execution_receipt": {
+                    "graph_id": graph.graph_id,
+                    "graph_revision": graph.revision,
+                    "accepted": False,
+                    "status": "CANCELLED",
+                    "reason_code": "INTENT_ADMISSION_BLOCKED",
+                },
+            }
+
+    coordinator = _TerminalCoordinator()
+    app = GovernedCommandApplication(
+        command_repository=_Repository(),
+        coordinator=coordinator,  # type: ignore[arg-type]
+        intent_admission_verifier=_DirectBlockVerifier(
+            calls,
+            error=_Blocked(),
+        ),
+    )
+    first_admission = AdmittedExecution.from_contracts(
+        command=command,
+        assignment=assignment,
+        graph=graph,
+        replayed=False,
+    )
+
+    with pytest.raises(GovernedRuntimeError) as blocked:
+        await app._verify_intent_admission(  # noqa: SLF001
+            admitted=first_admission,
+            command=command,
+            work_order=work_order,
+            graph=graph,
+        )
+
+    assert blocked.value.reason_code == "INTENT_ADMISSION_BLOCKED"
+    assert coordinator.requests[0]["source"] == "SYSTEM"
+    assert coordinator.requests[0]["reason_code"] == "INTENT_ADMISSION_BLOCKED"
+
+    replay_admission = AdmittedExecution.from_contracts(
+        command=command,
+        assignment=assignment,
+        graph=graph,
+        replayed=True,
+    )
+    terminal = await app._verify_intent_admission(  # noqa: SLF001
+        admitted=replay_admission,
+        command=command,
+        work_order=work_order,
+        graph=graph,
+    )
+
+    assert terminal is not None
+    assert terminal["decision"] == "CANCELLED"
+    assert len(coordinator.requests) == 2
+
+
+@pytest.mark.asyncio
 async def test_exact_intent_receipt_replay_skips_expired_parent_preflight() -> None:
     command, work_order, assignment, graph = _contracts(
         executor=TaskExecutor.CANONICAL

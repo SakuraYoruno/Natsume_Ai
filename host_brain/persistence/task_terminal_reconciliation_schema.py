@@ -56,10 +56,12 @@ SchemaDefinition: TypeAlias = tuple[str, str]
 
 
 def assert_terminal_reconciliation_schema(conn: sqlite3.Connection) -> None:
-    """Fail closed unless every 0099 object matches canonical SQL exactly."""
+    """Fail closed unless terminal objects match a frozen canonical schema."""
 
     expected = _canonical_migration_schema()
     actual = _read_terminal_schema(conn)
+    if actual in (expected, _canonical_legacy_migration_schema()):
+        return
     missing = sorted(set(expected) - set(actual))
     unexpected = sorted(set(actual) - set(expected))
     drifted = sorted(
@@ -70,7 +72,7 @@ def assert_terminal_reconciliation_schema(conn: sqlite3.Connection) -> None:
     if missing or unexpected or drifted:
         raise TaskStoreError(
             TASK_STORE_SCHEMA_NOT_READY,
-            "task runtime terminal reconciliation migration 0099 schema drifted: "
+            "task runtime terminal reconciliation migration 0099/0153 schema drifted: "
             f"missing={_labels(missing)}, unexpected={_labels(unexpected)}, "
             f"definitions={drifted}",
         )
@@ -78,16 +80,22 @@ def assert_terminal_reconciliation_schema(conn: sqlite3.Connection) -> None:
 
 @lru_cache(maxsize=1)
 def _canonical_migration_schema() -> dict[SchemaIdentity, SchemaDefinition]:
-    migration_path = (
+    migrations_dir = (
         Path(__file__).resolve().parents[1]
         / "audit"
         / "migrations"
-        / "0099_task_runtime_terminal_reconciliation.sql"
     )
     try:
-        migration_sql = migration_path.read_text(encoding="utf-8")
+        migration_sql = (
+            migrations_dir / "0099_task_runtime_terminal_reconciliation.sql"
+        ).read_text(encoding="utf-8")
+        correction_sql = (
+            migrations_dir
+            / "0153_terminal_prebudget_cancellation_classifier_correction.sql"
+        ).read_text(encoding="utf-8")
         with sqlite3.connect(":memory:") as conn:
             conn.executescript(migration_sql)
+            conn.executescript(correction_sql)
             expected = _read_terminal_schema(conn)
     except (OSError, sqlite3.DatabaseError) as exc:
         raise TaskStoreError(
@@ -103,6 +111,28 @@ def _canonical_migration_schema() -> dict[SchemaIdentity, SchemaDefinition]:
             "canonical terminal reconciliation migration object set is invalid: "
             f"missing={missing}, unexpected={unexpected}",
         )
+    return expected
+
+
+@lru_cache(maxsize=1)
+def _canonical_legacy_migration_schema() -> dict[SchemaIdentity, SchemaDefinition]:
+    """Keep old catalog-prefix databases readable without weakening drift checks."""
+
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "audit"
+        / "migrations"
+        / "0099_task_runtime_terminal_reconciliation.sql"
+    )
+    try:
+        with sqlite3.connect(":memory:") as conn:
+            conn.executescript(migration_path.read_text(encoding="utf-8"))
+            expected = _read_terminal_schema(conn)
+    except (OSError, sqlite3.DatabaseError) as exc:
+        raise TaskStoreError(
+            TASK_STORE_SCHEMA_NOT_READY,
+            "canonical legacy terminal reconciliation migration is unavailable",
+        ) from exc
     return expected
 
 

@@ -221,3 +221,18 @@ python -m pytest -q `
   tests/contract/test_edge_voice_pipeline_contract.py `
   tests/integration/test_voice_dual_chain_runtime_probe.py
 ```
+
+## Gateway 当前闭环与 Life Body 投影 Gate
+
+Gateway 当前请求只有在 `INPUT_COMPLETED` 同时携带以下精确枚举时，才计入 Reply Outbox committed：
+
+```text
+gateway_delivery_authority = acceptance_effect_outbox
+gateway_delivery_state     = OUTBOX_COMMITTED
+```
+
+断言必须同时验证：公开投影不含 `reply_preview` 或回复正文；canonical commit 能关闭当前请求的 ACK/progress 假缺口；legacy terminal 行仍可只读统计；360 分钟历史失败不被覆盖；Outbox commit 的 UI 文案明确“不等于外部平台物理 ACK”。不得通过降低阈值或补造已退役事件让指标变绿。
+
+Life Body 必须从真实 `digital_life_runtime_snapshot.hard_state.emotion_tag` 派生 `derived.currentEmotion`，并以真实 OBS／Nginx Monitor 浏览器断言页面不存在“待连接／待恢复”。仅构造 fixture 或 hook 默认值不能算真实通过。
+
+2026-08-04 当前证据：受影响 Python 30 passed、Monitor read-model 27 passed、生产构建通过、真实浏览器两条用例通过；真实签名 Gateway 三条新请求的最新有效桶 Reply Commit／Closed Loop／Completion 为 100%。整体仍按 `INCOMPLETE` 处理。

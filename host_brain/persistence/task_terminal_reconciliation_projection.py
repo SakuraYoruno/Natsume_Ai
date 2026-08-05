@@ -13,6 +13,9 @@ from typing import Any
 
 from host_brain.contracts.agent_runtime.contract_errors import ContractViolation
 from host_brain.contracts.agent_runtime.review_policy import ReviewItem
+from host_brain.contracts.agent_runtime.terminal_reconciliation import (
+    is_signed_prebudget_cancellation_classifier_correction,
+)
 from host_brain.persistence.review_continuation_store import (
     ReviewContinuationStoreError,
     validate_task_review_admission_in_transaction,
@@ -581,9 +584,9 @@ def _healthy_closure_if_required(
     if classified is not None:
         return classified
     graph = observation["graph"]
-    prior = conn.execute(
+    prior_rows = conn.execute(
         """
-        SELECT 1
+        SELECT *
         FROM task_runtime_terminal_reconciliation_case AS item
         WHERE item.graph_id = ? AND item.graph_revision = ?
           AND NOT EXISTS (
@@ -596,17 +599,25 @@ def _healthy_closure_if_required(
               FROM task_runtime_terminal_reconciliation_supersession AS supersession
               WHERE supersession.prior_case_id = item.case_id
           )
-        LIMIT 1
+        ORDER BY item.created_ts_ms, item.case_id
         """,
         (str(graph["graph_id"]), int(graph["revision"])),
-    ).fetchone()
-    if prior is None:
+    ).fetchall()
+    if not prior_rows:
         return None
     graph_budgets = [
         row
         for row in observation["budgets"]
         if row.get("node_id") is None and row.get("attempt_id") is None
     ]
+    if not graph_budgets and all(
+        is_signed_prebudget_cancellation_classifier_correction(dict(row))
+        for row in prior_rows
+    ):
+        # The historical case receives a signed no-op proof. Creating a
+        # synthetic Budget or replacement case would change task truth only to
+        # satisfy the superseded classifier assumption.
+        return None
     if len(graph_budgets) != 1:
         raise TaskStoreError(
             TASK_STORE_DURABLE_DATA_INVALID,

@@ -94,6 +94,7 @@ class CapabilityPlanSearchAdapter:
     goal_request: GoalPlanningRequest
     snapshot: CapabilityPlanningSnapshot
     base_context: PlanningCompilationContext
+    frozen_intent_json: str
 
     def search(self, request: SearchRequest) -> SearchResult:
         if not _same_request(request, self.request):
@@ -119,10 +120,21 @@ class CapabilityPlanSearchAdapter:
             )
         try:
             decision = GoalPlanningDecision(request=self.goal_request, result=result)
-            return bind_selected_capability_inputs(
+            selected_context = bind_selected_capability_inputs(
                 self.base_context,
                 snapshot=self.snapshot,
                 decision=decision,
+            )
+            selected_payload = selected_context.root_policy_payload()
+            selected_payload["metadata"].pop("planning_context", None)
+            selected_payload["input_pack"]["intent_draft"] = json.loads(
+                self.frozen_intent_json
+            )
+            return PlanningCompilationContext(
+                **selected_payload,
+                input_refs=selected_context.input_refs,
+                goal=selected_context.goal,
+                virtual_state=selected_context.virtual_state,
             )
         except CapabilityPlanningError as exc:
             raise CapabilityPlanSearchError(
@@ -376,6 +388,17 @@ def build_capability_plan_search(
         goal_request=goal_request,
         snapshot=snapshot,
         base_context=base_context,
+        # Keep the approved envelope outside the candidate-generation context:
+        # search must reject caller-owned plans.  Only after the selected path
+        # has been reconstructed from the frozen catalog is this immutable JSON
+        # attached for Production Intent admission.
+        frozen_intent_json=json.dumps(
+            raw_intent,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ),
     )
 
 

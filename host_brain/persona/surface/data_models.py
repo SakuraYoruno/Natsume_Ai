@@ -94,6 +94,15 @@ class IsolatedSurfaceInput(_StrictModel):
     control: ReplyControlPacket
     facts: list[str] = Field(default_factory=list)
     must_not_do: list[str] = Field(default_factory=list)
+    # Canonical Task-result artifacts are a separate input plane from memory
+    # and ordinary retrieval.  They are transient prompt material: the
+    # authoritative copy already lives in the Task ledger, so model dumps must
+    # not duplicate the full result text into Surface traces.
+    accepted_task_results: list[str] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
     case_id: str = ""
     # --- Inner-state leakage fields (mirrored from ReplyControlPacket) ---
     inner_weather: str = ""

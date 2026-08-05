@@ -39,6 +39,85 @@ from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_result_fact_lines,
 )
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
+from host_brain.contracts.agent_runtime.node_input_attestation import (
+    NODE_INPUT_ARTIFACT_ATTESTATION_SCHEMA,
+)
+
+
+_ACCEPTED_TASK_RESULT_ITEM_LIMIT = 4
+_ACCEPTED_TASK_RESULT_TOTAL_CHARS = 6_000
+_ACCEPTED_TASK_RESULT_ITEM_MAX_CHARS = 2_400
+
+
+def _accepted_task_result_texts(
+    agent_input: Any | None,
+    *,
+    trace_stage_meta: Mapping[str, Any] | None = None,
+) -> tuple[str, ...]:
+    """Return only result text bound to the frozen node attestation.
+
+    Ordinary retrieval rows, caller-provided ``store_id`` values and memory
+    evidence must never become Plan synthesis authority.  The frozen Chat
+    executor first validates each Task artifact and installs an immutable
+    attestation in its private trace.  Surface accepts a result row only when
+    all three identities (artifact, receipt and payload digest) match that
+    attestation.
+    """
+
+    trace = _safe_mapping(trace_stage_meta)
+    attestation = _safe_mapping(trace.get("node_input_artifact_attestation"))
+    if (
+        str(attestation.get("schema_version") or "").strip()
+        != NODE_INPUT_ARTIFACT_ATTESTATION_SCHEMA
+    ):
+        return ()
+    attested: dict[str, tuple[str, str]] = {}
+    for raw in _coerce_sequence(attestation.get("artifacts")):
+        item = _safe_mapping(raw)
+        artifact_ref = str(item.get("artifact_ref") or "").strip()
+        receipt_ref = str(item.get("receipt_ref") or "").strip()
+        payload_sha256 = str(item.get("payload_sha256") or "").strip().lower()
+        if artifact_ref and receipt_ref and payload_sha256:
+            attested[artifact_ref] = (receipt_ref, payload_sha256)
+    if not attested or agent_input is None:
+        return ()
+
+    candidates: list[str] = []
+    seen_refs: set[str] = set()
+    for raw in _coerce_sequence(
+        getattr(agent_input, "retrieval_evidence_items", None)
+    ):
+        row = _safe_mapping(raw)
+        metadata = _safe_mapping(row.get("metadata"))
+        store_id = str(
+            row.get("store_id") or metadata.get("store_id") or ""
+        ).strip().lower()
+        artifact_ref = str(row.get("source_ref") or "").strip()
+        expected = attested.get(artifact_ref)
+        if (
+            store_id != "task_result_artifact"
+            or expected is None
+            or artifact_ref in seen_refs
+            or str(row.get("evidence_ref") or "").strip() != expected[0]
+            or str(metadata.get("payload_sha256") or "").strip().lower()
+            != expected[1]
+        ):
+            continue
+        text = str(row.get("snippet") or "").replace("\x00", "").strip()
+        if not text:
+            continue
+        seen_refs.add(artifact_ref)
+        candidates.append(text)
+        if len(candidates) >= _ACCEPTED_TASK_RESULT_ITEM_LIMIT:
+            break
+
+    if not candidates:
+        return ()
+    per_item_limit = min(
+        _ACCEPTED_TASK_RESULT_ITEM_MAX_CHARS,
+        max(600, _ACCEPTED_TASK_RESULT_TOTAL_CHARS // len(candidates)),
+    )
+    return tuple(text[:per_item_limit].rstrip() for text in candidates)
 
 
 def _task_facts(

@@ -312,7 +312,7 @@ def graph_cancellation_authority_valid(
     owner: Any,
     conn: sqlite3.Connection,
     graph: Mapping[str, Any],
-    budget: Mapping[str, Any],
+    budget: Mapping[str, Any] | None,
 ) -> bool:
     """Reuse the 0092 trusted final-decision and Effect-overlay validator."""
 
@@ -340,14 +340,22 @@ def graph_cancellation_authority_valid(
                 conn,
                 record,
             )
+        budget_binding_valid = (
+            record.get("budget_id") is None
+            and record.get("budget_version_after") is None
+            if budget is None
+            else (
+                str(record.get("budget_id") or "") == str(budget["budget_id"])
+                and int(record.get("budget_version_after") or -1)
+                == int(budget["status_version"])
+            )
+        )
         return bool(
             str(record["graph_id"]) == str(graph["graph_id"])
             and int(record["graph_revision"]) == int(graph["revision"])
             and int(record["graph_version_after"])
             == int(graph["status_version"])
-            and str(record.get("budget_id") or "") == str(budget["budget_id"])
-            and int(record.get("budget_version_after") or -1)
-            == int(budget["status_version"])
+            and budget_binding_valid
         )
     except (TaskStoreError, KeyError, TypeError, ValueError):
         return False

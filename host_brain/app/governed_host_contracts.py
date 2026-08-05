@@ -104,6 +104,12 @@ def _build_frozen_context(
                 getattr(request_body, "person_id", "") or ""
             ).strip(),
             "response_form": str(getattr(request_body, "response_form", "") or "").strip(),
+            "suppress_edge_tts": bool(
+                getattr(request_body, "suppress_edge_tts", False)
+            ),
+            "suppress_edge_vts": bool(
+                getattr(request_body, "suppress_edge_vts", False)
+            ),
             "render_policy": dict(getattr(request_body, "render_policy", {}) or {}),
             "attachments": attachments,
             "multimodal_observations": dict(

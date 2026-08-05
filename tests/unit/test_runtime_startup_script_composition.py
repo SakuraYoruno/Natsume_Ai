@@ -64,6 +64,30 @@ def test_host_orchestrator_isolates_child_script_process_control() -> None:
     assert "Start-Process -Wait" not in source
 
 
+def test_obs_sidecar_receives_secret_file_references_without_copying_values() -> None:
+    host = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(encoding="utf-8")
+    obs = (ROOT / "scripts/runtime/start_obs_side.ps1").read_text(encoding="utf-8")
+
+    assert '$obsArgs["SecretEnvFile"] = $runtimeSecretEnvFile' in host
+    assert (
+        '$obsArgs["AuxiliarySecretEnvFile"] = $runtimeAuxiliarySecretEnvFile'
+        in host
+    )
+    assert '[string]$SecretEnvFile = ""' in obs
+    assert '[string]$AuxiliarySecretEnvFile = ""' in obs
+    assert "OBS_RUNTIME_SECRET_ENV_FILE_NOT_FOUND" in obs
+    assert (
+        '[Environment]::SetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", '
+        "$SecretEnvFile, \"Process\")" in obs
+    )
+    assert "Read-EnvFile -Path $SecretEnvFile" not in obs
+    assert "Get-Content -LiteralPath $SecretEnvFile" not in obs
+
+    obs_main = (ROOT / "host_brain/obs_main.py").read_text(encoding="utf-8")
+    assert "from host_brain.runtime_env import load_host_runtime_environment" in obs_main
+    assert "load_host_runtime_environment(repo_root=repo_root)" in obs_main
+
+
 def test_host_launcher_creates_loopback_operator_session_without_public_token(
     tmp_path: Path,
 ) -> None:
@@ -92,7 +116,9 @@ foreach ($name in $names) {{
   if ($null -eq $definition) {{ throw "function not found: $name" }}
   . ([ScriptBlock]::Create($definition.Extent.Text))
 }}
-$values = @{{}}
+$values = @{{
+  HOST_SECURE_INGRESS_HMAC_SECRETS_JSON = '{{"operator-test-key":"0123456789abcdef0123456789abcdef"}}'
+}}
 $env:MONITOR_UI_OPERATOR_SESSION_TOKEN = $null
 $result = Ensure-LocalOperatorSession `
   -ResolvedRuntimeRoot '{runtime_root}' `
@@ -111,6 +137,9 @@ $binding = @($bindings | Where-Object {{
   session_exists = Test-Path -LiteralPath $result.session_file -PathType Leaf
   token_length = $token.Length
   matching_binding_count = $binding.Count
+  key_id = [string]$binding[0].key_id
+  can_cancel = @($binding[0].scopes | Where-Object {{ [string]$_ -eq 'task-runtime:cancel' }}).Count -eq 1
+  can_write = @($binding[0].scopes | Where-Object {{ [string]$_ -eq 'obs:write' }}).Count -eq 1
   raw_token_in_public_values = @($values.Values | Where-Object {{ [string]$_ -eq $token }}).Count
   bootstrap_enabled = [string]$values['NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED']
 }} | ConvertTo-Json -Compress
@@ -138,6 +167,9 @@ $binding = @($bindings | Where-Object {{
         "session_exists": True,
         "token_length": 64,
         "matching_binding_count": 1,
+        "key_id": "operator-test-key",
+        "can_cancel": True,
+        "can_write": True,
         "raw_token_in_public_values": 0,
         "bootstrap_enabled": "true",
     }

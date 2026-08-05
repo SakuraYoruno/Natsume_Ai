@@ -696,7 +696,18 @@ async def _submit_gateway_payload(
 
 
 def _rejected(reason_code: str, detail: str, *, status: str = "REJECTED") -> EdgeTransportResult:
-    return EdgeTransportResult(False, status, reason_code, detail, {}, 0)
+    # Every caller reaches this helper before constructing or invoking an
+    # HTTP client. Preserve that zero-effect fact so the Acceptance Effect
+    # runtime can safely retry a corrected local configuration instead of
+    # quarantining it as an unknown network outcome.
+    return EdgeTransportResult(
+        False,
+        status,
+        reason_code,
+        detail,
+        {"external_side_effects": False},
+        0,
+    )
 
 
 __all__ = [

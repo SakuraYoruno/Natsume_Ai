@@ -314,3 +314,12 @@ python tools/doc_lint/doc_link_gate.py --root .
 ```
 
 历史方案和旧验收报告只用于追溯，不定义当前版本状态，统一从 [历史归档](docs/_history/README.md) 进入。
+
+## 当前真实验收增量（2026-08-04）
+
+- Monitor 的生命体情绪改为读取 canonical Digital Life `hard_state.emotion_tag`，不再依赖已经退役的 `emotion_context`；真实 OBS Sidecar 与浏览器均显示当前情绪，不再出现“待连接／待恢复”。
+- Gateway 闭环使用 `INPUT_COMPLETED + acceptance_effect_outbox/OUTBOX_COMMITTED` 判断 Host 已接受并持久提交回复。这个标记只表示可恢复的 Gateway Reply Outbox 已提交，绝不代表外部平台已经物理送达。
+- 真实签名 Gateway 新跑 `translate_delegate`、`memory_store`、`multi_skill_plan` 三条路线；最新有效时间桶的回复提交率、闭环率和完成率均为 100%。360 分钟历史窗口保留此前失败样本，没有通过改阈值或抹历史制造绿色结果。
+- Neo4j、Chroma、Redis、Host、OBS、Nginx Monitor、远端 Edge 与 Unified Gateway 仍以真实进程运行；VTS 缺兼容情绪热键、barge-in 未启用、常驻 ASR 噪声门控、长期人格盲测、PlanningSearch 三域收益和最终 SHA 全栈故障矩阵仍未完成。
+
+因此当前结论仍是 `INCOMPLETE`，不是 Full Architecture `PASS`。

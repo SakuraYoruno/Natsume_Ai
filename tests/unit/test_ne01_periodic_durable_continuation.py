@@ -144,3 +144,32 @@ async def test_periodic_continuation_shutdown_waits_for_active_scan() -> None:
     release.set()
     await joining
     assert continuation.health_snapshot()["running"] is False
+
+
+@pytest.mark.asyncio
+async def test_periodic_continuation_shutdown_accepts_cancelled_owned_child() -> None:
+    entered = asyncio.Event()
+
+    async def recover() -> tuple[dict[str, Any], ...]:
+        entered.set()
+        await asyncio.Event().wait()
+        return ()
+
+    continuation = PeriodicDurableContinuation(
+        runner=recover,
+        task_name="test-periodic-owned-cancellation",
+        failure_reason_code="TEST_PERIODIC_CONTINUATION_FAILED",
+        interval_ms=10,
+    )
+    await continuation.start()
+    continuation.wake()
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
+    owned_task = continuation._task
+    assert owned_task is not None
+    owned_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await owned_task
+
+    continuation.request_stop()
+    await continuation.join(timeout_s=1.0)
+    assert continuation.health_snapshot()["running"] is False

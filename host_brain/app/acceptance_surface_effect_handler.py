@@ -124,7 +124,11 @@ async def _deliver_accepted_surface_reply(
         msg_type="text",
         request_id=request_id,
         effect_id=effect_id,
-        wait_result=True,
+        # Acceptance commits the exact durable Gateway outbox intake.  The
+        # platform send is an independently recoverable eventual-delivery
+        # concern and must not add its retry/timeout window to an interactive
+        # Host turn.
+        wait_result=False,
         action_preview_service=terminal_proof.get("service"),
         action_preview_event_id=str(terminal_proof.get("event_id") or ""),
         action_preview_boundary=dict(terminal_proof.get("boundary") or {}),

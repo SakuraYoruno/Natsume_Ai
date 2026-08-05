@@ -103,7 +103,7 @@ Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Disp
 - VTube Studio expression 映射与 embodiment runtime；
 - Unified Gateway 的入站、SQLite transport、outbound 与平台 adapter。
 
-Edge 当前部署在另一台电脑上。本分支只完成 Host 接线、配置和本机语音验证，未形成远端硬件 `PASS`。
+Edge 当前部署在另一台电脑上。本轮已在用户授权下完成远端 Edge RPC、GPT-SoVITS TTS 物理播放、VTS 口型／身体动作、断线恢复和 Gateway 往返；VTS 情绪热键、barge-in 与常驻 ASR 噪声门控仍未通过，因此不能把远端三模态整体标为 `PASS`。
 
 ## 8. 数据与外部服务
 
@@ -116,3 +116,11 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 - 远端 Edge RPC、TTS、VTS 传输与口型已有局部实测；常驻 ASR 噪声门控、情绪热键、barge-in 和完整三模态同步仍未通过。
 - 真实多轮盲测、长期关系自然度和兼容 writer 运行清零仍待完成。
 - 完整 Docker／Host／OBS／Monitor／Gateway 故障验收尚未在当前 commit 集中执行。
+
+## 10. 2026-08-04 观测主链收口
+
+- `host_brain/input_runtime/worker_dispatch.py` 在 Governed Gateway 回复被 Acceptance 持久提交后，生成两个安全枚举：`acceptance_effect_outbox` 与 `OUTBOX_COMMITTED`；它不宣称外部平台已收到消息。
+- `host_brain/input_runtime/audit.py` 和 `observability_runtime/projection_ledger_view.py` 只允许这两个枚举进入公开读模型，继续剔除回复正文和私有字段。
+- `obs_routes_stats_input_humanoid.py` 将当前闭环定义为 canonical Reply Outbox commit 或有证据的 legacy terminal 信号；新样本不再依赖已退役的 ACK/progress 事件，旧样本仍按原事实保留。
+- `observability_runtime/life_body_source.py` 从 `digital_life_runtime_snapshot.hard_state.emotion_tag` 派生 `currentEmotion`；Monitor hook 同时兼容旧投影，但不再因缺少旧 `emotion_context` 显示待连接。
+- 当前真实新样本为三条签名 Gateway 路线，最新有效时间桶回复提交率、闭环率和完成率均为 100%；这不是全系统最终验收。

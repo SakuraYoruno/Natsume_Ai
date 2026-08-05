@@ -500,6 +500,8 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
             },
         }
     )
+
+    assert submitted[0]["wait_result"] is False
     assert result["status"] == "ACCEPTED"
     assert (
         result["receipt_ref"]

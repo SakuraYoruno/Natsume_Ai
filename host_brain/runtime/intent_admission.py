@@ -308,6 +308,111 @@ class DurableIntentAdmissionVerifier(_IntentReviewContinuationMixin):
         )
         return tuple(receipts)
 
+    def resolve_terminal_intent_block(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        graph: TaskGraph,
+    ) -> dict[str, Any] | None:
+        """Return cancellation authority for an immutable direct BLOCK.
+
+        Review rejection deliberately shares ``INTENT_ADMISSION_BLOCKED`` at
+        the execution boundary, but it has a different terminal authority.
+        This resolver therefore reopens every exact final receipt and returns
+        a SYSTEM cancellation identity only when at least one node's original
+        arbitration decision was ``BLOCK``.  No policy is re-evaluated here.
+        """
+
+        durable_command, durable_order, durable_graph = self._reopen_admission(
+            command=command,
+            work_order=work_order,
+            graph=graph,
+        )
+        scene = self._require_scene(_scene_query(durable_order))
+        prepared_event = self._graph_event(
+            stage="PREPARED",
+            command=durable_command,
+            work_order=durable_order,
+            graph=durable_graph,
+            scene=scene,
+            payload={},
+        )
+        prepared_marker = self._get_event(
+            prepared_event,
+            detail="terminal Intent BLOCK prepared-set lookup failed",
+        )
+        if prepared_marker is None:
+            raise IntentAdmissionError(
+                INTENT_ADMISSION_INVALID,
+                "terminal Intent BLOCK lacks a complete prepared-set marker",
+            )
+        prepared = self._load_prepared_set(
+            command=durable_command,
+            work_order=durable_order,
+            graph=durable_graph,
+            scene=scene,
+            marker_record=prepared_marker,
+        )
+        blocked: list[dict[str, str]] = []
+        for node in tuple(durable_graph.nodes):
+            payload = prepared[node.node_id]
+            final_event = self._node_event(
+                stage="FINAL",
+                command=durable_command,
+                graph=durable_graph,
+                node=node,
+                scene=scene,
+                payload=payload,
+            )
+            final_record = self._get_event(
+                final_event,
+                detail="terminal Intent BLOCK final receipt lookup failed",
+            )
+            if final_record is None:
+                raise IntentAdmissionError(
+                    INTENT_ADMISSION_INVALID,
+                    "terminal Intent BLOCK final receipt is missing",
+                )
+            receipt = self._validate_receipt(
+                record=final_record,
+                command=durable_command,
+                work_order=durable_order,
+                graph=durable_graph,
+                node=node,
+                scene=scene,
+                expected_event=final_event,
+                expected_payload=payload,
+            )
+            if receipt.get("decision") == "BLOCK":
+                blocked.append(
+                    {
+                        "task_node_id": node.node_id,
+                        "receipt_digest": str(receipt["receipt_digest"]),
+                        "receipt_event_id": str(final_event.event_id),
+                    }
+                )
+        if not blocked:
+            return None
+        blocked.sort(key=lambda item: item["task_node_id"])
+        identity = {
+            "schema_version": "natsume.intent-block-terminal.v1",
+            "command_id": durable_command.command_id,
+            "task_graph_id": durable_graph.graph_id,
+            "graph_revision": durable_graph.revision,
+            "blocked_receipts": blocked,
+        }
+        cancellation_digest = _digest(identity).split(":", 1)[1]
+        return {
+            **identity,
+            "blocked_node_ids": [item["task_node_id"] for item in blocked],
+            "request_id": f"intent-block-terminal-{cancellation_digest[:40]}",
+            "request_identity": (
+                f"intent-block://sha256/{cancellation_digest}"
+            ),
+            "reason_code": INTENT_ADMISSION_BLOCKED,
+        }
+
     def verify_terminal_intent_review_claim(
         self,
         *,

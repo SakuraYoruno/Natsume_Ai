@@ -69,6 +69,34 @@ def _receipt(command: dict[str, object], *, status: str = "IN_DOUBT") -> dict[st
     }
 
 
+def test_expression_batch_admission_is_atomic_and_exactly_replayable(tmp_path) -> None:
+    repository, db_path = _repository(tmp_path, "batch-admission")
+    authority = _authority(repository, worker_id="batch-owner")
+    first = _command("batch-first")
+    second = _command("batch-second")
+
+    admitted = repository.enqueue_many((first, second), authority=authority)
+    replayed = repository.enqueue_many((first, second), authority=authority)
+
+    assert [row["outbox_id"] for row in replayed] == [
+        row["outbox_id"] for row in admitted
+    ]
+    conflicting = {
+        **second,
+        "idempotency_key": "d8-authority-key-batch-second-drift",
+    }
+    with pytest.raises(EmbodimentOutboxError, match="IDEMPOTENCY_CONFLICT"):
+        repository.enqueue_many(
+            (_command("batch-rolled-back"), conflicting),
+            authority=authority,
+        )
+    with sqlite3.connect(db_path) as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM host_embodiment_outbox WHERE command_id = ?",
+            ("d8-authority-command-batch-rolled-back",),
+        ).fetchone()[0] == 0
+
+
 def test_0104_upgrades_a_0103_database_without_backfilling_unscoped_rows(tmp_path) -> None:
     legacy_dir = tmp_path / "migrations-0103"
     legacy_dir.mkdir()

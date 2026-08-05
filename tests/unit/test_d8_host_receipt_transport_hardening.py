@@ -58,6 +58,7 @@ def test_remote_cleartext_edge_rpc_is_rejected_before_http_client_creation(
     assert result.success is False
     assert result.status == "REJECTED"
     assert result.reason_code == "EDGE_RPC_TLS_REQUIRED"
+    assert result.event == {"external_side_effects": False}
     assert constructed == []
 
 
@@ -145,6 +146,7 @@ def test_remote_cleartext_gateway_reply_is_rejected_before_http_client_creation(
         )
     )
     assert transport_result.reason_code == "EDGE_GATEWAY_TLS_REQUIRED"
+    assert transport_result.event == {"external_side_effects": False}
     assert constructed == []
 
 
@@ -361,3 +363,41 @@ def test_matching_dispatch_receipt_preserves_edge_settlement(
     assert receipt.status == "APPLIED"
     assert receipt.command_id == command.command_id
     assert receipt.idempotency_key == command.idempotency_key
+
+
+def test_expired_command_is_rejected_before_edge_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = {"value": 1_000}
+    monkeypatch.setattr("host_brain.channels.embodiment.now_ms", lambda: clock["value"])
+    command = build_host_embodiment_command(
+        kind="voice",
+        action="speak",
+        payload={"text": "expired"},
+        request_id="d8-expired-before-transport",
+        deadline_ms=1_500,
+    )
+    lease = _lease(now=clock["value"])
+    calls: list[str] = []
+
+    async def post_to_edge(*, path, **_kwargs):  # noqa: ANN001, ANN201
+        calls.append(path)
+        raise AssertionError("expired command must not cross the network boundary")
+
+    clock["value"] = 2_000
+    receipt = asyncio.run(
+        _EdgeRpcEmbodimentCommandPort(
+            post_to_edge=post_to_edge,
+            session_config=EdgeEmbodimentSessionConfig(
+                session_id=lease.session_id,
+                owner_id=lease.owner_id,
+            ),
+            initial_lease=lease,
+        ).submit(command)
+    )
+
+    assert receipt.accepted is False
+    assert receipt.status == "REJECTED"
+    assert receipt.reason_code == "EMBODIMENT_COMMAND_EXPIRED"
+    assert receipt.event == {"external_side_effects": False}
+    assert calls == []

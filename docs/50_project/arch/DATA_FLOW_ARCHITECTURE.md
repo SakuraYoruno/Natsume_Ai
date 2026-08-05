@@ -174,3 +174,30 @@ Gateway 页面同样区分服务进程、durable transport 与平台通道详情
 | Relation episode | 结构化意义与未解决线程 |
 | Task／effect receipt | 幂等与恢复所需最小字段 |
 | 模型／语料／密钥 | 仓库外保存 |
+
+## 9. Gateway 回复与生命体情绪观测流
+
+```text
+signed Gateway webhook
+→ Durable inbox
+→ HostCommand / immutable TaskGraph
+→ model / skill / delegate / plan
+→ Verification / Acceptance
+→ surface.reply_delivery
+→ Gateway Reply Outbox COMMITTED
+→ INPUT_COMPLETED {authority, state}
+→ OBS closed-loop projection
+→ Monitor
+```
+
+这条链到 `OUTBOX_COMMITTED` 只证明 Host 已经完成可恢复提交。Gateway 实际 dispatch、未知外部副作用对账、平台 ACK 和用户可见性是后续独立阶段，缺少后续回执时不得推断为已送达。
+
+```text
+canonical Life journal
+→ digital_life_runtime_snapshot.hard_state.emotion_tag
+→ life_body_source.derived.currentEmotion
+→ OBS /obs/life-body
+→ Monitor 人格上下文
+```
+
+旧 `emotion_context` 只用于历史兼容；新运行时不会为了适配 UI 再制造第二份情绪真相。

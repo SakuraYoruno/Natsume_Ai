@@ -26,6 +26,10 @@ from host_brain.contracts.conversation_acceptance_effects import (
     conversation_life_command_id,
     preference_operation_id,
 )
+from host_brain.contracts.memory_acceptance_effects import (
+    EXPLICIT_MEMORY_STORE_EFFECT_TYPE,
+    EXPLICIT_MEMORY_STORE_SCHEMA_V1,
+)
 from host_brain.contracts.agent_runtime.plan_execution_policy import (
     PLAN_EXECUTION_POLICY_METADATA_KEY,
     PlanExecutionPolicyError,
@@ -227,6 +231,7 @@ def compile_graph_acceptance_effects(
         descriptors=foreground_descriptors,
         command=command,
         companion_subject_id=companion_subject_id,
+        companion_workspace_id=companion_workspace_id,
         surface_message=surface_message,
         narrative=narrative,
         render_lang=render_lang,
@@ -305,6 +310,16 @@ def compile_graph_acceptance_effects(
         },
     }
     payloads: list[tuple[str, Mapping[str, Any]]] = []
+    accepted_memory = _compile_explicit_memory_store_payload(
+        command=command,
+        work_order=work_order,
+        node_id=node_ref,
+        attempt_id=attempt_ref,
+        pack=pack,
+        person_id=companion_subject_id,
+    )
+    if accepted_memory is not None:
+        payloads.append((EXPLICIT_MEMORY_STORE_EFFECT_TYPE, accepted_memory))
     try:
         agent_workspace_effect = (
             agent_workspace_effects.compile_agent_workspace_artifact_effect(
@@ -394,6 +409,115 @@ def compile_graph_acceptance_effects(
             attempt_id=attempt_ref,
         )
         for effect_type, payload in payloads
+    )
+
+
+def _compile_explicit_memory_store_payload(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    attempt_id: str,
+    pack: Mapping[str, Any],
+    person_id: str,
+) -> dict[str, Any] | None:
+    target_id, intent_id, args = _accepted_skill_node_input(
+        command=command,
+        work_order=work_order,
+        node_id=node_id,
+        pack=pack,
+    )
+    if target_id != "memory_store":
+        return None
+    content = _required(args.get("content"), "memory_store.content")
+    if len(content) > 4_000:
+        raise AcceptanceEffectCompileError("memory_store.content exceeds 4000 characters")
+    memory_type = str(args.get("memory_type") or "episodic").strip().lower()
+    if memory_type not in {"episodic", "semantic"}:
+        raise AcceptanceEffectCompileError("memory_store.memory_type is invalid")
+    raw_tags = args.get("tags")
+    tags = (
+        [str(tag).strip().lower() for tag in raw_tags if str(tag).strip()]
+        if isinstance(raw_tags, list)
+        else []
+    )
+    if len(tags) > 16 or any(len(tag) > 64 for tag in tags):
+        raise AcceptanceEffectCompileError("memory_store.tags are invalid")
+    try:
+        importance = float(args.get("importance", 0.5))
+    except (TypeError, ValueError) as exc:
+        raise AcceptanceEffectCompileError("memory_store.importance is invalid") from exc
+    if not 0.0 <= importance <= 1.0:
+        raise AcceptanceEffectCompileError("memory_store.importance is outside 0..1")
+    return {
+        "schema_version": EXPLICIT_MEMORY_STORE_SCHEMA_V1,
+        "operation_id": (
+            f"memory-store://graph/{command.graph_id}/revision/{command.graph_revision}"
+            f"/node/{node_id}/attempt/{attempt_id}"
+        ),
+        "request_id": command.request_id,
+        "intent_id": intent_id,
+        "session_id": command.session_id,
+        "person_id": person_id,
+        "content": content,
+        "memory_type": memory_type,
+        "tags": tags,
+        "importance": importance,
+        "source": str(args.get("source") or "explicit_user_request").strip(),
+        "emotion_tag": str(args.get("emotion_tag") or "NEUTRAL").strip().upper() or "NEUTRAL",
+        "created_at_ms": int(command.created_at_ms),
+    }
+
+
+def _accepted_skill_node_input(
+    *,
+    command: HostCommand,
+    work_order: Any,
+    node_id: str,
+    pack: Mapping[str, Any],
+) -> tuple[str, str, dict[str, Any]]:
+    if command.route_type not in {"skill", "plan"}:
+        return "", "", {}
+    if command.route_type == "skill":
+        intent = _json_mapping(pack.get("intent_draft"), field_name="intent_draft")
+        return (
+            str(command.target_id or "").strip(),
+            _required(intent.get("id") or intent.get("intent_id"), "intent_draft.id"),
+            _json_mapping(intent.get("args"), field_name="intent_draft.args"),
+        )
+    metadata = _json_mapping(getattr(work_order, "metadata", {}), field_name="work_order.metadata")
+    lineage = _json_mapping(metadata.get("planning_lineage"), field_name="planning_lineage")
+    bindings = lineage.get("node_bindings")
+    if not isinstance(bindings, Sequence) or isinstance(bindings, (str, bytes, bytearray)):
+        return "", "", {}
+    binding = next(
+        (
+            dict(item)
+            for item in bindings
+            if isinstance(item, Mapping) and str(item.get("node_id") or "") == node_id
+        ),
+        None,
+    )
+    if binding is None:
+        return "", "", {}
+    candidate_id = str(binding.get("candidate_id") or "").strip()
+    approved = _json_mapping(
+        pack.get("approved_candidate_inputs"),
+        field_name="approved_candidate_inputs",
+    )
+    candidate = _json_mapping(
+        approved.get(candidate_id),
+        field_name="approved_candidate_input",
+    )
+    return (
+        str(binding.get("target_id") or "").strip(),
+        _required(
+            candidate.get("intent_id")
+            or candidate.get("id")
+            or f"plan-node:{command.graph_id}:{command.graph_revision}:{node_id}",
+            "planned memory intent_id",
+        ),
+        _json_mapping(candidate.get("args"), field_name="approved_candidate_input.args"),
     )
 
 
@@ -1350,6 +1474,7 @@ def _trusted_foreground_command(
     descriptors: Sequence[Mapping[str, Any]],
     command: HostCommand,
     companion_subject_id: str,
+    companion_workspace_id: str,
     surface_message: str,
     narrative: str,
     render_lang: str,
@@ -1411,11 +1536,19 @@ def _trusted_foreground_command(
         rich = _json_mapping(existing_projection.get("payload"), field_name="surface.post_process")
         rich.update(projection_payload)
         projection_payload = rich
+    canonical_workspace_id = (
+        str(companion_workspace_id or "").strip()
+        or str(payload.get("workspace_id") or "").strip()
+    )
     canonical_payload = {
         **payload,
         "request_id": command.request_id,
         "session_id": command.session_id,
         "person_id": companion_subject_id,
+        # Migration 0146 binds every Voice/Avatar protocol row back to this
+        # exact immutable Life event. The workspace must live on the command
+        # payload itself, not only inside the plan or individual intents.
+        "workspace_id": canonical_workspace_id,
         "user_message": surface_message,
         "assistant_reply": narrative,
         "completed_at_ms": completed_at_ms,

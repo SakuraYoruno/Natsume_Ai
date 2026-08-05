@@ -326,7 +326,34 @@ class SQLiteSecureIngressStore:
         secret_ref: str,
         at_ms: int,
     ) -> None:
-        """Idempotently seed one configured service identity.
+        """Idempotently seed one configured service identity."""
+
+        self.ensure_hmac_principal_authority(
+            principal_id=principal_id,
+            principal_kind=PrincipalKind.SERVICE,
+            key_id=key_id,
+            tenant_id=tenant_id,
+            granted_scopes=granted_scopes,
+            allowed_audiences=allowed_audiences,
+            allowed_actions=allowed_actions,
+            secret_ref=secret_ref,
+            at_ms=at_ms,
+        )
+
+    def ensure_hmac_principal_authority(
+        self,
+        *,
+        principal_id: str,
+        principal_kind: PrincipalKind | str,
+        key_id: str,
+        tenant_id: str,
+        granted_scopes: tuple[str, ...],
+        allowed_audiences: tuple[str, ...],
+        allowed_actions: tuple[str, ...],
+        secret_ref: str,
+        at_ms: int,
+    ) -> None:
+        """Idempotently seed one configured HMAC principal.
 
         The method stores only the secret reference.  Existing authority is
         never overwritten: a mismatch is configuration drift and fails Host
@@ -339,6 +366,16 @@ class SQLiteSecureIngressStore:
         reference = str(secret_ref or "").strip()
         if not all((principal, key, tenant, reference)):
             raise SecureIngressStoreError("SECURE_INGRESS_AUTHORITY_INVALID")
+        try:
+            kind = (
+                principal_kind
+                if isinstance(principal_kind, PrincipalKind)
+                else PrincipalKind(str(principal_kind).strip().lower())
+            )
+        except (TypeError, ValueError) as exc:
+            raise SecureIngressStoreError(
+                "SECURE_INGRESS_AUTHORITY_INVALID"
+            ) from exc
         scopes_json = self._json_array(tuple(granted_scopes))
         audiences_json = self._json_array(tuple(allowed_audiences))
         actions_json = self._json_array(tuple(allowed_actions))
@@ -363,7 +400,7 @@ class SQLiteSecureIngressStore:
                         """,
                         (
                             principal,
-                            PrincipalKind.SERVICE.value,
+                            kind.value,
                             tenant,
                             scopes_json,
                             audiences_json,
@@ -373,7 +410,7 @@ class SQLiteSecureIngressStore:
                     )
                 else:
                     expected_principal = (
-                        PrincipalKind.SERVICE.value,
+                        kind.value,
                         tenant,
                         "ACTIVE",
                         self._string_tuple(scopes_json),

@@ -88,6 +88,7 @@ def log_input_event(
                 "from_id", "to_id", "sender_name", "media_url",
                 "reply_to_msg_id", "is_group", "decision",
                 "gateway_success", "gateway_status", "gateway_reason_code", "gateway_detail", "gateway_latency_ms",
+                "gateway_delivery_authority", "gateway_delivery_state",
                 "reply_text_len", "reply_preview", "reply_form", "reply_form_reason", "voice_sent",
                 "immediate_ack_status", "immediate_ack_latency_ms",
                 "immediate_ack_preview", "immediate_ack_reason",
