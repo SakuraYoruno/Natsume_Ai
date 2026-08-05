@@ -1704,6 +1704,15 @@ if ($Port -le 0) {
   }
 }
 
+# The explicit launcher arguments are the final bind authority.  Keep the
+# process environment and the detached runtime snapshot aligned with them so
+# the Service Catalog candidate and the final Uvicorn process cannot resolve
+# different endpoints during a canary or isolated acceptance run.
+$env:HOST_APP_HOST = [string]$BindHost
+$envValues["HOST_APP_HOST"] = [string]$BindHost
+$env:HOST_APP_PORT = [string]$Port
+$envValues["HOST_APP_PORT"] = [string]$Port
+
 $probeHost = if ($BindHost -eq "0.0.0.0") { "127.0.0.1" } else { $BindHost }
 $monitorProxyEnabled = $false
 $obsEnabled = Parse-BoolValue -Value $(if ($env:HOST_OBS_APP_ENABLED) { $env:HOST_OBS_APP_ENABLED } elseif ($envValues.ContainsKey("HOST_OBS_APP_ENABLED")) { $envValues["HOST_OBS_APP_ENABLED"] } else { $null }) -Default $true

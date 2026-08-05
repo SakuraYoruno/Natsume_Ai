@@ -224,3 +224,9 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 因此 `HOST_PREOPERATION_CRASH_RECOVERY` 提升为 `PASS_REAL_SAME_ATTEMPT_FENCE_2_TAKEOVER`。微信客户端不可用，reply outbox 以 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 进入 DLQ，物理平台送达继续是 `NOT_TESTED_CLIENT_UNAVAILABLE`。脱敏报告位于本次隔离 acceptance evidence 目录，SHA-256 为 `e9f038a5e735ec29f935c57382df5fec48d692f593c8a31450dcbbbd6209fdb7`。unknown effect、rollback failure、覆盖率、PlanningSearch 收益、VTS、声学打断、实时延迟和人工盲测仍未完成，A15 总体保持 `INCOMPLETE`。
 
 随后执行的 terminal reconciliation canary 使用隔离真实 SQLite 构造 1 个 `EXACT_REPAIRABLE` 与 1 个 `SIGNED_REPAIR_REQUIRED` 半终态：前者仅凭系统 durable evidence 自动把 Budget 从 `ACTIVE` 释放并保留失败图，后者没有 proof、没有被修改，并以 `TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED` 阻断 production-ready；外部副作用为 0。首次报告错误回落到写死的旧 migration `0118`，因此未被采信；runner 现强制从本轮 MigrationResult 读取 `current_version == latest_version` 及对应物理资产，当前重跑必须报告真实 head `0153`。
+
+## 2026-08-06 A15 operation 未知副作用故障注入
+
+独立 Sidecar Gateway `19001` 通过真实 HMAC webhook 把请求送入 Sidecar Host `18083`。唯一 TaskGraph 进入 `RUNNING`，唯一 operation reservation 在 `1785970848681` 成为 `RESERVED`；1.032 秒后强制终止 PID 40156。Host 使用同一 SQLite 重启并等到旧 Lease 到期后，将原 Attempt 从 `RUNNING` 转为 `RECOVERABLE`、旧 Lease 转为 `EXPIRED`、reservation 转为 `RECOVERY_REQUIRED`，随后写入不可变的 `UNKNOWN_SIDE_EFFECT / SIGNED_OPERATION_RECONCILIATION_REQUIRED` hold。
+
+恢复后持续观察只存在 1 个 HostCommand、1 张 Graph、1 个 Node、1 个 Attempt、1 个 reservation 和 1 个 recovery hold；目标图的 Acceptance 与 Effect 均为 0，Gateway 没有 reply outbox，未出现第二次 worker 或模型账本记录。该结果记为 `PASS_FAIL_CLOSED`，只证明 operation fence、恢复分类和不盲目重放；进程终止前的 provider transport 没有独立 attestation，因此不得写成“外部模型已确定收到请求”。同时修复启动器的参数优先级：显式 `-BindHost/-Port` 现在会同步写入进程环境和 detached runtime snapshot，避免 Service Catalog candidate 仍按旧环境地址启动；23 项启动器单测与真实 `127.0.0.1:19999 → 0.0.0.0:18083` 覆盖测试通过。A15 总体继续为 `INCOMPLETE`，rollback failure 和其他既有 Gate 仍待处理。

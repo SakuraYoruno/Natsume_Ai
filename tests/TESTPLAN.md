@@ -282,3 +282,13 @@ python -m pytest -q `
 第三轮真实报告 `dl-live-1785965355637.json` 的 SHA-256 为 `6b1470e8ebb3892d33f3a3eaa34350c34aeda0b4f7d5ac1ae79d1e6132c0f82c`：3/3 自动结构通过，三条末轮 Voice 均 `APPLIED`，人工仍为 `PENDING`。新增人工回归是忙碌式边界反驳、用“哼回去”赶走害怕、吃味后的“不会成为麻烦”；第四轮同时修正上游 CompanionAct 指导和下游候选门禁，110 项定向测试通过。真实新 SHA 重跑前不得将自动 3/3 提升为人感通过。
 
 最终三轨迹报告 `dl-live-1785966063542.json` 的 SHA-256 为 `e004cb49ef1e4d90028f49d8ca87c790e530a7b60200924b93fdd7e34c9b9f5f`：2 自动通过、1 失败，三条 Voice 均 `APPLIED`。自动评分把自然的“有点怕也正常”判低分，却放过“省得你嫌烦”，因此该 scorer 只保留候选排序用途，不得作为人感验收 authority。补齐三个同义退化族后 101 项通过；后续扩大 cohort 并由盲测标签校准，而非继续围绕三条样本调分。
+
+真实 unknown-effect 故障项必须在 operation reservation 为 `RESERVED` 后终止独立 Host 进程，使用同一真实 SQLite 重启并等待 Lease 过期。断言同一 Attempt 为 `RECOVERABLE`、reservation 为 `RECOVERY_REQUIRED`、存在 `UNKNOWN_SIDE_EFFECT / SIGNED_OPERATION_RECONCILIATION_REQUIRED` hold，且观察窗口内 Command／Graph／Attempt／模型调用／Acceptance／Effect／Gateway reply 均不增加。该结果不得用于证明 provider transport 已发出；后者需要独立 transport attestation。
+
+Host 启动参数回归命令：
+
+```powershell
+python -m pytest -q tests/unit/test_runtime_startup_script_composition.py
+```
+
+除静态断言外，A15 Sidecar 还要用故意冲突的进程环境 `127.0.0.1:19999` 与显式参数 `0.0.0.0:18083` 启动，确认 runtime snapshot、Service Catalog candidate 和实际 listener 都采用显式值。

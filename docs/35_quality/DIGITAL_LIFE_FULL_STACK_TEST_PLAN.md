@@ -334,6 +334,8 @@ python scripts/runtime/run_ne07_external_services_acceptance.py `
 - 默认用户 Docker stack 未被停止、删除或复用。
 - 任一外部服务不可用时 `FAIL`，不得切换内存后端冒充通过。
 
+同一轮验收中若另起故障注入 Sidecar Host，并复用已经启动的 Docker project，Sidecar 必须使用 `-ExternalServicesBackend none` 并从本轮运行环境读取现有 Neo4j／Chroma／Redis 地址。不得再次以 `docker` 启动同名 project，否则 Compose 会按 Sidecar 当前环境重建容器。Host 的显式 `-BindHost/-Port` 是最终 authority，生成的 `host.runtime.env` 和 Service Catalog candidate 必须与其完全一致。
+
 ## 9. D 阶段：Host、OBS、Monitor 和前端
 
 ### 9.1 启动

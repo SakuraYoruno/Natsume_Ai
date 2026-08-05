@@ -519,6 +519,26 @@ def test_host_launcher_exports_explicit_workspace_root_to_runtime_snapshot() -> 
     assert "agent_workspace_root = $resolvedAgentWorkspaceRoot" in source
 
 
+def test_host_launcher_exports_resolved_bind_to_runtime_snapshot() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    bind_resolution = source.index("if (-not $BindHost) {")
+    port_resolution = source.index("if ($Port -le 0) {", bind_resolution)
+    probe_resolution = source.index("$probeHost = ", port_resolution)
+    runtime_snapshot = source.index("$null = Write-RuntimeEnvFile", probe_resolution)
+    resolved_bind_source = source[port_resolution:probe_resolution]
+
+    for expected in (
+        '$env:HOST_APP_HOST = [string]$BindHost',
+        '$envValues["HOST_APP_HOST"] = [string]$BindHost',
+        '$env:HOST_APP_PORT = [string]$Port',
+        '$envValues["HOST_APP_PORT"] = [string]$Port',
+    ):
+        assert expected in resolved_bind_source
+    assert bind_resolution < port_resolution < probe_resolution < runtime_snapshot
+
+
 def test_child_script_capture_does_not_wait_for_long_lived_descendant(
     tmp_path: Path,
 ) -> None:

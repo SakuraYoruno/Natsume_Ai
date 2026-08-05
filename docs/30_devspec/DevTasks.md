@@ -70,7 +70,8 @@
 - [ ] 验证 Outbox 对账／网络恢复不会重复外发；外部平台不可用时不得用本地 DLQ 替代物理送达证明。
 - [x] 注入真实 Host 崩溃与 Lease 过期：修复后旧 Lease 变为 `EXPIRED`，fencing token 2 在 2.446 秒后接管同一 Attempt，Node Grant 尚余 57.211 秒；最终图、节点、预算和 6 类 Acceptance Effect 全部正常结算且无重复命令／图／Attempt。
 - [x] 运行隔离真实 SQLite terminal reconciliation canary：精确可修复案例自动释放预算，模糊案例保持未修改并以 `TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED` 阻断；报告强制绑定真实 migration head `0153`。
-- [ ] 注入 unknown effect 和 rollback failure，并验证必须先 reconciliation、不得盲目重放。
+- [x] 注入真实进程 unknown effect：operation reservation 已 `RESERVED` 后强杀 Sidecar Host；重启后同一 Attempt 进入 `RECOVERABLE`，operation 进入 `RECOVERY_REQUIRED` 并生成 signed-reconciliation hold，持续观察无第二次 worker／模型／Acceptance／Effect／reply。
+- [ ] 注入 rollback failure，并验证失败可恢复且不会伪造成功终态。
 - [x] 验证分段 TTS 合成失败会结算父命令并取消兄弟分段，打断后队列归零。
 - [x] 验证 VTS 人工授权等待不会触发无界自动重连或句柄增长。
 
