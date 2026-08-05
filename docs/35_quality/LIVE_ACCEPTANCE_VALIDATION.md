@@ -148,3 +148,5 @@ Gateway 五路线首轮结果为 2 `PASS`、2 `WARN`、1 `FAIL`。失败路线�
 同轮还确认两个启动边界：显式传入 acceptance `RuntimeRoot` 时，Host 仍会优先采用源 `.env` 中遗留的 `NATSUME_AUDIT_DB`；Edge 的中日语音 profile 则会无条件把明确配置的 barge-in 改回关闭。修复后，显式 RuntimeRoot 默认独占其 `audit.sqlite3`，只有显式 `AuditDbPath` 才能覆盖；barge-in 保持默认关闭，但显式设置不再被语言 profile 改写。两项均须在重新启动真实进程后提升状态。
 
 首次加载终局合成修复后的真实重测又暴露出第二层缺陷：两个前序节点均成功并持久化完整审查结果，终局模型也各生成 754／821 completion tokens，但 Surface 的通用“内部过程泄漏”启发式把包含“用户、需要、必须、可以”等正常任务措辞的长答案整体清空，最终以 `MODEL_BUDGET_GUARD_REJECTED` 耗尽两次模型尝试。修复只对绑定 canonical accepted Task artifacts 的终局合成放开这些通用词命中；显式内部字段、系统指令、过程标记和普通聊天的原防泄漏门保持不变。真实新请求重测前仍不记 PASS。
+
+保留该失败图并再次重启 Host 时，启动期 terminal reconciliation 首次读到“parallel settlement 已将图置为 FAILED、预算置为 RELEASED”的真实组合，暴露 `_parallel_terminal_snapshot_matches` 缺少实例参数，导致 Task Runtime composition fail-closed。修复补齐方法绑定，并把 settled parallel failure／budget 的跨进程终态再次送入 reconciliation inventory，断言不产生伪修复 case。该缺陷说明此前故障测试只覆盖了 runtime 恢复，没有覆盖 Host composition 的随后 inventory；本次不删除失败图，直接用原账本验证修复。
