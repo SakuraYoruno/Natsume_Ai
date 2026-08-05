@@ -40,6 +40,46 @@ def test_edge_side_stop_wrapper_uses_named_parameter_splatting() -> None:
     assert "$invokeArgs = @()" not in source
 
 
+def test_edge_stop_reaps_repo_scoped_model_workers_and_process_tree() -> None:
+    source = (ROOT / "scripts/runtime/stop_edge.ps1").read_text(encoding="utf-8")
+
+    assert "function Get-DescendantProcessIds" in source
+    assert "function Stop-ProcessTree" in source
+    assert "function Stop-StaleRepoEdgeProcesses" in source
+    assert 'edge_client\\actuators\\tts_persistent_worker.py' in source
+    assert '$normalized.Contains("-m edge_client")' in source
+    assert "Stop-ProcessTree -RootProcessId $edgePid" in source
+    assert "Stop-ProcessTree -RootProcessId $listeningPid" in source
+    assert 'Join-Path $env:SystemRoot "System32\\taskkill.exe"' in source
+    assert "/PID $RootProcessId /T /F" in source
+    assert "stale_repo_edge_process_ids" in source
+
+
+def test_edge_start_supports_explicit_isolated_data_root() -> None:
+    edge = (ROOT / "scripts/runtime/start_edge.ps1").read_text(encoding="utf-8")
+    wrapper = (ROOT / "scripts/runtime/start_edge_side.ps1").read_text(encoding="utf-8")
+
+    assert '[string]$DataRoot = ""' in edge
+    assert '[System.IO.Path]::GetFullPath($DataRoot)' in edge
+    assert 'SetEnvironmentVariable("NATSUME_DATA_DIR", $resolvedDataRoot, "Process")' in edge
+    assert 'data_root = if ([string]::IsNullOrWhiteSpace($resolvedDataRoot))' in edge
+    assert '[string]$DataRoot = ""' in wrapper
+    assert "-DataRoot $DataRoot `" in wrapper
+
+
+def test_real_edge_voice_probe_never_accepts_a_secret_argument_or_mock() -> None:
+    source = (ROOT / "scripts/runtime/test_edge_real_voice_acceptance.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'os.environ.get("EDGE_HMAC_SHARED_KEY")' in source
+    assert 'parser.add_argument("--expected-data-root"' in source
+    assert "--shared-key" not in source
+    assert '"mock_transport": False' in source
+    assert '"physical_playback_requested": True' in source
+    assert 'barge_summary["reason_code"] == "VOICE_INTERRUPTED"' in source
+
+
 def test_host_orchestrator_isolates_child_script_process_control() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"

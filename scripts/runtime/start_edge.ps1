@@ -2,6 +2,7 @@
 param(
   [string]$EnvFile = "",
   [string]$LogDir = "",
+  [string]$DataRoot = "",
   [int]$WaitSeconds = 20,
   [switch]$ForceRestart,
   [switch]$ShowConsoleWindow,
@@ -897,6 +898,15 @@ foreach ($overrideKey in $processWechatOverrides.Keys) {
   $envValues[$overrideKey] = [string]$processWechatOverrides[$overrideKey]
 }
 Set-ProcessEnv -Values $envValues
+$resolvedDataRoot = ""
+if (-not [string]::IsNullOrWhiteSpace($DataRoot)) {
+  $resolvedDataRoot = [System.IO.Path]::GetFullPath($DataRoot)
+  Ensure-Directory -Path $resolvedDataRoot
+  [Environment]::SetEnvironmentVariable("NATSUME_DATA_DIR", $resolvedDataRoot, "Process")
+  $envValues["NATSUME_DATA_DIR"] = $resolvedDataRoot
+} else {
+  $resolvedDataRoot = [string]([Environment]::GetEnvironmentVariable("NATSUME_DATA_DIR", "Process"))
+}
 $startupPreWarnings = @()
 $startupEnvDefaultsApplied = @()
 $startupEnvEnforcedApplied = @()
@@ -2007,6 +2017,7 @@ $result = [ordered]@{
   pid_file = $pidFile
   port = $port
   env_file = $EnvFile
+  data_root = if ([string]::IsNullOrWhiteSpace($resolvedDataRoot)) { $null } else { $resolvedDataRoot }
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   startup_mode = $startupMode

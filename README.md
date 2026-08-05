@@ -189,10 +189,10 @@ flowchart TB
 | 主动陪伴 | 已有场景、权限、冷却和安静时段策略；长期频率与接受度仍待实测。 |
 | 文本表达 | 本地可运行；需要真实 Provider，长期人格一致性仍在迭代。 |
 | 日语声线方案 B | 当前是 GPT-SoVITS V4 预训练权重配合七海参考音频的参考条件推理，不是七海专属微调模型。 |
-| Avatar 与多模态同步 | 目标 Edge 已真实运行：ASR、GPT-SoVITS TTS、音频播放和 Edge RPC 为 `UP`；VTS 已认证且口型／身体动作可用，但缺少兼容情绪热键，状态为 `DEGRADED`；barge-in 关闭并保持 `NOT_TESTED`。 |
+| Avatar 与多模态同步 | 目标 Edge 已在隔离数据根真实运行：ASR 与 GPT-SoVITS TTS 为 `READY`，短句物理播放完成，播放中的长句通过签名 RPC 在 16 ms 内中断；ASR 因目标机缺少 `cublas64_12.dll` 自动回退 CPU。VTube Studio 当前停在授权窗口且未加载角色模型，状态为 `RECONNECTING`，所以可见 Avatar 动作仍是 `ACCEPTANCE_PENDING_EXTERNAL`。声学触发的自动 barge-in 也尚未验收。 |
 | Gateway 消息陪伴 | 真实 QQ 入站已贯通 Secure Ingress → 单节点 TaskGraph → Acceptance → durable Gateway Outbox → 平台送达；重复入站复用原任务且不重复外发。直接本地聊天仍保持低延迟实时链。 |
 | OBS 与 Monitor | Host、Edge 和 Gateway 组件状态持续写入只读投影；本机 Nginx 页面会自动建立 HttpOnly owner 会话，普通浏览器无需手工注入 Token。真实页面已核对 TaskGraph、预算、验收、回执和服务状态；未知平台详情显示为“未确认”，不会伪装成健康。 |
-| 隔离全服务栈 | 固定镜像的 Neo4j、Chroma、Redis 已在隔离 acceptance project 完成真实写入、读取、容器重启与持久读取；Host、OBS、Monitor、Edge 和 Gateway 在重启后保持可达。 |
+| 隔离全服务栈 | 固定镜像的 Neo4j、Chroma、Redis 已在隔离 acceptance project 完成真实写入、读取、容器重启与持久读取；Host、OBS、Monitor、Edge 和 Gateway 在重启后保持可达。Edge 现在通过启动参数 `-DataRoot` 明确写入验收目录，不再回落到用户 `%LOCALAPPDATA%`。 |
 | 当前质量基线 | 11573 条离线 JUnit 为 11559 passed、14 classified skips、0 failed/error；完整生产 Python 分母 line 72.22%、branch 55.08%，Monitor line 61.31%、branch 52.78%，均低于系统 2.0 放行门槛，真实服务与人感验收仍待执行。 |
 | 整体数字生命体验 | `INCOMPLETE`，不能用单元测试、静态合同或生成几段样音冒充完整交付。 |
 
@@ -271,7 +271,8 @@ pwsh scripts/runtime/stop_docker_services.ps1
 目标机准备好模型权重、参考音频、显卡环境和网络配置后，再在 Edge 电脑执行：
 
 ```powershell
-pwsh scripts/runtime/start_edge_side.ps1
+$EdgeAcceptanceData = "D:\Natsume_Ai_acceptance\runtime\edge-data"
+pwsh scripts/runtime/start_edge_side.ps1 -DataRoot $EdgeAcceptanceData
 ```
 
 声线清单见 [gpt_sovits_nanami_v4.json](configs/voice/gpt_sovits_nanami_v4.json)，双机开发与非仓库资产同步见 [双节点工作流](docs/50_project/guides/DUAL_NODE_DEV_WORKFLOW.md)。当前远端已完成真实连通预检，但这不等于三模态验收通过；Host 的生命状态和文字入口仍可在 Edge 断开时独立运行。
@@ -317,11 +318,13 @@ python tools/doc_lint/doc_link_gate.py --root .
 
 历史方案和旧验收报告只用于追溯，不定义当前版本状态，统一从 [历史归档](docs/_history/README.md) 进入。
 
-## 当前真实验收增量（2026-08-04）
+## 当前真实验收增量（2026-08-06）
 
 - Monitor 的生命体情绪改为读取 canonical Digital Life `hard_state.emotion_tag`，不再依赖已经退役的 `emotion_context`；真实 OBS Sidecar 与浏览器均显示当前情绪，不再出现“待连接／待恢复”。
 - Gateway 闭环使用 `INPUT_COMPLETED + acceptance_effect_outbox/OUTBOX_COMMITTED` 判断 Host 已接受并持久提交回复。这个标记只表示可恢复的 Gateway Reply Outbox 已提交，绝不代表外部平台已经物理送达。
 - 真实签名 Gateway 新跑 `translate_delegate`、`memory_store`、`multi_skill_plan` 三条路线；最新有效时间桶的回复提交率、闭环率和完成率均为 100%。360 分钟历史窗口保留此前失败样本，没有通过改阈值或抹历史制造绿色结果。
-- Neo4j、Chroma、Redis、Host、OBS、Nginx Monitor、远端 Edge 与 Unified Gateway 仍以真实进程运行；VTS 缺兼容情绪热键、barge-in 未启用、常驻 ASR 噪声门控、长期人格盲测、PlanningSearch 三域收益和最终 SHA 全栈故障矩阵仍未完成。
+- Neo4j、Chroma、Redis、Host、OBS、Nginx Monitor、远端 Edge 与 Unified Gateway 仍以真实进程运行。远端已清理重复 Edge 与六个遗留 GPT-SoVITS worker；新的停止入口会收口同仓库进程树并确认 17800 与 worker 均归零。
+- Edge 使用独立 `DataRoot` 重启后，ASR、GPT-SoVITS、物理播放和手动打断均通过真实 HMAC 链路；短句从请求到播放启动为 2641 ms，长句播放中的打断请求为 16 ms。单次样本不能冒充 p95，且 2641 ms 仍略高于 2500 ms 目标。
+- VTS 当前授权窗口未确认且没有加载角色模型，声学 ASR 触发打断、长期人格盲测、PlanningSearch 三域收益和最终 SHA 全栈故障矩阵仍未完成。
 
 因此当前结论仍是 `INCOMPLETE`，不是 Full Architecture `PASS`。

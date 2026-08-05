@@ -115,6 +115,7 @@ $EvidenceRoot = Join-Path $PWD "artifacts/local-gates/$CommitSha/$RunId"
 
 - 本机和 Edge 被测代码必须记录 commit SHA；远端存在受控补丁时另外记录文件 digest。
 - `runtime/acceptance/<run-id>/` 与用户日常数据根完全分离。
+- 远端 Edge 必须通过 `start_edge_side.ps1 -DataRoot <acceptance-root>` 显式绑定数据根；只隔离源码目录而让 `NATSUME_DATA_DIR` 回落到 `%LOCALAPPDATA%` 视为失败。
 - Docker project、container、network、Neo4j namespace、Chroma collection 和 Redis prefix 都包含 `RunId`。
 - 测试 person、workspace 和 session 使用专用身份，禁止复用真实用户会话。
 - Neo4j 密码、HMAC、provider key 只通过忽略的 ACL 文件或进程环境注入，不写命令行、日志和仓库。
@@ -146,6 +147,22 @@ $EvidenceRoot = Join-Path $PWD "artifacts/local-gates/$CommitSha/$RunId"
 | PRE-08 | 生成测试身份和隔离数据根 | 与日常数据不存在路径或 namespace 重叠 |
 
 任一强制前置项失败即停止本阶段，修复后从该阶段重跑，不继续制造连锁噪声。
+
+真实 Edge 语音与打断使用仓库探针，不通过命令行传入密钥：
+
+```powershell
+& scripts/runtime/start_edge_side.ps1 `
+  -EnvFile $EdgeAcceptanceEnv `
+  -DataRoot $EdgeAcceptanceData `
+  -Background
+
+python scripts/runtime/test_edge_real_voice_acceptance.py `
+  --base-url http://127.0.0.1:17800 `
+  --expected-data-root $EdgeAcceptanceData `
+  --output $EvidenceRoot/edge-real-voice.json
+```
+
+探针必须观察到真实 GPT-SoVITS 合成、物理播放完成、第二段播放被 `VOICE_INTERRUPTED` 中断以及隔离具身 SQLite 存在。它只证明签名 RPC 打断；麦克风声学检测触发仍需单独实测。
 
 ## 5. 轻量证据规则
 

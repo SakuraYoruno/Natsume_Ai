@@ -18,12 +18,14 @@
 
 ## P0：目标 Edge 三模态验收
 
-- [ ] 将已选择的声线配置、参考音频和所需权重同步到 Edge 电脑的非仓库模型目录。
+- [x] 将已选择的声线配置、参考音频和所需权重同步到 Edge 电脑的非仓库模型目录。
 - [ ] 在 Edge 上验证中文 ASR → 日语 TTS 的完整语言链路。
 - [ ] 实测普通、开心、安慰、委屈、边界、修复、安静陪伴等表达计划。
 - [ ] 接通 VTS/VRM，确认与 TTS 共用 `synchronization_id`。
 - [ ] 实测播放中打断、TTS 断线、Avatar 断线和 Host 重连。
 - [ ] 测量首段 TTS、barge-in 和 Voice／Avatar 起始偏差。
+
+2026-08-06 当前实测增量：Edge 已在显式隔离 `DataRoot` 下以单实例启动，ASR／GPT-SoVITS 为 `READY`；短句真实播放完成，播放中的长句经签名 RPC 在 16 ms 内中断。短句播放启动为 2641 ms，只是一个样本且略高于 2500 ms 门槛。VTS 仍卡在设备端授权窗口且没有加载角色模型；当前只通过“手动签名打断”，没有通过“麦克风声学检测自动打断”，因此其余 P0 项不勾选。
 
 约束：Edge 在另一台电脑上。本轮双端验收已经用户明确授权；后续新一轮远程启动或可能影响设备的操作仍需遵守当轮授权边界。
 
@@ -55,9 +57,9 @@
 
 ## P1：完整本地服务栈
 
-- [ ] 以隔离 acceptance 数据根启动 Neo4j、Chroma、Redis、Host、OBS、Monitor 和 Gateway。
-- [ ] 对三项 Docker 服务完成真实写入、读取、重启恢复和清理 namespace。
-- [ ] 验证 Monitor 展示真实 task、budget、verification、acceptance、effect 和 receipt 数据。
+- [x] 以隔离 acceptance 数据根启动 Neo4j、Chroma、Redis、Host、OBS、Monitor、Gateway 和远端 Edge。
+- [x] 对三项 Docker 服务完成真实写入、读取、重启恢复和清理 namespace。
+- [x] 验证 Monitor 展示真实 task、budget、verification、acceptance、effect 和 receipt 数据。
 - [ ] 验证 Gateway 重复入站、Outbox 重放和网络恢复不会重复外发。
 - [ ] 注入 Host 崩溃、Lease 过期、未知副作用和回滚失败。
 

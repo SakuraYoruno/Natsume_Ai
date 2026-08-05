@@ -152,3 +152,13 @@ Gateway 五路线首轮结果为 2 `PASS`、2 `WARN`、1 `FAIL`。失败路线�
 保留该失败图并再次重启 Host 时，启动期 terminal reconciliation 首次读到“parallel settlement 已将图置为 FAILED、预算置为 RELEASED”的真实组合，暴露 `_parallel_terminal_snapshot_matches` 缺少实例参数，导致 Task Runtime composition fail-closed。修复补齐方法绑定，并把 settled parallel failure／budget 的跨进程终态再次送入 reconciliation inventory，断言不产生伪修复 case。该缺陷说明此前故障测试只覆盖了 runtime 恢复，没有覆盖 Host composition 的随后 inventory；本次不删除失败图，直接用原账本验证修复。
 
 修复加载后，Host 在包含上述失败图的原 SQLite 上启动成功；新的 Gateway 请求 `req:f2b3a4691e2443cbbe47ca2f295965b8` 再次生成 `agent_frontend_review → agent_frontend_acceptance → planning_search` 三节点图，3／3 节点均为 `ACCEPTED`，图终态为 `COMPLETED`。终局综合为 655 字，实际覆盖路由、页面状态、响应式、键盘／ARIA 无障碍、Lighthouse 性能和报告交付，不再退化为空泛短句。该路线功能状态提升为 `PASS_REAL_GATEWAY_TASKGRAPH_TERMINAL_SYNTHESIS`；总耗时 76,016 ms，仍保留为 PlanningSearch 实时性能问题，不能用功能 PASS 覆盖延迟门槛。
+
+## 2026-08-06 A15 Edge 单实例、隔离数据与真实打断
+
+远端续测中的 TTS 冷启动超时并非语音模型权重损坏：进程清单显示两套 Edge 主进程和六个 GPT-SoVITS persistent worker 同时存在，重复加载争抢资源。旧停止脚本只强杀 PID 文件中的父进程，Windows 不会自动回收脱离的模型子进程。停止入口现会快照并终止进程树、清理仅属于同一仓库的遗留 Edge／worker，并等待退出；实机复验结果为 17800 listener 0、worker 0，未触碰 Gateway、QQ OneBot 或用户其他进程。
+
+同轮还发现远端验收只隔离了源码目录，没有设置 `NATSUME_DATA_DIR`，导致具身 SQLite 回落到用户 `%LOCALAPPDATA%`。未删除该用户数据；启动入口新增显式 `-DataRoot`，随后将 Edge 重启到 `D:\Natsume_Ai_acceptance_d7e0cfba8\runtime\edge\acceptance-data`，真实 `edge/embodiment_transport.sqlite3` 已在该目录创建。启动状态为 ASR `ok`、TTS `ok`、barge-in enabled；ASR 因目标机缺失 `cublas64_12.dll` 自动回退 CPU 后保持 `READY`，TTS persistent worker 保持 `READY`。
+
+新的无 mock、无端口占位探针通过真实 HMAC 执行两段日语 GPT-SoVITS：短句合成、物理播放启动并在预期音频时长后回到非播放态；长句播放 350 ms 后提交 barge-in，返回 `ACCEPTED / VOICE_INTERRUPTED`。短句请求到播放启动 2641 ms，打断 RPC 16 ms，隔离具身库存在。该结果把“真实 TTS 与手动播放打断”提升为 `PASS`，但一个样本不能计算 p95，且短句 2641 ms 略高于 2500 ms 体验目标。
+
+VTube Studio 当前仍返回 API 51：设备端授权窗口已打开但未确认，同时没有加载角色模型，故 VTS 为 `RECONNECTING`，可见 Avatar 与 Voice／Avatar 起始偏差继续是 `ACCEPTANCE_PENDING_EXTERNAL`。本轮也没有用手动 RPC 结果冒充麦克风声学检测自动触发 barge-in。A15 总体仍为 `INCOMPLETE`。
