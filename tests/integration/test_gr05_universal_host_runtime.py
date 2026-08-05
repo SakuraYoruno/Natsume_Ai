@@ -413,11 +413,17 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         )
 
     def frozen_skill_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
-        skill_calls.append(str(_order.metadata.get("skill_id") or ""))
+        skill_id = str(_order.metadata.get("skill_id") or "")
+        skill_calls.append(skill_id)
+        result_text = (
+            "文档审查结果：先核对目标、信息层级与关键说明，再记录缺失证据和待确认边界。"
+            if skill_id == "agent_document_digest"
+            else "前端验收结果：覆盖主要流程、空态、错误态、响应式与键盘无障碍，并按影响分级。"
+        )
         return {
             "status": "EXECUTED",
             "summary": "frozen skill completed",
-            "result_text": "skill:curated plan input",
+            "result_text": result_text,
             "metadata": {"worker_terminal": True},
         }
 
