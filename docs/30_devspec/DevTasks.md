@@ -68,7 +68,8 @@
 - [x] 验证 Monitor 展示真实 task、budget、verification、acceptance、effect 和 receipt 数据。
 - [x] 验证真实 Gateway 重复入站和 Gateway 重启：同一 webhook 只有 1 条 Inbox、1 个 HostCommand、1 张 TaskGraph，重启后未新增 replay。微信客户端不可用，平台物理外发仍为 `NOT_TESTED_CLIENT_UNAVAILABLE`。
 - [ ] 验证 Outbox 对账／网络恢复不会重复外发；外部平台不可用时不得用本地 DLQ 替代物理送达证明。
-- [ ] 注入 Host 崩溃、Lease 过期、未知副作用和回滚失败。首次真实 Host 崩溃已暴露 Node Grant 比 Lease 早约 168 ms 到期、恢复窗口为零；代码改为“冻结时间预算 + 60 秒恢复窗口”，39 项回归通过，真实复测前不勾选。
+- [x] 注入真实 Host 崩溃与 Lease 过期：修复后旧 Lease 变为 `EXPIRED`，fencing token 2 在 2.446 秒后接管同一 Attempt，Node Grant 尚余 57.211 秒；最终图、节点、预算和 6 类 Acceptance Effect 全部正常结算且无重复命令／图／Attempt。
+- [ ] 注入 unknown effect 和 rollback failure，并验证必须先 reconciliation、不得盲目重放。
 - [x] 验证分段 TTS 合成失败会结算父命令并取消兄弟分段，打断后队列归零。
 - [x] 验证 VTS 人工授权等待不会触发无界自动重连或句柄增长。
 

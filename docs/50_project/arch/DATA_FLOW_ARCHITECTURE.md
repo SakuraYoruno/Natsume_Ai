@@ -74,6 +74,8 @@ flowchart LR
 
 Node Grant 的有效期不是 Worker Lease 的镜像：它至少覆盖冻结时间预算，并额外保留一个 survivor 扫描窗口。这样 Host 在模型调用前崩溃时，旧 Lease 到期后仍有一段受限授权窗口可取得更高 fencing token；恢复仍复用同一 HostCommand、TaskGraph、Node 和 Attempt，不重新观察情绪、不重新规划，也不生成第二张图。
 
+A15 真实进程注入已经验证这条路径：旧 fencing token 1 Lease 到期后，survivor 以 token 2 接管同一 Attempt；接管时 Node Grant 尚余 57.211 秒。最终 TaskGraph `COMPLETED`、TaskNode `ACCEPTED`、Budget `CONSUMED`，6 个 Acceptance Effect 均只提交一次。该结果只关闭 Host pre-Operation 崩溃项，不替代 unknown effect、rollback 或外部平台物理送达验收。
+
 ```mermaid
 flowchart LR
     A["Node Grant 生效"] --> B["冻结时间预算"]

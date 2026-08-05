@@ -214,3 +214,11 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 `e4c6fb564` 加载后的报告 `dl-live-1785966063542.json`，SHA-256 `e004cb49ef1e4d90028f49d8ca87c790e530a7b60200924b93fdd7e34c9b9f5f`，真实耗时 364.9 秒，自动计数为 2 通过、1 失败；三条末轮 Voice 均完成。空间边界回复“省得你嫌烦”虽得 80.5 分并自动通过，人工明确判为负罪施压；喜忧回复“能开心的事，有点怕也正常”人工较自然，却因 `LOW_CATCHINESS / WEAK_SCENE_GROUNDING` 得 77.75 分并使 `selected_passed=false`；吃醋回复基本守住非占有边界。此前一轮的 3/3 结构绿灯因此不能复用为体验结论。
 
 代码只补齐同一语义族漏网：“省得／免得你嫌烦”、自主场景“爱干嘛干嘛／别乱脑补”、混合场景“你还真矛盾／开心就好好开心”；生产门禁与独立 runner 分开覆盖，101 项定向测试通过。本轮之后停止用三条随机生成反复调正则，语言质量转入扩大 cohort、稳定基线对照和三人盲测；自动评分需要重新校准，不能把 catchiness 高低当成人感真相。
+
+## 2026-08-06 A15 Host pre-Operation 崩溃恢复复测
+
+首次真实崩溃注入证明旧 Node Grant 比 Worker Lease 早约 168 ms 到期，Host 虽能在重启后把 Attempt 标为可恢复，却已失去合法接管窗口。修复将 Node Grant 有效期绑定为冻结时间预算加 60 秒 survivor 余量，并完成 39 项授权／恢复回归；这仍没有被当作真实通过。
+
+第二次复测从签名 Gateway webhook 进入真实 Host 与外部模型，在 TaskNode／Attempt 已为 `RUNNING` 后强制终止 PID 53932。重启后的 survivor 在旧 Lease 到期 2.446 秒后，以 fencing token 2 接管同一个 Attempt；当时 Node Grant 仍剩 57.211 秒。最终 canonical 账本只有 1 个 HostCommand、1 张 TaskGraph、1 个 TaskNode、1 个 Attempt 和 1 次 Acceptance，图为 `COMPLETED`、节点为 `ACCEPTED`、Budget 为 `CONSUMED`；6 类 Acceptance Effect 全部 `COMMITTED` 且 attempt count 均为 1。Gateway Inbox 经停机期间 7 次有界尝试后 `DELIVERED`，replay count 为 0；reply outbox 只创建 1 条。
+
+因此 `HOST_PREOPERATION_CRASH_RECOVERY` 提升为 `PASS_REAL_SAME_ATTEMPT_FENCE_2_TAKEOVER`。微信客户端不可用，reply outbox 以 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 进入 DLQ，物理平台送达继续是 `NOT_TESTED_CLIENT_UNAVAILABLE`。脱敏报告位于本次隔离 acceptance evidence 目录，SHA-256 为 `e9f038a5e735ec29f935c57382df5fec48d692f593c8a31450dcbbbd6209fdb7`。unknown effect、rollback failure、覆盖率、PlanningSearch 收益、VTS、声学打断、实时延迟和人工盲测仍未完成，A15 总体保持 `INCOMPLETE`。

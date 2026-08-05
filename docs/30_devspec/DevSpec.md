@@ -56,6 +56,7 @@ flowchart TD
 - delivery intent 与本地接受状态保持幂等；已展示、已播放或已外发内容不得重放。
 - 有副作用节点的执行 Grant 必须至少覆盖冻结时间预算，再额外保留一个恢复扫描窗口；不得与 Worker Lease 同时或更早到期，否则 pre-Operation 崩溃会形成不可恢复的 `RUNNING` 节点。
 - 周期恢复只记录稳定 reason code 和异常类型，同一失败在恢复前最多记录一次；日志不得包含用户正文、secret 或异常原文。
+- A15 的真实模型故障注入已验证该边界：旧 Lease 过期后由 fencing token 2 接管同一 Attempt，接管时 Node Grant 仍有 57.211 秒有效期；最终只存在一条 HostCommand、一张 TaskGraph、一个 Attempt 和一组 exact-once Acceptance Effect。
 - 兼容模块只能读取 canonical projection；兼容写调用必须计量并最终归零。
 
 ## 5. 实时执行
