@@ -305,3 +305,14 @@ python scripts/runtime/run_task_runtime_rollback_failure_canary.py `
 必须断言激活失败后 rollback close 失败不会把 Container 标成 closed，第二次 activate 以 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED` 阻断，第一次全容器 close 保留 Store，故障解除后的重试关闭成功，终态重复 close 为 no-op。Canary 使用完整迁移后的真实临时 SQLite，但不等价于远端设备或外部 provider 回滚。
 
 Sidecar 停机回归必须先记录主 Obs／Nginx PID，对一个没有 PID 文件的显式空 RuntimeRoot 调用 `stop_host_side.ps1`，再确认主 PID 未变且 `/health`、`/monitor/index.html` 继续返回 200。静态合同同时要求 `host.runtime.env` 在子停止器执行后才删除，显式 RuntimeRoot 的 Obs 禁止全局扫描，Monitor 仅停止命令行匹配目标 Nginx prefix 的监听进程。
+
+Gateway Outbox 网络恢复的独立命令为：
+
+```powershell
+python -m pytest -q tests/integration/test_gateway_outbox_network_recovery_acceptance.py
+python scripts/runtime/run_gateway_outbox_network_recovery_acceptance.py `
+  --run-id <acceptance-run-id> `
+  --receipt <isolated-evidence-path>
+```
+
+Canary 必须使用完整 migration catalog、真实临时 SQLite、生产 `GatewayDeliveryRuntime`／`OutboundDispatcher`／`QQAdapter` 和真实 loopback HTTP socket。适配器选择失败发生在 `dispatch_started` 前，可以有界重试；OneBot peer 可用后只允许一次 HTTP。若 peer 已读取请求但丢失响应，则 Outbox 必须进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN`／DLQ，重复提交、进程重启和无 reconciliation 的 operator replay 均不得再次发送。Loopback peer 不是 QQ／微信客户端，其成功响应或本地 DLQ 都不能作为物理平台送达证明。

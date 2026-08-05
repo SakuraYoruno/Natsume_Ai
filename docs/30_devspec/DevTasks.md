@@ -67,7 +67,7 @@
 - [x] 对三项 Docker 服务完成真实写入、读取、重启恢复和清理 namespace。
 - [x] 验证 Monitor 展示真实 task、budget、verification、acceptance、effect 和 receipt 数据。
 - [x] 验证真实 Gateway 重复入站和 Gateway 重启：同一 webhook 只有 1 条 Inbox、1 个 HostCommand、1 张 TaskGraph，重启后未新增 replay。微信客户端不可用，平台物理外发仍为 `NOT_TESTED_CLIENT_UNAVAILABLE`。
-- [ ] 验证 Outbox 对账／网络恢复不会重复外发；外部平台不可用时不得用本地 DLQ 替代物理送达证明。
+- [ ] 验证 Outbox 对账／网络恢复不会重复外发；隔离真实 SQLite 与 loopback OneBot HTTP canary 已实现，覆盖发送前安全恢复和响应丢失后禁止盲重放，待提交后绑定当前 SHA 收据。真实 QQ／微信客户端不可用，物理送达继续为 `NOT_TESTED_PLATFORM_CLIENT_UNAVAILABLE`，不得用本地 ACK 或 DLQ 替代。
 - [x] 注入真实 Host 崩溃与 Lease 过期：修复后旧 Lease 变为 `EXPIRED`，fencing token 2 在 2.446 秒后接管同一 Attempt，Node Grant 尚余 57.211 秒；最终图、节点、预算和 6 类 Acceptance Effect 全部正常结算且无重复命令／图／Attempt。
 - [x] 运行隔离真实 SQLite terminal reconciliation canary：精确可修复案例自动释放预算，模糊案例保持未修改并以 `TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED` 阻断；报告强制绑定真实 migration head `0153`。
 - [x] 注入真实进程 unknown effect：operation reservation 已 `RESERVED` 后强杀 Sidecar Host；重启后同一 Attempt 进入 `RECOVERABLE`，operation 进入 `RECOVERY_REQUIRED` 并生成 signed-reconciliation hold，持续观察无第二次 worker／模型／Acceptance／Effect／reply。
