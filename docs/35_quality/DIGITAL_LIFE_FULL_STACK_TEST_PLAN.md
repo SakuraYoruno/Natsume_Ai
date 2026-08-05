@@ -790,4 +790,6 @@ pwsh scripts/runtime/stop_docker_services.ps1 -ProjectName $DockerProject
 
 为避免输出格式波动让私人陪伴直接断话，唯一一次重试后的单候选可在同时满足“非空中文、自然日语、关系边界、非操控门禁和本地文本门禁”时以 `DEGRADED_SINGLE_AFTER_RETRY` 送达。它只证明可用性降级，不满足本节双候选 cardinality，自动报告必须写入 `benefit_eligible=false`。没有日语字段、被安全门禁拒绝或无法解析时仍 fail-closed。
 
+双候选择器必须先对每个候选独立执行硬门禁，再只在剩余候选中按质量排序；禁止先选最高分、发现其有追问或关系越界后把整组候选一起拒绝。独立验收 runner 还要断言 `selected_passed=true` 和 `benefit_eligible=true`，并逐轮扫描已冻结的边界防御、混合情绪否定、无依据人格判断和 AI 式情感回避模式。
+
 上述两轮已在 `767f21b5a` 的真实 Gateway、DeepSeek 和远端 GPT-SoVITS 上通过：第二轮候选数 2、配对形状正确、TaskGraph 完成、Voice 应用。后续 G 阶段仍须把场景说明转换为自然可执行台词，逐族运行并由人工评价内容是否接住用户；不能用这一个成功样本推导整体“像人”。

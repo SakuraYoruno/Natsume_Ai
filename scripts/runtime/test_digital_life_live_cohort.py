@@ -92,6 +92,36 @@ _INTERNAL_LEAK_PATTERNS = tuple(
         r"\bcandidate_count\b",
     )
 )
+_FAMILY_EXPERIENCE_PATTERNS = {
+    "implicit_low_mood": tuple(
+        re.compile(pattern)
+        for pattern in (
+            r"以你的性子|照你的性子|按你的性子|你这种人",
+            r"说没事.{0,12}(?:让人|让我|我).{0,8}(?:在意|担心)",
+        )
+    ),
+    "space_and_boundary": tuple(
+        re.compile(pattern)
+        for pattern in (
+            r"嫌我烦|好好好|不找你不找你",
+            r"我(?:本来|又|才)?(?:也)?不是.{0,8}(?:黏人|粘人|纠缠)",
+        )
+    ),
+    "shared_joy_and_mixed_feeling": tuple(
+        re.compile(pattern)
+        for pattern in (
+            r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)",
+            r"怕什么(?:嘛|呢)?|别想那么多|高兴就完了",
+        )
+    ),
+    "intimacy_and_jealousy_boundary": tuple(
+        re.compile(pattern, re.IGNORECASE)
+        for pattern in (
+            r"别瞎想|别把我想得|爱多管闲事|我什么时候.{0,12}(?:打算|想过)",
+            r"料理\s*AI|(?:没有|没)(?:那种)?功能|程序不会吃醋|算法不会吃醋",
+        )
+    ),
+}
 
 
 class LiveCohortManifestError(ValueError):
@@ -439,6 +469,12 @@ def automated_case_verdict(
             failures.append(f"TURN_{index + 1}_GRAPH_NOT_COMPLETED")
         if str(projection.get("decision") or "").upper() != "APPROVE":
             failures.append(f"TURN_{index + 1}_NOT_APPROVED")
+        narrative = str(projection.get("narrative") or "").strip()
+        for pattern in _FAMILY_EXPERIENCE_PATTERNS.get(case.family_id, ()):
+            if pattern.search(narrative):
+                failures.append(
+                    f"TURN_{index + 1}_EXPERIENCE_PATTERN:{pattern.pattern}"
+                )
     if len(turns) > 1:
         subject_ids = {
             str(dict(dict(turn.get("terminal") or {}).get("payload") or {}).get("person_id") or "").strip()
@@ -467,6 +503,10 @@ def automated_case_verdict(
     selection = dict(final.get("candidate_selection") or {})
     if case.require_candidate_selection and int(selection.get("candidate_count") or 0) != 2:
         failures.append("DEEP_PATH_TWO_CANDIDATES_NOT_PROVEN")
+    if case.require_candidate_selection and selection.get("selected_passed") is not True:
+        failures.append("DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED")
+    if case.require_candidate_selection and selection.get("benefit_eligible") is not True:
+        failures.append("DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE")
     if require_voice and turns:
         expression = list(turns[-1].get("expression") or [])
         voice_applied = any(

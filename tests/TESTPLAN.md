@@ -268,3 +268,5 @@ python -m pytest -q `
 多轮 runner 的独立回归还必须断言：同一轨迹所有 webhook 使用同一个 sender，从而得到唯一 `relationship_subject_id`；每轮 `msg_id` 仍唯一；终态 payload 的 `person_id` 和 TaskGraph `session_id` 在全轨迹内各只有一个值。只固定 `conversation_id` 不足以证明关系连续性。
 
 真实稳定主体首轮四轨迹报告 `dl-live-1785961076715.json` 的 SHA-256 为 `c246275def1c2884296df01d792d525fe931cfeae95e39537ec50580af0cedda`：2 条结构通过、2 条失败，但人工内容均未达到放行口径。边界回复出现“嫌我烦”的负罪暗示，现实自主回复出现“别瞎想”，倾听回复出现“以你的性子”的无证据人格判断，吃醋问题被“料理AI”玩笑回避，混合情绪末轮因双候选数量错误拒绝。上述问题必须分别由 canonical CompanionAct 与窄硬门禁复验；第二次模型尝试只有一个完整安全候选时允许降级送达，但 `candidate_count=1`、`benefit_eligible=false`，不得冒充双候选通过。
+
+第二轮真实报告 `dl-live-1785963171706.json` 的 SHA-256 为 `6c5c12f21e39f956af39d3466d5805a871a978864a25aa9864620653844b3871`：3 条自动结构通过、1 条失败，但人工仍没有整体通过。独立 runner verifier 现在逐轮拒绝四个已知体验回归族，并要求深路径 `candidate_count=2`、`selected_passed=true`、`benefit_eligible=true`；否则自动状态必须为 `FAIL`。这套 verifier 与生产 Surface 门禁分开实现，避免用同一判断代码自证正确。

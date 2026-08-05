@@ -399,27 +399,52 @@ def _select_buffered_affective_candidate(
         raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID")
     candidates = [str(record.get("reply_text") or "") for record in records]
     scores = score_isolated_surface_candidates(compiled_request, candidates)
-    selected = select_best_isolated_candidate(scores)
-    if selected is None or bool(selected.hard_fail):
-        raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
-    # ``control.must_include`` contains semantic guidance (for example,
-    # "自然确认会尊重空间"), not literal substrings.  The legacy scorer keeps
-    # those misses as ranking observations; the same deterministic hard gate
-    # used by normal Surface replies remains the actual blocking authority.
-    hard_gate_violations = _surface_hard_gate_violations(
-        compiled_request,
-        selected.text,
-    )
-    if hard_gate_violations:
-        raise RuntimeError(hard_gate_violations[0])
-    gate = gate_stream_sentence(selected.text)
-    if not gate.accepted:
-        raise RuntimeError(gate.reason_code)
+    eligible: list[Any] = []
+    gated_sentences: dict[int, str] = {}
+    rejected_reasons: dict[int, tuple[str, ...]] = {}
+    for index, row in enumerate(scores):
+        reasons: list[str] = []
+        if bool(row.hard_fail):
+            reasons.append("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
+        # ``control.must_include`` contains semantic guidance (for example,
+        # "自然确认会尊重空间"), not literal substrings.  Ranking observations
+        # stay soft, while the same deterministic hard gate used by normal
+        # Surface replies decides whether this candidate can be sent.
+        reasons.extend(_surface_hard_gate_violations(compiled_request, row.text))
+        gate = gate_stream_sentence(row.text)
+        if not gate.accepted:
+            reasons.append(gate.reason_code)
+        record = records[index]
+        normalized_payload = _safe_mapping(record.get("normalized_payload"))
+        if japanese_companion_voice_enabled() and not str(
+            normalized_payload.get("tts_text_ja") or ""
+        ).strip():
+            reasons.append("JAPANESE_SPEECH_TEXT_MISSING")
+        if reasons:
+            rejected_reasons[index] = tuple(dict.fromkeys(reasons))
+            continue
+        eligible.append(row)
+        gated_sentences[index] = gate.sentence
+
+    selected = select_best_isolated_candidate(eligible)
+    if selected is None:
+        unfiltered = select_best_isolated_candidate(scores)
+        unfiltered_index = next(
+            (index for index, row in enumerate(scores) if row is unfiltered),
+            -1,
+        )
+        reasons = rejected_reasons.get(unfiltered_index, ())
+        raise RuntimeError(
+            reasons[0] if reasons else "AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED"
+        )
     selected_index = next(
         (index for index, row in enumerate(scores) if row is selected),
         -1,
     )
     if selected_index < 0:
+        raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
+    selected_sentence = gated_sentences.get(selected_index, "")
+    if not selected_sentence:
         raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
     selected_record = records[selected_index]
     selected_payload = selected_record.get("structured_payload")
@@ -430,14 +455,14 @@ def _select_buffered_affective_candidate(
         ).strip():
             raise RuntimeError("JAPANESE_SPEECH_TEXT_MISSING")
         selected_payload = dict(selected_payload)
-        selected_payload["reply_text"] = gate.sentence
+        selected_payload["reply_text"] = selected_sentence
         selected_output = json.dumps(
             selected_payload,
             ensure_ascii=False,
             separators=(",", ":"),
         )
     else:
-        selected_output = gate.sentence
+        selected_output = selected_sentence
     if isinstance(trace_stage_meta, dict):
         trace_stage_meta["affective_candidate_selection"] = {
             "schema_version": "affective_candidate_selection.v1",
@@ -449,6 +474,11 @@ def _select_buffered_affective_candidate(
                 else "PAIRED_SELECTION"
             ),
             "benefit_eligible": not degraded_single,
+            "rejected_candidate_count": len(rejected_reasons),
+            "rejected_candidate_reason_codes": [
+                list(rejected_reasons[index])[:8]
+                for index in sorted(rejected_reasons)
+            ],
             "selected_index": selected_index,
             "selected_score": round(float(selected.score), 4),
             "selected_passed": bool(selected.passed),

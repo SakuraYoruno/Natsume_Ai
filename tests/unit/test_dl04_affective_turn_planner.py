@@ -301,6 +301,51 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         "好，你想说的时候我还在。",
     ]
 
+    import host_brain.persona.surface.candidate_scoring as candidate_scoring
+
+    original_score_candidates = candidate_scoring.score_isolated_surface_candidates
+    unsafe = SimpleNamespace(
+        text="会有一点。要我继续说下去？",
+        score=99.0,
+        passed=True,
+        hard_fail=False,
+        reason_codes=(),
+        control_violations=(),
+        dimensions={},
+    )
+    safe = SimpleNamespace(
+        text="会有一点吧，但那是我的感受，不是拿来管你的。",
+        score=80.0,
+        passed=True,
+        hard_fail=False,
+        reason_codes=(),
+        control_violations=(),
+        dimensions={},
+    )
+    monkeypatch.setattr(
+        candidate_scoring,
+        "score_isolated_surface_candidates",
+        lambda _request, _candidates: [unsafe, safe],
+    )
+    safe_trace: dict[str, object] = {}
+    safe_selected = _select_buffered_affective_candidate(
+        raw_output=json.dumps(
+            {"candidates": [unsafe.text, safe.text]},
+            ensure_ascii=False,
+        ),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=safe_trace,
+    )
+    assert safe_selected == safe.text
+    assert safe_trace["affective_candidate_selection"]["selected_index"] == 1
+    assert safe_trace["affective_candidate_selection"]["rejected_candidate_count"] == 1
+    monkeypatch.setattr(
+        candidate_scoring,
+        "score_isolated_surface_candidates",
+        original_score_candidates,
+    )
+
     monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
     paired_messages = _buffered_affective_candidate_messages(
         [
