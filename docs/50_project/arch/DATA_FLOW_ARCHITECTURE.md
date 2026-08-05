@@ -72,6 +72,16 @@ flowchart LR
 
 节点失败、取消、重试和未知副作用在 Task Runtime 内恢复。只有 accepted effect 才进入外部交付。
 
+Node Grant 的有效期不是 Worker Lease 的镜像：它至少覆盖冻结时间预算，并额外保留一个 survivor 扫描窗口。这样 Host 在模型调用前崩溃时，旧 Lease 到期后仍有一段受限授权窗口可取得更高 fencing token；恢复仍复用同一 HostCommand、TaskGraph、Node 和 Attempt，不重新观察情绪、不重新规划，也不生成第二张图。
+
+```mermaid
+flowchart LR
+    A["Node Grant 生效"] --> B["冻结时间预算"]
+    B --> C["旧 Lease 到期"]
+    C --> D["恢复扫描窗口"]
+    D --> E["更高 fencing token 续跑"]
+```
+
 只读 Delegate 也不共用一套模糊执行权限：Pentest handoff 不接模型或工具并提交精确零用量证明；翻译 Delegate 从冻结 Node Budget 生成不可扩大的 model guard，经唯一 `ModelAttemptService` 调用 `workbench_translate`，把真实 provider usage 结算回 Node Budget。翻译结果本身没有 delivery authority，只有图 Acceptance 后才可进入 Gateway 回复。
 
 ```mermaid

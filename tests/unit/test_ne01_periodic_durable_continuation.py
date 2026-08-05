@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import pytest
@@ -55,7 +56,8 @@ async def test_periodic_continuation_serializes_wakeups_and_timer_ticks() -> Non
 
 
 @pytest.mark.asyncio
-async def test_periodic_continuation_retains_failure_and_retries() -> None:
+async def test_periodic_continuation_retains_failure_and_retries(caplog) -> None:
+    caplog.set_level(logging.INFO)
     recovered = asyncio.Event()
     calls = 0
 
@@ -84,10 +86,13 @@ async def test_periodic_continuation_retains_failure_and_retries() -> None:
     failure = continuation.health_snapshot()["last_failure"]
     assert failure["reason_code"] == "TEST_PERIODIC_CONTINUATION_FAILED"
     assert failure["error_type"] == "ValueError"
+    assert "opaque failure" not in caplog.text
+    assert caplog.text.count("TEST_PERIODIC_CONTINUATION_FAILED") == 1
 
     continuation.wake()
     await asyncio.wait_for(recovered.wait(), timeout=1.0)
     assert continuation.health_snapshot()["last_failure"] is None
+    assert "durable continuation recovered" in caplog.text
     continuation.request_stop()
     await continuation.join(timeout_s=1.0)
 

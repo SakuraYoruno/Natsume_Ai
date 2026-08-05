@@ -211,6 +211,8 @@ python -m pytest -q `
 
 Gateway 传输的故障语义按方向验收：INBOX 使用冻结请求体、稳定 Host 幂等键和 canonical HostCommand 精确重放，Host 响应超时后进入有界重试；OUTBOX 已开始的平台发送仍视为未知外部副作用，只能隔离并对账，禁止盲目重放。
 
+Host pre-Operation 崩溃必须用真实模型调用注入：在 Gateway 已接受、TaskNode 已进入 `RUNNING` 后终止 Host，等待旧 Lease 到期并由 survivor 取得更高 fencing token。Node Grant 的到期时间必须晚于“冻结时间预算 + 一个恢复扫描窗口”；最终断言只有一个 HostCommand、TaskGraph、Attempt 业务身份和外部 delivery intent。文件型跨进程测试用于回归，但不能替代这条真实进程故障证据。周期恢复故障日志只能出现稳定 reason code／异常类型，同一故障恢复前不得每 5 秒刷屏，也不得写入用户正文。
+
 真实 Gateway live matrix 必须使用生产 HMAC 边界，密钥只从运行时 secret env 读取且不得写入报告。图证据以 `host_command_journal` → `task_runtime_graph` → `task_runtime_node` 为权威；`graph_run_trace` 只允许作为历史数据库兼容读取，不能再作为当前通过依据。探针若因 schema 漂移崩溃、Host Credential Gate 拒绝或 Governor 拒绝，均记为 `FAIL` 并保留对应 DLQ／audit 事实。
 
 探针轮询必须把 `INPUT_COMPLETED` 与 `INPUT_FAILED` 都视为终态：失败时立即结束等待并报告 durable `reason_code`／detail；只有 `INPUT_COMPLETED` 可以进入语音成功断言。终态后必须重新读取 Host 日志，避免用 admission 前的旧日志片段漏掉 `dispatch failed`。远端启停脚本必须用命名参数 splatting 调用 `stop_edge.ps1`，并在真实停止／重启演练中验证 PID 文件与监听端口都指向本轮隔离运行根。2026-08-04 最新翻译实测已在入口与 Governor 通过后暴露 `GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE`，同时常驻 ASR 噪声会破坏 Host 启动稳定性；两项均保持 `FAIL／REMEDIATION_REQUIRED`，不得由 Gateway health 或禁用 ASR 后的稳定运行替代。

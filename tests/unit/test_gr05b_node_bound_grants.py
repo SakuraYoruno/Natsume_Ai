@@ -388,7 +388,7 @@ def test_gr05b_expired_batch_reopens_identity_but_cannot_authorize_execution() -
         ledger.close()
 
 
-def test_gr05b_node_grant_uses_bounded_task_budget_after_parent_window_closes() -> None:
+def test_gr05b_node_grant_keeps_one_recovery_margin_after_task_budget() -> None:
     ledger = SQLiteLedger(":memory:")
     tokens = _CountingTokenService()
     try:
@@ -400,7 +400,11 @@ def test_gr05b_node_grant_uses_bounded_task_budget_after_parent_window_closes() 
         )
         grant = _derive(_service(ledger, tokens), parent_ref, graph, order).grants[0]
 
-        assert grant.expires_at_ms == NOW_MS + 360_000
+        assert grant.expires_at_ms == NOW_MS + 420_000
+        assert (
+            grant.expires_at_ms
+            == NOW_MS + order.budget_policy.limits.time_ms + 60_000
+        )
         assert grant.expires_at_ms > NOW_MS + 100_000
         child_row = next(
             row

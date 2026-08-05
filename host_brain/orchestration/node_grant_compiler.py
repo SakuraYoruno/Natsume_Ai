@@ -69,9 +69,15 @@ def _execution_grant_ttl_ms(
             NODE_GRANT_INPUT_INVALID,
             "Task execution budget exceeds the 24-hour node-grant ceiling",
         )
+    # A worker Lease may legitimately consume the full frozen time budget.
+    # The node credential must therefore outlive that Lease long enough for
+    # the periodic survivor to fence and resume a pre-Operation crash.  Using
+    # only ``budget_time_ms`` made the grant expire a few milliseconds before
+    # the Lease that it was meant to recover.
+    recovery_margin_ms = int(minimum_ttl_ms)
     return min(
         _MAX_EXECUTION_GRANT_TTL_MS,
-        max(int(minimum_ttl_ms), budget_time_ms),
+        max(recovery_margin_ms, budget_time_ms + recovery_margin_ms),
     )
 
 
