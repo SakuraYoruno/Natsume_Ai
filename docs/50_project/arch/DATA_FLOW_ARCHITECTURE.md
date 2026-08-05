@@ -80,6 +80,8 @@ A15 真实进程注入已经验证这条路径：旧 fencing token 1 Lease 到�
 
 operation reservation 已持久化、但 receipt 尚未提交时发生崩溃，系统不能判断外部调用究竟“尚未执行”还是“已执行但响应丢失”。恢复器因此只允许 `RUNNING → RECOVERABLE`、`RESERVED → RECOVERY_REQUIRED`，并追加 `UNKNOWN_SIDE_EFFECT` hold；在签名 reconciliation 给出 `NO_SIDE_EFFECT` 或 `SIDE_EFFECT_CONFIRMED` 前，禁止新建 Attempt、重新调用 worker 或提交 Acceptance Effect。这个高风险恢复边界不进入没有外部副作用的普通实时对话主链。
 
+Gateway 平台外发采用相同的效果边界，但保持更轻量：payload 校验和 adapter selection 都在 `dispatch_started` 前完成，因此明确未发送时可以用同一冻结 Outbox 有界重试；真实 adapter 调用开始后若响应丢失，记录直接进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN`／DLQ。此后 duplicate enqueue、进程重启和普通 replay 都只返回已有事实，不再次调用平台；只有独立 reconciliation 能决定下一步。Loopback OneBot HTTP 可以证明本地 socket、SQLite 和重启语义，不能证明 QQ／微信客户端实际收到消息。
+
 Container 启动是另一条生命周期边界：Coordinator 已激活、Continuation 尚未就绪时若启动失败，逆序回滚必须先静默 worker 再关闭 Coordinator。任一关闭失败都会保留 bound runtime 与 Store 并进入 `LIFECYCLE_RETRY_REQUIRED`；这时既不能再次 activate，也不能关闭底层 SQLite。后续 retry 只有在全部 quiescence proof 通过后才能 drain Outbox 并逆序关闭基础设施。
 
 ```mermaid

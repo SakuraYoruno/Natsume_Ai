@@ -60,6 +60,7 @@ flowchart TD
 - 如果进程终止时 operation reservation 已存在但没有 committed receipt，恢复器不得再次调用 worker。它必须把同一 Attempt 标为 `RECOVERABLE`、operation 标为 `RECOVERY_REQUIRED`，持久化 `UNKNOWN_SIDE_EFFECT` hold，并等待有签名的 reconciliation 结论；普通聊天快路径不承担这套外部副作用恢复成本。
 - Task Runtime 激活后的回滚关闭如果失败，Container 必须保留 bound runtime 和全部 Store，设置 lifecycle retry fence，并拒绝再次 activate；只有协调器、continuation 和 outbox 都证明静默后才允许关闭基础设施。成功重试后的重复 close 必须是 no-op。
 - 显式 RuntimeRoot 的停止命令只能关闭该根 PID 文件或命令行可证明归属的进程。PID 缺失或失效时宁可报告 scoped cleanup pending，也不能按共享端口扫描并停止另一个 Host 的 Obs／Monitor；runtime snapshot 必须在子服务停止后再删除。
+- Gateway 平台 Outbox 只在 `dispatch_started` 之前允许普通有界重试。适配器已经调用但没有可信响应时必须进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 并等待 reconciliation；相同业务幂等键、Gateway 重启或普通 operator replay 均不能再次外发。Adapter confirmation 只证明本地协议调用返回成功，不能升级成 QQ／微信物理送达。
 - 兼容模块只能读取 canonical projection；兼容写调用必须计量并最终归零。
 
 ## 5. 实时执行
