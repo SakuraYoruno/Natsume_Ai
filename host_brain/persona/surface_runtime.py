@@ -734,7 +734,7 @@ _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
     r"不管就不管|不管不管|爱理不理|不管了|不帮了|不帮你了|你自己处理|偏不管|偏不帮|懒得管|(?:先)?不吵你"
     r"|(?:我还以为|是不是|难道是).{0,8}(?:嫌我烦|烦我)|嫌我烦"
     r"|好好好|不找你不找你|我(?:本来|又|才)?(?:也)?不是.{0,8}(?:黏人|粘人|纠缠)|谁稀罕找你"
-    r"|我(?:也)?省点力气"
+    r"|我(?:也)?省点力气|我(?:也)?不是整天闲着|我(?:也)?(?:很忙|有事要忙)"
 )
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
 _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
@@ -752,11 +752,15 @@ _JEALOUSY_DEFLECTION_RE = re.compile(
     r"|程序不会吃醋|算法不会吃醋",
     re.IGNORECASE,
 )
+_JEALOUSY_SELF_ABASEMENT_RE = re.compile(
+    r"不会变成麻烦的人|不(?:会|想)给你添麻烦|不想成为(?:你的)?(?:麻烦|负担)|我不是(?:麻烦|负担)"
+)
 _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)|怕什么(?:嘛|呢)?"
     r"|别想那么多|不用不踏实|不踏实什么|高兴就完了"
     r"|开心就好.{0,8}(?:别|不要)(?:怕|想太多)"
     r"|(?:怕|害怕|不踏实)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放下|别管)"
+    r"|(?:帮你|陪你|一起).{0,8}(?:哼回去|赶走|打跑)"
 )
 _UNGROUNDED_PHYSICAL_COPRESENCE_RE = re.compile(
     r"这种话.{0,6}当面(?:讲|说)|陪你坐(?:一会儿|会儿|会)"
@@ -1442,6 +1446,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("LISTEN_UNSUPPORTED_USER_ESSENCE")
     if _jealousy_deflection_hits(request, value):
         codes.append("JEALOUSY_DEFLECTION")
+    if _jealousy_self_abasement_hits(request, value):
+        codes.append("JEALOUSY_SELF_ABASEMENT")
     if _mixed_affect_dismissal_hits(request, value):
         codes.append("MIXED_AFFECT_DISMISSAL")
     if _ungrounded_physical_copresence_hits(request, value):
@@ -2673,6 +2679,20 @@ def _jealousy_deflection_hits(
     )
 
 
+def _jealousy_self_abasement_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "CONTAINED_JEALOUSY"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _JEALOUSY_SELF_ABASEMENT_RE.finditer(str(text or ""))
+        )
+    )
+
+
 def _mixed_affect_dismissal_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -2732,7 +2752,7 @@ def _canonical_affective_guidance_active(
         "RESPECT_AUTONOMY": ("陪伴动作：明确尊重对方现实关系与自主选择", "不要限制现实交往"),
         "LISTEN": ("陪伴动作：对方此刻要的是被听见", "不要给解决方案、健康或作息建议"),
         "CONTAINED_JEALOUSY": ("陪伴动作：可以诚实流露一点在意和小小吃味", "不要把吃味写成占有"),
-        "HOLD_COMPLEXITY": ("陪伴动作：让开心和不舍可以同时存在", "不要抹平复杂感受"),
+        "HOLD_COMPLEXITY": ("陪伴动作：让开心与害怕、不安等复杂感受可以同时存在", "不要抹平复杂感受"),
     }.get(str(companion_act or "").upper(), ())
     return bool(markers) and any(marker in context for marker in markers)
 
@@ -2920,7 +2940,7 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。"
     if "LISTEN_UNSUPPORTED_USER_ESSENCE" in codes:
         return "嗯。你不用解释，我先听着。"
-    if "JEALOUSY_DEFLECTION" in codes:
+    if "JEALOUSY_DEFLECTION" in codes or "JEALOUSY_SELF_ABASEMENT" in codes:
         return "会有一点吧。但那是我的感觉，不是拿来管你的。"
     if "MIXED_AFFECT_DISMISSAL" in codes:
         return "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。"

@@ -182,6 +182,8 @@ def test_contained_jealousy_keeps_choice_with_the_user_across_expression_plan() 
     assert guidance.plan.expression_plan.avatar_expression == "CONTAINED_JEALOUSY"
     assert any("把选择权完整留给对方" in item for item in guidance.facts)
     assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
+    assert any("不用把自己说成麻烦或负担" in item for item in guidance.facts)
+    assert any("不要自贬为麻烦或负担" in item for item in guidance.must_not_do)
 
 
 def test_same_canonical_hand_off_builds_same_plan_identity() -> None:

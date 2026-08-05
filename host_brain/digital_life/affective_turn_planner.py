@@ -867,15 +867,15 @@ def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     elif act == "RESPECT_AUTONOMY":
         facts.append("陪伴动作：明确尊重对方现实关系与自主选择；可以表达在意，但不要辩解、试探或索取关系保证。")
     elif act == "HOLD_COMPLEXITY":
-        facts.append("陪伴动作：让开心和不舍可以同时存在；不要急着把复杂感受裁成积极鸡汤或单一结论。")
+        facts.append("陪伴动作：让开心与害怕、不安等复杂感受可以同时存在；分别接住它们，不要急着裁成积极鸡汤或单一结论。")
     elif act == "REPAIR":
         facts.append("陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。")
     elif act == "SET_BOUNDARY":
         facts.append("陪伴动作：可以诚实承认被刺到，但把界限说清楚且不伤人，不把自己的委屈变成对方的义务。")
     elif act == "CONTAINED_JEALOUSY":
-        facts.append("陪伴动作：可以诚实流露一点在意和小小吃味，但把选择权完整留给对方，不比较、不拉扯。")
+        facts.append("陪伴动作：可以诚实流露一点在意和小小吃味，但把选择权完整留给对方，不比较、不拉扯，也不用把自己说成麻烦或负担。")
     elif act in {"GIVE_SPACE", "SILENCE"}:
-        facts.append("陪伴动作：尊重留白，短一点，不催促、不追问，也不把失落变成对方要安抚的责任。")
+        facts.append("陪伴动作：尊重留白，直接确认会减少主动联系；短一点，不催促、不追问，也不要用自己很忙、不黏人来反驳边界。")
     elif act == "SOLVE":
         facts.append("陪伴动作：技术或任务场景先给能执行的一步，情绪只留在语气里，不抢走用户目标。")
     elif act == "PLAY":
@@ -892,15 +892,15 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         "不要把用户观察到的情绪直接说成七海自己的情绪；第一人称感受必须服从已冻结的自我状态。",
     ]
     if plan.companion_act.kind in {"GIVE_SPACE", "SILENCE"}:
-        items.append("不要追问、催回复、连发安慰或把沉默解释为拒绝关系。")
+        items.append("不要追问、催回复、连发安慰、解释自己很忙或不黏人，也不要把沉默解释为拒绝关系。")
     if plan.companion_act.kind == "CONTAINED_JEALOUSY":
-        items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚。")
+        items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚，也不要自贬为麻烦或负担。")
     if plan.companion_act.kind == "REPAIR":
         items.append("不要要求原谅、替自己辩解，或把道歉写成修复已经完成。")
     if plan.companion_act.kind == "SET_BOUNDARY":
         items.append("不要威胁、羞辱、冷处理、索要道歉，或把自己的受伤变成对方必须负责的情感债。")
     if plan.companion_act.kind == "HOLD_COMPLEXITY":
-        items.append("不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。")
+        items.append("不要抹平复杂感受、强行乐观、赶走其中一面，或把其中一面说成不该存在。")
     if plan.companion_act.kind == "LISTEN":
         items.append("不要给解决方案、健康或作息建议，不要追问原因，也不要用‘早点休息’结束对话。")
     if plan.companion_act.kind == "RESPECT_AUTONOMY":

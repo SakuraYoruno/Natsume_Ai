@@ -206,3 +206,7 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 `c35c3feed` 加载后的选择性报告为 `dl-live-1785964323732.json`，SHA-256 `2a5028cfa6cf730d20e7d2ac4d0a446c81ece99a837ee06a8bec5a64461124e2`，真实耗时 281.8 秒，三条 TaskGraph 均完成且末轮远端 Voice receipt 均为 `APPLIED`；Avatar 仍因 VTS 外部状态拒绝。吃醋轮现在会淘汰带追问候选并选择“如果是重要的人，可能会有一点”，证明逐候选择已真实生效。自动 verdict 为 2 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、1 `FAIL`：空间边界选中项仅 79.8094 分且 `selected_passed=false`；混合情绪仍说“怕的那部分先放一放／陪你坐会儿”；现实自主前序回复仍有“懒得管／别瞎操心”，还出现文本通道无依据的“当面讲”。因此不能把 2 条结构绿灯写成人工体验通过。
 
 第三轮代码只覆盖上述真实观察：边界动作拒绝“省点力气”式隐性赌气，现实自主拒绝“懒得管／别瞎操心”，混合情绪拒绝把害怕或不踏实暂时放下；文本上下文没有明确见面事实时拒绝“当面讲／陪你坐会儿”，但显式见面语境仍允许。独立 runner 以另一组 family pattern 复核同样的体验风险。Surface、Planner 选择器与 runner 共 105 项定向测试通过；Host 尚未加载本提交，状态保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`28cc3b9ef` 加载后的报告 `dl-live-1785965355637.json`，SHA-256 `6b1470e8ebb3892d33f3a3eaa34350c34aeda0b4f7d5ac1ae79d1e6132c0f82c`，真实耗时 356.5 秒。空间边界、喜忧混合、亲密／吃醋三条均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，每条末轮 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；这是首次 3/3 自动结构通过。人工仍不能放行：“我也不是整天闲着”以忙碌反驳边界，“帮你一起哼回去”语义怪异且把害怕当作要赶走的对象，“不会变成麻烦的人”把一点吃味转成自我贬低。
+
+第四轮不再只追加词表，而是修正上游生成含义：`HOLD_COMPLEXITY` 从固定“开心和不舍”改为按当前观察同时接住害怕／不安；`GIVE_SPACE` 明确直接确认减少主动联系；`CONTAINED_JEALOUSY` 明确无需自贬为麻烦或负担。对应已观察短语仍由候选门禁与独立 runner 双侧覆盖。110 项定向测试通过；真实复验前只能写 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
