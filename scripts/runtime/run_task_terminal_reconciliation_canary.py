@@ -466,6 +466,23 @@ def _commit_sha(repository_root: Path) -> str:
     return value
 
 
+def _migration_head(migration_result: Any) -> tuple[str, int]:
+    summary = dict(getattr(migration_result, "summary", {}) or {})
+    current_version = int(summary.get("current_version") or 0)
+    latest_version = int(summary.get("latest_version") or 0)
+    if current_version < 1 or current_version != latest_version:
+        raise RuntimeError("CANARY_MIGRATION_HEAD_NOT_CURRENT")
+    prefix = f"{latest_version:04d}_"
+    candidates = sorted(
+        str(record.migration_id)
+        for record in tuple(getattr(migration_result, "records", ()) or ())
+        if str(record.migration_id).startswith(prefix)
+    )
+    if not candidates:
+        raise RuntimeError("CANARY_MIGRATION_HEAD_ASSET_MISSING")
+    return candidates[-1] + ".sql", latest_version
+
+
 def run_canary(*, repository_root: Path) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="natsume-ne01-terminal-canary-") as raw:
         root = Path(raw).resolve()
@@ -478,6 +495,7 @@ def run_canary(*, repository_root: Path) -> dict[str, Any]:
             raise RuntimeError(
                 "CANARY_MIGRATION_FAILED:" + json.dumps(migration.as_dict())
             )
+        migration_head, migration_head_version = _migration_head(migration)
         clock = _Clock()
         store = DurableTaskStore(db_path, clock=clock)
         repository = HostCommandRepository(db_path, clock=clock)
@@ -549,11 +567,8 @@ def run_canary(*, repository_root: Path) -> dict[str, Any]:
                 "schema_version": CANARY_SCHEMA_VERSION,
                 "commit_sha": _commit_sha(repository_root),
                 "database_kind": "ISOLATED_REAL_SQLITE",
-                "migration_head": str(
-                    getattr(container.migration_result, "last_applied", "")
-                    or getattr(container.migration_result, "latest_migration", "")
-                    or "0118_conversation_acceptance_effects.sql"
-                ),
+                "migration_head": migration_head,
+                "migration_head_version": migration_head_version,
                 "terminal_inventory": {
                     "candidate_count": len(pre_cases),
                     "exact_repairable_count": len(exact_cases),

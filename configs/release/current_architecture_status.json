@@ -378,6 +378,7 @@
     "host_preoperation_crash_recovery": "PASS_REAL_SAME_ATTEMPT_FENCE_2_TAKEOVER_GRAPH_COMPLETED_BUDGET_CONSUMED_EFFECTS_EXACT_ONCE",
     "host_preoperation_crash_recovery_regression": "PASS_39",
     "host_preoperation_crash_recovery_evidence_sha256": "e9f038a5e735ec29f935c57382df5fec48d692f593c8a31450dcbbbd6209fdb7",
+    "terminal_reconciliation_canary": "PASS_REAL_SQLITE_EXACT_AUTO_REPAIR_AMBIGUOUS_FAIL_CLOSED_MIGRATION_HEAD_0153",
     "docker_host_obs_monitor_gateway_full_stack": "RUNNING_CURRENT_SHA_DOCKER_MONITOR_TEXT_VOICE_PASS_VTS_PENDING_EXTERNAL",
     "real_provider_performance": "INCOMPLETE",
     "fixed_72_scenarios": "EXECUTION_SPEC_READY_STABLE_SUBJECT_ASSERTED_48_GATEWAY_TEXT_24_REAL_DRIVER_REQUIRED_MEASUREMENT_PENDING",

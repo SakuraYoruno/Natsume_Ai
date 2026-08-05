@@ -76,6 +76,8 @@ Node Grant 的有效期不是 Worker Lease 的镜像：它至少覆盖冻结时�
 
 A15 真实进程注入已经验证这条路径：旧 fencing token 1 Lease 到期后，survivor 以 token 2 接管同一 Attempt；接管时 Node Grant 尚余 57.211 秒。最终 TaskGraph `COMPLETED`、TaskNode `ACCEPTED`、Budget `CONSUMED`，6 个 Acceptance Effect 均只提交一次。该结果只关闭 Host pre-Operation 崩溃项，不替代 unknown effect、rollback 或外部平台物理送达验收。
 
+图已终止但预算或节点未结算时，terminal reconciliation 只能自动处理能由 canonical durable evidence 唯一推出的修复；任何需要解释或权限扩张的组合都保持原状并阻断生产就绪。Canary 报告绑定实际 migration catalog head，禁止用历史 migration 名称兜底制造“当前 schema 已验证”的假象。
+
 ```mermaid
 flowchart LR
     A["Node Grant 生效"] --> B["冻结时间预算"]

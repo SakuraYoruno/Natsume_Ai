@@ -11,8 +11,15 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_real_sqlite_terminal_reconciliation_canary() -> None:
     receipt = run_canary(repository_root=ROOT)
 
+    expected_head = max(
+        (ROOT / "host_brain" / "audit" / "migrations").glob("*.sql"),
+        key=lambda path: (int(path.name[:4]), path.name),
+    )
+
     assert receipt["status"] == "PASS"
     assert receipt["database_kind"] == "ISOLATED_REAL_SQLITE"
+    assert receipt["migration_head"] == expected_head.name
+    assert receipt["migration_head_version"] == int(expected_head.name[:4])
     assert receipt["terminal_inventory"] == {
         "candidate_count": 2,
         "exact_repairable_count": 1,

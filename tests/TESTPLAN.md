@@ -215,6 +215,8 @@ Host pre-Operation 崩溃必须用真实模型调用注入：在 Gateway 已接�
 
 当前 A15 真实复测为 `PASS_REAL_HOST_CRASH_RECOVERY`：fencing token 1 的 Lease 到期后 2.446 秒由 token 2 接管同一个 Attempt，接管时 Node Grant 尚余 57.211 秒；最终只有 1 个 HostCommand、1 张 TaskGraph、1 个 Attempt、1 次 Acceptance，Budget 为 `CONSUMED`，6 类 Acceptance Effect 各提交一次。脱敏报告 SHA-256 为 `e9f038a5e735ec29f935c57382df5fec48d692f593c8a31450dcbbbd6209fdb7`。微信客户端不可用导致物理外发进入 DLQ，仍按 `NOT_TESTED_CLIENT_UNAVAILABLE` 处理，不能由本项 PASS 覆盖。
 
+Terminal reconciliation canary 必须从本轮 MigrationResult 的 `current_version == latest_version` 推导实际 catalog head，禁止以历史常量兜底。当前隔离真实 SQLite 复跑覆盖一个 `EXACT_REPAIRABLE` 和一个 `SIGNED_REPAIR_REQUIRED` 半终态：前者只能按 durable evidence 自动释放预算，后者必须保持未修改并阻断 production-ready；两者均不得产生外部副作用。
+
 真实 Gateway live matrix 必须使用生产 HMAC 边界，密钥只从运行时 secret env 读取且不得写入报告。图证据以 `host_command_journal` → `task_runtime_graph` → `task_runtime_node` 为权威；`graph_run_trace` 只允许作为历史数据库兼容读取，不能再作为当前通过依据。探针若因 schema 漂移崩溃、Host Credential Gate 拒绝或 Governor 拒绝，均记为 `FAIL` 并保留对应 DLQ／audit 事实。
 
 探针轮询必须把 `INPUT_COMPLETED` 与 `INPUT_FAILED` 都视为终态：失败时立即结束等待并报告 durable `reason_code`／detail；只有 `INPUT_COMPLETED` 可以进入语音成功断言。终态后必须重新读取 Host 日志，避免用 admission 前的旧日志片段漏掉 `dispatch failed`。远端启停脚本必须用命名参数 splatting 调用 `stop_edge.ps1`，并在真实停止／重启演练中验证 PID 文件与监听端口都指向本轮隔离运行根。2026-08-04 最新翻译实测已在入口与 Governor 通过后暴露 `GOVERNED_HOST_DELEGATE_TARGET_UNAVAILABLE`，同时常驻 ASR 噪声会破坏 Host 启动稳定性；两项均保持 `FAIL／REMEDIATION_REQUIRED`，不得由 Gateway health 或禁用 ASR 后的稳定运行替代。
