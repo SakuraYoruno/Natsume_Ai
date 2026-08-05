@@ -74,3 +74,17 @@ def test_cn_asr_ja_tts_launcher_selects_nanami_v4_without_starting_edge() -> Non
     assert 'EDGE_TTS_LANGUAGE = "ja"' in enforced_block
     assert "gpt_sovits_nanami_v4.json" in enforced_block
     assert 'EDGE_TTS_PERSISTENT_WORKER_ENABLED = "true"' in enforced_block
+    assert "EDGE_BARGE_IN_ENABLED" not in enforced_block
+
+
+def test_voice_profile_does_not_override_explicit_barge_in_policy() -> None:
+    source = (REPO_ROOT / "scripts" / "runtime" / "start_edge.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+    profile_end = source.index("# Barge-in is an interaction policy")
+    enforced_start = source.index("if ($EnforceCnAsrJaTtsMode) {")
+    assert profile_end > enforced_start
+    assert (
+        'Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" '
+        '-DefaultValue "false"'
+    ) in source[profile_end:]

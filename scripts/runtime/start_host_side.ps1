@@ -1583,6 +1583,10 @@ if (-not [string]::IsNullOrWhiteSpace($schedulerClockSecretEnvFile)) {
 
 $configuredAuditDbPath = if (-not [string]::IsNullOrWhiteSpace($AuditDbPath)) {
   [string]$AuditDbPath
+} elseif ($runtimeRootWasExplicit) {
+  # An explicit runtime root declares an isolated run.  Reusing a source .env
+  # audit path here silently crosses acceptance runs and defeats that boundary.
+  Join-Path $RuntimeRoot "audit.sqlite3"
 } else {
   Get-EnvSetting `
     -Values $envValues `

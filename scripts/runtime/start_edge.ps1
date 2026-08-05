@@ -917,7 +917,6 @@ if ($EnforceCnAsrJaTtsMode) {
     EDGE_TTS_LANGUAGE = "ja"
     EDGE_TTS_VOICE_BANK_PATH = (Join-Path $repoRoot "configs\voice\gpt_sovits_nanami_v4.json")
     EDGE_TTS_PERSISTENT_WORKER_ENABLED = "true"
-    EDGE_BARGE_IN_ENABLED = "false"
   }
   foreach ($enforcedKey in $enforcedVoiceEnv.Keys) {
     $desiredValue = [string]$enforcedVoiceEnv[$enforcedKey]
@@ -942,10 +941,6 @@ if ($EnforceCnAsrJaTtsMode) {
     $envValues["EDGE_TTS_LANGUAGE"] = "zh"
     $startupEnvDefaultsApplied += "EDGE_TTS_LANGUAGE=zh"
   }
-  if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
-    $envValues["EDGE_BARGE_IN_ENABLED"] = "false"
-    $startupEnvDefaultsApplied += "EDGE_BARGE_IN_ENABLED=false"
-  }
   $resolvedAsrDeviceIndex = [string]([Environment]::GetEnvironmentVariable("EDGE_ASR_DEVICE_INDEX", "Process"))
   if (-not [string]::IsNullOrWhiteSpace($resolvedAsrDeviceIndex)) {
     $realCaptureDefaults = [ordered]@{
@@ -965,6 +960,14 @@ if ($EnforceCnAsrJaTtsMode) {
       }
     }
   }
+}
+
+# Barge-in is an interaction policy, not part of the zh-ASR/ja-TTS language
+# profile.  Keep the conservative default, but never overwrite an explicit
+# acceptance or production setting merely because the voice profile is pinned.
+if (Ensure-ProcessEnvDefault -Key "EDGE_BARGE_IN_ENABLED" -DefaultValue "false") {
+  $envValues["EDGE_BARGE_IN_ENABLED"] = "false"
+  $startupEnvDefaultsApplied += "EDGE_BARGE_IN_ENABLED=false"
 }
 
 function Get-RunningProcessByName {

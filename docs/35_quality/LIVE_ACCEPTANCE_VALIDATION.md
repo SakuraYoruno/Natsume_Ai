@@ -144,3 +144,5 @@ Edge 总体仍为 `DEGRADED`，原因只剩当前模型没有兼容的情绪 exp
 在 `d7e0cfba8` 上已用隔离 acceptance 数据根启动固定版本 Neo4j、Chroma、Redis、Host、OBS、Nginx Monitor、远端 Edge 与 Unified Gateway。三项 Docker 服务均完成真实写入、查询、容器重启、重启后读取和 namespace 清理；Monitor 的真实 Nginx／OBS 自动化已证明不再显示“待连接”或“Runtime 待恢复”。远端 GPT-SoVITS 方案 B 完成日语合成、物理播放和 VTS 口型帧发送，但 VTube Studio 当前没有加载角色模型，因此不能把口型帧提升为可见 Avatar 动作通过。
 
 Gateway 五路线首轮结果为 2 `PASS`、2 `WARN`、1 `FAIL`。失败路线真实生成并完成了三节点 PlanningSearch TaskGraph，三个节点均进入 `ACCEPTED`，但终局 Surface 只返回 24 字空泛短句，没有消费两个前序验收结果。该问题已定位为终局合成质量门缺失；修复限定在含 canonical accepted Task artifacts 的合成回合，普通实时聊天不增加检查或等待。代码加入领域无关的最小内容与多结果覆盖检查，并在模型仍失败时确定性保留全部已验收结果；真实 Gateway 重测前，PlanningSearch 路线状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，A15 总体仍为 `INCOMPLETE`。
+
+同轮还确认两个启动边界：显式传入 acceptance `RuntimeRoot` 时，Host 仍会优先采用源 `.env` 中遗留的 `NATSUME_AUDIT_DB`；Edge 的中日语音 profile 则会无条件把明确配置的 barge-in 改回关闭。修复后，显式 RuntimeRoot 默认独占其 `audit.sqlite3`，只有显式 `AuditDbPath` 才能覆盖；barge-in 保持默认关闭，但显式设置不再被语言 profile 改写。两项均须在重新启动真实进程后提升状态。
