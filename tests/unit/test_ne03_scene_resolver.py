@@ -69,6 +69,26 @@ class MemoryRuntimeEventStore:
         ][:limit]
 
 
+class CountingRuntimeEventStore(MemoryRuntimeEventStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.after_cursors: list[int] = []
+
+    def list_events_for_aggregates(
+        self,
+        *,
+        aggregate_refs: tuple[tuple[str, str], ...],
+        after_cursor: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        self.after_cursors.append(after_cursor)
+        return super().list_events_for_aggregates(
+            aggregate_refs=aggregate_refs,
+            after_cursor=after_cursor,
+            limit=limit,
+        )
+
+
 def _snapshot(value: str = "calm") -> WorldSnapshotV2:
     fact = WorldFactV2(
         workspace_id="workspace-a",
@@ -94,6 +114,7 @@ def _context(
     user_state: str = "CALM",
     activity_state: str = "WORKING",
     local_hour: int = 14,
+    risk_level: int = 2,
 ) -> SceneResolutionInputV1:
     return SceneResolutionInputV1(
         workspace_id="workspace-a",
@@ -103,7 +124,7 @@ def _context(
         user_state=user_state,
         activity_state=activity_state,
         local_hour=local_hour,
-        risk_level=2,
+        risk_level=risk_level,
     )
 
 
@@ -182,6 +203,30 @@ def test_scene_change_advances_revision_and_survives_restart() -> None:
     same = restored.resolve(snapshot=_snapshot("busy"), context=_context())
     assert same == second
     assert len(store.records) == 2
+
+
+def test_scene_exact_read_reuses_verified_projection_and_checks_only_tail() -> None:
+    store = CountingRuntimeEventStore()
+    resolver = _resolver(event_store=store, clock=lambda: 700)
+    emitted = resolver.resolve(snapshot=_snapshot(), context=_context())
+
+    first = resolver.require_decision(
+        workspace_id=emitted.workspace_id,
+        subject_id=emitted.subject_id,
+        scene_id=emitted.scene_id,
+        revision=emitted.revision,
+        decision_digest=emitted.decision_digest,
+    )
+    second = resolver.require_decision(
+        workspace_id=emitted.workspace_id,
+        subject_id=emitted.subject_id,
+        scene_id=emitted.scene_id,
+        revision=emitted.revision,
+        decision_digest=emitted.decision_digest,
+    )
+
+    assert first == second == emitted
+    assert store.after_cursors == [0, 1, 1]
 
 
 def test_scene_append_failure_does_not_advance_memory_state() -> None:
@@ -279,6 +324,76 @@ def test_scene_resolver_derives_eight_required_scenarios(
     )
 
     assert decision.scene_id == expected_scene
+
+
+def test_guardian_degradation_restricts_but_does_not_review_low_risk_chat() -> None:
+    decision = _resolver(
+        clock=lambda: 500,
+        guardian_status="RECOVERY_PENDING",
+    ).resolve(
+        snapshot=_snapshot(),
+        context=_context(task_kind="CHAT", risk_level=2),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["GUARDIAN_DEGRADED_RESTRICTION"] == "RESTRICT"
+    assert "GUARDIAN_DEGRADED_REVIEW" not in constraints
+
+
+def test_guardian_degradation_does_not_review_low_risk_read_only_delegate() -> None:
+    decision = _resolver(
+        clock=lambda: 500,
+        guardian_status="DEGRADED",
+    ).resolve(
+        snapshot=_snapshot(),
+        context=_context(task_kind="DELEGATE", risk_level=2),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["GUARDIAN_DEGRADED_RESTRICTION"] == "RESTRICT"
+    assert "GUARDIAN_DEGRADED_REVIEW" not in constraints
+
+
+def test_guardian_degradation_does_not_block_low_risk_personal_skill() -> None:
+    decision = _resolver(
+        clock=lambda: 500,
+        guardian_status="SLO_BREACH",
+    ).resolve(
+        snapshot=_snapshot(),
+        context=_context(task_kind="SKILL", risk_level=1),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["GUARDIAN_DEGRADED_RESTRICTION"] == "RESTRICT"
+    assert "GUARDIAN_DEGRADED_REVIEW" not in constraints
+
+
+def test_guardian_degradation_does_not_review_low_risk_research_plan() -> None:
+    decision = _resolver(
+        clock=lambda: 500,
+        guardian_status="DEGRADED",
+    ).resolve(
+        snapshot=_snapshot(),
+        context=_context(task_kind="RESEARCH", risk_level=2),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["SOURCE_EVIDENCE_REQUIRED"] == "RESTRICT"
+    assert constraints["GUARDIAN_DEGRADED_RESTRICTION"] == "RESTRICT"
+    assert "GUARDIAN_DEGRADED_REVIEW" not in constraints
+
+
+def test_guardian_degradation_still_requires_review_for_higher_risk_chat() -> None:
+    decision = _resolver(
+        clock=lambda: 500,
+        guardian_status="DEGRADED",
+    ).resolve(
+        snapshot=_snapshot(),
+        context=_context(task_kind="CHAT", risk_level=3),
+    )
+
+    constraints = {item.code: item.disposition for item in decision.constraints}
+    assert constraints["GUARDIAN_DEGRADED_REVIEW"] == "REVIEW"
 
 
 def test_scene_sleep_activity_restricts_intent_and_blocks_proactive_projection() -> None:

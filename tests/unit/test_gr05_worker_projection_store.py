@@ -29,6 +29,11 @@ MIGRATIONS = (
     / "audit"
     / "migrations"
     / "0114_task_runtime_tool_worker_projection.sql",
+    ROOT
+    / "host_brain"
+    / "audit"
+    / "migrations"
+    / "0127_worker_projection_immutability.sql",
 )
 BODY_FIELDS = (
     "phase", "done", "decision", "reason_code", "command_id", "request_id", "narrative",

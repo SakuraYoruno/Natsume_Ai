@@ -155,10 +155,16 @@ def test_production_composition_uses_one_host_owner_for_all_consumers() -> None:
     lifecycle_source = (
         ROOT / "host_brain/app/lifecycle_runtime_composition.py"
     ).read_text(encoding="utf-8")
+    scheduler_handlers_source = (
+        ROOT / "host_brain/app/host_scheduler_runtime_handlers.py"
+    ).read_text(encoding="utf-8")
 
     assert "hard_state_provider=host_lifecycle.get_hard_state" in asgi_source
     assert "endocrine_state_provider=host_lifecycle.get_endocrine_state" in asgi_source
-    assert "return str(host_lifecycle.get_hard_state().sys_mode)" in asgi_source
+    assert (
+        "return str(self._host_lifecycle.get_hard_state().sys_mode)"
+        in scheduler_handlers_source
+    )
     assert "hard_state=process_services.get_hard_state" not in tribe_source
     assert "get_hard_state=hard_state_provider or process_services" not in lifecycle_source
     assert "get_endocrine_state=process_services" not in lifecycle_source

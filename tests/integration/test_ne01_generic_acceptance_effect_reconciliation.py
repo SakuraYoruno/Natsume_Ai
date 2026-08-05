@@ -385,11 +385,10 @@ async def test_life_response_loss_reopens_projection_barrier_after_restart(
     assert recovered["status"] == "APPLIED"
     assert recovered["replayed"] is True
     assert recovered["receipt_ref"].startswith(
-        "life-projection-barrier://sha256/"
+        "life-projection-admission://sha256/"
     )
-    assert recovered["projection_receipts"][0]["result"]["target"] == (
-        "surface.post_process"
-    )
+    assert recovered["projection_delivery_status"] == "QUEUED"
+    assert recovered["projection_intent_count"] == 1
     assert _receipt_ref(recovered) == recovered["receipt_ref"]
     assert writer_calls == 1
     first_receipt_ref = recovered["receipt_ref"]
@@ -409,7 +408,7 @@ async def test_life_response_loss_reopens_projection_barrier_after_restart(
 
 
 @pytest.mark.asyncio
-async def test_life_projection_failure_stays_unknown_across_restart(
+async def test_life_projection_failure_retries_without_blocking_accepted_reply(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -425,19 +424,21 @@ async def test_life_projection_failure_stays_unknown_across_restart(
         raise RuntimeError("private local projection failure")
 
     monkeypatch.setattr(PROCESS_LIFE_PROVIDER, "require", lambda: life)
+    projection_dispatcher = LifeProjectionDispatcher(
+        life.repository,
+        fail_projection,
+        base_retry_ms=60_000,
+    )
     handler = build_production_acceptance_effect_handlers(
         life_receipt_reader_provider=lambda: life.snapshot_reader,
-        life_projection_dispatcher=LifeProjectionDispatcher(
-            life.repository,
-            fail_projection,
-            base_retry_ms=60_000,
-        ),
+        life_projection_dispatcher=projection_dispatcher,
     )["life.foreground_completed"]
 
-    with pytest.raises(AcceptanceEffectOutcomeUnknown) as uncertain:
-        await handler(payload)
+    accepted = await handler(payload)
+    failed = await projection_dispatcher.dispatch_pending_async(limit=10)
 
-    assert "private local projection failure" not in uncertain.value.detail
+    assert accepted["projection_delivery_status"] == "QUEUED"
+    assert failed.failed == 1
     assert projection_calls == 1
     assert life.snapshot_reader.get_receipt(payload["command_id"]) is not None
     intent = life.snapshot_reader.list_projection_intents(
@@ -450,8 +451,7 @@ async def test_life_projection_failure_stays_unknown_across_restart(
     restarted = build_production_acceptance_effect_handlers(
         life_receipt_reader_provider=lambda: restarted_reader,
     )["life.foreground_completed"]
-    with pytest.raises(AcceptanceEffectOutcomeUnknown):
-        restarted.reconcile(payload)
+    assert restarted.reconcile(payload)["receipt_ref"] == accepted["receipt_ref"]
     assert projection_calls == 1
 
 

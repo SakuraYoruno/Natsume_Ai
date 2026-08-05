@@ -13,6 +13,7 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import threading
 import time
 from typing import Any, Callable, Mapping
 
@@ -301,7 +302,7 @@ class SQLiteEdgeEmbodimentStore:
     ) -> EmbodimentReceipt:
         now = self.now_ms()
         serialized, digest = _serialize_receipt(receipt)
-        status = "APPLIED" if receipt.accepted else "REJECTED"
+        status = _stored_command_status(receipt)
         with self._transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM edge_embodiment_command WHERE command_id = ?",
@@ -317,6 +318,62 @@ class SQLiteEdgeEmbodimentStore:
                 "WHERE command_id = ? AND status = 'DISPATCHING'",
                 (status, serialized, digest, now, now, command.command_id),
             )
+        return receipt
+
+    def settle_accepted_command(
+        self,
+        command: EmbodimentCommand,
+        receipt: EmbodimentReceipt,
+    ) -> EmbodimentReceipt:
+        """Settle one previously accepted asynchronous physical command.
+
+        Only an exact non-terminal ``ACCEPTED/QUEUED/PENDING`` receipt may be
+        replaced.  An unknown or terminal outcome is immutable, so a late
+        playback callback can never overwrite a crash marker or replay result.
+        """
+
+        if _stored_command_status(receipt) not in {"APPLIED", "REJECTED"}:
+            raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_RECEIPT_NOT_TERMINAL")
+        now = self.now_ms()
+        serialized, digest = _serialize_receipt(receipt)
+        target_status = _stored_command_status(receipt)
+        with self._transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM edge_embodiment_command WHERE command_id = ?",
+                (command.command_id,),
+            ).fetchone()
+            if row is None or str(row["command_digest"]) != _command_digest(command):
+                raise EdgeEmbodimentTransportError(EMBODIMENT_COMMAND_CONFLICT)
+            current = self._receipt_from_row(row, now=now)
+            if _receipt_is_terminal(current):
+                return current
+            if not _receipt_is_accepted_pending(current):
+                raise EdgeEmbodimentTransportError(EMBODIMENT_COMMAND_IN_DOUBT)
+            current_digest = str(row["receipt_sha256"] or "")
+            updated = conn.execute(
+                "UPDATE edge_embodiment_command SET status = ?, receipt_json = ?, "
+                "receipt_sha256 = ?, updated_at_ms = ?, completed_at_ms = ? "
+                "WHERE command_id = ? AND command_digest = ? "
+                "AND status = 'IN_DOUBT' AND receipt_sha256 = ?",
+                (
+                    target_status,
+                    serialized,
+                    digest,
+                    now,
+                    now,
+                    command.command_id,
+                    _command_digest(command),
+                    current_digest,
+                ),
+            )
+            if updated.rowcount != 1:
+                reopened = conn.execute(
+                    "SELECT * FROM edge_embodiment_command WHERE command_id = ?",
+                    (command.command_id,),
+                ).fetchone()
+                if reopened is None:
+                    raise EdgeEmbodimentTransportError(EMBODIMENT_COMMAND_CONFLICT)
+                return self._receipt_from_row(reopened, now=now)
         return receipt
 
     def mark_in_doubt(self, command: EmbodimentCommand) -> EmbodimentReceipt:
@@ -538,6 +595,8 @@ class DurableEmbodimentRuntime:
 
     def __init__(self, store: SQLiteEdgeEmbodimentStore) -> None:
         self.store = store
+        self._pending_voice_lock = threading.Lock()
+        self._pending_voice_commands: dict[str, EmbodimentCommand] = {}
 
     def execute(
         self,
@@ -548,9 +607,16 @@ class DurableEmbodimentRuntime:
         if not claim.execute:
             assert claim.receipt is not None
             return claim.receipt
+        is_async_voice = command.kind == "voice" and command.action == "speak"
+        if is_async_voice:
+            with self._pending_voice_lock:
+                self._pending_voice_commands[command.command_id] = command
         try:
             outcome = executor(command)
         except Exception:
+            if is_async_voice:
+                with self._pending_voice_lock:
+                    self._pending_voice_commands.pop(command.command_id, None)
             # The executor boundary cannot prove whether the physical side
             # effect happened before the error.  Persist uncertainty and deny
             # all reconnect/replay attempts.
@@ -568,7 +634,50 @@ class DurableEmbodimentRuntime:
             completed_at_ms=completed,
             event=payload,
         )
-        return self.store.complete_command(command, receipt)
+        stored = self.store.complete_command(command, receipt)
+        if not _receipt_is_accepted_pending(stored):
+            with self._pending_voice_lock:
+                self._pending_voice_commands.pop(command.command_id, None)
+        return stored
+
+    def complete_voice_playback(self, result: Any) -> EmbodimentReceipt | None:
+        """Bind a physical playback terminal event to its exact queued command."""
+
+        value = _mapping(result)
+        event = dict(value.get("event") or {})
+        command_id = str(event.get("request_id") or "").strip()
+        event_type = str(event.get("event_type") or "").strip().upper()
+        if not command_id or event_type not in {
+            "TTS_PLAYBACK_FINISHED",
+            "TTS_PLAYBACK_INTERRUPTED",
+        }:
+            return None
+        with self._pending_voice_lock:
+            command = self._pending_voice_commands.pop(command_id, None)
+        if command is None:
+            return None
+        now = self.store.now_ms()
+        interrupted = event_type == "TTS_PLAYBACK_INTERRUPTED"
+        receipt = _receipt(
+            command,
+            accepted=True,
+            status="APPLIED",
+            reason_code=(str(value.get("reason_code") or "").strip() or None),
+            detail=(
+                "tts playback interrupted after physical start"
+                if interrupted
+                else "tts playback finished"
+            ),
+            received_at_ms=now,
+            completed_at_ms=now,
+            event={
+                **event,
+                "external_side_effects": True,
+                "physical_terminal": True,
+                "interrupted": interrupted,
+            },
+        )
+        return self.store.settle_accepted_command(command, receipt)
 
 
 def _command_digest(command: EmbodimentCommand) -> str:
@@ -613,6 +722,28 @@ def _serialize_receipt(receipt: EmbodimentReceipt) -> tuple[str, str]:
     except (TypeError, ValueError) as exc:
         raise EdgeEmbodimentTransportError("EDGE_EMBODIMENT_RECEIPT_INVALID") from exc
     return serialized, hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _receipt_is_accepted_pending(receipt: EmbodimentReceipt) -> bool:
+    return bool(receipt.accepted) and str(receipt.status or "").strip().upper() in {
+        "ACCEPTED",
+        "QUEUED",
+        "PENDING",
+    }
+
+
+def _receipt_is_terminal(receipt: EmbodimentReceipt) -> bool:
+    status = str(receipt.status or "").strip().upper()
+    return status in {"APPLIED", "COMPLETED", "SUCCEEDED", "REJECTED"}
+
+
+def _stored_command_status(receipt: EmbodimentReceipt) -> str:
+    status = str(receipt.status or "").strip().upper()
+    if _receipt_is_accepted_pending(receipt) or status == "IN_DOUBT":
+        return "IN_DOUBT"
+    if receipt.accepted and status in {"APPLIED", "COMPLETED", "SUCCEEDED"}:
+        return "APPLIED"
+    return "REJECTED"
 
 
 def _parse_stored_receipt(raw: str) -> EmbodimentReceipt:

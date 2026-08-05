@@ -100,6 +100,10 @@ def test_all_nine_evidence_types_round_trip_through_typed_repository() -> None:
         assert plane.list_clock_events(request_id="request-9")[0]["node_id"] == "clock-9"
         assert plane.list_branch_manifests(request_id="request-9")[0]["total_count"] == 1
         assert plane.list_stream_events(request_id="request-9")[0]["node_id"] == "stream-9"
+        assert plane.list_stream_event_cursors_by_time(
+            since_ms=0,
+            end_ms=101,
+        ) == [{"request_id": "request-9", "ts_ms": 101, "event_count": 1}]
         assert plane.get_checkpoint(checkpoint_id="checkpoint-9") is not None
         assert plane.list_barrier_joins(request_id="request-9")[0]["passed"] is True
         assert plane.list_subgraph_traces(run_id="run-9")[0]["node_id"] == "subgraph-9"

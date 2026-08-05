@@ -36,6 +36,9 @@ from host_brain.skills.execution_policy_validation import (
 
 
 GOVERNED_NODE_GRANT_INVALID = "GOVERNED_NODE_GRANT_INVALID"
+GOVERNED_MEMORY_ACCEPTANCE_EFFECT_REQUIRED = (
+    "GOVERNED_MEMORY_ACCEPTANCE_EFFECT_REQUIRED"
+)
 
 
 def execute_governed_skill(
@@ -98,6 +101,13 @@ def execute_governed_skill(
     )
     if grant_error:
         raise PermissionError(grant_error)
+
+    # ``memory_store`` is intentionally not a low-level execution target.
+    # The frozen worker emits an effect-free proposal and the Task Runtime
+    # performs the actual write only after graph Acceptance.  Keeping this
+    # guard here prevents compatibility callers from restoring an eager write.
+    if skill_name == "memory_store":
+        raise PermissionError(GOVERNED_MEMORY_ACCEPTANCE_EFFECT_REQUIRED)
 
     registry = ports.skill_registry
     capability_broker = ports.capability_broker

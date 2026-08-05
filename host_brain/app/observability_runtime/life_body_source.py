@@ -14,6 +14,11 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from host_brain.app.observability_runtime.health_device_projection import (
+    ORGAN_TRIBE_KEY,
+    ORGAN_TRIBE_KIND,
+    ORGAN_TRIBE_MAX_AGE_MS,
+)
 from host_brain.app.observability_runtime.process_state_projection import (
     DIGITAL_LIFE_MAX_AGE_MS,
     DIGITAL_LIFE_OVERVIEW_KIND,
@@ -113,7 +118,7 @@ class _RootRead:
     freshness_ts_ms: int
 
 
-_ROOTS = (
+_REQUIRED_ROOTS = (
     _RootSpec(
         "runtime-snapshot",
         RUNTIME_SNAPSHOT_KIND,
@@ -134,13 +139,19 @@ _ROOTS = (
         SUMMARY_MAX_AGE_MS,
         expected_window_minutes=INSIGHTS_WINDOW_MINUTES,
     ),
-    _RootSpec(
-        "trace-feed",
-        TRACE_FEED_KIND,
-        TRACE_FEED_INDEX_KEY,
-        TRACE_FEED_MAX_AGE_MS,
-        allow_zero_timestamp=True,
-    ),
+)
+_TRACE_FEED_ROOT = _RootSpec(
+    "trace-feed",
+    TRACE_FEED_KIND,
+    TRACE_FEED_INDEX_KEY,
+    TRACE_FEED_MAX_AGE_MS,
+    allow_zero_timestamp=True,
+)
+_ORGAN_TRIBE_ROOT = _RootSpec(
+    "organ-tribe",
+    ORGAN_TRIBE_KIND,
+    ORGAN_TRIBE_KEY,
+    ORGAN_TRIBE_MAX_AGE_MS,
 )
 
 
@@ -844,12 +855,47 @@ class LifeBodySourceReader:
         now = _non_negative_int(self.clock_ms())
         roots = {
             spec.name: _root_read(self.store, spec, now_ms=now)
-            for spec in _ROOTS
+            for spec in _REQUIRED_ROOTS
         }
+        trace_feed_reason: str | None = None
+        try:
+            roots[_TRACE_FEED_ROOT.name] = _root_read(
+                self.store,
+                _TRACE_FEED_ROOT,
+                now_ms=now,
+            )
+        except LifeBodySourceUnavailable as exc:
+            # Trace is historical diagnostic enrichment, not the authority for
+            # whether the Digital Life runtime exists.  A slow trace rebuild
+            # must not blank an otherwise healthy self/runtime snapshot.
+            trace_feed_reason = exc.reason_code
+            roots[_TRACE_FEED_ROOT.name] = _RootRead(
+                payload={"items": [], "count": 0, "timestamp": 0},
+                source_cursor=0,
+                freshness_ts_ms=0,
+            )
+        organ_tribe_reason: str | None = None
+        try:
+            roots[_ORGAN_TRIBE_ROOT.name] = _root_read(
+                self.store,
+                _ORGAN_TRIBE_ROOT,
+                now_ms=now,
+            )
+        except LifeBodySourceUnavailable as exc:
+            # The body overview remains useful while Host runtime state is
+            # recovering, but the missing live organ/tick source must remain
+            # explicit instead of falling back to an old wall-clock artifact.
+            organ_tribe_reason = exc.reason_code
+            roots[_ORGAN_TRIBE_ROOT.name] = _RootRead(
+                payload={},
+                source_cursor=0,
+                freshness_ts_ms=0,
+            )
         runtime = roots["runtime-snapshot"].payload
         overview = roots["digital-life-overview"].payload
         insights = roots["insights-summary"].payload
         trace_feed = roots["trace-feed"].payload
+        organ_tribe = roots["organ-tribe"].payload
         start_ms = max(0, now - self.window_minutes * 60_000)
         lineage = _lineage_rows(
             self.query_repository,
@@ -907,6 +953,7 @@ class LifeBodySourceReader:
             _non_negative_int(overview.get("timestamp")),
             _non_negative_int(insights.get("timestamp")),
             _non_negative_int(trace_feed.get("timestamp")),
+            _non_negative_int(organ_tribe.get("timestamp")),
             *(
                 _row_timestamp(row)
                 for rows in lineage.values()
@@ -927,6 +974,12 @@ class LifeBodySourceReader:
             if alerts
             else "stable"
         )
+        hard_state = _mapping(runtime.get("hard_state"))
+        emotion_context = _mapping(runtime.get("emotion_context"))
+        bond_state = _mapping(runtime.get("bond_state"))
+        motive_state = _mapping(runtime.get("motive_state"))
+        runtime_summary = _mapping(runtime.get("runtime_summary"))
+        reply_posture = _mapping(runtime_summary.get("reply_posture"))
         payload = {
             "schema_version": LIFE_BODY_SCHEMA_VERSION,
             "window_minutes": self.window_minutes,
@@ -937,6 +990,7 @@ class LifeBodySourceReader:
             "memoryData": _mapping(overview.get("memoryData")) or None,
             "servicesData": _mapping(overview.get("servicesData")) or None,
             "subsystemsData": _mapping(overview.get("subsystemsData")) or None,
+            "organTribeData": _mapping(organ_tribe) or None,
             "capabilityGapData": _mapping(overview.get("capabilityGapData")) or None,
             "capabilityGapProjection": _mapping(overview.get("capabilityGapProjection")),
             "humanoidLoopData": _mapping(overview.get("humanoidLoopData")) or None,
@@ -965,6 +1019,18 @@ class LifeBodySourceReader:
                 "hasCapabilityGapData": bool(_mapping(overview.get("capabilityGapData"))),
                 "overviewUpdatedAt": overview_updated,
                 "runtimeUpdatedAt": runtime_updated,
+                "currentEmotion": str(
+                    emotion_context.get("emotion_tag")
+                    or hard_state.get("emotion_tag")
+                    or ""
+                ).strip(),
+                "currentBondStage": str(
+                    bond_state.get("current_stage") or ""
+                ).strip(),
+                "dominantMotive": str(
+                    motive_state.get("dominant_motive") or ""
+                ).strip(),
+                "replyPosture": str(reply_posture.get("style") or "").strip(),
                 "activeTraceFeedCount": len(list(trace_feed.get("items") or [])),
                 "memoryLineageCount": len(lineage["memory_ops_log"]),
                 "bondLineageCount": len(lineage["bond_update_log"]),
@@ -1013,6 +1079,16 @@ class LifeBodySourceReader:
                 "rootEvidenceTimestamp": {
                     name: _non_negative_int(root.payload.get("timestamp"))
                     for name, root in roots.items()
+                },
+                "optionalSourceStatus": {
+                    "trace-feed": {
+                        "available": trace_feed_reason is None,
+                        "reason_code": trace_feed_reason,
+                    },
+                    "organ-tribe": {
+                        "available": organ_tribe_reason is None,
+                        "reason_code": organ_tribe_reason,
+                    },
                 },
                 "lineageLedger": {
                     "memoryRows": len(lineage["memory_ops_log"]),

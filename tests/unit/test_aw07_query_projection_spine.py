@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -15,7 +16,11 @@ from host_brain.app.obs_route_ports import (
     require_obs_projection_ledger_view,
 )
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.app.observability_runtime.projection_runtime import ProjectionOperatorReadModelService
+from host_brain.app.observability_runtime.projection_runtime import (
+    DEFAULT_OPERATOR_PROJECTION_MAX_AGE_MS,
+    ProjectionOperatorReadModelService,
+    upsert_monotonic_projection,
+)
 from host_brain.observability.projection_store import (
     PROJECTION_CURSOR_CONFLICT,
     PROJECTION_CURSOR_REGRESSION,
@@ -46,6 +51,42 @@ def _obs_request(store: QueryProjectionStore) -> SimpleNamespace:
     return ObsRequest(
         app=SimpleNamespace(state=SimpleNamespace(obs_route_ports=ports)),
     )
+
+
+def test_monotonic_projection_advances_when_payload_changes_at_same_source_cursor(
+    tmp_path,
+) -> None:
+    store = _store(tmp_path)
+    first = upsert_monotonic_projection(
+        store,
+        "task_execution",
+        "graph@1",
+        {"state": "RUNNING"},
+        observed_cursor=10,
+        source_ref="test-source",
+    )
+    same = upsert_monotonic_projection(
+        store,
+        "task_execution",
+        "graph@1",
+        {"state": "RUNNING"},
+        observed_cursor=10,
+        source_ref="test-source",
+    )
+    changed = upsert_monotonic_projection(
+        store,
+        "task_execution",
+        "graph@1",
+        {"state": "COMPLETED"},
+        observed_cursor=10,
+        source_ref="test-source",
+    )
+
+    assert first.source_cursor == 10
+    assert same.source_cursor == 10
+    assert same.projection_version == first.projection_version
+    assert changed.source_cursor == 11
+    assert changed.projection_version == first.projection_version + 1
 
 
 def test_projection_ledger_view_is_built_from_each_obs_app_store(tmp_path):
@@ -149,6 +190,31 @@ def test_two_store_instances_compete_on_durable_lease_and_stale_fence_cannot_wri
 
     with second_store.bind_leader_lease(second_lease):
         accepted = second_store.upsert("trace", "req", {"value": "fresh"}, source_cursor=2)
+    assert accepted.payload == {"value": "fresh"}
+
+
+def test_long_projection_job_can_renew_its_bound_fence(tmp_path) -> None:
+    now = [1_000]
+    store = _store(tmp_path, clock=lambda: now[0])
+    lease = store.acquire_leader_lease("long-trace-worker", lease_ms=10)
+    assert lease is not None
+
+    with store.bind_leader_lease(lease):
+        now[0] = 1_005
+        renewed = store.renew_bound_leader_lease(lease_ms=10)
+        assert renewed is not None
+        assert renewed.lease_expires_ts_ms == 1_015
+
+        # The original lease would have expired at 1_010.  The same owner and
+        # fencing token can still commit because the bound lease was renewed.
+        now[0] = 1_012
+        accepted = store.upsert(
+            "trace",
+            "long-running-request",
+            {"value": "fresh"},
+            source_cursor=1,
+        )
+
     assert accepted.payload == {"value": "fresh"}
 
 
@@ -382,6 +448,30 @@ def test_task_session_and_trace_gets_never_call_source_loader(tmp_path, monkeypa
     assert trace_result.status == "DEGRADED"
     assert trace_result.projection["reason_code"] == "OPERATOR_PROJECTION_NOT_READY"
     source_loader.assert_not_called()
+
+
+def test_task_runtime_default_freshness_covers_a_complete_projection_wave(tmp_path):
+    store = _store(tmp_path)
+    now_ms = int(time.time() * 1000)
+    store.upsert(
+        "task_execution",
+        "index",
+        {
+            "schema_version": "Natsume.operator.execution_index.v1",
+            "generated_at_ms": now_ms - 60_000,
+            "read_only": True,
+            "source_contracts": ["TaskGraph", "TaskNode"],
+            "executions": [{"graph_id": "graph-1", "graph_revision": 1}],
+            "execution_count": 1,
+        },
+        source_cursor=1,
+        freshness_ts_ms=now_ms - 60_000,
+    )
+
+    assert DEFAULT_OPERATOR_PROJECTION_MAX_AGE_MS >= 120_000
+    result = ProjectionOperatorReadModelService(store=store).list_executions(limit=10)
+    assert result["projection"]["available"] is True
+    assert result["execution_count"] == 1
 
 
 def test_reconcile_repairs_changed_payload_without_bumping_unchanged_document(tmp_path):

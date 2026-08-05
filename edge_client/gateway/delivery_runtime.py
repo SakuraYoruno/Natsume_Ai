@@ -741,10 +741,7 @@ class GatewayDeliveryRuntime:
                 detail = str(getattr(result, "detail", "Host delivery failed") or "Host delivery failed")
                 reason = str(getattr(result, "reason_code", "") or GW_TRANSPORT_DELIVERY_FAILED)
                 failure = GatewayDeliveryError(reason, detail)
-                if "UNCERTAIN" in reason:
-                    self._leave_uncertain("inbox", row, failure)
-                else:
-                    self._retry_inbox(row, failure)
+                self._retry_inbox(row, failure)
                 return
             receipt_ref = str(getattr(result, "receipt_ref", "") or "").strip()
             receipt_body_sha256 = str(
@@ -764,10 +761,12 @@ class GatewayDeliveryRuntime:
             )
             self._increment("inbox_completed")
         except Exception as exc:
-            # Dispatch was marked before the external call.  A thrown timeout,
-            # process interruption or receipt-commit failure may have happened
-            # after Host accepted the side effect. Persist uncertain DLQ now.
-            self._leave_uncertain("inbox", row, exc)
+            # The frozen inbox body and stable Host idempotency key make an
+            # exact retry safe even when the first HTTP response was lost.
+            # Secure Ingress and HostCommand replay return the existing result
+            # instead of creating a second TaskGraph. Platform outbox effects
+            # intentionally keep the stricter uncertain-delivery quarantine.
+            self._retry_inbox(row, exc)
 
     def _retry_inbox(self, row: Mapping[str, Any], exc: Exception) -> None:
         reason = str(getattr(exc, "reason_code", "") or exc.__class__.__name__)
@@ -892,25 +891,19 @@ class GatewayDeliveryRuntime:
         exc: Exception,
     ) -> None:
         normalized = str(direction).strip().lower()
+        if normalized != "outbox":
+            raise ValueError(
+                "uncertain delivery quarantine is reserved for platform outbox effects"
+            )
         try:
-            if normalized == "inbox":
-                self._store.retry_inbox(
-                    inbox_id=str(row.get("inbox_id") or ""),
-                    claim_token=str(row.get("claim_token") or ""),
-                    fencing_token=int(row.get("fencing_token") or 0),
-                    reason_code="GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN",
-                    base_delay_ms=1_000,
-                    max_delay_ms=60_000,
-                )
-            else:
-                self._store.retry_outbox(
-                    outbox_id=str(row.get("outbox_id") or ""),
-                    claim_token=str(row.get("claim_token") or ""),
-                    fencing_token=int(row.get("fencing_token") or 0),
-                    reason_code="GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN",
-                    base_delay_ms=1_000,
-                    max_delay_ms=60_000,
-                )
+            self._store.retry_outbox(
+                outbox_id=str(row.get("outbox_id") or ""),
+                claim_token=str(row.get("claim_token") or ""),
+                fencing_token=int(row.get("fencing_token") or 0),
+                reason_code="GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN",
+                base_delay_ms=1_000,
+                max_delay_ms=60_000,
+            )
             self._increment(f"{normalized}_uncertain")
         except Exception as persist_exc:  # lease expiry remains a safe fallback
             self._record_worker_error(persist_exc)

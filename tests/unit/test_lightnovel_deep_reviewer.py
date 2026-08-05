@@ -23,13 +23,23 @@ from host_brain.memory.life_memory.store import LifeMemoryStore
 def _configure_review_persistence(monkeypatch):  # noqa: ANN001
     from host_brain.app.observability_persist import persist_life_action_event_memory
 
+    review = review_lightnovel_selection_from_memory_packet
+
+    def _review_with_explicit_persistence(**kwargs):  # noqa: ANN003, ANN202
+        life_memory_store = kwargs.get("life_memory_store")
+        kwargs.setdefault(
+            "persist_life_action_event_memory",
+            partial(
+                persist_life_action_event_memory,
+                life_memory_store=life_memory_store,
+            ),
+        )
+        return review(**kwargs)
+
     monkeypatch.setattr(
         sys.modules[__name__],
         "review_lightnovel_selection_from_memory_packet",
-        partial(
-            review_lightnovel_selection_from_memory_packet,
-            persist_life_action_event_memory=persist_life_action_event_memory,
-        ),
+        _review_with_explicit_persistence,
     )
 
 
@@ -754,11 +764,6 @@ def test_lightnovel_deep_review_persists_backlink_to_source_recommendation(monke
                 ],
             },
         )
-        monkeypatch.setattr(
-            "host_brain.composition.process_services.get_life_memory_store",
-            lambda: store,
-        )
-        monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: None)
         pages = {
             "https://www.lightnovel.fun/cn/detail/1": _html(
                 "恋爱日常 A",
@@ -868,11 +873,6 @@ def test_lightnovel_deep_review_writes_body_evidence_back_to_collection_entity(m
                 ],
             },
         )
-        monkeypatch.setattr(
-            "host_brain.composition.process_services.get_life_memory_store",
-            lambda: store,
-        )
-        monkeypatch.setattr("host_brain.composition.process_services.get_episodic_store", lambda: None)
         delivery_collection = next(
             row
             for row in ledger.life_memory_collection

@@ -20,6 +20,7 @@ class _FakeStore:
     def __init__(self, path) -> None:  # noqa: ANN001
         self.path = path
         self.close_count = 0
+        self.hmac_authorities: list[dict] = []
         self.__class__.instances.append(self)
 
     def close(self) -> None:
@@ -30,6 +31,9 @@ class _FakeStore:
 
     def resolve_committed_authority_by_audit(self, *, audit_ref):  # noqa: ANN001
         return {"audit_ref": audit_ref}
+
+    def ensure_hmac_principal_authority(self, **kwargs) -> None:  # noqa: ANN003
+        self.hmac_authorities.append(dict(kwargs))
 
 
 class _FakeShadowStateStore:
@@ -240,6 +244,51 @@ def test_active_matrix_builds_one_central_store_and_explicit_mode(
     composition.close()
     assert store.close_count == 1
     assert composition.ingress.admission_closed is True
+
+
+def test_operator_bff_write_binding_seeds_only_scope_eligible_actions(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _install_fakes(monkeypatch)
+    env = _env("QUERY_ONLY", "ENFORCE")
+    env[composition_module.OPERATOR_QUERY_AUTH_BINDINGS_ENV] = json.dumps(
+        [
+            {
+                "token_sha256": "a" * 64,
+                "principal_id": "local-monitor-owner",
+                "tenant_id": "local",
+                "key_id": "obs-key",
+                "principal_kind": "user",
+                "scopes": [
+                    "obs:write",
+                    "task-runtime:cancel",
+                    "obs:task-runtime:read",
+                ],
+            }
+        ]
+    )
+
+    composition = composition_module.build_obs_command_composition(
+        env=env,
+        db_path=tmp_path / "audit.sqlite3",
+        emergency_audit_path=tmp_path / "emergency.jsonl",
+    )
+
+    assert composition.enabled is True
+    authority = _FakeStore.instances[0].hmac_authorities
+    assert len(authority) == 1
+    assert authority[0]["principal_id"] == "local-monitor-owner"
+    assert authority[0]["principal_kind"].value == "user"
+    assert authority[0]["granted_scopes"] == (
+        "obs:task-runtime:read",
+        "obs:write",
+        "task-runtime:cancel",
+    )
+    assert authority[0]["allowed_actions"] == (
+        "obs:command:task_graph.cancel",
+    )
+    composition.close()
 
 
 def test_explicit_outcome_journal_path_is_recovered_once_and_injected(

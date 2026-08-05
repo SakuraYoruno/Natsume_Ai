@@ -17,7 +17,7 @@ from host_brain.app.acceptance_effect_handler_common import _canonical_id_ref
 from host_brain.digital_life.companion_expression_acceptance import (
     COMPANION_EXPRESSION_ENQUEUE_EFFECT,
     CompanionExpressionEffectError,
-    parse_companion_expression_effect_payload,
+    parse_companion_expression_effect_batch_payload,
 )
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
@@ -46,14 +46,20 @@ class AcceptedCompanionExpressionEnqueueHandler:
             runtime_provider=self._runtime_provider,
             life_receipt_reader_provider=self._life_receipt_reader_provider,
         )
-        command = value["command"]
+        commands = tuple(item["command"] for item in value)
         try:
-            ack = runtime.enqueue(
-                command,
-                action_preview_service=preview["service"],
-                action_preview_event_id=preview["event_id"],
-                action_preview_boundary=preview["boundary"],
-            )
+            if preview.get("mode") == "ACCEPTANCE_LINEAGE":
+                acknowledgements = runtime.enqueue_accepted_companion_batch(
+                    commands,
+                    acceptance_effect_payload=preview["payload"],
+                )
+            else:
+                acknowledgements = runtime.enqueue_batch(
+                    commands,
+                    action_preview_service=preview["service"],
+                    action_preview_event_id=preview["event_id"],
+                    action_preview_boundary=preview["boundary"],
+                )
         except Exception as exc:
             try:
                 return self.reconcile(payload)
@@ -62,16 +68,27 @@ class AcceptedCompanionExpressionEnqueueHandler:
                 # absent, the dispatcher may retry the immutable enqueue.
                 raise exc
         reopened = self.reconcile(payload)
-        if (
-            str(getattr(ack, "outbox_id", "") or "")
-            != str(reopened.get("outbox_id") or "")
-            or str(getattr(ack, "command_id", "") or "") != command.command_id
-            or str(getattr(ack, "idempotency_key", "") or "")
-            != command.idempotency_key
-        ):
+        expected_acks = tuple(
+            (
+                str(getattr(ack, "outbox_id", "") or ""),
+                str(getattr(ack, "command_id", "") or ""),
+                str(getattr(ack, "idempotency_key", "") or ""),
+            )
+            for ack in acknowledgements
+        )
+        reopened_acks = tuple(
+            (
+                str(item.get("outbox_id") or ""),
+                str(item.get("command_id") or ""),
+                str(item.get("idempotency_key") or ""),
+            )
+            for item in list(reopened.get("commands") or [])
+            if isinstance(item, Mapping)
+        )
+        if expected_acks != reopened_acks:
             raise AcceptanceEffectOutcomeUnknown(
-                "companion expression enqueue acknowledgement differs from "
-                "its exact Host outbox row"
+                "companion expression batch acknowledgement differs from "
+                "its exact Host outbox rows"
             )
         return reopened
 
@@ -81,52 +98,83 @@ class AcceptedCompanionExpressionEnqueueHandler:
             runtime_provider=self._runtime_provider,
             life_receipt_reader_provider=self._life_receipt_reader_provider,
         )
-        command = value["command"]
         reopen = getattr(runtime, "reopen_outbox_command", None)
         if not callable(reopen):
             raise AcceptanceEffectOutcomeUnknown(
                 "companion expression runtime exposes no exact Host outbox reader"
             )
-        row = reopen(command)
-        if not isinstance(row, Mapping):
-            raise AcceptanceEffectOutcomeUnknown(
-                "accepted companion expression has no exact durable Host outbox row"
+        commands: list[dict[str, Any]] = []
+        for item in value:
+            command = item["command"]
+            row = reopen(command)
+            if not isinstance(row, Mapping):
+                raise AcceptanceEffectOutcomeUnknown(
+                    "accepted companion expression has no exact durable Host outbox row"
+                )
+            durable = dict(row)
+            outbox_id = str(durable.get("outbox_id") or "").strip()
+            status = str(durable.get("status") or "").strip().upper()
+            if (
+                not outbox_id
+                or str(durable.get("runtime_scope_id") or "").strip()
+                != str(getattr(runtime, "runtime_scope_id", "") or "").strip()
+                or str(durable.get("command_id") or "").strip()
+                != command.command_id
+                or str(durable.get("idempotency_key") or "").strip()
+                != command.idempotency_key
+                or status
+                not in {
+                    "PENDING",
+                    "DISPATCHING",
+                    "IN_DOUBT",
+                    "APPLIED",
+                    "REJECTED",
+                }
+            ):
+                raise AcceptanceEffectOutcomeUnknown(
+                    "accepted companion expression durable Host outbox row drifted"
+                )
+            receipt = durable.get("receipt")
+            physical_receipt_ref = (
+                str(receipt.get("receipt_ref") or "").strip()
+                if isinstance(receipt, Mapping)
+                else ""
             )
-        durable = dict(row)
-        outbox_id = str(durable.get("outbox_id") or "").strip()
-        status = str(durable.get("status") or "").strip().upper()
-        if (
-            not outbox_id
-            or str(durable.get("runtime_scope_id") or "").strip()
-            != str(getattr(runtime, "runtime_scope_id", "") or "").strip()
-            or str(durable.get("command_id") or "").strip() != command.command_id
-            or str(durable.get("idempotency_key") or "").strip()
-            != command.idempotency_key
-            or status
-            not in {"PENDING", "DISPATCHING", "IN_DOUBT", "APPLIED", "REJECTED"}
-        ):
-            raise AcceptanceEffectOutcomeUnknown(
-                "accepted companion expression durable Host outbox row drifted"
+            intent = item["intent"]
+            commands.append(
+                {
+                    "outbox_id": outbox_id,
+                    "command_id": command.command_id,
+                    "idempotency_key": command.idempotency_key,
+                    "delivery_id": intent.delivery_id,
+                    "synchronization_id": intent.synchronization_id,
+                    "self_affect_revision": intent.self_affect_revision,
+                    "host_outbox_status": status,
+                    "physical_receipt_ref": physical_receipt_ref or None,
+                }
             )
-        receipt = durable.get("receipt")
-        physical_receipt_ref = (
-            str(receipt.get("receipt_ref") or "").strip()
-            if isinstance(receipt, Mapping)
-            else ""
-        )
-        intent = value["intent"]
+        material = {
+            "schema_version": "Natsume.companion_expression_batch_receipt.v1",
+            "outbox_ids": [item["outbox_id"] for item in commands],
+            "command_ids": [item["command_id"] for item in commands],
+        }
+        receipt_digest = hashlib.sha256(
+            json.dumps(
+                material,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        statuses = {str(item["host_outbox_status"]) for item in commands}
         return {
-            "receipt_ref": companion_expression_handler_receipt_ref(outbox_id),
-            "outbox_id": outbox_id,
-            "command_id": command.command_id,
-            "idempotency_key": command.idempotency_key,
-            "delivery_id": intent.delivery_id,
-            "synchronization_id": intent.synchronization_id,
-            "self_affect_revision": intent.self_affect_revision,
+            "receipt_ref": f"embodiment-outbox-batch://sha256/{receipt_digest}",
+            "batch_size": len(commands),
+            "commands": commands,
             # This is the Host local outbox state only.  It is never an Edge
             # render claim, even if a later dispatcher has returned a receipt.
-            "host_outbox_status": status,
-            "physical_receipt_ref": physical_receipt_ref or None,
+            "host_outbox_status": next(iter(statuses)) if len(statuses) == 1 else "MIXED",
         }
 
 
@@ -139,13 +187,13 @@ def _accepted_companion_expression_request(
     *,
     runtime_provider: Callable[[], Any],
     life_receipt_reader_provider: Callable[[], Any],
-) -> tuple[dict[str, Any], Any, dict[str, Any]]:
+) -> tuple[tuple[dict[str, Any], ...], Any, dict[str, Any]]:
     from host_brain.governor.action_preview import ActionPreviewService  # noqa: PLC0415
 
     value = dict(payload or {})
     raw_preview = value.pop("_action_preview_terminal_proof", None)
     preview = dict(raw_preview) if isinstance(raw_preview, Mapping) else {}
-    if (
+    if raw_preview is not None and (
         set(preview) != {"service", "event_id", "boundary"}
         or not isinstance(preview.get("service"), ActionPreviewService)
         or not str(preview.get("event_id") or "").strip()
@@ -153,21 +201,43 @@ def _accepted_companion_expression_request(
     ):
         raise ValueError("accepted companion expression Preview proof is invalid")
     try:
-        parsed = parse_companion_expression_effect_payload(value)
+        parsed = parse_companion_expression_effect_batch_payload(value)
     except CompanionExpressionEffectError as exc:
         raise ValueError("accepted companion expression payload drifted") from exc
     runtime = runtime_provider()
     if (
         runtime is None
-        or not callable(getattr(runtime, "enqueue", None))
         or not callable(getattr(runtime, "reopen_outbox_command", None))
         or not str(getattr(runtime, "runtime_scope_id", "") or "").strip()
     ):
         raise ValueError("accepted companion expression runtime is unavailable")
     _require_life_foreground_receipt(
-        parsed["life_foreground"],
+        parsed[0]["life_foreground"],
         life_receipt_reader_provider=life_receipt_reader_provider,
     )
+    if raw_preview is None:
+        if not callable(getattr(runtime, "enqueue_accepted_companion_batch", None)):
+            raise ValueError("accepted companion expression runtime is unavailable")
+        grant_refs = {
+            str(item["command"].grant_ref or "").strip() for item in parsed
+        }
+        if (
+            len(grant_refs) != 1
+            or "" in grant_refs
+            or any(
+                not str(item["command"].authority_ref or "").startswith(
+                    "authority://task-acceptance/sha256/"
+                )
+                for item in parsed
+            )
+        ):
+            raise ValueError("accepted companion expression lineage drifted")
+        return parsed, runtime, {
+            "mode": "ACCEPTANCE_LINEAGE",
+            "payload": value,
+        }
+    if not callable(getattr(runtime, "enqueue_batch", None)):
+        raise ValueError("accepted companion expression runtime is unavailable")
     boundary = dict(preview["boundary"])
     authority_context = boundary.get("authority_context")
     action_scope = str(boundary.get("action_scope") or "").strip()
@@ -186,8 +256,11 @@ def _accepted_companion_expression_request(
         or not str(authority_context.get("lease_owner_id") or "").strip()
         or isinstance(authority_context.get("fencing_token"), bool)
         or int(authority_context.get("fencing_token") or 0) < 1
-        or str(parsed["command"].grant_ref or "")
-        != str(boundary.get("node_grant_ref") or "").strip()
+        or any(
+            str(item["command"].grant_ref or "")
+            != str(boundary.get("node_grant_ref") or "").strip()
+            for item in parsed
+        )
     ):
         raise ValueError("accepted companion expression Preview boundary drifted")
     reopened = preview["service"].require_execution(

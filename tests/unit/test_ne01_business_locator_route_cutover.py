@@ -116,13 +116,10 @@ def test_health_compatibility_flag_cannot_reopen_process_ledger() -> None:
         )
 
 
-def test_obs_forge_handler_resolves_only_the_bound_route_provider() -> None:
-    forge = object()
-    ports = HostRoutePorts(capability_forge_service_provider=lambda: forge)
-
-    assert domain_command_ports._capability_forge_service(ports) is forge
-    with pytest.raises(
-        domain_command_ports.ObsDomainCommandError,
-        match="OBS_CAPABILITY_FORGE_DOMAIN_UNAVAILABLE",
-    ):
-        domain_command_ports._capability_forge_service(HostRoutePorts())
+def test_obs_forge_runtime_command_route_is_retired() -> None:
+    assert not hasattr(HostRoutePorts(), "capability_forge_service_provider")
+    assert not hasattr(domain_command_ports, "_capability_forge_service")
+    assert all(
+        "forge" not in command_id
+        for command_id in domain_command_ports.GOVERNED_OPERATOR_COMMAND_IDS
+    )

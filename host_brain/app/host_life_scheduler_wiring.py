@@ -41,7 +41,15 @@ SCHEDULER_HANDLER_RESULT_INVALID = "SCHEDULER_HANDLER_RESULT_INVALID"
 # This was the pre-DL-06 timer-driven proactive route.  New definitions are
 # already excluded by the registry scheduler policy; the composition root also
 # disables an old persisted head during startup so it cannot survive upgrade.
-RETIRED_LEGACY_SCHEDULER_TASK_IDS = ("proactive_talk_periodic",)
+RETIRED_LEGACY_SCHEDULER_TASK_IDS = (
+    "proactive_talk_periodic",
+    # Durable outbox delivery is infrastructure I/O, not a user command.  A
+    # full HostCommand/TaskGraph every one to five seconds added seconds of
+    # SQLite churn even while both outboxes were empty.  App-local pumps now
+    # own these two drains after Service Catalog promotion.
+    "life_io_dispatch_periodic",
+    "embodiment_outbox_periodic",
+)
 
 
 class SchedulerHandlerResultError(RuntimeError):
@@ -222,6 +230,32 @@ def submit_life_tick_command(
     return scheduler_handler_result(receipt)
 
 
+def reconcile_life_tick_command(
+    *,
+    occurrence: Any,
+    definition: Any,
+    command: Any,
+    execution_context: Mapping[str, Any],
+    life_snapshot_reader: LifeSnapshotReaderPort,
+) -> dict[str, Any]:
+    """Read an exact Life receipt without executing another Life command."""
+
+    del definition, command, execution_context
+    life_command_id = f"life_tick::{occurrence.occurrence_id}"
+    existing_receipt = life_snapshot_reader.get_receipt(life_command_id)
+    if existing_receipt is None:
+        raise SchedulerHandlerResultError(
+            "life tick has no exact durable Life receipt"
+        )
+    as_replayed = getattr(existing_receipt, "as_replayed", None)
+    replayed_receipt = (
+        as_replayed() if callable(as_replayed) else existing_receipt
+    )
+    result = scheduler_handler_result(replayed_receipt)
+    result["replayed"] = True
+    return result
+
+
 def _select_life_tick_person_id(
     *,
     args: Mapping[str, Any],
@@ -323,52 +357,7 @@ def scheduler_seed_configs(
 
     # The definition is always seeded so the catalog has one explicit Life
     # periodic authority. Its enabled flag is still governed by Host settings.
-    configs: list[SchedulerTaskConfig] = [
-        build_life_tick_task_config(),
-        SchedulerTaskConfig(
-            task_id="life_io_dispatch_periodic",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 5},
-            intent_template={
-                "skill_name": "life_io_dispatch",
-                "args": {"limit": 100},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.HIGH,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            max_consecutive_failures=3,
-            description=(
-                "Dispatch committed Life projection/outbox work; SchedulerClock "
-                "remains the sole timer"
-            ),
-            resource_profile={
-                "resource_class": "life_io",
-                "uses_llm": False,
-                "uses_gpu": False,
-            },
-        ),
-        SchedulerTaskConfig(
-            task_id="embodiment_outbox_periodic",
-            trigger_mode=TriggerMode.INTERVAL,
-            trigger_config={"seconds": 1},
-            intent_template={
-                "skill_name": "embodiment_outbox_dispatch",
-                "args": {"limit": 100},
-                "proposer_node_id": "scheduler",
-            },
-            priority=TaskPriority.HIGH,
-            mode_allowlist=["normal", "focus", "gaming", "sleep"],
-            enabled=True,
-            max_consecutive_failures=3,
-            description="Dispatch the canonical Host physical-command outbox",
-            resource_profile={
-                "resource_class": "embodiment_io",
-                "uses_llm": False,
-                "uses_gpu": False,
-            },
-        ),
-    ]
+    configs: list[SchedulerTaskConfig] = [build_life_tick_task_config()]
     if settings.seed_builtin_definitions:
         from host_brain.scheduler.scheduling_center import (  # noqa: PLC0415
             build_personality_scheduler_seed_task_configs,
@@ -832,6 +821,7 @@ __all__ = [
     "distillation_scheduler_handler_result",
     "proactive_scheduler_handler_result",
     "reset_life_command_authority",
+    "reconcile_life_tick_command",
     "scheduler_handler_result",
     "scheduler_seed_configs",
     "security_immune_scheduler_handler_result",

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from host_brain.app import asgi as asgi_module
 from host_brain.app.asgi import app as host_app
 from host_brain.app.obs_fastapi_app import app as obs_app
+from host_brain.app.settings.scheduler import SchedulerSettings
 
 
 def test_host_main_does_not_mount_obs_or_monitor_routes() -> None:
@@ -19,7 +21,16 @@ def test_host_main_does_not_mount_obs_or_monitor_routes() -> None:
     assert "/panel" not in host_paths
 
 
-def test_host_main_rejects_monitor_and_obs_requests_without_redirecting() -> None:
+def test_host_main_rejects_monitor_and_obs_requests_without_redirecting(
+    monkeypatch,
+) -> None:
+    # This route-isolation case starts Host with the optional periodic clock
+    # disabled; explicit Scheduler credential readiness is tested separately.
+    monkeypatch.setattr(
+        asgi_module,
+        "get_scheduler_settings",
+        lambda: SchedulerSettings(clock_enabled=False),
+    )
     with TestClient(host_app) as client:
         for path in (
             "/obs/runtime-snapshot?window_minutes=60",

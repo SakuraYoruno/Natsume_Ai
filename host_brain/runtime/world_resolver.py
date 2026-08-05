@@ -7,6 +7,8 @@ transition.  A read never renews TTL and never writes Life or Memory.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from threading import RLock
 from typing import Protocol, Sequence
 
 from .context_contracts import (
@@ -41,11 +43,46 @@ class WorldObservationPort(Protocol):
         limit: int,
     ) -> Sequence[WorldObservationBatchV1]: ...
 
+    def verify_cached_source_events(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        source_events: dict[str, str],
+    ) -> bool: ...
+
+
+@dataclass(slots=True)
+class _VerifiedReplayState:
+    active: dict[str, WorldFactV2]
+    expired: set[str]
+    source_events: dict[str, str]
+    revision: int = 0
+    batch_digest: str = ""
+    observed_at_ms: int = 0
+    runtime_owner_id: str | None = None
+    runtime_lease_id: str | None = None
+    fencing_token: int = 0
+
+    def clone(self) -> "_VerifiedReplayState":
+        return _VerifiedReplayState(
+            active=dict(self.active),
+            expired=set(self.expired),
+            source_events=dict(self.source_events),
+            revision=self.revision,
+            batch_digest=self.batch_digest,
+            observed_at_ms=self.observed_at_ms,
+            runtime_owner_id=self.runtime_owner_id,
+            runtime_lease_id=self.runtime_lease_id,
+            fencing_token=self.fencing_token,
+        )
+
 
 class WorldResolver:
     """Rebuild World from a monotonic, digest-chained observation journal."""
 
     _PAGE_SIZE = 1000
+    _CACHE_STATE_LIMIT = 64
 
     def __init__(self, *, observation_port: WorldObservationPort) -> None:
         if observation_port is None or not all(
@@ -54,6 +91,79 @@ class WorldResolver:
         ):
             raise WorldResolverError("workspace observation port is required")
         self._observation_port = observation_port
+        self._cache_lock = RLock()
+        self._verified_states: dict[
+            tuple[str, str, int], _VerifiedReplayState
+        ] = {}
+
+    def _seed_replay(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        through_revision: int,
+    ) -> _VerifiedReplayState:
+        cached_key: tuple[str, str, int] | None = None
+        cached: _VerifiedReplayState | None = None
+        with self._cache_lock:
+            candidates = tuple(
+                key
+                for key in self._verified_states
+                if key[0] == workspace_id
+                and key[1] == subject_id
+                and key[2] <= through_revision
+            )
+            if candidates:
+                cached_key = max(candidates, key=lambda item: item[2])
+                cached = self._verified_states[cached_key].clone()
+        if cached is not None:
+            revalidate = getattr(
+                self._observation_port,
+                "verify_cached_source_events",
+                None,
+            )
+            if callable(revalidate):
+                try:
+                    source_unchanged = revalidate(
+                        workspace_id=workspace_id,
+                        subject_id=subject_id,
+                        source_events=dict(cached.source_events),
+                    )
+                except Exception as exc:
+                    raise WorldResolverError(
+                        "cached observation source authority is unavailable"
+                    ) from exc
+                if source_unchanged is not True:
+                    # Fall back to the full verifier.  It owns the detailed
+                    # fail-closed error and prevents a drifted cache hit.
+                    return _VerifiedReplayState(
+                        active={},
+                        expired=set(),
+                        source_events={},
+                    )
+            if cached_key is not None:
+                with self._cache_lock:
+                    current = self._verified_states.pop(cached_key, None)
+                    if current is not None:
+                        self._verified_states[cached_key] = current
+            return cached
+        return _VerifiedReplayState(active={}, expired=set(), source_events={})
+
+    def _remember_verified_state(
+        self,
+        *,
+        workspace_id: str,
+        subject_id: str,
+        state: _VerifiedReplayState,
+    ) -> None:
+        key = (workspace_id, subject_id, state.revision)
+        with self._cache_lock:
+            # Refresh insertion order so the app-local revision cache stays
+            # bounded without introducing another persistence owner.
+            self._verified_states.pop(key, None)
+            self._verified_states[key] = state.clone()
+            while len(self._verified_states) > self._CACHE_STATE_LIMIT:
+                self._verified_states.pop(next(iter(self._verified_states)))
 
     def resolve(
         self,
@@ -140,16 +250,6 @@ class WorldResolver:
         if isinstance(now_ms, bool) or not isinstance(now_ms, int) or now_ms < 0:
             raise WorldResolverError("now_ms must be a non-negative integer")
 
-        active: dict[str, WorldFactV2] = {}
-        expired: set[str] = set()
-        source_events: dict[str, str] = {}
-        expected_revision = 1
-        previous_digest = ""
-        previous_observed_at = 0
-        previous_owner: str | None = None
-        previous_lease: str | None = None
-        previous_fence = 0
-        cursor = 0
         try:
             head = self._observation_port.read_observation_head(
                 workspace_id=workspace,
@@ -170,6 +270,25 @@ class WorldResolver:
                     "observation journal does not contain requested revision"
                 )
             terminal_revision = through_revision
+        state = self._seed_replay(
+            workspace_id=workspace,
+            subject_id=subject,
+            through_revision=terminal_revision,
+        )
+        active = state.active
+        expired = state.expired
+        source_events = state.source_events
+        cursor = state.revision
+        expected_revision = cursor + 1
+        previous_digest = state.batch_digest
+        previous_observed_at = state.observed_at_ms
+        previous_owner = state.runtime_owner_id
+        previous_lease = state.runtime_lease_id
+        previous_fence = state.fencing_token
+        if previous_observed_at > now_ms:
+            raise WorldResolverError(
+                "cached observation journal contains a future-dated batch"
+            )
         while cursor < terminal_revision:
             try:
                 page = tuple(
@@ -285,6 +404,33 @@ class WorldResolver:
         ):
             raise WorldResolverError("observation journal did not reach captured head")
 
+        facts = tuple(
+            sorted(
+                active.values(),
+                key=lambda item: (
+                    item.key,
+                    item.source_ref,
+                    item.fact_digest,
+                ),
+            )
+        )
+        verified_state = _VerifiedReplayState(
+            active=dict(active),
+            expired=set(expired),
+            source_events=dict(source_events),
+            revision=cursor,
+            batch_digest=previous_digest,
+            observed_at_ms=previous_observed_at,
+            runtime_owner_id=previous_owner,
+            runtime_lease_id=previous_lease,
+            fencing_token=previous_fence,
+        )
+        if terminal_revision > 0:
+            self._remember_verified_state(
+                workspace_id=workspace,
+                subject_id=subject,
+                state=verified_state,
+            )
         overdue = tuple(
             sorted(
                 fact.fact_digest
@@ -296,16 +442,6 @@ class WorldResolver:
             raise WorldResolverError(
                 "WORLD_EXPIRY_TRANSITION_MISSING: active facts exceeded expires_at_ms"
             )
-        facts = tuple(
-            sorted(
-                active.values(),
-                key=lambda item: (
-                    item.key,
-                    item.source_ref,
-                    item.fact_digest,
-                ),
-            )
-        )
         return WorldSnapshotV2(
             workspace_id=workspace,
             subject_id=subject,

@@ -20,6 +20,7 @@ from host_brain.surface_runtime.eligibility import (
     _surface_scene_guardrails,
 )
 from host_brain.surface_runtime.fact_compiler import (
+    _accepted_task_result_texts,
     _build_digest_from_inner_monologue,
     _necessary_facts,
     _surface_boundary_must_not_do,
@@ -295,6 +296,10 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
+    accepted_task_results = _accepted_task_result_texts(
+        agent_input,
+        trace_stage_meta=trace_stage_meta,
+    )
     task_control = _apply_affective_turn_guidance(
         task_control,
         agent_input=agent_input,
@@ -413,7 +418,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
         user_message=str(getattr(agent_input, "user_message", "") or "").strip(),
         case_id=str(getattr(agent_input, "request_id", "") or "").strip(),
         task_control=task_control,
-        memory_packet=None if preference_query_owned else _memory_packet(
+        memory_packet=None if (preference_query_owned or accepted_task_results) else _memory_packet(
             agent_input,
             trace_stage_meta=trace_stage_meta,
             runtime_payload=runtime_payload,
@@ -430,6 +435,7 @@ def build_surface_main_chain_input_from_surface_reply_input(
             task_control=task_control,
             trace_stage_meta=trace_stage_meta,
         ),
+        accepted_task_results=accepted_task_results,
         must_not_do=surface_must_not_do,
         style_anchor=(
             "像熟人私聊：先接住当前话，再轻轻顶嘴或顺手打趣；不要写成客服回执、流程确认或任务记录。",

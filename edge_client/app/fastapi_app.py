@@ -139,6 +139,17 @@ def create_edge_fastapi_app(
     else:
         embodiment_store_value = embodiment_store
     embodiment_runtime = DurableEmbodimentRuntime(embodiment_store_value)
+    voice_pipeline = getattr(runtime_value, "voice_pipeline", None)
+    register_playback_completion = getattr(
+        voice_pipeline,
+        "register_playback_completion_observer",
+        None,
+    )
+    playback_completion_unsubscribe = (
+        register_playback_completion(embodiment_runtime.complete_voice_playback)
+        if callable(register_playback_completion)
+        else None
+    )
 
     @asynccontextmanager
     async def _lifespan(_: FastAPI):
@@ -146,6 +157,8 @@ def create_edge_fastapi_app(
         try:
             yield
         finally:
+            if callable(playback_completion_unsubscribe):
+                playback_completion_unsubscribe()
             await _run_lifecycle_hook(shutdown_runner, runtime_value)
 
     app = FastAPI(
@@ -898,8 +911,13 @@ def _execute_embodiment_effect(
     envelope: EdgeRpcEnvelope,
     command: Any,
 ) -> EdgeGatewayResult:
+    effect_request_id = (
+        command.command_id
+        if command.kind == EMBODIMENT_KIND_VOICE and command.action == "speak"
+        else command.request_id
+    )
     effect_envelope = EdgeRpcEnvelope(
-        request_id=command.request_id,
+        request_id=effect_request_id,
         ts_ms=command.issued_at_ms,
         nonce=envelope.nonce,
         signature=envelope.signature,
@@ -910,10 +928,28 @@ def _execute_embodiment_effect(
             effect = _handle_barge_in(runtime, effect_envelope)
         elif command.action == "asr_control":
             effect = _handle_asr(runtime, effect_envelope)
+        elif command.action == "release":
+            effect = EdgeGatewayResult(
+                success=True,
+                status="APPLIED",
+                reason_code=None,
+                stage="S_EDGE_VOICE_RELEASE",
+                detail="voice stream released; queued playback remains authoritative",
+                event={"external_side_effects": False, "release_applied": True},
+            )
         else:
             effect = _handle_speak(runtime, effect_envelope)
     elif command.kind == EMBODIMENT_KIND_AVATAR:
-        if command.action == "desktop_pet":
+        if command.action == "release":
+            effect = EdgeGatewayResult(
+                success=True,
+                status="APPLIED",
+                reason_code=None,
+                stage="S_EDGE_AVATAR_RELEASE",
+                detail="avatar stream released; playback completion owns idle transition",
+                event={"external_side_effects": False, "release_applied": True},
+            )
+        elif command.action == "desktop_pet":
             pet_payload = dict(command.payload)
             pet_payload["action"] = str(
                 pet_payload.pop("desktop_pet_action", "status") or "status"

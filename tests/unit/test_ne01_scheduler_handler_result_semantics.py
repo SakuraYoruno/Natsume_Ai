@@ -219,17 +219,19 @@ def test_security_mapper_uses_snapshot_failure_and_provider_semantics(
 
 
 def test_asgi_handlers_use_three_explicit_production_mappers() -> None:
-    source = (ROOT / "host_brain/app/asgi.py").read_text(encoding="utf-8")
+    source = (
+        ROOT / "host_brain/app/host_scheduler_runtime_handlers.py"
+    ).read_text(encoding="utf-8")
     assert (
-        "return _scheduler_result_wiring.proactive_scheduler_handler_result(result)"
+        "return scheduler_result_wiring.proactive_scheduler_handler_result(result)"
         in source
     )
     assert (
-        "return _scheduler_result_wiring.distillation_scheduler_handler_result(report)"
+        "return scheduler_result_wiring.distillation_scheduler_handler_result(report)"
         in source
     )
     assert (
-        "return _scheduler_result_wiring.security_immune_scheduler_handler_result(result)"
+        "return scheduler_result_wiring.security_immune_scheduler_handler_result("
         in source
     )
     assert "scheduler_handler_result as _scheduler_handler_result" not in source

@@ -11,6 +11,7 @@ from typing import Any, Callable
 from host_brain.contracts.agent_runtime.terminal_reconciliation import (
     TerminalReconciliationStoreRejected,
     build_terminal_reconciliation_attestation_binding,
+    is_signed_prebudget_cancellation_classifier_correction,
 )
 
 from .ports import TerminalReconciliationStorePort, TaskOutboxFactoryPort
@@ -458,6 +459,9 @@ class TerminalStateReconciliationService:
         subject: Mapping[str, Any],
         request: Mapping[str, Any],
     ) -> None:
+        signed_classifier_correction = (
+            is_signed_prebudget_cancellation_classifier_correction(case)
+        )
         if (
             str(case.get("case_id") or "") != request["case_id"]
             or str(case.get("snapshot_sha256") or "")
@@ -465,8 +469,11 @@ class TerminalStateReconciliationService:
             or str(subject.get("snapshot_sha256") or "")
             != request["expected_subject_snapshot_sha256"]
             or str(case.get("recommended_action") or "") != request["action"]
-            or str(case.get("classification") or "")
-            == "QUARANTINED_STRUCTURAL"
+            or (
+                str(case.get("classification") or "")
+                == "QUARANTINED_STRUCTURAL"
+                and not signed_classifier_correction
+            )
         ):
             self._reject("case, current subject, or requested action drifted")
         classification = str(case.get("classification") or "")
@@ -474,7 +481,10 @@ class TerminalStateReconciliationService:
         if authority == "SYSTEM_DURABLE_EVIDENCE":
             if classification != "EXACT_REPAIRABLE":
                 self._reject("system authority is limited to exact repairable cases")
-        elif classification not in {"EXACT_REPAIRABLE", "SIGNED_REPAIR_REQUIRED"}:
+        elif (
+            classification not in {"EXACT_REPAIRABLE", "SIGNED_REPAIR_REQUIRED"}
+            and not signed_classifier_correction
+        ):
             self._reject("signed authority cannot repair a quarantined case")
         graph_status = str(case.get("graph_status") or "")
         action = request["action"]

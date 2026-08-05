@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import sqlite3
 import threading
 
 import pytest
@@ -10,8 +11,10 @@ from edge_client.gateway.embodiment_runtime import (
     EdgeEmbodimentTransportError,
     SQLiteEdgeEmbodimentStore,
 )
+from edge_client.actuators.speech import SpeechQueueResult
 from edge_client.gateway.migration_runner import apply_edge_gateway_migrations
 from edge_client.app.fastapi_app import (
+    _execute_embodiment_effect,
     _handle_embodiment_command,
     _handle_embodiment_session,
 )
@@ -56,6 +59,26 @@ def _command(lease, *, key: str = "idem-1", deadline_ms: int = 50_000, payload=N
         authority_ref="authority://host/device",
         grant_ref="grant://host/device/1",
         deadline_ms=deadline_ms,
+        idempotency_key=key,
+        request_id=f"request-{key}",
+        issued_at_ms=900,
+    )
+    return bind_command_to_lease(raw, lease)
+
+
+def _voice_command(lease, *, key: str = "voice-idem"):
+    raw = build_embodiment_command(
+        kind="voice",
+        action="speak",
+        payload={
+            "session_id": "voice-session",
+            "utterance_id": key,
+            "text": "short voice",
+            "lang_hint": "en",
+        },
+        authority_ref="authority://host/device",
+        grant_ref="grant://host/device/voice",
+        deadline_ms=50_000,
         idempotency_key=key,
         request_id=f"request-{key}",
         issued_at_ms=900,
@@ -257,6 +280,89 @@ def test_receipt_survives_process_reopen_and_replay_never_reexecutes(tmp_path) -
     assert calls == [command.command_id]
     assert duplicate.as_dict() == first.as_dict()
     assert first.receipt_ref and first.receipt_ref == duplicate.receipt_ref
+
+
+def test_queued_voice_receipt_settles_from_exact_playback_terminal_without_replay(tmp_path) -> None:
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    lease = store.open_session(session_id="host-session", owner_id="host", ttl_ms=10_000)
+    command = _voice_command(lease)
+    runtime = DurableEmbodimentRuntime(store)
+    calls: list[str] = []
+
+    queued = runtime.execute(
+        command,
+        lambda item: calls.append(item.command_id) or {
+            "success": True,
+            "status": "ACCEPTED",
+            "detail": "tts queued",
+            "event": {"external_side_effects": "PENDING"},
+        },
+    )
+
+    assert queued.status == "ACCEPTED"
+    with sqlite3.connect(store.db_path) as connection:
+        assert connection.execute(
+            "SELECT status FROM edge_embodiment_command WHERE command_id = ?",
+            (command.command_id,),
+        ).fetchone()[0] == "IN_DOUBT"
+
+    clock.value += 50
+    settled = runtime.complete_voice_playback(
+        SpeechQueueResult(
+            success=True,
+            status="ACCEPTED",
+            reason_code=None,
+            stage="S_VOICE_TTS_PLAYBACK",
+            detail="tts playback finished",
+            event={
+                "request_id": command.command_id,
+                "event_type": "TTS_PLAYBACK_FINISHED",
+                "ts_ms": clock.value,
+            },
+        )
+    )
+    duplicate = runtime.execute(
+        command,
+        lambda item: calls.append(f"duplicate:{item.command_id}") or {"success": True},
+    )
+
+    assert settled is not None
+    assert settled.status == "APPLIED"
+    assert settled.event["physical_terminal"] is True
+    assert duplicate.as_dict() == settled.as_dict()
+    assert calls == [command.command_id]
+
+
+@pytest.mark.parametrize("kind", ["voice", "avatar"])
+def test_expression_release_is_a_terminal_control_not_a_speak_request(kind: str) -> None:
+    command = build_embodiment_command(
+        kind=kind,
+        action="release",
+        payload={"session_id": "voice-session"},
+        authority_ref="authority://host/device",
+        grant_ref="grant://host/device/release",
+        deadline_ms=50_000,
+        idempotency_key=f"release-{kind}",
+        request_id=f"request-release-{kind}",
+        issued_at_ms=900,
+    )
+
+    result = _execute_embodiment_effect(
+        object(),
+        EdgeRpcEnvelope(
+            request_id=command.request_id,
+            ts_ms=900,
+            nonce="nonce-release",
+            signature="signature",
+            payload=command.as_dict(),
+        ),
+        command,
+    )
+
+    assert result.success is True
+    assert result.status == "APPLIED"
+    assert result.event["effect"]["release_applied"] is True
 
 
 def test_same_idempotency_key_with_different_payload_fails_closed(tmp_path) -> None:

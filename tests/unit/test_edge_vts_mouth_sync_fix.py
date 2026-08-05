@@ -499,7 +499,32 @@ def test_set_expression_does_not_fallback_to_unrelated_hotkey(monkeypatch) -> No
     result = driver.set_expression("HAPPY")
 
     assert result.success is False
-    assert calls == ["exp_happy_01"]
+    assert result.reason_code == "VTS_EXPRESSION_UNAVAILABLE"
+    assert calls == []
+
+
+def test_set_expression_fails_fast_when_active_model_has_no_hotkeys(monkeypatch) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "edge_client.actuators.vts_driver._list_vts_hotkeys",
+        lambda **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "edge_client.actuators.vts_driver._trigger_vts_hotkey",
+        lambda **kwargs: calls.append(str(kwargs["hotkey_id"])),
+    )
+
+    driver = VTubeStudioDriver(VtsConfig())
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = object()
+    driver._hotkey_catalog = []
+
+    result = driver.set_expression("CALM")
+
+    assert result.success is False
+    assert result.reason_code == "VTS_EXPRESSION_UNAVAILABLE"
+    assert calls == []
 
 
 def test_set_expression_skips_blocked_hotkey_and_uses_safe_hint_match(monkeypatch) -> None:
@@ -666,6 +691,45 @@ def test_set_mouth_open_level_reconnects_once_on_protocol_error(monkeypatch) -> 
     assert calls[-1][0] == "fresh-conn"
 
 
+def test_set_mouth_open_level_reconnects_once_on_going_away_close(monkeypatch) -> None:
+    calls: list[str] = []
+    reconnect_calls: list[str] = []
+
+    def _fake_set(*, vts, param_name: str, value: float, timeout_s: float) -> None:
+        _ = (param_name, value, timeout_s)
+        calls.append(str(vts))
+        if str(vts) == "stale-conn":
+            raise RuntimeError(
+                "received 1001 (going away); then sent 1001 (going away)"
+            )
+
+    def _fake_connect(self) -> object:
+        reconnect_calls.append("connect")
+        self._state = VtsState.AUTHENTICATED
+        self._vts = "fresh-conn"
+        return type("ReconnectResult", (), {"success": True})()
+
+    monkeypatch.setattr("edge_client.actuators.vts_driver._set_vts_parameter", _fake_set)
+    monkeypatch.setattr(VTubeStudioDriver, "connect", _fake_connect)
+
+    driver = VTubeStudioDriver(
+        VtsConfig(
+            mouth_param_candidates=(VTS_MOUTH_PARAM,),
+            mouth_volume_param_candidates=(),
+            voice_silence_param_candidates=(),
+        )
+    )
+    driver._state = VtsState.AUTHENTICATED
+    driver._vts = "stale-conn"
+
+    result = driver.set_mouth_open_level(0.36)
+
+    assert result.success is True
+    assert reconnect_calls == ["connect"]
+    assert calls[0] == "stale-conn"
+    assert calls[-1] == "fresh-conn"
+
+
 def test_set_expression_reconnects_once_on_protocol_error(monkeypatch) -> None:
     calls: list[str] = []
     reconnect_calls: list[str] = []
@@ -680,6 +744,7 @@ def test_set_expression_reconnects_once_on_protocol_error(monkeypatch) -> None:
         reconnect_calls.append("connect")
         self._state = VtsState.AUTHENTICATED
         self._vts = "fresh-conn"
+        self._hotkey_catalog = [{"id": "exp_happy_01", "name": "happy"}]
         return type("ReconnectResult", (), {"success": True})()
 
     monkeypatch.setattr("edge_client.actuators.vts_driver._trigger_vts_hotkey", _fake_trigger)
@@ -688,7 +753,7 @@ def test_set_expression_reconnects_once_on_protocol_error(monkeypatch) -> None:
     driver = VTubeStudioDriver(VtsConfig())
     driver._state = VtsState.AUTHENTICATED
     driver._vts = "stale-conn"
-    driver._hotkey_catalog = []
+    driver._hotkey_catalog = [{"id": "exp_happy_01", "name": "happy"}]
 
     result = driver.set_expression("HAPPY")
 

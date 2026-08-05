@@ -20,6 +20,8 @@
 | 中文猎奇口音 | 确认 speech language 为 `ja`，不要让日语模型直接合成中文 |
 | 第二组声线异常 | 对比原始参考、切分边界、噪声和 transcript |
 | VTS 无动作 | WebSocket 权限、hotkey 名称、模型加载与 receipt |
+| `1001 going away` 后错误持续增长 | 确认 Edge 已识别连接关闭并进入有界 `RECONNECTING`；动作线程不得逐帧重试，VTS 恢复后无需重启 Edge |
+| VTS 晚于 Edge 启动 | health 应先显示 `waiting_for_vts／RECONNECTING`，VTS 8001 就绪后自动恢复 `AUTHENTICATED` |
 | Voice 与 Avatar 不同步 | synchronization id、队列时间戳和启动偏差 |
 | 打断后仍播放 | barge-in cancel、已排队 chunk 和旧 session fence |
 

@@ -13,6 +13,12 @@ from host_brain.app.surface_main_chain_adapter import (
 )
 from host_brain.surface_runtime.eligibility import surface_main_chain_enabled
 from host_brain.surface_runtime.input_compiler import build_surface_main_chain_input_from_surface_reply_input
+from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
+from host_brain.persona.surface_runtime import build_direct_surface_messages
+from host_brain.contracts.agent_runtime.node_artifact import artifact_digest
+from host_brain.contracts.agent_runtime.node_input_attestation import (
+    build_node_input_artifact_attestation,
+)
 from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 from host_brain.surface_runtime.life_context import _surface_life_context_task_facts
 from host_brain.surface_runtime.memory_context import (
@@ -523,6 +529,88 @@ def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_
     assert "memory://episodic/1" not in json.dumps(payload.as_dict(), ensure_ascii=False)
 
 
+def test_plan_terminal_surface_synthesizes_only_attested_task_results(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    artifact_ref = (
+        "artifact://task-result/graph-synthesis/revisions/1/nodes/node-review"
+    )
+    receipt_ref = "worker-projection://review/" + "a" * 64
+    artifact_payload = {
+        "receipt_ref": receipt_ref,
+        "narrative": (
+            "先扫描路由与页面，再检查空态、错误态、加载态、响应式、无障碍和性能；"
+            "最后按影响与修复成本分级，交付问题清单和整改建议。"
+        ),
+    }
+    artifact = {
+        "artifact_ref": artifact_ref,
+        "receipt_ref": receipt_ref,
+        "payload": artifact_payload,
+        "payload_sha256": artifact_digest(artifact_payload),
+    }
+    trace: dict[str, object] = {
+        "node_input_artifact_attestation": build_node_input_artifact_attestation(
+            [artifact]
+        )
+    }
+    agent_input = _agent_input(
+        user_message="请给我一个前端可用性审查方案",
+        retrieval_evidence_items=[
+            {
+                "source_ref": "memory://unrelated",
+                "evidence_ref": "memory-receipt://unrelated",
+                "snippet": "先追问用户具体项目。",
+                "store_id": "task_result_artifact",
+                "metadata": {"store_id": "task_result_artifact"},
+            },
+            {
+                "source_ref": artifact_ref,
+                "evidence_ref": receipt_ref,
+                "snippet": artifact_payload["narrative"],
+                "store_id": "task_result_artifact",
+                "metadata": {
+                    "store_id": "task_result_artifact",
+                    "payload_sha256": artifact["payload_sha256"],
+                },
+            },
+        ],
+    )
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        agent_input,
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert payload.task_control["task_mode"] == "accepted_task_result_synthesis"
+    assert payload.task_control["response_move"] == "synthesize_accepted_task_results"
+    assert payload.task_control["question_budget"] == 0
+    assert payload.task_control["information_budget"] == "detailed"
+    assert tuple(payload.accepted_task_results) == (
+        artifact_payload["narrative"],
+    )
+    assert payload.memory_packet is None
+
+    compiled = compile_surface_main_chain_input(payload)
+    rendered_prompt = "\n".join(
+        item["content"] for item in build_direct_surface_messages(compiled.request)
+    )
+    assert "已验收任务结果" in rendered_prompt
+    assert artifact_payload["narrative"] in rendered_prompt
+    assert "memory://unrelated" not in rendered_prompt
+    assert "不得再询问范围" in rendered_prompt or "不得追问" in rendered_prompt
+    assert artifact_payload["narrative"] not in json.dumps(
+        compiled.as_dict(),
+        ensure_ascii=False,
+    )
+
+
 def test_build_surface_main_chain_input_injects_sub_agent_result(
     monkeypatch,
     surface_runtime_ports_factory,
@@ -752,6 +840,55 @@ def test_build_surface_main_chain_input_prefers_surface_task_control(
     assert trace["surface_selected_reply_plan"]["task_mode"] == "style_repair"
     assert trace["reply_plan"]["task_mode"] == "style_repair"
     assert "memory://raw/should-not-pass" not in json.dumps(payload.as_dict(), ensure_ascii=False)
+
+
+def test_build_surface_main_chain_input_uses_inline_code_semantics_over_generic_chat_plan(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    def _generic_chat_context(**_kwargs):  # noqa: ANN003
+        return {
+            "reply_plan": {
+                "task_mode": "daily_chat",
+                "response_move": "reply_current_turn",
+                "response_goal": "contextual_chat_reply",
+                "information_budget": "short",
+                "question_budget": 0,
+            },
+            "surface_affect_packet": {},
+            "surface_memory_recall_packet": {},
+        }
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        _agent_input(
+            user_message="写一个 Python 函数，统计列表元素频次并按频次降序返回。",
+            render_policy={},
+            surface_task_control={},
+            intent_draft={
+                "route": "chat",
+                "args": {
+                    "semantic_intent": {
+                        "type": "inline_code_generation",
+                        "dialogue_act": "request_code_answer",
+                        "domain": "technical_chat",
+                        "answer_strategy": "direct_runnable_snippet_with_brief_explanation",
+                    }
+                },
+            },
+        ),
+        ports=surface_runtime_ports_factory(build_surface_context_packet=_generic_chat_context),
+    )
+
+    assert payload.task_control["task_mode"] == "technical_help"
+    assert payload.task_control["response_move"] == "direct_code_answer"
+    assert payload.task_control["information_budget"] == "normal"
+    assert "完整可运行代码" in payload.task_control["reply_contract"]
+    assert "完整、可复制运行的代码" in payload.task_control["must_include"]
 
 
 def test_sanitize_main_chain_meta_reply_replaces_generic_latency_reply() -> None:

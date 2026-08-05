@@ -888,12 +888,13 @@ def test_classify_task_intent_by_rules_keeps_legacy_translate_rule() -> None:
     assert decision["reason_code"] == "RULE_FORCE_TRANSLATE_AGENT"
 
 
-def test_classify_task_intent_by_rules_routes_planning_advice_to_intent_agent() -> None:
+def test_classify_task_intent_by_rules_keeps_planning_advice_in_chat() -> None:
     decision = classify_task_intent_by_rules("帮我整理一下我现在应该先做什么，再给我一个三步建议。")
 
     assert decision is not None
-    assert decision["route"] == "delegate"
-    assert decision["target_id"] == "intent_agent"
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "THALAMUS_RULE_PLANNING_ADVICE_CHAT"
 
 
 def test_classify_task_intent_by_rules_routes_generic_execution_without_llm() -> None:
@@ -905,13 +906,13 @@ def test_classify_task_intent_by_rules_routes_generic_execution_without_llm() ->
     assert decision["reason_code"] == "RULE_ACTION_INTENT"
 
 
-def test_classify_task_intent_by_rules_routes_short_continuation_to_intent_agent() -> None:
+def test_classify_task_intent_by_rules_keeps_short_continuation_in_chat() -> None:
     decision = classify_task_intent_by_rules("开始吧")
 
     assert decision is not None
-    assert decision["route"] == "delegate"
-    assert decision["target_id"] == "intent_agent"
-    assert decision["reason_code"] == "RULE_CONTEXT_CONTINUATION"
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "THALAMUS_RULE_CONTEXT_CONTINUATION_CHAT"
 
 
 def test_classify_task_intent_by_rules_routes_open_settings_to_open_app() -> None:
@@ -1115,9 +1116,9 @@ def test_classify_task_intent_by_rules_readonly_code_plan_not_agent_worker() -> 
     decision = classify_task_intent_by_rules("给我一个完整方案，不要改代码")
 
     assert decision is not None
-    assert decision["route"] == "delegate"
-    assert decision["target_id"] == "intent_agent"
-    assert decision["reason_code"] == "RULE_ACTION_INTENT"
+    assert decision["route"] == "chat"
+    assert decision["target_id"] == ""
+    assert decision["reason_code"] == "THALAMUS_RULE_PLANNING_ADVICE_CHAT"
 
 
 def test_classify_task_intent_by_rules_routes_relational_followup_to_chat() -> None:
@@ -1556,7 +1557,7 @@ def test_classify_and_compile_intent_draft_defaults_runtime_repo_for_codex_code_
     assert compiled["args"]["task"] == "please fix the failing test and show me the code"
 
 
-def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_lightweight_code_snippet() -> None:
+def test_classify_and_compile_intent_draft_keeps_lightweight_code_snippet_in_chat() -> None:
     agent = ThalamusAgent()
 
     compiled = _run(
@@ -1569,11 +1570,10 @@ def test_classify_and_compile_intent_draft_uses_inspect_temp_workspace_for_light
         )
     )
 
-    assert compiled["route"] == "skill"
-    assert compiled["target_id"] == "agent_inspect"
-    assert compiled["args"]["run_mode"] == "inspect"
-    assert compiled["args"]["allow_temp_workspace"] is True
-    assert "workspace_strategy" not in compiled["args"]
+    assert compiled["route"] == "chat"
+    assert compiled["target_id"] == ""
+    assert compiled["reason_code"] == "THALAMUS_RULE_INLINE_CODE_CHAT"
+    assert compiled["semantic_intent"]["type"] == "inline_code_generation"
 
 
 def test_classify_and_compile_intent_draft_defaults_to_chat_without_model_classification() -> None:

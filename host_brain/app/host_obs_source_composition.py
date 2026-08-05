@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+import logging
 import threading
 from typing import Any
 import uuid
@@ -34,6 +35,9 @@ from natsume_contracts.operator import (
     HostRuntimeSourceSnapshot,
     HostSemanticRecallSourceSnapshot,
 )
+
+
+logger = logging.getLogger("Natsume.host.obs_sources")
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,16 +210,19 @@ def _read_capability_forge(
                 "HOST_SEMANTIC_RECALL_RUNTIME_NOT_READY",
                 observed_at_ms=observed_at_ms,
             )
-        try:
-            governance = _governance_snapshot(
-                runtime,
-                observed_at_ms=observed_at_ms,
-            )
-        except Exception:
-            governance = _compat_source_unavailable(
-                "HOST_OBS_GOVERNANCE_RUNTIME_NOT_READY",
-                observed_at_ms=observed_at_ms,
-            )
+        # Governance has its own authenticated source and projection job.  The
+        # capability projection discards this compatibility child before it is
+        # materialized, so rebuilding the complete governance view here only
+        # duplicated an expensive registry walk and could make an otherwise
+        # healthy Capability Forge source miss the Obs transport deadline.
+        governance = _compat_source_delegated(
+            "/internal/obs-sources/governance",
+            observed_at_ms=observed_at_ms,
+        )
+        # Some read-only providers timestamp the projection they build.  Take
+        # the envelope clock after all providers have returned so their fresh
+        # evidence cannot race a few milliseconds ahead of ``observed_at_ms``.
+        observed_at_ms = _positive_clock(runtime)
         evidence_ts_ms = _latest_bounded_timestamp(
             observed_at_ms,
             gap.get("timestamp"),
@@ -244,6 +251,7 @@ def _read_capability_forge(
         )
         return HostCapabilityForgeSourceSnapshot.from_mapping(payload)
     except Exception:
+        logger.warning("HOST_OBS_CAPABILITY_SOURCE_READ_FAILED", exc_info=True)
         raise HostObsReadSourceUnavailable(
             "HOST_OBS_CAPABILITY_RUNTIME_NOT_READY"
         ) from None
@@ -278,11 +286,12 @@ def _read_governance(
     runtime: HostObsSourceRuntimePorts,
 ) -> HostGovernanceSourceSnapshot:
     try:
-        observed_at_ms = _positive_clock(runtime)
+        projection_started_at_ms = _positive_clock(runtime)
         governance = _governance_snapshot(
             runtime,
-            observed_at_ms=observed_at_ms,
+            observed_at_ms=projection_started_at_ms,
         )
+        observed_at_ms = _positive_clock(runtime)
         payload = public_projection_payload(
             {
                 "schema_version": HOST_GOVERNANCE_SOURCE_SCHEMA_VERSION,
@@ -294,6 +303,7 @@ def _read_governance(
         )
         return HostGovernanceSourceSnapshot.from_mapping(payload)
     except Exception:
+        logger.warning("HOST_OBS_GOVERNANCE_SOURCE_READ_FAILED", exc_info=True)
         raise HostObsReadSourceUnavailable(
             "HOST_OBS_GOVERNANCE_RUNTIME_NOT_READY"
         ) from None
@@ -301,7 +311,7 @@ def _read_governance(
 
 def _read_runtime(runtime: HostObsSourceRuntimePorts) -> HostRuntimeSourceSnapshot:
     try:
-        observed_at_ms = _positive_clock(runtime)
+        projection_started_at_ms = _positive_clock(runtime)
         scheduler = runtime.scheduler_container_provider()
         if scheduler is None:
             scheduler_snapshot: dict[str, Any] = {
@@ -318,8 +328,18 @@ def _read_runtime(runtime: HostObsSourceRuntimePorts) -> HostRuntimeSourceSnapsh
             )
             scheduler_snapshot["clock"] = clock_health
             scheduler_snapshot["evidence_ts_ms"] = _latest_bounded_timestamp(
-                observed_at_ms,
+                projection_started_at_ms,
                 clock_health.get("last_tick_ms"),
+                scheduler_snapshot.get("updated_at_ms"),
+                scheduler_snapshot.get("timestamp"),
+            )
+        observed_at_ms = _positive_clock(runtime)
+        # Re-evaluate the bounded scheduler evidence against the final
+        # envelope clock in case a tick landed while health was sampled.
+        if scheduler is not None:
+            scheduler_snapshot["evidence_ts_ms"] = _latest_bounded_timestamp(
+                observed_at_ms,
+                dict(scheduler_snapshot.get("clock") or {}).get("last_tick_ms"),
                 scheduler_snapshot.get("updated_at_ms"),
                 scheduler_snapshot.get("timestamp"),
             )
@@ -340,6 +360,7 @@ def _read_runtime(runtime: HostObsSourceRuntimePorts) -> HostRuntimeSourceSnapsh
         )
         return HostRuntimeSourceSnapshot.from_mapping(payload)
     except Exception:
+        logger.warning("HOST_OBS_RUNTIME_SOURCE_READ_FAILED", exc_info=True)
         raise HostObsReadSourceUnavailable("HOST_OBS_RUNTIME_NOT_READY") from None
 
 
@@ -378,6 +399,22 @@ def _compat_source_unavailable(
         "available": False,
         "reason_code": reason_code,
         "status": "SOURCE_UNAVAILABLE",
+        "timestamp": observed_at_ms,
+    }
+
+
+def _compat_source_delegated(
+    source_path: str,
+    *,
+    observed_at_ms: int,
+) -> dict[str, Any]:
+    path = str(source_path or "").strip()
+    if not path.startswith("/internal/obs-sources/"):
+        raise ValueError("delegated Host Obs source path is invalid")
+    return {
+        "available": True,
+        "status": "DELEGATED",
+        "source_path": path,
         "timestamp": observed_at_ms,
     }
 

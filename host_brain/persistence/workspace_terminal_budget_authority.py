@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hmac
 import json
 import sqlite3
 
+from host_brain.contracts.agent_runtime.internal_budget_claim_result import (
+    build_internal_budget_rejection_result_ref,
+)
 from host_brain.persistence.task_budget_usage_store import (
     _assert_terminal_budget_authority,
 )
@@ -52,7 +56,7 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
     historical_lease_id: str,
     historical_fencing_token: int,
 ) -> bool:
-    """Prove one Plan writer Budget terminal inside the Workspace CAS."""
+    """Prove one checkpoint Budget terminal inside the Workspace CAS."""
 
     if (
         not graph_id
@@ -172,6 +176,31 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
     if historical_index < 0:
         return False
     if (
+        command is None
+        or projection_record is None
+        or not isinstance(node_payload, Mapping)
+    ):
+        return False
+    plan_route = bool(
+        str(node_payload.get("route") or "").startswith("skill:")
+        and str(command["route_type"]) == "plan"
+        and str(command["target_id"]) == "planning_search"
+        and len(node_rows) >= 2
+    )
+    internal_route = bool(
+        str(node_payload.get("route") or "") == "delegate:agent_runtime"
+        and str(command["surface"]) == "internal"
+        and str(command["route_type"]) == "delegate"
+        and str(command["target_id"]) == "agent_runtime"
+        and str(projection_record.get("route_type") or "") == "delegate"
+        and str(projection_record.get("target_id") or "") == "agent_runtime"
+        and str(projection_record.get("command_id") or "")
+        == str(command["command_id"])
+        and str(projection_record.get("request_id") or "")
+        == str(command["request_id"])
+        and len(node_rows) == 1
+    )
+    if (
         str(row["graph_status"]) != "BLOCKED"
         or str(row["node_status"]) != "FAILED"
         or str(row["attempt_status"]) != "FAILED"
@@ -190,9 +219,7 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
         or projection_record is None
         or not isinstance(node_payload, Mapping)
         or str(node_payload.get("node_id") or "") != node_id
-        or not str(node_payload.get("route") or "").startswith("skill:")
-        or str(command["route_type"]) != "plan"
-        or str(command["target_id"]) != "planning_search"
+        or not (plan_route or internal_route)
         or str(command["graph_id"]) != graph_id
         or int(command["graph_revision"]) != graph_revision
         or str(command["business_scope"]) != str(row["business_scope"])
@@ -203,7 +230,6 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
         or str(projection_record["node_id"]) != node_id
         or str(projection_record["attempt_id"]) != attempt_id
         or str(projection_record["projection_id"]) != str(row["receipt_ref"])
-        or len(node_rows) < 2
         or not _lease_lineage_is_terminal(
             leases,
             historical_index=historical_index,
@@ -218,39 +244,52 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
         }
         for item in node_rows
     }
-    decision = canonical_current_parallel_terminal_decision(
-        conn,
-        {
-            "graph_id": graph_id,
-            "revision": graph_revision,
-            "status": str(row["graph_status"]),
-            "status_version": int(row["graph_status_version"]),
-        },
+    decision = (
+        canonical_current_parallel_terminal_decision(
+            conn,
+            {
+                "graph_id": graph_id,
+                "revision": graph_revision,
+                "status": str(row["graph_status"]),
+                "status_version": int(row["graph_status_version"]),
+            },
+        )
+        if plan_route
+        else None
     )
-    if not isinstance(decision, dict):
-        return False
-    selected = [
-        dict(item)
-        for item in decision.get("outcomes") or ()
-        if isinstance(item, dict)
-        and str(item.get("node_id") or "") == node_id
-        and str(item.get("attempt_id") or "") == attempt_id
-    ]
-    if (
-        decision.get("decision_kind") != "BUDGET"
-        or decision.get("selected_node_id") != node_id
-        or decision.get("graph_target_status") != "BLOCKED"
-        or decision.get("budget_target_status") != "RELEASED"
-        or decision.get("budget_id") != str(row["budget_id"])
-        or type(decision.get("budget_status_version_before")) is not int
-        or int(decision["budget_status_version_before"]) + 1
-        != int(row["budget_status_version"])
-        or str(row["budget_status"]) != "RELEASED"
-        or decision.get("node_states") != actual_states
-        or len(selected) != 1
-        or selected[0].get("status") != "BUDGET_BLOCKED"
-    ):
-        return False
+    selected: list[dict[str, object]] = []
+    if plan_route:
+        if not isinstance(decision, dict):
+            return False
+        selected = [
+            dict(item)
+            for item in decision.get("outcomes") or ()
+            if isinstance(item, dict)
+            and str(item.get("node_id") or "") == node_id
+            and str(item.get("attempt_id") or "") == attempt_id
+        ]
+        if (
+            decision.get("decision_kind") != "BUDGET"
+            or decision.get("selected_node_id") != node_id
+            or decision.get("graph_target_status") != "BLOCKED"
+            or decision.get("budget_target_status") != "RELEASED"
+            or decision.get("budget_id") != str(row["budget_id"])
+            or type(decision.get("budget_status_version_before")) is not int
+            or int(decision["budget_status_version_before"]) + 1
+            != int(row["budget_status_version"])
+            or str(row["budget_status"]) != "RELEASED"
+            or decision.get("node_states") != actual_states
+            or len(selected) != 1
+            or selected[0].get("status") != "BUDGET_BLOCKED"
+        ):
+            return False
+        terminal_version = int(decision["budget_status_version_before"])
+    else:
+        if str(row["budget_status"]) != "RELEASED":
+            return False
+        terminal_version = int(row["budget_status_version"]) - 1
+        if terminal_version < 1:
+            return False
     try:
         budget_row = conn.execute(
             """
@@ -264,15 +303,33 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
         winner, _dimensions = _assert_terminal_budget_authority(
             conn,
             budget_row=budget_row,
-            terminal_version=int(decision["budget_status_version_before"]),
+            terminal_version=terminal_version,
         )
     except (TaskStoreError, KeyError, TypeError, ValueError):
         return False
     usage_id = str(winner["usage_id"])
+    route_evidence_is_exact = (
+        usage_id in tuple(selected[0].get("evidence_refs") or ())
+        if plan_route
+        else _internal_terminal_evidence_is_exact(
+            conn,
+            command=command,
+            projection=projection_record,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            graph_status_version=int(row["graph_status_version"]),
+            node_id=node_id,
+            attempt_id=attempt_id,
+            reservation_id=str(row["reservation_id"]),
+            budget_id=str(row["budget_id"]),
+            error_ref=str(row["attempt_error_ref"]),
+            usage_id=usage_id,
+        )
+    )
     if (
         str(winner["node_id"]) != node_id
         or str(winner["attempt_id"]) != attempt_id
-        or usage_id not in tuple(selected[0].get("evidence_refs") or ())
+        or not route_evidence_is_exact
         or not _node_budget_binding_is_exact(
             conn,
             graph_id=graph_id,
@@ -294,6 +351,7 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
             lease=leases[-1],
             error_ref=str(row["attempt_error_ref"]),
             usage_id=usage_id,
+            internal_route=internal_route,
         )
         or not _zero_downstream_authority(
             conn,
@@ -305,6 +363,78 @@ def finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
     ):
         return False
     return True
+
+
+def _internal_terminal_evidence_is_exact(
+    conn: sqlite3.Connection,
+    *,
+    command: sqlite3.Row,
+    projection: Mapping[str, object],
+    graph_id: str,
+    graph_revision: int,
+    graph_status_version: int,
+    node_id: str,
+    attempt_id: str,
+    reservation_id: str,
+    budget_id: str,
+    error_ref: str,
+    usage_id: str,
+) -> bool:
+    """Bind single-node Internal cleanup to its Graph and ingress terminal."""
+
+    graph_outboxes = conn.execute(
+        """
+        SELECT * FROM task_runtime_outbox
+        WHERE aggregate_type = 'TASK_GRAPH' AND aggregate_id = ?
+          AND aggregate_version = ? AND event_type = 'TASK_GRAPH_BLOCKED'
+        """,
+        (graph_id, graph_status_version),
+    ).fetchall()
+    claim_ref = str(command["ingress_claim_ref"] or "").strip()
+    claims = conn.execute(
+        """
+        SELECT * FROM secure_ingress_idempotency_claim
+        WHERE claim_ref = ?
+        """,
+        (claim_ref,),
+    ).fetchall()
+    if len(graph_outboxes) != 1 or len(claims) != 1 or not claim_ref:
+        return False
+    graph_outbox = graph_outboxes[0]
+    claim = claims[0]
+    try:
+        evidence_refs = tuple(json.loads(str(graph_outbox["evidence_refs_json"])))
+        expected_result_ref = build_internal_budget_rejection_result_ref(
+            command_id=str(command["command_id"]),
+            ingress_claim_ref=claim_ref,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            node_id=node_id,
+            attempt_id=attempt_id,
+            reservation_id=reservation_id,
+            budget_id=budget_id,
+            usage_id=usage_id,
+        )
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return False
+    return bool(
+        str(graph_outbox["attempt_id"] or "") == attempt_id
+        and error_ref in evidence_refs
+        and usage_id in evidence_refs
+        and str(claim["claim_status"]) == "COMMITTED"
+        and hmac.compare_digest(
+            str(claim["result_ref"] or ""),
+            expected_result_ref,
+        )
+        and hmac.compare_digest(
+            f"sha256:{str(claim['body_sha256'] or '')}",
+            str(command["input_sha256"] or ""),
+        )
+        and str(projection.get("graph_id") or "") == graph_id
+        and projection.get("graph_revision") == graph_revision
+        and str(projection.get("node_id") or "") == node_id
+        and str(projection.get("attempt_id") or "") == attempt_id
+    )
 
 
 def _lease_lineage_is_terminal(
@@ -386,6 +516,7 @@ def _child_terminal_outboxes_are_exact(
     lease: sqlite3.Row,
     error_ref: str,
     usage_id: str,
+    internal_route: bool,
 ) -> bool:
     identities = (
         (
@@ -401,7 +532,7 @@ def _child_terminal_outboxes_are_exact(
             f"{graph_id}@{graph_revision}/{node_id}",
             node_version,
             "TASK_NODE_FAILED",
-            None,
+            attempt_id if internal_route else None,
             True,
         ),
         (
@@ -410,7 +541,7 @@ def _child_terminal_outboxes_are_exact(
             int(lease["status_version"]),
             "TASK_LEASE_RELEASED_TERMINAL",
             attempt_id,
-            False,
+            internal_route,
         ),
     )
     for (

@@ -31,8 +31,15 @@ COMPANION_EXPRESSION_ENQUEUE_EFFECT = "host.companion_expression_enqueue"
 COMPANION_EXPRESSION_EFFECT_SCHEMA = (
     "Natsume.companion_expression_acceptance_effect.v1"
 )
+COMPANION_EXPRESSION_BATCH_SCHEMA = (
+    "Natsume.companion_expression_acceptance_batch.v1"
+)
 _SPEECH_TTL_MS = 30_000
-_CONTROL_TTL_MS = 5_000
+# Release/cancel controls are compiled only after all sentence intents.  They
+# share the speech window so a bounded multi-sentence reply cannot consume the
+# old five-second TTL while Acceptance and the serial physical outbox are still
+# delivering the preceding Voice/Avatar commands.
+_CONTROL_TTL_MS = _SPEECH_TTL_MS
 
 
 class CompanionExpressionEffectError(ValueError):
@@ -99,6 +106,8 @@ def compile_companion_expression_effect_payloads(
         raise
     except ValueError as exc:
         raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_INVALID") from exc
+    if not sentence_intents and not controls and not receipts:
+        return ()
     expected_intents = tuple((*sentence_intents, *controls))
     life_binding = _foreground_life_binding(foreground_value)
     values: list[dict[str, Any]] = []
@@ -128,7 +137,19 @@ def compile_companion_expression_effect_payloads(
                 "embodiment_command": embodiment_command.as_dict(),
             }
         )
-    return tuple(values)
+    # One accepted ExpressionPlan is one local admission decision.  Keeping
+    # Voice/Avatar commands as separate Acceptance Effects forced the same
+    # immutable plan through ActionPreview four or more times on every ordinary
+    # reply.  The commands remain independently idempotent and independently
+    # receipted by the embodiment outbox, while the batch itself crosses the
+    # authorization boundary once.
+    return (
+        {
+            "schema_version": COMPANION_EXPRESSION_BATCH_SCHEMA,
+            "life_foreground": life_binding,
+            "entries": values,
+        },
+    )
 
 
 def parse_companion_expression_effect_payload(
@@ -175,6 +196,39 @@ def parse_companion_expression_effect_payload(
     }
 
 
+def parse_companion_expression_effect_batch_payload(
+    raw: Mapping[str, Any] | Any,
+) -> tuple[dict[str, Any], ...]:
+    """Parse one batch, while retaining exact replay of legacy single rows."""
+
+    if not isinstance(raw, Mapping):
+        raise CompanionExpressionEffectError("COMPANION_EXPRESSION_EFFECT_INVALID")
+    value = dict(raw)
+    if value.get("schema_version") == COMPANION_EXPRESSION_EFFECT_SCHEMA:
+        return (parse_companion_expression_effect_payload(value),)
+    if (
+        set(value) != {"schema_version", "life_foreground", "entries"}
+        or value.get("schema_version") != COMPANION_EXPRESSION_BATCH_SCHEMA
+    ):
+        raise CompanionExpressionEffectError("COMPANION_EXPRESSION_BATCH_INVALID")
+    batch_life = _parse_life_foreground(value.get("life_foreground"))
+    entries = _sequence(value.get("entries"), "entries")
+    if not entries or len(entries) > 66:
+        raise CompanionExpressionEffectError("COMPANION_EXPRESSION_BATCH_INVALID")
+    parsed = tuple(parse_companion_expression_effect_payload(item) for item in entries)
+    if tuple(item["delivery_sequence"] for item in parsed) != tuple(range(len(parsed))):
+        raise CompanionExpressionEffectError("COMPANION_EXPRESSION_BATCH_SEQUENCE_DRIFT")
+    if any(item["life_foreground"] != batch_life for item in parsed):
+        raise CompanionExpressionEffectError("COMPANION_EXPRESSION_BATCH_LIFE_DRIFT")
+    command_ids = [item["command"].command_id for item in parsed]
+    idempotency_keys = [item["command"].idempotency_key for item in parsed]
+    if len(set(command_ids)) != len(command_ids) or len(set(idempotency_keys)) != len(
+        idempotency_keys
+    ):
+        raise CompanionExpressionEffectError("COMPANION_EXPRESSION_BATCH_IDENTITY_DRIFT")
+    return parsed
+
+
 def verify_companion_expression_command(
     *,
     payload: Mapping[str, Any],
@@ -183,10 +237,10 @@ def verify_companion_expression_command(
     """Return whether a Preview-bound payload owns exactly this command."""
 
     try:
-        value = parse_companion_expression_effect_payload(payload)
+        values = parse_companion_expression_effect_batch_payload(payload)
     except CompanionExpressionEffectError:
         return False
-    return value["command"].as_dict() == command.as_dict()
+    return any(value["command"].as_dict() == command.as_dict() for value in values)
 
 
 def _required_scope(**value: Any) -> dict[str, Any]:
@@ -282,6 +336,19 @@ def _rebuild_frozen_expression_protocol(
     raw_intents = _sequence(payload.get("expression_delivery_intents"), "expression_delivery_intents")
     raw_controls = _sequence(payload.get("expression_delivery_controls"), "expression_delivery_controls")
     raw_receipts = _sequence(payload.get("expression_delivery_receipts"), "expression_delivery_receipts")
+    suppression_reason = str(
+        payload.get("expression_delivery_suppressed_reason") or ""
+    ).strip().upper()
+    if suppression_reason:
+        if (
+            suppression_reason != "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
+            or raw_intents
+            or raw_controls
+            or raw_receipts
+            or str(payload.get("tts_text_ja") or "").strip()
+        ):
+            raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
+        return (), (), ()
     expected_tts_text_ja = str(payload.get("tts_text_ja") or "").strip()
     try:
         parsed_intents = tuple(
@@ -590,10 +657,12 @@ def _is_sha256(value: str) -> bool:
 
 
 __all__ = [
+    "COMPANION_EXPRESSION_BATCH_SCHEMA",
     "COMPANION_EXPRESSION_EFFECT_SCHEMA",
     "COMPANION_EXPRESSION_ENQUEUE_EFFECT",
     "CompanionExpressionEffectError",
     "compile_companion_expression_effect_payloads",
+    "parse_companion_expression_effect_batch_payload",
     "parse_companion_expression_effect_payload",
     "verify_companion_expression_command",
 ]

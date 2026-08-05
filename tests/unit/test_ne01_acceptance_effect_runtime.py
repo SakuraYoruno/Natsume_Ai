@@ -7,13 +7,14 @@ from typing import Any
 
 import pytest
 
+from host_brain.app.governed_acceptance_effect_projection import (
+    dispatch_accepted_effects,
+)
 from host_brain.composition.runtime_group import (
     GovernedRuntimeGroup,
     GovernedRuntimeGroupCloseError,
 )
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
-    ACCEPTANCE_EFFECT_RECOVERY_PENDING,
-    AcceptanceEffectDispatchError,
     AcceptanceEffectDispatcher,
     AcceptanceEffectRuntime,
 )
@@ -374,6 +375,62 @@ async def test_dispatch_graph_reports_other_owner_claim_as_recovery_pending() ->
 
 
 @pytest.mark.asyncio
+async def test_governed_projection_reports_visible_reply_and_background_work() -> None:
+    calls: list[tuple[str, int]] = []
+
+    class InteractiveDispatcher:
+        async def dispatch_interactive_graph(
+            self,
+            *,
+            graph_id: str,
+            graph_revision: int,
+        ) -> tuple[dict[str, Any], ...]:
+            calls.append((graph_id, graph_revision))
+            return (
+                {
+                    "effect_type": "conversation.user_turn",
+                    "status": "COMMITTED",
+                },
+                {
+                    "effect_type": "surface.reply_delivery",
+                    "status": "COMMITTED",
+                },
+                {
+                    "effect_type": "conversation.preference_signal",
+                    "status": "PENDING",
+                    "attempt_count": 0,
+                },
+            )
+
+        async def dispatch_graph(self, **_kwargs: Any):
+            raise AssertionError("interactive graph must use the reply cutoff")
+
+    projected = await dispatch_accepted_effects(
+        {
+            "execution_receipt": {
+                "accepted": True,
+                "status": "ACCEPTED",
+                "graph_id": "graph-interactive-summary",
+                "graph_revision": 2,
+            }
+        },
+        InteractiveDispatcher(),
+    )
+
+    assert calls == [("graph-interactive-summary", 2)]
+    assert projected["audit_refs"]["acceptance_effects"] == {
+        "count": 3,
+        "committed": 2,
+        "failed": 0,
+        "pending": 1,
+        "recovery_pending": 0,
+        "dispatch_status": "DELIVERY_COMMITTED_BACKGROUND_PENDING",
+        "delivery_committed": True,
+        "background_pending": 1,
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_method", ["stop", "join"])
 async def test_group_close_aggregates_review_surface_and_effect_failures(
     failure_method: str,
@@ -441,7 +498,7 @@ async def test_group_close_aggregates_review_surface_and_effect_failures(
 
 
 @pytest.mark.asyncio
-async def test_effect_runtime_blocks_admission_while_startup_recovery_is_pending(
+async def test_effect_runtime_quarantines_startup_pending_without_blocking_host(
 ) -> None:
     row = {
         "effect_id": "acceptance-effect://sha256/startup-held",
@@ -460,14 +517,14 @@ async def test_effect_runtime_blocks_admission_while_startup_recovery_is_pending
         recovery_observer=lambda item: observations.append(dict(item)),
     )
 
-    with pytest.raises(AcceptanceEffectDispatchError) as pending:
-        await runtime.activate()
-
-    assert pending.value.reason_code == ACCEPTANCE_EFFECT_RECOVERY_PENDING
-    assert runtime.active is False
-    assert len(observations) == 1
-    assert observations[0]["status"] == "FAILED"
-    assert observations[0]["error_type"].endswith(
-        "AcceptanceEffectDispatchError"
-    )
-    assert "startup-held" not in str(observations[0])
+    await runtime.activate()
+    try:
+        assert runtime.active is True
+        assert len(observations) == 1
+        assert observations[0]["status"] == "FAILED"
+        assert observations[0]["error_type"].endswith(
+            "AcceptanceEffectDispatchError"
+        )
+        assert "startup-held" not in str(observations[0])
+    finally:
+        await runtime.aclose()

@@ -7,6 +7,8 @@ import sqlite3
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from natsume_contracts.identity import (
     CredentialProof,
     CredentialProofKind,
@@ -19,6 +21,10 @@ from natsume_contracts.identity import (
 from host_brain.app.input_service_gateway import (
     complete_host_gateway_ingress,
     evaluate_host_gateway_ingress,
+)
+from host_brain.composition.command_ingress import (
+    CommandIngressCompositionError,
+    build_process_command_ingress_container,
 )
 from host_brain.persistence.secure_ingress_repository import SECURE_INGRESS_MIGRATION_SHA256
 from host_brain.secure_ingress import (
@@ -33,6 +39,10 @@ NOW = 1_900_000_000_000
 SECRET = "task0488-host-gateway-unit-secret"
 PRINCIPAL_ID = "service.edge.gateway"
 KEY_ID = "edge.gateway.hmac.v1"
+SCHEDULER_SECRET = "host-scheduler-clock-unit-secret"
+SCHEDULER_PRINCIPAL_ID = "service.host.scheduler-clock"
+SCHEDULER_TENANT_ID = "local"
+SCHEDULER_KEY_ID = "host.scheduler.clock.hmac.v1"
 
 
 class _Request:
@@ -167,6 +177,201 @@ def _env() -> dict[str, str]:
         "HOST_EDGE_GATEWAY_HMAC_SECRET": SECRET,
         "HOST_EDGE_GATEWAY_HMAC_KEY_ID": KEY_ID,
     }
+
+
+def _remove_seeded_authority(db_path: Path) -> None:
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DELETE FROM secure_ingress_credential")
+        conn.execute("DELETE FROM secure_ingress_principal")
+
+
+def test_command_ingress_composition_seeds_gateway_identity_idempotently(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    authority = first.store.resolve(
+        principal_id=PRINCIPAL_ID,
+        key_id=KEY_ID,
+        at_ms=NOW,
+    )
+    assert authority is not None
+    assert authority.granted_scopes == ("host:write",)
+    assert authority.allowed_audiences == ("host",)
+    assert authority.allowed_actions == ("host:input",)
+    first.close()
+
+    restarted = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    restarted.close()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_principal"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_credential"
+        ).fetchone()[0] == 1
+
+
+def test_command_ingress_composition_seeds_enabled_scheduler_clock_identity(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={SCHEDULER_KEY_ID: SCHEDULER_SECRET},
+        scheduler_clock_enabled=True,
+        scheduler_principal_id=SCHEDULER_PRINCIPAL_ID,
+        scheduler_tenant_id=SCHEDULER_TENANT_ID,
+        scheduler_key_id=SCHEDULER_KEY_ID,
+    )
+    authority = first.store.resolve(
+        principal_id=SCHEDULER_PRINCIPAL_ID,
+        key_id=SCHEDULER_KEY_ID,
+        at_ms=NOW,
+    )
+    assert authority is not None
+    assert authority.granted_scopes == ("scheduler:admin",)
+    assert authority.allowed_audiences == ("scheduler",)
+    assert authority.allowed_actions == ("scheduler:admin",)
+    first.close()
+
+    restarted = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={SCHEDULER_KEY_ID: SCHEDULER_SECRET},
+        scheduler_clock_enabled=True,
+        scheduler_principal_id=SCHEDULER_PRINCIPAL_ID,
+        scheduler_tenant_id=SCHEDULER_TENANT_ID,
+        scheduler_key_id=SCHEDULER_KEY_ID,
+    )
+    restarted.close()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_principal"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM secure_ingress_credential"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            """
+            SELECT secret_ref FROM secure_ingress_credential
+            WHERE principal_id = ? AND key_id = ?
+            """,
+            (SCHEDULER_PRINCIPAL_ID, SCHEDULER_KEY_ID),
+        ).fetchone()[0] == "env://HOST_SCHEDULER_CLOCK_HMAC_SECRET"
+
+
+def test_command_ingress_composition_rejects_enabled_scheduler_without_secret(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+
+    with pytest.raises(
+        CommandIngressCompositionError,
+        match="SchedulerClock lacks an explicit service identity",
+    ):
+        build_process_command_ingress_container(
+            canonical_db_path=db_path,
+            mode="ENFORCE",
+            hmac_secrets={},
+            scheduler_clock_enabled=True,
+            scheduler_principal_id=SCHEDULER_PRINCIPAL_ID,
+            scheduler_tenant_id=SCHEDULER_TENANT_ID,
+            scheduler_key_id=SCHEDULER_KEY_ID,
+        )
+
+
+def test_command_ingress_composition_rejects_gateway_authority_drift(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    first.close()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE secure_ingress_principal
+            SET granted_scopes_json = '["host:admin"]'
+            WHERE principal_id = ?
+            """,
+            (PRINCIPAL_ID,),
+        )
+
+    with pytest.raises(CommandIngressCompositionError):
+        build_process_command_ingress_container(
+            canonical_db_path=db_path,
+            mode="ENFORCE",
+            hmac_secrets={KEY_ID: SECRET},
+            gateway_principal_id=PRINCIPAL_ID,
+            gateway_key_id=KEY_ID,
+        )
+
+
+def test_command_ingress_composition_preserves_valid_rotated_secret_reference(
+    tmp_path: Path,
+) -> None:
+    db_path = _database(tmp_path)
+    _remove_seeded_authority(db_path)
+    first = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    first.close()
+    rotated_ref = "env://HOST_EDGE_GATEWAY_HMAC_SECRET_ROTATED"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE secure_ingress_credential
+            SET secret_ref = ?
+            WHERE principal_id = ? AND key_id = ?
+            """,
+            (rotated_ref, PRINCIPAL_ID, KEY_ID),
+        )
+
+    restarted = build_process_command_ingress_container(
+        canonical_db_path=db_path,
+        mode="ENFORCE",
+        hmac_secrets={KEY_ID: SECRET},
+        gateway_principal_id=PRINCIPAL_ID,
+        gateway_key_id=KEY_ID,
+    )
+    restarted.close()
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            """
+            SELECT secret_ref FROM secure_ingress_credential
+            WHERE principal_id = ? AND key_id = ?
+            """,
+            (PRINCIPAL_ID, KEY_ID),
+        ).fetchone()[0] == rotated_ref
 
 
 def test_valid_exact_raw_body_is_allowed_and_restart_duplicate_is_stable(tmp_path: Path) -> None:

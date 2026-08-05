@@ -507,7 +507,16 @@ def _derived_constraints(
     )
     if binding_risk > 5:
         raise IntentAuthorityError("canonical grant risk_level is invalid")
-    risk = max(int(work_order.risk_level), int(node.risk_level), binding_risk)
+    # The parent grant records the highest risk the Governor authorized.  A
+    # capability search may select a narrower, lower-risk path inside that
+    # ceiling; treating the ceiling as the selected node's actual risk makes
+    # every broad Plan grant self-block at admission.  Fail closed if compiled
+    # work exceeds the grant, then apply policy to the actual immutable work.
+    risk = max(int(work_order.risk_level), int(node.risk_level))
+    if risk > binding_risk:
+        raise IntentAuthorityError(
+            "canonical task risk exceeds the durable grant ceiling"
+        )
     if risk >= 3:
         result["risk_constraints"] = (
             ContextConstraintV1(

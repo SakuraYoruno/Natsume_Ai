@@ -42,6 +42,7 @@ def _log_input_event(
     source: str = "GATEWAY",
     session_id: str = "qq_dm_obs_001",
     status: str | None = None,
+    gateway_delivery_committed: bool = False,
     ts_ms: int,
 ) -> None:
     normalized_status = str(status or ("OK" if "COMPLETED" in event_type else event_type.replace("INPUT_", ""))).upper()
@@ -55,6 +56,14 @@ def _log_input_event(
             "stage": f"input_dispatch.{event_type.lower()}",
             "payload": {
                 "source": source,
+                **(
+                    {
+                        "gateway_delivery_authority": "acceptance_effect_outbox",
+                        "gateway_delivery_state": "OUTBOX_COMMITTED",
+                    }
+                    if gateway_delivery_committed
+                    else {}
+                ),
             },
             "detail": event_type,
             "ts_ms": ts_ms,
@@ -87,6 +96,16 @@ def test_input_humanoid_loop_trend_returns_bucketed_rates(client, ledger):
         ts_ms=now - 15 * 60 * 1000 + 2600,
     )
 
+    # req-4: current governed reply path; no retired ACK/progress event.
+    _log_input_event(ledger, request_id="req-trend-4", event_type="INPUT_ACCEPTED", ts_ms=now - 5 * 60 * 1000)
+    _log_input_event(
+        ledger,
+        request_id="req-trend-4",
+        event_type="INPUT_COMPLETED",
+        gateway_delivery_committed=True,
+        ts_ms=now - 5 * 60 * 1000 + 1200,
+    )
+
     # non-gateway should be ignored
     _log_input_event(
         ledger,
@@ -102,10 +121,11 @@ def test_input_humanoid_loop_trend_returns_bucketed_rates(client, ledger):
     data = resp.json()
 
     assert len(data["timeseries_labels"]) == 6
-    assert sum(data["timeseries_total_gateway_requests"]) == 3
-    assert sum(data["timeseries_completed_requests"]) == 2
+    assert sum(data["timeseries_total_gateway_requests"]) == 4
+    assert sum(data["timeseries_completed_requests"]) == 3
     assert sum(data["timeseries_failed_requests"]) == 1
-    assert sum(data["timeseries_closed_loop_requests"]) == 1
+    assert sum(data["timeseries_closed_loop_requests"]) == 2
+    assert sum(data["timeseries_reply_committed_requests"]) == 1
     assert sum(data["timeseries_ack_touched_requests"]) == 2
     assert sum(data["timeseries_progress_touched_requests"]) == 1
     assert sum(data["timeseries_deviation_detected_requests"]) == 1
@@ -113,17 +133,20 @@ def test_input_humanoid_loop_trend_returns_bucketed_rates(client, ledger):
 
     completion_rates = [v for v in data["timeseries_completion_rate"] if v is not None]
     closed_loop_rates = [v for v in data["timeseries_closed_loop_rate"] if v is not None]
+    reply_commit_rates = [v for v in data["timeseries_reply_commit_rate"] if v is not None]
     ack_touch_rates = [v for v in data["timeseries_ack_touch_rate"] if v is not None]
     progress_touch_rates = [v for v in data["timeseries_progress_touch_rate"] if v is not None]
     deviation_recovery_rates = [v for v in data["timeseries_deviation_recovery_rate"] if v is not None]
 
     assert completion_rates
     assert closed_loop_rates
+    assert reply_commit_rates
     assert ack_touch_rates
     assert progress_touch_rates
     assert deviation_recovery_rates
     assert max(completion_rates) == 100.0
     assert max(closed_loop_rates) == 100.0
+    assert max(reply_commit_rates) == 100.0
     assert max(ack_touch_rates) == 100.0
     assert max(progress_touch_rates) == 100.0
     assert min(deviation_recovery_rates) == 0.0

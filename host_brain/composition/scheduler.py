@@ -186,6 +186,7 @@ def build_process_scheduler_container(
     current_mode: Callable[[], str],
     default_handler: SchedulerHandler,
     task_handlers: Mapping[str, SchedulerHandler] | None = None,
+    task_reconcilers: Mapping[str, SchedulerHandler] | None = None,
     seed_definitions: Iterable[Any] = (),
     seed_worker_keys: Mapping[str, str] | None = None,
     retired_task_ids: Iterable[str] = (),
@@ -217,6 +218,8 @@ def build_process_scheduler_container(
     workers.register("scheduler_production", default_handler)
     for worker_key, handler in dict(task_handlers or {}).items():
         workers.register(str(worker_key), handler)
+    for worker_key, reconciler in dict(task_reconcilers or {}).items():
+        workers.register_reconciler(str(worker_key), reconciler)
     policy = SchedulerDefinitionPolicyEvaluator(
         current_mode=current_mode,
         resource_gate=resource_gate,

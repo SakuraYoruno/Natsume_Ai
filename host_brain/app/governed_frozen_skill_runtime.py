@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Mapping
+import hashlib
 import time
 from typing import Any
 
@@ -20,6 +21,13 @@ from host_brain.app.governed_skill_execution_ports import (
     GovernedSkillExecutionPorts,
     execute_frozen_governed_skill,
     record_governed_skill_execution,
+)
+from host_brain.skills.governed_execution_support import (
+    GovernedSkillExecutionOutcome,
+)
+from host_brain.digital_life.governed_companion_presentation import (
+    GovernedCompanionPresentationError,
+    build_governed_companion_expression_intents,
 )
 from host_brain.app.governed_task_authority import (
     GOVERNED_HOST_AUTHORITY_INVALID,
@@ -103,6 +111,18 @@ _MEMORY_LONG_TERM_TAGS = frozenset(
 )
 
 
+def _skill_companion_presentation_allowed(command: HostCommand) -> bool:
+    """Return whether this Skill result is itself visible to the user.
+
+    Every Skill node inside an atomic Plan is an intermediate dependency.  The
+    Plan's unique Chat result node owns conversation/Life/delivery effects, so
+    presenting an intermediate Skill would both leak internal output and
+    create duplicate ``foreground_completed`` effects for one request.
+    """
+
+    return str(command.route_type or "").strip().lower() != "plan"
+
+
 def _frozen_node_executor_payload(
     *,
     command: HostCommand,
@@ -165,6 +185,120 @@ def _frozen_node_executor_payload(
     return payload
 
 
+def _prepare_frozen_skill_input(
+    *,
+    command: HostCommand,
+    work_order: WorkOrderV3,
+    node_id: str,
+) -> tuple[str, dict[str, Any]]:
+    """Resolve and validate immutable Skill input without executing effects."""
+
+    if str(command.route_type or "").strip().lower() == "skill":
+        _require_fail_closed_direct_skill_work_order(work_order)
+        _assert_work_order_command_binding(work_order, command)
+    else:
+        _require_fail_closed_governed_work_order(work_order, command=command)
+    pack = dict(work_order.input_pack or {})
+    binding = _planning_node_binding(work_order, node_id=node_id)
+    target = str(binding.get("target_id") or "").strip()
+    route = str(binding.get("worker_route") or "").strip().lower()
+    direct_intent = _mapping(pack.get("intent_draft"))
+    if (
+        route == "skill"
+        and str(direct_intent.get("route") or "").strip().lower() == "skill"
+    ):
+        intent_draft = direct_intent
+    else:
+        approved_inputs = _mapping(pack.get("approved_candidate_inputs"))
+        candidate_id = str(binding.get("candidate_id") or "").strip()
+        candidate_input = _mapping(approved_inputs.get(candidate_id))
+        intent_draft = {
+            "route": route,
+            "target_id": target,
+            "task": str(
+                candidate_input.get("objective")
+                or binding.get("objective")
+                or ""
+            ).strip(),
+            "args": _mapping(candidate_input.get("args")),
+        }
+    if str(intent_draft.get("route") or "").strip().lower() != "skill":
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_ROUTE_UNSUPPORTED,
+            "frozen worker accepts only a direct skill intent",
+        )
+    if not target or str(intent_draft.get("target_id") or "").strip() != target:
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_ROUTE_UNSUPPORTED,
+            "durable skill intent target differs from its frozen TaskNode binding",
+        )
+    if target.startswith("mcp::"):
+        # Stale durable graphs must fail before Preview issuance, grant
+        # reopening or registry/handler access. MCP provider execution is
+        # legal only as a governed Tool node with an immutable binding.
+        raise GovernedHostAdapterError(
+            MCP_TASK_AUTHORITY_REQUIRED,
+            "retired MCP Skill target requires a governed Tool Task node",
+        )
+    if target not in set(work_order.capability_requirements):
+        raise GovernedHostAdapterError(
+            GOVERNED_HOST_AUTHORITY_INVALID,
+            "direct skill target is absent from WorkOrderV3 capability lineage",
+        )
+    return target, _mapping(intent_draft.get("args"))
+
+
+def _memory_store_proposal_outcome(
+    *,
+    request_id: str,
+    execution_args: Mapping[str, Any],
+) -> GovernedSkillExecutionOutcome:
+    """Return an effect-free proposal; the accepted handler owns the write."""
+
+    content = str(execution_args.get("content") or "").strip()
+    digest = hashlib.sha256(
+        f"{str(request_id or '').strip()}\nmemory_store".encode("utf-8")
+    ).hexdigest()
+    receipt_ref = f"skillreceipt://sha256/{digest}"
+    if not content:
+        return GovernedSkillExecutionOutcome(
+            route_type="skill",
+            target_id="memory_store",
+            skill_family="memory",
+            success=False,
+            result_text="",
+            error_text="MEMORY_CONTENT_REQUIRED",
+            latency_ms=0,
+            payload={
+                "result": {
+                    "status": "REJECTED",
+                    "reason_code": "MEMORY_CONTENT_REQUIRED",
+                },
+                "receipt_ref": receipt_ref,
+            },
+        )
+    return GovernedSkillExecutionOutcome(
+        route_type="skill",
+        target_id="memory_store",
+        skill_family="memory",
+        success=True,
+        result_text="好，我记住了。",
+        error_text="",
+        latency_ms=0,
+        payload={
+            "result": {
+                "status": "OK",
+                "action": "store",
+                "detail": {
+                    "content_length": len(content),
+                    "accepted_effect_pending": True,
+                },
+            },
+            "receipt_ref": receipt_ref,
+        },
+    )
+
+
 class _FrozenSkillWorker:
     def __init__(
         self,
@@ -183,6 +317,38 @@ class _FrozenSkillWorker:
         self._action_preview_service = action_preview_service
         self._review_store = review_store
 
+    def prepare_execution(
+        self,
+        *,
+        command: HostCommand,
+        work_order: WorkOrderV3,
+        node_id: str,
+    ) -> None:
+        """Fail deterministic Skill preparation before Operation reservation.
+
+        Dependency availability and frozen production payload validation are
+        side-effect-free.  Running them after reserving the external Operation
+        incorrectly turns a known local configuration error into an unknown
+        effect that requires reconciliation.
+        """
+
+        target, execution_args = _prepare_frozen_skill_input(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+        )
+        _require_frozen_skill_dependencies(
+            ports=self._execution_ports,
+            target=target,
+            args=execution_args,
+        )
+        _frozen_node_executor_payload(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+            target_id=target,
+        )
+
     async def execute_stream(
         self,
         *,
@@ -190,54 +356,28 @@ class _FrozenSkillWorker:
         work_order: WorkOrderV3,
         execution_context: Mapping[str, Any],
     ) -> AsyncIterator[dict[str, Any]]:
-        if str(command.route_type or "").strip().lower() == "skill":
-            _require_fail_closed_direct_skill_work_order(work_order)
-            _assert_work_order_command_binding(work_order, command)
-        else:
-            _require_fail_closed_governed_work_order(work_order, command=command)
-        pack = dict(work_order.input_pack or {})
         node_id = str(execution_context.get("node_id") or "").strip()
+        target, execution_args = _prepare_frozen_skill_input(
+            command=command,
+            work_order=work_order,
+            node_id=node_id,
+        )
+        pack = dict(work_order.input_pack or {})
         binding = _planning_node_binding(work_order, node_id=node_id)
-        target = str(binding.get("target_id") or "").strip()
-        route = str(binding.get("worker_route") or "").strip().lower()
         execution_context = dict(execution_context)
         direct_intent = _mapping(pack.get("intent_draft"))
-        if route == "skill" and str(direct_intent.get("route") or "").strip().lower() == "skill":
+        if str(direct_intent.get("route") or "").strip().lower() == "skill":
             intent_draft = direct_intent
         else:
             approved_inputs = _mapping(pack.get("approved_candidate_inputs"))
             candidate_id = str(binding.get("candidate_id") or "").strip()
             candidate_input = _mapping(approved_inputs.get(candidate_id))
             intent_draft = {
-                "route": route,
+                "route": "skill",
                 "target_id": target,
                 "task": str(candidate_input.get("objective") or binding.get("objective") or "").strip(),
                 "args": _mapping(candidate_input.get("args")),
             }
-        if str(intent_draft.get("route") or "").strip().lower() != "skill":
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_ROUTE_UNSUPPORTED,
-                "frozen worker accepts only a direct skill intent",
-            )
-        if not target or str(intent_draft.get("target_id") or "").strip() != target:
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_ROUTE_UNSUPPORTED,
-                "durable skill intent target differs from its frozen TaskNode binding",
-            )
-        if target.startswith("mcp::"):
-            # Stale durable graphs must fail before Preview issuance, grant
-            # reopening or registry/handler access. MCP provider execution is
-            # legal only as a governed Tool node with an immutable binding.
-            raise GovernedHostAdapterError(
-                MCP_TASK_AUTHORITY_REQUIRED,
-                "retired MCP Skill target requires a governed Tool Task node",
-            )
-        if target not in set(work_order.capability_requirements):
-            raise GovernedHostAdapterError(
-                GOVERNED_HOST_AUTHORITY_INVALID,
-                "direct skill target is absent from WorkOrderV3 capability lineage",
-            )
-        execution_args = _mapping(intent_draft.get("args"))
         node_grant_ref = str(execution_context.get("node_grant_ref") or "").strip()
         if not node_grant_ref:
             raise GovernedHostAdapterError(
@@ -307,14 +447,18 @@ class _FrozenSkillWorker:
             "scene_decision_v2": pack.get("scene_decision_v2"),
             "scene_identity_v2": pack.get("scene_identity_v2"),
         }
-        preview = self._preview_effectful_skill(
-            command=command,
-            work_order=work_order,
-            execution_context=execution_context,
-            target=target,
-            execution_args=execution_args,
-            governor_result=governor_result,
-            verified_grant=verified_grant.to_dict(),
+        preview = (
+            None
+            if target == "memory_store"
+            else self._preview_effectful_skill(
+                command=command,
+                work_order=work_order,
+                execution_context=execution_context,
+                target=target,
+                execution_args=execution_args,
+                governor_result=governor_result,
+                verified_grant=verified_grant.to_dict(),
+            )
         )
         _require_frozen_skill_dependencies(
             ports=self._execution_ports,
@@ -327,26 +471,32 @@ class _FrozenSkillWorker:
             node_id=node_id,
             target_id=target,
         )
-        outcome = await asyncio.to_thread(
-            execute_frozen_governed_skill,
-            ports=self._execution_ports,
-            durable_authority_ledger=self._ledger,
-            request_id=command.request_id,
-            session_id=command.session_id,
-            person_id=str(pack.get("person_id") or command.principal_id),
-            intent_id=child_intent_id,
-            skill_id=target,
-            task_text=str(intent_draft.get("task") or binding.get("objective") or work_order.objective),
-            user_message=str(pack.get("user_message") or work_order.objective),
-            governor_result=governor_result,
-            intent_draft=child_intent,
-            emotion_context=_mapping(pack.get("emotion_context")),
-            render_target_lang=str(pack.get("render_target_lang") or "zh"),
-            governed_execution_context=execution_context,
-            execution_args_override=execution_args,
-            verified_node_grant=verified_grant.to_dict(),
-            frozen_executor_payload=frozen_executor_payload,
-        )
+        if target == "memory_store":
+            outcome = _memory_store_proposal_outcome(
+                request_id=command.request_id,
+                execution_args=execution_args,
+            )
+        else:
+            outcome = await asyncio.to_thread(
+                execute_frozen_governed_skill,
+                ports=self._execution_ports,
+                durable_authority_ledger=self._ledger,
+                request_id=command.request_id,
+                session_id=command.session_id,
+                person_id=str(pack.get("person_id") or command.principal_id),
+                intent_id=child_intent_id,
+                skill_id=target,
+                task_text=str(intent_draft.get("task") or binding.get("objective") or work_order.objective),
+                user_message=str(pack.get("user_message") or work_order.objective),
+                governor_result=governor_result,
+                intent_draft=child_intent,
+                emotion_context=_mapping(pack.get("emotion_context")),
+                render_target_lang=str(pack.get("render_target_lang") or "zh"),
+                governed_execution_context=execution_context,
+                execution_args_override=execution_args,
+                verified_node_grant=verified_grant.to_dict(),
+                frozen_executor_payload=frozen_executor_payload,
+            )
         payload = _mapping(getattr(outcome, "payload", None))
         receipt_ref = str(payload.get("receipt_ref") or "").strip()
         narrative = str(getattr(outcome, "result_text", "") or "").strip()
@@ -407,10 +557,50 @@ class _FrozenSkillWorker:
                         "action_preview_event_id": preview["event_id"],
                     }
                     if preview is not None
-                    else {"action_preview_status": "LEGACY_CONTEXT_NOT_APPLICABLE"}
+                    else {
+                        "action_preview_status": (
+                            "LOCAL_ACCEPTANCE_PROPOSAL"
+                            if target == "memory_store"
+                            else "LEGACY_CONTEXT_NOT_APPLICABLE"
+                        )
+                    }
                 ),
             },
         }
+        if success and _skill_companion_presentation_allowed(command):
+            request_body = _mapping(pack.get("request_body"))
+            try:
+                expression_intents = build_governed_companion_expression_intents(
+                    request_id=command.request_id,
+                    session_id=command.session_id,
+                    workspace_id=str(pack.get("workspace_id") or "").strip(),
+                    relationship_subject_id=str(pack.get("subject_id") or "").strip(),
+                    runtime_context_schema=str(
+                        pack.get("runtime_context_schema") or ""
+                    ).strip(),
+                    input_source=str(request_body.get("input_source") or ""),
+                    suppress_edge_tts=bool(request_body.get("suppress_edge_tts")),
+                    suppress_edge_vts=bool(request_body.get("suppress_edge_vts")),
+                    emotion_context=_mapping(
+                        pack.get("prepared_emotion_context")
+                        or pack.get("emotion_context")
+                    ),
+                    narrative=narrative,
+                    decision="APPROVE",
+                    task_mode=str(
+                        _mapping(pack.get("surface_task_control")).get("task_mode")
+                        or ""
+                    ).strip(),
+                    created_at_ms=command.created_at_ms,
+                    metadata_source="governed_skill_companion_presentation",
+                )
+            except GovernedCompanionPresentationError as exc:
+                raise GovernedHostAdapterError(
+                    GOVERNED_HOST_AUTHORITY_INVALID,
+                    str(exc),
+                ) from exc
+            if expression_intents:
+                commit["acceptance_effect_intents"] = list(expression_intents)
         raw_agent_result = payload.get("result")
         protected_stage = (
             raw_agent_result.get("_protected_stage")
@@ -436,7 +626,7 @@ class _FrozenSkillWorker:
             public_agent_result = dict(raw_agent_result)
             public_agent_result.pop("_protected_stage", None)
             if success:
-                commit["acceptance_effect_intents"] = [
+                commit.setdefault("acceptance_effect_intents", []).append(
                     {
                         "effect_type": AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
                         "commit_scope": "NODE",
@@ -462,7 +652,7 @@ class _FrozenSkillWorker:
                             ),
                         },
                     }
-                ]
+                )
             else:
                 # A failed write-capable Agent still owns a real, sealed
                 # Workspace stage.  Persist only its bounded descriptor in
@@ -540,6 +730,7 @@ class _FrozenSkillWorker:
                 "receipt_ref": projection_id,
             }
         yield commit
+
 
     def _consumed_pre_execution_review_ref(
         self,
@@ -735,8 +926,11 @@ def _trusted_skill_budget_observations(
         and str(metadata.get("execution_authority") or "").strip()
         == "canonical_agent_executor"
     ):
+        # Capability Broker output is sanitized for presentation and may replace
+        # token-shaped values with ``[REDACTED]``.  Its trace is still useful for
+        # counting tool calls, but it is not a budget authority.  Exact model
+        # usage comes only from the task-bound attestation below.
         observations = {
-            "model_attempts": list(metadata.get("model_attempts") or []),
             "trace": dict(metadata.get("trace") or {})
             if isinstance(metadata.get("trace"), Mapping)
             else {},
@@ -806,9 +1000,7 @@ def _trusted_skill_budget_observations(
             GOVERNED_HOST_AUTHORITY_INVALID,
             "governed Skill model budget attestation binding drifted",
         )
-    existing = list(observations.get("model_attempts") or [])
     observations["model_attempts"] = [
-        *existing,
         *(dict(item) for item in model_attempts),
     ]
     return observations

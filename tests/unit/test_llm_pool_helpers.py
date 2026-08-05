@@ -1,8 +1,26 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from host_brain.integrations import llm_helpers as helpers
+
+
+@pytest.fixture(autouse=True)
+def _isolated_pool_runtime(monkeypatch: pytest.MonkeyPatch):
+    """Make every pool case independent of prior scene policy and cache state."""
+
+    for name in tuple(os.environ):
+        if name.startswith("HOST_LLM_POOL_") or name == (
+            "PENTEST_LLM_ATTEMPT_TIMEOUT_HARD_CAP_MS"
+        ):
+            monkeypatch.delenv(name, raising=False)
+    helpers._POOL_COMPLETION_CACHE.clear()
+    helpers._POOL_COOLDOWN_UNTIL_MS.clear()
+    yield
+    helpers._POOL_COMPLETION_CACHE.clear()
+    helpers._POOL_COOLDOWN_UNTIL_MS.clear()
 
 
 def test_complete_llm_with_pool_falls_back_and_uses_cache(monkeypatch: pytest.MonkeyPatch) -> None:

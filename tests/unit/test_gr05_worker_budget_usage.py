@@ -10,6 +10,10 @@ from host_brain.app.governed_route_executors import (
     FrozenDelegateRouteExecutor,
     GovernedRouteExecutorError,
 )
+from host_brain.app.governed_delegate_dispatch import (
+    GovernedDelegateTarget,
+    READONLY_DELEGATE_EXECUTION_MODE,
+)
 from host_brain.app import model_provider_composition
 from host_brain.model_runtime import (
     CallableProviderAdapter,
@@ -380,6 +384,7 @@ async def test_frozen_delegate_budget_projection_trusts_only_bound_zero_attestat
     async def dispatch(**kwargs):  # noqa: ANN003
         frozen = kwargs["frozen"]
         invocation_ref = "governed-delegate://sha256/" + "a" * 64
+        policy = dict(frozen.input_pack["delegate_target_policy"])
         return {
             "route_type": "delegate",
             "target_id": "intent_agent",
@@ -390,6 +395,11 @@ async def test_frozen_delegate_budget_projection_trusts_only_bound_zero_attestat
                         "delegate_invocation_ref": invocation_ref,
                         "delegate_adapter": "test-port-free-readonly.v1",
                         "delegate_execution_mode": "PORT_FREE_READ_ONLY",
+                        "delegate_target_policy_ref": policy["policy_ref"],
+                        "delegate_review_mode": policy["review_mode"],
+                        "delegate_budget_mode": policy["budget_mode"],
+                        "delegate_effect_mode": policy["effect_mode"],
+                        "side_effects_executed": False,
                         "delegate_runtime_usage_attestation": (
                         build_readonly_delegate_usage_attestation(
                             command_id=frozen.command_id,
@@ -496,6 +506,14 @@ def test_application_model_transport_returns_usage_from_the_same_provider_call(
 
 
 def _budget_frozen(*, route: str, target_id: str) -> FrozenNodeInput:
+    input_pack = {"user_message": "hello"}
+    if route == "delegate":
+        input_pack["delegate_target_policy"] = GovernedDelegateTarget(
+            target_id=target_id,
+            handler=lambda _payload, _context: {},
+            adapter_id="test-port-free-readonly.v1",
+            execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+        ).policy_projection()
     return FrozenNodeInput(
         command_id=f"command-budget-{route}",
         request_id=f"request-budget-{route}",
@@ -515,7 +533,7 @@ def _budget_frozen(*, route: str, target_id: str) -> FrozenNodeInput:
         target_id=target_id,
         objective="measure canonical budget usage",
         input_refs=(),
-        _input_pack_json=json.dumps({"user_message": "hello"}),
+        _input_pack_json=json.dumps(input_pack),
         _input_artifacts_json="[]",
         node_grant_ref=f"governor-grant://child/{route}",
         parent_grant_ref=f"governor-grant://parent/{route}",

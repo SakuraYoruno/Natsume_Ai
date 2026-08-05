@@ -8,7 +8,7 @@
     "task_0461_commit": "030ad1f98aef134a337ad29430f8668c3aff90df",
     "m48a_frozen_head": "29bedcaf77138f73b1e032d6e2323711425b277c",
     "manifest_ref": "docs/35_quality/audits/NLE_WP00_BASELINE_MANIFEST_20260710.json",
-    "manifest_sha256": "3c71ae4f0a84f68026b4e6c1545368d7a4b1746dbe4ab24f0e5c580e1471289a",
+    "manifest_sha256": "5cb19d50b52c21ff9f687307b889d553bf73353b750c3973228df204c4e5a07e",
     "protected_entry_count": 26,
     "policy": "All protected user WIP, Pentest runtime canon data, ignored DB/model/secret/cache remain no-touch until their recorded owner transfers them."
   },

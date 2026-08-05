@@ -8,6 +8,11 @@ from host_brain.app.governed_delegate_dispatch import GovernedDelegateTarget
 from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     READONLY_DELEGATE_EXECUTION_MODE,
 )
+from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+    GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+    GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+)
 from host_brain.contracts.agent_runtime.control_route_execution_policy import (
     CONTROL_ROUTE_EXECUTION_POLICY_KEY,
     CONTROL_ROUTE_INTENT_REVIEW_REQUIRED,
@@ -83,6 +88,17 @@ def _governed_delegate_policy(target_id: str = "pentest_agent") -> dict:
         handler=lambda _payload, _context: {},
         adapter_id="readonly-pentest-domain-handoff.v1",
         execution_mode=READONLY_DELEGATE_EXECUTION_MODE,
+    ).policy_projection()
+
+
+def _governed_model_delegate_policy() -> dict:
+    return GovernedDelegateTarget(
+        target_id="translate_agent",
+        handler=lambda _payload, _context: {},
+        adapter_id="model-backed-translate.v1",
+        execution_mode=GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+        review_mode=GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+        budget_mode=GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
     ).policy_projection()
 
 
@@ -222,6 +238,41 @@ def test_enabled_delegate_freezes_target_policy_and_requires_durable_review() ->
             delegate_target_policy=tampered,
         )
     assert raised.value.reason_code == HOST_ROUTE_AUTHORITY_INVALID
+
+
+def test_low_risk_model_delegate_uses_task_budget_and_governor_review_waiver() -> None:
+    target_policy = _governed_model_delegate_policy()
+    contracts = _build(
+        "delegate",
+        "translate_agent",
+        delegate_target_policy=target_policy,
+    )
+
+    assert contracts.work_order.review_policy == {
+        "review_required": False,
+        "durable_review_required": False,
+        "mode": "governor_grant_review_waiver",
+        "reason": "governed_delegate_low_risk_waiver",
+        "waiver_authority": "governor_grant",
+        "waiver_ref": contracts.work_order.review_ref,
+        "frozen_delegate_policy_ref": target_policy["policy_ref"],
+    }
+    assert contracts.work_order.budget_policy is not None
+    assert contracts.work_order.budget_policy.limits.to_dict() == {
+        "token_count": 32_768,
+        "tool_call_count": 32,
+        "time_ms": 300_000,
+        "concurrency": 1,
+        "retry_count": 1,
+        "model_cost_micros": 1_000_000,
+    }
+    assert (
+        contracts.work_order.budget_policy.metadata["measurement_mode"]
+        == GOVERNED_MODEL_DELEGATE_BUDGET_MODE
+    )
+    assert contracts.work_order.budget_policy.metadata["enabled_target"] == (
+        "translate_agent"
+    )
 
 
 def test_operator_control_policy_is_content_addressed_and_bound_to_graph() -> None:

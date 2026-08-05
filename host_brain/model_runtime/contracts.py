@@ -311,6 +311,10 @@ _REQUIRED_MODEL_BUDGET_USAGE_DIMENSIONS = (
     "completion_tokens",
     "model_cost_micros",
 )
+_MINIMUM_MODEL_BUDGET_USAGE_DIMENSIONS = (
+    "token_count",
+    "completion_tokens",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,10 +368,16 @@ class ModelBudgetGuard:
         dimensions = tuple(
             dict.fromkeys(str(item or "").strip() for item in self.required_usage_dimensions)
         )
+        canonical_dimensions = tuple(
+            item
+            for item in _REQUIRED_MODEL_BUDGET_USAGE_DIMENSIONS
+            if item in dimensions
+        )
         if (
             not dimensions
             or not set(dimensions).issubset(_MODEL_BUDGET_USAGE_DIMENSIONS)
-            or dimensions != _REQUIRED_MODEL_BUDGET_USAGE_DIMENSIONS
+            or not set(_MINIMUM_MODEL_BUDGET_USAGE_DIMENSIONS).issubset(dimensions)
+            or dimensions != canonical_dimensions
         ):
             raise ValueError("model budget guard usage dimensions are invalid")
         object.__setattr__(self, "required_usage_dimensions", dimensions)

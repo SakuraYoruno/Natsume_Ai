@@ -3,6 +3,7 @@ param(
   [string]$EnvFile = "",
   [string]$RuntimeRoot = "",
   [string]$PidFile = "",
+  [string]$BindHost = "",
   [int]$Port = 0
 )
 
@@ -34,11 +35,35 @@ function Read-EnvFile {
 }
 
 function Get-ListeningPid {
-  param([int]$ProbePort)
-  $conn = Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($null -eq $conn) {
+  param(
+    [int]$ProbePort,
+    [string]$ProbeHost = ""
+  )
+  $connections = @(
+    Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue
+  )
+  if ($connections.Count -eq 0) {
     return $null
   }
+  if (-not [string]::IsNullOrWhiteSpace($ProbeHost)) {
+    $normalizedHost = $ProbeHost.Trim().TrimStart("[").TrimEnd("]").ToLowerInvariant()
+    if ($normalizedHost -eq "localhost") {
+      $normalizedHost = "127.0.0.1"
+    }
+    $conn = $connections |
+      Where-Object { ([string]$_.LocalAddress).ToLowerInvariant() -eq $normalizedHost } |
+      Select-Object -First 1
+    if ($null -eq $conn -and $normalizedHost -notin @("0.0.0.0", "::")) {
+      $conn = $connections |
+        Where-Object { ([string]$_.LocalAddress).ToLowerInvariant() -in @("0.0.0.0", "::") } |
+        Select-Object -First 1
+    }
+    if ($null -eq $conn) {
+      return $null
+    }
+    return [int]$conn.OwningProcess
+  }
+  $conn = $connections | Select-Object -First 1
   return [int]$conn.OwningProcess
 }
 
@@ -122,6 +147,15 @@ if (-not $PidFile) {
 $runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 
 $envValues = Read-EnvFile -Path $EnvFile
+if (-not $BindHost) {
+  if ($envValues.ContainsKey("HOST_APP_HOST")) {
+    $BindHost = [string]$envValues["HOST_APP_HOST"]
+  } elseif ($env:HOST_APP_HOST) {
+    $BindHost = [string]$env:HOST_APP_HOST
+  } else {
+    $BindHost = "127.0.0.1"
+  }
+}
 if ($Port -le 0) {
   if ($envValues.ContainsKey("HOST_APP_PORT")) {
     $Port = [int]$envValues["HOST_APP_PORT"]
@@ -158,7 +192,7 @@ if (Test-Path -Path $PidFile) {
 }
 
 if (-not $stopped) {
-  $listeningPid = Get-ListeningPid -ProbePort $Port
+  $listeningPid = Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost
   if ($null -ne $listeningPid) {
     if (Is-HostProcess -ProcessId $listeningPid) {
       $ok = Stop-ProcessTree -ProcessId $listeningPid

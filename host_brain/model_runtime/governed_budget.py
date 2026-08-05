@@ -47,8 +47,12 @@ def build_governed_model_budget_guard(
     graph_revision: int,
     node_id: str,
     attempt_id: str,
+    require_model_cost: bool = True,
 ) -> ModelBudgetGuard:
     """Project one exact ACTIVE Task budget snapshot into a model guard."""
+
+    if not isinstance(require_model_cost, bool):
+        _invalid("require_model_cost must be a boolean")
 
     raw = dict(budget or {})
     budget_id = _required_text(raw.get("budget_id"), field_name="budget_id")
@@ -97,6 +101,15 @@ def build_governed_model_budget_guard(
             max_token_count=remaining["token_count"],
             max_output_tokens=max_output_tokens,
             max_model_cost_micros=remaining["model_cost_micros"],
+            required_usage_dimensions=(
+                (
+                    "token_count",
+                    "completion_tokens",
+                    "model_cost_micros",
+                )
+                if require_model_cost
+                else ("token_count", "completion_tokens")
+            ),
         )
     except (TypeError, ValueError) as exc:
         raise GovernedModelBudgetError(

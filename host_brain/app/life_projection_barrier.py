@@ -147,6 +147,60 @@ def require_life_projection_barrier(
     }
 
 
+def require_life_projection_admission(
+    *,
+    reader: Any,
+    command_receipt: Mapping[str, Any],
+    command_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Prove command+intent atomicity without blocking on derived projections.
+
+    The canonical Life command, event, state head and immutable projection
+    intents are committed in one SQLite transaction.  Ordinary conversation
+    Acceptance therefore only needs to reopen that exact intent set.  The
+    app-local one-second projection pump owns delivery/retry and durable
+    receipts; a visible reply must not wait for Memory or Surface projections.
+    """
+
+    expected = _expected_projection_intents(
+        command_receipt=command_receipt,
+        command_payload=command_payload,
+    )
+    list_intents = getattr(reader, "list_projection_intents", None)
+    if not callable(list_intents):
+        raise LifeProjectionBarrierError(
+            "Life projection admission requires an app-local intent reader"
+        )
+    actual_rows = list_intents(str(command_receipt.get("command_id") or ""))
+    actual = {
+        str(row.get("intent_id") or ""): row
+        for row in (_mapping(item, "Life projection intent") for item in actual_rows)
+    }
+    expected_by_id = {row["intent_id"]: row for row in expected}
+    if actual != expected_by_id:
+        raise LifeProjectionBarrierError(
+            "Life projection intent set differs from accepted command"
+        )
+    material = {
+        "schema_version": "Natsume.life_projection_admission.v1",
+        "command_id": str(command_receipt.get("command_id") or ""),
+        "command_hash": str(command_receipt.get("command_hash") or ""),
+        "event_id": str(command_receipt.get("event_id") or ""),
+        "projection_intents": expected,
+    }
+    digest = hashlib.sha256(_canonical_json(material).encode("utf-8")).hexdigest()
+    return {
+        **dict(command_receipt),
+        "status": "APPLIED",
+        "command_receipt_ref": (
+            "life-event://id/" + str(command_receipt.get("event_id") or "")
+        ),
+        "projection_delivery_status": "QUEUED",
+        "projection_intent_count": len(expected),
+        "receipt_ref": f"life-projection-admission://sha256/{digest}",
+    }
+
+
 def _expected_projection_intents(
     *,
     command_receipt: Mapping[str, Any],
@@ -246,5 +300,6 @@ def _canonical_json(value: Any) -> str:
 __all__ = [
     "LifeProjectionBarrierError",
     "dispatch_and_require_life_projection_barrier",
+    "require_life_projection_admission",
     "require_life_projection_barrier",
 ]

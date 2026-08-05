@@ -52,6 +52,14 @@ class _ReplayCommandRepository:
         del surface, request_id
         return self.record
 
+    def validate_ingress_claim_result(self, command_id: str):
+        if (
+            self.record is None
+            or self.record["command"].command_id != command_id
+        ):
+            raise RuntimeError("command not found")
+        return self.record
+
 
 class _CapturingApplication:
     def __init__(self, repository: _ReplayCommandRepository) -> None:
@@ -312,6 +320,27 @@ async def test_secure_ingress_direct_routes_preserve_surface_principal_and_diges
         assert command.ingress_claim_ref == authority["claim_ref"]
         assert command.ingress_audit_ref == authority["audit_ref"]
         assert command.input_sha256 == "sha256:" + authority["body_sha256"]
+        if expected_surface is HostCommandSurface.GATEWAY:
+            admission = runtime.require_gateway_ingress_admission(
+                command_id=command.command_id,
+                claim_ref=authority["claim_ref"],
+                principal_id=authority["principal_id"],
+                body_sha256=authority["body_sha256"],
+            )
+            assert admission == {
+                "command_id": command.command_id,
+                "request_id": command.request_id,
+                "graph_id": command.graph_id,
+                "graph_revision": command.graph_revision,
+            }
+            with pytest.raises(GovernedHostAdapterError) as exc_info:
+                runtime.require_gateway_ingress_admission(
+                    command_id=command.command_id,
+                    claim_ref=authority["claim_ref"],
+                    principal_id=authority["principal_id"],
+                    body_sha256="f" * 64,
+                )
+            assert exc_info.value.reason_code == GOVERNED_HOST_AUTHORITY_INVALID
     finally:
         await runtime.aclose()
 

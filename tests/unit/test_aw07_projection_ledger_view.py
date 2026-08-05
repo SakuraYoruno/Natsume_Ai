@@ -133,6 +133,24 @@ def test_stats_source_authority_uses_canonical_model_attempts() -> None:
         "total_tokens": 12,
     }
 
+    delivery = sanitize_stats_row(
+        "voice_event_log",
+        {
+            "request_id": "request-delivery",
+            "event_type": "INPUT_COMPLETED",
+            "status": "OK",
+            "payload": {
+                "source": "GATEWAY",
+                "gateway_delivery_authority": "acceptance_effect_outbox",
+                "gateway_delivery_state": "OUTBOX_COMMITTED",
+                "reply_preview": "private reply body",
+            },
+        },
+    )
+    assert delivery["gateway_delivery_authority"] == "acceptance_effect_outbox"
+    assert delivery["gateway_delivery_state"] == "OUTBOX_COMMITTED"
+    assert "reply_preview" not in delivery
+
 
 def test_allowlisted_table_with_unresolved_canonical_source_is_unavailable() -> None:
     class _UnresolvedLedger:

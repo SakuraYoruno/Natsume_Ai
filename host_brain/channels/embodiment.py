@@ -17,6 +17,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Protocol
 
 from natsume_contracts.edge.embodiment_v1 import (
+    EMBODIMENT_COMMAND_EXPIRED,
     EMBODIMENT_KIND_AVATAR,
     EMBODIMENT_KIND_DESKTOP,
     EMBODIMENT_KIND_MATEENGINE,
@@ -146,6 +147,11 @@ class EmbodimentOutboxAck:
 
 class EmbodimentOutboxPort(Protocol):
     def enqueue(self, command: EmbodimentCommand) -> EmbodimentOutboxAck: ...
+
+    def enqueue_many(
+        self,
+        commands: tuple[EmbodimentCommand, ...],
+    ) -> tuple[EmbodimentOutboxAck, ...]: ...
 
 
 ReceiptObserver = Callable[[EmbodimentCommand, EmbodimentReceipt], None]
@@ -307,6 +313,19 @@ class _EdgeRpcEmbodimentCommandPort:
                 detail=exc.detail,
                 received_at_ms=now_ms(),
                 completed_at_ms=now_ms(),
+                event={"external_side_effects": False},
+            )
+        observed_now = now_ms()
+        if command.deadline_ms <= observed_now:
+            return EmbodimentReceipt(
+                command_id=command.command_id,
+                idempotency_key=command.idempotency_key,
+                accepted=False,
+                status="REJECTED",
+                reason_code=EMBODIMENT_COMMAND_EXPIRED,
+                detail="embodiment command expired before Host transport",
+                received_at_ms=command.issued_at_ms,
+                completed_at_ms=observed_now,
                 event={"external_side_effects": False},
             )
         leased_command = bind_command_to_lease(command, lease)
@@ -850,6 +869,76 @@ class HostEmbodimentRuntime:
         self._require_authority()
         return self._outbox.enqueue(command)
 
+    def enqueue_batch(
+        self,
+        commands: tuple[EmbodimentCommand, ...],
+        *,
+        action_preview_service: Any | None = None,
+        action_preview_event_id: str | None = None,
+        action_preview_boundary: Mapping[str, Any] | None = None,
+    ) -> tuple[EmbodimentOutboxAck, ...]:
+        """Atomically admit one Preview-bound local expression batch."""
+
+        values = tuple(commands)
+        if not values or len(values) > 66 or any(
+            not isinstance(command, EmbodimentCommand) for command in values
+        ):
+            raise ValueError("EMBODIMENT_COMMAND_BATCH_INVALID")
+        _require_terminal_embodiment_batch_preview(
+            commands=values,
+            action_preview_service=action_preview_service,
+            action_preview_event_id=action_preview_event_id,
+            action_preview_boundary=action_preview_boundary,
+        )
+        self._require_authority()
+        enqueue_many = getattr(self._outbox, "enqueue_many", None)
+        if not callable(enqueue_many):
+            raise RuntimeError("EMBODIMENT_OUTBOX_BATCH_UNAVAILABLE")
+        return tuple(enqueue_many(values))
+
+    def enqueue_accepted_companion_batch(
+        self,
+        commands: tuple[EmbodimentCommand, ...],
+        *,
+        acceptance_effect_payload: Mapping[str, Any],
+    ) -> tuple[EmbodimentOutboxAck, ...]:
+        """Admit a deterministic low-risk ExpressionPlan after Task Acceptance.
+
+        This boundary performs no network or device I/O.  The compiler has
+        already rebuilt every command from the accepted narrative and frozen
+        affective plan; the durable Edge dispatcher still executes each command
+        under its task-acceptance authority and node grant.
+        """
+
+        from host_brain.digital_life.companion_expression_acceptance import (  # noqa: PLC0415
+            parse_companion_expression_effect_batch_payload,
+        )
+
+        values = tuple(commands)
+        parsed = parse_companion_expression_effect_batch_payload(
+            acceptance_effect_payload
+        )
+        expected = tuple(item["command"] for item in parsed)
+        grant_refs = {str(command.grant_ref or "").strip() for command in values}
+        if (
+            not values
+            or values != expected
+            or len(grant_refs) != 1
+            or "" in grant_refs
+            or any(
+                not str(command.authority_ref or "").startswith(
+                    "authority://task-acceptance/sha256/"
+                )
+                for command in values
+            )
+        ):
+            raise RuntimeError("EMBODIMENT_ACCEPTED_BATCH_LINEAGE_DRIFT")
+        self._require_authority()
+        enqueue_many = getattr(self._outbox, "enqueue_many", None)
+        if not callable(enqueue_many):
+            raise RuntimeError("EMBODIMENT_OUTBOX_BATCH_UNAVAILABLE")
+        return tuple(enqueue_many(values))
+
     def reopen_outbox_command(
         self,
         command: EmbodimentCommand,
@@ -1320,6 +1409,55 @@ def _require_terminal_embodiment_preview(
         not direct_preview
         and not acceptance_effect_preview
         and not companion_expression_preview
+    ):
+        raise RuntimeError("ACTION_PREVIEW_DRIFT")
+    action_preview_service.require_execution(
+        event_id=str(action_preview_event_id),
+        **boundary,
+    )
+
+
+def _require_terminal_embodiment_batch_preview(
+    *,
+    commands: tuple[EmbodimentCommand, ...],
+    action_preview_service: Any,
+    action_preview_event_id: str | None,
+    action_preview_boundary: Mapping[str, Any] | None,
+) -> None:
+    """Reopen one exact Preview for every command in one expression batch."""
+
+    from host_brain.governor.action_preview import ActionPreviewService  # noqa: PLC0415
+    from host_brain.digital_life.companion_expression_acceptance import (  # noqa: PLC0415
+        verify_companion_expression_command,
+    )
+
+    if not isinstance(action_preview_service, ActionPreviewService):
+        raise RuntimeError("ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED")
+    if not str(action_preview_event_id or "").strip() or not isinstance(
+        action_preview_boundary, Mapping
+    ):
+        raise RuntimeError("ACTION_PREVIEW_TASK_AUTHORITY_REQUIRED")
+    boundary = dict(action_preview_boundary)
+    args = boundary.get("action_args")
+    authority_context = boundary.get("authority_context")
+    if (
+        str(boundary.get("action_kind") or "")
+        != "acceptance-effect.host.companion_expression_enqueue"
+        or not isinstance(args, Mapping)
+        or not isinstance(authority_context, Mapping)
+        or str(authority_context.get("effect_id") or "").strip()
+        != str(boundary.get("action_scope") or "").strip()
+        or str(authority_context.get("schema_version") or "")
+        != "Natsume.action_preview.acceptance_effect_authority_request.v1"
+        or any(
+            str(command.grant_ref or "")
+            != str(boundary.get("node_grant_ref") or "").strip()
+            or not verify_companion_expression_command(
+                payload=dict(args),
+                command=command,
+            )
+            for command in commands
+        )
     ):
         raise RuntimeError("ACTION_PREVIEW_DRIFT")
     action_preview_service.require_execution(

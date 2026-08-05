@@ -25,7 +25,29 @@ _ROUTE_MODULES = (
 )
 
 _MODEL_EXPORTS = {
-    obs_routes_core: api_models.__all__,
+    obs_routes_core: (
+        "GraphSchemaEdge",
+        "GraphSchemaNode",
+        "GraphSchemaResponse",
+        "LiveTraceFeedItem",
+        "LlmNodeItem",
+        "LlmNodesResponse",
+        "MetricsTimeseriesResponse",
+        "SessionItem",
+        "SessionsResponse",
+        "StreamEventItem",
+        "TimeseriesPoint",
+        "TraceEdge",
+        "TraceLiveFeedDelta",
+        "TraceLiveFeedDeltaItem",
+        "TraceLiveFeedNodeDelta",
+        "TraceLiveFeedSnapshot",
+        "TraceNode",
+        "TraceResponse",
+        "TraceStreamEventsResponse",
+        "TribeEventItem",
+        "TribeEventsResponse",
+    ),
     obs_routes_health: (
         "ServiceHealthItem",
         "ServicesHealthResponse",

@@ -18,6 +18,7 @@ class InputHumanoidLoopStatsResponse(BaseModel):
     total_gateway_requests: int
     completed_requests: int
     failed_requests: int
+    reply_committed_requests: int
     ack_touched_requests: int
     ack_confirmed_requests: int
     progress_touched_requests: int
@@ -25,6 +26,7 @@ class InputHumanoidLoopStatsResponse(BaseModel):
     deviation_recovered_requests: int
     closed_loop_requests: int
     completion_rate: Optional[float]
+    reply_commit_rate: Optional[float]
     ack_touch_rate: Optional[float]
     progress_touch_rate: Optional[float]
     deviation_recovery_rate: Optional[float]
@@ -41,12 +43,14 @@ class InputHumanoidLoopTrendResponse(BaseModel):
     timeseries_completed_requests: List[int]
     timeseries_failed_requests: List[int]
     timeseries_closed_loop_requests: List[int]
+    timeseries_reply_committed_requests: List[int]
     timeseries_ack_touched_requests: List[int]
     timeseries_progress_touched_requests: List[int]
     timeseries_deviation_detected_requests: List[int]
     timeseries_deviation_recovered_requests: List[int]
     timeseries_completion_rate: List[Optional[float]]
     timeseries_closed_loop_rate: List[Optional[float]]
+    timeseries_reply_commit_rate: List[Optional[float]]
     timeseries_ack_touch_rate: List[Optional[float]]
     timeseries_progress_touch_rate: List[Optional[float]]
     timeseries_deviation_recovery_rate: List[Optional[float]]
@@ -75,6 +79,7 @@ class InputHumanoidLoopAlertsResponse(BaseModel):
     summary: str
     latest_completion_rate: Optional[float]
     latest_closed_loop_rate: Optional[float]
+    latest_reply_commit_rate: Optional[float]
     latest_ack_touch_rate: Optional[float]
     latest_progress_touch_rate: Optional[float]
     latest_failed_rate: Optional[float]

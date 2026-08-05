@@ -37,6 +37,11 @@ export function countGatewayPlatformsByStatus(platforms, status) {
   return rows.filter((item) => item?.status === status).length
 }
 
+export function countKnownGatewayPlatforms(platforms) {
+  const rows = Array.isArray(platforms) ? platforms : []
+  return rows.filter((item) => ['UP', 'DEGRADED', 'DOWN', 'DISABLED'].includes(item?.status)).length
+}
+
 export function getWeChatRateLimits(wechatDetail) {
   return Array.isArray(wechatDetail?.rate_limits) ? wechatDetail.rate_limits : []
 }
@@ -56,7 +61,10 @@ export function buildGatewayLoadState({ data, wechatDetail, loading = false, ref
   })
 }
 
-export function buildGatewayHeroDescription({ data, isInitialState } = {}) {
+export function buildGatewayHeroDescription({ data, isInitialState, knownPlatformCount = 0 } = {}) {
+  if (isInitialState && knownPlatformCount === 0) {
+    return '当前窗口暂无流量样本；Gateway 服务在线，但分平台健康明细未接入，不能据此判断通道健康。'
+  }
   if (isInitialState) return '当前窗口暂无流量样本，平台卡显示的是适配器健康态。'
   return `近窗口入站 ${data?.total_inbound ?? 0}，出站 ${data?.total_outbound ?? 0}，错误 ${data?.total_errors ?? 0}。`
 }
@@ -111,6 +119,7 @@ function buildGatewayFocusAction({
   rateLimitCount,
   downPlatformCount,
   degradedPlatformCount,
+  unknownPlatformCount,
 }) {
   if (error) {
     return {
@@ -130,6 +139,17 @@ function buildGatewayFocusAction({
       detail: '等待 Gateway 与 WeChat stats 返回后，再判断平台健康和路由风险。',
       label: '刷新状态',
       action: 'refresh',
+      state: 'warning',
+    }
+  }
+
+  if (unknownPlatformCount > 0) {
+    return {
+      icon: 'wifi',
+      title: '先补齐分平台健康证据',
+      detail: `当前仍有 ${unknownPlatformCount} 个平台状态未确认；只能确认 Gateway 进程与 durable transport 在线，不能把零流量解释为通道健康。`,
+      label: '查看服务状态',
+      to: '/observability/overview',
       state: 'warning',
     }
   }
@@ -200,6 +220,7 @@ export function buildGatewayCommandRailView({
   gatewayEventCount,
   downPlatformCount,
   degradedPlatformCount,
+  unknownPlatformCount,
   loading = false,
   refreshing = false,
   error = null,
@@ -211,7 +232,7 @@ export function buildGatewayCommandRailView({
   const totalErrors = Number(data?.total_errors ?? 0)
   const rateLimitCount = getWeChatRateLimits(wechatDetail).length
   const wechatEventCount = getWeChatRecentEvents(wechatDetail).length
-  const riskSignalCount = totalErrors + downPlatformCount + degradedPlatformCount + rateLimitCount
+  const riskSignalCount = totalErrors + downPlatformCount + degradedPlatformCount + unknownPlatformCount + rateLimitCount
   const focusAction = buildGatewayFocusAction({
     data,
     error,
@@ -221,9 +242,10 @@ export function buildGatewayCommandRailView({
     rateLimitCount,
     downPlatformCount,
     degradedPlatformCount,
+    unknownPlatformCount,
   })
   const telemetryState = error ? 'blocked' : (isLoading ? 'warning' : (hasData ? 'ready' : 'blocked'))
-  const platformState = totalPlatformCount === 0
+  const platformState = totalPlatformCount === 0 || unknownPlatformCount > 0
     ? 'warning'
     : downPlatformCount > 0
       ? 'blocked'
@@ -243,9 +265,11 @@ export function buildGatewayCommandRailView({
           ? `${degradedPlatformCount} 个平台降级`
           : rateLimitCount > 0
             ? `${rateLimitCount} 条 WeChat 限制`
-            : gatewayEventCount > 0
-              ? '路由样本可追踪'
-              : '空流量健康态',
+            : unknownPlatformCount > 0
+              ? `${unknownPlatformCount} 个平台状态未确认`
+              : gatewayEventCount > 0
+                ? '路由样本可追踪'
+                : '空流量健康态',
     focusAction,
     gateCards: [
       {
@@ -257,7 +281,7 @@ export function buildGatewayCommandRailView({
         label: 'Platform Health',
         state: platformState,
         detail: totalPlatformCount
-          ? `${activePlatformCount}/${totalPlatformCount} active，${downPlatformCount} down，${degradedPlatformCount} degraded。`
+          ? `${activePlatformCount}/${totalPlatformCount} active，${downPlatformCount} down，${degradedPlatformCount} degraded，${unknownPlatformCount} unknown。`
           : '当前窗口没有平台快照。',
       },
       {
@@ -283,14 +307,14 @@ export function buildGatewayCommandRailView({
         key: 'platforms',
         label: 'Platform Coverage',
         value: totalPlatformCount ? `${activePlatformCount}/${totalPlatformCount} active` : 'no platform',
-        detail: totalPlatformCount ? `${downPlatformCount} down / ${degradedPlatformCount} degraded。` : '平台列表为空，无法判断分平台健康。',
+        detail: totalPlatformCount ? `${downPlatformCount} down / ${degradedPlatformCount} degraded / ${unknownPlatformCount} unknown。` : '平台列表为空，无法判断分平台健康。',
         state: platformState,
       },
       {
         key: 'risk',
         label: 'Risk Hotspot',
         value: riskSignalCount ? `${riskSignalCount} signals` : 'clear',
-        detail: `${totalErrors} errors，${downPlatformCount} down，${degradedPlatformCount} degraded，${rateLimitCount} WeChat limits。`,
+        detail: `${totalErrors} errors，${downPlatformCount} down，${degradedPlatformCount} degraded，${unknownPlatformCount} unknown，${rateLimitCount} WeChat limits。`,
         state: downPlatformCount > 0 || totalErrors > 0 ? 'blocked' : (riskSignalCount > 0 ? 'warning' : 'ready'),
       },
       {
@@ -326,6 +350,8 @@ export function buildGatewayViewModel({
   const initialState = isGatewayInitialState(data)
   const downPlatformCount = countGatewayPlatformsByStatus(platforms, 'DOWN')
   const degradedPlatformCount = countGatewayPlatformsByStatus(platforms, 'DEGRADED')
+  const knownPlatformCount = countKnownGatewayPlatforms(platforms)
+  const unknownPlatformCount = Math.max(0, platforms.length - knownPlatformCount)
   const gatewayLoadState = buildGatewayLoadState({ data, wechatDetail, loading, refreshing, error })
   const hasWeChatRateLimits = getWeChatRateLimits(wechatDetail).length > 0
   const hasWeChatEvents = getWeChatRecentEvents(wechatDetail).length > 0
@@ -336,6 +362,7 @@ export function buildGatewayViewModel({
     activePlatformCount: activePlatforms.length,
     downPlatformCount,
     degradedPlatformCount,
+    unknownPlatformCount,
     totalInbound: data?.total_inbound,
     totalOutbound: data?.total_outbound,
     totalErrors: data?.total_errors,
@@ -355,10 +382,16 @@ export function buildGatewayViewModel({
     hasWeChatEvents,
     downPlatformCount,
     degradedPlatformCount,
+    knownPlatformCount,
+    unknownPlatformCount,
     gatewayLoadState,
     motorOrganModel,
     heroTitle: `${platforms.length} 平台`,
-    heroDescription: buildGatewayHeroDescription({ data, isInitialState: initialState }),
+    heroDescription: buildGatewayHeroDescription({
+      data,
+      isInitialState: initialState,
+      knownPlatformCount,
+    }),
     heroMetaItems: buildGatewayHeroMetaItems({
       activePlatformCount: activePlatforms.length,
       data,
@@ -373,6 +406,7 @@ export function buildGatewayViewModel({
       gatewayEventCount,
       downPlatformCount,
       degradedPlatformCount,
+      unknownPlatformCount,
       loading,
       refreshing,
       error,

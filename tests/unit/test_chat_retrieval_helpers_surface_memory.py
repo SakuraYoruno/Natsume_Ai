@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import ast
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 import time
 
@@ -38,8 +39,11 @@ async def test_semantic_embedding_load_does_not_block_conversation_event_loop(
                 }
             }
 
+    event_loop_thread_id = threading.get_ident()
+    embedding_thread_ids: list[int] = []
+
     def _slow_embed(_query):  # noqa: ANN001
-        time.sleep(0.2)
+        embedding_thread_ids.append(threading.get_ident())
         return [0.2] * 16, "slow-test-embedding"
 
     monkeypatch.setattr(
@@ -49,28 +53,24 @@ async def test_semantic_embedding_load_does_not_block_conversation_event_loop(
     )
     monkeypatch.setattr(helpers, "_embed_surface_memory_query", _slow_embed)
 
-    started = time.perf_counter()
-    task = asyncio.create_task(
-        helpers._run_retrieval(
-            life_snapshot_reader=_LIFE_SNAPSHOT_READER,
-            life_memory_store=_LIFE_MEMORY_STORE,
-            request_id="req-nonblocking-embedding",
-            message="下一步怎么处理这个文本质量问题",
-            person_id="person-1",
-            session_id="sess-1",
-            ts_ms=123,
-            emotion_tag="NEUTRAL",
-            render_target_lang="zh",
-            bond_summary={"relationship_distance": "familiar"},
-            intent_draft={"route": "technical_help", "intent_id": "intent-1"},
-        )
+    summary, evidence_items = await helpers._run_retrieval(
+        life_snapshot_reader=_LIFE_SNAPSHOT_READER,
+        life_memory_store=_LIFE_MEMORY_STORE,
+        request_id="req-nonblocking-embedding",
+        message="下一步怎么处理这个文本质量问题",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        emotion_tag="NEUTRAL",
+        render_target_lang="zh",
+        bond_summary={"relationship_distance": "familiar"},
+        intent_draft={"route": "technical_help", "intent_id": "intent-1"},
     )
-    await asyncio.sleep(0.02)
-    assert time.perf_counter() - started < 0.12
-    summary, evidence_items = await task
 
     assert evidence_items == []
     assert summary["embedding_model_id"] == "slow-test-embedding"
+    assert embedding_thread_ids
+    assert all(thread_id != event_loop_thread_id for thread_id in embedding_thread_ids)
 
 
 @pytest.mark.asyncio

@@ -111,7 +111,10 @@ def analyze_request_execution_quality(
     skill_rows = get_request_skill_exec_rows(ledger, request_id=request_id)
     result["skill_exec_count"] = len(skill_rows)
 
-    if normalized_route_type in {"skill", "delegate"} and not skill_rows:
+    # Delegate workers publish canonical TaskGraph/model-attempt evidence,
+    # not the legacy skill_exec log. Requiring a skill row here falsely
+    # degrades successful governed delegates such as translate_agent.
+    if normalized_route_type == "skill" and not skill_rows:
         result["degraded"] = True
         result["reason_code"] = "SKILL_EXEC_MISSING"
         result["detail_tags"] = ["skill_exec_missing=true"]

@@ -102,6 +102,31 @@ class _VerifyingCancellationService:
         }
 
 
+class _VerifyingGovernedOperatorRuntime:
+    """Current Operator port backed by the focused cancellation verifier."""
+
+    def __init__(self, service: _VerifyingCancellationService) -> None:
+        self._service = service
+
+    async def execute_operator_control(
+        self,
+        payload: Mapping[str, Any],
+        _request_id: str,
+    ) -> Mapping[str, Any]:
+        authority = dict(payload.get("_operator_authority") or {})
+        result = self._service.request_graph_cancellation(
+            graph_id=str(payload.get("graph_id") or ""),
+            graph_revision=int(payload.get("graph_revision") or 0),
+            reason_code=str(payload.get("reason_code") or ""),
+            authority=authority,
+        )
+        return {
+            "success": True,
+            "side_effects_executed": True,
+            **dict(result),
+        }
+
+
 def test_authenticated_operator_command_binds_durable_authority_to_exact_revision(
     tmp_path: Path,
 ) -> None:
@@ -240,7 +265,10 @@ def test_authenticated_operator_command_binds_durable_authority_to_exact_revisio
 
     try:
         app_state = SimpleNamespace(
-            task_graph_cancellation_command_service=cancellation_service,
+            governed_operator_runtime=(
+                _VerifyingGovernedOperatorRuntime(cancellation_service)
+            ),
+            task_graph_cancellation_operator_enabled=True,
         )
         with bind_operator_command_runtime(app_state, raw_body=raw_body):
             outcome = asyncio.run(ingress.execute(signed))

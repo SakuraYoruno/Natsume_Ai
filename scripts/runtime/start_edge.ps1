@@ -1505,7 +1505,14 @@ function Start-EdgeAttempt {
   }
   if ($ModeLabel -eq "normal" -and $AutoDegradeOnAsrCrash) {
     $asrHealthUrl = "http://127.0.0.1:$asrPort/health"
-    if (-not (Wait-HttpHealthy -Url $asrHealthUrl -TimeoutSeconds 8)) {
+    # ASR is normally hosted inside the Edge RPC process.  Only require the
+    # legacy standalone health endpoint when a real standalone listener owns
+    # that port; absence of 17801 is not evidence that embedded ASR crashed.
+    $standaloneAsrPid = Get-ListeningPid -Port $asrPort
+    if (
+      $null -ne $standaloneAsrPid -and
+      -not (Wait-HttpHealthy -Url $asrHealthUrl -TimeoutSeconds 8)
+    ) {
       throw "[$ModeLabel] asr health probe failed at $asrHealthUrl; triggering asr_disabled_fallback."
     }
   }
@@ -1551,14 +1558,73 @@ $vtsAutoStartStatus = "skipped"
 $vtsAutoStartDetail = "EDGE_VTS_AUTOSTART disabled"
 $startupWarnings = @($startupPreWarnings)
 
-# ASR 健康探测（/health/asr 或 /asr/health）
-try {
-  $asrResp = Invoke-WebRequest -Uri "http://$edgeHost`:$asrPort/health" -UseBasicParsing -TimeoutSec 5
-  if ($asrResp.StatusCode -lt 200 -or $asrResp.StatusCode -ge 300) {
-    $asrStatus = "degraded"; $startupWarnings += "STARTUP_ASR_DEGRADED"
+function Get-EmbeddedEdgeComponent {
+  param(
+    [object]$Snapshot,
+    [string]$ComponentName
+  )
+  if ($null -eq $Snapshot) {
+    return $null
   }
+  $eventProperty = $Snapshot.PSObject.Properties["event"]
+  if ($null -eq $eventProperty -or $null -eq $eventProperty.Value) {
+    return $null
+  }
+  $componentsProperty = $eventProperty.Value.PSObject.Properties["components"]
+  if ($null -eq $componentsProperty -or $null -eq $componentsProperty.Value) {
+    return $null
+  }
+  $componentProperty = $componentsProperty.Value.PSObject.Properties[$ComponentName]
+  if ($null -eq $componentProperty) {
+    return $null
+  }
+  return $componentProperty.Value
+}
+
+function Test-EmbeddedEdgeComponentHealthy {
+  param([object]$Component)
+  if ($null -eq $Component) {
+    return $false
+  }
+  $status = ([string]$Component.status).Trim().ToLowerInvariant()
+  return (
+    [bool]$Component.enabled -and
+    [bool]$Component.available -and
+    (@("ok", "up", "healthy") -contains $status)
+  )
+}
+
+$edgeHealthSnapshot = $null
+try {
+  $edgeHealthSnapshot = Invoke-RestMethod `
+    -Uri "http://$edgeHost`:$port/v1/edge/health" `
+    -TimeoutSec 5
 } catch {
-  $asrStatus = "degraded"; $startupWarnings += "STARTUP_ASR_DEGRADED"
+  $edgeHealthSnapshot = $null
+}
+
+# ASR 健康探测优先使用真实 Edge 内嵌组件；仅对实际存在的旧独立
+# ASR listener 回退到 /health，避免把不存在的 17801 误判成组件崩溃。
+$embeddedAsr = Get-EmbeddedEdgeComponent `
+  -Snapshot $edgeHealthSnapshot `
+  -ComponentName "asr"
+if ($null -ne $embeddedAsr) {
+  if (-not (Test-EmbeddedEdgeComponentHealthy -Component $embeddedAsr)) {
+    $asrStatus = "degraded"
+    $startupWarnings += "STARTUP_ASR_DEGRADED"
+  }
+} else {
+  $standaloneAsrPid = Get-ListeningPid -Port $asrPort
+  if ($null -ne $standaloneAsrPid) {
+    try {
+      $asrResp = Invoke-WebRequest -Uri "http://$edgeHost`:$asrPort/health" -UseBasicParsing -TimeoutSec 5
+      if ($asrResp.StatusCode -lt 200 -or $asrResp.StatusCode -ge 300) {
+        $asrStatus = "degraded"; $startupWarnings += "STARTUP_ASR_DEGRADED"
+      }
+    } catch {
+      $asrStatus = "degraded"; $startupWarnings += "STARTUP_ASR_DEGRADED"
+    }
+  }
 }
 if ($forcedAsrDisabled) {
   $asrStatus = "degraded"
@@ -1567,14 +1633,27 @@ if ($forcedAsrDisabled) {
   }
 }
 
-# TTS 健康探测
-try {
-  $ttsResp = Invoke-WebRequest -Uri "http://$edgeHost`:$ttsPort/health" -UseBasicParsing -TimeoutSec 5
-  if ($ttsResp.StatusCode -lt 200 -or $ttsResp.StatusCode -ge 300) {
-    $ttsStatus = "degraded"; $startupWarnings += "STARTUP_TTS_DEGRADED"
+# TTS 与 ASR 同样以内嵌组件为准；旧独立端口只在真实监听时探测。
+$embeddedTts = Get-EmbeddedEdgeComponent `
+  -Snapshot $edgeHealthSnapshot `
+  -ComponentName "tts"
+if ($null -ne $embeddedTts) {
+  if (-not (Test-EmbeddedEdgeComponentHealthy -Component $embeddedTts)) {
+    $ttsStatus = "degraded"
+    $startupWarnings += "STARTUP_TTS_DEGRADED"
   }
-} catch {
-  $ttsStatus = "degraded"; $startupWarnings += "STARTUP_TTS_DEGRADED"
+} else {
+  $standaloneTtsPid = Get-ListeningPid -Port $ttsPort
+  if ($null -ne $standaloneTtsPid) {
+    try {
+      $ttsResp = Invoke-WebRequest -Uri "http://$edgeHost`:$ttsPort/health" -UseBasicParsing -TimeoutSec 5
+      if ($ttsResp.StatusCode -lt 200 -or $ttsResp.StatusCode -ge 300) {
+        $ttsStatus = "degraded"; $startupWarnings += "STARTUP_TTS_DEGRADED"
+      }
+    } catch {
+      $ttsStatus = "degraded"; $startupWarnings += "STARTUP_TTS_DEGRADED"
+    }
+  }
 }
 
 # VTS 自启动（可选）：通过 Steam 拉起 VTube Studio

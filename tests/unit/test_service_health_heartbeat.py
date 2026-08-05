@@ -553,6 +553,10 @@ def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:
         "detail": "edge rpc reachable",
         "latency_ms": 15,
         "event": {
+            "config_snapshot": {
+                "barge_in_enabled": False,
+                "resource_gate_enabled": True,
+            },
             "components": {
                 "vts": {
                     "enabled": True,
@@ -567,6 +571,91 @@ def test_collect_edge_sub_services_extracts_vts_from_edge_event() -> None:
     sub_services = heartbeat._collect_edge_sub_services(probe)
     assert sub_services["vts"]["status"] == "UP"
     assert "vts healthy" in str(sub_services["vts"].get("detail") or "")
+
+
+def test_collect_edge_sub_services_uses_playback_device_not_barge_in() -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+
+    probe = {
+        "available": True,
+        "status": "ACCEPTED",
+        "detail": "edge rpc reachable",
+        "event": {
+            "config_snapshot": {
+                "barge_in_enabled": False,
+                "resource_gate_enabled": True,
+            },
+            "components": {
+                "tts_playback_device": {
+                    "enabled": True,
+                    "available": True,
+                    "status": "ok",
+                    "detail": "output device ready",
+                }
+            }
+        },
+    }
+
+    sub_services = heartbeat._collect_edge_sub_services(
+        probe,
+        dependency_status_builder=lambda _probe: {
+            "edge.rpc.barge_in": {
+                "available": False,
+                "detail": "barge-in disabled",
+            },
+            "edge.rpc.resource_gate": {
+                "available": True,
+                "detail": "resource gate ready",
+            },
+        },
+    )
+
+    assert sub_services["audio_playback"] == {
+        "status": "UP",
+        "detail": "output device ready",
+    }
+    assert sub_services["barge_in"]["status"] == "NOT_TESTED"
+    assert sub_services["barge_in"]["reason_code"] == "ACCEPTANCE_PENDING_EXTERNAL"
+    assert sub_services["resource_gate"]["status"] == "UP"
+
+
+def test_persist_probe_health_observations_writes_only_explicit_facts() -> None:
+    from host_brain.app.observability_runtime import service_health_heartbeat as heartbeat
+
+    rows: list[dict] = []
+    persisted = heartbeat._persist_probe_health_observations(
+        now_ts=1_800_000_000_000,
+        edge_result={
+            "status": "UP",
+            "sub_services": {
+                "edge_rpc": {"status": "UP", "detail": "reachable"},
+                "asr": {"status": "UP", "detail": "ready"},
+                "tts": {"status": "UP", "detail": "ready"},
+                "vts": {"status": "DEGRADED", "detail": "hotkey missing"},
+                "audio_playback": {"status": "UP", "detail": "device ready"},
+            },
+        },
+        host_result={
+            "overall_status": "UP",
+            "sub_services": {
+                "sqlite_ledger": {"status": "UP", "detail": "ready"},
+            },
+        },
+        service_health_writer=rows.append,
+    )
+
+    assert len(persisted) == 6
+    assert {row["service_id"] for row in rows} == {
+        "host.audit.sqlite_ledger",
+        "edge.rpc.gateway",
+        "edge.rpc.asr",
+        "edge.rpc.tts",
+        "edge.rpc.vts",
+        "edge.rpc.audio_playback",
+    }
+    assert next(row for row in rows if row["service_id"] == "edge.rpc.vts")[
+        "status"
+    ] == "DEGRADED"
 
 
 def test_probe_edge_uses_only_app_local_probe_ports() -> None:

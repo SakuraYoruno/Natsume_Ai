@@ -2,9 +2,9 @@
 
 The audit intentionally works on every ``APIRoute`` entry before de-duplicating
 paths.  This prevents a shadowed writer from disappearing behind an earlier
-query route.  HTTP methods alone are insufficient because three legacy Obs
-POST endpoints are read-only previews/trace queries; those routes are the only
-non-GET query exceptions registered here.
+query route.  HTTP methods alone are insufficient because a small, explicit
+set of Obs POST endpoints only reads authority or computes previews; those
+routes are the only non-GET query exceptions registered here.
 """
 
 from __future__ import annotations
@@ -72,6 +72,11 @@ OBS_PURE_QUERY_NON_GET_SPECS = (
         HttpRouteKey("POST", "/observability/trace"),
         "host_brain.app.obs_fastapi_app",
         "request_trace",
+    ),
+    PureQueryRouteSpec(
+        HttpRouteKey("POST", "/obs/operator-session/bootstrap"),
+        "host_brain.observability.operator_session_bootstrap",
+        "bootstrap_operator_session",
     ),
 )
 OBS_PURE_QUERY_NON_GET_ROUTES = frozenset(

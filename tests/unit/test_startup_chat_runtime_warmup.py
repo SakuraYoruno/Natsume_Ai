@@ -209,9 +209,9 @@ def test_warmup_retrieval_runtime_basics_reports_ready(monkeypatch) -> None:
     )
 
     assert status.startswith("OK")
-    assert "embed_model=hash-embed-v1" in status
+    assert "embed_model=models/Qwen3-Embedding-0.6B" in status
     assert "embed_dim=3" in status
-    assert "warmup_mode=chroma_hash_probe" in status
+    assert "warmup_mode=semantic_embedding" in status
     assert "collection=episodic" in status
     assert "collection_dim=3" in status
     assert "chroma_hits=1" in status

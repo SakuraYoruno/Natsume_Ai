@@ -19,6 +19,9 @@ RUNTIME_SCRIPTS = (
     ROOT / "scripts/runtime/stop_obs_side.ps1",
     ROOT / "scripts/runtime/stop_monitor_proxy.ps1",
 )
+START_GATEWAY = ROOT / "scripts/runtime/start_gateway_side.ps1"
+
+SYNC_DUAL_SECRETS = ROOT / "scripts/runtime/sync_dual_runtime_secret_pairs.ps1"
 
 
 def test_external_images_are_digest_pinned_and_password_has_no_repo_default() -> None:
@@ -126,10 +129,126 @@ def test_detached_host_uses_a_separate_runtime_secret_file() -> None:
     assert '[string]$SecretEnvFile = ""' in source
     assert "HOST_RUNTIME_SECRET_ENV_FILE_NOT_FOUND" in source
     assert "HOST_RUNTIME_SECRET_ENV_FILE_MUST_BE_SEPARATE" in source
+    assert "HOST_RUNTIME_ENV_FILE_MUST_BE_SEPARATE_FROM_SOURCE" in source
     assert 'set ""HOST_RUNTIME_SECRET_ENV_FILE=$runtimeSecretEnvFile""' in source
+    assert (
+        'set ""HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE='
+        '$runtimeAuxiliarySecretEnvFile""' in source
+    )
     assert "runtime_secret_env_configured = [bool]$runtimeSecretEnvFile" in source
+    assert (
+        "runtime_auxiliary_secret_env_configured = "
+        "[bool]$runtimeAuxiliarySecretEnvFile" in source
+    )
+    assert "Ensure-SchedulerClockSecretEnvFile" in source
+    assert "host.scheduler-clock.secret.env" in source
+    assert "HOST_SCHEDULER_CLOCK_SECRET_ACL_FAILED" in source
+    assert "HOST_SCHEDULER_CLOCK_HMAC_SECRET=$secret" in source
     assert "Get-Content -LiteralPath $runtimeSecretEnvFile" not in source
     assert "Read-EnvFile -Path $runtimeSecretEnvFile" not in source
+
+
+def test_host_acceptance_can_pin_the_canonical_audit_database() -> None:
+    source = START_HOST.read_text(encoding="utf-8")
+
+    assert '[string]$AuditDbPath = ""' in source
+    assert (
+        '$configuredAuditDbPath = if (-not '
+        '[string]::IsNullOrWhiteSpace($AuditDbPath))' in source
+    )
+    assert '[string]$AuditDbPath' in source
+
+
+def test_remote_gateway_breaks_away_and_records_the_listener_pid() -> None:
+    source = START_GATEWAY.read_text(encoding="utf-8")
+
+    assert "[bool]$BreakawayFromSsh = $true" in source
+    assert '$useBreakawayLauncher = [bool]($BreakawayFromSsh' in source
+    assert '([wmiclass]"Win32_Process").Create(' in source
+    assert "[IO.File]::ReadAllLines(" in source
+    assert (
+        "[Environment]::SetEnvironmentVariable($name, $value, ''Process'')"
+        in source
+    )
+    assert "'$process = Start-Process -FilePath '" in source
+    assert "'$process.WaitForExit(); exit $process.ExitCode'" in source
+    assert "$gatewayPid = Get-ListeningPid -ProbePort $Port" in source
+    assert "Set-Content -LiteralPath $pidFile -Value ([string]$gatewayPid)" in source
+    assert "pid = [int]$gatewayPid" in source
+
+
+def test_dual_runtime_secret_sync_keeps_each_wire_pair_identical() -> None:
+    source = SYNC_DUAL_SECRETS.read_text(encoding="utf-8")
+
+    assert '"EDGE_HMAC_SHARED_KEY", "HOST_EDGE_RPC_SHARED_KEY"' in source
+    assert (
+        '"EDGE_GATEWAY_HOST_HMAC_SECRET", '
+        '"HOST_EDGE_GATEWAY_HMAC_SECRET"' in source
+    )
+    assert (
+        '"EDGE_GATEWAY_REPLY_HMAC_SECRET", '
+        '"HOST_GATEWAY_REPLY_HMAC_SECRET"' in source
+    )
+    assert "Write-Output $edgeValue" not in source
+    assert "Write-Output $hostValue" not in source
+    assert '[string]$SourcePath = ""' in source
+    assert "DUAL_RUNTIME_SECRET_SOURCE_FILE_NOT_FOUND" in source
+    assert "DUAL_RUNTIME_SECRET_SOURCE_PAIR_MISSING" in source
+    assert "$values[$edgeName] = $sourceValue" in source
+
+
+def test_dual_runtime_secret_sync_can_import_active_edge_pairs(tmp_path: Path) -> None:
+    source_path = tmp_path / "edge.env"
+    target_path = tmp_path / "host.env"
+    source_path.write_text(
+        "EDGE_HMAC_SHARED_KEY=" + "a" * 40 + "\n"
+        "EDGE_GATEWAY_HOST_HMAC_SECRET=" + "b" * 40 + "\n"
+        "EDGE_GATEWAY_REPLY_HMAC_SECRET=" + "c" * 40 + "\n",
+        encoding="utf-8",
+    )
+    target_path.write_text(
+        "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET=" + "d" * 40 + "\n"
+        "HOST_EDGE_RPC_SHARED_KEY=" + "x" * 40 + "\n",
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(SYNC_DUAL_SECRETS),
+            "-Path",
+            str(target_path),
+            "-SourcePath",
+            str(source_path),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8-sig",
+    )
+
+    result = json.loads(completed.stdout)
+    values = dict(
+        line.split("=", 1)
+        for line in target_path.read_text(encoding="utf-8-sig").splitlines()
+        if "=" in line
+    )
+    assert result["source_imported"] is True
+    assert values["HOST_EDGE_RPC_SHARED_KEY"] == values["EDGE_HMAC_SHARED_KEY"]
+    assert (
+        values["HOST_EDGE_GATEWAY_HMAC_SECRET"]
+        == values["EDGE_GATEWAY_HOST_HMAC_SECRET"]
+    )
+    assert (
+        values["HOST_GATEWAY_REPLY_HMAC_SECRET"]
+        == values["EDGE_GATEWAY_REPLY_HMAC_SECRET"]
+    )
+    assert "a" * 40 not in completed.stdout
 
 
 def test_host_passes_resolved_obs_endpoint_to_detached_child() -> None:
@@ -169,8 +288,10 @@ $env:OPENAI_API_KEY = 'must-not-be-written'
 $env:EDGE_HMAC_SHARED_KEY = 'must-not-be-written'
 $env:BOND_NEO4J_AUTH_REF = 'sec://neo4j/ne07'
 $env:NATSUME_AUDIT_DB = 'runtime/acceptance/canonical.sqlite3'
+$env:NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = '[{{"token_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","principal_id":"acceptance-operator","scopes":["obs:operator:read"]}}]'
 Write-RuntimeEnvFile -Path '{output.as_posix()}' -SeedValues @{{
   BOND_NEO4J_AUTH_REF = 'ignored'
+  NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = 'ignored'
 }} | Out-Null
 [ordered]@{{
   content = [string](Get-Content -Raw -LiteralPath '{output.as_posix()}')
@@ -197,3 +318,7 @@ Write-RuntimeEnvFile -Path '{output.as_posix()}' -SeedValues @{{
     assert "NATSUME_NEO4J_USER=" not in content
     assert "BOND_NEO4J_AUTH_REF=sec://neo4j/ne07" in content
     assert "NATSUME_AUDIT_DB=runtime/acceptance/canonical.sqlite3" in content
+    assert (
+        'NATSUME_OPERATOR_QUERY_AUTH_BINDINGS=[{"token_sha256":"aaaaaaaa'
+        in content
+    )

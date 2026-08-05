@@ -124,6 +124,26 @@ class PeriodicDurableContinuation:
                 asyncio.shield(task),
                 timeout=max(0.1, float(timeout_s)),
             )
+        except asyncio.CancelledError:
+            # Uvicorn may cancel lifespan-owned background tasks while an
+            # incomplete candidate is being stopped.  Once this supervisor's
+            # own stop event is set, an already-cancelled child is quiescent;
+            # propagating its cancellation would falsely turn orderly Host
+            # teardown into a retry-required runtime failure.  Never swallow
+            # cancellation of the caller itself.
+            current = asyncio.current_task()
+            caller_cancelling = bool(
+                current is not None
+                and callable(getattr(current, "cancelling", None))
+                and current.cancelling()
+            )
+            if (
+                caller_cancelling
+                or not task.cancelled()
+                or self._stop_event is None
+                or not self._stop_event.is_set()
+            ):
+                raise
         except TimeoutError as exc:
             raise RuntimeError(
                 f"{self._failure_reason_code}_STOP_TIMEOUT"

@@ -40,10 +40,14 @@ RESOURCE_MANAGER_KEY = "current"
 BIO_OPS_KIND = "bio_ops_metadata"
 BIO_OPS_LATEST_KEY = "latest"
 
-SUMMARY_MAX_AGE_MS = 90_000
+# Summary and Life Body are 60/360-minute aggregates produced by one serial
+# 22-job wave.  A full real-data wave can take around 90 seconds, so their GET
+# freshness window needs one complete-wave margin.  Canonical Runtime remains
+# on its separate 45-second live contract below.
+SUMMARY_MAX_AGE_MS = 180_000
 DIGITAL_LIFE_MAX_AGE_MS = 180_000
 RUNTIME_MAX_AGE_MS = 45_000
-LIFE_BODY_MAX_AGE_MS = 90_000
+LIFE_BODY_MAX_AGE_MS = 180_000
 RESOURCE_MANAGER_MAX_AGE_MS = 90_000
 BIO_OPS_MAX_AGE_MS = 5 * 60_000
 
@@ -75,7 +79,13 @@ def complete_projection_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
         "age_ms": int(meta.get("age_ms") or 0),
         "degraded_state": str(meta.get("degraded_state") or "REBUILDING"),
         "degraded_detail": meta.get("degraded_detail"),
-        "reason_code": meta.get("reason_code") or "OPERATOR_PROJECTION_NOT_READY",
+        # A healthy projection has no degradation reason.  Do not attach the
+        # fallback NOT_READY code to an explicitly available document.
+        "reason_code": (
+            meta.get("reason_code")
+            if bool(meta.get("available", False))
+            else meta.get("reason_code") or "OPERATOR_PROJECTION_NOT_READY"
+        ),
     }
 
 

@@ -702,6 +702,7 @@ def test_compiler_keeps_gateway_authority_separate_from_companion_subject() -> N
         == "service.edge.gateway"
     )
     life = by_type["life.foreground_completed"]
+    assert life["payload"]["workspace_id"] == "tenant:gr06-companion"
     assert life["payload"]["person_id"] == "person-gr06-companion"
     assert (
         life["payload"]["projection_intents"][0]["payload"]["person_id"]
@@ -737,10 +738,17 @@ def test_compiler_places_frozen_companion_expression_after_life_acceptance() -> 
     effect_types = [item.effect_type for item in effects]
     first_expression = effect_types.index("host.companion_expression_enqueue")
     assert effect_types[first_expression - 1] == "life.foreground_completed"
-    assert effect_types.count("host.companion_expression_enqueue") == 4
+    assert effect_types.count("host.companion_expression_enqueue") == 1
+    life = next(
+        item.payload
+        for item in effects
+        if item.effect_type == "life.foreground_completed"
+    )
+    assert life["payload"]["workspace_id"] == "workspace-gr06-affective"
     expression = effects[first_expression]
-    assert expression.payload["embodiment_command"]["kind"] == "voice"
-    assert expression.payload["embodiment_command"]["action"] == "speak"
+    assert len(expression.payload["entries"]) == 4
+    assert expression.payload["entries"][0]["embodiment_command"]["kind"] == "voice"
+    assert expression.payload["entries"][0]["embodiment_command"]["action"] == "speak"
     assert expression.payload["_action_preview_context"]["node_grant_ref"] == (
         "node-grant://gr06-affective"
     )

@@ -42,7 +42,10 @@ _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
     "EMOTION": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 400},
     "MULTIMODAL": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 1_200},
     "PLAN_SYNTHESIZE": {"temperature": 0.4, "top_p": 0.9, "max_tokens": 1_200},
-    "NATSUME_AGENT": {"temperature": 0.3, "top_p": 0.85, "max_tokens": 1_200},
+    # Agent JSON includes both one bounded analysis and the publishable plan.
+    # 1,200 tokens was repeatedly exhausted by real reasoning providers before
+    # the closing JSON object, so the canonical contract could never validate.
+    "NATSUME_AGENT": {"temperature": 0.3, "top_p": 0.85, "max_tokens": 2_400},
     "SUBAGENT": {"temperature": 0.3, "top_p": 0.85, "max_tokens": 1_200},
     "VISION_UI": {"temperature": 0.7, "max_tokens": 800},
     "VISION_ACTION_PLANNER": {"temperature": 0.2, "max_tokens": 1_200},

@@ -8,37 +8,11 @@ import os
 import sys
 from pathlib import Path
 
-
-def _load_env_file(env_path: Path, *, override: bool = False) -> None:
-    if not env_path.exists():
-        return
-    with open(env_path, encoding="utf-8-sig") as handle:
-        for raw_line in handle:
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, _, value = line.partition("=")
-            key = key.strip()
-            value = value.strip()
-            if not key:
-                continue
-            if override or key not in os.environ:
-                os.environ[key] = value
-
+from host_brain.runtime_env import load_host_runtime_environment
 
 def _load_dotenv_file() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    _load_env_file(repo_root / ".env", override=False)
-
-    runtime_env_raw = str(os.environ.get("HOST_RUNTIME_ENV_FILE") or "").strip()
-    runtime_env_path = (
-        Path(runtime_env_raw)
-        if runtime_env_raw
-        else (repo_root / "runtime" / "host" / "host.runtime.env")
-    )
-    if not runtime_env_path.is_absolute():
-        runtime_env_path = repo_root / runtime_env_path
-    _load_env_file(runtime_env_path, override=True)
+    load_host_runtime_environment(repo_root=repo_root)
 
 
 def _env_int(value: object, *, default: int, min_value: int, max_value: int) -> int:

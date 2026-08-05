@@ -31,8 +31,8 @@ function CapabilitySectionFallback({ loading = false }) {
 function GatewaySectionFallback({ loading = false }) {
   return (
     <LifeSection
-      title="人体闭环健康（Gateway）"
-      hint="展示请求从即时确认、进度触达到偏航修复与终态收束的健康度。"
+      title="Gateway 回复闭环健康"
+      hint="展示请求从 Acceptance Reply Outbox 提交、终态收束到偏航修复的健康度。"
       actionTo="/execution/gateway"
       actionLabel="查看通道详情"
     >

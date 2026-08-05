@@ -25,6 +25,7 @@ from host_brain.task_runtime.errors import (
     GOVERNED_CANCELLATION_AUTHORITY_REQUIRED,
 )
 from host_brain.task_runtime.ports import CommandRepositoryPort
+from host_brain.runtime.intent_admission_contracts import INTENT_ADMISSION_BLOCKED
 
 
 class GraphCancellationAuthorityVerifierPort(Protocol):
@@ -98,12 +99,14 @@ class GovernedCommandApplication:
             assignment=assignment,
             graph=graph,
         )
-        await self._verify_intent_admission(
+        intent_terminal = await self._verify_intent_admission(
             admitted=admitted,
             command=persisted_command,
             work_order=persisted_work_order,
             graph=persisted_graph,
         )
+        if intent_terminal is not None:
+            return intent_terminal
         if self._node_grants is None:
             return await self._coordinator.execute(
                 admitted=admitted,
@@ -149,12 +152,15 @@ class GovernedCommandApplication:
             assignment=assignment,
             graph=graph,
         )
-        await self._verify_intent_admission(
+        intent_terminal = await self._verify_intent_admission(
             admitted=admitted,
             command=persisted_command,
             work_order=persisted_work_order,
             graph=persisted_graph,
         )
+        if intent_terminal is not None:
+            yield intent_terminal
+            return
         execution_kwargs: dict[str, Any] = {
             "admitted": admitted,
             "command": persisted_command,
@@ -439,7 +445,7 @@ class GovernedCommandApplication:
         command: HostCommand,
         work_order: Any,
         graph: Any,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         verifier = self._intent_admission
         if verifier is None:
             return
@@ -468,6 +474,16 @@ class GovernedCommandApplication:
                 getattr(exc, "detail", None)
                 or "canonical Intent admission verification failed"
             ).strip()
+            terminal = None
+            if reason_code == INTENT_ADMISSION_BLOCKED:
+                terminal = await self._terminalize_direct_intent_block(
+                    admitted=admitted,
+                    command=command,
+                    work_order=work_order,
+                    graph=graph,
+                )
+            if terminal is not None and admitted.replayed:
+                return terminal
             raise GovernedRuntimeError(reason_code, detail) from exc
         expected_nodes = {binding.node_id for binding in admitted.nodes}
         returned_nodes = (
@@ -489,6 +505,86 @@ class GovernedCommandApplication:
                 GOVERNED_ADMISSION_INVALID,
                 "Intent admission verifier did not cover the exact TaskGraph",
             )
+        return None
+
+    async def _terminalize_direct_intent_block(
+        self,
+        *,
+        admitted: AdmittedExecution,
+        command: HostCommand,
+        work_order: Any,
+        graph: Any,
+    ) -> dict[str, Any] | None:
+        """Cancel a graph only when its immutable receipt proves direct BLOCK.
+
+        A rejected Review also surfaces as ``INTENT_ADMISSION_BLOCKED``.  The
+        verifier therefore returns ``None`` for Review-derived denial and only
+        issues authority for an original arbitration decision of ``BLOCK``.
+        New requests retain their explicit failure response after the durable
+        cancellation commits; startup replay returns the cancellation terminal
+        so one historical denial cannot brick the Host process forever.
+        """
+
+        verifier = self._intent_admission
+        resolve = getattr(verifier, "resolve_terminal_intent_block", None)
+        if not callable(resolve):
+            return None
+        proof = resolve(
+            command=command,
+            work_order=work_order,
+            graph=graph,
+        )
+        if inspect.isawaitable(proof):
+            proof = await proof
+        if proof is None:
+            return None
+        if not isinstance(proof, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "terminal Intent BLOCK verifier returned no durable binding",
+            )
+        request_id = str(proof.get("request_id") or "").strip()
+        request_identity = str(proof.get("request_identity") or "").strip()
+        blocked_nodes = proof.get("blocked_node_ids")
+        expected_nodes = {binding.node_id for binding in admitted.nodes}
+        if (
+            proof.get("command_id") != command.command_id
+            or proof.get("task_graph_id") != admitted.graph_id
+            or proof.get("graph_revision") != admitted.graph_revision
+            or proof.get("reason_code") != INTENT_ADMISSION_BLOCKED
+            or not request_id
+            or not request_identity
+            or not isinstance(blocked_nodes, list)
+            or not blocked_nodes
+            or not set(blocked_nodes).issubset(expected_nodes)
+        ):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "terminal Intent BLOCK proof differs from durable admission",
+            )
+        cancel = getattr(self._coordinator, "request_graph_cancellation", None)
+        if not callable(cancel):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "governed coordinator cannot terminalize a direct Intent BLOCK",
+            )
+        terminal = cancel(
+            admitted=admitted,
+            command=command,
+            work_order=work_order,
+            request_id=request_id,
+            request_identity=request_identity,
+            source="SYSTEM",
+            reason_code=INTENT_ADMISSION_BLOCKED,
+        )
+        if inspect.isawaitable(terminal):
+            terminal = await terminal
+        if not isinstance(terminal, Mapping):
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "direct Intent BLOCK cancellation returned no durable result",
+            )
+        return dict(terminal)
 
     async def request_graph_cancellation(
         self,

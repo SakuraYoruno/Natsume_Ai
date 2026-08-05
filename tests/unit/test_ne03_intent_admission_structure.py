@@ -67,6 +67,7 @@ def test_intent_admission_keeps_one_authority_owner_and_public_entry_points() ->
     assert {
         "has_prepared_intent_receipt_set",
         "verify_intent_admission",
+        "resolve_terminal_intent_block",
         "verify_terminal_intent_review_claim",
         "_reopen_admission",
         "_require_scene",

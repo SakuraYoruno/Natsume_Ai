@@ -573,6 +573,14 @@ def _resolve_intent_risk_level(registry: Any, action: str) -> int:
     # not belong in SkillRegistry.  Their risk is frozen here by the Governor
     # authority instead of being nominated by an ingress caller.
     builtin_risk = {
+        # ``work_translate`` is a server-owned semantic action rather than an
+        # executable SkillRegistry entry.  Its governed target is the frozen
+        # read-only translation delegate: it may spend the Task model budget,
+        # but cannot call tools, mutate a workspace, or emit an effect before
+        # graph acceptance.  Leaving it to the unknown-action fallback turns
+        # every ordinary translation into risk 5 and permanently blocks it at
+        # Intent admission.
+        "work_translate": 2,
         "operator_edge_command_push": 4,
         "operator_sys_mode_transition": 4,
         # Risk 5 is a non-overridable Intent block.  Signed terminal repair is

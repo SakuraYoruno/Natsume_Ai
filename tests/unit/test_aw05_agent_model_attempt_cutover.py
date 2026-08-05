@@ -200,6 +200,57 @@ def test_agent_executor_records_read_tool_proposal_without_nested_execution(
     assert not (tmp_path / "must-not-be-read.txt").exists()
 
 
+def test_agent_executor_planning_proposal_exposes_only_terminal_report(
+    tmp_path: Path,
+) -> None:
+    registry = build_live_production_prompt_registry()
+    adapter = _ScriptedAdapter(
+        [
+            json.dumps(
+                {
+                    "thought": "produce the bounded proposal",
+                    "tool_id": "agent_finish",
+                    "tool_args": {},
+                    "final_answer": "先定义验收目标，再覆盖关键路径、异常状态与可访问性。",
+                },
+                ensure_ascii=False,
+            )
+        ]
+    )
+    service = _service(registry, adapter)
+    order = AgentWorkOrder.from_mapping(
+        {
+            "work_order_id": "wo-aw05-plan-proposal",
+            "domain": "code",
+            "run_mode": "inspect",
+            "objective": "给出前端可用性审查方案",
+            "allowed_actions": ["generate_report"],
+            "forbidden_actions": ["modify_secret_files"],
+            "metadata": {
+                "request_id": "req-aw05-plan-proposal",
+                "proposal_only": True,
+                "execution_policy": "PRE_ACCEPTANCE_PROPOSAL_ONLY",
+            },
+        }
+    )
+
+    result = AgentExecutor(
+        model_attempt_service=service,
+        prompt_registry=registry,
+    ).execute(order, workspace=tmp_path)
+
+    assert result.status == "EXECUTED"
+    assert "关键路径" in result.result_text
+    assert len(adapter.requests) == 1
+    rendered_prompt = "\n".join(
+        str(message.get("content") or "")
+        for message in adapter.requests[0].prompt.messages
+    )
+    assert "effect-free planning proposal node" in rendered_prompt
+    assert "final_answer under 1,200 Chinese characters" in rendered_prompt
+    assert "agent_read_file" not in rendered_prompt
+
+
 def test_subagent_gateway_has_no_private_provider_call_or_secret_state(monkeypatch) -> None:
     registry = build_live_production_prompt_registry()
     adapter = _ScriptedAdapter(["sub-agent canonical output"])

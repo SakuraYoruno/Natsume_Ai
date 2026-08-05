@@ -49,6 +49,7 @@ from host_brain.app.observability_runtime.health_device_projection import (
     SERVICE_HEALTH_KIND,
     load_device_status_projection_sources,
     load_health_projection_sources,
+    merge_gateway_health_projection,
 )
 from host_brain.app.observability_runtime.operator_live_sources import (
     AppOwnedGatewayHealthReader,
@@ -56,6 +57,10 @@ from host_brain.app.observability_runtime.operator_live_sources import (
     OperatorLiveSourcePorts,
     OperatorSourceUnavailable,
     build_operator_live_state_callback,
+)
+from host_brain.app.observability_runtime.live_source_projection import (
+    GATEWAY_STATS_SOURCE_KEY,
+    GATEWAY_STATS_SOURCE_KIND,
 )
 from host_brain.app.observability_runtime.process_state_projection import (
     BIO_OPS_KIND,
@@ -341,6 +346,10 @@ def _health_callback(ledger: Any, store: QueryProjectionStore) -> Callable[[], o
         service_payload, node_payload, observed = load_health_projection_sources(
             ledger,
             include_process_cache=False,
+        )
+        service_payload = merge_gateway_health_projection(
+            service_payload,
+            store.get(GATEWAY_STATS_SOURCE_KIND, GATEWAY_STATS_SOURCE_KEY),
         )
         _upsert(
             store,
@@ -1403,11 +1412,19 @@ def build_explicit_obs_projection_callbacks(
         "semantic-recall-stats",
         "sessions",
         "skill-pack-catalog",
-        "task-runtime",
-        "trace",
+        # The live cockpit projections must not sit behind the comparatively
+        # expensive Task Runtime materializer.  They do not consume its
+        # output and must remain fresh even when Task Runtime reconciliation
+        # is slow or fails independently.
         "digital-life-overview",
         "insights-summary",
         "life-body",
+        "task-runtime",
+        # Trace history can be comparatively expensive.  It is enrichment,
+        # not a prerequisite for the canonical Runtime/Life Body snapshot, so
+        # keep it last to prevent historical reconciliation from starving the
+        # live cockpit projections.
+        "trace",
     )
     if set(callbacks) != set(required_order):
         raise RuntimeError("OBS_EXPLICIT_PROJECTION_COVERAGE_INVALID")

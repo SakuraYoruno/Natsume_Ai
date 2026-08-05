@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from host_brain.agent_runtime.runtime_router import CanonicalRuntimeRouter
-from host_brain.app.governed_task_adapter import GovernedHostRuntime
+from host_brain.app.governed_task_adapter import (
+    GOVERNED_HOST_PLANNING_SEARCH_REQUIRED,
+    GovernedHostAdapterError,
+    GovernedHostRuntime,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.contracts.agent_runtime.task_graph import (
     TaskGraph,
@@ -502,7 +506,7 @@ async def test_replan_supersession_fault_rolls_back_replacement_and_authority(
 
 
 @pytest.mark.asyncio
-async def test_governed_host_plan_route_exposes_only_explicit_failure_replan(
+async def test_governed_host_plan_route_rejects_caller_planned_steps_before_admission(
     tmp_path,
 ) -> None:
     db_path = tmp_path / "planning-replan-production-entry.sqlite3"
@@ -525,72 +529,25 @@ async def test_governed_host_plan_route_exposes_only_explicit_failure_replan(
     await runtime.activate()
     try:
         intent, governor = _approved_intent()
-        initial_events = [
-            event
-            async for event in runtime.execute_stream(
-                request_body=SimpleNamespace(),
-                request_id=intent["request_id"],
-                session_id=intent["session_id"],
-                ts_ms=intent["ts_ms"],
-                intent_draft=intent,
-                governor_result=governor,
-                person_id=intent["person_id"],
-                sanitized_message=intent["task"],
-            )
-        ]
-        assert initial_events[-1]["narrative"] == "captured immutable graph"
-        initial_graph = application.calls[-1]["graph"]
-        graph_id = initial_graph.graph_id
-        assert initial_graph.revision == 1
-
-        active = store.transition_graph(
-            graph_id,
-            1,
-            expected_version=0,
-            target_status=TaskGraphStatus.ACTIVE,
-            outbox=_graph_outbox(graph_id, version=1, status="ACTIVE"),
-        )
-        assert active["status"] == "ACTIVE"
-        failed = store.transition_graph(
-            graph_id,
-            1,
-            expected_version=1,
-            target_status=TaskGraphStatus.FAILED,
-            outbox=_graph_outbox(graph_id, version=2, status="FAILED"),
-        )
-        immutable_failed = TaskGraph.from_mapping(failed["graph"]).to_dict()
-
-        replan_intent, replan_governor = _approved_replan_intent(graph_id=graph_id)
-        replan_events = [
-            event
-            async for event in runtime.execute_stream(
-                request_body=SimpleNamespace(),
-                request_id=replan_intent["request_id"],
-                session_id=replan_intent["session_id"],
-                ts_ms=replan_intent["ts_ms"],
-                intent_draft=replan_intent,
-                governor_result=replan_governor,
-                person_id=replan_intent["person_id"],
-                sanitized_message=replan_intent["task"],
-            )
-        ]
-        assert replan_events[-1]["narrative"] == "captured immutable graph"
-        replacement = application.calls[-1]["graph"]
-        assert replacement.graph_id == graph_id
-        assert replacement.root_work_order_id == initial_graph.root_work_order_id
-        assert replacement.revision == 2
-        assert TaskGraph.from_mapping(store.get_graph(graph_id, 1)["graph"]).to_dict() == immutable_failed
+        with pytest.raises(GovernedHostAdapterError) as captured:
+            _ = [
+                event
+                async for event in runtime.execute_stream(
+                    request_body=SimpleNamespace(),
+                    request_id=intent["request_id"],
+                    session_id=intent["session_id"],
+                    ts_ms=intent["ts_ms"],
+                    intent_draft=intent,
+                    governor_result=governor,
+                    person_id=intent["person_id"],
+                    sanitized_message=intent["task"],
+                )
+            ]
+        assert captured.value.reason_code == GOVERNED_HOST_PLANNING_SEARCH_REQUIRED
+        assert application.calls == []
 
         with sqlite3.connect(db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT graph_id, graph_revision, root_work_order_id, request_id
-                FROM host_command_journal
-                ORDER BY graph_revision
-                """
-            ).fetchall()
-        assert [(row[0], row[1]) for row in rows] == [(graph_id, 1), (graph_id, 2)]
-        assert rows[0][2] == rows[1][2] == initial_graph.root_work_order_id
-        assert rows[1][3].endswith(".graph-revision-2")
+            assert conn.execute("SELECT COUNT(*) FROM host_command_journal").fetchone() == (0,)
+            assert conn.execute("SELECT COUNT(*) FROM task_runtime_graph").fetchone() == (0,)
     finally:
         await runtime.aclose()

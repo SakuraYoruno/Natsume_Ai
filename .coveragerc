@@ -1,0 +1,33 @@
+[run]
+branch = True
+relative_files = True
+source =
+    host_brain
+    edge_client
+    natsume_contracts
+concurrency =
+    thread
+    multiprocessing
+parallel = True
+sigterm = True
+
+[report]
+precision = 2
+show_missing = True
+skip_empty = True
+exclude_also =
+    if TYPE_CHECKING:
+    if typing.TYPE_CHECKING:
+    raise NotImplementedError
+    @(?:abc\.)?abstractmethod
+    @overload
+
+[html]
+directory = htmlcov
+
+[xml]
+output = coverage.xml
+
+[json]
+output = coverage.json
+pretty_print = True

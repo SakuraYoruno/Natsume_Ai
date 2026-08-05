@@ -437,7 +437,9 @@ def test_ready_route_uses_explicit_ledger_and_probe_ports(monkeypatch) -> None:
         response = client.get("/ready")
 
     assert response.status_code == 200
-    assert response.json()["summary"]["ledger"] == {"owner": "app-local"}
+    # Polling readiness remains read-only.  The provider is still required as
+    # app-local authority, while the lifespan heartbeat owns durable rows.
+    assert response.json()["summary"]["ledger"] is None
     assert response.json()["summary"]["dependency_probes"] == {
         "edge.rpc.gateway": {"available": True}
     }

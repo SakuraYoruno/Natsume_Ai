@@ -44,6 +44,9 @@ MIGRATIONS = (
     / "audit"
     / "migrations"
 )
+CURRENT_MIGRATION = max(
+    int(path.name.split("_", 1)[0]) for path in MIGRATIONS.glob("*.sql")
+)
 
 
 def _sha256(value: str) -> str:
@@ -57,7 +60,7 @@ def _migrated_db(tmp_path: Path) -> Path:
         ts_ms=NOW,
     )
     assert result.success is True, result.as_dict()
-    assert result.summary["current_version"] == 125
+    assert result.summary["current_version"] == CURRENT_MIGRATION
     return db_path
 
 
@@ -401,5 +404,5 @@ def test_migration_0124_partial_failure_rolls_back_and_exact_retry_succeeds(
         ts_ms=NOW + 2,
     )
     assert retried.success is True, retried.as_dict()
-    assert retried.summary["current_version"] == 125
+    assert retried.summary["current_version"] == CURRENT_MIGRATION
     HostCommandRepository(db_path).assert_schema_ready()

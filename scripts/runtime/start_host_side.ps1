@@ -3,6 +3,7 @@ param(
   [string]$EnvFile = "",
   [string]$SecretEnvFile = "",
   [string]$RuntimeRoot = "",
+  [string]$AuditDbPath = "",
   [string]$LogDir = "",
   [string]$AgentWorkspaceRoot = "",
   [string]$BindHost = "",
@@ -302,6 +303,31 @@ function Test-SensitiveRuntimeEnvEntry {
   if (-not $normalizedName) {
     return $false
   }
+  # This setting contains only server-side SHA-256 token digests plus
+  # non-secret principal/scope metadata.  It must reach both detached Host
+  # and Obs processes so the same-origin Monitor session can authenticate;
+  # no raw operator session token is ever written to the runtime snapshot.
+  if (
+    [string]::Equals(
+      $normalizedName,
+      "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS",
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+  ) {
+    return $false
+  }
+  # This value is an absolute path to an ACL-protected local credential, not
+  # the credential itself.  Detached Host and OBS processes need the same
+  # reference after restart; the raw token remains outside this snapshot.
+  if (
+    [string]::Equals(
+      $normalizedName,
+      "HOST_OBS_READ_TOKEN_FILE",
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+  ) {
+    return $false
+  }
   # Neo4j direct auth is an indivisible runtime credential.  The password is
   # intentionally excluded below, so retaining only its username would create
   # an unusable half-credential when this snapshot is reused.  Persist the
@@ -365,12 +391,337 @@ function Write-RuntimeEnvFile {
   return $snapshot
 }
 
+function Ensure-SchedulerClockSecretEnvFile {
+  param(
+    [string]$ResolvedRuntimeRoot,
+    [hashtable]$EnvValues
+  )
+
+  $clockEnabled = Parse-BoolValue `
+    -Value (Get-EnvSetting -Values $EnvValues -Name "HOST_SCHEDULER_CLOCK_ENABLED" -DefaultValue "false") `
+    -Default $false
+  if (-not $clockEnabled) {
+    return ""
+  }
+
+  $secretPath = Join-Path $ResolvedRuntimeRoot "host.scheduler-clock.secret.env"
+  if (Test-Path -LiteralPath $secretPath -PathType Leaf) {
+    $existing = Read-EnvFile -Path $secretPath
+    if (
+      $existing.ContainsKey("HOST_SCHEDULER_CLOCK_HMAC_SECRET") -and
+      -not [string]::IsNullOrWhiteSpace(
+        [string]$existing["HOST_SCHEDULER_CLOCK_HMAC_SECRET"]
+      )
+    ) {
+      return (Resolve-Path -LiteralPath $secretPath).Path
+    }
+    throw "HOST_SCHEDULER_CLOCK_SECRET_FILE_INVALID"
+  }
+
+  $secret = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_SCHEDULER_CLOCK_HMAC_SECRET" `
+    -DefaultValue ""
+  if ([string]::IsNullOrWhiteSpace($secret)) {
+    $bytes = New-Object byte[] 48
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+      $generator.GetBytes($bytes)
+    } finally {
+      $generator.Dispose()
+    }
+    $secret = [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+  }
+  $encoding = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText(
+    $secretPath,
+    "HOST_SCHEDULER_CLOCK_HMAC_SECRET=$secret`r`n",
+    $encoding
+  )
+  $principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $grant = "{0}:(F)" -f $principal
+  & icacls.exe $secretPath /inheritance:r /grant:r $grant | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Remove-Item -LiteralPath $secretPath -Force -ErrorAction SilentlyContinue
+    throw "HOST_SCHEDULER_CLOCK_SECRET_ACL_FAILED"
+  }
+  return (Resolve-Path -LiteralPath $secretPath).Path
+}
+
+function Get-Sha256Hex {
+  param([Parameter(Mandatory = $true)][string]$Value)
+
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Value)
+    $digest = $sha.ComputeHash($bytes)
+  } finally {
+    $sha.Dispose()
+  }
+  return ([System.BitConverter]::ToString($digest).Replace("-", "").ToLowerInvariant())
+}
+
+function New-OperatorSessionToken {
+  $bytes = New-Object byte[] 48
+  $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $generator.GetBytes($bytes)
+  } finally {
+    $generator.Dispose()
+  }
+  return [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
+}
+
+function Ensure-HostObsReadTokenFile {
+  param(
+    [string]$ResolvedRuntimeRoot,
+    [hashtable]$EnvValues
+  )
+
+  $configuredPath = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_OBS_READ_TOKEN_FILE" `
+    -DefaultValue (Join-Path $ResolvedRuntimeRoot "host.obs-read.token")
+  $candidate = [Environment]::ExpandEnvironmentVariables(([string]$configuredPath).Trim())
+  if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+    $candidate = Join-Path $ResolvedRuntimeRoot $candidate
+  }
+  $tokenPath = [System.IO.Path]::GetFullPath($candidate)
+  $parent = [System.IO.Path]::GetDirectoryName($tokenPath)
+  Ensure-Directory -Path $parent
+
+  if (Test-Path -LiteralPath $tokenPath -PathType Leaf) {
+    $token = [System.IO.File]::ReadAllText($tokenPath).Trim()
+  } else {
+    $token = Get-EnvSetting `
+      -Values $EnvValues `
+      -Name "HOST_OBS_READ_TOKEN" `
+      -DefaultValue ""
+    if ([string]::IsNullOrWhiteSpace($token)) {
+      $token = New-OperatorSessionToken
+    }
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($tokenPath, "$token`r`n", $encoding)
+  }
+
+  if (
+    [string]::IsNullOrWhiteSpace($token) -or
+    $token.Length -gt 4096 -or
+    $token -match '\s'
+  ) {
+    throw "HOST_OBS_READ_TOKEN_FILE_INVALID"
+  }
+
+  $principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $grant = "{0}:(F)" -f $principal
+  & icacls.exe $tokenPath /inheritance:r /grant:r $grant | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "HOST_OBS_READ_TOKEN_FILE_ACL_FAILED"
+  }
+
+  $resolvedPath = (Resolve-Path -LiteralPath $tokenPath).Path
+  $env:HOST_OBS_READ_TOKEN_FILE = $resolvedPath
+  $EnvValues["HOST_OBS_READ_TOKEN_FILE"] = $resolvedPath
+  return $resolvedPath
+}
+
+function Ensure-LocalOperatorSession {
+  param(
+    [string]$ResolvedRuntimeRoot,
+    [hashtable]$EnvValues,
+    [string]$MonitorHost,
+    [int]$MonitorPort,
+    [bool]$Enabled
+  )
+
+  $disabled = [ordered]@{
+    enabled = $false
+    mode = "disabled"
+    session_file = ""
+  }
+  if (-not $Enabled) {
+    $env:NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED = "false"
+    $EnvValues["NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED"] = "false"
+    return $disabled
+  }
+  $normalizedHost = ([string]$MonitorHost).Trim().Trim('[', ']').ToLowerInvariant()
+  if ($normalizedHost -notin @("127.0.0.1", "localhost", "::1")) {
+    $env:NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED = "false"
+    $EnvValues["NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED"] = "false"
+    return [ordered]@{
+      enabled = $false
+      mode = "explicit_session_required"
+      session_file = ""
+    }
+  }
+  if ($MonitorPort -lt 1 -or $MonitorPort -gt 65535) {
+    throw "MONITOR_OPERATOR_SESSION_PORT_INVALID"
+  }
+
+  $sessionPath = Join-Path $ResolvedRuntimeRoot "monitor.operator-session.token"
+  $explicitToken = [Environment]::GetEnvironmentVariable(
+    "MONITOR_UI_OPERATOR_SESSION_TOKEN",
+    "Process"
+  )
+  $token = ([string]$explicitToken).Trim()
+  [Environment]::SetEnvironmentVariable(
+    "MONITOR_UI_OPERATOR_SESSION_TOKEN",
+    $null,
+    "Process"
+  )
+  if ($EnvValues.ContainsKey("MONITOR_UI_OPERATOR_SESSION_TOKEN")) {
+    $EnvValues.Remove("MONITOR_UI_OPERATOR_SESSION_TOKEN")
+  }
+  if (-not $token -and (Test-Path -LiteralPath $sessionPath -PathType Leaf)) {
+    $token = ([System.IO.File]::ReadAllText($sessionPath)).Trim()
+  }
+  if (-not $token) {
+    $token = New-OperatorSessionToken
+  }
+  if (
+    $token.Length -lt 32 -or
+    $token.Length -gt 4096 -or
+    $token -match '\s'
+  ) {
+    throw "MONITOR_OPERATOR_SESSION_TOKEN_INVALID"
+  }
+
+  $encoding = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($sessionPath, $token, $encoding)
+  $principal = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $grant = "{0}:(F)" -f $principal
+  & icacls.exe $sessionPath /inheritance:r /grant:r $grant | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Remove-Item -LiteralPath $sessionPath -Force -ErrorAction SilentlyContinue
+    throw "MONITOR_OPERATOR_SESSION_ACL_FAILED"
+  }
+  $sessionPath = (Resolve-Path -LiteralPath $sessionPath).Path
+
+  $bindingText = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS" `
+    -DefaultValue ""
+  $bindings = @()
+  if (-not [string]::IsNullOrWhiteSpace($bindingText)) {
+    try {
+      $decoded = $bindingText | ConvertFrom-Json
+    } catch {
+      throw "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS_INVALID"
+    }
+    $bindings = @($decoded)
+  }
+  $operatorKeyId = (Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_OPERATOR_BFF_HMAC_KEY_ID" `
+    -DefaultValue "").Trim()
+  $hmacSecretsText = Get-EnvSetting `
+    -Values $EnvValues `
+    -Name "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON" `
+    -DefaultValue ""
+  try {
+    $hmacSecrets = $hmacSecretsText | ConvertFrom-Json
+    $hmacKeys = @($hmacSecrets.PSObject.Properties)
+  } catch {
+    throw "MONITOR_OPERATOR_HMAC_AUTHORITY_INVALID"
+  }
+  if (-not $operatorKeyId) {
+    if ($hmacKeys.Count -ne 1) {
+      throw "MONITOR_OPERATOR_HMAC_KEY_ID_REQUIRED"
+    }
+    $operatorKeyId = ([string]$hmacKeys[0].Name).Trim()
+  }
+  $matchingHmacKey = @(
+    $hmacKeys | Where-Object {
+      ([string]$_.Name).Trim() -eq $operatorKeyId -and
+      -not [string]::IsNullOrWhiteSpace([string]$_.Value)
+    }
+  )
+  if ($matchingHmacKey.Count -ne 1) {
+    throw "MONITOR_OPERATOR_HMAC_AUTHORITY_INVALID"
+  }
+
+  $tokenDigest = Get-Sha256Hex -Value $token
+  $bindings = @(
+    $bindings | Where-Object {
+      ([string]$_.token_sha256).Trim().ToLowerInvariant() -ne $tokenDigest
+    }
+  )
+  $bindings += [ordered]@{
+    token_sha256 = $tokenDigest
+    principal_id = "local-monitor-owner"
+    tenant_id = "local"
+    key_id = $operatorKeyId
+    principal_kind = "user"
+    scopes = @(
+      "obs:operator:read",
+      "obs:health:stream",
+      "obs:task-runtime:read",
+      "obs:session:read",
+      "obs:session:export",
+      "obs:trace:read",
+      "obs:checkpoint:read",
+      "obs:memory:read",
+      "obs:immune:read",
+      "obs:bio-ops:read",
+      "obs:ui:read",
+      "obs:capability-forge:read",
+      "obs:life-evolution:read",
+      "obs:agent-history:read",
+      "obs:write",
+      "obs:sys-mode:write",
+      "obs:long-term-goal:write",
+      "scheduler:write",
+      "device:edge:write",
+      "task-runtime:cancel",
+      "task-runtime:reconcile",
+      "task-review:write"
+    )
+  }
+  $serializedBindings = ConvertTo-Json -InputObject @($bindings) -Compress -Depth 8
+  $env:NATSUME_OPERATOR_QUERY_AUTH_BINDINGS = $serializedBindings
+  $EnvValues["NATSUME_OPERATOR_QUERY_AUTH_BINDINGS"] = $serializedBindings
+  $env:NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED = "true"
+  $EnvValues["NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED"] = "true"
+  $env:NATSUME_OPERATOR_SESSION_FILE = $sessionPath
+  $EnvValues["NATSUME_OPERATOR_SESSION_FILE"] = $sessionPath
+
+  return [ordered]@{
+    enabled = $true
+    mode = "loopback_http_only_cookie"
+    session_file = $sessionPath
+  }
+}
+
 function Get-ListeningPid {
-  param([int]$ProbePort)
-  $conn = Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($null -eq $conn) {
+  param(
+    [int]$ProbePort,
+    [string]$ProbeHost = ""
+  )
+  $connections = @(
+    Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue
+  )
+  if ($connections.Count -eq 0) {
     return $null
   }
+  if (-not [string]::IsNullOrWhiteSpace($ProbeHost)) {
+    $normalizedHost = $ProbeHost.Trim().TrimStart("[").TrimEnd("]").ToLowerInvariant()
+    if ($normalizedHost -eq "localhost") {
+      $normalizedHost = "127.0.0.1"
+    }
+    $conn = $connections |
+      Where-Object { ([string]$_.LocalAddress).ToLowerInvariant() -eq $normalizedHost } |
+      Select-Object -First 1
+    if ($null -eq $conn -and $normalizedHost -notin @("0.0.0.0", "::")) {
+      $conn = $connections |
+        Where-Object { ([string]$_.LocalAddress).ToLowerInvariant() -in @("0.0.0.0", "::") } |
+        Select-Object -First 1
+    }
+    if ($null -eq $conn) {
+      return $null
+    }
+    return [int]$conn.OwningProcess
+  }
+  $conn = $connections | Select-Object -First 1
   return [int]$conn.OwningProcess
 }
 
@@ -561,7 +912,7 @@ function Wait-HostCatalogStage {
         -Url $Url `
         -Kind "health" `
         -ExpectedCatalogStage $ExpectedCatalogStage `
-        -TimeoutSec 3
+        -TimeoutSec 12
     ) {
       return $true
     }
@@ -574,20 +925,22 @@ function Test-HostStartupStability {
   param(
     [int]$ExpectedPid,
     [int]$ProbePort,
+    [string]$ProbeHost,
     [string]$HealthUrl,
     [string]$ReadyUrl,
     [string]$ExpectedCatalogStage,
     [ValidateRange(2, 10)]
     [int]$RequiredConsecutiveChecks = 5
   )
+  $script:HostStartupStabilityDiagnostics = @()
   $consecutive = 0
-  $maxChecks = $RequiredConsecutiveChecks + 5
+  $maxChecks = $RequiredConsecutiveChecks + 10
   for ($attempt = 0; $attempt -lt $maxChecks; $attempt++) {
     $processAlive = (
       $null -ne (Get-Process -Id $ExpectedPid -ErrorAction SilentlyContinue) -and
       (Is-HostProcess -ProcessId $ExpectedPid)
     )
-    $listeningPid = Get-ListeningPid -ProbePort $ProbePort
+    $listeningPid = Get-ListeningPid -ProbePort $ProbePort -ProbeHost $ProbeHost
     $listenerMatches = (
       $null -ne $listeningPid -and
       [int]$listeningPid -eq $ExpectedPid
@@ -597,7 +950,7 @@ function Test-HostStartupStability {
         -Url $HealthUrl `
         -Kind "health" `
         -ExpectedCatalogStage $ExpectedCatalogStage `
-        -TimeoutSec 3
+        -TimeoutSec 12
     } else {
       $false
     }
@@ -606,17 +959,32 @@ function Test-HostStartupStability {
         -Url $ReadyUrl `
         -Kind "readiness" `
         -ExpectedCatalogStage $ExpectedCatalogStage `
-        -TimeoutSec 3
+        -TimeoutSec 12
     } else {
       $false
     }
-    if ($processAlive -and $listenerMatches -and $healthIdentity -and $readyIdentity) {
+    $sampleSucceeded = (
+      $processAlive -and
+      $listenerMatches -and
+      $healthIdentity -and
+      $readyIdentity
+    )
+    if ($sampleSucceeded) {
       $consecutive += 1
-      if ($consecutive -ge $RequiredConsecutiveChecks) {
-        return $true
-      }
     } else {
       $consecutive = 0
+    }
+    $script:HostStartupStabilityDiagnostics += [ordered]@{
+      attempt = $attempt + 1
+      process_alive = [bool]$processAlive
+      listening_pid = if ($null -eq $listeningPid) { $null } else { [int]$listeningPid }
+      listener_matches = [bool]$listenerMatches
+      health_identity = [bool]$healthIdentity
+      readiness_identity = [bool]$readyIdentity
+      consecutive = [int]$consecutive
+    }
+    if ($consecutive -ge $RequiredConsecutiveChecks) {
+      return $true
     }
     Start-Sleep -Seconds 1
   }
@@ -1076,7 +1444,7 @@ function Start-MateEngineBridgeRuntime {
     }
   }
 
-  $listeningBridgePid = Get-ListeningPid -ProbePort $portValue
+  $listeningBridgePid = Get-ListeningPid -ProbePort $portValue -ProbeHost $hostValue
   if ($null -ne $listeningBridgePid) {
     return [ordered]@{
       side = "mateengine_bridge"
@@ -1162,6 +1530,19 @@ $stdoutLog = Join-Path $LogDir "host.stdout.log"
 $stderrLog = Join-Path $LogDir "host.stderr.log"
 $runtimeEnvFile = Join-Path $RuntimeRoot "host.runtime.env"
 $runtimeSecretEnvFile = ""
+$runtimeAuxiliarySecretEnvFile = ""
+$resolvedEnvFile = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
+  (Resolve-Path -LiteralPath $EnvFile).Path
+} else {
+  [System.IO.Path]::GetFullPath($EnvFile)
+}
+if ([string]::Equals(
+    $resolvedEnvFile,
+    [System.IO.Path]::GetFullPath($runtimeEnvFile),
+    [System.StringComparison]::OrdinalIgnoreCase
+  )) {
+  throw "HOST_RUNTIME_ENV_FILE_MUST_BE_SEPARATE_FROM_SOURCE"
+}
 
 if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
   $secretCandidate = [Environment]::ExpandEnvironmentVariables($SecretEnvFile.Trim())
@@ -1172,11 +1553,6 @@ if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
     throw "HOST_RUNTIME_SECRET_ENV_FILE_NOT_FOUND: $secretCandidate"
   }
   $runtimeSecretEnvFile = (Resolve-Path -LiteralPath $secretCandidate).Path
-  $resolvedEnvFile = if (Test-Path -LiteralPath $EnvFile -PathType Leaf) {
-    (Resolve-Path -LiteralPath $EnvFile).Path
-  } else {
-    [System.IO.Path]::GetFullPath($EnvFile)
-  }
   if (
     [string]::Equals($runtimeSecretEnvFile, $resolvedEnvFile, [System.StringComparison]::OrdinalIgnoreCase) -or
     [string]::Equals($runtimeSecretEnvFile, $runtimeEnvFile, [System.StringComparison]::OrdinalIgnoreCase)
@@ -1187,11 +1563,32 @@ if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
 
 $envValues = Read-EnvFile -Path $EnvFile
 Set-ProcessEnv -Values $envValues
+$hostObsReadTokenFile = Ensure-HostObsReadTokenFile `
+  -ResolvedRuntimeRoot $RuntimeRoot `
+  -EnvValues $envValues
+$schedulerClockSecretEnvFile = Ensure-SchedulerClockSecretEnvFile `
+  -ResolvedRuntimeRoot $RuntimeRoot `
+  -EnvValues $envValues
+if (-not [string]::IsNullOrWhiteSpace($schedulerClockSecretEnvFile)) {
+  if ([string]::IsNullOrWhiteSpace($runtimeSecretEnvFile)) {
+    $runtimeSecretEnvFile = $schedulerClockSecretEnvFile
+  } elseif (-not [string]::Equals(
+      $runtimeSecretEnvFile,
+      $schedulerClockSecretEnvFile,
+      [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+    $runtimeAuxiliarySecretEnvFile = $schedulerClockSecretEnvFile
+  }
+}
 
-$configuredAuditDbPath = Get-EnvSetting `
-  -Values $envValues `
-  -Name "NATSUME_AUDIT_DB" `
-  -DefaultValue (Join-Path $RuntimeRoot "audit.sqlite3")
+$configuredAuditDbPath = if (-not [string]::IsNullOrWhiteSpace($AuditDbPath)) {
+  [string]$AuditDbPath
+} else {
+  Get-EnvSetting `
+    -Values $envValues `
+    -Name "NATSUME_AUDIT_DB" `
+    -DefaultValue (Join-Path $RuntimeRoot "audit.sqlite3")
+}
 if (-not [System.IO.Path]::IsPathRooted($configuredAuditDbPath)) {
   $configuredAuditDbPath = Join-Path $repoRoot $configuredAuditDbPath
 }
@@ -1199,6 +1596,14 @@ $auditDbPath = [System.IO.Path]::GetFullPath($configuredAuditDbPath)
 Ensure-Directory -Path ([System.IO.Path]::GetDirectoryName($auditDbPath))
 $env:NATSUME_AUDIT_DB = $auditDbPath
 $envValues["NATSUME_AUDIT_DB"] = $auditDbPath
+if (-not $envValues.ContainsKey("HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S") -and -not $env:HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S) {
+  # The inner Uvicorn candidate must not time out before this launcher's
+  # explicit readiness window. Durable Task recovery can legitimately take
+  # longer than the old fixed 45-second candidate limit.
+  $candidateStartupTimeout = [string]([Math]::Max(15, [Math]::Min(600, $WaitSeconds)))
+  $envValues["HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S"] = $candidateStartupTimeout
+  $env:HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S = $candidateStartupTimeout
+}
 
 $configuredAgentWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceRoot)) {
   [string]$AgentWorkspaceRoot
@@ -1351,6 +1756,12 @@ $env:HOST_MONITOR_PROXY_PORT = [string]$MonitorProxyPort
 $env:HOST_MONITOR_PROXY_ENABLED = if ($monitorProxyEnabled) { "true" } else { "false" }
 $env:HOST_MAIN_OBS_REDIRECT_ENABLED = if ($obsEnabled) { "true" } else { "false" }
 $env:HOST_MAIN_MONITOR_REDIRECT_ENABLED = if ($monitorProxyEnabled) { "true" } else { "false" }
+$monitorOperatorSession = Ensure-LocalOperatorSession `
+  -ResolvedRuntimeRoot $RuntimeRoot `
+  -EnvValues $envValues `
+  -MonitorHost $MonitorProxyHost `
+  -MonitorPort $MonitorProxyPort `
+  -Enabled $monitorProxyEnabled
 
 $localServices = $null
 $localOllama = Ensure-LocalOllamaRuntime -RepoRoot $repoRoot -EnvValues $envValues
@@ -1409,7 +1820,7 @@ if ($ForceRestart.IsPresent) {
       -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy") `
       -NginxExe $NginxExe `
       -Port $MonitorProxyPort
-    $remainingMonitorPid = Get-ListeningPid -ProbePort $MonitorProxyPort
+    $remainingMonitorPid = Get-ListeningPid -ProbePort $MonitorProxyPort -ProbeHost $MonitorProxyHost
     if ($null -ne $remainingMonitorPid) {
       throw (
         "failed to stop existing monitor proxy on port $MonitorProxyPort " +
@@ -1426,7 +1837,7 @@ if ($ForceRestart.IsPresent) {
       -EnvFile $EnvFile `
       -RuntimeRoot $RuntimeRoot `
       -Port $obsBindPort
-    $remainingObsPid = Get-ListeningPid -ProbePort $obsBindPort
+    $remainingObsPid = Get-ListeningPid -ProbePort $obsBindPort -ProbeHost $obsBindHost
     if ($null -ne $remainingObsPid) {
       throw (
         "failed to stop existing obs sidecar on port $obsBindPort " +
@@ -1472,7 +1883,7 @@ if (Test-Path -Path $pidFile) {
   }
 }
 
-$listeningPid = Get-ListeningPid -ProbePort $Port
+$listeningPid = Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost
 if ($null -ne $listeningPid) {
   if (-not $ForceRestart.IsPresent) {
     if (Is-HostProcess -ProcessId $listeningPid) {
@@ -1573,6 +1984,12 @@ if ($runtimeSecretEnvFile) {
     "&&"
   )
 }
+if ($runtimeAuxiliarySecretEnvFile) {
+  $hostCommandParts += @(
+    "set ""HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE=$runtimeAuxiliarySecretEnvFile""",
+    "&&"
+  )
+}
 $hostCommandParts += @(
   (ConvertTo-CmdArgument -Value $pythonExe),
   (Join-CmdArguments -Arguments $hostArgs),
@@ -1610,7 +2027,7 @@ if (-not $healthOk) {
 $hostPid = [int]$proc.Id
 $listeningPid = $null
 for ($i = 0; $i -lt 20; $i++) {
-  $candidatePid = Get-ListeningPid -ProbePort $Port
+  $candidatePid = Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost
   if ($null -ne $candidatePid -and [int]$candidatePid -gt 0) {
     $listeningPid = [int]$candidatePid
     break
@@ -1645,6 +2062,12 @@ if ($obsEnabled) {
         BindHost = $obsBindHost
         Port = $obsBindPort
         WaitSeconds = $WaitSeconds
+      }
+      if (-not [string]::IsNullOrWhiteSpace($runtimeSecretEnvFile)) {
+        $obsArgs["SecretEnvFile"] = $runtimeSecretEnvFile
+      }
+      if (-not [string]::IsNullOrWhiteSpace($runtimeAuxiliarySecretEnvFile)) {
+        $obsArgs["AuxiliarySecretEnvFile"] = $runtimeAuxiliarySecretEnvFile
       }
       if ($ForceRestart.IsPresent) {
         $obsArgs["ForceRestart"] = $true
@@ -1856,8 +2279,9 @@ if ($monitorProxyEnabled) {
 $hostStable = Test-HostStartupStability `
   -ExpectedPid $hostPid `
   -ProbePort $Port `
+  -ProbeHost $BindHost `
   -HealthUrl $healthUrl `
-  -ReadyUrl "http://$probeHost`:$Port/ready" `
+  -ReadyUrl "http://$probeHost`:$Port/ready?skip_dependency_probes=1" `
   -ExpectedCatalogStage $catalogTargetStage `
   -RequiredConsecutiveChecks 5
 $obsProcessStatus = [string]$(
@@ -1909,9 +2333,12 @@ if (-not $hostStable -or -not $obsStable -or -not $monitorStable) {
   Stop-ProcessTree -ProcessId $hostPid | Out-Null
   Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
   $stderrTail = Get-SanitizedLogTail -Path $stderrLog -Lines 80
+  $stabilityDiagnostics = @($script:HostStartupStabilityDiagnostics) |
+    ConvertTo-Json -Depth 4 -Compress
   throw (
     "HOST_STACK_STARTUP_STABILITY_FAILED: host=$hostStable; " +
-    "obs=$obsStable; monitor=$monitorStable.`n$stderrTail"
+    "obs=$obsStable; monitor=$monitorStable; " +
+    "diagnostics=$stabilityDiagnostics.`n$stderrTail"
   )
 }
 
@@ -1928,7 +2355,10 @@ $result = [ordered]@{
   runtime_root = $RuntimeRoot
   agent_workspace_root = $resolvedAgentWorkspaceRoot
   runtime_env_file = $runtimeEnvFile
+  host_obs_read_auth_configured = [bool]$hostObsReadTokenFile
+  host_obs_read_token_file = $hostObsReadTokenFile
   runtime_secret_env_configured = [bool]$runtimeSecretEnvFile
+  runtime_auxiliary_secret_env_configured = [bool]$runtimeAuxiliarySecretEnvFile
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
   local_services = $localServices
@@ -1944,6 +2374,7 @@ $result = [ordered]@{
   obs_process = $obsProcessResult
   monitor_proxy_status = [string]$(if ($monitorProxyResult.PSObject.Properties.Name -contains "status") { $monitorProxyResult.status } else { "" })
   monitor_proxy = $monitorProxyResult
+  monitor_operator_session = $monitorOperatorSession
   breakaway_from_console = $BreakawayFromConsole
   launcher_pid = [int]$proc.Id
   startup_warnings = $startupWarnings

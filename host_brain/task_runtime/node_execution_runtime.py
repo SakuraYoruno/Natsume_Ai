@@ -576,6 +576,15 @@ class DurableNodeExecutionRuntime:
                 executor=admitted.executor,
                 worker_route=admitted.worker_route,
             )
+            prepare_execution = getattr(worker, "prepare_execution", None)
+            if callable(prepare_execution):
+                await _maybe_await(
+                    prepare_execution(
+                        command=command,
+                        work_order=work_order,
+                        node_id=admitted.node_id,
+                    )
+                )
         except RetryableWorkerPreparationError as exc:
             reason_code = _exception_reason(exc, GOVERNED_WORKER_FAILED)
             if not _retry_attempt_available(node, attempt_no=attempt_no):

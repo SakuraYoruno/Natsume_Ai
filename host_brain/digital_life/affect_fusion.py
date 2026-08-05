@@ -890,10 +890,11 @@ def _collect_observation_drafts(
 
 
 def _text_draft(*, message: str, now_ms: int) -> _ObservationDraft:
-    # Import lazily to avoid making the pure life package depend on Host app
-    # composition. The old keyword recognizer is deliberately only a low
-    # confidence observer now; it cannot directly change self-affect.
-    from host_brain.app.emotion_context import infer_bootstrap_emotion_from_text
+    # The keyword recognizer is deliberately only a low-confidence user
+    # observer. It cannot directly change Natsume's self-affect.
+    from host_brain.digital_life.text_affect_observer import (
+        infer_bootstrap_emotion_from_text,
+    )
 
     inferred = infer_bootstrap_emotion_from_text(message)
     tag = normalize_emotion_tag(inferred.emotion_tag)

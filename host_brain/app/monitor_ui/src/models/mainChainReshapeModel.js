@@ -49,8 +49,29 @@ function stage(id, title, status, detail, evidence = [], to = '') {
   }
 }
 
-function buildOrganCoverage(soakSummary = {}, soakMeta = {}) {
+function buildOrganCoverage(soakSummary = {}, soakMeta = {}, organTribeData = null) {
   const expected = numeric(soakMeta.expectedOrganCount, EXPECTED_ORGAN_COUNT) || EXPECTED_ORGAN_COUNT
+  const liveProjectionState = String(organTribeData?.projection?.degraded_state || '').toUpperCase()
+  const liveRegistered = numeric(organTribeData?.total_agents, 0)
+  const liveActive = numeric(organTribeData?.active_agents, 0)
+  const liveAvailable = Boolean(
+    organTribeData
+      && liveRegistered > 0
+      && (!liveProjectionState || liveProjectionState === 'HEALTHY')
+  )
+  if (liveAvailable) {
+    return {
+      expected,
+      registered: liveRegistered,
+      active: liveActive,
+      status: liveRegistered >= expected ? 'healthy' : 'degraded',
+      label: `${liveRegistered}/${expected}`,
+      secondaryLabel: `${liveActive}/${expected}`,
+      secondaryKind: '活跃',
+      source: 'live',
+    }
+  }
+
   const registered = numeric(soakSummary.registered_organ_count, 0)
   const mapped = numeric(soakSummary.last_mapped_organ_count, 0)
   const available = Boolean(soakSummary.run_id || soakSummary.status || soakSummary.verdict)
@@ -62,24 +83,56 @@ function buildOrganCoverage(soakSummary = {}, soakMeta = {}) {
     mapped,
     status: !available ? 'unknown' : complete ? 'healthy' : registered > 0 || mapped > 0 ? 'degraded' : 'down',
     label: available ? `${registered}/${expected}` : '--',
-    mappedLabel: available ? `${mapped}/${expected}` : '--',
+    secondaryLabel: available ? `${mapped}/${expected}` : '--',
+    secondaryKind: '映射',
+    source: available ? 'soak' : 'unavailable',
   }
 }
 
-function buildTickStatus(soakSummary = {}, runtimeSnapshot = {}) {
+function buildTickStatus(soakSummary = {}, runtimeSnapshot = {}, organTribeData = null) {
   const background = runtimeSnapshot?.background_runtime || {}
-  const schedulerStatus = String(soakSummary.scheduler_status || background.scheduler_status || '').toUpperCase()
-  const tickHealth = String(soakSummary.tick_health || background.tick_health || '').toLowerCase()
-  const alive = soakSummary.alive ?? background.alive
-  const advancing = soakSummary.is_advancing ?? background.is_advancing
-  const hasTick = Boolean(schedulerStatus || tickHealth || soakSummary.idle_tick_count != null || Object.keys(background).length)
+  const hostScheduler = organTribeData?.host_scheduler || {}
+  const hostClock = hostScheduler?.clock || {}
+  const lastHostTickMs = numeric(hostClock.last_tick_ms, 0)
+  const hostClockActive = hostScheduler.clock_active === true && hostClock.active !== false
+  const hasHostTick = lastHostTickMs > 0 || hostClockActive
+  const hasRuntimeTick = Object.keys(background).length > 0
+  const hasLiveTick = hasHostTick || hasRuntimeTick
+  const hostTickAgeSeconds = lastHostTickMs > 0
+    ? Math.max(0, Math.round((Date.now() - lastHostTickMs) / 1000))
+    : null
+  const hostTickFresh = hostTickAgeSeconds != null && hostTickAgeSeconds <= 120
+  const schedulerStatus = String(
+    hasHostTick
+      ? (hostClockActive ? 'HEALTHY' : 'DEGRADED')
+      : (background.scheduler_status || soakSummary.scheduler_status || '')
+  ).toUpperCase()
+  const tickHealth = String(
+    hasHostTick
+      ? (hostTickFresh ? 'fresh' : lastHostTickMs > 0 ? 'stale' : 'waiting')
+      : (background.tick_health || soakSummary.tick_health || '')
+  ).toLowerCase()
+  const alive = hasHostTick ? hostClockActive : hasRuntimeTick ? background.scheduler_active : soakSummary.alive
+  const advancing = hasHostTick ? hostTickFresh : hasRuntimeTick ? background.is_advancing : soakSummary.is_advancing
+  const hasTick = Boolean(schedulerStatus || tickHealth || soakSummary.idle_tick_count != null || hasLiveTick)
   const healthy = alive !== false && advancing !== false && schedulerStatus === 'HEALTHY' && ['fresh', 'ok', 'healthy'].includes(tickHealth)
+  const secondsSinceTick = hasHostTick
+    ? hostTickAgeSeconds
+    : background.seconds_since_inner_world_tick
+  const metricValue = hasLiveTick
+    ? (tickHealth || '--')
+    : (soakSummary.idle_tick_count ?? '--')
+  const metricHint = hasLiveTick && secondsSinceTick != null
+    ? `${schedulerStatus || '--'} · 距今 ${secondsSinceTick}s`
+    : `${schedulerStatus || '--'} / ${tickHealth || '--'}`
 
   return {
     status: !hasTick ? 'unknown' : healthy ? 'healthy' : alive === false || advancing === false ? 'down' : 'degraded',
     schedulerStatus: schedulerStatus || '--',
     tickHealth: tickHealth || '--',
-    idleTickCount: soakSummary.idle_tick_count ?? background.tick_count ?? '--',
+    metricValue,
+    metricHint,
+    secondsSinceTick: secondsSinceTick ?? null,
   }
 }
 
@@ -117,6 +170,7 @@ export function buildMainChainReshapeModel({
   lifeBodyModel = {},
   lifeBodyDerived = {},
   wallClockSoakData = null,
+  organTribeData = null,
   hasRuntimeSnapshot = false,
   hasMemoryData = false,
   hasMemorySamples = false,
@@ -132,8 +186,8 @@ export function buildMainChainReshapeModel({
 } = {}) {
   const soakSummary = wallClockSoakData?.summary || {}
   const soakMeta = wallClockSoakData?.meta || {}
-  const organCoverage = buildOrganCoverage(soakSummary, soakMeta)
-  const tickStatus = buildTickStatus(soakSummary, runtimeSnapshot)
+  const organCoverage = buildOrganCoverage(soakSummary, soakMeta, organTribeData)
+  const tickStatus = buildTickStatus(soakSummary, runtimeSnapshot, organTribeData)
   const outputLoop = buildOutputLoopStatus(humanoidLoopData)
   const criticalAlerts = runtimeAlerts.filter((item) => item?.severity === 'critical').length
   const warningAlerts = runtimeAlerts.filter((item) => item?.severity === 'warning').length
@@ -214,13 +268,15 @@ export function buildMainChainReshapeModel({
       '23 个器官族接入',
       organCoverage.status,
       organCoverage.status === 'healthy'
-        ? '23 个器官族已经注册并完成主链映射。'
+        ? organCoverage.source === 'live'
+          ? '23 个器官代理已注册，实时状态由当前 Host 投影提供。'
+          : '23 个器官族已经注册并完成主链映射。'
         : organCoverage.status === 'unknown'
           ? '等待真实墙钟 soak 暴露器官族映射。'
           : '器官族注册或映射尚未满额。',
       [
         `注册 ${organCoverage.label}`,
-        `映射 ${organCoverage.mappedLabel}`,
+        `${organCoverage.secondaryKind} ${organCoverage.secondaryLabel}`,
       ],
       '/cockpit'
     ),
@@ -257,7 +313,7 @@ export function buildMainChainReshapeModel({
       [
         `scheduler ${tickStatus.schedulerStatus}`,
         `tick ${tickStatus.tickHealth}`,
-        `idle ${tickStatus.idleTickCount}`,
+        `状态 ${tickStatus.metricValue}`,
       ],
       '/execution/automation'
     ),
@@ -292,8 +348,8 @@ export function buildMainChainReshapeModel({
     gaps: [...hardBreaks, ...softGaps].slice(0, 4),
     metrics: [
       { label: '主链阶段', value: `${completionCount}/${stages.length}`, hint: `${completionRatio}% 可观测` },
-      { label: '器官族', value: organCoverage.label, hint: `映射 ${organCoverage.mappedLabel}` },
-      { label: 'idle tick', value: tickStatus.idleTickCount, hint: `${tickStatus.schedulerStatus} / ${tickStatus.tickHealth}` },
+      { label: '器官族', value: organCoverage.label, hint: `${organCoverage.secondaryKind} ${organCoverage.secondaryLabel}` },
+      { label: '后台 tick', value: tickStatus.metricValue, hint: tickStatus.metricHint },
       { label: '器官病灶', value: unstableOrganCount, hint: unstableOrganCount ? '需看病灶中心' : '无明显紧张器官' },
     ],
   }

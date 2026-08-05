@@ -15,6 +15,10 @@ from host_brain.app.observability_runtime.life_body_source import (
     LIFE_BODY_ROOT_NOT_READY,
     LIFE_BODY_ROOT_STALE,
 )
+from host_brain.app.observability_runtime.health_device_projection import (
+    ORGAN_TRIBE_KEY,
+    ORGAN_TRIBE_KIND,
+)
 from host_brain.app.observability_runtime.process_state_projection import (
     DIGITAL_LIFE_OVERVIEW_KIND,
     INSIGHTS_SUMMARY_KIND,
@@ -76,6 +80,7 @@ def _seed_roots(
                 "persona_user_id": marker,
                 "sys_mode": "normal",
                 "slot_status": {"hard_state": "live"},
+                "hard_state": {"emotion_tag": "CALM"},
                 "private_body": f"PRIVATE_RUNTIME_{marker}",
                 "timestamp": (
                     now_ms
@@ -137,6 +142,25 @@ def _seed_roots(
             },
             now_ms,
         ),
+        "organ-tribe": (
+            ORGAN_TRIBE_KIND,
+            ORGAN_TRIBE_KEY,
+            {
+                "total_agents": 23,
+                "active_agents": 0,
+                "continuous_system_active": True,
+                "timestamp": now_ms,
+                "host_scheduler": {
+                    "clock_active": True,
+                    "clock": {
+                        "active": True,
+                        "last_tick_ms": now_ms,
+                        "next_retry_at_ms": now_ms + 60_000,
+                    },
+                },
+            },
+            now_ms,
+        ),
     }
     for offset, (name, (kind, key, payload, freshness)) in enumerate(
         roots.items(),
@@ -190,7 +214,9 @@ def test_two_obs_apps_cold_read_only_their_own_sqlite_roots(
         assert first_body is not None and second_body is not None
         assert first_body.degraded_state is ProjectionDegradedState.HEALTHY
         assert first_body.payload["runtimeSnapshot"]["persona_user_id"] == "first"
+        assert first_body.payload["derived"]["currentEmotion"] == "CALM"
         assert first_body.payload["memoryData"]["marker"] == "first"
+        assert first_body.payload["organTribeData"]["total_agents"] == 23
         assert second_body.payload["runtimeSnapshot"]["persona_user_id"] == "second"
         assert second_body.payload["memoryData"]["marker"] == "second"
         assert "second" not in json.dumps(first_body.payload, ensure_ascii=False)
@@ -367,7 +393,47 @@ def test_life_body_missing_invalid_and_stale_roots_fail_closed(
         ports.close_owned_resources()
 
 
-def test_life_body_is_last_after_all_direct_and_transitive_prerequisites(
+def test_life_body_keeps_runtime_live_when_optional_trace_feed_is_missing(
+    tmp_path: Path,
+) -> None:
+    ports = build_default_obs_application_ports(
+        canonical_db_path=tmp_path / "d7b-optional-trace.sqlite3",
+    )
+    now_ms = int(time.time() * 1000)
+    try:
+        _seed_roots(
+            ports.query_projection_store,
+            marker="optional-trace",
+            now_ms=now_ms,
+            omit="trace-feed",
+        )
+
+        result = _life_body_job(ports).callback()
+
+        assert result["unavailable_document_count"] == 0
+        document = ports.query_projection_store.get(
+            LIFE_BODY_KIND,
+            window_key(360),
+        )
+        assert document is not None
+        assert document.degraded_state is ProjectionDegradedState.HEALTHY
+        assert document.payload["runtimeSnapshot"]["persona_user_id"] == (
+            "optional-trace"
+        )
+        assert document.payload["derived"]["activeTraceFeedCount"] == 0
+        assert document.payload["meta"]["optionalSourceStatus"]["trace-feed"] == {
+            "available": False,
+            "reason_code": LIFE_BODY_ROOT_NOT_READY,
+        }
+        assert document.payload["meta"]["optionalSourceStatus"]["organ-tribe"] == {
+            "available": True,
+            "reason_code": None,
+        }
+    finally:
+        ports.close_owned_resources()
+
+
+def test_life_body_runs_before_trace_after_its_required_prerequisites(
     tmp_path: Path,
 ) -> None:
     ports = build_default_obs_application_ports(
@@ -376,13 +442,13 @@ def test_life_body_is_last_after_all_direct_and_transitive_prerequisites(
     try:
         names = [job.name for job in ports.projection_jobs]
         life_body_index = names.index("life-body")
-        assert life_body_index == len(names) - 1
+        assert life_body_index < names.index("trace")
         for prerequisite in (
             "health-passive",
             "remaining-operator-queries",
             "operator-live-state",
+            "organ-tribe",
             "runtime-snapshot",
-            "trace",
             "digital-life-overview",
             "insights-summary",
         ):

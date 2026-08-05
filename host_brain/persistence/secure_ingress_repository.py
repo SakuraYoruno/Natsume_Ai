@@ -314,6 +314,185 @@ class SQLiteSecureIngressStore:
         except (TypeError, ValueError, json.JSONDecodeError):
             return None
 
+    def ensure_hmac_service_authority(
+        self,
+        *,
+        principal_id: str,
+        key_id: str,
+        tenant_id: str,
+        granted_scopes: tuple[str, ...],
+        allowed_audiences: tuple[str, ...],
+        allowed_actions: tuple[str, ...],
+        secret_ref: str,
+        at_ms: int,
+    ) -> None:
+        """Idempotently seed one configured service identity."""
+
+        self.ensure_hmac_principal_authority(
+            principal_id=principal_id,
+            principal_kind=PrincipalKind.SERVICE,
+            key_id=key_id,
+            tenant_id=tenant_id,
+            granted_scopes=granted_scopes,
+            allowed_audiences=allowed_audiences,
+            allowed_actions=allowed_actions,
+            secret_ref=secret_ref,
+            at_ms=at_ms,
+        )
+
+    def ensure_hmac_principal_authority(
+        self,
+        *,
+        principal_id: str,
+        principal_kind: PrincipalKind | str,
+        key_id: str,
+        tenant_id: str,
+        granted_scopes: tuple[str, ...],
+        allowed_audiences: tuple[str, ...],
+        allowed_actions: tuple[str, ...],
+        secret_ref: str,
+        at_ms: int,
+    ) -> None:
+        """Idempotently seed one configured HMAC principal.
+
+        The method stores only the secret reference.  Existing authority is
+        never overwritten: a mismatch is configuration drift and fails Host
+        composition closed instead of silently widening permissions.
+        """
+
+        principal = str(principal_id or "").strip()
+        key = str(key_id or "").strip()
+        tenant = str(tenant_id or "").strip()
+        reference = str(secret_ref or "").strip()
+        if not all((principal, key, tenant, reference)):
+            raise SecureIngressStoreError("SECURE_INGRESS_AUTHORITY_INVALID")
+        try:
+            kind = (
+                principal_kind
+                if isinstance(principal_kind, PrincipalKind)
+                else PrincipalKind(str(principal_kind).strip().lower())
+            )
+        except (TypeError, ValueError) as exc:
+            raise SecureIngressStoreError(
+                "SECURE_INGRESS_AUTHORITY_INVALID"
+            ) from exc
+        scopes_json = self._json_array(tuple(granted_scopes))
+        audiences_json = self._json_array(tuple(allowed_audiences))
+        actions_json = self._json_array(tuple(allowed_actions))
+        now_ms = int(at_ms)
+
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                principal_row = self._conn.execute(
+                    "SELECT * FROM secure_ingress_principal WHERE principal_id = ?",
+                    (principal,),
+                ).fetchone()
+                if principal_row is None:
+                    self._conn.execute(
+                        """
+                        INSERT INTO secure_ingress_principal(
+                            principal_id, principal_kind, tenant_id, status,
+                            version, granted_scopes_json,
+                            allowed_audiences_json, allowed_actions_json,
+                            valid_from_ms, valid_until_ms, updated_at_ms
+                        ) VALUES (?, ?, ?, 'ACTIVE', 1, ?, ?, ?, 0, NULL, ?)
+                        """,
+                        (
+                            principal,
+                            kind.value,
+                            tenant,
+                            scopes_json,
+                            audiences_json,
+                            actions_json,
+                            now_ms,
+                        ),
+                    )
+                else:
+                    expected_principal = (
+                        kind.value,
+                        tenant,
+                        "ACTIVE",
+                        self._string_tuple(scopes_json),
+                        self._string_tuple(audiences_json),
+                        self._string_tuple(actions_json),
+                    )
+                    actual_principal = (
+                        str(principal_row["principal_kind"]),
+                        str(principal_row["tenant_id"]),
+                        str(principal_row["status"]),
+                        self._string_tuple(principal_row["granted_scopes_json"]),
+                        self._string_tuple(principal_row["allowed_audiences_json"]),
+                        self._string_tuple(principal_row["allowed_actions_json"]),
+                    )
+                    if actual_principal != expected_principal or not self._within_validity(
+                        now_ms,
+                        int(principal_row["valid_from_ms"]),
+                        principal_row["valid_until_ms"],
+                    ):
+                        raise SecureIngressStoreError(
+                            "SECURE_INGRESS_AUTHORITY_DRIFT:principal"
+                        )
+
+                credential_row = self._conn.execute(
+                    """
+                    SELECT * FROM secure_ingress_credential
+                    WHERE principal_id = ? AND key_id = ?
+                    """,
+                    (principal, key),
+                ).fetchone()
+                if credential_row is None:
+                    self._conn.execute(
+                        """
+                        INSERT INTO secure_ingress_credential(
+                            principal_id, key_id, credential_kind, algorithm,
+                            secret_ref, status, version, valid_from_ms,
+                            valid_until_ms, updated_at_ms
+                        ) VALUES (?, ?, ?, ?, ?, 'ACTIVE', 1, 0, NULL, ?)
+                        """,
+                        (
+                            principal,
+                            key,
+                            CredentialProofKind.HMAC_SHA256.value,
+                            "hmac-sha256",
+                            reference,
+                            now_ms,
+                        ),
+                    )
+                else:
+                    expected_credential = (
+                        CredentialProofKind.HMAC_SHA256.value,
+                        "hmac-sha256",
+                        "ACTIVE",
+                    )
+                    actual_credential = (
+                        str(credential_row["credential_kind"]),
+                        str(credential_row["algorithm"]),
+                        str(credential_row["status"]),
+                    )
+                    existing_secret_ref = str(
+                        credential_row["secret_ref"] or ""
+                    ).strip()
+                    secret_ref_is_safe = existing_secret_ref.startswith(
+                        ("env://", "sec://")
+                    ) and len(existing_secret_ref) > len("env://")
+                    if (
+                        actual_credential != expected_credential
+                        or not secret_ref_is_safe
+                        or not self._within_validity(
+                        now_ms,
+                        int(credential_row["valid_from_ms"]),
+                        credential_row["valid_until_ms"],
+                        )
+                    ):
+                        raise SecureIngressStoreError(
+                            "SECURE_INGRESS_AUTHORITY_DRIFT:credential"
+                        )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
     def consume(
         self,
         *,

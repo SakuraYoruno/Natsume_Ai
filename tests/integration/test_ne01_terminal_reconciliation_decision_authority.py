@@ -12,7 +12,7 @@ from host_brain.contracts.agent_runtime.graph_cancellation import (
     normalize_graph_cancellation_decision,
     normalize_graph_cancellation_intent,
 )
-from tests.contract.test_ne01_atomic_failure_bundle import GRAPH_ID, _event
+from tests.contract.test_ne01_atomic_failure_bundle import GRAPH_ID, NOW, _event
 from tests.integration.test_ne01_b5_parallel_success import _b5_fixture, _execute
 from tests.contract.test_ne01_parallel_store_settlement import (
     BUDGET_ID,
@@ -23,15 +23,21 @@ from tests.unit.test_ne01_terminal_reconciliation_classification import (
     _fresh_graph_store,
     _reader,
 )
+from tests.integration.test_ne01_terminal_reconciliation_store import (
+    _proof_authority,
+    _record,
+    _reopen,
+    _request,
+)
 
 
 def _sha256_empty_object() -> str:
     return "sha256:" + hashlib.sha256(b"{}").hexdigest()
 
 
-def _canonical_cancelled_store(tmp_path: Path):
+def _canonical_cancelled_store(tmp_path: Path, *, with_budget: bool = True):
     store = _fresh_graph_store(tmp_path)
-    budget_id = _active_budget(store)
+    budget_id = _active_budget(store) if with_budget else None
     node_id = "node-resolver"
     request_identity = "principal://operator/terminal-authority"
     request_seed = _event(
@@ -54,8 +60,8 @@ def _canonical_cancelled_store(tmp_path: Path):
             "graph_status_version_before": 1,
             "graph_target_status": "BLOCKED",
             "budget_id": budget_id,
-            "budget_status_before": "ACTIVE",
-            "budget_status_version_before": 1,
+            "budget_status_before": "ACTIVE" if with_budget else None,
+            "budget_status_version_before": 1 if with_budget else None,
             "node_states_before": {
                 node_id: {"status": "READY", "status_version": 0},
             },
@@ -70,7 +76,7 @@ def _canonical_cancelled_store(tmp_path: Path):
         1,
         budget_id=budget_id,
         expected_graph_version=1,
-        expected_budget_version=1,
+        expected_budget_version=1 if with_budget else None,
         expected_node_states=intent.payload["node_states_before"],
         intent_ref=intent.intent_ref,
         intent_payload=intent.payload,
@@ -92,12 +98,16 @@ def _canonical_cancelled_store(tmp_path: Path):
         "TASK_GRAPH_CANCELLED",
         identity="terminal-authority-final-graph",
     )
-    budget_seed = _event(
-        "BUDGET_RESERVATION",
-        budget_id,
-        2,
-        "BUDGET_RESERVATION_RELEASED",
-        identity="terminal-authority-final-budget",
+    budget_seed = (
+        _event(
+            "BUDGET_RESERVATION",
+            budget_id,
+            2,
+            "BUDGET_RESERVATION_RELEASED",
+            identity="terminal-authority-final-budget",
+        )
+        if with_budget
+        else None
     )
     node_states_before = {
         node_id: {"status": "CANCEL_REQUESTED", "status_version": 1},
@@ -114,9 +124,9 @@ def _canonical_cancelled_store(tmp_path: Path):
             "graph_status_version_before": 2,
             "graph_target_status": "CANCELLED",
             "budget_id": budget_id,
-            "budget_status_before": "ACTIVE",
-            "budget_status_version_before": 1,
-            "budget_target_status": "RELEASED",
+            "budget_status_before": "ACTIVE" if with_budget else None,
+            "budget_status_version_before": 1 if with_budget else None,
+            "budget_target_status": "RELEASED" if with_budget else None,
             "node_states_before": node_states_before,
             "node_states_after": {
                 node_id: {"status": "CANCELLED", "status_version": 2},
@@ -125,7 +135,7 @@ def _canonical_cancelled_store(tmp_path: Path):
                 advanced["reconciliation_evidence_refs"]
             ),
             "graph_outbox_id": graph_seed.outbox_id,
-            "budget_outbox_id": budget_seed.outbox_id,
+            "budget_outbox_id": budget_seed.outbox_id if budget_seed else None,
         }
     )
     evidence_refs = (decision.decision_ref, intent.intent_ref, request_identity)
@@ -134,7 +144,7 @@ def _canonical_cancelled_store(tmp_path: Path):
         1,
         budget_id=budget_id,
         expected_graph_version=2,
-        expected_budget_version=1,
+        expected_budget_version=1 if with_budget else None,
         expected_node_states=node_states_before,
         intent_ref=intent.intent_ref,
         decision_ref=decision.decision_ref,
@@ -147,16 +157,75 @@ def _canonical_cancelled_store(tmp_path: Path):
             evidence_refs=evidence_refs,
             identity="terminal-authority-final-graph",
         ),
-        budget_outbox=_event(
-            "BUDGET_RESERVATION",
-            budget_id,
-            2,
-            "BUDGET_RESERVATION_RELEASED",
-            evidence_refs=evidence_refs,
-            identity="terminal-authority-final-budget",
+        budget_outbox=(
+            _event(
+                "BUDGET_RESERVATION",
+                budget_id,
+                2,
+                "BUDGET_RESERVATION_RELEASED",
+                evidence_refs=evidence_refs,
+                identity="terminal-authority-final-budget",
+            )
+            if with_budget
+            else None
         ),
     )
     return store, decision.decision_ref
+
+
+def test_prebudget_cancelled_graph_is_healthy_and_old_false_positive_closes_signed(
+    tmp_path: Path,
+) -> None:
+    base, _ = _canonical_cancelled_store(tmp_path, with_budget=False)
+    assert base.list_terminal_reconciliation_inventory_candidates() == ()
+    base.assert_terminal_reconciliation_production_ready()
+
+    with base._transaction() as conn:  # noqa: SLF001 - freeze the old classifier case
+        graph = conn.execute(
+            "SELECT * FROM task_runtime_graph WHERE graph_id = ? AND revision = 1",
+            (GRAPH_ID,),
+        ).fetchone()
+        assert graph is not None
+        observation = base._terminal_observation(conn, graph)  # noqa: SLF001
+        legacy_case = base._build_terminal_case(  # noqa: SLF001
+            observation,
+            case_kind="TERMINAL_STRUCTURAL_ANOMALY",
+            classification="QUARANTINED_STRUCTURAL",
+            reason_code="TERMINAL_GRAPH_BUDGET_BINDING_AMBIGUOUS",
+            recommended_action="NONE",
+            selected_budget=None,
+            selected_node=None,
+            selected_attempt=None,
+            failure_bundle=None,
+        )
+        base._insert_terminal_reconciliation_case(  # noqa: SLF001
+            conn,
+            legacy_case,
+            created_ts_ms=NOW + 1,
+        )
+
+    private_key, verifier = _proof_authority()
+    store = _reopen(base, verifier=verifier)
+    candidates = store.list_terminal_reconciliation_candidates()
+    assert len(candidates) == 1
+    aggregate = candidates[0]
+    before = store.get_graph(GRAPH_ID, 1)
+    request = _request(
+        aggregate,
+        authority_kind="SIGNED_OPERATOR",
+        actor="operator://terminal-reconciliation/classifier-correction",
+        issued_ts_ms=NOW + 2,
+        private_key=private_key,
+        key_id="terminal-reconciliation-v1",
+        attestation_ref="attestation://terminal-reconciliation/classifier-correction",
+    )
+
+    settled = _record(store, aggregate, request)
+
+    assert settled["proof"]["action"] == "NONE"
+    assert settled["budget"] is None
+    assert store.get_graph(GRAPH_ID, 1) == before
+    store.assert_terminal_reconciliation_production_ready()
 
 
 @pytest.mark.asyncio

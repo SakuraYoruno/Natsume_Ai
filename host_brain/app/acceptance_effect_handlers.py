@@ -35,7 +35,9 @@ from host_brain.app.accepted_edge_embodiment_handler import (
     AcceptedEdgeEmbodimentEnqueueHandler,
 )
 from host_brain.app.accepted_companion_expression_handler import AcceptedCompanionExpressionEnqueueHandler
+from host_brain.app.accepted_memory_store_handler import AcceptedMemoryStoreHandler
 from host_brain.digital_life.companion_expression_acceptance import COMPANION_EXPRESSION_ENQUEUE_EFFECT
+from host_brain.contracts.memory_acceptance_effects import EXPLICIT_MEMORY_STORE_EFFECT_TYPE
 from host_brain.app.accepted_sys_mode_receipt import (
     sys_mode_transition_handler_receipt_ref,
 )
@@ -50,8 +52,7 @@ from host_brain.app.accepted_operator_state_control_handler import (
 )
 from host_brain.app.life_projection_barrier import (
     LifeProjectionBarrierError,
-    dispatch_and_require_life_projection_barrier,
-    require_life_projection_barrier,
+    require_life_projection_admission,
 )
 from host_brain.contracts.conversation_acceptance_effects import (
     AcceptedLifeConversationProjectionV1,
@@ -91,6 +92,7 @@ def build_production_acceptance_effect_handlers(
     task_store: Any | None = None,
     review_command_service: Any | None = None,
     review_store: Any | None = None,
+    episodic_store_provider: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     handlers: dict[str, Any] = {
         "conversation.user_turn": _AcceptedConversationUserTurnHandler(
@@ -124,6 +126,10 @@ def build_production_acceptance_effect_handlers(
     if mode_transition_service_provider is not None:
         handlers["host.sys_mode_transition"] = AcceptedSysModeTransitionHandler(
             service_provider=mode_transition_service_provider,
+        )
+    if episodic_store_provider is not None:
+        handlers[EXPLICIT_MEMORY_STORE_EFFECT_TYPE] = AcceptedMemoryStoreHandler(
+            episodic_store_provider=episodic_store_provider,
         )
     if scheduler_command_service_provider is not None:
         if (
@@ -301,12 +307,10 @@ class _AcceptedLifeConversationHandler:
                     f"{_opaque_failure(reconciliation)}"
                 ) from exc
         try:
-            return await dispatch_and_require_life_projection_barrier(
+            return require_life_projection_admission(
                 reader=self._reader(),
-                dispatcher=self._projection_dispatcher,
                 command_receipt=command_receipt,
                 command_payload=fields["payload"],
-                correlation_id=request.conversation.request_id,
             )
         except Exception as exc:
             try:
@@ -325,13 +329,12 @@ class _AcceptedLifeConversationHandler:
         try:
             reader = self._reader()
             command_receipt = self._command_receipt(request)
-            return require_life_projection_barrier(
+            return require_life_projection_admission(
                 reader=reader,
                 command_receipt=command_receipt,
                 command_payload=_life_conversation_command_fields(request)[
                     "payload"
                 ],
-                correlation_id=request.conversation.request_id,
             )
         except AcceptanceEffectOutcomeUnknown:
             raise
@@ -371,7 +374,7 @@ class _AcceptedLifeConversationHandler:
         return _validated_life_conversation_receipt(request, projected)
 
 class _AcceptedLifeForegroundHandler:
-    """Submit one Life command and require its exact local projection receipts."""
+    """Commit one Life command and its exact asynchronous projection intents."""
 
     def __init__(
         self,
@@ -413,12 +416,10 @@ class _AcceptedLifeForegroundHandler:
                 value=value,
                 foreground_receipt=command_receipt,
             )
-            projected = await dispatch_and_require_life_projection_barrier(
+            projected = require_life_projection_admission(
                 reader=self._reader(),
-                dispatcher=self._projection_dispatcher,
                 command_receipt=command_receipt,
                 command_payload=value["payload"],
-                correlation_id=value["correlation_id"],
             )
             return self._with_relationship_episode(projected, relationship_episode)
         except Exception as exc:
@@ -438,11 +439,10 @@ class _AcceptedLifeForegroundHandler:
             receipt_reader_provider=self._receipt_reader_provider,
         )
         try:
-            projected = require_life_projection_barrier(
+            projected = require_life_projection_admission(
                 reader=self._reader(),
                 command_receipt=command_receipt,
                 command_payload=value["payload"],
-                correlation_id=value["correlation_id"],
             )
             relationship_episode = self._reconcile_relationship_episode(
                 value=value,
@@ -1063,6 +1063,17 @@ def _accepted_life_request(payload: Mapping[str, Any]) -> dict[str, Any]:
         or not isinstance(metadata, Mapping)
     ):
         raise ValueError("accepted Life foreground identity is incomplete")
+    expression_fields = (
+        "expression_delivery_intents",
+        "expression_delivery_controls",
+        "expression_delivery_receipts",
+    )
+    if any(bool(command_payload.get(field)) for field in expression_fields):
+        workspace_id = str(command_payload.get("workspace_id") or "").strip()
+        if not _is_exact_effect_identity(workspace_id, limit=240):
+            raise ValueError(
+                "accepted Life foreground expression scope lacks workspace_id"
+            )
     if command_id != f"life::foreground_completed::{correlation_id}":
         raise ValueError("accepted Life foreground command identity drifted")
     created_at_ms = value.get("created_at_ms")

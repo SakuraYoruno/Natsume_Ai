@@ -4,6 +4,7 @@ import EmptyStateCard from '../../../shared/ui/EmptyStateCard.jsx'
 import { isPentestTool } from '../../../shared/pentestMeta.js'
 import { TOOL_AUTH_LEVEL_STYLES, TOOL_SIDE_EFFECT_STYLES } from '../../../shared/statusMeta.js'
 import { buildToolExecutionGate } from '../toolsCatalogModel.js'
+import { getToolExecutionAvailability } from '../api.js'
 import ToolExecutePanel from './ToolExecutePanel.jsx'
 
 function gateToneClass(tone) {
@@ -30,6 +31,7 @@ export default function ToolDetailPanel({
   const auth = TOOL_AUTH_LEVEL_STYLES[selectedTool.auth_level] || TOOL_AUTH_LEVEL_STYLES.NONE
   const executeOpen = executeTarget?.id === selectedTool.id
   const gate = buildToolExecutionGate(selectedTool)
+  const executionAvailability = getToolExecutionAvailability()
 
   return (
     <div id="tools-detail-panel" className="scroll-mt-24">
@@ -51,9 +53,15 @@ export default function ToolDetailPanel({
 
         <p className="text-sm text-gray-600">{selectedTool.desc || '暂无描述'}</p>
 
-        <div className={`rounded-lg border px-3 py-2 text-sm ${gateToneClass(gate.tone)}`}>
-          <div className="font-semibold">Execution Gate：{gate.title}</div>
-          <div className="mt-1 text-xs leading-5">{gate.detail}</div>
+        <div className={`rounded-lg border px-3 py-2 text-sm ${gateToneClass(executionAvailability.available ? gate.tone : 'amber')}`}>
+          <div className="font-semibold">
+            Execution Gate：{executionAvailability.available ? gate.title : '人工直执行已迁移'}
+          </div>
+          <div className="mt-1 text-xs leading-5">
+            {executionAvailability.available
+              ? gate.detail
+              : `目录元数据可读；实际调用由 ${executionAvailability.replacementAuthority || '受治理 TaskGraph'} 接管。`}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 text-xs">
@@ -92,7 +100,9 @@ export default function ToolDetailPanel({
             ? '收起执行面板'
             : isPentestTool(selectedTool)
               ? '查看 Pentest Lab 入口'
-              : '执行该工具'}
+              : executionAvailability.available
+                ? '执行该工具'
+                : '查看执行迁移说明'}
         </button>
       </div>
 

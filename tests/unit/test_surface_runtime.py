@@ -6,6 +6,7 @@ import pytest
 import host_brain.persona.surface_runtime as surface_runtime_module
 from host_brain.persona.surface_runtime import (
     SurfaceRuntime,
+    evaluate_surface_model_response_for_retry,
     parse_surface_generation_output,
     strip_surface_process_preface,
 )
@@ -38,7 +39,10 @@ def _payload(**overrides):
             "relationship_distance": "familiar",
             "information_budget": "short",
             "question_budget": 0,
-            "facts": ["上一轮摘要：已建议先看输入和输出，不急着改全段。"],
+            "facts": [
+                "当前时段是 morning。",
+                "上一轮摘要：已建议先看输入和输出，不急着改全段。",
+            ],
             "style_anchor": ["短句", "熟人私聊"],
         },
     }
@@ -84,6 +88,49 @@ def test_surface_runtime_uses_first_reply_without_code_scoring() -> None:
     assert "输出：只写最终正文" in rendered_prompt
     assert "不要写“我们被要求”" in rendered_prompt
     assert "raw_history" not in rendered_prompt
+
+
+def test_surface_runtime_replaces_plan_clarification_with_accepted_result() -> None:
+    calls: list[list[dict[str, str]]] = []
+    accepted = (
+        "前端可用性审查分四步：先梳理路由与关键流程，再检查空态、错误态和加载态，"
+        "随后覆盖响应式与无障碍，最后按影响和修复成本分级，交付问题清单与整改建议。"
+    )
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(
+            ["请先告诉我要审查哪个项目，有具体页面或组件范围吗？"]
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="请给我一个前端可用性审查方案",
+                accepted_task_results=[accepted],
+                reply_control_packet={
+                    "response_move": "synthesize_accepted_task_results",
+                    "task_mode": "accepted_task_result_synthesis",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "detailed",
+                    "question_budget": 0,
+                    "facts": ["已有一份通过节点验收的任务结果。"],
+                    "must_not_do": ["不要再询问项目、页面、组件或范围。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == accepted
+    assert "ACCEPTED_TASK_RESULT_CLARIFICATION" not in result.observation_codes
+    rendered_prompt = "\n".join(message["content"] for message in calls[0])
+    assert "已验收任务结果" in rendered_prompt
+    assert accepted in rendered_prompt
 
 
 def test_surface_runtime_retries_auditory_check_without_text_grounding() -> None:
@@ -230,6 +277,93 @@ def test_japanese_companion_voice_uses_one_bilingual_model_response(monkeypatch)
     assert result.as_dict()["tts_text_ja"] == result.tts_text_ja
 
 
+def test_japanese_companion_voice_keeps_runnable_code_in_text_and_speaks_summary(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    messages = surface_runtime_module.build_direct_surface_messages(
+        _payload(
+            user_message="写一个 Python 函数，统计列表元素频次并按频次降序返回。",
+            reply_control_packet={
+                "response_move": "direct_code_answer",
+                "task_mode": "technical_help",
+                "emotional_tone": "steady_helpful",
+                "relationship_distance": "familiar",
+                "information_budget": "normal",
+                "question_budget": 0,
+                "facts": [],
+                "style_anchor": [],
+            },
+        )
+    )
+    rendered = "\n".join(str(item["content"]) for item in messages)
+
+    assert "完整、可复制运行的 Markdown 代码块" in rendered
+    assert "不得只说已经写好" in rendered
+    assert "不要朗读代码、标识符、符号、路径或 Markdown" in rendered
+    assert "reply_text 是用户看到的自然简体中文私聊，1～3 个短句" not in rendered
+
+
+def test_direct_code_answer_retries_summary_and_internal_authorship_leak(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply_text": "又是这种题，Codex 说已经写好了。",
+                    "tts_text_ja": "もう書けたよ。",
+                    "natsume_emotion_tag": "CALM",
+                    "user_emotion_tag": "NEUTRAL",
+                    "emotion_confidence": 0.4,
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "reply_text": (
+                    "直接用这个：\n```python\n"
+                    "from collections import Counter\n\n"
+                    "def dedup_by_freq(items):\n"
+                    "    return [item for item, _ in Counter(items).most_common()]\n"
+                    "```"
+                ),
+                "tts_text_ja": "出現回数を数えて、多い順に返す形にしたよ。",
+                "natsume_emotion_tag": "CALM",
+                "user_emotion_tag": "NEUTRAL",
+                "emotion_confidence": 0.4,
+            },
+            ensure_ascii=False,
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="写一个 Python 函数，统计列表元素频次并按频次降序返回。",
+                reply_control_packet={
+                    "response_move": "direct_code_answer",
+                    "task_mode": "technical_help",
+                    "emotional_tone": "steady_helpful",
+                    "relationship_distance": "familiar",
+                    "information_budget": "normal",
+                    "question_budget": 0,
+                    "facts": [],
+                    "style_anchor": [],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    retry_prompt = "\n".join(item["content"] for item in calls[1])
+    assert "DIRECT_CODE_MISSING_RUNNABLE_SNIPPET" in retry_prompt
+    assert "SURFACE_INTERNAL_AUTHORSHIP_LEAK" in retry_prompt
+    assert "tts_text_ja" in retry_prompt
+    assert "def dedup_by_freq" in result.selected_text
+    assert "Codex" not in result.selected_text
+    assert result.tts_text_ja == "出現回数を数えて、多い順に返す形にしたよ。"
+
+
 def test_japanese_companion_voice_discards_non_japanese_speech_text() -> None:
     parsed = parse_surface_generation_output(
         '{"reply_text":"我在。","tts_text_ja":"这仍然是中文。"}'
@@ -237,6 +371,33 @@ def test_japanese_companion_voice_discards_non_japanese_speech_text() -> None:
 
     assert parsed["reply_text"] == "我在。"
     assert parsed["tts_text_ja"] == ""
+
+
+def test_japanese_companion_voice_retries_missing_speech_once_then_degrades(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    request = surface_runtime_module._coerce_surface_request(  # noqa: SLF001
+        _payload(user_message="今天有点累，陪我说两句。")
+    )
+    raw = json.dumps({"reply_text": "那就先歇一下，我陪你待会儿。"}, ensure_ascii=False)
+
+    first = evaluate_surface_model_response_for_retry(
+        request,
+        raw_output=raw,
+        current_messages=(),
+    )
+    degraded = evaluate_surface_model_response_for_retry(
+        request,
+        raw_output=raw,
+        current_messages=(),
+        allow_voice_degradation=True,
+    )
+
+    assert first.retry is True
+    assert first.violation_codes == ("JAPANESE_SPEECH_TEXT_MISSING",)
+    assert "tts_text_ja" in "\n".join(item["content"] for item in first.messages)
+    assert degraded.retry is False
 
 
 def test_parse_surface_generation_output_cleans_chat_punctuation_tail() -> None:
@@ -833,6 +994,36 @@ def test_surface_runtime_falls_back_when_low_info_retry_still_overreads() -> Non
     assert len(calls) == 2
     assert result.selected_text == "阿晓，早～"
     assert "LOW_INFO_SCENE_STATE_GUESS" not in result.observation_codes
+
+
+def test_surface_runtime_falls_back_naturally_for_mistimed_morning_greeting() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        return _candidate_payload(["老哥早上好～今天慢慢来。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="早",
+                reply_control_packet={
+                    "response_move": "ack_with_topic_hook",
+                    "task_mode": "short_ack",
+                    "emotional_tone": "light",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["当前时段是 afternoon。"],
+                    "style_anchor": ["短句", "熟人私聊"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert result.selected_text == "阿晓，都下午啦。"
+    assert result.observation_codes == ()
 
 
 @pytest.mark.parametrize(

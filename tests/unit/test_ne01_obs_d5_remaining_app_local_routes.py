@@ -294,6 +294,7 @@ def test_seven_gets_keep_two_obs_apps_and_sqlite_databases_distinct(
         process_services,
         "get_capability_scorecard_provider",
         forbidden_global_source,
+        raising=False,
     )
 
     now_ms = int(time.time() * 1000)

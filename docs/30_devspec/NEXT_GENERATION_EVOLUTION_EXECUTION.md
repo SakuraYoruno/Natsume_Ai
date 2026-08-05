@@ -17,7 +17,12 @@
 - 普通聊天采用轻量实时路径；工具和外部副作用仍采用 Governed Runtime。
 - GPT-SoVITS V4 方案 B 已在本机 CUDA 环境完成参考条件生成和人工试听；当前使用预训练权重，不是七海专属微调 checkpoint。
 - #194 与文档收口 PR #209 已合入 `dev`，本地和远端临时分支已清理。
-- 远端 Edge 尚未启动，VTS/VRM 和真实三模态未验收。
+- 用户已授权并启动目标 Edge；ASR、GPT-SoVITS TTS、音频播放、Edge RPC、Unified Gateway 与真实消息平台核心往返已验证。
+- Gateway Chat 已贯通 canonical HostCommand／TaskGraph／Acceptance／Outbox；重复入站不会重复建图或外发。
+- OBS/Monitor 已如实投影双端状态；VTS 缺兼容情绪热键而 `DEGRADED`，barge-in 关闭并为 `NOT_TESTED`。
+- Monitor 的普通本机浏览器会话已接通：启动器生成 ACL 保护的 owner token，浏览器经 loopback/same-origin bootstrap 获得 HttpOnly Cookie，HTTP 与 WebSocket 不再显示伪“待连接”。
+- Security Hunt、Tool Execute 和 MateEngine 直推的退役按钮已改为只读迁移说明；不会为通过 UI 测试恢复第二套写 authority。
+- Cockpit 深层诊断默认折叠；依赖审计已消除 `brace-expansion` high，React Router 仍有 2 项仅适用于当前依赖边界的 moderate 待上游安全版本。
 - GitHub Actions 因账户额度不可用，远程状态为 `NOT_RUN_ACCOUNT_QUOTA`。
 - 整体状态保持 `INCOMPLETE`。
 
@@ -25,13 +30,12 @@
 
 ```mermaid
 flowchart LR
-    A["仓库与文档收口：已完成"] --> B["合入 dev / 删除临时分支：已完成"]
-    B --> C["Edge 资产准备：下一步"]
-    C --> D["用户授权后启动 Edge"]
-    D --> E["真实 TTS + Avatar"]
-    E --> F["真实多轮盲测"]
-    F --> G["完整服务栈与故障验收"]
-    G --> H["发布判定"]
+    A["仓库与文档收口：已完成"] --> B["Edge / Gateway 核心往返：已完成"]
+    B --> C["Host / OBS / Monitor 真实 UI与本机会话：已完成"]
+    C --> D["固定版本 Docker 重启持久性：已完成"]
+    D --> E["VTS 热键与 barge-in：待外部配置"]
+    E --> F["真实多轮盲测与性能"]
+    F --> G["发布判定"]
 ```
 
 ## 4. 交付规则
@@ -54,7 +58,7 @@ flowchart LR
 4. #194 与 #209 均以中文 squash 提交进入 `dev`。
 5. 本地和远端只保留长期分支 `dev`、`main`。
 
-当前执行点已经移动到 Edge 资产准备；未经用户授权仍不得启动目标 Edge。
+本轮 P0 代码已绑定提交 `cdaa4ea54`，固定版本 Neo4j、Chroma 与 Redis 的真实写读、容器重启和持久读取已经通过。当前执行点转为外部能力补齐与完整体验门槛：VTS 情绪热键、barge-in、多轮盲测和实时性能。目标 Edge 的运行已经获得本轮授权；后续再次启动、停止或变更模型资产仍需新的明确指令。
 
 ## 6. 最终验收
 

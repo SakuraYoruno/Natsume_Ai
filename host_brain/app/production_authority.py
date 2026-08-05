@@ -66,19 +66,28 @@ def _verify_durable_production_authority(
             return "AGENT_PRODUCTION_DURABLE_COMMAND_MISSING"
         expected_request_id = str(order.metadata.get("request_id") or order.work_order_id).strip()
         expected_target_id = str(order.metadata.get("skill_id") or "").strip()
+        command_route = str(command.get("route_type") or "").strip().lower()
+        command_target = str(command.get("target_id") or "").strip()
         if (
             str(command.get("request_id") or "") != expected_request_id
             or str(command.get("request_id") or "") != str(authority.get("request_id") or "")
             or str(command.get("principal_id") or "") != str(authority.get("principal_id") or "")
-            or str(command.get("target_id") or "") != expected_target_id
-            or str(command.get("target_id") or "") != str(authority.get("target_id") or "")
+            or expected_target_id != str(authority.get("target_id") or "")
             or str(command.get("root_work_order_id") or "") != order.work_order_id
             or str(command.get("root_work_order_id") or "")
             != str(authority.get("work_order_id") or "")
             or str(command.get("graph_id") or "") != str(authority.get("graph_id") or "")
             or int(command.get("graph_revision") or 0)
             != int(authority.get("graph_revision") or 0)
-            or str(command.get("route_type") or "").strip().lower() != "skill"
+            or command_route not in {"skill", "plan"}
+            or (
+                command_route == "skill"
+                and command_target != expected_target_id
+            )
+            or (
+                command_route == "plan"
+                and command_target != "planning_search"
+            )
         ):
             return "AGENT_PRODUCTION_DURABLE_COMMAND_BINDING_MISMATCH"
         task_store = DurableTaskStore(db_path)
@@ -96,12 +105,17 @@ def _verify_durable_production_authority(
             int(authority.get("graph_revision") or 0),
             str(authority.get("node_id") or ""),
         )
+        node_payload = node.get("node")
+        expected_node_route = f"skill:{expected_target_id}"
         if (
             str(node.get("graph_id") or "") != str(authority.get("graph_id") or "")
             or int(node.get("graph_revision") or 0)
             != int(authority.get("graph_revision") or 0)
             or str(node.get("node_id") or "") != str(authority.get("node_id") or "")
             or str(node.get("status") or "").strip().upper() != "RUNNING"
+            or not isinstance(node_payload, Mapping)
+            or str(node_payload.get("route") or "").strip()
+            != expected_node_route
         ):
             return "AGENT_PRODUCTION_DURABLE_NODE_BINDING_MISMATCH"
         lease = task_store.get_active_lease(str(authority.get("attempt_id") or ""))

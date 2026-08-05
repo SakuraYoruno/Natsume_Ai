@@ -264,6 +264,12 @@ def _build_insights_summary_snapshot_sync(
             projection_store,
             AGENT_LOOP_KIND,
             AGENT_LOOP_INDEX_KEY,
+            # The Insights document is a 60-minute aggregate refreshed by a
+            # serial projection wave.  Requiring its agent-loop input to be
+            # younger than the route-level 15-second live TTL makes it expire
+            # before the same wave reaches this job.  Align dependency
+            # freshness with the aggregate contract instead.
+            max_age_ms=SUMMARY_MAX_AGE_MS,
         )
     except Exception:
         raise AggregateProjectionSourceUnavailable(source="query:agent-loop") from None

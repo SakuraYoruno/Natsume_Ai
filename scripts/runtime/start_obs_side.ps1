@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$EnvFile = "",
+  [string]$SecretEnvFile = "",
+  [string]$AuxiliarySecretEnvFile = "",
   [string]$RuntimeRoot = "",
   [string]$LogDir = "",
   [string]$BindHost = "",
@@ -178,6 +180,28 @@ if (-not $EnvFile) {
   }
 }
 
+foreach ($secretInput in @(
+    @{ Name = "SecretEnvFile"; Value = $SecretEnvFile },
+    @{ Name = "AuxiliarySecretEnvFile"; Value = $AuxiliarySecretEnvFile }
+  )) {
+  $candidate = [string]$secretInput.Value
+  if ([string]::IsNullOrWhiteSpace($candidate)) {
+    continue
+  }
+  if (-not [System.IO.Path]::IsPathRooted($candidate)) {
+    $candidate = Join-Path $repoRoot $candidate
+  }
+  if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+    throw "OBS_RUNTIME_SECRET_ENV_FILE_NOT_FOUND: $candidate"
+  }
+  $resolved = (Resolve-Path -LiteralPath $candidate).Path
+  if ([string]$secretInput.Name -eq "SecretEnvFile") {
+    $SecretEnvFile = $resolved
+  } else {
+    $AuxiliarySecretEnvFile = $resolved
+  }
+}
+
 if (-not $RuntimeRoot) {
   $RuntimeRoot = Join-Path $repoRoot "runtime\host"
 } elseif (-not [System.IO.Path]::IsPathRooted($RuntimeRoot)) {
@@ -331,7 +355,15 @@ if (Test-Path -Path $stderrLog) {
 }
 
 $previousRuntimeEnv = [Environment]::GetEnvironmentVariable("HOST_RUNTIME_ENV_FILE", "Process")
+$previousSecretEnv = [Environment]::GetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", "Process")
+$previousAuxiliarySecretEnv = [Environment]::GetEnvironmentVariable("HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE", "Process")
 [Environment]::SetEnvironmentVariable("HOST_RUNTIME_ENV_FILE", $runtimeEnvFile, "Process")
+if (-not [string]::IsNullOrWhiteSpace($SecretEnvFile)) {
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", $SecretEnvFile, "Process")
+}
+if (-not [string]::IsNullOrWhiteSpace($AuxiliarySecretEnvFile)) {
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE", $AuxiliarySecretEnvFile, "Process")
+}
 try {
   $startProcessArgs = @{
     FilePath = $pythonExe
@@ -345,6 +377,8 @@ try {
   $proc = Start-Process @startProcessArgs
 } finally {
   [Environment]::SetEnvironmentVariable("HOST_RUNTIME_ENV_FILE", $previousRuntimeEnv, "Process")
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", $previousSecretEnv, "Process")
+  [Environment]::SetEnvironmentVariable("HOST_RUNTIME_AUXILIARY_SECRET_ENV_FILE", $previousAuxiliarySecretEnv, "Process")
 }
 
 for ($i = 0; $i -lt ($WaitSeconds * 2); $i++) {

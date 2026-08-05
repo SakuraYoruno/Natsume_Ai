@@ -271,7 +271,9 @@ def test_integrations_feature_api_uses_endpoint_aware_client() -> None:
 
     assert "from '../../shared/api/endpointClient.js'" in source
     assert "endpointGet(" in source
-    assert "endpointPost(" in source
+    assert "endpointPost(" not in source
+    assert "getMateDispatchAvailability" in source
+    assert "retired" in source
     assert "httpGet" not in source
     assert "httpPost" not in source
 
@@ -281,7 +283,9 @@ def test_security_feature_api_uses_endpoint_aware_client_for_json_requests() -> 
 
     assert "from '../../shared/api/endpointClient.js'" in source
     assert "endpointGet(" in source
-    assert "endpointPost(" in source
+    assert "endpointPost(" not in source
+    assert "getSecurityHuntAvailability" in source
+    assert "retired" in source
     assert "httpGet" not in source
     assert "httpPost" not in source
     assert "httpText" not in source
@@ -1518,15 +1522,16 @@ def test_trace_summary_panels_use_shared_json_block() -> None:
     assert "light:" in shared
 
 
-def test_tools_execution_results_use_shared_json_block() -> None:
+def test_retired_tool_execution_panel_has_no_direct_result_renderer() -> None:
     tool_execute_panel = (
         MONITOR_SRC / "features" / "execution" / "components" / "ToolExecutePanel.jsx"
     ).read_text(encoding="utf-8")
 
-    assert "shared/ui/JsonBlock.jsx" in tool_execute_panel
+    assert "shared/ui/JsonBlock.jsx" not in tool_execute_panel
     assert "JSON.stringify(result.data" not in tool_execute_panel
-    assert 'variant="light"' in tool_execute_panel
-    assert 'className="mt-1 border-green-200 bg-white/70 font-mono text-green-900"' in tool_execute_panel
+    assert "getToolExecutionAvailability" in tool_execute_panel
+    assert 'to="/execution/task-runtime"' in tool_execute_panel
+    assert "打开执行审查" in tool_execute_panel
 
 
 def test_trace_live_history_and_runtime_panels_render_dynamic_values_safely() -> None:
@@ -2065,7 +2070,8 @@ def test_tools_catalog_model_lives_in_execution_feature() -> None:
     assert "./toolsCatalogModel.js" in tools_controller
     assert "./toolsDashboardModel.js" in tools_controller
     assert "getPentestToolMetadataView(capabilities)" in pentest_section
-    assert "buildToolExecutionRequest(tool, form)" in execute_panel
+    assert "buildToolExecutionRequest(tool, form)" not in execute_panel
+    assert "getToolExecutionAvailability()" in execute_panel
     assert "reconcileSelectedTool({" in tools_controller
     assert "filterToolsBySideEffect(toolItems, filter)" in dashboard_model
     assert "getToolsCatalogCounts(toolItems)" in dashboard_model
@@ -2767,7 +2773,8 @@ def test_tools_page_delegates_catalog_and_execution_ui_to_execution_feature() ->
     assert "./ToolsPentestMetadataSection.jsx" in tools_surface
     assert "features/execution/components/ToolsDashboardSurface.jsx" in tools_page
     assert "ToolExecutePanel" in detail_panel
-    assert "executeTool(" in execute_panel
+    assert "executeTool(" not in execute_panel
+    assert 'to="/execution/task-runtime"' in execute_panel
     assert "getPentestToolMetadataView(capabilities)" in pentest_section
 
     for needle in [
@@ -3797,7 +3804,9 @@ def test_security_immune_query_and_view_model_live_in_security_feature() -> None
     assert "riskCards.map" in page
     assert "visibleIncidentRows.map" in page
     assert "StatusBadge status={runtimeBadge.status}" in page
-    assert "runSecurityHuntOnce('manual_web_security_immune')" in page
+    assert "runSecurityHuntOnce('manual_web_security_immune')" not in page
+    assert "getSecurityHuntAvailability()" in page
+    assert "只读 · 已迁移" in page
 
     for forbidden in [
         "fetchSecurityRuntime",
@@ -4327,6 +4336,9 @@ def test_capability_forge_unavailable_is_visible_at_every_stats_consumer() -> No
     risk_bar = (
         OPERATIONS_COMPONENTS / "ForgeRiskActionBar.jsx"
     ).read_text(encoding="utf-8")
+    forge_error_model = (
+        MONITOR_SRC / "features" / "operations" / "forgeProjectionError.js"
+    ).read_text(encoding="utf-8")
     insights_section = (
         OBSERVABILITY_COMPONENTS
         / "insights"
@@ -4342,7 +4354,9 @@ def test_capability_forge_unavailable_is_visible_at_every_stats_consumer() -> No
 
     assert "queryError: capabilityGapError" in layout
     assert "capabilityGapError={capabilityGapError}" in layout
-    assert "Capability Forge unavailable" in risk_bar
+    assert "describeForgeProjectionError" in risk_bar
+    assert "能力演化投影暂不可用" in forge_error_model
+    assert "String(capabilityGapError" not in risk_bar
     assert "Capability Forge projection unavailable" in insights_section
     assert "capabilityGapError: capabilityGapResult.error" in alerts_queries
     assert "Capability Forge projection unavailable" in alerts_surface

@@ -67,7 +67,7 @@ Ingress → observation/fusion → appraisal/fold → AffectiveTurnPlan
        → model streaming → text/TTS/avatar delivery → aftereffect
 ```
 
-该链只保留幂等交付、关系连续性和必要的错误证据。普通闲聊不创建复杂 TaskGraph。
+该链只保留幂等交付、关系连续性和必要的错误证据。本地／HTTP 普通闲聊不创建复杂 TaskGraph；来自 Gateway 的聊天因为需要产生可恢复的外部回信，会编译为单节点受管图，由 Acceptance 生成唯一 delivery intent。它不会把整段日常对话升级成多节点任务规划。
 
 ### 受管执行主链
 
@@ -77,7 +77,7 @@ HostCommand → immutable TaskGraph → node attempt
            → acceptance → outbox → durable receipt
 ```
 
-该链用于 Skill、Delegate、Plan、Scheduler、Internal、Operator 和设备副作用。
+该链用于 Skill、Delegate、Plan、Scheduler、Internal、Operator、Gateway 回信和设备副作用。Gateway Secure Ingress 在 Host composition 启动时按已配置 HMAC key 幂等注册最小权限 service principal；数据库中只保存 secret ref，不保存密钥值。合法的既有轮换引用会原样保留，权限、身份或凭据类型不一致时启动失败而不是覆盖。
 
 ## 6. 故障模型
 
@@ -85,7 +85,7 @@ HostCommand → immutable TaskGraph → node attempt
 - Tribe 重建：Agent catalog、event bus 和短期状态重新构造；长期自我只从 canonical Life 恢复。
 - Edge 断开：文本可继续；语音／Avatar 各自降级，self affect 不被改写。
 - Provider 超时：快速回退并表达不确定性，不阻塞数分钟。
-- Gateway 网络中断：accepted outbox eventual delivery，重复 webhook 不重复建任务。
+- Gateway 网络中断：INBOX 以稳定 Host 幂等键精确重试，重复 webhook 不重复建任务；accepted OUTBOX eventual delivery，但平台 dispatch 后的未知结果必须隔离对账，不能盲目重发。
 - Neo4j／Chroma／Redis 中断：依能力降级；不可把内存 fallback 当最终验收。
 
 ## 7. 安全与隐私
@@ -94,4 +94,24 @@ HostCommand → immutable TaskGraph → node attempt
 
 ## 8. 当前状态
 
-Tribe 的 23 个 Agent 已在 production composition 中完成 app-local 构造、端口绑定和订阅注册，canonical Life 仍是唯一长期自我。目标 Edge、真实三模态、长期人工体验和全栈故障恢复尚未共同通过，因此系统状态为 `INCOMPLETE`。
+Tribe 的 23 个 Agent 已在 production composition 中完成 app-local 构造、端口绑定和订阅注册，canonical Life 仍是唯一长期自我。目标 Edge 已真实运行：ASR、GPT-SoVITS TTS、音频播放、Edge RPC 和 Unified Gateway 为 `UP`；VTS 已认证且口型／身体动作可用，但缺兼容情绪热键而保持 `DEGRADED`，barge-in 关闭并保持 `NOT_TESTED`。
+
+真实消息平台入站已经贯通 Secure Ingress、canonical HostCommand、不可变单节点 TaskGraph、Attempt、Verification、Acceptance、Gateway Outbox 和平台回执；超时重试复用同一 command／graph，不重复创建任务或外发。Host 接受后的 TTS／Avatar intent 通过 Edge durable receipt 对账，排队中的物理动作先保持 `IN_DOUBT`，只在终端回执到达后变更为 `APPLIED`／`REJECTED`，不会把“已入队”冒充“已经播放”。
+
+OBS/Monitor 读取 Host、Edge 与 Gateway 的最新 canonical health projection，关闭能力不再因 RPC 可达而显示为 `UP`。本轮 P0 双端主链已通过真实网络验证，但 VTS 情绪热键、barge-in、长期多轮体验与完整性能门槛仍未完成，所以整体数字生命状态仍为 `INCOMPLETE`。
+
+## 9. 当前观测闭环
+
+```mermaid
+flowchart LR
+    A["TaskGraph Acceptance"] --> B["surface.reply_delivery"]
+    B --> C["Gateway Reply Outbox COMMITTED"]
+    C --> D["INPUT_COMPLETED 安全枚举投影"]
+    D --> E["OBS Gateway 闭环读模型"]
+    E --> F["Monitor"]
+    C -. "不等同于" .-> G["外部平台物理 ACK"]
+    H["Digital Life hard_state.emotion_tag"] --> I["life_body_source"]
+    I --> F
+```
+
+`worker_dispatch` 只把 `gateway_delivery_authority=acceptance_effect_outbox` 与 `gateway_delivery_state=OUTBOX_COMMITTED` 两个无正文枚举写入完成事件。OBS 用它们判断当前请求是否已完成 Host→Gateway 的可恢复提交；平台物理送达仍由独立 terminal/ACK 证据负责。Life Body 则直接从 canonical runtime snapshot 的 `hard_state` 派生当前情绪，旧 `emotion_context` 仅作历史兼容读取。

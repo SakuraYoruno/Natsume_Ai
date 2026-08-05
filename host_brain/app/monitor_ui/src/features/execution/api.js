@@ -69,8 +69,14 @@ export function fetchToolMeta(toolId) {
   return endpointGet(execution.toolMeta, {}, { toolId })
 }
 
-export function executeTool(body) {
-  return endpointPost(execution.toolExecute, body, {}, {}, { timeoutMs: REQUEST_TIMEOUT_MS })
+export function getToolExecutionAvailability() {
+  const entry = execution.toolExecute
+  return Object.freeze({
+    available: entry?.retired !== true,
+    commandId: String(entry?.retiredCommandId || entry?.commandId || ''),
+    replacementAuthority: String(entry?.replacementAuthority || ''),
+    replacementWave: String(entry?.replacementWave || ''),
+  })
 }
 
 export function fetchActionPlanStats(params = {}) {

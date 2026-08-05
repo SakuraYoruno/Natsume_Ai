@@ -189,9 +189,10 @@ class ProjectionJobDaemon:
                     due_jobs.append((name, callback))
         if not due_jobs:
             return results
+        lease_owner = str(owner_id or self._owner_id)
         try:
             lease = store.acquire_leader_lease(
-                str(owner_id or self._owner_id),
+                lease_owner,
                 lease_ms=lease_ms,
             )
         except Exception as exc:
@@ -221,8 +222,28 @@ class ProjectionJobDaemon:
                 )
                 continue
             if renewed is None:
-                results[name] = "SKIPPED_LEASE_LOST"
-                continue
+                # A slow but bounded callback may outlive the current lease.
+                # Reacquire only when no competing leader has taken over; if
+                # another process owns the lease, fail closed and skip.  This
+                # prevents one expensive projection from starving every
+                # later cockpit projection forever.
+                try:
+                    renewed = store.acquire_leader_lease(
+                        lease_owner,
+                        lease_ms=lease_ms,
+                    )
+                except Exception as exc:
+                    results[name] = f"LEASE_REACQUIRE_ERROR: {type(exc).__name__}"
+                    logger.warning(
+                        "projection leader lease reacquire failed: "
+                        "job=%s error_type=%s",
+                        name,
+                        type(exc).__name__,
+                    )
+                    continue
+                if renewed is None:
+                    results[name] = "SKIPPED_LEASE_LOST"
+                    continue
             lease = renewed
             self._active_lease = renewed
             with self._jobs_lock:
@@ -278,6 +299,12 @@ class ProjectionJobDaemon:
             "ok_count": len(ok_jobs),
             "skipped_count": len(skipped_jobs),
             "failed_count": len(failed_jobs),
+            # Job names are already public composition metadata.  Keeping
+            # them in the latest bounded wave makes a cadence skip
+            # distinguishable from a projection that silently stopped
+            # advancing, without exposing callback payloads or exceptions.
+            "ok_jobs": sorted(ok_jobs),
+            "skipped_jobs": sorted(skipped_jobs),
             "failed_jobs": sorted(failed_jobs),
             "error_types": sorted(error_types),
         }
@@ -321,6 +348,8 @@ class ProjectionJobDaemon:
                 "ok_count": 0,
                 "skipped_count": 0,
                 "failed_count": 1,
+                "ok_jobs": [],
+                "skipped_jobs": [],
                 "failed_jobs": [],
                 "error_types": [error_type],
                 "observed_ts_ms": observed_ts_ms,

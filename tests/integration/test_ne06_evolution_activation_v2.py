@@ -93,7 +93,7 @@ def _runtime(tmp_path: Path):
         ts_ms=2_200_000_000_000,
     )
     assert migrated.success, migrated.as_dict()
-    assert migrated.summary["latest_version"] == 142
+    assert migrated.summary["latest_version"] == 152
     clock = _Clock()
     repository = SQLiteEvolutionActivationV2Repository(
         db,
@@ -108,6 +108,53 @@ def _runtime(tmp_path: Path):
         SQLiteTrustedEvolutionLabLedger(db, clock=clock),
         ReviewStore(db, clock=clock),
     )
+
+
+def test_ne06_feedback_baseline_digest_is_scoped_per_subject(
+    tmp_path: Path,
+) -> None:
+    (
+        db,
+        _clock,
+        _repository,
+        service,
+        _v2,
+        _trusted,
+        _reviews,
+    ) = _runtime(tmp_path)
+
+    first = service.stage_feedback_signal(
+        workspace_id=WORKSPACE,
+        subject_id="runtime-subject-a",
+        source_kind="verification",
+        outcome="APPROVED",
+        evidence_refs=("task-receipt://shared-evidence",),
+    )
+    second = service.stage_feedback_signal(
+        workspace_id=WORKSPACE,
+        subject_id="runtime-subject-b",
+        source_kind="verification",
+        outcome="APPROVED",
+        evidence_refs=("task-receipt://shared-evidence",),
+    )
+
+    assert first["status"] == "STAGED"
+    assert second["status"] == "STAGED"
+    assert first["active_digest"] == second["active_digest"]
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            """
+            SELECT workspace_id, subject_id, policy_kind, version_digest
+            FROM evolution_policy_version_v2
+            WHERE version_digest = ?
+            ORDER BY subject_id
+            """,
+            (first["active_digest"],),
+        ).fetchall()
+    assert [row[1] for row in rows] == [
+        "runtime-subject-a",
+        "runtime-subject-b",
+    ]
 
 
 def _trusted_authority(

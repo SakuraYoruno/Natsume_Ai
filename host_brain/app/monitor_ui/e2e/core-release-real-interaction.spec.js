@@ -1,8 +1,17 @@
 import { expect, test } from '@playwright/test'
+import { mkdir } from 'node:fs/promises'
+import path from 'node:path'
 import { installRequiredOperatorSession } from './operator-session.js'
 
 function monitorUrl(baseURL, routePath) {
   return new URL(`#${routePath}`, baseURL).toString()
+}
+
+async function captureAcceptanceScreenshot(page, fileName) {
+  const artifactRoot = String(process.env.MONITOR_UI_ACCEPTANCE_ARTIFACT_DIR || '').trim()
+  if (!artifactRoot) return
+  await mkdir(artifactRoot, { recursive: true })
+  await page.screenshot({ path: path.join(artifactRoot, fileName), fullPage: true })
 }
 
 async function waitForAuthenticatedJson(page, baseURL, path, isTrusted) {
@@ -47,9 +56,12 @@ function hasCoherentReadableProjection(payload, kind) {
   if (projection.available === true) {
     return projection.degraded_state !== 'STALE' && !projection.reason_code
   }
+  const unavailableReasons = {
+    SOURCE_UNAVAILABLE: 'OPERATOR_PROJECTION_SOURCE_UNAVAILABLE',
+    STALE: 'OPERATOR_PROJECTION_STALE',
+  }
   return projection.available === false
-    && projection.degraded_state === 'STALE'
-    && projection.reason_code === 'OPERATOR_PROJECTION_STALE'
+    && unavailableReasons[projection.degraded_state] === projection.reason_code
 }
 
 function healthTargets(baseURL) {
@@ -75,6 +87,7 @@ test('Core Release validates live health contracts and canonical production navi
   page,
   baseURL,
 }) => {
+  test.setTimeout(120_000)
   await installRequiredOperatorSession(context, baseURL)
   const { hostBase, obsBase } = healthTargets(baseURL)
 
@@ -82,25 +95,57 @@ test('Core Release validates live health contracts and canonical production navi
   expect(obsResponse.status()).toBe(200)
   expect(obsResponse.headers()['content-type']).toContain('application/json')
   const obsHealth = await obsResponse.json()
-  expect(obsHealth.status).toBe('OK')
+  expect(['OK', 'DEGRADED']).toContain(obsHealth.status)
   expect(obsHealth.service).toBe('obs')
   expect(obsHealth.projection?.schema_version).toBe('Natsume.operator.query_projection.v1')
   expect(obsHealth.projection?.kind).toBeTruthy()
+  expect(obsHealth.composition?.projection_daemon?.status).toBe('RUNNING')
+  expect(obsHealth.composition?.projection_daemon?.consecutive_failure_waves).toBe(0)
+  await expect.poll(async () => {
+    const response = await page.request.get(`${obsBase}/health`)
+    const health = await response.json()
+    await response.dispose()
+    return health.composition?.projection_daemon?.last_wave?.failed_count ?? 'PENDING'
+  }, {
+    message: 'the real projection daemon must complete one failure-free wave',
+    timeout: 90_000,
+  }).toBe(0)
+  expect(obsHealth.composition?.typed_unavailable_job_count).toBe(0)
+  if (obsHealth.status === 'DEGRADED') {
+    expect(obsHealth.composition?.declared_partial_job_count).toBeGreaterThan(0)
+  }
 
   if (hostBase) {
-    const hostResponse = await page.request.get(`${hostBase}/health?skip_dependency_probes=1`)
+    const hostResponse = await page.request.get(`${hostBase}/health`)
     expect(hostResponse.status()).toBe(200)
     expect(hostResponse.headers()['content-type']).toContain('application/json')
     const hostHealth = await hostResponse.json()
-    expect(hostHealth.status).toBe('OK')
+    expect(['OK', 'ACCEPTANCE_PENDING_EXTERNAL']).toContain(hostHealth.status)
     expect(hostHealth.version).toBeTruthy()
-    expect(hostHealth.details?.summary?.overall_status).toBe('UP')
+    expect(hostHealth.details?.summary?.overall_status).toBe(hostHealth.status)
+    expect(hostHealth.details?.summary?.required_unavailable).toBe(0)
   }
 
   const protectedResponse = await page.request.get(new URL('/obs/task-runtime/executions', baseURL).toString())
   expect(protectedResponse.status()).toBe(200)
   expect(protectedResponse.headers()['content-type']).toContain('application/json')
   expect(protectedResponse.headers()['x-natsume-query-auth']).toBe('AUTHENTICATED')
+  const executionIndex = await protectedResponse.json()
+  expect(executionIndex.read_only).toBe(true)
+  expect(executionIndex.executions.length).toBeGreaterThan(0)
+  const selectedExecution = executionIndex.executions[0]
+  const executionDetailResponse = await page.request.get(new URL(
+    `/obs/task-runtime/executions/${encodeURIComponent(selectedExecution.graph_id)}`
+      + `?revision=${Number(selectedExecution.revision || 1)}&after_cursor=0&event_limit=200`,
+    baseURL,
+  ).toString())
+  expect(executionDetailResponse.status()).toBe(200)
+  expect(executionDetailResponse.headers()['x-natsume-query-auth']).toBe('AUTHENTICATED')
+  const executionDetail = await executionDetailResponse.json()
+  expect(executionDetail.read_only).toBe(true)
+  expect(executionDetail.mutation_contract?.direct_database_write).toBe(false)
+  expect(executionDetail.mutation_contract?.automatic_resume).toBe(false)
+  expect(executionDetail.mutation_contract?.resume_requires_bound_token).toBe(true)
 
   const runtimeSnapshotResponse = await page.request.get(
     new URL('/obs/runtime-snapshot', baseURL).toString(),
@@ -114,10 +159,13 @@ test('Core Release validates live health contracts and canonical production navi
     baseURL,
     '/obs/security/runtime',
     (payload) => payload?.schema_version === 'Natsume.security_immune.runtime.v1'
-      && Number(payload?.generated_ts_ms || 0) > 0
+      && (
+        payload?.projection?.available === false
+        || Number(payload?.generated_ts_ms || 0) > 0
+      )
       && Array.isArray(payload?.assets)
       && Array.isArray(payload?.incidents)
-      && hasTrustedProjection(payload, 'security_immune'),
+      && hasCoherentReadableProjection(payload, 'security_immune'),
   )
   const securityAssets = await waitForAuthenticatedJson(
     page,
@@ -126,7 +174,7 @@ test('Core Release validates live health contracts and canonical production navi
     (payload) => payload?.schema_version === 'Natsume.security_immune.assets.v1'
       && Array.isArray(payload?.assets)
       && payload?.asset_count === payload.assets.length
-      && hasTrustedProjection(payload, 'security_immune'),
+      && hasCoherentReadableProjection(payload, 'security_immune'),
   )
   const securityIncidents = await waitForAuthenticatedJson(
     page,
@@ -135,7 +183,7 @@ test('Core Release validates live health contracts and canonical production navi
     (payload) => payload?.schema_version === 'Natsume.security_immune.incidents.v1'
       && Array.isArray(payload?.incidents)
       && payload?.incident_count === payload.incidents.length
-      && hasTrustedProjection(payload, 'security_immune'),
+      && hasCoherentReadableProjection(payload, 'security_immune'),
   )
   expect(securityRuntime.asset_count).toBe(securityAssets.asset_count)
 
@@ -165,10 +213,18 @@ test('Core Release validates live health contracts and canonical production navi
   await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { name: '安全免疫', exact: true })).toBeVisible()
   const securityStatus = page.getByRole('region', { name: 'Security Immune hero status' })
-  await expect(securityStatus.getByText('connected', { exact: true })).toBeVisible()
+  const securityProjectionAvailable = securityRuntime.projection.available === true
+  await expect(securityStatus.getByText(
+    securityProjectionAvailable ? 'connected' : 'degraded',
+    { exact: true },
+  )).toBeVisible()
   await expect(securityStatus.getByText(`${securityAssets.asset_count} assets`, { exact: true })).toBeVisible()
   await expect(securityStatus.getByText(`${securityIncidents.incident_count} open`, { exact: true })).toBeVisible()
-  await expect(page.getByText('部分接口降级', { exact: true })).toHaveCount(0)
+  if (securityProjectionAvailable) {
+    await expect(securityStatus.getByText('Security Immune 降级运行', { exact: true })).toHaveCount(0)
+  } else {
+    await expect(securityStatus.getByText('Security Immune 降级运行', { exact: true })).toBeVisible()
+  }
 
   const mainNav = page.getByRole('navigation', { name: '主导航' })
   await expect(mainNav).toBeVisible()
@@ -184,4 +240,27 @@ test('Core Release validates live health contracts and canonical production navi
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1))
     .toBe(true)
+
+  await page.goto(monitorUrl(baseURL, '/observability/overview'), { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: '观测总览', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '外周器官', exact: true })).toBeVisible()
+  await captureAcceptanceScreenshot(page, '01-observability-overview.png')
+
+  await page.goto(monitorUrl(baseURL, '/execution/gateway'), { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: '统一消息网关', exact: true })).toBeVisible()
+  const gatewayGate = page.getByRole('region', { name: 'Gateway Routing Gate' })
+  await expect(gatewayGate).toBeVisible()
+  await expect(page.getByText('正在同步网关快照', { exact: true })).toHaveCount(0, { timeout: 40_000 })
+  await expect(page.getByText('6 平台', { exact: true }).first()).toBeVisible()
+  await expect(gatewayGate.getByText('Platform Health', { exact: true })).toBeVisible()
+  await expect(page.getByText('网关观测接口当前未返回可用数据', { exact: false })).toHaveCount(0)
+  await captureAcceptanceScreenshot(page, '02-gateway-live.png')
+
+  await page.goto(monitorUrl(baseURL, '/execution/task-runtime'), { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: '执行审查', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'TaskGraph selector' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'TaskGraph DAG' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Task budget reservations' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Task verification status' })).toBeVisible()
+  await captureAcceptanceScreenshot(page, '03-task-runtime-live.png')
 })

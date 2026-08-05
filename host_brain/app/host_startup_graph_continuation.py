@@ -16,6 +16,14 @@ from typing import Any
 
 from host_brain.contracts.agent_runtime.task_graph import TaskGraph
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.orchestration.node_grant_errors import NODE_GRANT_EXPIRED
+from host_brain.runtime.intent_admission_contracts import (
+    INTENT_ADMISSION_REVIEW_REQUIRED,
+)
+from host_brain.task_runtime.errors import (
+    GOVERNED_EXECUTION_IN_PROGRESS,
+    GOVERNED_REVIEW_REQUIRED,
+)
 from natsume_contracts.task import ExecutorAssignment, HostCommand, HostCommandSurface
 
 
@@ -29,7 +37,14 @@ _DEFAULT_HOST_SURFACES = frozenset(
 )
 _RESUMABLE_GRAPH_STATUSES = frozenset({"CREATED", "ACTIVE", "BLOCKED"})
 _LIVE_LEASE_STATUS = "ACTIVE"
-_EXECUTION_IN_PROGRESS = "GOVERNED_EXECUTION_IN_PROGRESS"
+_DEFERRED_REASON_CODES = frozenset(
+    {
+        GOVERNED_EXECUTION_IN_PROGRESS,
+        GOVERNED_REVIEW_REQUIRED,
+        INTENT_ADMISSION_REVIEW_REQUIRED,
+        NODE_GRANT_EXPIRED,
+    }
+)
 _PAGE_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_page.v1"
 _CURSOR_SCHEMA_VERSION = "Natsume.host.nonterminal_admission_cursor.v1"
 
@@ -214,16 +229,14 @@ class HostStartupGraphContinuation:
                         graph,
                     )
                 except Exception as exc:
-                    if (
-                        str(getattr(exc, "reason_code", ""))
-                        == _EXECUTION_IN_PROGRESS
-                    ):
+                    reason_code = str(getattr(exc, "reason_code", ""))
+                    if reason_code in _DEFERRED_REASON_CODES:
                         reports.append(
                             _report(
                                 graph_id,
                                 graph_revision,
                                 status="DEFERRED",
-                                reason_code=_EXECUTION_IN_PROGRESS,
+                                reason_code=reason_code,
                             )
                         )
                         continue

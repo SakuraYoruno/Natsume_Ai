@@ -69,11 +69,11 @@ def test_obs_fastapi_app_health_ok(tmp_path, monkeypatch):
             "semantic-recall-stats",
             "sessions",
             "skill-pack-catalog",
-            "task-runtime",
-            "trace",
             "digital-life-overview",
             "insights-summary",
             "life-body",
+            "task-runtime",
+            "trace",
         ]
         assert payload["composition"]["missing_jobs"] == []
         assert payload["composition"]["registered_count"] == 22

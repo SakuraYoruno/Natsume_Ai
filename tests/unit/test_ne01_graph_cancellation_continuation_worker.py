@@ -39,7 +39,7 @@ def _admission() -> dict[str, Any]:
                 dependencies=(),
                 route="executive_runtime",
                 input_refs=(),
-                output_contract={},
+                output_contract={"schema_version": "test.cancellation-output.v1"},
                 retry_policy={"max_attempts": 1, "retry_backoff_ms": 0},
                 risk_level=1,
                 acceptance_criteria=(),

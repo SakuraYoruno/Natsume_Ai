@@ -66,7 +66,54 @@ flowchart LR
 
 节点失败、取消、重试和未知副作用在 Task Runtime 内恢复。只有 accepted effect 才进入外部交付。
 
+只读 Delegate 也不共用一套模糊执行权限：Pentest handoff 不接模型或工具并提交精确零用量证明；翻译 Delegate 从冻结 Node Budget 生成不可扩大的 model guard，经唯一 `ModelAttemptService` 调用 `workbench_translate`，把真实 provider usage 结算回 Node Budget。翻译结果本身没有 delivery authority，只有图 Acceptance 后才可进入 Gateway 回复。
+
+```mermaid
+flowchart LR
+    D["Frozen Delegate Node"] --> P{"Target policy"}
+    P -- "Pentest · port-free" --> Z["Read-only handoff + zero usage proof"]
+    P -- "Translate · model-backed" --> B["Task-bound model budget guard"]
+    B --> M["ModelAttemptService / workbench_translate"]
+    Z --> A["Node Verification / Acceptance"]
+    M --> A
+```
+
+Gateway 入站聊天属于“实时生成 + 有副作用交付”的交界：消息经 Secure Ingress 后编译为紧凑单节点 TaskGraph，聊天生成仍只执行一次，Acceptance 再原子写入可见对话和 Gateway Outbox。直接网页／本地聊天继续走低延迟实时链，不承担这层外部投递账本。
+
+Gateway INBOX 固定请求体与 Host 幂等键；即使第一次 HTTP 响应丢失，Secure Ingress 和 HostCommand repository 也只返回既有图的精确结果，因此可以有界重试。向 QQ 等平台发送的 OUTBOX 不具备同等可证明语义，dispatch 开始后的未知结果必须进入对账隔离，不能盲目重发。
+
+HostCommand 一旦与 Secure Ingress claim 原子绑定，Gateway 重试只验证 claim、command、principal 和 body digest 后确认 durable handoff，不重新运行情绪观察、反馈、路由或图编译。Task Runtime 独立负责把已接管图推进到 Verification／Acceptance／Outbox。
+
+```mermaid
+flowchart LR
+    GW["Gateway webhook"] --> SI["Secure Ingress"]
+    SI --> HC["HostCommand / one-node TaskGraph"]
+    HC --> CHAT["Affective chat generation"]
+    CHAT --> AC["Verification / Acceptance"]
+    AC --> OUT["Gateway Outbox"]
+    OUT --> SEND["Idempotent platform delivery"]
+    SEND --> REC["Delivery receipt"]
+```
+
 ## 4. 语音与 Avatar
+
+Acceptance 只代表 Host 已决定表达，不代表声音已经播放或动作已经执行。Host 为每个 TTS／Avatar effect 写入 durable intent；Edge 接收后，排队中的语音保持 `IN_DOUBT`，物理播放完成或失败时再写 terminal receipt。Host 只按同一 effect identity 对账，不盲目重放未知外部副作用。
+
+```mermaid
+sequenceDiagram
+    participant H as Host Acceptance
+    participant O as Embodiment Outbox
+    participant E as Edge Runtime
+    participant D as TTS / VTS Device
+
+    H->>O: append expression intent
+    O->>E: signed effect + idempotency identity
+    E-->>O: queued / IN_DOUBT
+    E->>D: execute physical effect
+    D-->>E: terminal result
+    E-->>O: APPLIED or REJECTED receipt
+    O-->>H: reconcile exact effect
+```
 
 ```mermaid
 flowchart LR
@@ -112,7 +159,9 @@ independent aftereffects
 
 ## 7. 观测流
 
-canonical SQLite ledgers 生成只读 projection，OBS 注册并刷新 projection jobs，Monitor 通过 OBS/Host API 展示状态。Monitor 的 React state、toast 或缓存不是业务成功证据。
+Host lifespan 心跳分别读取 Host 自身和真实 Edge 子服务，只把明确探测到的事实写入 canonical `service_health_log`；Host-only 自检不会再写一组较新的 Edge `NOT_TESTED` 覆盖远端事实。RPC 端口可达只作为缺失子服务结果时的 fallback，不能把关闭的 barge-in 或故障的播放设备标为 `UP`。OBS 从 canonical SQLite ledgers 生成只读 projection，Monitor 通过 OBS/Host API 展示状态。Monitor 的 React state、toast 或缓存不是业务成功证据。
+
+Gateway 页面同样区分服务进程、durable transport 与平台通道详情。Gateway 本身 `UP` 但平台详情尚未上报时，读模型保留 `UNKNOWN` 并显示未确认数量；只有具体平台 observation 才能改变对应状态。
 
 ## 8. 数据保留
 
@@ -125,3 +174,30 @@ canonical SQLite ledgers 生成只读 projection，OBS 注册并刷新 projectio
 | Relation episode | 结构化意义与未解决线程 |
 | Task／effect receipt | 幂等与恢复所需最小字段 |
 | 模型／语料／密钥 | 仓库外保存 |
+
+## 9. Gateway 回复与生命体情绪观测流
+
+```text
+signed Gateway webhook
+→ Durable inbox
+→ HostCommand / immutable TaskGraph
+→ model / skill / delegate / plan
+→ Verification / Acceptance
+→ surface.reply_delivery
+→ Gateway Reply Outbox COMMITTED
+→ INPUT_COMPLETED {authority, state}
+→ OBS closed-loop projection
+→ Monitor
+```
+
+这条链到 `OUTBOX_COMMITTED` 只证明 Host 已经完成可恢复提交。Gateway 实际 dispatch、未知外部副作用对账、平台 ACK 和用户可见性是后续独立阶段，缺少后续回执时不得推断为已送达。
+
+```text
+canonical Life journal
+→ digital_life_runtime_snapshot.hard_state.emotion_tag
+→ life_body_source.derived.currentEmotion
+→ OBS /obs/life-body
+→ Monitor 人格上下文
+```
+
+旧 `emotion_context` 只用于历史兼容；新运行时不会为了适配 UI 再制造第二份情绪真相。

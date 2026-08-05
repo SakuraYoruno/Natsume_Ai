@@ -122,12 +122,25 @@ def _validate_timestamp_tree(
                 ("_ts_ms", "_at_ms")
             ):
                 if item is not None:
-                    _validate_known_timestamp(
-                        value,
-                        str(key),
-                        observed_at_ms=observed_at_ms,
-                        reason_code=reason_code,
-                    )
+                    # Expiry, retry and scheduling fields describe a future
+                    # boundary rather than already-observed evidence.  They
+                    # must remain typed/non-negative, but rejecting values
+                    # after ``observed_at_ms`` makes a healthy live scheduler
+                    # fail its source contract by construction.
+                    if _is_future_boundary_timestamp(normalized):
+                        if (
+                            not isinstance(item, int)
+                            or isinstance(item, bool)
+                            or item < 0
+                        ):
+                            raise HostObsSourceContractError(reason_code)
+                    else:
+                        _validate_known_timestamp(
+                            value,
+                            str(key),
+                            observed_at_ms=observed_at_ms,
+                            reason_code=reason_code,
+                        )
             else:
                 _validate_timestamp_tree(
                     item,
@@ -145,6 +158,25 @@ def _validate_timestamp_tree(
                 observed_at_ms=observed_at_ms,
                 reason_code=reason_code,
             )
+
+
+def _is_future_boundary_timestamp(field_name: str) -> bool:
+    """Return whether a timestamp names a planned future boundary.
+
+    Observation, creation and update timestamps stay bounded by the source
+    observation clock.  This narrow classifier only covers values whose
+    semantics explicitly require permission to point into the future.
+    """
+
+    normalized = str(field_name or "").strip().lower()
+    return (
+        normalized.startswith("next_")
+        or "expires_" in normalized
+        or "expiry_" in normalized
+        or "deadline_" in normalized
+        or "not_before_" in normalized
+        or "renew_after_" in normalized
+    )
 
 
 def _mapping(value: Any, reason_code: str) -> dict[str, Any]:

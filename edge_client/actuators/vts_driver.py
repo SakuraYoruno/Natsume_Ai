@@ -23,6 +23,7 @@ from natsume_contracts.edge.v1 import (
     AVATAR_TAG_INVALID,
     VTS_API_ERROR,
     VTS_CONNECTION_FAILED,
+    VTS_EXPRESSION_UNAVAILABLE,
     VTS_EXPRESSION_TIMEOUT,
     VTS_RECONNECTED,
     VTS_RECONNECT_EXHAUSTED,
@@ -724,6 +725,9 @@ class VTubeStudioDriver:
             return False
         hints = (
             "protocol error",
+            "received 1001",
+            "sent 1001",
+            "going away",
             "received 1002",
             "sent 1002",
             "connectionclosed",
@@ -1278,12 +1282,30 @@ class VTubeStudioDriver:
         ):
             self._expression_hotkey_overrides.pop(normalized, None)
             override_hotkey = ""
+        # A VTS API connection is not proof that an active model exposes an
+        # expression.  Refresh once so a model loaded after Edge startup is
+        # discovered, then fail immediately when no compatible hotkey exists.
+        # Sending an invented legacy ID in that state makes VTS wait for the
+        # full API timeout and incorrectly turns a deterministic capability
+        # gap into an unknown physical side effect.
         discovered_hotkey = self._resolve_hotkey_for_emotion(
             emotion_tag=normalized,
             preferred_hotkey=expression_id,
-            include_preferred=False,
+            include_preferred=True,
         )
-        hotkey_id = override_hotkey or discovered_hotkey or expression_id
+        hotkey_id = override_hotkey or discovered_hotkey or ""
+        if not hotkey_id:
+            return VtsDriverResult(
+                success=False,
+                reason_code=VTS_EXPRESSION_UNAVAILABLE,
+                detail=(
+                    "active VTS model exposes no compatible expression hotkey "
+                    f"for {normalized}"
+                ),
+                action="set_expression",
+                expression_id=expression_id,
+                emotion_tag=normalized,
+            )
         try:
             _trigger_vts_hotkey(
                 vts=self._vts,
@@ -1969,7 +1991,27 @@ class VTubeStudioDriver:
 
     def health(self) -> dict[str, Any]:
         """Return VTS driver health snapshot."""
+        expression_hotkey_match_count = _expression_hotkey_match_count(
+            self._hotkey_catalog
+        )
+        authenticated = self._state == VtsState.AUTHENTICATED
+        expression_hotkey_ready = bool(
+            authenticated and expression_hotkey_match_count > 0
+        )
+        if authenticated and not expression_hotkey_ready:
+            capability_status = "degraded"
+            capability_detail = (
+                "VTS authenticated; compatible expression hotkeys unavailable"
+            )
+        elif self._connection_error:
+            capability_status = "degraded"
+            capability_detail = f"VTS connection unavailable; state={self._state.value}"
+        else:
+            capability_status = self._state.value
+            capability_detail = f"VTS state: {self._state.value}"
         return {
+            "status": capability_status,
+            "detail": capability_detail,
             "state": self._state.value,
             "talking": self._talking,
             "current_expression": self._current_expression,
@@ -1996,6 +2038,8 @@ class VTubeStudioDriver:
             "last_model_move": dict(self._last_model_move),
             "emotion_map_size": len(EMOTION_TO_EXPRESSION_ID),
             "hotkey_catalog_size": len(self._hotkey_catalog),
+            "expression_hotkey_match_count": expression_hotkey_match_count,
+            "expression_hotkey_ready": expression_hotkey_ready,
             "expression_overrides": dict(self._expression_hotkey_overrides),
             "bad_expression_hotkeys": dict(self._bad_expression_hotkeys),
             "reconnect": {
@@ -2384,6 +2428,41 @@ def _list_vts_hotkeys(*, vts: Any, timeout_s: float) -> list[dict[str, str]]:
         return list(_run_in_vts_loop(_list(), timeout_s=timeout_s + 1.0) or [])
     except Exception:
         return []
+
+
+def _expression_hotkey_match_count(catalog: Any) -> int:
+    """Count safe model hotkeys that can satisfy a canonical emotion.
+
+    Authentication proves that VTS is reachable, not that the active model
+    implements the expression IDs assumed by the Host.  This local capability
+    check exposes only a count and never model-specific hotkey names.
+    """
+
+    if not isinstance(catalog, list):
+        return 0
+    known_ids = {
+        str(value or "").strip().lower()
+        for value in EMOTION_TO_EXPRESSION_ID.values()
+        if str(value or "").strip()
+    }
+    hints = {
+        str(value or "").strip().lower()
+        for values in EMOTION_HOTKEY_HINTS.values()
+        for value in values
+        if str(value or "").strip()
+    }
+    matches = 0
+    for raw in catalog:
+        if not isinstance(raw, dict):
+            continue
+        hotkey_id = str(raw.get("id") or "").strip()
+        name = str(raw.get("name") or "").strip()
+        if not hotkey_id or is_blocked_avatar_hotkey_id(hotkey_id, name=name):
+            continue
+        searchable = f"{hotkey_id} {name}".lower()
+        if hotkey_id.lower() in known_ids or any(hint in searchable for hint in hints):
+            matches += 1
+    return matches
 
 
 def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:

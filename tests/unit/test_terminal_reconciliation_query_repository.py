@@ -6,18 +6,12 @@ import sqlite3
 import pytest
 
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
-from host_brain.contracts.agent_runtime.budget_policy import (
-    BudgetAmount,
-    BudgetReservation,
-    BudgetReservationStatus,
-)
 from host_brain.persistence.task_store_types import TaskStoreError
 from host_brain.persistence.terminal_reconciliation_query_repository import (
     TerminalReconciliationQueryRepository,
 )
 from tests.contract.test_ne01_atomic_failure_bundle import (
     GRAPH_ID,
-    _event,
     _fail,
     _running_store,
 )
@@ -99,37 +93,10 @@ def test_query_repository_public_reads_leave_database_unchanged(tmp_path: Path) 
 
 def test_inventory_discovery_uses_one_sqlite_read_snapshot(tmp_path: Path) -> None:
     store, context = _running_store(tmp_path)
-    budget_id = "budget-query-snapshot"
-    store.create_budget_reservation(
-        BudgetReservation(
-            budget_id=budget_id,
-            scope=f"graph:{GRAPH_ID}@1",
-            limits=BudgetAmount(token_count=10),
-            reserved=BudgetAmount(token_count=10),
-            status=BudgetReservationStatus.PENDING,
-        ),
-        graph_id=GRAPH_ID,
-        graph_revision=1,
-        node_id=None,
-        attempt_id=None,
-        outbox=_event(
-            "BUDGET_RESERVATION",
-            budget_id,
-            0,
-            "BUDGET_RESERVATION_CREATED",
-        ),
-    )
-    store.transition_budget(
-        budget_id,
-        expected_version=0,
-        target_status=BudgetReservationStatus.ACTIVE,
-        outbox=_event(
-            "BUDGET_RESERVATION",
-            budget_id,
-            1,
-            "BUDGET_RESERVATION_ACTIVE",
-        ),
-    )
+    # The shared running-store fixture already owns the single graph budget.
+    # Reuse it so this test measures snapshot isolation rather than creating
+    # an invalid two-authority graph aggregate.
+    budget_id = "budget-terminal-reconciliation"
     _fail(store, context["lease"])
     with sqlite3.connect(store.db_path) as conn:
         conn.execute("PRAGMA journal_mode = WAL")

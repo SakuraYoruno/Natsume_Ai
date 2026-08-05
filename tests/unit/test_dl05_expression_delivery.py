@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -17,7 +15,7 @@ from host_brain.digital_life.companion_expression_acceptance import (
     COMPANION_EXPRESSION_ENQUEUE_EFFECT,
     CompanionExpressionEffectError,
     compile_companion_expression_effect_payloads,
-    parse_companion_expression_effect_payload,
+    parse_companion_expression_effect_batch_payload,
 )
 from host_brain.app.accepted_companion_expression_handler import (
     AcceptedCompanionExpressionEnqueueHandler,
@@ -399,9 +397,9 @@ def _companion_effects() -> tuple[dict[str, object], ...]:
 def test_governed_expression_acceptance_rebuilds_exact_host_outbox_commands() -> None:
     effects = _companion_effects()
 
-    assert len(effects) == 4  # paired sentence protocol followed by paired release
-    assert [effect["delivery_sequence"] for effect in effects] == [0, 1, 2, 3]
-    parsed = [parse_companion_expression_effect_payload(item) for item in effects]
+    assert len(effects) == 1
+    parsed = list(parse_companion_expression_effect_batch_payload(effects[0]))
+    assert [item["delivery_sequence"] for item in parsed] == [0, 1, 2, 3]
     assert [item["command"].kind for item in parsed] == ["voice", "avatar", "voice", "avatar"]
     assert [item["command"].action for item in parsed] == ["speak", "set_expression", "release", "release"]
     assert all(item["command"].session_id == "session-dl05" for item in parsed)
@@ -409,6 +407,10 @@ def test_governed_expression_acceptance_rebuilds_exact_host_outbox_commands() ->
     assert all(item["protocol_receipt"].physical_receipt_ref is None for item in parsed)
     assert all(
         item["command"].authority_ref.startswith("authority://task-acceptance/sha256/")
+        for item in parsed
+    )
+    assert all(
+        item["command"].deadline_ms - item["command"].issued_at_ms == 30_000
         for item in parsed
     )
     assert COMPANION_EXPRESSION_ENQUEUE_EFFECT == "host.companion_expression_enqueue"
@@ -457,7 +459,7 @@ def test_governed_expression_acceptance_binds_japanese_speech_to_chinese_narrati
         foreground=foreground,
     )
 
-    voice = parse_companion_expression_effect_payload(effects[0])["command"]
+    voice = parse_companion_expression_effect_batch_payload(effects[0])[0]["command"]
     assert voice.payload["text"] == speech
     assert voice.payload["display_text"] == narrative
     assert voice.payload["lang_hint"] == "ja"
@@ -477,6 +479,34 @@ def test_governed_expression_acceptance_binds_japanese_speech_to_chinese_narrati
             node_grant_ref="node-grant://dl05",
             foreground=foreground,
         )
+
+
+def test_governed_expression_acceptance_allows_explicit_japanese_voice_degradation() -> None:
+    foreground = _governed_foreground()
+    payload = foreground["payload"]
+    assert isinstance(payload, dict)
+    payload["expression_delivery_intents"] = []
+    payload["expression_delivery_controls"] = []
+    payload["expression_delivery_receipts"] = []
+    payload["expression_delivery_suppressed_reason"] = (
+        "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
+    )
+
+    effects = compile_companion_expression_effect_payloads(
+        graph_id="graph-dl05",
+        graph_revision=1,
+        node_id="node-dl05",
+        attempt_id="attempt-dl05",
+        request_id="request-dl05",
+        principal_id="person-dl05",
+        relationship_subject_id="person-dl05",
+        workspace_id="workspace-dl05",
+        session_id="session-dl05",
+        node_grant_ref="node-grant://dl05",
+        foreground=foreground,
+    )
+
+    assert effects == ()
 
 
 def test_governed_expression_acceptance_rejects_worker_protocol_drift() -> None:
@@ -518,11 +548,11 @@ def test_governed_expression_acceptance_keeps_service_principal_separate_from_co
         foreground=_governed_foreground(),
     )
 
-    assert len(effects) == 4
+    assert len(effects) == 1
     assert all(
-        parse_companion_expression_effect_payload(effect)["life_foreground"]["person_id"]
+        item["life_foreground"]["person_id"]
         == "person-dl05"
-        for effect in effects
+        for item in parse_companion_expression_effect_batch_payload(effects[0])
     )
 
 
@@ -594,36 +624,14 @@ def test_governed_expression_acceptance_preserves_frozen_sentence_boundaries() -
         foreground=foreground,
     )
 
-    assert len(effects) == 6
+    assert len(effects) == 1
+    assert len(parse_companion_expression_effect_batch_payload(effects[0])) == 6
 
 
-def test_accepted_companion_expression_only_enqueues_host_outbox(monkeypatch) -> None:
-    from host_brain.governor import action_preview
-
+def test_accepted_companion_expression_only_enqueues_host_outbox() -> None:
     effect = _companion_effects()[0]
     business = dict(effect)
     calls: list[object] = []
-
-    class PreviewService:
-        def require_execution(self, **kwargs: object) -> object:
-            calls.append(kwargs)
-            encoded = json.dumps(
-                business,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            return SimpleNamespace(
-                payload={
-                    "authority_kind": "ACCEPTANCE_EFFECT",
-                    "action_kind": "acceptance-effect.host.companion_expression_enqueue",
-                    "action_scope": "acceptance-effect://dl05/0",
-                    "risk_level": 4,
-                    "action_args_digest": "sha256:" + hashlib.sha256(encoded).hexdigest(),
-                }
-            )
-
-    monkeypatch.setattr(action_preview, "ActionPreviewService", PreviewService)
 
     class Runtime:
         runtime_scope_id = "runtime-dl05"
@@ -631,21 +639,33 @@ def test_accepted_companion_expression_only_enqueues_host_outbox(monkeypatch) ->
         def __init__(self) -> None:
             self.rows: dict[str, dict[str, object]] = {}
 
-        def enqueue(self, command: object, **_kwargs: object) -> object:
-            calls.append(command)
-            self.rows[command.command_id] = {
-                "outbox_id": "outbox-dl05",
-                "runtime_scope_id": self.runtime_scope_id,
-                "command_id": command.command_id,
-                "idempotency_key": command.idempotency_key,
-                "status": "PENDING",
-                "command": command.as_dict(),
-            }
-            return SimpleNamespace(
-                outbox_id="outbox-dl05",
-                command_id=command.command_id,
-                idempotency_key=command.idempotency_key,
-            )
+        def enqueue_accepted_companion_batch(
+            self,
+            commands: tuple[object, ...],
+            *,
+            acceptance_effect_payload: dict[str, object],
+        ) -> tuple[object, ...]:
+            assert acceptance_effect_payload == business
+            acknowledgements: list[object] = []
+            for index, command in enumerate(commands):
+                calls.append(command)
+                outbox_id = f"outbox-dl05-{index}"
+                self.rows[command.command_id] = {
+                    "outbox_id": outbox_id,
+                    "runtime_scope_id": self.runtime_scope_id,
+                    "command_id": command.command_id,
+                    "idempotency_key": command.idempotency_key,
+                    "status": "PENDING",
+                    "command": command.as_dict(),
+                }
+                acknowledgements.append(
+                    SimpleNamespace(
+                        outbox_id=outbox_id,
+                        command_id=command.command_id,
+                        idempotency_key=command.idempotency_key,
+                    )
+                )
+            return tuple(acknowledgements)
 
         def reopen_outbox_command(self, command: object) -> dict[str, object] | None:
             return self.rows.get(command.command_id)
@@ -666,39 +686,18 @@ def test_accepted_companion_expression_only_enqueues_host_outbox(monkeypatch) ->
                 "event_id": "life_evt_dl05",
             }
 
-    boundary = {
-        "action_kind": "acceptance-effect.host.companion_expression_enqueue",
-        "action_scope": "acceptance-effect://dl05/0",
-        "risk_level": 4,
-        "action_args": business,
-        "node_grant_ref": "node-grant://dl05",
-        "authority_context": {
-            "schema_version": "Natsume.action_preview.acceptance_effect_authority_request.v1",
-            "effect_id": "acceptance-effect://dl05/0",
-            "lease_owner_id": "dispatcher-dl05",
-            "fencing_token": 1,
-        },
-    }
     handler = AcceptedCompanionExpressionEnqueueHandler(
         runtime_provider=lambda: runtime,
         life_receipt_reader_provider=Reader,
     )
-    receipt = handler(
-        {
-            **business,
-            "_action_preview_terminal_proof": {
-                "service": PreviewService(),
-                "event_id": "preview-dl05",
-                "boundary": boundary,
-            },
-        }
-    )
+    receipt = handler(business)
 
     assert receipt["host_outbox_status"] == "PENDING"
-    assert receipt["physical_receipt_ref"] is None
-    assert receipt["receipt_ref"].startswith("embodiment-outbox://")
-    assert len(runtime.rows) == 1
-    assert len([item for item in calls if hasattr(item, "command_id")]) == 1
+    assert receipt["batch_size"] == 4
+    assert all(item["physical_receipt_ref"] is None for item in receipt["commands"])
+    assert receipt["receipt_ref"].startswith("embodiment-outbox-batch://")
+    assert len(runtime.rows) == 4
+    assert len([item for item in calls if hasattr(item, "command_id")]) == 4
 
 
 def test_production_handler_registry_requires_life_receipt_reader() -> None:

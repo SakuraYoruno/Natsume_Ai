@@ -143,6 +143,15 @@ _SECRET_KEY_PARTS = frozenset(
         "token",
     }
 )
+# These exact boolean policy flags describe whether a secret is required; they
+# never contain the secret itself.  Keeping the allowlist type-bound avoids
+# weakening the fail-closed token-field rule for strings, refs, or objects.
+_PUBLIC_SECRET_POLICY_BOOLEAN_FIELDS = frozenset(
+    {
+        "resume_requires_bound_token",
+        "resume_requires_token",
+    }
+)
 _SECRET_VALUE_RE = re.compile(
     r"(?i)(?:bearer\s+[A-Za-z0-9._~+/-]{8,}|"
     r"(?:approval|confirm|undo|review_resume|canon|credential|token)::[^\s,;]+)"
@@ -286,6 +295,11 @@ _OPERATOR_QUERY_NAMESPACES = (
     re.compile(r"/obs(?:/.*)?"),
     re.compile(r"/api/ui(?:/.*)?"),
     re.compile(r"/observability(?:/.*)?"),
+)
+_PUBLIC_QUERY_METHOD_ROUTES = frozenset(
+    {
+        ("POST", "/obs/operator-session/bootstrap"),
+    }
 )
 
 
@@ -651,6 +665,8 @@ def require_operator_query_scope(request: Request, required_scope: str) -> Opera
 def required_operator_query_scope(*, method: str, path: str) -> str | None:
     normalized_method = str(method or "GET").strip().upper()
     normalized_path = str(path or "/").strip() or "/"
+    if (normalized_method, normalized_path) in _PUBLIC_QUERY_METHOD_ROUTES:
+        return None
     for policy in OPERATOR_QUERY_ROUTE_POLICIES:
         if policy.matches(method=normalized_method, path=normalized_path):
             return policy.required_scope
@@ -748,6 +764,8 @@ def _sanitize_value(
 
 
 def _field_is_private(normalized_key: str, value: Any) -> bool:
+    if normalized_key in _PUBLIC_SECRET_POLICY_BOOLEAN_FIELDS:
+        return not isinstance(value, bool)
     if normalized_key in DEFAULT_FORBIDDEN_PRIVATE_FIELDS:
         return True
     if normalized_key in _SECRET_FIELD_NAMES:

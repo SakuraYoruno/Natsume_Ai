@@ -465,7 +465,13 @@ async def build_live_health_report(
             )
             _runtime_statuses.update(_dep_probes)
             _edge_gateway = dict(_dep_probes.get("edge.rpc.gateway") or {})
-            _runtime_statuses.update(_project_edge_transport_statuses(_edge_gateway))
+            for service_id, transport_status in _project_edge_transport_statuses(
+                _edge_gateway
+            ).items():
+                # Transport reachability is only a fallback.  A real ASR/TTS/
+                # barge-in/resource-gate probe must never be overwritten by
+                # the fact that the Edge HTTP port itself answered.
+                _runtime_statuses.setdefault(service_id, transport_status)
         except HealthRuntimeDependencyUnavailable:
             raise
         except Exception as _edge_exc:
@@ -479,7 +485,10 @@ async def build_live_health_report(
     health_report = build_service_health_report(
         runtime_statuses=_runtime_statuses,
         request_id=req_id,
-        ledger=ledger,
+        # The lifespan heartbeat owns durable service observations.  Its
+        # Host-only self-read sets skip_dependency_probes and must not append a
+        # newer NOT_TESTED Edge report every 30 seconds.
+        ledger=None if skip_dependency_probes else ledger,
         ts_ms=ts_value,
     )
     workspace_cleanup = _read_workspace_cleanup_health(
@@ -522,6 +531,7 @@ async def build_live_health_report(
 
 async def build_live_readiness_report(
     *,
+    skip_dependency_probes: bool = False,
     request_id: str | None = None,
     ts_ms: int | None = None,
     ledger_provider: HealthLedgerProvider | None = None,
@@ -532,21 +542,30 @@ async def build_live_readiness_report(
     req_id = str(request_id or new_request_id()).strip()
     ts_value = int(ts_ms if ts_ms is not None else time.time() * 1000)
     node_inventory, expected_node_count, inventory_path = _resolve_node_inventory_payload()
-    ledger = _read_health_ledger(
+    # Readiness is a polling/read adapter.  Resolve the app-local authority so
+    # a miswired production router still fails closed, but never append twelve
+    # service rows for every load-balancer poll.  The lifespan heartbeat owns
+    # durable service observations.
+    _read_health_ledger(
         ledger_provider=ledger_provider,
         allow_legacy_process_providers=allow_legacy_process_providers,
     )
-    dependency_probes = await _read_dependency_probes(
-        dependency_probe_provider=dependency_probe_provider,
-        allow_legacy_process_providers=allow_legacy_process_providers,
-    )
+    if skip_dependency_probes:
+        dependency_probes = _build_edge_not_tested_statuses(
+            detail="remote Edge dependency probes were skipped by this Host-only readiness request"
+        )
+    else:
+        dependency_probes = await _read_dependency_probes(
+            dependency_probe_provider=dependency_probe_provider,
+            allow_legacy_process_providers=allow_legacy_process_providers,
+        )
     readiness_report = build_env_readiness_report(
         env=str(os.environ.get("Natsume_ENV") or "dev"),
         node_inventory=node_inventory,
         expected_node_count=expected_node_count,
         dependency_probes=dependency_probes,
         request_id=req_id,
-        ledger=ledger,
+        ledger=None,
         ts_ms=ts_value,
     )
     workspace_cleanup = _read_workspace_cleanup_health(
@@ -680,6 +699,10 @@ async def degradation_health_state(
 
 
 async def environment_readiness(
+    skip_dependency_probes: bool = Query(
+        False,
+        description="Skip external dependency probes and return Host-only readiness.",
+    ),
     include_immune_proposal: bool = Query(
         False,
         description="Attach a Codex immune proposal when the readiness report is degraded or failed.",
@@ -696,6 +719,7 @@ async def environment_readiness(
 
     try:
         readiness_report = await build_live_readiness_report(
+            skip_dependency_probes=skip_dependency_probes,
             request_id=request_id,
             ts_ms=ts_ms,
             ledger_provider=ledger_provider,
@@ -913,6 +937,12 @@ def create_health_router(
 
     @health_router.get("/ready", response_model=ReadinessResponse)
     async def app_environment_readiness(
+        skip_dependency_probes: bool = Query(
+            False,
+            description=(
+                "Skip external dependency probes and return Host-only readiness."
+            ),
+        ),
         include_immune_proposal: bool = Query(
             False,
             description=(
@@ -922,6 +952,7 @@ def create_health_router(
         ),
     ) -> ReadinessResponse:
         return await environment_readiness(
+            skip_dependency_probes=skip_dependency_probes,
             include_immune_proposal=include_immune_proposal,
             ledger_provider=ledger_provider,
             dependency_probe_provider=dependency_probe_provider,

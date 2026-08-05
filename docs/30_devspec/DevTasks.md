@@ -25,7 +25,17 @@
 - [ ] 实测播放中打断、TTS 断线、Avatar 断线和 Host 重连。
 - [ ] 测量首段 TTS、barge-in 和 Voice／Avatar 起始偏差。
 
-约束：Edge 在另一台电脑上，用户未明确允许前不得启动或远程操作。
+约束：Edge 在另一台电脑上。本轮双端验收已经用户明确授权；后续新一轮远程启动或可能影响设备的操作仍需遵守当轮授权边界。
+
+## 2026-08-04 已完成的双端观测切片
+
+- [x] Life Body 从 canonical `hard_state.emotion_tag` 派生人格上下文，并在真实 OBS／Nginx Monitor 浏览器中消除“待连接／待恢复”。
+- [x] Gateway 完成事件公开最小 Reply Outbox commit marker；回复正文与私有字段不进入观测投影。
+- [x] 用真实签名 Gateway 分别跑通翻译 Delegate、Memory Store 与多 Skill Plan；最新有效桶的 Reply Outbox、Closed Loop、Completion 均为 100%。
+- [x] 保留 360 分钟历史失败，不降低阈值，不把 Outbox commit 标作外部平台 ACK。
+- [x] Monitor read-model 27 项、生产构建、真实后端主链与核心交互浏览器用例通过。
+
+本切片不关闭 VTS 情绪热键、barge-in、常驻 ASR 噪声、PlanningSearch 收益、人类盲测或最终 SHA 故障矩阵。
 
 ## P0：真实对话体验
 

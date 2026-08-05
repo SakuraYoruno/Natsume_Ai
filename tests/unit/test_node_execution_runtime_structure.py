@@ -53,7 +53,7 @@ _MIGRATED_COORDINATOR_METHODS = {
     "_try_operation",
 }
 _EXECUTE_STREAM_BASELINE_SHA256 = (
-    "3c11a970af7b59056514099923da28ce1ef1126f19dbb5f2769ecf5da6ecddf4"
+    "2f33ffac1d7398ea2e3d0d9bc63459a8d1bdc141eae1a3091babdf99f36eac24"
 )
 _PROJECTION_BASELINE_SHA256 = {
     "matching_parallel_decision": "d07db84d3b4cda033da5bc10b8f247156bec437b02b24ec2fdd62539a80b72a9",

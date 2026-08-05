@@ -221,7 +221,7 @@ def test_monitor_ui_has_manifest_driven_playwright_route_smoke() -> None:
     assert "hasCoherentReadableProjection" in core_spec
     assert "OPERATOR_PROJECTION_STALE" in core_spec
     assert "SSE 实时流已连接" in core_spec
-    assert "部分接口降级" in core_spec
+    assert "Security Immune 降级运行" in core_spec
     assert "/obs/digital-life/runtime-snapshot" not in core_spec
     assert "MONITOR_UI_OPERATOR_SESSION_TOKEN is required" in session_helper
     assert "refuses non-loopback plaintext HTTP" in session_helper

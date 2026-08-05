@@ -28,6 +28,18 @@ def test_child_startup_scripts_return_control_to_host_orchestrator(
     assert not re.search(r"(?m)^\s*exit\s+0\s*$", source)
 
 
+def test_edge_side_stop_wrapper_uses_named_parameter_splatting() -> None:
+    source = (ROOT / "scripts/runtime/stop_edge_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    assert "$invokeArgs = @{}" in source
+    assert '$invokeArgs["PidFile"] = $PidFile' in source
+    assert '$invokeArgs["Port"] = $Port' in source
+    assert "& $stopEdgeScript @invokeArgs" in source
+    assert "$invokeArgs = @()" not in source
+
+
 def test_host_orchestrator_isolates_child_script_process_control() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"
@@ -50,6 +62,191 @@ def test_host_orchestrator_isolates_child_script_process_control() -> None:
     assert source.count("-TimeoutSeconds ([Math]::Max(60, (2 * $WaitSeconds) + 30))") == 1
     assert source.count("-TimeoutSeconds ([Math]::Max(30, $WaitSeconds + 30))") == 1
     assert "Start-Process -Wait" not in source
+
+
+def test_obs_sidecar_receives_secret_file_references_without_copying_values() -> None:
+    host = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(encoding="utf-8")
+    obs = (ROOT / "scripts/runtime/start_obs_side.ps1").read_text(encoding="utf-8")
+
+    assert '$obsArgs["SecretEnvFile"] = $runtimeSecretEnvFile' in host
+    assert (
+        '$obsArgs["AuxiliarySecretEnvFile"] = $runtimeAuxiliarySecretEnvFile'
+        in host
+    )
+    assert '[string]$SecretEnvFile = ""' in obs
+    assert '[string]$AuxiliarySecretEnvFile = ""' in obs
+    assert "OBS_RUNTIME_SECRET_ENV_FILE_NOT_FOUND" in obs
+    assert (
+        '[Environment]::SetEnvironmentVariable("HOST_RUNTIME_SECRET_ENV_FILE", '
+        "$SecretEnvFile, \"Process\")" in obs
+    )
+    assert "Read-EnvFile -Path $SecretEnvFile" not in obs
+    assert "Get-Content -LiteralPath $SecretEnvFile" not in obs
+
+    obs_main = (ROOT / "host_brain/obs_main.py").read_text(encoding="utf-8")
+    assert "from host_brain.runtime_env import load_host_runtime_environment" in obs_main
+    assert "load_host_runtime_environment(repo_root=repo_root)" in obs_main
+
+
+def test_host_launcher_creates_loopback_operator_session_without_public_token(
+    tmp_path: Path,
+) -> None:
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    runtime_root = tmp_path / "host-runtime"
+    runtime_root.mkdir()
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Get-EnvSetting',
+  'Get-Sha256Hex',
+  'New-OperatorSessionToken',
+  'Ensure-LocalOperatorSession'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$values = @{{
+  HOST_SECURE_INGRESS_HMAC_SECRETS_JSON = '{{"operator-test-key":"0123456789abcdef0123456789abcdef"}}'
+}}
+$env:MONITOR_UI_OPERATOR_SESSION_TOKEN = $null
+$result = Ensure-LocalOperatorSession `
+  -ResolvedRuntimeRoot '{runtime_root}' `
+  -EnvValues $values `
+  -MonitorHost '127.0.0.1' `
+  -MonitorPort 18180 `
+  -Enabled $true
+$token = [System.IO.File]::ReadAllText($result.session_file).Trim()
+$bindings = @($values['NATSUME_OPERATOR_QUERY_AUTH_BINDINGS'] | ConvertFrom-Json)
+$binding = @($bindings | Where-Object {{
+  ([string]$_.token_sha256).ToLowerInvariant() -eq (Get-Sha256Hex -Value $token)
+}})
+[ordered]@{{
+  enabled = [bool]$result.enabled
+  mode = [string]$result.mode
+  session_exists = Test-Path -LiteralPath $result.session_file -PathType Leaf
+  token_length = $token.Length
+  matching_binding_count = $binding.Count
+  key_id = [string]$binding[0].key_id
+  can_cancel = @($binding[0].scopes | Where-Object {{ [string]$_ -eq 'task-runtime:cancel' }}).Count -eq 1
+  can_write = @($binding[0].scopes | Where-Object {{ [string]$_ -eq 'obs:write' }}).Count -eq 1
+  raw_token_in_public_values = @($values.Values | Where-Object {{ [string]$_ -eq $token }}).Count
+  bootstrap_enabled = [string]$values['NATSUME_OPERATOR_SESSION_BOOTSTRAP_ENABLED']
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    assert payload == {
+        "enabled": True,
+        "mode": "loopback_http_only_cookie",
+        "session_exists": True,
+        "token_length": 64,
+        "matching_binding_count": 1,
+        "key_id": "operator-test-key",
+        "can_cancel": True,
+        "can_write": True,
+        "raw_token_in_public_values": 0,
+        "bootstrap_enabled": "true",
+    }
+
+
+def test_host_launcher_persists_obs_read_auth_as_protected_file_reference(
+    tmp_path: Path,
+) -> None:
+    host_script = ROOT / "scripts/runtime/start_host_side.ps1"
+    runtime_root = tmp_path / "host-runtime"
+    runtime_root.mkdir()
+    harness = rf"""
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile(
+  '{host_script}', [ref]$tokens, [ref]$parseErrors
+)
+if ($parseErrors.Count -gt 0) {{ throw ($parseErrors | Out-String) }}
+$names = @(
+  'Ensure-Directory',
+  'Get-EnvSetting',
+  'New-OperatorSessionToken',
+  'Ensure-HostObsReadTokenFile',
+  'Test-SensitiveRuntimeEnvEntry'
+)
+foreach ($name in $names) {{
+  $definition = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+      $node.Name -eq $name
+  }}, $true)
+  if ($null -eq $definition) {{ throw "function not found: $name" }}
+  . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+$env:HOST_OBS_READ_TOKEN = $null
+$env:HOST_OBS_READ_TOKEN_FILE = $null
+$values = @{{}}
+$path = Ensure-HostObsReadTokenFile `
+  -ResolvedRuntimeRoot '{runtime_root}' `
+  -EnvValues $values
+$token = [System.IO.File]::ReadAllText($path).Trim()
+[ordered]@{{
+  exists = Test-Path -LiteralPath $path -PathType Leaf
+  token_length = $token.Length
+  file_reference = [string]$values['HOST_OBS_READ_TOKEN_FILE']
+  raw_token_persisted = $values.ContainsKey('HOST_OBS_READ_TOKEN')
+  file_reference_is_public = -not (Test-SensitiveRuntimeEnvEntry `
+    -Name 'HOST_OBS_READ_TOKEN_FILE' `
+    -Value $path)
+  raw_token_is_sensitive = Test-SensitiveRuntimeEnvEntry `
+    -Name 'HOST_OBS_READ_TOKEN' `
+    -Value $token
+}} | ConvertTo-Json -Compress
+"""
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            harness,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    payload = json.loads(completed.stdout.strip())
+    assert payload["exists"] is True
+    assert payload["token_length"] == 64
+    assert Path(payload["file_reference"]) == runtime_root / "host.obs-read.token"
+    assert payload["raw_token_persisted"] is False
+    assert payload["file_reference_is_public"] is True
+    assert payload["raw_token_is_sensitive"] is True
 
 
 def test_host_orchestrator_requires_post_sidecar_stability_before_success() -> None:
@@ -84,7 +281,7 @@ def test_host_stability_gate_checks_expected_listener_and_both_payload_identitie
 
     for required in (
         "Is-HostProcess -ProcessId $ExpectedPid",
-        "Get-ListeningPid -ProbePort $ProbePort",
+        "Get-ListeningPid -ProbePort $ProbePort -ProbeHost $ProbeHost",
         "[int]$listeningPid -eq $ExpectedPid",
         '-ExpectedCatalogStage $ExpectedCatalogStage',
         '-Kind "health"',
@@ -92,6 +289,21 @@ def test_host_stability_gate_checks_expected_listener_and_both_payload_identitie
         "$consecutive -ge $RequiredConsecutiveChecks",
     ):
         assert required in function_source
+
+
+def test_host_listener_lookup_is_scoped_to_the_configured_bind_address() -> None:
+    start_source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    stop_source = (ROOT / "scripts/runtime/stop_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    for source in (start_source, stop_source):
+        assert '[string]$ProbeHost = ""' in source
+        assert "([string]$_.LocalAddress).ToLowerInvariant() -eq $normalizedHost" in source
+    assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in start_source
+    assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in stop_source
 
 
 def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() -> None:

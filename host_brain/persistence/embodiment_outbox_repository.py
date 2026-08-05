@@ -103,58 +103,101 @@ class EmbodimentOutboxRepository:
         *,
         authority: EmbodimentRuntimeAuthority,
     ) -> dict[str, Any]:
-        payload = _canonical_json(command)
-        digest = _digest(payload)
-        command_id = _normalise_identifier(command.get("command_id"), field="command_id")
-        idempotency_key = _normalise_identifier(
-            command.get("idempotency_key"), field="idempotency_key"
-        )
+        return self.enqueue_many((command,), authority=authority)[0]
+
+    def enqueue_many(
+        self,
+        commands: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
+        *,
+        authority: EmbodimentRuntimeAuthority,
+    ) -> tuple[dict[str, Any], ...]:
+        """Atomically admit one bounded ExpressionPlan command batch.
+
+        Each command keeps its own idempotency identity and terminal physical
+        receipt.  The transaction only prevents a Host crash from leaving half
+        of one already-approved local expression plan in the outbox.
+        """
+
+        values = tuple(commands)
+        if not values or len(values) > 66 or any(
+            not isinstance(command, Mapping) for command in values
+        ):
+            raise EmbodimentOutboxError("EMBODIMENT_OUTBOX_BATCH_INVALID")
+        prepared: list[tuple[Mapping[str, Any], str, str, str]] = []
+        for command in values:
+            payload = _canonical_json(command)
+            command_id = _normalise_identifier(
+                command.get("command_id"), field="command_id"
+            )
+            idempotency_key = _normalise_identifier(
+                command.get("idempotency_key"), field="idempotency_key"
+            )
+            prepared.append((command, payload, _digest(payload), idempotency_key))
+        command_ids = [
+            _normalise_identifier(item[0].get("command_id"), field="command_id")
+            for item in prepared
+        ]
+        idempotency_keys = [item[3] for item in prepared]
+        if len(set(command_ids)) != len(command_ids) or len(set(idempotency_keys)) != len(
+            idempotency_keys
+        ):
+            raise EmbodimentOutboxError("EMBODIMENT_OUTBOX_BATCH_IDENTITY_CONFLICT")
+
         now = _now_ms()
-        outbox_id = f"embodiment_outbox_{uuid4().hex}"
+        output: list[dict[str, Any]] = []
         with self._transaction() as connection:
             self._require_runtime_authority(connection, authority=authority, now=now)
-            key_row = connection.execute(
-                "SELECT * FROM host_embodiment_outbox WHERE idempotency_key = ?",
-                (idempotency_key,),
-            ).fetchone()
-            command_row = connection.execute(
-                "SELECT * FROM host_embodiment_outbox WHERE command_id = ?",
-                (command_id,),
-            ).fetchone()
-            existing = key_row or command_row
-            if existing is not None:
-                if str(existing["runtime_scope_id"] or "") != self._runtime_scope_id:
-                    raise EmbodimentOutboxError("EMBODIMENT_OUTBOX_SCOPE_CONFLICT")
-                if (
-                    str(existing["command_id"]) != command_id
-                    or str(existing["idempotency_key"]) != idempotency_key
-                    or str(existing["command_digest"]) != digest
-                ):
-                    raise EmbodimentOutboxError("EMBODIMENT_OUTBOX_IDEMPOTENCY_CONFLICT")
-                return dict(existing)
-            connection.execute(
-                "INSERT INTO host_embodiment_outbox "
-                "(outbox_id, runtime_scope_id, command_id, idempotency_key, command_digest, "
-                "command_json, status, created_at_ms, updated_at_ms) "
-                "VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)",
-                (
-                    outbox_id,
-                    self._runtime_scope_id,
-                    command_id,
-                    idempotency_key,
-                    digest,
-                    payload,
-                    now,
-                    now,
-                ),
-            )
-            row = connection.execute(
-                "SELECT * FROM host_embodiment_outbox "
-                "WHERE outbox_id = ? AND runtime_scope_id = ?",
-                (outbox_id, self._runtime_scope_id),
-            ).fetchone()
-        assert row is not None
-        return dict(row)
+            for command, payload, digest, idempotency_key in prepared:
+                command_id = _normalise_identifier(
+                    command.get("command_id"), field="command_id"
+                )
+                key_row = connection.execute(
+                    "SELECT * FROM host_embodiment_outbox WHERE idempotency_key = ?",
+                    (idempotency_key,),
+                ).fetchone()
+                command_row = connection.execute(
+                    "SELECT * FROM host_embodiment_outbox WHERE command_id = ?",
+                    (command_id,),
+                ).fetchone()
+                existing = key_row or command_row
+                if existing is not None:
+                    if str(existing["runtime_scope_id"] or "") != self._runtime_scope_id:
+                        raise EmbodimentOutboxError("EMBODIMENT_OUTBOX_SCOPE_CONFLICT")
+                    if (
+                        str(existing["command_id"]) != command_id
+                        or str(existing["idempotency_key"]) != idempotency_key
+                        or str(existing["command_digest"]) != digest
+                    ):
+                        raise EmbodimentOutboxError(
+                            "EMBODIMENT_OUTBOX_IDEMPOTENCY_CONFLICT"
+                        )
+                    output.append(dict(existing))
+                    continue
+                outbox_id = f"embodiment_outbox_{uuid4().hex}"
+                connection.execute(
+                    "INSERT INTO host_embodiment_outbox "
+                    "(outbox_id, runtime_scope_id, command_id, idempotency_key, command_digest, "
+                    "command_json, status, created_at_ms, updated_at_ms) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)",
+                    (
+                        outbox_id,
+                        self._runtime_scope_id,
+                        command_id,
+                        idempotency_key,
+                        digest,
+                        payload,
+                        now,
+                        now,
+                    ),
+                )
+                row = connection.execute(
+                    "SELECT * FROM host_embodiment_outbox "
+                    "WHERE outbox_id = ? AND runtime_scope_id = ?",
+                    (outbox_id, self._runtime_scope_id),
+                ).fetchone()
+                assert row is not None
+                output.append(dict(row))
+        return tuple(output)
 
     def claim_next(
         self,
@@ -819,6 +862,14 @@ def _receipt_status(receipt: Mapping[str, Any]) -> str:
     raw_status = str(receipt.get("status") or "").strip().upper()
     if accepted and raw_status in {"APPLIED", "COMPLETED", "SUCCEEDED"}:
         return "APPLIED"
+    # Edge may durably accept a queued TTS/Avatar command before the physical
+    # renderer has produced its terminal receipt.  Treating that acknowledgement
+    # as a rejection loses the only safe read-only reconciliation path and makes
+    # a successfully queued utterance look failed forever.  ``IN_DOUBT`` here
+    # means "accepted but not terminal yet"; the dispatcher never resubmits it
+    # and may only settle it through the exact Edge receipt query.
+    if accepted and raw_status in {"ACCEPTED", "QUEUED", "PENDING"}:
+        return "IN_DOUBT"
     if raw_status == "IN_DOUBT":
         return "IN_DOUBT"
     return "REJECTED"

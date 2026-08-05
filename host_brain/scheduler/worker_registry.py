@@ -46,11 +46,25 @@ class SchedulerHandler(Protocol):
     ) -> Mapping[str, Any] | Awaitable[Mapping[str, Any]]: ...
 
 
+class SchedulerReconciler(Protocol):
+    """Read-only resolver for a worker-owned durable terminal receipt."""
+
+    def __call__(
+        self,
+        *,
+        occurrence: SchedulerOccurrence,
+        definition: SchedulerDefinitionSnapshot,
+        command: HostCommand,
+        execution_context: Mapping[str, Any],
+    ) -> Mapping[str, Any] | Awaitable[Mapping[str, Any]]: ...
+
+
 class SchedulerWorkerRegistry:
     """Composition-owned exact map of post-Acceptance real handlers."""
 
     def __init__(self, *, default_handler: SchedulerHandler | None = None) -> None:
         self._handlers: dict[str, SchedulerHandler] = {}
+        self._reconcilers: dict[str, SchedulerReconciler] = {}
         if default_handler is not None:
             self._handlers[SCHEDULER_WORKER_ROUTE] = _handler(default_handler)
 
@@ -62,6 +76,22 @@ class SchedulerWorkerRegistry:
 
     def register_default(self, handler: SchedulerHandler) -> None:
         self.register(SCHEDULER_WORKER_ROUTE, handler)
+
+    def register_reconciler(
+        self,
+        worker_key: str,
+        reconciler: SchedulerReconciler,
+    ) -> None:
+        """Bind an explicit read-only receipt resolver to one real worker."""
+
+        key = _worker_key(worker_key)
+        if key not in self._handlers:
+            raise ValueError(
+                f"scheduler reconciler has no registered worker: {key}"
+            )
+        if key in self._reconcilers:
+            raise ValueError(f"scheduler reconciler already registered: {key}")
+        self._reconcilers[key] = _handler(reconciler)
 
     @property
     def worker_keys(self) -> tuple[str, ...]:
@@ -76,6 +106,15 @@ class SchedulerWorkerRegistry:
                 f"no governed scheduler handler is registered for worker_key={key!r}",
             )
         return handler
+
+    def resolve_reconciler(
+        self,
+        *,
+        worker_key: str,
+        task_id: str,
+    ) -> SchedulerReconciler | None:
+        del task_id
+        return self._reconcilers.get(_worker_key(worker_key))
 
 
 class SchedulerPlanWorker(Protocol):
@@ -143,6 +182,7 @@ __all__ = [
     "SCHEDULER_DURABLE_RESULT_INVALID",
     "SCHEDULER_HANDLER_NOT_REGISTERED",
     "SchedulerHandler",
+    "SchedulerReconciler",
     "SchedulerPlanWorker",
     "SchedulerWorkerError",
     "SchedulerWorkerRegistry",

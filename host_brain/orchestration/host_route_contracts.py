@@ -23,6 +23,8 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 )
 from host_brain.contracts.agent_runtime.delegate_target_policy import (
     GOVERNED_DELEGATE_BUDGET_MODE,
+    GOVERNED_DELEGATE_REVIEW_MODE,
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
     GovernedDelegateTargetPolicyError,
     validate_governed_delegate_target_policy,
 )
@@ -335,9 +337,14 @@ def build_direct_host_route_contracts(
                 "Tool durable Review flag differs from Governor route authority",
             )
     elif route == "delegate" and delegate_policy is not None:
-        durable_review_required = True
+        durable_review_required = (
+            delegate_policy["review_mode"] == GOVERNED_DELEGATE_REVIEW_MODE
+        )
         caller_review_flag = intent_draft.get("durable_review_required")
-        if caller_review_flag is not None and caller_review_flag is not True:
+        if (
+            caller_review_flag is not None
+            and caller_review_flag is not durable_review_required
+        ):
             raise HostRouteContractError(
                 HOST_ROUTE_AUTHORITY_INVALID,
                 "Delegate durable Review flag differs from target policy",
@@ -371,6 +378,12 @@ def build_direct_host_route_contracts(
             or (delegate_policy is None and target == "pentest_agent")
         )
     )
+    model_backed_delegate = (
+        route == "delegate"
+        and delegate_policy is not None
+        and delegate_policy["budget_mode"]
+        == GOVERNED_MODEL_DELEGATE_BUDGET_MODE
+    )
     budget = BudgetPolicy(
         scope=f"work-order:{root_id}",
         limits=(
@@ -385,10 +398,14 @@ def build_direct_host_route_contracts(
             "fail_closed": True,
             **(
                 {
-                    "measurement_mode": GOVERNED_DELEGATE_BUDGET_MODE,
+                    "measurement_mode": (
+                        delegate_policy["budget_mode"]
+                        if delegate_policy is not None
+                        else GOVERNED_DELEGATE_BUDGET_MODE
+                    ),
                     "enabled_target": target,
                 }
-                if port_free_delegate
+                if (port_free_delegate or model_backed_delegate)
                 else {}
             ),
             **(
@@ -544,6 +561,8 @@ def build_direct_host_route_contracts(
                     if control_policy is not None
                     and control_policy["review_mode"]
                     == CONTROL_ROUTE_INTENT_REVIEW_REQUIRED
+                    else "governed_delegate_low_risk_waiver"
+                    if route == "delegate" and delegate_policy is not None
                     else "explicit_low_risk_direct_route_waiver"
                 ),
                 "waiver_authority": "governor_grant",
@@ -557,6 +576,12 @@ def build_direct_host_route_contracts(
                     if control_policy is not None
                     and control_policy["review_mode"]
                     == CONTROL_ROUTE_INTENT_REVIEW_REQUIRED
+                    else {
+                        "frozen_delegate_policy_ref": delegate_policy[
+                            "policy_ref"
+                        ]
+                    }
+                    if route == "delegate" and delegate_policy is not None
                     else {}
                 ),
             }

@@ -184,6 +184,30 @@ def test_projection_serializer_rejects_token_aliases_and_bare_secret_refs() -> N
     assert result.redacted_fields == 4
 
 
+def test_projection_serializer_preserves_only_typed_token_policy_flags() -> None:
+    gateway = OperatorQueryGateway(DigestOperatorQueryAuthenticator())
+
+    result = gateway.serialize_public(
+        {
+            "mutation_contract": {
+                "resume_requires_bound_token": True,
+            },
+            "actions": {
+                "resume_requires_token": True,
+            },
+            "resume_requires_token": "secret-shaped-value",
+            "resume_token_ref": "review_resume::abc123",
+        }
+    )
+    encoded = json.dumps(result.payload)
+
+    assert result.payload["mutation_contract"]["resume_requires_bound_token"] is True
+    assert result.payload["actions"]["resume_requires_token"] is True
+    assert "secret-shaped-value" not in encoded
+    assert "abc123" not in encoded
+    assert result.redacted_fields == 2
+
+
 def test_projection_serializer_normalizes_camel_case_private_aliases() -> None:
     gateway = OperatorQueryGateway(DigestOperatorQueryAuthenticator())
 
@@ -398,6 +422,23 @@ def test_same_origin_operator_session_cookie_authenticates_without_js_header(mon
     assert context.authority.auth_status is OperatorQueryAuthStatus.AUTHENTICATED
     assert context.authority.principal_id == "ops.test"
     assert context.authority.auth_ref.startswith("operator-auth://sha256/")
+
+
+def test_operator_session_bootstrap_is_public_only_at_exact_post_path() -> None:
+    assert (
+        required_operator_query_scope(
+            method="POST",
+            path="/obs/operator-session/bootstrap",
+        )
+        is None
+    )
+    assert (
+        required_operator_query_scope(
+            method="GET",
+            path="/obs/operator-session/bootstrap",
+        )
+        == "obs:operator:read"
+    )
 
 
 @pytest.mark.parametrize(

@@ -6,6 +6,9 @@ import pytest
 
 from host_brain.contracts.agent_runtime.budget_policy import BudgetAmount, BudgetPolicy
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.persistence.worker_projection_repository import (
+    validate_worker_projection_payload,
+)
 from host_brain.task_runtime.governed_workers import (
     GOVERNED_NODE_COMMIT_INVALID,
     GOVERNED_NODE_GRANT_INVALID,
@@ -36,6 +39,18 @@ class _ProjectionStore:
             raise AssertionError("projection replay drift")
         self.rows[projection_id] = payload
         return payload
+
+
+class _ValidatingProjectionStore(_ProjectionStore):
+    def stage(self, *, projection_id: str, projection):  # noqa: ANN001
+        validated = validate_worker_projection_payload(
+            projection,
+            expected_projection_id=projection_id,
+        )
+        return super().stage(
+            projection_id=projection_id,
+            projection=validated,
+        )
 
 
 class _Executor:
@@ -318,6 +333,62 @@ async def test_delegate_worker_rejects_executor_reroute_before_projection() -> N
 
     assert raised.value.reason_code == GOVERNED_NODE_COMMIT_INVALID
     assert projections.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_model_delegate_stages_secret_free_projection_after_budget_guard_use() -> None:
+    command, order, context = _contracts(route="delegate", target="translate_agent")
+    projections = _ValidatingProjectionStore()
+    worker = GovernedFrozenNodeWorker(
+        route_kind="delegate",
+        executor=_Executor(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "You worked hard today. Get some rest.",
+                "route_type": "delegate",
+                "target_id": "translate_agent",
+                "audit_refs": {
+                    "delegate_model_budget_guard": {
+                        "budget_id": "budget://governed-workers/active",
+                        "max_token_count": 120,
+                    },
+                    "delegate_model_attempt": {
+                        "success": True,
+                        "attempt_ids": ["model-attempt-translate"],
+                        "budget_measurement": {
+                            "token_count": 24,
+                            "retry_count": 0,
+                        },
+                    },
+                },
+                "budget_usage": {
+                    "schema_version": "Natsume.task_runtime.worker_budget_usage.v1",
+                    "usage_id": "worker-budget-usage://delegate/translate/1",
+                    "measurements": {"token_count": 24, "retry_count": 0},
+                    "evidence_refs": ["model-budget://delegate/translate/1"],
+                },
+            }
+        ),
+        node_grants=_GrantVerifier(),
+        projections=projections,
+    )
+
+    events = [
+        event
+        async for event in worker.execute_stream(
+            command=command,
+            work_order=order,
+            execution_context=context,
+        )
+    ]
+
+    assert len(events) == 1
+    staged = projections.rows[events[0]["receipt_ref"]]
+    assert "delegate_model_budget_guard" not in staged["audit_refs"]
+    assert staged["audit_refs"]["delegate_model_attempt"]["success"] is True
+    assert staged["budget_usage"]["measurements"]["token_count"] == 24
 
 
 @pytest.mark.asyncio

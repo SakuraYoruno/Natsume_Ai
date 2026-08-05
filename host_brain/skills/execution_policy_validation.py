@@ -48,7 +48,8 @@ def governed_skill_policy_error(
         execution_policy
         is SkillExecutionPolicy.PRE_ACCEPTANCE_PROPOSAL_ONLY
     )
-    if proposal_only != (agent_runtime and not write_agent):
+    proposal_capable = (agent_runtime and not write_agent) or normalized == "memory_store"
+    if proposal_only != proposal_capable:
         return "GOVERNED_SKILL_EXECUTION_POLICY_INVALID"
     if (
         budget_policy is SkillBudgetPolicy.TASK_PRECHARGE_AGENT_MODEL

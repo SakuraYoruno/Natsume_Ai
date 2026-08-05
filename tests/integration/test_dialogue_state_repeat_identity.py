@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from host_brain.app.context.prompt_context_plane import assemble_prompt_context_plane
+from host_brain.agent_runtime.context_read_ports import ConversationContextReadPorts
 from host_brain.persona.context.soul_runtime import get_compiled_soul
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.conversation import ConversationHistory
-from host_brain.composition.process_service_container import get_process_service_container
 from host_brain.persistence.context_repository import ContextRepository
 
 
-def test_dialogue_state_uses_real_conversation_window_for_repeat_identity(monkeypatch) -> None:
+def test_dialogue_state_uses_real_conversation_window_for_repeat_identity() -> None:
     display_name = get_compiled_soul().display_name
     ledger = SQLiteLedger(":memory:", check_same_thread=False)
     store = ContextRepository.from_ledger(ledger)
@@ -39,8 +39,6 @@ def test_dialogue_state_uses_real_conversation_window_for_repeat_identity(monkey
         }
     )
 
-    monkeypatch.setattr(get_process_service_container(), "conversation_history", history)
-
     plane = assemble_prompt_context_plane(
         node_id="cortex_orchestrator",
         runtime_payload={
@@ -54,6 +52,12 @@ def test_dialogue_state_uses_real_conversation_window_for_repeat_identity(monkey
             "prompt_context": {"payload": {}},
             "render_policy": {},
         },
+        context_read_ports=ConversationContextReadPorts(
+            conversation_history=lambda: history,
+            conversation_turn_store=lambda: store,
+            session_topic_ledger_store=lambda: None,
+            session_tactic_ledger_store=lambda: None,
+        ),
     )
 
     assert plane.continuity.turns_injected == 2

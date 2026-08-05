@@ -106,12 +106,17 @@ class MemoryEventRepository:
             self.assert_schema_ready(require_catalog=raw != ":memory:")
 
     @classmethod
-    def from_ledger(cls, ledger: Any) -> "MemoryEventRepository":
+    def from_ledger(
+        cls,
+        ledger: Any,
+        *,
+        verify_schema: bool = True,
+    ) -> "MemoryEventRepository":
         if isinstance(ledger, sqlite3.Connection):
             database = ledger.execute("PRAGMA database_list").fetchone()
             database_file = str(database[2] or "") if database is not None else ""
             if database_file:
-                return cls(database_file)
+                return cls(database_file, verify_schema=verify_schema)
             return cls(
                 ":memory:",
                 _borrowed_connection=ledger,
@@ -122,7 +127,7 @@ class MemoryEventRepository:
             or getattr(ledger, "db_path", "")
         ).strip()
         if path and path != ":memory:":
-            return cls(path)
+            return cls(path, verify_schema=verify_schema)
         connection = getattr(ledger, "_conn", None)
         path = path or (":memory:" if connection is not None else "")
         lock = getattr(ledger, "_write_lock", None)
@@ -132,6 +137,7 @@ class MemoryEventRepository:
             )
         return cls(
             path,
+            verify_schema=verify_schema,
             _borrowed_connection=connection,
             _borrowed_lock=lock,
         )

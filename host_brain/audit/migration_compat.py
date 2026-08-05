@@ -75,13 +75,12 @@ LEGACY_INLINE_SCHEMA_ASSETS: dict[
     ),
 }
 
-# 0089, 0093, 0095 and 0131 contain ALTER TABLE statements followed by
-# indexes/triggers in
-# one explicit transaction.  SQL may commit before the runner persists its
-# migration receipt; the next startup then sees a duplicate column although
-# the complete physical migration exists.  Repair is allowed only for exact
-# checksums and only after every column constraint, index and trigger required
-# by the corresponding frozen asset has been validated.
+# These frozen assets contain non-idempotent ALTER statements or trigger
+# creation inside one explicit transaction. SQL may commit before the runner
+# persists its migration receipt; the next startup then sees a duplicate
+# column/trigger although the complete physical migration exists. Repair is
+# allowed only for exact checksums and only after every required column,
+# constraint, index and trigger has been validated.
 CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
     str,
     tuple[
@@ -296,6 +295,132 @@ CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS: dict[
                     "new.actionin('commit','release','reacquire')",
                     "new.actionin('commit','release')",
                     "raise(abort,'task_operation_reconciliation_recovery_case_invalid')",
+                ),
+            ),
+        },
+    ),
+    "0148_companion_profile_control_audit.sql": (
+        "a94d26ee6d86e941e03132411b00cb97caf698abc4af115ebd1f4cc7471c56f0",
+        "companion_profile_life_event_v1",
+        {
+            "source_control_ref": ("TEXT", True),
+        },
+        {},
+        (
+            "source_control_reftextnotnulldefault''",
+            "check(length(source_control_ref)<=512)",
+        ),
+        {
+            "companion_profile_life_event_v1_insert_guard": (
+                "companion_profile_life_event_v1",
+                (
+                    "beforeinsertoncompanion_profile_life_event_v1",
+                    "$.command_payload.profile.source_control_ref",
+                    "=new.source_control_ref",
+                    "companion_profile_life_event_v1requiresanexactimmutablelifeevent",
+                ),
+            ),
+            "companion_profile_life_event_v1_from_life_event": (
+                "life_event_journal",
+                (
+                    "afterinsertonlife_event_journal",
+                    "insertintocompanion_profile_life_event_v1",
+                    "source_control_ref",
+                    "$.command_payload.profile.source_control_ref",
+                ),
+            ),
+        },
+    ),
+    "0149_task_runtime_chat_delivery.sql": (
+        "c6e3377f9678aaaab136755e9c7ff7c4caa52d672993bfeba828640c055e6cc7",
+        "task_runtime_chat_delivery_event",
+        {
+            "event_id": ("TEXT", False),
+            "schema_version": ("TEXT", True),
+            "event_kind": ("TEXT", True),
+            "graph_id": ("TEXT", True),
+            "graph_revision": ("INTEGER", True),
+            "node_id": ("TEXT", True),
+            "attempt_id": ("TEXT", True),
+            "lease_id": ("TEXT", True),
+            "lease_owner_id": ("TEXT", True),
+            "fencing_token": ("INTEGER", True),
+            "node_grant_ref": ("TEXT", True),
+            "request_id": ("TEXT", True),
+            "session_id": ("TEXT", True),
+            "principal_id": ("TEXT", True),
+            "self_id": ("TEXT", True),
+            "relationship_subject_id": ("TEXT", True),
+            "workspace_id": ("TEXT", True),
+            "plan_id": ("TEXT", True),
+            "plan_digest": ("TEXT", True),
+            "synchronization_id": ("TEXT", True),
+            "self_affect_revision": ("INTEGER", True),
+            "sentence_index": ("INTEGER", True),
+            "sent_sentence_count": ("INTEGER", True),
+            "sentence_text": ("TEXT", True),
+            "sentence_digest": ("TEXT", True),
+            "reason_code": ("TEXT", True),
+            "payload_json": ("TEXT", True),
+            "payload_digest": ("TEXT", True),
+            "created_ts_ms": ("INTEGER", True),
+        },
+        {
+            "idx_task_runtime_chat_delivery_request": (
+                "task_runtime_chat_delivery_event",
+                (
+                    "request_id",
+                    "session_id",
+                    "principal_id",
+                    "workspace_id",
+                    "sentence_index",
+                    "event_id",
+                ),
+            ),
+            "idx_task_runtime_chat_delivery_attempt": (
+                "task_runtime_chat_delivery_event",
+                (
+                    "graph_id",
+                    "graph_revision",
+                    "node_id",
+                    "attempt_id",
+                    "sentence_index",
+                ),
+            ),
+        },
+        (
+            "check(schema_version='natsume.task_runtime.chat_delivery.v1')",
+            "unique(graph_id,graph_revision,node_id,attempt_id,event_kind,sentence_index)",
+            "foreignkey(graph_id,graph_revision,node_id)referencestask_runtime_node",
+            "foreignkey(attempt_id)referencestask_runtime_attempt",
+            "foreignkey(lease_id)referencestask_runtime_lease",
+            "event_kind='sentence_staged'",
+            "event_kind<>'sentence_staged'",
+        ),
+        {
+            "trg_task_runtime_chat_delivery_identity_guard": (
+                "task_runtime_chat_delivery_event",
+                (
+                    "beforeinsertontask_runtime_chat_delivery_event",
+                    "attempt.attempt_id=new.attempt_id",
+                    "lease.lease_id=new.lease_id",
+                    "lease.owner_id=new.lease_owner_id",
+                    "lease.fencing_token=new.fencing_token",
+                    "taskchatdeliveryeventdoesnotbindexactattemptleasefence",
+                ),
+            ),
+            "trg_task_runtime_chat_delivery_no_update": (
+                "task_runtime_chat_delivery_event",
+                (
+                    "beforeupdateontask_runtime_chat_delivery_event",
+                    "taskchatdeliveryeventisimmutable",
+                ),
+            ),
+            "trg_task_runtime_chat_delivery_no_delete": (
+                "task_runtime_chat_delivery_event",
+                (
+                    "beforedeleteontask_runtime_chat_delivery_event",
+                    "taskchatdeliveryeventcannotbedeleted",
                 ),
             ),
         },
@@ -1159,11 +1284,20 @@ def is_exact_checksum_bound_schema_replay_failure(
                 flags=re.IGNORECASE,
             )
         )
-    frozen = CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS.get(asset_filename(asset))
+    filename = asset_filename(asset)
+    frozen = CHECKSUM_BOUND_SCHEMA_REPLAY_ASSETS.get(filename)
+    normalized_error = str(exc).strip().lower()
+    recognized_physical_collision = normalized_error.startswith(
+        "duplicate column name:"
+    ) or (
+        filename == "0149_task_runtime_chat_delivery.sql"
+        and normalized_error
+        == "trigger trg_task_runtime_chat_delivery_identity_guard already exists"
+    )
     return bool(
         frozen is not None
         and str(getattr(asset, "checksum")) == frozen[0]
-        and str(exc).lower().startswith("duplicate column name:")
+        and recognized_physical_collision
     )
 
 

@@ -33,6 +33,7 @@ from host_brain.tribe.application_ports import TribeApplicationPorts
 
 
 ROOT = Path(__file__).resolve().parents[2]
+pytestmark = pytest.mark.usefixtures("tribe_runtime_context")
 
 
 class _ScriptedAdapter:

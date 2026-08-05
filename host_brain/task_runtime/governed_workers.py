@@ -8,6 +8,7 @@ observe the single COMMIT event.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 import hashlib
@@ -243,7 +244,11 @@ class GovernedFrozenNodeWorker:
             fencing_token=frozen.fencing_token,
         )
         _assert_verified_grant(verified, frozen=frozen)
-        preview = self._preview_action(
+        # World/Scene reopening performs bounded synchronous SQLite reads and
+        # digest verification. Keep that work off the ASGI event loop so one
+        # background Scheduler node cannot stall interactive Gateway admission.
+        preview = await asyncio.to_thread(
+            self._preview_action,
             command=command,
             work_order=work_order,
             frozen=frozen,
@@ -1193,6 +1198,12 @@ def _safe_audit_refs(value: Any) -> dict[str, Any]:
         public_trace = dict(trace)
         public_trace.pop("governed_model_budget", None)
         public["trace_stage_meta"] = public_trace
+    # FrozenDelegateRouteExecutor has already compared this guard with the
+    # durable node budget and converted the provider measurement into the
+    # typed ``budget_usage`` projection. Keeping the consumed constraint here
+    # duplicates authority and exposes max-token fields that the durable
+    # public projection correctly rejects as sensitive.
+    public.pop("delegate_model_budget_guard", None)
     return public
 
 

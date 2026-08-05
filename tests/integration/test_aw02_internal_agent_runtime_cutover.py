@@ -83,6 +83,9 @@ from host_brain.persistence.review_repository import ReviewStore
 from host_brain.persistence.review_continuation_store import ReviewContinuationStore
 from host_brain.persistence.worker_projection_repository import WorkerProjectionStore
 from host_brain.persistence.workspace_repository import WorkspaceRepository
+from host_brain.persistence.workspace_terminal_budget_authority import (
+    finalized_checkpoint_budget_rejection_allows_workspace_abandonment,
+)
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 from host_brain.secure_ingress import ClaimStatus, IngressAuditEvent
 from host_brain.secure_ingress.graph_cancellation_authority import (
@@ -1890,10 +1893,15 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         assert snapshot["active_leases"] == []
         assert snapshot["budgets"][0]["status"] == "RELEASED"
         with sqlite3.connect(str(db_path)) as conn:
-            assert conn.execute(
-                "SELECT status FROM task_runtime_lease WHERE attempt_id = ?",
+            terminal_lease = conn.execute(
+                "SELECT lease_id, fencing_token, status "
+                "FROM task_runtime_lease WHERE attempt_id = ?",
                 (snapshot["attempts"][0]["attempt_id"],),
-            ).fetchone()[0] == "RELEASED"
+            ).fetchone()
+            assert terminal_lease is not None
+            historical_lease_id = str(terminal_lease[0])
+            historical_fencing_token = int(terminal_lease[1])
+            assert terminal_lease[2] == "RELEASED"
             rejected_usage = conn.execute(
                 "SELECT accepted, reason_code, delta_json "
                 "FROM task_runtime_budget_usage WHERE accepted = 0"
@@ -1972,6 +1980,17 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         assert str(recovered_budget_claim_result_ref).startswith(
             INTERNAL_BUDGET_REJECTION_RESULT_REF_PREFIX
         )
+        with sqlite3.connect(str(db_path)) as conn:
+            conn.row_factory = sqlite3.Row
+            assert finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
+                conn,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                node_id=snapshot["graph_record"]["nodes"][0]["node_id"],
+                attempt_id=snapshot["attempts"][0]["attempt_id"],
+                historical_lease_id=historical_lease_id,
+                historical_fencing_token=historical_fencing_token,
+            )
         assert (
             HostCommandRepository(
                 db_path,
@@ -1990,6 +2009,16 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
                 ("task-terminal://internal-budget-rejection/sha256/tampered", claim_ref),
             )
             conn.commit()
+            conn.row_factory = sqlite3.Row
+            assert not finalized_checkpoint_budget_rejection_allows_workspace_abandonment(
+                conn,
+                graph_id=command.graph_id,
+                graph_revision=command.graph_revision,
+                node_id=snapshot["graph_record"]["nodes"][0]["node_id"],
+                attempt_id=snapshot["attempts"][0]["attempt_id"],
+                historical_lease_id=historical_lease_id,
+                historical_fencing_token=historical_fencing_token,
+            )
         with pytest.raises(HostCommandRepositoryError) as tampered:
             HostCommandRepository(
                 tampered_db_path,
@@ -1999,7 +2028,7 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
         assert reopened_artifacts.inventory_governed_seals(
             namespace="staging",
             limit=10,
-        ) == ()
+        ) == (), reopened_runtime._terminal_continuation_worker.health_snapshot()
         assert reopened_artifacts.inventory_governed_seals(
             namespace="accepted",
             limit=10,

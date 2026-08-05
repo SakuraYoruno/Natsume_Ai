@@ -13,6 +13,10 @@ import pytest
 from host_brain.app.observability_runtime.host_projection_sources import (
     AuthenticatedHostProjectionSources,
 )
+from host_brain.app.observability_runtime.capability_stats_projection import (
+    CAPABILITY_FORGE_OPERATOR_MAX_AGE_MS,
+    read_capability_forge_projection_from_store,
+)
 from host_brain.app.observability_runtime.operator_live_sources import (
     OperatorSourceUnavailable,
 )
@@ -41,6 +45,31 @@ from host_brain.app.observability_runtime.projection_runtime import (
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_capability_forge_read_window_covers_one_full_projection_wave() -> None:
+    class ProjectionDocument:
+        schema_version = "Natsume.operator.query_projection.v1"
+        projection_version = 1
+        projection_cursor = 1
+        source_cursor = 1
+        source_digest = "sha256:test"
+        freshness_ts_ms = int(time.time() * 1000) - 60_000
+        degraded_state = ProjectionDegradedState.HEALTHY
+        degraded_detail = None
+        payload = {"candidates": []}
+
+    class ProjectionStore:
+        @staticmethod
+        def get(kind: str, key: str):  # noqa: ANN202
+            assert (kind, key) == ("capability_forge_operator", "current")
+            return ProjectionDocument()
+
+    assert CAPABILITY_FORGE_OPERATOR_MAX_AGE_MS == 120_000
+    payload, meta = read_capability_forge_projection_from_store(ProjectionStore())
+    assert payload == {"candidates": []}
+    assert meta["available"] is True
+    assert meta["degraded_state"] == "HEALTHY"
 
 
 def _forbidden_locator(*_args, **_kwargs):  # noqa: ANN002, ANN003

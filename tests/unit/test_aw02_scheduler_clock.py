@@ -395,6 +395,32 @@ def test_weekly_cron_scans_to_the_next_allowed_weekday() -> None:
     )
 
 
+def test_interval_catch_up_coalesces_to_first_future_boundary() -> None:
+    definition = SchedulerDefinitionSnapshot.from_mapping(
+        {
+            "task_id": "outbox_recovery",
+            "definition_revision": 1,
+            "head_version": 1,
+            "enabled": True,
+            "definition": {
+                "task_id": "outbox_recovery",
+                "trigger_mode": "interval",
+                "trigger_config": {"seconds": 5},
+                "intent_template": {},
+                "worker_key": "scheduler_production",
+                "priority": "LOW",
+                "enabled": True,
+            },
+        }
+    )
+
+    assert _next_scheduled_at_ms(
+        definition,
+        scheduled_at_ms=NOW - 60_000,
+        not_before_ms=NOW,
+    ) == NOW + 5_000
+
+
 @pytest.mark.asyncio
 async def test_clock_shutdown_is_bounded_without_cancelling_runtime_dispatch() -> None:
     authority = _authority("slow_task", 1, NOW)

@@ -16,6 +16,9 @@ from host_brain.agent_runtime.workspace_artifact_effect import (
     AGENT_WORKSPACE_ACTION_PREVIEW_CONTEXT_SCHEMA,
     AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
 )
+from host_brain.contracts.memory_acceptance_effects import (
+    EXPLICIT_MEMORY_STORE_EFFECT_TYPE,
+)
 
 
 logger = logging.getLogger("Natsume.acceptance_effect_recovery")
@@ -46,6 +49,16 @@ _NODE_DERIVED_CONTEXT_SCHEMAS = {
 _NODE_RISK_EFFECT_TYPES = frozenset(
     _NODE_DERIVED_CONTEXT_SCHEMAS
 )
+_LOCAL_ACCEPTANCE_PROJECTION_TYPES = frozenset(
+    {
+        "conversation.user_turn",
+        "conversation.preference_signal",
+        "life.conversation_turn_recorded",
+        "life.foreground_completed",
+        "host.companion_expression_enqueue",
+        EXPLICIT_MEMORY_STORE_EFFECT_TYPE,
+    }
+)
 
 AcceptanceEffectHandler = Callable[[Mapping[str, Any]], Mapping[str, Any] | str | Awaitable[Any]]
 AcceptanceEffectRecoveryObserver = Callable[[Mapping[str, Any]], Any]
@@ -58,17 +71,23 @@ _EFFECT_TYPE_ORDER = {
     AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE: 1,
     "edge.embodiment_enqueue": 1,
     "conversation.user_turn": 2,
-    "conversation.preference_signal": 3,
+    # The Life conversation projection owns accepted memory admission and
+    # therefore remains part of the reply commit prefix.
     "life.conversation_turn_recorded": 4,
     "life.foreground_completed": 5,
     # This is Host-local durable admission, not an Edge physical result.  It
     # must only run after the exact foreground Life command is applied.
     "host.companion_expression_enqueue": 6,
     "surface.reply_delivery": 7,
-    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 8,
+    # Explicit memory has already been durably accepted as an immutable
+    # effect intent.  Semantic embedding/Chroma indexing and preference
+    # learning are recoverable aftereffects and must not extend reply latency.
+    EXPLICIT_MEMORY_STORE_EFFECT_TYPE: 8,
+    "conversation.preference_signal": 9,
+    _INTERNAL_RESULT_COMMIT_EFFECT_TYPE: 10,
 }
 
-_RECOVERY_POLL_SECONDS = 0.25
+_RECOVERY_POLL_SECONDS = 5.0
 
 
 class AcceptanceEffectDispatchError(RuntimeError):
@@ -133,14 +152,38 @@ class AcceptanceEffectDispatcher:
         self._retry_base_ms = max(0, int(retry_base_ms))
         self._retry_max_ms = max(self._retry_base_ms, int(retry_max_ms))
         self._action_preview_service = action_preview_service
-        self._dispatch_lock = asyncio.Lock()
+        # Exact-effect calls must serialize, but unrelated Scheduler,
+        # Operator, and conversation effects must not share one global lock.
+        # The durable claim/fence remains the cross-process authority; these
+        # ref-counted locks only prevent same-process duplicate invocation.
+        self._dispatch_locks_guard = asyncio.Lock()
+        self._dispatch_locks: dict[str, tuple[asyncio.Lock, int]] = {}
 
     async def dispatch_effect(self, effect_id: str) -> dict[str, Any] | None:
         # Inline dispatch and the recovery drain share one process owner.  A
-        # lock prevents an exact-owner claim replay from invoking a public
-        # handler twice while the first invocation is still in flight.
-        async with self._dispatch_lock:
-            return await self._dispatch_effect(effect_id)
+        # per-effect lock prevents an exact-owner claim replay from invoking a
+        # public handler twice while letting unrelated graphs make progress.
+        identity = str(effect_id or "").strip()
+        async with self._dispatch_locks_guard:
+            current = self._dispatch_locks.get(identity)
+            if current is None:
+                lock = asyncio.Lock()
+                self._dispatch_locks[identity] = (lock, 1)
+            else:
+                lock, references = current
+                self._dispatch_locks[identity] = (lock, references + 1)
+        try:
+            async with lock:
+                return await self._dispatch_effect(identity)
+        finally:
+            async with self._dispatch_locks_guard:
+                current = self._dispatch_locks.get(identity)
+                if current is not None and current[0] is lock:
+                    references = current[1] - 1
+                    if references <= 0:
+                        self._dispatch_locks.pop(identity, None)
+                    else:
+                        self._dispatch_locks[identity] = (lock, references)
 
     async def _dispatch_effect(self, effect_id: str) -> dict[str, Any] | None:
         claimed = self._store.claim_acceptance_effect_intent(
@@ -169,7 +212,13 @@ class AcceptanceEffectDispatcher:
                 detail=f"no handler registered for {effect_type or '<empty>'}",
             )
         try:
-            handler_payload, preview = self._require_action_preview(effect)
+            # Reopening Task/World/Scene authority is synchronous and may scan
+            # durable history. Keep it off the ASGI event loop so background
+            # recovery cannot stall interactive Gateway admission.
+            handler_payload, preview = await asyncio.to_thread(
+                self._require_action_preview,
+                effect,
+            )
             if preview is not None:
                 terminal_boundary = dict(preview["_terminal_execution_boundary"])
                 if effect_type in _NODE_RISK_EFFECT_TYPES:
@@ -226,9 +275,9 @@ class AcceptanceEffectDispatcher:
                         "reclaimed Acceptance Effect has no read-only reconciler: "
                         f"{effect_type or '<empty>'}"
                     )
-                outcome = reconciler(handler_payload)
+                outcome = await asyncio.to_thread(reconciler, handler_payload)
             else:
-                outcome = handler(handler_payload)
+                outcome = await asyncio.to_thread(handler, handler_payload)
             if inspect.isawaitable(outcome):
                 outcome = await outcome
             receipt_ref = _receipt_ref(outcome)
@@ -296,12 +345,6 @@ class AcceptanceEffectDispatcher:
                 "ACTION_PREVIEW_INVALID",
                 "Acceptance Effect preview context is invalid",
             )
-        service = self._action_preview_service
-        if service is None:
-            raise AcceptanceEffectDispatchError(
-                "ACTION_PREVIEW_INVALID",
-                "runtime-context Acceptance Effect has no ActionPreview authority",
-            )
         context = dict(raw_context)
         if context.get("schema_version") != "Natsume.acceptance_effect.action_preview_context.v1":
             raise AcceptanceEffectDispatchError(
@@ -309,6 +352,22 @@ class AcceptanceEffectDispatcher:
                 "Acceptance Effect preview context schema drifted",
             )
         effect_type = str(effect.get("effect_type") or "").strip()
+        if effect_type in _LOCAL_ACCEPTANCE_PROJECTION_TYPES:
+            # These effects append Host-local state only after the owning node
+            # has passed Verification and Acceptance.  Reissuing a terminal
+            # Preview for each passive projection added seconds to every local
+            # conversation without guarding an external side effect.
+            self._require_local_acceptance_projection_lineage(
+                effect=effect,
+                context=context,
+            )
+            return payload, None
+        service = self._action_preview_service
+        if service is None:
+            raise AcceptanceEffectDispatchError(
+                "ACTION_PREVIEW_INVALID",
+                "runtime-context Acceptance Effect has no ActionPreview authority",
+            )
         risk_level = {
             "host.sys_mode_transition": 4,
             "edge.embodiment_enqueue": 4,
@@ -410,12 +469,123 @@ class AcceptanceEffectDispatcher:
         preview["_terminal_execution_boundary"] = execution_boundary
         return payload, preview
 
+    @staticmethod
+    def _require_local_acceptance_projection_lineage(
+        *,
+        effect: Mapping[str, Any],
+        context: Mapping[str, Any],
+    ) -> None:
+        digest = re.compile(r"^sha256:[0-9a-f]{64}$")
+        scene_identity = context.get("scene_identity")
+        graph_id = str(effect.get("graph_id") or "").strip()
+        graph_revision = int(effect.get("graph_revision") or 0)
+        node_id = str(effect.get("node_id") or "").strip()
+        raw_context_revision = context.get("graph_revision")
+        try:
+            context_revision = (
+                int(raw_context_revision) if raw_context_revision is not None else None
+            )
+        except (TypeError, ValueError):
+            context_revision = -1
+        if (
+            not graph_id
+            or graph_revision < 1
+            or not node_id
+            or not digest.fullmatch(
+                str(context.get("context_pack_digest") or "").strip().lower()
+            )
+            or not isinstance(scene_identity, Mapping)
+            or not scene_identity
+            or not _DURABLE_REF.fullmatch(
+                str(context.get("parent_governor_grant_ref") or "").strip()
+            )
+            or not _DURABLE_REF.fullmatch(
+                str(context.get("node_grant_ref") or "").strip()
+            )
+            or not digest.fullmatch(
+                str(context.get("node_grant_digest") or "").strip().lower()
+            )
+            or (
+                context.get("task_graph_id") is not None
+                and str(context.get("task_graph_id") or "").strip() != graph_id
+            )
+            or (
+                context_revision is not None and context_revision != graph_revision
+            )
+            or (
+                context.get("task_node_id") is not None
+                and str(context.get("task_node_id") or "").strip() != node_id
+            )
+        ):
+            raise AcceptanceEffectDispatchError(
+                "ACTION_PREVIEW_INVALID",
+                "local Acceptance projection Runtime Context lineage drifted",
+            )
+
     async def dispatch_graph(
         self,
         *,
         graph_id: str,
         graph_revision: int,
         limit: int = 100,
+    ) -> tuple[dict[str, Any], ...]:
+        return await self._dispatch_graph(
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+            limit=limit,
+        )
+
+    async def dispatch_interactive_graph(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        limit: int = 100,
+    ) -> tuple[dict[str, Any], ...]:
+        """Commit the visible reply, leaving passive projections durable.
+
+        Graphs without a Surface delivery retain the original full-chain
+        behavior.  For an interactive graph, the user turn, accepted Life
+        projection, foreground affect state, and expression intents remain
+        ahead of the reply boundary.  Explicit memory indexing and preference
+        learning stay in the same durable queue and are completed by the
+        app-local recovery Runtime after the reply is visible.
+        """
+
+        identity = {
+            "graph_id": str(graph_id),
+            "graph_revision": int(graph_revision),
+        }
+        rows = self._store.list_acceptance_effect_intents(
+            **identity,
+            limit=1_000,
+        )
+        if not any(
+            str(row.get("effect_type") or "") == "surface.reply_delivery"
+            for row in rows
+        ):
+            return await self.dispatch_graph(limit=limit, **identity)
+
+        await self._dispatch_graph(
+            limit=limit,
+            stop_after_effect_type="surface.reply_delivery",
+            **identity,
+        )
+        # Return the complete durable state, not merely the synchronous
+        # prefix, so callers cannot report an inaccurate all-committed result.
+        current = self._store.list_acceptance_effect_intents(
+            **identity,
+            limit=1_000,
+        )
+        return tuple(dict(row) for row in sorted(current, key=_effect_dispatch_key))
+
+    async def _dispatch_graph(
+        self,
+        *,
+        graph_id: str,
+        graph_revision: int,
+        limit: int,
+        stop_after_effect_type: str | None = None,
     ) -> tuple[dict[str, Any], ...]:
         requested_limit = min(1_000, max(1, int(limit)))
         rows = self._store.list_acceptance_effect_intents(
@@ -433,6 +603,12 @@ class AcceptanceEffectDispatcher:
             status = str(row.get("status") or "")
             if status == "COMMITTED":
                 results.append(dict(row))
+                if (
+                    stop_after_effect_type is not None
+                    and str(row.get("effect_type") or "")
+                    == stop_after_effect_type
+                ):
+                    break
                 continue
             if status == "FAILED":
                 results.append(dict(row))
@@ -457,10 +633,15 @@ class AcceptanceEffectDispatcher:
             results.append(dispatched)
             newly_dispatched += 1
             if str(dispatched.get("status") or "") != "COMMITTED":
-                # Conversation -> Life -> delivery is a commit chain.  A
-                # failed or retrying earlier phase closes the graph queue to
-                # later public effects rather than leaking a partially
-                # accepted result.
+                # The ordered prefix is a commit chain.  A failed or retrying
+                # earlier phase closes the graph queue to later public
+                # effects rather than leaking a partially accepted result.
+                break
+            if (
+                stop_after_effect_type is not None
+                and str(dispatched.get("effect_type") or "")
+                == stop_after_effect_type
+            ):
                 break
         return tuple(results)
 
@@ -523,7 +704,7 @@ class AcceptanceEffectDispatcher:
         return tuple(results)
 
     def list_recovery_pending(self, *, limit: int = 1) -> tuple[dict[str, Any], ...]:
-        """Return bounded durable work which still blocks clean admission."""
+        """Return bounded durable work quarantined for background recovery."""
 
         bounded = min(1_000, max(1, int(limit)))
         rows = [
@@ -611,7 +792,7 @@ class AcceptanceEffectRuntime:
         dispatcher: AcceptanceEffectDispatcher,
         poll_seconds: float = _RECOVERY_POLL_SECONDS,
         startup_limit: int = 1_000,
-        recovery_limit: int = 100,
+        recovery_limit: int = 10,
         recovery_observer: AcceptanceEffectRecoveryObserver | None = None,
     ) -> None:
         if not isinstance(dispatcher, AcceptanceEffectDispatcher):
@@ -643,8 +824,12 @@ class AcceptanceEffectRuntime:
         async with self._lifecycle_lock:
             if self.active:
                 return
-            # Startup recovery is completed before any governed surface can
-            # accept a new command.
+            # Run one recovery pass before admission so immediately
+            # recoverable effects settle first. A correctly persisted UNKNOWN
+            # outcome remains quarantined behind its exact effect id; it must
+            # not make the whole personal Host unavailable. The background
+            # owner keeps reconciling it and RuntimeGuardian retains the
+            # durable breach until the queue is actually clean.
             try:
                 await self._dispatcher.drain_ready(limit=self._startup_limit)
                 remaining = self._dispatcher.list_recovery_pending(limit=1)
@@ -660,11 +845,10 @@ class AcceptanceEffectRuntime:
                     f"durable Acceptance Effect still requires recovery: {effect_id}",
                 )
                 await self._record_recovery_failure(pending)
-                raise pending
-            # A previous process may have recorded a durable recovery breach.
-            # The production observer resolves it only after this process has
-            # completed a real startup recovery pass.
-            await self._record_recovery_success(force=True)
+            else:
+                # A previous process may have recorded a durable recovery
+                # breach. Resolve it only after a real clean startup pass.
+                await self._record_recovery_success(force=True)
             self._stop.clear()
             self._task = asyncio.create_task(
                 self._run(),
@@ -698,7 +882,20 @@ class AcceptanceEffectRuntime:
             try:
                 await self._flush_pending_failure_observation()
                 await self._dispatcher.drain_ready(limit=self._recovery_limit)
-                await self._record_recovery_success()
+                remaining = self._dispatcher.list_recovery_pending(limit=1)
+                if remaining:
+                    effect_id = str(
+                        remaining[0].get("effect_id") or "<unknown>"
+                    )
+                    await self._record_recovery_failure(
+                        AcceptanceEffectDispatchError(
+                            ACCEPTANCE_EFFECT_RECOVERY_PENDING,
+                            "durable Acceptance Effect still requires "
+                            f"recovery: {effect_id}",
+                        )
+                    )
+                else:
+                    await self._record_recovery_success()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

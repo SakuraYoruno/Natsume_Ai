@@ -32,7 +32,7 @@ pwsh scripts/runtime/stop_host_side.ps1
 pwsh scripts/runtime/stop_docker_services.ps1
 ```
 
-Edge 位于另一台电脑。当前仓库操作不得调用远端启动脚本，除非用户当次明确授权。
+Edge 位于另一台电脑。远端启动、停止和模型资产变更必须由用户当次明确授权；本轮双端验收已获得授权并使用隔离运行根执行。
 
 ## 3. Monitor 构建
 
@@ -65,4 +65,8 @@ Host 默认将中文文本映射为日语 TTS 请求。Edge 启动脚本在启�
 
 ## 7. 当前部署状态
 
-当前 commit 未执行完整目标部署验收；远端 Edge 明确为 `NOT_TESTED`。GitHub Actions 未运行的原因为账户额度，状态为 `NOT_RUN_ACCOUNT_QUOTA`。
+目标 Edge、Unified Gateway 和真实消息平台已运行并完成核心往返；ASR、GPT-SoVITS TTS、音频播放、Edge RPC 和 Gateway 为 `UP`。VTS 已认证且口型／身体动作可用，但缺兼容情绪热键，状态为 `DEGRADED`；barge-in 关闭，状态为 `NOT_TESTED`。
+
+Host、OBS 与 Nginx Monitor 已在隔离 acceptance 数据根启动，真实后端 Playwright 验证通过。提交 `cdaa4ea54` 已绑定固定版本 Neo4j、Chroma 与 Redis 的真实写入、读取、容器重启和持久读取回执，状态为 `PASS`；重启后 Host、OBS、Monitor、Edge 与 Gateway health 仍可达。GitHub Actions 未运行的原因为账户额度，状态为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+Gateway 公共 health 只提供无敏感信息的常量规模存活视图。详细 `/v1/gateway/stats` 在没有 authenticated admin surface 时按合同 fail-closed；生产 Monitor 从 OBS 的 durable Gateway projection 查询统计，不直接依赖该未安装管理面。

@@ -10,7 +10,8 @@ param(
   [int]$WaitSeconds = 30,
   [switch]$DisableTribeEvents,
   [switch]$ForceRestart,
-  [switch]$ShowConsoleWindow
+  [switch]$ShowConsoleWindow,
+  [bool]$BreakawayFromSsh = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,6 +84,11 @@ function Get-PythonRuntime {
     throw "python executable not found"
   }
   return $python.Source
+}
+
+function ConvertTo-PowerShellLiteral {
+  param([AllowNull()][string]$Value)
+  return "'" + ([string]$Value).Replace("'", "''") + "'"
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
@@ -191,24 +197,92 @@ if ($DisableTribeEvents.IsPresent) {
   $arguments += "--disable-tribe-events"
 }
 
-$startParameters = @{
-  FilePath = $pythonExe
-  ArgumentList = $arguments
-  WorkingDirectory = $repoRoot
-  RedirectStandardOutput = $stdoutLog
-  RedirectStandardError = $stderrLog
-  PassThru = $true
+$sshSessionDetected = (
+  -not [string]::IsNullOrWhiteSpace([string]$env:SSH_CONNECTION)
+) -or (
+  -not [string]::IsNullOrWhiteSpace([string]$env:SSH_CLIENT)
+)
+$useBreakawayLauncher = [bool]($BreakawayFromSsh -and $sshSessionDetected)
+$launchPid = 0
+if ($useBreakawayLauncher) {
+  # Start-Process descendants remain attached to the OpenSSH job on Windows
+  # and are terminated when the SSH command exits.  WMI creates a small hidden
+  # wrapper outside that job; the wrapper waits on Python, while the durable
+  # PID file below records the actual listening Python process.
+  $childArguments = "@(" + (
+    @(
+      $arguments |
+        ForEach-Object { ConvertTo-PowerShellLiteral -Value ([string]$_) }
+    ) -join ","
+  ) + ")"
+  $envFileLiteral = ConvertTo-PowerShellLiteral -Value $EnvFile
+  $childSource = (
+    '$ErrorActionPreference = ''Stop''; ' +
+    '$utf8 = New-Object Text.UTF8Encoding($false); ' +
+    '$OutputEncoding = $utf8; [Console]::OutputEncoding = $utf8; ' +
+    'foreach ($line in [IO.File]::ReadAllLines(' + $envFileLiteral +
+    ', $utf8)) { $trimmed = ([string]$line).Trim(); ' +
+    'if (-not $trimmed -or $trimmed.StartsWith(''#'')) { continue }; ' +
+    '$separator = $trimmed.IndexOf(''=''); if ($separator -lt 1) { continue }; ' +
+    '$name = $trimmed.Substring(0, $separator).Trim().TrimStart([char]0xFEFF); ' +
+    '$value = $trimmed.Substring($separator + 1).Trim(); ' +
+    'if ($name) { [Environment]::SetEnvironmentVariable($name, $value, ''Process'') } }; ' +
+    '$process = Start-Process -FilePath ' +
+    (ConvertTo-PowerShellLiteral -Value $pythonExe) +
+    ' -ArgumentList ' + $childArguments +
+    ' -WorkingDirectory ' + (ConvertTo-PowerShellLiteral -Value $repoRoot) +
+    ' -RedirectStandardOutput ' +
+    (ConvertTo-PowerShellLiteral -Value $stdoutLog) +
+    ' -RedirectStandardError ' +
+    (ConvertTo-PowerShellLiteral -Value $stderrLog) +
+    ' -WindowStyle Hidden -PassThru; ' +
+    '$process.WaitForExit(); exit $process.ExitCode'
+  )
+  $encodedCommand = [Convert]::ToBase64String(
+    [Text.Encoding]::Unicode.GetBytes($childSource)
+  )
+  $powershellExe = Join-Path $PSHOME "powershell.exe"
+  $commandLine = (
+    '"' + $powershellExe + '" -NoProfile -NonInteractive ' +
+    '-ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand ' +
+    $encodedCommand
+  )
+  $startup = ([wmiclass]"Win32_ProcessStartup").CreateInstance()
+  $startup.ShowWindow = 0
+  $created = ([wmiclass]"Win32_Process").Create(
+    $commandLine,
+    $repoRoot,
+    $startup
+  )
+  if ([int]$created.ReturnValue -ne 0) {
+    throw "gateway breakaway launch failed: return=$($created.ReturnValue)"
+  }
+  $launchPid = [int]$created.ProcessId
+} else {
+  $startParameters = @{
+    FilePath = $pythonExe
+    ArgumentList = $arguments
+    WorkingDirectory = $repoRoot
+    RedirectStandardOutput = $stdoutLog
+    RedirectStandardError = $stderrLog
+    PassThru = $true
+  }
+  if (-not $ShowConsoleWindow.IsPresent) {
+    $startParameters["WindowStyle"] = "Hidden"
+  }
+  $process = Start-Process @startParameters
+  $launchPid = [int]$process.Id
 }
-if (-not $ShowConsoleWindow.IsPresent) {
-  $startParameters["WindowStyle"] = "Hidden"
-}
-$process = Start-Process @startParameters
 
 $healthUrl = "http://$BindHost`:$Port/v1/gateway/health"
 $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(1, $WaitSeconds))
 $health = $null
 while ([DateTime]::UtcNow -lt $deadline) {
-  if ($process.HasExited) {
+  $launchAlive = $null -ne (
+    Get-Process -Id $launchPid -ErrorAction SilentlyContinue
+  )
+  $candidateListener = Get-ListeningPid -ProbePort $Port
+  if (-not $launchAlive -and $null -eq $candidateListener) {
     break
   }
   try {
@@ -227,9 +301,8 @@ while ([DateTime]::UtcNow -lt $deadline) {
 }
 
 if ($null -eq $health) {
-  if (-not $process.HasExited) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-  }
+  $null = & $stopScript -RuntimeRoot $RuntimeRoot -Port $Port
+  Stop-Process -Id $launchPid -Force -ErrorAction SilentlyContinue
   $stderrTail = if (Test-Path -LiteralPath $stderrLog) {
     (Get-Content -LiteralPath $stderrLog -Tail 40 -Encoding UTF8) -join "`n"
   } else {
@@ -238,11 +311,21 @@ if ($null -eq $health) {
   throw "gateway failed readiness at $healthUrl`n$stderrTail"
 }
 
-Set-Content -LiteralPath $pidFile -Value ([string]$process.Id) -Encoding ascii
+$gatewayPid = Get-ListeningPid -ProbePort $Port
+if (
+  $null -eq $gatewayPid -or
+  -not (Test-GatewaySideProcess -ProcessId ([int]$gatewayPid))
+) {
+  $null = & $stopScript -RuntimeRoot $RuntimeRoot -Port $Port
+  Stop-Process -Id $launchPid -Force -ErrorAction SilentlyContinue
+  throw "gateway readiness passed without an owned listener"
+}
+Set-Content -LiteralPath $pidFile -Value ([string]$gatewayPid) -Encoding ascii
 [ordered]@{
   side = "gateway"
   status = "started"
-  pid = [int]$process.Id
+  pid = [int]$gatewayPid
+  launcher_pid = $launchPid
   pid_file = $pidFile
   bind_host = $BindHost
   port = $Port
@@ -253,6 +336,8 @@ Set-Content -LiteralPath $pidFile -Value ([string]$process.Id) -Encoding ascii
   transport_mode = [string]$health.transport.mode
   worker_alive = [bool]$health.transport.worker_alive
   remote_edge_started = $false
+  ssh_session_detected = $sshSessionDetected
+  breakaway_launcher_used = $useBreakawayLauncher
   stdout_log = $stdoutLog
   stderr_log = $stderrLog
 } | ConvertTo-Json -Depth 6

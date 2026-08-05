@@ -12,10 +12,16 @@ from typing import Any
 GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION = (
     "Natsume.host.governed_delegate_target_policy.v1"
 )
+GOVERNED_MODEL_DELEGATE_POLICY_SCHEMA_VERSION = (
+    "Natsume.host.governed_delegate_target_policy.v2"
+)
 GOVERNED_DELEGATE_EXECUTION_MODE = "PORT_FREE_READ_ONLY"
 GOVERNED_DELEGATE_REVIEW_MODE = "DURABLE_PRE_EXECUTION_REQUIRED"
 GOVERNED_DELEGATE_BUDGET_MODE = "PORT_FREE_READ_ONLY_ATTESTED_ZERO"
 GOVERNED_DELEGATE_EFFECT_MODE = "GRAPH_ACCEPTANCE_RESULT_ONLY"
+GOVERNED_MODEL_DELEGATE_EXECUTION_MODE = "MODEL_BACKED_READ_ONLY"
+GOVERNED_MODEL_DELEGATE_REVIEW_MODE = "GOVERNOR_LOW_RISK_WAIVER"
+GOVERNED_MODEL_DELEGATE_BUDGET_MODE = "TASK_MODEL_BUDGET_GUARD"
 GOVERNED_DELEGATE_POLICY_INVALID = "GOVERNED_DELEGATE_POLICY_INVALID"
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,254}$")
@@ -88,25 +94,40 @@ def _normalized_base(payload: Mapping[str, Any]) -> dict[str, Any]:
         raise GovernedDelegateTargetPolicyError(
             "Delegate target policy payload has missing or unknown fields"
         )
-    expected = {
-        "schema_version": GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION,
-        "execution_mode": GOVERNED_DELEGATE_EXECUTION_MODE,
-        "review_mode": GOVERNED_DELEGATE_REVIEW_MODE,
-        "budget_mode": GOVERNED_DELEGATE_BUDGET_MODE,
-        "effect_mode": GOVERNED_DELEGATE_EFFECT_MODE,
+    schema_version = str(raw.get("schema_version") or "").strip()
+    profiles = {
+        GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION: {
+            "schema_version": GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION,
+            "execution_mode": GOVERNED_DELEGATE_EXECUTION_MODE,
+            "review_mode": GOVERNED_DELEGATE_REVIEW_MODE,
+            "budget_mode": GOVERNED_DELEGATE_BUDGET_MODE,
+            "effect_mode": GOVERNED_DELEGATE_EFFECT_MODE,
+        },
+        GOVERNED_MODEL_DELEGATE_POLICY_SCHEMA_VERSION: {
+            "schema_version": GOVERNED_MODEL_DELEGATE_POLICY_SCHEMA_VERSION,
+            "execution_mode": GOVERNED_MODEL_DELEGATE_EXECUTION_MODE,
+            "review_mode": GOVERNED_MODEL_DELEGATE_REVIEW_MODE,
+            "budget_mode": GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
+            "effect_mode": GOVERNED_DELEGATE_EFFECT_MODE,
+        },
     }
+    expected = profiles.get(schema_version)
+    if expected is None:
+        raise GovernedDelegateTargetPolicyError(
+            "Delegate target policy declares an unsupported schema version"
+        )
     if any(raw.get(key) != value for key, value in expected.items()):
         raise GovernedDelegateTargetPolicyError(
             "Delegate target policy declares an unsupported execution mode"
         )
     return {
-        "schema_version": GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION,
+        "schema_version": expected["schema_version"],
         "target_id": _identifier(raw.get("target_id"), field_name="target_id"),
         "adapter_id": _identifier(raw.get("adapter_id"), field_name="adapter_id"),
-        "execution_mode": GOVERNED_DELEGATE_EXECUTION_MODE,
-        "review_mode": GOVERNED_DELEGATE_REVIEW_MODE,
-        "budget_mode": GOVERNED_DELEGATE_BUDGET_MODE,
-        "effect_mode": GOVERNED_DELEGATE_EFFECT_MODE,
+        "execution_mode": expected["execution_mode"],
+        "review_mode": expected["review_mode"],
+        "budget_mode": expected["budget_mode"],
+        "effect_mode": expected["effect_mode"],
     }
 
 
@@ -152,6 +173,10 @@ __all__ = [
     "GOVERNED_DELEGATE_POLICY_INVALID",
     "GOVERNED_DELEGATE_POLICY_SCHEMA_VERSION",
     "GOVERNED_DELEGATE_REVIEW_MODE",
+    "GOVERNED_MODEL_DELEGATE_BUDGET_MODE",
+    "GOVERNED_MODEL_DELEGATE_EXECUTION_MODE",
+    "GOVERNED_MODEL_DELEGATE_POLICY_SCHEMA_VERSION",
+    "GOVERNED_MODEL_DELEGATE_REVIEW_MODE",
     "GovernedDelegateTargetPolicyError",
     "freeze_governed_delegate_target_policy",
     "validate_governed_delegate_target_policy",

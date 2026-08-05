@@ -83,6 +83,11 @@ def _model_budget_guard(
     max_token_count: int = 100,
     max_output_tokens: int = 40,
     max_model_cost_micros: int = 1_000,
+    required_usage_dimensions: tuple[str, ...] = (
+        "token_count",
+        "completion_tokens",
+        "model_cost_micros",
+    ),
 ) -> ModelBudgetGuard:
     return ModelBudgetGuard(
         budget_id="budget://model-attempt-test",
@@ -95,6 +100,7 @@ def _model_budget_guard(
         max_token_count=max_token_count,
         max_output_tokens=max_output_tokens,
         max_model_cost_micros=max_model_cost_micros,
+        required_usage_dimensions=required_usage_dimensions,
     )
 
 
@@ -264,6 +270,55 @@ async def test_model_budget_guard_rejects_missing_canonical_usage_without_fallba
         AttemptStatus.STARTED,
         AttemptStatus.REJECTED,
     ]
+
+
+async def test_model_budget_guard_accepts_provider_tokens_when_cost_is_optional() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-token-attested-chat",
+            (ProviderTarget("deepseek", "deepseek", "deepseek-chat"),),
+            "ordinary companion chat",
+            max_attempts=1,
+        )
+    )
+
+    async def _complete(_attempt):
+        return ProviderResponse(
+            content="token-attested response",
+            usage={
+                "prompt_tokens": 8,
+                "completion_tokens": 4,
+                "total_tokens": 12,
+            },
+        )
+
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("deepseek", complete_fn=_complete)]
+        ),
+        audit_repository=InMemoryAttemptAuditRepository(),
+    )
+
+    result = await service.complete(
+        _request(
+            model_budget_guard=_model_budget_guard(
+                required_usage_dimensions=(
+                    "token_count",
+                    "completion_tokens",
+                )
+            )
+        )
+    )
+
+    assert result.success is True
+    measurements = result.attempts[-1].metadata["provider_budget_measurements"]
+    assert measurements == {
+        "prompt_tokens": 8,
+        "completion_tokens": 4,
+        "token_count": 12,
+    }
 
 
 @pytest.mark.parametrize(

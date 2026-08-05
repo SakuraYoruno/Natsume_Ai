@@ -13,6 +13,10 @@ from host_brain.app import user_preference_store as user_preference_store_module
 from host_brain.app.acceptance_effect_handlers import (
     build_production_acceptance_effect_handlers,
 )
+from host_brain.app.life_projection_barrier import (
+    LifeProjectionBarrierError,
+    require_life_projection_barrier,
+)
 from host_brain.app.user_preference_store import UserPreferenceStore
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
@@ -503,12 +507,14 @@ async def test_life_conversation_response_loss_reopens_exact_projection_barrier(
     assert recovered["status"] == "APPLIED"
     assert recovered["command_id"] == payload["command_id"]
     assert recovered["receipt_ref"].startswith(
-        "life-projection-barrier://sha256/"
+        "life-projection-admission://sha256/"
     )
-    assert {
-        receipt["result"]["target"]
-        for receipt in recovered["projection_receipts"]
-    } == {"life.experience", "experience"}
+    assert recovered["projection_delivery_status"] == "QUEUED"
+    assert recovered["projection_intent_count"] == 2
+    assert all(
+        life.snapshot_reader.get_projection_receipt(intent.intent_id) is None
+        for intent in life.snapshot_reader.list_projection_intents(payload["command_id"])
+    )
     assert calls == 1
     receipt_ref = recovered["receipt_ref"]
     ledger.close()
@@ -536,15 +542,18 @@ async def test_life_projection_barrier_rejects_durable_receipt_tamper(
         content="拒绝被篡改的本地投影回执",
     )
     monkeypatch.setattr(PROCESS_LIFE_PROVIDER, "require", lambda: life)
+    projection_dispatcher = LifeProjectionDispatcher(
+        life.repository,
+        _ack_life_projection,
+    )
     handler = build_production_acceptance_effect_handlers(
         life_receipt_reader_provider=lambda: life.snapshot_reader,
-        life_projection_dispatcher=LifeProjectionDispatcher(
-            life.repository,
-            _ack_life_projection,
-        ),
+        life_projection_dispatcher=projection_dispatcher,
     )["life.conversation_turn_recorded"]
     committed = await handler(payload)
-    intent_id = committed["projection_receipts"][0]["intent_id"]
+    dispatched = await projection_dispatcher.dispatch_pending_async(limit=10)
+    assert dispatched.delivered == 2
+    intent_id = life.snapshot_reader.list_projection_intents(payload["command_id"])[0].intent_id
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("DROP TRIGGER life_projection_receipt_no_update")
@@ -568,6 +577,23 @@ async def test_life_projection_barrier_rejects_durable_receipt_tamper(
         )
         conn.commit()
 
-    with pytest.raises(AcceptanceEffectOutcomeUnknown):
-        handler.reconcile(payload)
+    command_receipt = life.snapshot_reader.get_receipt(payload["command_id"])
+    assert command_receipt is not None
+    with sqlite3.connect(db_path) as conn:
+        command_payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM life_command WHERE command_id = ?",
+                (payload["command_id"],),
+            ).fetchone()[0]
+        )
+    with pytest.raises(LifeProjectionBarrierError):
+        require_life_projection_barrier(
+            reader=life.snapshot_reader,
+            command_receipt=command_receipt.as_dict(),
+            command_payload=command_payload,
+            correlation_id=payload["request_id"],
+        )
+    # Conversation replay only reopens canonical command+intent admission; a
+    # corrupt derived projection is isolated to the background projector.
+    assert handler.reconcile(payload)["receipt_ref"] == committed["receipt_ref"]
     ledger.close()

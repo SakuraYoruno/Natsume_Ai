@@ -24,7 +24,8 @@ def test_0096_fresh_schema_is_coordination_only_and_checksum_replays(tmp_path) -
     )
 
     assert first.success is True, first.as_dict()
-    assert first.summary["current_version"] == 125
+    assert first.summary["current_version"] == first.summary["latest_version"]
+    assert first.summary["current_version"] >= 96
     assert any(
         record.migration_id == "0096_task_runtime_review_continuation"
         for record in first.records
@@ -84,7 +85,8 @@ def test_0096_fresh_schema_is_coordination_only_and_checksum_replays(tmp_path) -
         ts_ms=1_001,
     )
     assert replay.success is True, replay.as_dict()
-    assert replay.summary["current_version"] == 125
+    assert replay.summary["current_version"] == first.summary["current_version"]
+    assert replay.summary["latest_version"] == first.summary["latest_version"]
 
 
 def test_0096_rejects_partial_claim_and_fence_attempt_mismatch(tmp_path) -> None:

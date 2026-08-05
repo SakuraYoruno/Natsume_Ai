@@ -148,22 +148,11 @@ class SchedulerAcceptedOperationHandler:
             worker_key=reopened.definition.worker_key,
             task_id=reopened.occurrence.task_id,
         )
-        execution_context = {
-            "command_id": canonical["command_id"],
-            "request_id": canonical["request_id"],
-            "work_order_id": canonical["work_order_id"],
-            "graph_id": canonical["graph_id"],
-            "graph_revision": canonical["graph_revision"],
-            "node_id": canonical["node_id"],
-            "attempt_id": canonical["attempt_id"],
-            "worker_route": f"delegate:{canonical['worker_key']}",
-            "target_id": canonical["worker_key"],
-            "frozen_input_pack": deepcopy(reopened.work_order.input_pack),
-            # This is an in-process proof context issued by the Dispatcher for
-            # the current Acceptance Effect claim.  It is not a live grant and
-            # must never be copied into the immutable Scheduler result.
-            _PRIVATE_PREVIEW_FIELD: deepcopy(preview_context),
-        }
+        execution_context = _scheduler_execution_context(
+            canonical=canonical,
+            reopened=reopened,
+            preview_context=preview_context,
+        )
 
         try:
             raw_result = handler(
@@ -229,23 +218,63 @@ class SchedulerAcceptedOperationHandler:
         return _handler_outcome(record, replayed=False)
 
     async def reconcile(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Reopen an unknown operation result without invoking its worker.
+        """Reopen an unknown operation result without re-invoking its worker.
 
         The Dispatcher may call this path only after an invocation crossed the
         external-effect boundary and lost attribution.  Reconciliation is
-        therefore read-only: an absent or non-exact result remains unknown and
-        can never fall through to ``SchedulerWorkerRegistry.resolve``.
+        therefore read-only: it first checks the Scheduler receipt, then an
+        explicitly registered worker-owned receipt resolver.  It can never
+        fall through to the worker's effectful handler.
         """
 
         canonical, preview_context = _accepted_payload(payload)
-        await self._reopen(canonical, preview_context)
+        reopened = await self._reopen(canonical, preview_context)
         try:
             existing = await _resolve(
                 self._results.get_by_command(canonical["command_id"])
             )
-            if existing is None:
-                raise LookupError("exact Scheduler result is absent")
-            record = _exact_result_record(existing, canonical=canonical)
+            if existing is not None:
+                record = _exact_result_record(existing, canonical=canonical)
+            else:
+                reconciler = self._workers.resolve_reconciler(
+                    worker_key=reopened.definition.worker_key,
+                    task_id=reopened.occurrence.task_id,
+                )
+                if reconciler is None:
+                    raise LookupError("exact Scheduler result is absent")
+                raw_result = reconciler(
+                    occurrence=reopened.occurrence,
+                    definition=reopened.definition,
+                    command=reopened.command,
+                    execution_context=_scheduler_execution_context(
+                        canonical=canonical,
+                        reopened=reopened,
+                        preview_context=preview_context,
+                    ),
+                )
+                normalized = _scheduler_handler_result(await _resolve(raw_result))
+                if _contains_private_runtime_authority(normalized):
+                    raise SchedulerWorkerError(
+                        SCHEDULER_DURABLE_RESULT_INVALID,
+                        "scheduler reconciler result contains private runtime authority",
+                    )
+                _canonical_json(normalized)
+                await _resolve(
+                    self._results.append(
+                        occurrence_id=canonical["occurrence_id"],
+                        command_id=canonical["command_id"],
+                        work_order_id=canonical["work_order_id"],
+                        result=normalized,
+                    )
+                )
+                durable = await _resolve(
+                    self._results.get_by_command(canonical["command_id"])
+                )
+                record = _exact_result_record(
+                    durable,
+                    canonical=canonical,
+                    expected_result=normalized,
+                )
         except AcceptanceEffectOutcomeUnknown:
             raise
         except Exception as exc:
@@ -342,6 +371,30 @@ class SchedulerAcceptedOperationHandler:
             )
         except Exception:
             return None
+
+
+def _scheduler_execution_context(
+    *,
+    canonical: Mapping[str, Any],
+    reopened: _ReopenedOperation,
+    preview_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "command_id": canonical["command_id"],
+        "request_id": canonical["request_id"],
+        "work_order_id": canonical["work_order_id"],
+        "graph_id": canonical["graph_id"],
+        "graph_revision": canonical["graph_revision"],
+        "node_id": canonical["node_id"],
+        "attempt_id": canonical["attempt_id"],
+        "worker_route": f"delegate:{canonical['worker_key']}",
+        "target_id": canonical["worker_key"],
+        "frozen_input_pack": deepcopy(reopened.work_order.input_pack),
+        # This is an in-process proof context issued by the Dispatcher for the
+        # current Acceptance Effect claim. It is not a live grant and must
+        # never be copied into an immutable Scheduler result.
+        _PRIVATE_PREVIEW_FIELD: deepcopy(preview_context),
+    }
 
 
 def _accepted_payload(

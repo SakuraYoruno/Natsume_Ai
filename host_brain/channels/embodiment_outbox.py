@@ -47,6 +47,27 @@ class DurableEmbodimentOutbox:
             reason_code=(str(row["reason_code"]) if row.get("reason_code") else None),
         )
 
+    def enqueue_many(
+        self,
+        commands: tuple[EmbodimentCommand, ...],
+    ) -> tuple[EmbodimentOutboxAck, ...]:
+        rows = self._repository.enqueue_many(
+            tuple(command.as_dict() for command in commands),
+            authority=self._authority_provider(),
+        )
+        return tuple(
+            EmbodimentOutboxAck(
+                outbox_id=str(row["outbox_id"]),
+                command_id=str(row["command_id"]),
+                idempotency_key=str(row["idempotency_key"]),
+                status=str(row["status"]),
+                reason_code=(
+                    str(row["reason_code"]) if row.get("reason_code") else None
+                ),
+            )
+            for row in rows
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class EmbodimentDispatchBatch:
@@ -147,6 +168,11 @@ class EmbodimentOutboxDispatcher:
             status = str(receipt.status or "").strip().upper()
             if receipt.accepted and status in {"APPLIED", "COMPLETED", "SUCCEEDED"}:
                 applied += 1
+            elif receipt.accepted and status in {"ACCEPTED", "QUEUED", "PENDING"}:
+                # A durable Edge queue acknowledgement is intentionally
+                # non-terminal.  The next reconciliation pass performs an
+                # identity-bound receipt lookup and never replays the command.
+                in_doubt += 1
             elif status == "IN_DOUBT":
                 in_doubt += 1
             else:
@@ -210,12 +236,23 @@ class EmbodimentOutboxDispatcher:
             except (TypeError, ValueError):
                 unavailable += 1
                 continue
-            if not reconciled:
-                skipped += 1
-                continue
             status = str(receipt.status or "").strip().upper()
+            if not reconciled:
+                if (
+                    (receipt.accepted and status in {"ACCEPTED", "QUEUED", "PENDING"})
+                    or status == "IN_DOUBT"
+                ):
+                    # The exact non-terminal Edge receipt was already stored.
+                    # It remains unresolved and must stay visible as such,
+                    # even though the digest-bound CAS correctly made no write.
+                    still_in_doubt += 1
+                else:
+                    skipped += 1
+                continue
             if receipt.accepted and status in {"APPLIED", "COMPLETED", "SUCCEEDED"}:
                 applied += 1
+            elif receipt.accepted and status in {"ACCEPTED", "QUEUED", "PENDING"}:
+                still_in_doubt += 1
             elif status == "IN_DOUBT":
                 still_in_doubt += 1
             else:

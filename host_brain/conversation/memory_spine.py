@@ -152,7 +152,13 @@ def append_visible_conversation_turn(
         "\x1f".join((session, str(request_id or "").strip(), clean_role)).encode("utf-8")
     ).hexdigest()
     memory_event_id = f"memevt_{uuid.uuid4().hex}"
-    repository = MemoryEventRepository.from_ledger(ledger)
+    # Host startup owns migration/schema readiness. Rechecking the complete
+    # migration catalog and index inventory on every visible turn adds a cold
+    # SQLite scan to the interactive path without increasing write safety.
+    repository = MemoryEventRepository.from_ledger(
+        ledger,
+        verify_schema=False,
+    )
     admitted = repository.append_visible_turn(
         event={
             "event_id": memory_event_id,
@@ -195,20 +201,11 @@ def append_visible_conversation_turn(
             "status": "SKIPPED",
             "reason_code": "DUPLICATE_VISIBLE_TURN",
         }
+    # ``append_visible_turn`` already commits the MemoryEvent, turn binding,
+    # refs and projection head atomically. Do not reopen two extra write
+    # transactions for data that is already canonical.
     turn = dict(admitted.get("turn") or {})
-    repository.merge_refs(
-        event_id=memory_event_id,
-        refs={
-            "turn_id": turn.get("turn_id"),
-        },
-    )
-    projection_status = {
-        "conversation_turn": {"status": "OK", "turn_id": turn.get("turn_id")},
-    }
-    repository.merge_projection_status(
-        event_id=memory_event_id,
-        projection_status=projection_status,
-    )
+    projection_status = dict(admitted.get("projection_status") or {})
     return {
         "status": "OK",
         "memory_event_id": memory_event_id,

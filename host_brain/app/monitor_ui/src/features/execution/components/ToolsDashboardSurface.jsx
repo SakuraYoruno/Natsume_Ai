@@ -20,7 +20,7 @@ function ToolsHeader({ loading, refreshing, runtimeLoading, onRefresh }) {
     <div className="flex items-center justify-between">
       <div>
         <h1 className="text-xl font-bold text-gray-800">{EXECUTION_TOOLS_COPY.heroTitle}</h1>
-        <p className="mt-0.5 text-sm text-gray-500">统一查看工具目录、权限等级、健康状态与手动执行入口。</p>
+        <p className="mt-0.5 text-sm text-gray-500">统一查看工具目录、权限等级、健康状态与受治理执行归属。</p>
       </div>
       <button onClick={onRefresh} disabled={busy} className="btn-secondary">
         <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
@@ -55,7 +55,7 @@ function ToolsHero({ heroView, sampleMeta }) {
   )
 }
 
-function ToolsNotices({ noticeView }) {
+function ToolsNotices({ noticeView, executionAvailability }) {
   return (
     <>
       {noticeView.catalogError ? <NoticeBanner variant="error">{noticeView.catalogError}</NoticeBanner> : null}
@@ -64,6 +64,11 @@ function ToolsNotices({ noticeView }) {
       ) : null}
       {noticeView.showNoSample ? (
         <NoticeBanner variant="info">当前系统还没有可观测的工具目录样本。</NoticeBanner>
+      ) : null}
+      {!executionAvailability?.available ? (
+        <NoticeBanner variant="warning" title="人工工具直执行已迁移">
+          工具目录继续只读展示；旧命令 {executionAvailability.commandId || 'tool.execute'} 不再可点击，实际执行请从受治理 TaskGraph 进入。
+        </NoticeBanner>
       ) : null}
     </>
   )
@@ -250,7 +255,10 @@ export default function ToolsDashboardSurface({
       />
 
       <ToolsHero heroView={heroView} sampleMeta={sampleMeta} />
-      <ToolsNotices noticeView={noticeView} />
+      <ToolsNotices
+        noticeView={noticeView}
+        executionAvailability={commandRailView.executionAvailability}
+      />
 
       <ToolsExecutionCommandRail
         mission={commandRailView.mission}

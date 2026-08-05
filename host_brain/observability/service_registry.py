@@ -8,14 +8,17 @@ from __future__ import annotations
 from typing import Dict, List
 
 # ---------------------------------------------------------------------------
-# Edge 侧服务（5 个）
+# Edge 侧服务
 # ---------------------------------------------------------------------------
 EDGE_SERVICES: List[Dict[str, str]] = [
     {"service_id": "asr",            "name": "ASR (Whisper)",      "side": "edge"},
     {"service_id": "tts",            "name": "TTS (GPT-SoVITS)",   "side": "edge"},
     {"service_id": "vts",            "name": "VTS / Live2D",       "side": "edge"},
     {"service_id": "audio_playback", "name": "Audio Playback",     "side": "edge"},
+    {"service_id": "barge_in",       "name": "Voice Barge-in",     "side": "edge"},
+    {"service_id": "resource_gate",  "name": "Edge Resource Gate", "side": "edge"},
     {"service_id": "edge_rpc",       "name": "Edge RPC Server",    "side": "edge"},
+    {"service_id": "unified_gateway", "name": "Unified Gateway",   "side": "edge"},
 ]
 
 EDGE_SERVICE_IDS: List[str] = [s["service_id"] for s in EDGE_SERVICES]
@@ -32,21 +35,20 @@ EDGE_SERVICE_EVENT_PREFIXES: Dict[str, List[str]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Host 侧服务（15 个）
+# Host 侧服务
+#
+# 这里只登记 Host /health 能逐项给出显式证据的真实组件。旧版 Neo4j、
+# Chroma、Bond Engine、Embedding 等卡片没有持续探针，长期显示 UNKNOWN；
+# 它们属于外部依赖或领域模块，不得再冒充服务健康清单。
 # ---------------------------------------------------------------------------
 HOST_SERVICES: List[Dict[str, str]] = [
-    {"service_id": "llm_gateway",         "name": "LLM Gateway",            "side": "host"},
-    {"service_id": "neo4j",               "name": "Neo4j Bond SSOT",        "side": "host"},
     {"service_id": "sqlite_ledger",       "name": "SQLite Ledger",          "side": "host"},
-    {"service_id": "chroma",              "name": "Chroma Vector Store",    "side": "host"},
-    {"service_id": "scheduler",           "name": "Scheduler",              "side": "host"},
-    {"service_id": "bond_engine",         "name": "Bond Engine",            "side": "host"},
-    {"service_id": "memory_distiller",    "name": "Memory Distiller",       "side": "host"},
-    {"service_id": "mcp_provider",        "name": "MCP Provider",           "side": "host"},
-    {"service_id": "embedding",           "name": "Embedding Service",      "side": "host"},
-    {"service_id": "reranker",            "name": "Reranker Service",       "side": "host"},
-    {"service_id": "memory_guard",        "name": "Memory Guard",           "side": "host"},
-    {"service_id": "state_arbiter",       "name": "State Arbiter",          "side": "host"},
+    {"service_id": "governor",            "name": "Governor Decision",       "side": "host"},
+    {"service_id": "skill_loader",        "name": "Skill Loader",            "side": "host"},
+    {"service_id": "llm_gateway",         "name": "LLM Gateway",             "side": "host"},
+    {"service_id": "recall_fusion",       "name": "Recall Fusion",           "side": "host"},
+    {"service_id": "screen_ocr",          "name": "Screen OCR",              "side": "host"},
+    {"service_id": "camera_recognizer",   "name": "Camera Recognizer",       "side": "host"},
 ]
 
 HOST_SERVICE_IDS: List[str] = [s["service_id"] for s in HOST_SERVICES]

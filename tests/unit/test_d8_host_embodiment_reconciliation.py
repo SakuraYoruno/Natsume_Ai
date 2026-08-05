@@ -201,6 +201,41 @@ def test_lookup_fault_keeps_host_command_in_doubt_without_replay(tmp_path) -> No
     assert row["receipt_json"] is None
 
 
+def test_queued_edge_receipt_stays_in_doubt_until_terminal_without_replay(tmp_path) -> None:
+    repository, db_path = _repository(tmp_path, "queued")
+    command = _command("queued")
+    outbox_id = _expire_dispatched_row(repository, db_path, command)
+    queued = EmbodimentReceipt(
+        command_id=command.command_id,
+        idempotency_key=command.idempotency_key,
+        accepted=True,
+        status="ACCEPTED",
+        reason_code=None,
+        detail="tts queued",
+        received_at_ms=command.issued_at_ms,
+        completed_at_ms=command.issued_at_ms,
+        event={"external_side_effects": "PENDING"},
+        receipt_ref="edge-embodiment-receipt://d8-queued",
+    )
+    port = _LookupPort(queued)
+    runtime = HostEmbodimentRuntime(
+        repository=repository,
+        worker_id="d8-reconcile-worker",
+        command_port=port,
+    )
+
+    first = asyncio.run(runtime.reconcile_in_doubt_async(limit=10))
+    second = asyncio.run(runtime.reconcile_in_doubt_async(limit=10))
+
+    assert first.still_in_doubt == 1
+    assert second.still_in_doubt == 1
+    assert port.submit_calls == []
+    assert port.lookup_calls == [command.command_id, command.command_id]
+    row = repository.get(outbox_id)
+    assert row is not None
+    assert row["status"] == "IN_DOUBT"
+
+
 def test_repeated_reconciliation_cannot_overwrite_or_execute_an_applied_receipt(tmp_path) -> None:
     repository, db_path = _repository(tmp_path, "duplicate")
     command = _command("duplicate")

@@ -13,6 +13,7 @@ from host_brain.app.observability_runtime.host_read_transport import (
     HOST_READ_ALLOWED_PATHS,
     HOST_READ_AUTH,
     HOST_READ_CONFIG,
+    HOST_READ_DEFAULT_TIMEOUT_S,
     HOST_READ_HTTP,
     HOST_READ_INVALID_JSON,
     HOST_READ_INVALID_PAYLOAD,
@@ -479,6 +480,48 @@ def test_environment_factory_captures_configuration_once(monkeypatch) -> None:
     with pytest.raises(FrozenInstanceError):
         client.base_url = "http://mutated-host:29090"
     assert not hasattr(client, "__dict__")
+
+
+def test_environment_factory_uses_projection_materialization_deadline_by_default() -> None:
+    client = HostReadTransport.from_environment(
+        {
+            "HOST_OBS_HOST_API_BASE_URL": "https://captured-host:19090",
+            "HOST_OBS_READ_TOKEN": "captured-token",
+        }
+    )
+
+    assert client.timeout_s == HOST_READ_DEFAULT_TIMEOUT_S
+    assert client.timeout_s >= 4.0
+
+
+def test_environment_factory_reads_acl_file_reference(tmp_path, monkeypatch) -> None:
+    token_file = tmp_path / "host.obs-read.token"
+    token_file.write_text("file-backed-token\n", encoding="utf-8")
+    client = HostReadTransport.from_environment(
+        {
+            "HOST_OBS_HOST_API_BASE_URL": "https://captured-host:19090",
+            "HOST_OBS_READ_TOKEN_FILE": str(token_file),
+        },
+        timeout_s=0.5,
+    )
+    captured: dict[str, object] = {}
+
+    def _urlopen(request, *, timeout):
+        captured["token"] = request.get_header("X-internal-token")
+        return _Response(b"{}")
+
+    monkeypatch.setattr(transport_module, "_open_no_redirect", _urlopen)
+
+    assert client.read_json("/internal/obs-sources/runtime").ok is True
+    assert captured["token"] == "file-backed-token"
+
+
+def test_environment_factory_rejects_relative_token_file() -> None:
+    client = HostReadTransport.from_environment(
+        {"HOST_OBS_READ_TOKEN_FILE": "runtime/host/host.obs-read.token"}
+    )
+
+    assert client.read_json("/internal/obs-sources/runtime").reason_code == HOST_READ_CONFIG
 
 
 def test_parallel_reads_do_not_share_payload_state(monkeypatch) -> None:

@@ -48,7 +48,11 @@ pip-wheel-metadata/
 .coverage
 .coverage.*
 coverage.xml
+coverage.json
 coverage-*.json
+*.lcov
+lcov.info
+coverage/
 docs/60_trace/diag_test_report.json
 docs/60_trace/diag_test_report.md
 htmlcov/

@@ -95,6 +95,9 @@ def build_isolated_surface_input(
         "control": control,
         "facts": _optional_list(payload.get("facts")),
         "must_not_do": _optional_list(payload.get("must_not_do")),
+        "accepted_task_results": _optional_list(
+            payload.get("accepted_task_results")
+        ),
         "case_id": _clean_text(payload.get("case_id")),
         # --- Inner-state leakage pass-through ---
         "inner_weather": _clean_text(payload.get("inner_weather")),

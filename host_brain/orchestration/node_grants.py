@@ -1,10 +1,4 @@
-"""TaskGraph-driven, node-bound child Governor grants.
-
-The service deliberately has no dependency on Executive planning types.  It
-accepts only the canonical ``TaskGraph``/``WorkOrderV3`` pair and returns
-opaque durable grant references; bearer approval tokens remain confined to
-the Governor ledger.
-"""
+"""TaskGraph child grants; only canonical inputs cross the Governor boundary."""
 
 from __future__ import annotations
 
@@ -56,6 +50,7 @@ _REVIEW_RENEWAL_REASON = "TASK_GRAPH_NODE_REVIEW_CONTINUATION_APPROVE"
 _REVIEW_RENEWAL_SCHEMA = "Natsume.task.review_continuation_authority.v1"
 _SUPPORTED_EXECUTABLE_ROUTES = frozenset({"skill", "delegate", "chat", "tool"})
 _ISSUABLE_NODE_ROUTES = _SUPPORTED_EXECUTABLE_ROUTES
+_MAX_EXECUTION_GRANT_TTL_MS = 24 * 60 * 60 * 1_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,6 +330,10 @@ class NodeBoundGrantService:
             session_id=session,
             principal_id=principal,
             now_ms=now_ms,
+            # Derivation may be reopening an already-durable batch solely to
+            # project an exact replay. An expired parent can never mint a new
+            # batch; that check runs after the replay lookup below.
+            allow_expired=True,
         )
         parent_binding = durable_governor_binding(parent)
         specs, batch_id = _compile_specs(
@@ -377,9 +376,16 @@ class NodeBoundGrantService:
             NODE_GRANT_PARENT_INVALID,
             "parent expiry",
         )
-        child_expiry = min(parent_expiry, now_ms + self._child_ttl_ms)
-        if child_expiry <= now_ms:
-            raise NodeGrantDerivationError(NODE_GRANT_EXPIRED, "child grant expiry is not in the future")
+        if parent_expiry <= now_ms:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_EXPIRED,
+                "expired parent grant cannot derive a new node-grant batch",
+            )
+        execution_ttl_ms = _execution_grant_ttl_ms(
+            work_order=work_order,
+            minimum_ttl_ms=self._child_ttl_ms,
+        )
+        child_expiry = now_ms + execution_ttl_ms
         parent_scope = str(parent_binding.get("scope") or "").strip().lower()
 
         staged: list[tuple[dict[str, Any], NodeBoundGrant]] = []
@@ -390,6 +396,7 @@ class NodeBoundGrantService:
                 session_id=session,
                 seq=spec.seq,
                 now_ts_ms=now_ms,
+                ttl_ms=execution_ttl_ms,
             )
             child_intent = _child_intent(
                 spec=spec,
@@ -623,15 +630,19 @@ class NodeBoundGrantService:
             if work_order.budget_policy is not None
             else 0
         )
-        if budget_time_ms > 86_400_000:
+        if budget_time_ms > _MAX_EXECUTION_GRANT_TTL_MS:
             raise NodeGrantDerivationError(
                 NODE_GRANT_INPUT_INVALID,
                 "Review continuation execution budget exceeds the 24-hour grant ceiling",
             )
-        child_expiry = now_ms + max(
-            self._child_ttl_ms,
-            budget_time_ms + self._child_ttl_ms,
+        execution_ttl_ms = min(
+            _MAX_EXECUTION_GRANT_TTL_MS,
+            max(
+                self._child_ttl_ms,
+                budget_time_ms + self._child_ttl_ms,
+            ),
         )
+        child_expiry = now_ms + execution_ttl_ms
         staged: list[tuple[dict[str, Any], NodeBoundGrant]] = []
         for spec in specs:
             token_ref = self._token_service.issue_approval_token(
@@ -640,6 +651,7 @@ class NodeBoundGrantService:
                 session_id=session,
                 seq=spec.seq,
                 now_ts_ms=now_ms,
+                ttl_ms=execution_ttl_ms,
             )
             child_intent = _child_intent(
                 spec=spec,
@@ -808,11 +820,15 @@ class NodeBoundGrantService:
             or str(binding.get("principal_id") or "").strip() != principal_id
             or str(binding.get("scope") or "").strip() == ""
             or seq < 0
-            or (expires_at_ms <= now_ms and not allow_expired)
         ):
             raise NodeGrantDerivationError(
                 NODE_GRANT_PARENT_INVALID,
-                "durable parent action/session/principal/scope/expiry binding mismatch",
+                "durable parent action/session/principal/scope binding mismatch",
+            )
+        if expires_at_ms <= now_ms and not allow_expired:
+            raise NodeGrantDerivationError(
+                NODE_GRANT_EXPIRED,
+                "durable parent grant expired",
             )
         return decision
 
@@ -904,8 +920,10 @@ class NodeBoundGrantService:
                 )
             ):
                 raise NodeGrantDerivationError(NODE_GRANT_REPLAY_DRIFT, f"durable child drifted: {spec.node_id}")
-            if expires_at_ms <= now_ms:
-                raise NodeGrantDerivationError(NODE_GRANT_EXPIRED, f"durable child expired: {spec.node_id}")
+            # Reopen the immutable child identity even after expiry so a
+            # terminal Task receipt can be replayed exactly.  This is not
+            # execution authority: DurableNodeGrantVerifier still rejects an
+            # expired child before claim/worker mutation.
             ref = governor_grant_ref(request_id, row)
             if ref == parent_ref:
                 raise NodeGrantDerivationError(NODE_GRANT_REPLAY_DRIFT, "child reused parent grant")
@@ -1060,6 +1078,7 @@ class DurableNodeGrantVerifier:
         try:
             parent_seq = int(parent_binding.get("seq"))
             parent_expiry = int(parent_binding.get("expires_at_ms") or 0)
+            parent_issued_at_ms = int(parent_binding.get("issued_at_ms") or 0)
         except (TypeError, ValueError) as exc:
             raise NodeGrantVerificationError("durable parent binding is malformed") from exc
         if (
@@ -1068,15 +1087,12 @@ class DurableNodeGrantVerifier:
             or str(parent_binding.get("session_id") or "") != expected["session_id"]
             or str(parent_binding.get("principal_id") or "") != expected["principal_id"]
             or parent_seq < 0
-            or (parent_expiry <= now_ms and not review_renewal)
+            or parent_issued_at_ms <= 0
+            or parent_expiry <= parent_issued_at_ms
         ):
             raise NodeGrantVerificationError(
-                "durable parent binding mismatch or expiry",
-                reason_code=(
-                    NODE_GRANT_EXPIRED
-                    if parent_expiry <= now_ms and not review_renewal
-                    else NODE_GRANT_VERIFICATION_FAILED
-                ),
+                "durable parent binding mismatch",
+                reason_code=NODE_GRANT_VERIFICATION_FAILED,
             )
 
         authority = _mapping(snapshots.get("node_grant"))
@@ -1087,6 +1103,7 @@ class DurableNodeGrantVerifier:
         binding = durable_governor_binding(decision)
         try:
             expiry = int(binding.get("expires_at_ms") or 0)
+            issued_at_ms = int(binding.get("issued_at_ms") or 0)
             ordinal = int(authority.get("ordinal") or 0)
         except (TypeError, ValueError) as exc:
             raise NodeGrantVerificationError("durable node binding integers are malformed") from exc
@@ -1095,8 +1112,20 @@ class DurableNodeGrantVerifier:
                 "durable node grant is expired",
                 reason_code=NODE_GRANT_EXPIRED,
             )
-        if (expiry > parent_expiry and not review_renewal) or ordinal < 1:
-            raise NodeGrantVerificationError("node expiry or ordinal exceeds parent authority")
+        if (
+            issued_at_ms <= 0
+            or expiry <= issued_at_ms
+            or expiry - issued_at_ms > _MAX_EXECUTION_GRANT_TTL_MS
+            or ordinal < 1
+            or int(decision.get("ts_ms") or 0) != issued_at_ms
+            or (
+                not review_renewal
+                and not (parent_issued_at_ms <= issued_at_ms < parent_expiry)
+            )
+        ):
+            raise NodeGrantVerificationError(
+                "node grant issuance window, expiry or ordinal is invalid"
+            )
 
         batch_identity: dict[str, Any] = {
             "request_id": expected["request_id"],
@@ -1254,6 +1283,35 @@ class DurableNodeGrantVerifier:
         """Verify immutable grant authority before the READY claim transaction."""
 
         return self.verify(**kwargs, _claim_phase=True)
+
+
+def _execution_grant_ttl_ms(
+    *,
+    work_order: WorkOrderV3,
+    minimum_ttl_ms: int,
+) -> int:
+    """Bind an admitted node credential to the Task's frozen time budget.
+
+    The parent grant limits when a TaskGraph may be admitted and delegated. Once
+    that delegation is durably recorded, its nodes need an execution window long
+    enough to consume the already-approved Task budget. The credential remains
+    bounded and still expires independently of the durable Task state.
+    """
+
+    budget_time_ms = (
+        int(work_order.budget_policy.limits.time_ms)
+        if work_order.budget_policy is not None
+        else 0
+    )
+    if budget_time_ms > _MAX_EXECUTION_GRANT_TTL_MS:
+        raise NodeGrantDerivationError(
+            NODE_GRANT_INPUT_INVALID,
+            "Task execution budget exceeds the 24-hour node-grant ceiling",
+        )
+    return min(
+        _MAX_EXECUTION_GRANT_TTL_MS,
+        max(int(minimum_ttl_ms), budget_time_ms),
+    )
 
 
 def _compile_specs(
@@ -1482,19 +1540,12 @@ def _integer(value: Any, reason_code: str, field_name: str) -> int:
 
 
 __all__ = [
-    "NODE_GRANT_BINDING_MISSING",
-    "NODE_GRANT_EXPIRED",
-    "NODE_GRANT_INPUT_INVALID",
-    "NODE_GRANT_PARENT_INVALID",
-    "NODE_GRANT_REPLAY_DRIFT",
-    "NODE_GRANT_ROUTE_DRIFT",
-    "NODE_GRANT_ROUTE_UNSUPPORTED",
-    "NODE_GRANT_VERIFICATION_FAILED",
-    "DurableNodeGrantVerifier",
-    "NodeBoundGrant",
-    "NodeBoundGrantService",
-    "NodeGrantBatch",
-    "NodeGrantDerivationError",
-    "NodeGrantVerificationError",
+    "NODE_GRANT_BINDING_MISSING", "NODE_GRANT_EXPIRED",
+    "NODE_GRANT_INPUT_INVALID", "NODE_GRANT_PARENT_INVALID",
+    "NODE_GRANT_REPLAY_DRIFT", "NODE_GRANT_ROUTE_DRIFT",
+    "NODE_GRANT_ROUTE_UNSUPPORTED", "NODE_GRANT_VERIFICATION_FAILED",
+    "DurableNodeGrantVerifier", "NodeBoundGrant",
+    "NodeBoundGrantService", "NodeGrantBatch",
+    "NodeGrantDerivationError", "NodeGrantVerificationError",
     "VerifiedNodeGrant",
 ]

@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import inspect
 import json
 import re
+import time
 from typing import Any, Protocol
 
 from host_brain.model_runtime.governed_budget import (
@@ -30,6 +31,8 @@ from host_brain.contracts.agent_runtime.delegate_usage_attestation import (
     validate_readonly_delegate_usage_attestation,
 )
 from host_brain.contracts.agent_runtime.delegate_target_policy import (
+    GOVERNED_DELEGATE_BUDGET_MODE,
+    GOVERNED_MODEL_DELEGATE_BUDGET_MODE,
     GovernedDelegateTargetPolicyError,
     validate_governed_delegate_target_policy,
 )
@@ -40,6 +43,10 @@ from host_brain.contracts.agent_runtime.node_input_attestation import (
 from host_brain.persistence.task_chat_delivery_store import TaskChatDeliveryStore
 from host_brain.task_runtime.chat_delivery_authority import (
     TaskBoundChatDeliveryAuthority,
+)
+from host_brain.digital_life.governed_companion_presentation import (
+    GovernedCompanionPresentationError,
+    build_governed_companion_expression_intents,
 )
 
 
@@ -129,10 +136,16 @@ class FrozenDelegateRouteExecutor:
         narrative = _outcome_narrative(projected, decision=decision)
         reason_code = _outcome_reason_code(projected, decision=decision)
         audit_refs = _outcome_audit_refs(projected)
-        _assert_delegate_target_policy(
+        target_policy = _assert_delegate_target_policy(
             frozen=frozen,
             input_pack=input_pack,
             audit_refs=audit_refs,
+        )
+        acceptance_effect_intents = _delegate_companion_expression_intents(
+            frozen=frozen,
+            input_pack=input_pack,
+            narrative=narrative,
+            decision=decision,
         )
         yield _terminal_commit(
             frozen=frozen,
@@ -140,8 +153,10 @@ class FrozenDelegateRouteExecutor:
             narrative=narrative,
             reason_code=reason_code,
             audit_refs=audit_refs,
-            budget_usage=_readonly_delegate_budget_payload(
+            acceptance_effect_intents=acceptance_effect_intents,
+            budget_usage=_delegate_budget_payload(
                 frozen,
+                target_policy=target_policy,
                 audit_refs=audit_refs,
             ),
         )
@@ -619,6 +634,12 @@ def _governed_model_budget(frozen: FrozenNodeInput) -> dict[str, Any] | None:
             graph_revision=frozen.graph_revision,
             node_id=frozen.node_id,
             attempt_id=frozen.attempt_id,
+            # Ordinary personal conversation providers commonly attest exact
+            # token usage but do not return a per-request currency charge.
+            # Keep token/output/time enforcement on the critical path without
+            # fabricating a zero-cost provider fact.  Agent/Skill builders keep
+            # the strict default and still require model_cost_micros.
+            require_model_cost=False,
         )
     except GovernedModelBudgetError as exc:
         raise GovernedRouteExecutorError(
@@ -663,11 +684,11 @@ def _assert_guarded_chat_terminal(
         or not isinstance(attempt_ids, Sequence)
         or isinstance(attempt_ids, (str, bytes, bytearray))
         or not attempt_ids
-        or not {"token_count", "model_cost_micros"}.issubset(measurement)
+        or "token_count" not in measurement
     ):
         raise GovernedRouteExecutorError(
             GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
-            "guarded chat approval lacks a complete surface model measurement",
+            "guarded chat approval lacks a provider token measurement",
         )
 
 
@@ -688,6 +709,65 @@ def _delegate_context(input_pack: Mapping[str, Any], *, frozen: FrozenNodeInput)
         }
     )
     return raw_context
+
+
+def _delegate_companion_expression_intents(
+    *,
+    frozen: FrozenNodeInput,
+    input_pack: Mapping[str, Any],
+    narrative: str,
+    decision: str,
+) -> tuple[dict[str, Any], ...]:
+    """Freeze the companion presentation for an accepted user-facing Delegate.
+
+    Delegate targets remain read-only and never receive delivery authority.
+    Their accepted text still needs the same Digital Life presentation boundary
+    as native Chat, otherwise a governed translation or research answer silently
+    drops TTS and Avatar.  The plan is derived only from the immutable canonical
+    AffectFusion hand-off already stored in the WorkOrder; caller emotion fields
+    and the delegate result cannot rewrite Natsume's self-affect.
+    """
+
+    if decision != "APPROVE" or not narrative:
+        return ()
+    request_body = _safe_mapping(input_pack.get("request_body"))
+    source = str(request_body.get("input_source") or "").strip().upper()
+    if source not in {"CHAT", "GATEWAY", "HOST_INPUT", "WEB"}:
+        return ()
+    if bool(request_body.get("suppress_edge_tts")) or bool(
+        request_body.get("suppress_edge_vts")
+    ):
+        return ()
+    context_schema = str(input_pack.get("runtime_context_schema") or "").strip()
+    if context_schema != "natsume.runtime-context.request.v1":
+        return ()
+    workspace_id = str(input_pack.get("workspace_id") or "").strip()
+    relationship_subject_id = _frozen_relationship_subject_id(frozen)
+    try:
+        return build_governed_companion_expression_intents(
+            request_id=frozen.request_id,
+            session_id=frozen.session_id,
+            workspace_id=workspace_id,
+            relationship_subject_id=relationship_subject_id,
+            runtime_context_schema=context_schema,
+            input_source=str(request_body.get("input_source") or ""),
+            suppress_edge_tts=bool(request_body.get("suppress_edge_tts")),
+            suppress_edge_vts=bool(request_body.get("suppress_edge_vts")),
+            emotion_context=_safe_mapping(
+                input_pack.get("prepared_emotion_context")
+                or input_pack.get("emotion_context")
+            ),
+            narrative=narrative,
+            decision=decision,
+            task_mode="technical_help",
+            created_at_ms=max(0, int(time.time() * 1000)),
+            metadata_source="governed_delegate_companion_presentation",
+        )
+    except GovernedCompanionPresentationError as exc:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_INPUT_INVALID,
+            str(exc),
+        ) from exc
 
 
 def _project_outcome(value: Any) -> dict[str, Any]:
@@ -801,7 +881,7 @@ def _assert_delegate_target_policy(
     frozen: FrozenNodeInput,
     input_pack: Mapping[str, Any],
     audit_refs: Mapping[str, Any],
-) -> None:
+) -> dict[str, Any]:
     try:
         policy = validate_governed_delegate_target_policy(
             _safe_mapping(input_pack.get("delegate_target_policy"))
@@ -830,6 +910,7 @@ def _assert_delegate_target_policy(
             GOVERNED_ROUTE_ROUTE_DRIFT,
             "Delegate execution evidence differs from its admitted target policy",
         )
+    return policy
 
 
 def _terminal_commit(
@@ -902,6 +983,29 @@ def _chat_budget_observations(terminal: Mapping[str, Any]) -> dict[str, Any]:
     return {"model_budget_measurements": measurements}
 
 
+def _delegate_budget_payload(
+    frozen: FrozenNodeInput,
+    *,
+    target_policy: Mapping[str, Any],
+    audit_refs: Mapping[str, Any],
+) -> dict[str, Any]:
+    budget_mode = str(target_policy.get("budget_mode") or "").strip()
+    if budget_mode == GOVERNED_DELEGATE_BUDGET_MODE:
+        return _readonly_delegate_budget_payload(
+            frozen,
+            audit_refs=audit_refs,
+        )
+    if budget_mode == GOVERNED_MODEL_DELEGATE_BUDGET_MODE:
+        return _model_backed_delegate_budget_payload(
+            frozen,
+            audit_refs=audit_refs,
+        )
+    raise GovernedRouteExecutorError(
+        GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+        "Delegate target policy has no supported budget measurement mode",
+    )
+
+
 def _readonly_delegate_budget_payload(
     frozen: FrozenNodeInput,
     *,
@@ -960,6 +1064,42 @@ def _readonly_delegate_budget_payload(
         },
         evidence_refs=(str(attestation["attestation_ref"]),),
     ).to_payload()
+
+
+def _model_backed_delegate_budget_payload(
+    frozen: FrozenNodeInput,
+    *,
+    audit_refs: Mapping[str, Any],
+) -> dict[str, Any]:
+    expected_guard = _governed_model_budget(frozen)
+    actual_guard = _mapping_child(audit_refs, "delegate_model_budget_guard")
+    if expected_guard is None or dict(actual_guard) != expected_guard:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "model-backed Delegate did not preserve its frozen Task budget guard",
+        )
+    model_attempt = _mapping_child(audit_refs, "delegate_model_attempt")
+    measurement = _mapping_child(model_attempt, "budget_measurement")
+    if (
+        model_attempt.get("success") is not True
+        or not measurement
+        or "token_count" not in measurement
+    ):
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "model-backed Delegate lacks a successful provider token measurement",
+        )
+    usage = _worker_budget_payload(
+        frozen,
+        observations={"model_budget_measurements": [dict(measurement)]},
+        include_agent_tool_calls=False,
+    )
+    if usage is None:
+        raise GovernedRouteExecutorError(
+            GOVERNED_ROUTE_BUDGET_MEASUREMENT_REQUIRED,
+            "model-backed Delegate produced no billable budget dimensions",
+        )
+    return usage
 
 
 def _append_model_budget_measurement(

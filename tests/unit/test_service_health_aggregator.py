@@ -42,12 +42,12 @@ def test_health_single_service_timeout():
 
     agg = ServiceHealthAggregator(timeout_ms=50)
     agg.register_probe("sqlite_ledger", probe_timeout)
-    agg.register_probe("scheduler", probe_up)
+    agg.register_probe("skill_loader", probe_up)
     result = asyncio.run(agg.aggregate())
     svc_map = {svc["service_id"]: svc for svc in result["services"]}
     assert svc_map["sqlite_ledger"]["status"] == "DOWN"
     assert "超时" in (svc_map["sqlite_ledger"]["error_summary"] or "")
-    assert svc_map["scheduler"]["status"] == "UP"
+    assert svc_map["skill_loader"]["status"] == "UP"
 
 
 def test_health_side_filter_host():

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping
 
 from host_brain.composition.task_runtime import ProcessTaskRuntimeContainer
 from host_brain.governor.action_preview import ActionPreviewService
@@ -44,7 +44,11 @@ class ServiceCatalogGuardianObservation:
     operation_id: str
     logger: Any
 
-    async def observe_terminal_receipt(self) -> None:
+    async def observe_terminal_receipt(
+        self,
+        *,
+        on_activation_started: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         try:
             for _attempt in range(240):
                 receipt = await asyncio.to_thread(
@@ -52,7 +56,16 @@ class ServiceCatalogGuardianObservation:
                     self.operation_id,
                 )
                 if receipt is not None:
-                    self.observer.observe_operation(self.operation_id)
+                    await asyncio.to_thread(
+                        self.observer.observe_operation,
+                        self.operation_id,
+                    )
+                    if (
+                        str(receipt.get("event_type") or "")
+                        == "ACTIVATION_STARTED"
+                        and on_activation_started is not None
+                    ):
+                        await on_activation_started()
                     return
                 await asyncio.sleep(0.25)
             self.logger.error(

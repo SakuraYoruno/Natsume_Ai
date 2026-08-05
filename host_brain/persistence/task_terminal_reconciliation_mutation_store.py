@@ -14,6 +14,7 @@ from host_brain.contracts.agent_runtime.budget_policy import (
 from host_brain.contracts.agent_runtime.task_graph import TaskGraphStatus
 from host_brain.contracts.agent_runtime.terminal_reconciliation import (
     TerminalReconciliationStoreRejected,
+    is_signed_prebudget_cancellation_classifier_correction,
 )
 from host_brain.persistence.task_record_codec import _graph_record
 from host_brain.persistence.reconciliation_proof_verifier import (
@@ -482,11 +483,17 @@ class TaskTerminalReconciliationMutationMixin:
         del subject
         classification = str(case["classification"])
         authority_kind = request["authority_kind"]
+        signed_classifier_correction = (
+            is_signed_prebudget_cancellation_classifier_correction(case)
+        )
         if (
             request["expected_case_snapshot_sha256"] != case["snapshot_sha256"]
             or request["expected_subject_snapshot_sha256"] != subject_digest
             or request["action"] != case["recommended_action"]
-            or classification == "QUARANTINED_STRUCTURAL"
+            or (
+                classification == "QUARANTINED_STRUCTURAL"
+                and not signed_classifier_correction
+            )
             or (
                 classification == "EXACT_REPAIRABLE"
                 and authority_kind
@@ -496,6 +503,7 @@ class TaskTerminalReconciliationMutationMixin:
                 classification == "SIGNED_REPAIR_REQUIRED"
                 and authority_kind != "SIGNED_OPERATOR"
             )
+            or (signed_classifier_correction and authority_kind != "SIGNED_OPERATOR")
         ):
             raise TaskStoreError(
                 TASK_STORE_CAS_CONFLICT,

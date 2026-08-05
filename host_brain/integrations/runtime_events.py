@@ -678,6 +678,20 @@ class RuntimeEventStore:
             raise RuntimeEventError(exc.reason_code, exc.detail) from exc
         return _runtime_event_record(row) if row is not None else None
 
+    def get_events_by_ids(
+        self,
+        *,
+        event_ids: Sequence[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Read a bounded exact-id set without opening one connection per event."""
+
+        try:
+            rows = self._repository.get_journals_by_event_ids(event_ids=event_ids)
+        except RuntimeEventRepositoryError as exc:
+            raise RuntimeEventError(exc.reason_code, exc.detail) from exc
+        records = [_runtime_event_record(row) for row in rows]
+        return {str(record["event_id"]): record for record in records}
+
     def get_latest_event_for_aggregate(
         self,
         *,

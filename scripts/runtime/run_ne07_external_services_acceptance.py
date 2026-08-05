@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 
 SCHEMA_VERSION = "natsume.ne07-external-services-acceptance.v1"
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-_IDENTITY_RE = re.compile(r"^natsume-ne07-[a-z0-9][a-z0-9_.-]*$")
+_IDENTITY_RE = re.compile(r"^natsume-(?:ne07|dual)-[a-z0-9][a-z0-9_.-]*$")
 _DEFAULT_PORTS = {6379, 7474, 17687, 18000}
 
 
@@ -151,7 +151,10 @@ class AcceptanceConfig:
             self.redis_container,
         )
         if any(not _IDENTITY_RE.fullmatch(value) for value in identities):
-            raise ValueError("all Docker identities must use the natsume-ne07-* prefix")
+            raise ValueError(
+                "all Docker identities must use an isolated natsume-ne07-* "
+                "or natsume-dual-* prefix"
+            )
         ports = {
             _endpoint_port(self.neo4j_uri, 7687),
             _endpoint_port(self.chroma_endpoint, 8000),

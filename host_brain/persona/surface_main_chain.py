@@ -30,6 +30,7 @@ _ALLOWED_INPUT_KEYS = frozenset(
         "max_must_not_do",
         "max_style_anchors",
         "active_loops",
+        "accepted_task_results",
         "influence_packet",
         "memory_packet",
         "memory_recall_packet",
@@ -65,6 +66,7 @@ class SurfaceMainChainInput:
     necessary_facts: Sequence[Any] = ()
     must_not_do: Sequence[Any] = ()
     style_anchor: Sequence[Any] = ()
+    accepted_task_results: Sequence[Any] = ()
     max_facts: int = 8
     max_style_anchors: int = 10
     max_must_not_do: int = 12
@@ -89,6 +91,7 @@ class SurfaceMainChainInput:
             "necessary_facts": list(self.necessary_facts),
             "must_not_do": list(self.must_not_do),
             "style_anchor": list(self.style_anchor),
+            "accepted_task_results": list(self.accepted_task_results),
             "max_facts": int(self.max_facts),
             "max_style_anchors": int(self.max_style_anchors),
             "max_must_not_do": int(self.max_must_not_do),
@@ -181,6 +184,9 @@ def compile_surface_main_chain_input(payload: SurfaceMainChainInput | Mapping[st
         necessary_facts=_coerce_sequence(values.get("necessary_facts")),
         must_not_do=_coerce_sequence(values.get("must_not_do")),
         style_anchor=_coerce_sequence(values.get("style_anchor")),
+        accepted_task_results=_coerce_sequence(
+            values.get("accepted_task_results")
+        ),
         max_facts=_coerce_int(values.get("max_facts"), default=8),
         max_style_anchors=_coerce_int(values.get("max_style_anchors"), default=10),
         max_must_not_do=_coerce_int(values.get("max_must_not_do"), default=12),

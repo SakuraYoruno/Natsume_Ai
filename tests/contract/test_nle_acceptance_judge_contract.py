@@ -85,7 +85,7 @@ def test_t_nle_09_executor_attaches_acceptance_judgement(monkeypatch, tmp_path: 
         def __init__(self, **_ports) -> None:  # noqa: ANN003
             pass
 
-        def execute(self, order, *, workspace: Path) -> AgentResult:
+        def execute(self, order, *, workspace: Path, **_kwargs) -> AgentResult:  # noqa: ANN003
             return AgentResult(
                 status="EXECUTED",
                 work_order_id=order.work_order_id,

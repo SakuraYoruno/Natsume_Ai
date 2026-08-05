@@ -11,6 +11,7 @@ from host_brain.persistence.task_graph_admission_authority import (
     canonical_task_graph_admission_scope,
     register_task_graph_admission_authority,
 )
+from tests.support.migration_catalog import migration_catalog_through
 
 
 CASE_TABLE = "task_runtime_terminal_reconciliation_case"
@@ -47,7 +48,11 @@ def _migrated_db(tmp_path, name: str) -> tuple[SQLiteMigrationRunner, Any]:
     assert "0102_task_runtime_node_artifact" in {
         record.migration_id for record in result.records
     }
-    return runner, db_path
+    frozen_runner = SQLiteMigrationRunner(
+        db_path=db_path,
+        migrations_dir=migration_catalog_through(tmp_path, 102),
+    )
+    return frozen_runner, db_path
 
 
 def _connect(db_path) -> sqlite3.Connection:

@@ -43,6 +43,13 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
+  a,
+  button,
+  summary,
+  select {
+    min-height: 24px;
+  }
+
   body {
     @apply text-gray-800 font-sans;
     position: relative;

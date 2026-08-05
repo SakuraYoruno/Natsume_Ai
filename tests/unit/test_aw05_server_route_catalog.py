@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import inspect
+import os
+
+import pytest
 
 from host_brain.composition.process_services import get_model_route_catalog
 import host_brain.app.route_catalog_runtime as route_runtime
@@ -13,6 +16,50 @@ from host_brain.model_runtime.route_catalog import ServerRouteCatalog
 from host_brain.model_runtime.production_composition import (
     get_default_production_route_catalog,
 )
+from host_brain.model_runtime.production_route_policy import (
+    build_production_server_route_catalog,
+)
+
+
+_ROUTE_ENV_PREFIXES = (
+    "HOST_MODEL_ROUTE_",
+    "HOST_OPENAI_",
+    "HOST_GEMINI_",
+    "HOST_DEEPSEEK_",
+    "HOST_CODEX_",
+    "HOST_MINIMAX_",
+    "HOST_CHAT_LOCAL_LLM_",
+    "HOST_CHAT_HOST_14B_",
+    "HOST_CHAT_AGENT_",
+    "HOST_REALTIME_COMPANION_",
+    "HOST_SURFACE_REPLY_",
+    "HOST_SUBAGENT_",
+    "HOST_NATSUME_AGENT_",
+    "HOST_EXECUTIVE_ROUTER_",
+    "HOST_DISPATCH_AGENT_",
+    "HOST_VISION_LLM_",
+)
+_ROUTE_ENV_KEYS = frozenset(
+    {
+        "HOST_LLM_PROVIDER",
+        "HOST_LLM_TIMEOUT_MS",
+        "HOST_OPENAI_MODEL_ID",
+        "HOST_GEMINI_MODEL_ID",
+        "HOST_DEEPSEEK_MODEL_ID",
+        "HOST_CODEX_MODEL_ID",
+        "HOST_MINIMAX_MODEL_ID",
+        "HOST_CHAT_FORCE_CLOUD",
+    }
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_route_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep higher-precedence route lanes from leaking across test modules."""
+
+    for name in tuple(os.environ):
+        if name in _ROUTE_ENV_KEYS or name.startswith(_ROUTE_ENV_PREFIXES):
+            monkeypatch.delenv(name, raising=False)
 
 
 def test_route_catalog_is_secret_free_and_credential_independent(monkeypatch) -> None:  # noqa: ANN001
@@ -141,6 +188,32 @@ def test_realtime_companion_accepts_dedicated_provider_lane(monkeypatch) -> None
     assert route["provider_name"] == "gemini"
     assert route["model_id"] == "gemini-2.5-flash-lite"
     assert route["route_lane"] == "realtime_companion"
+
+
+def test_natsume_agent_has_independent_model_timeout_lane(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_LLM_TIMEOUT_MS", "8000")
+
+    route = build_production_server_route_catalog().resolve(
+        scene_type="NATSUME_AGENT",
+        cognitive_tier="B",
+        prompt_id="agent.react.v1",
+    )
+
+    assert route["route_lane"] == "agent"
+    assert route["model_id"] == "deepseek-v4-pro"
+    assert route["timeout_ms"] == 45000
+    assert route["generation_parameters"]["max_tokens"] == 2400
+
+    monkeypatch.setenv("HOST_NATSUME_AGENT_MODEL_ID", "deepseek-v4-flash")
+    monkeypatch.setenv("HOST_NATSUME_AGENT_MODEL_TIMEOUT_MS", "61000")
+    overridden = build_production_server_route_catalog().resolve(
+        scene_type="NATSUME_AGENT",
+        cognitive_tier="B",
+        prompt_id="agent.react.v1",
+    )
+    assert overridden["model_id"] == "deepseek-v4-flash"
+    assert overridden["timeout_ms"] == 61000
 
 
 def test_cross_provider_role_models_are_ignored_for_selected_provider(monkeypatch) -> None:  # noqa: ANN001

@@ -30,6 +30,11 @@ from host_brain.app.observability_runtime.projection_runtime import (
     TRACE_FEED_KIND,
     projection_meta,
 )
+from host_brain.app.observability_runtime.health_device_projection import (
+    ORGAN_TRIBE_KEY,
+    ORGAN_TRIBE_KIND,
+    ORGAN_TRIBE_MAX_AGE_MS,
+)
 from host_brain.app.observability_runtime.process_state_projection import (
     LIFE_BODY_KIND,
     LIFE_BODY_MAX_AGE_MS,
@@ -151,7 +156,7 @@ ORGAN_META: dict[str, dict[str, str]] = {
         "name": "运动系统",
         "path": "/gateway",
         "drilldownLabel": "查看执行闭环",
-        "fallbackImpact": "会影响 ACK、进度触达和用户对行动结果的体感。",
+        "fallbackImpact": "会影响回复 Outbox、终态收束和用户对行动结果的体感。",
     },
     "self": {
         "name": "自我系统",
@@ -269,6 +274,7 @@ class LifeBodyResponse(BaseModel):
     memoryData: Optional[Dict[str, Any]] = None
     servicesData: Optional[Dict[str, Any]] = None
     subsystemsData: Optional[Dict[str, Any]] = None
+    organTribeData: Optional[Dict[str, Any]] = None
     capabilityGapData: Optional[Dict[str, Any]] = None
     capabilityGapProjection: Dict[str, Any] = Field(default_factory=dict)
     humanoidLoopData: Optional[Dict[str, Any]] = None
@@ -1806,7 +1812,7 @@ def _build_timeline_events(
     total_gateway_requests = int((humanoid_loop_data or {}).get("total_gateway_requests") or 0)
     if total_gateway_requests > 0:
         closed_loop_rate = float((humanoid_loop_data or {}).get("closed_loop_rate") or 0)
-        events.append({"id": "gateway-loop", "type": "execution", "typeLabel": "执行", "organId": "motor", "organLabel": ORGAN_META["motor"]["name"], "severity": "warning" if closed_loop_rate < 70 else "info", "timestamp": gateway_ts, "title": "执行闭环更新", "detail": f"闭环 {_format_percent((humanoid_loop_data or {}).get('closed_loop_rate'))} · ACK {_format_percent((humanoid_loop_data or {}).get('ack_touch_rate'))} · 偏航恢复 {_format_percent((humanoid_loop_data or {}).get('deviation_recovery_rate'))}", "to": "/gateway", "linkLabel": "查看闭环"})
+        events.append({"id": "gateway-loop", "type": "execution", "typeLabel": "执行", "organId": "motor", "organLabel": ORGAN_META["motor"]["name"], "severity": "warning" if closed_loop_rate < 70 else "info", "timestamp": gateway_ts, "title": "执行闭环更新", "detail": f"闭环 {_format_percent((humanoid_loop_data or {}).get('closed_loop_rate'))} · 回复提交 {_format_percent((humanoid_loop_data or {}).get('reply_commit_rate'))} · 偏航恢复 {_format_percent((humanoid_loop_data or {}).get('deviation_recovery_rate'))}", "to": "/gateway", "linkLabel": "查看闭环"})
     events.extend(immune_lineage_events)
     events.extend(memory_lineage_events)
     events.extend(bond_lineage_events)
@@ -1927,6 +1933,15 @@ def _build_life_body_payload(
     runtime_payload = dict(runtime_document or {})
     if runtime_document is not None:
         runtime_payload["projection"] = runtime_projection
+    organ_tribe_document, organ_tribe_projection = read_process_projection(
+        projection_store,
+        ORGAN_TRIBE_KIND,
+        ORGAN_TRIBE_KEY,
+        max_age_ms=ORGAN_TRIBE_MAX_AGE_MS,
+    )
+    organ_tribe_data = dict(organ_tribe_document or {})
+    if organ_tribe_document is not None:
+        organ_tribe_data["projection"] = organ_tribe_projection
     prompt_stats = _model_dump_compat(
         build_prompt_builder_stats_from_view(
             ProjectionLedgerView(projection_store),
@@ -1952,6 +1967,7 @@ def _build_life_body_payload(
     humanoid_loop_alerts_data = _as_dict(overview_payload.get("humanoidLoopAlertsData"))
     humanoid_loop_hotspots_data = _as_dict(overview_payload.get("humanoidLoopHotspotsData"))
     emotion_context = _as_dict(runtime_snapshot.get("emotion_context"))
+    hard_state = _as_dict(runtime_snapshot.get("hard_state"))
     bond_state = _as_dict(runtime_snapshot.get("bond_state"))
     motive_state = _as_dict(runtime_snapshot.get("motive_state"))
     offline_state = _as_dict(runtime_snapshot.get("offline_state"))
@@ -1959,7 +1975,12 @@ def _build_life_body_payload(
     memory_summary = _summarize_success_rate_samples(memory_subsystems)
     top_emotions = _as_list(vts_data.get("top_emotions"))
     top_emotion_item = _as_dict(top_emotions[0]) if top_emotions else {}
-    current_emotion = _format_emotion_tag(emotion_context.get("emotion_tag") or top_emotion_item.get("emotion_tag") or top_emotion_item.get("tag"))
+    current_emotion = _format_emotion_tag(
+        emotion_context.get("emotion_tag")
+        or hard_state.get("emotion_tag")
+        or top_emotion_item.get("emotion_tag")
+        or top_emotion_item.get("tag")
+    )
     current_bond_stage = _format_stage(bond_state.get("current_stage"))
     bond_trend = _format_trend(bond_state.get("trend"))
     dominant_motive = _format_dominant_motive(motive_state.get("dominant_motive"))
@@ -2011,7 +2032,7 @@ def _build_life_body_payload(
         {"id": "limbic", "name": ORGAN_META["limbic"]["name"], "status": _pick_status(has_data=bool(runtime_snapshot) or _has_text(current_emotion) or _has_text(current_bond_stage), critical=any(_as_text(item.get("reason_code")) == "TOPIC_RESISTANCE_ACTIVE" for item in runtime_alerts), warning=reply_posture in {"收敛", "谨慎"} or not _has_text(current_emotion)), "summary": f"当前情绪 {current_emotion or '--'}，关系阶段 {current_bond_stage or '--'}。" if _has_text(current_emotion) or _has_text(current_bond_stage) else "等待情绪与关系样本聚合。", "drilldownPath": "/bond", "drilldownLabel": ORGAN_META["limbic"]["drilldownLabel"], "downstreamImpacts": [f"当前回复姿态 {reply_posture or '--'}，会直接影响陪伴感与亲密度表达。"]},
         {"id": "memory", "name": ORGAN_META["memory"]["name"], "status": _pick_status(has_data=bool(memory_data), critical=False, warning=memory_summary["averageRate"] is None or (memory_summary["averageRate"] is not None and memory_summary["averageRate"] < 70)), "summary": f"平均成功率 {memory_summary['averageRate']}% · {memory_summary['sampledCount']}/{memory_summary['configuredCount']} 个子系统有样本。" if memory_summary["averageRate"] is not None else "记忆统计已接入，但当前窗口暂无足够样本。", "drilldownPath": ORGAN_META["memory"]["path"], "drilldownLabel": ORGAN_META["memory"]["drilldownLabel"], "downstreamImpacts": [ORGAN_META["memory"]["fallbackImpact"]]},
         {"id": "endocrine", "name": ORGAN_META["endocrine"]["name"], "status": _pick_status(has_data=bool(_as_dict(runtime_snapshot.get("background_runtime"))), critical=any(_as_text(item.get("reason_code")) == "BACKGROUND_RUNTIME_NOT_ADVANCING" and _as_text(item.get("severity")) == "critical" for item in runtime_alerts), warning=any(_as_text(item.get("reason_code")).startswith("BACKGROUND_") for item in runtime_alerts)), "summary": "后台推进已接入。" if _as_dict(runtime_snapshot.get("background_runtime")) else "等待后台推进快照。", "drilldownPath": ORGAN_META["endocrine"]["path"], "drilldownLabel": ORGAN_META["endocrine"]["drilldownLabel"], "downstreamImpacts": [ORGAN_META["endocrine"]["fallbackImpact"]]},
-        {"id": "motor", "name": ORGAN_META["motor"]["name"], "status": _pick_status(has_data=bool(humanoid_loop_data), critical=_as_text(humanoid_loop_alerts_data.get("severity")) == "critical", warning=(_as_text(humanoid_loop_alerts_data.get("severity")) == "warning" or (humanoid_loop_data and float(humanoid_loop_data.get("closed_loop_rate") or 0) < 70))), "summary": f"闭环 {_format_percent(humanoid_loop_data.get('closed_loop_rate'))} · ACK {_format_percent(humanoid_loop_data.get('ack_touch_rate'))}。" if humanoid_loop_data else "等待执行闭环样本。", "drilldownPath": ORGAN_META["motor"]["path"], "drilldownLabel": ORGAN_META["motor"]["drilldownLabel"], "downstreamImpacts": [ORGAN_META["motor"]["fallbackImpact"]]},
+        {"id": "motor", "name": ORGAN_META["motor"]["name"], "status": _pick_status(has_data=bool(humanoid_loop_data), critical=_as_text(humanoid_loop_alerts_data.get("severity")) == "critical", warning=(_as_text(humanoid_loop_alerts_data.get("severity")) == "warning" or (humanoid_loop_data and float(humanoid_loop_data.get("closed_loop_rate") or 0) < 70))), "summary": f"闭环 {_format_percent(humanoid_loop_data.get('closed_loop_rate'))} · 回复提交 {_format_percent(humanoid_loop_data.get('reply_commit_rate'))}。" if humanoid_loop_data else "等待执行闭环样本。", "drilldownPath": ORGAN_META["motor"]["path"], "drilldownLabel": ORGAN_META["motor"]["drilldownLabel"], "downstreamImpacts": [ORGAN_META["motor"]["fallbackImpact"]]},
         {"id": "immune", "name": ORGAN_META["immune"]["name"], "status": _pick_status(has_data=bool(runtime_snapshot) or bool(prompt_stats), critical=any(_as_text(item.get("severity")) == "critical" and _get_alert_organ_id(item) == "immune" for item in runtime_alerts), warning=any(_get_alert_organ_id(item) == "immune" for item in runtime_alerts)), "summary": f"当前叙事护栏风险 {risk_level or '--'}。" if runtime_snapshot else "等待免疫与提示构建样本。", "drilldownPath": ORGAN_META["immune"]["path"], "drilldownLabel": ORGAN_META["immune"]["drilldownLabel"], "downstreamImpacts": [ORGAN_META["immune"]["fallbackImpact"]]},
         {"id": "self", "name": ORGAN_META["self"]["name"], "status": _pick_status(has_data=bool(runtime_snapshot) or bool(capability_gap_data), critical=any(_as_text(item.get("severity")) == "critical" and _get_alert_organ_id(item) == "self" for item in runtime_alerts), warning=bool(growth_signals.get("hasAnyGrowth")) is False), "summary": _as_text(growth_signals.get("overviewSummary")) or "自我系统在线，等待更多成长样本聚合。", "drilldownPath": ORGAN_META["self"]["path"], "drilldownLabel": ORGAN_META["self"]["drilldownLabel"], "downstreamImpacts": [ORGAN_META["self"]["fallbackImpact"]]},
     ]
@@ -2020,7 +2041,7 @@ def _build_life_body_payload(
     primary_pathology = pathologies[0] if pathologies else None
     life_state = _build_life_state(has_runtime_snapshot=bool(runtime_snapshot), mode_label=_format_mode_label(runtime_snapshot.get("sys_mode")), runtime_alerts=runtime_alerts, background_runtime=_as_dict(runtime_snapshot.get("background_runtime")), humanoid_loop_alerts_data=humanoid_loop_alerts_data)
     diagnostic_guidance = _build_diagnostic_guidance(life_state=life_state, primary_organ=primary_organ, primary_pathology=primary_pathology, timeline_events=timeline_events)
-    payload = LifeBodyResponse(window_minutes=window_minutes, timestamp=_now_ms(), runtimeSnapshot=runtime_snapshot, promptStats=prompt_stats, vtsData=vts_data, memoryData=memory_data, servicesData=services_data, subsystemsData=subsystems_data, capabilityGapData=(capability_gap_data if capability_gap_available else None), capabilityGapProjection=capability_gap_projection, humanoidLoopData=humanoid_loop_data, humanoidLoopTrendData=_as_dict(overview_payload.get("humanoidLoopTrendData")), humanoidLoopAlertsData=humanoid_loop_alerts_data, humanoidLoopRemediationData=_as_dict(overview_payload.get("humanoidLoopRemediationData")), humanoidLoopDiagnosticsData=_as_dict(overview_payload.get("humanoidLoopDiagnosticsData")), humanoidLoopHotspotsData=humanoid_loop_hotspots_data, humanoidLoopHotspotTrendData=_as_dict(overview_payload.get("humanoidLoopHotspotTrendData")), humanoidLoopSourceCorrelationData=_as_dict(overview_payload.get("humanoidLoopSourceCorrelationData")), runtimeAlerts=runtime_alerts, nonLiveSlots=non_live_slots, growthSignals=growth_signals, derived={"hasRuntimeSnapshot": bool(runtime_snapshot), "hasMemoryData": bool(memory_data), "hasMemorySamples": memory_summary["averageRate"] is not None, "avgMemorySuccessRate": memory_summary["averageRate"], "sampledMemorySubsystemCount": memory_summary["sampledCount"], "configuredMemorySubsystemCount": memory_summary["configuredCount"], "hasCapabilityGapData": capability_gap_available, "overviewUpdatedAt": overview_updated_at, "runtimeUpdatedAt": runtime_updated_at, "currentBondStage": current_bond_stage, "currentEmotion": current_emotion, "dominantMotive": dominant_motive, "replyPosture": reply_posture, "riskLevel": risk_level, "absenceBand": absence_band, "bondTrend": bond_trend, "activeSubsystemCount": active_subsystem_count, "recentSessionCount": len(recent_sessions), "recentSessionWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "activeTraceFeedCount": len(trace_feed_items), "memoryLineageCount": len(memory_lineage_rows), "bondLineageCount": len(bond_lineage_rows), "tickLineageCount": len(scheduler_tick_rows), "immuneLineageCount": len(immune_lineage_rows)}, model={"organSystems": organ_systems_preview, "lifeState": life_state, "pathologies": pathologies, "primaryPathology": primary_pathology, "timelineEvents": timeline_events, "timelineEventPool": timeline_event_pool, "primaryOrgan": primary_organ, "diagnosticGuidance": diagnostic_guidance}, meta={"aggregateSource": "obs-sidecar-life-body", "projectionMode": "derived-from-runtime-and-overview-snapshots-plus-bounded-ledger-lineage", "lifeBodyRouteCacheTtlMs": _LIFE_BODY_ROUTE_CACHE_TTL_MS, "promptStatsCacheTtlMs": 0, "projectionWindowMinutes": LIFE_BODY_PROJECTION_WINDOW_MINUTES, "recentSessionsLimit": _LIFE_BODY_RECENT_SESSIONS_LIMIT, "recentSessionsWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "traceFeedMeta": _as_dict(trace_feed_projection.get("meta")), "lineageLedger": {"memoryRows": len(memory_lineage_rows), "bondRows": len(bond_lineage_rows), "tickRows": len(scheduler_tick_rows), "immuneRows": len(immune_lineage_rows), "memoryLimit": _LIFE_LINEAGE_MEMORY_LIMIT, "bondLimit": _LIFE_LINEAGE_BOND_LIMIT, "tickLimit": _LIFE_LINEAGE_TICK_LIMIT, "immuneLimit": _LIFE_LINEAGE_IMMUNE_LIMIT, "immuneScanLimit": _LIFE_LINEAGE_IMMUNE_SCAN_LIMIT}})
+    payload = LifeBodyResponse(window_minutes=window_minutes, timestamp=_now_ms(), runtimeSnapshot=runtime_snapshot, promptStats=prompt_stats, vtsData=vts_data, memoryData=memory_data, servicesData=services_data, subsystemsData=subsystems_data, organTribeData=(organ_tribe_data or None), capabilityGapData=(capability_gap_data if capability_gap_available else None), capabilityGapProjection=capability_gap_projection, humanoidLoopData=humanoid_loop_data, humanoidLoopTrendData=_as_dict(overview_payload.get("humanoidLoopTrendData")), humanoidLoopAlertsData=humanoid_loop_alerts_data, humanoidLoopRemediationData=_as_dict(overview_payload.get("humanoidLoopRemediationData")), humanoidLoopDiagnosticsData=_as_dict(overview_payload.get("humanoidLoopDiagnosticsData")), humanoidLoopHotspotsData=humanoid_loop_hotspots_data, humanoidLoopHotspotTrendData=_as_dict(overview_payload.get("humanoidLoopHotspotTrendData")), humanoidLoopSourceCorrelationData=_as_dict(overview_payload.get("humanoidLoopSourceCorrelationData")), runtimeAlerts=runtime_alerts, nonLiveSlots=non_live_slots, growthSignals=growth_signals, derived={"hasRuntimeSnapshot": bool(runtime_snapshot), "hasMemoryData": bool(memory_data), "hasMemorySamples": memory_summary["averageRate"] is not None, "avgMemorySuccessRate": memory_summary["averageRate"], "sampledMemorySubsystemCount": memory_summary["sampledCount"], "configuredMemorySubsystemCount": memory_summary["configuredCount"], "hasCapabilityGapData": capability_gap_available, "overviewUpdatedAt": overview_updated_at, "runtimeUpdatedAt": runtime_updated_at, "currentBondStage": current_bond_stage, "currentEmotion": current_emotion, "dominantMotive": dominant_motive, "replyPosture": reply_posture, "riskLevel": risk_level, "absenceBand": absence_band, "bondTrend": bond_trend, "activeSubsystemCount": active_subsystem_count, "recentSessionCount": len(recent_sessions), "recentSessionWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "activeTraceFeedCount": len(trace_feed_items), "memoryLineageCount": len(memory_lineage_rows), "bondLineageCount": len(bond_lineage_rows), "tickLineageCount": len(scheduler_tick_rows), "immuneLineageCount": len(immune_lineage_rows)}, model={"organSystems": organ_systems_preview, "lifeState": life_state, "pathologies": pathologies, "primaryPathology": primary_pathology, "timelineEvents": timeline_events, "timelineEventPool": timeline_event_pool, "primaryOrgan": primary_organ, "diagnosticGuidance": diagnostic_guidance}, meta={"aggregateSource": "obs-sidecar-life-body", "projectionMode": "derived-from-runtime-and-overview-snapshots-plus-bounded-ledger-lineage", "lifeBodyRouteCacheTtlMs": _LIFE_BODY_ROUTE_CACHE_TTL_MS, "promptStatsCacheTtlMs": 0, "projectionWindowMinutes": LIFE_BODY_PROJECTION_WINDOW_MINUTES, "recentSessionsLimit": _LIFE_BODY_RECENT_SESSIONS_LIMIT, "recentSessionsWindowMinutes": int(recent_sessions_projection.get("windowMinutes") or 0), "traceFeedMeta": _as_dict(trace_feed_projection.get("meta")), "lineageLedger": {"memoryRows": len(memory_lineage_rows), "bondRows": len(bond_lineage_rows), "tickRows": len(scheduler_tick_rows), "immuneRows": len(immune_lineage_rows), "memoryLimit": _LIFE_LINEAGE_MEMORY_LIMIT, "bondLimit": _LIFE_LINEAGE_BOND_LIMIT, "tickLimit": _LIFE_LINEAGE_TICK_LIMIT, "immuneLimit": _LIFE_LINEAGE_IMMUNE_LIMIT, "immuneScanLimit": _LIFE_LINEAGE_IMMUNE_SCAN_LIMIT}})
     return payload.model_dump()
 
 

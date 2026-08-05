@@ -201,7 +201,14 @@ _PRIVATE_OR_SECRET_FIELDS = frozenset(
 # and later re-wrapped into a minimal public payload for the gateway read
 # model.
 _PUBLIC_VOICE_PAYLOAD_FIELDS = frozenset(
-    {"platform", "source", "phase", "latency_ms"}
+    {
+        "platform",
+        "source",
+        "phase",
+        "latency_ms",
+        "gateway_delivery_authority",
+        "gateway_delivery_state",
+    }
 )
 _PUBLIC_IMMUNE_GATE_FIELDS = frozenset(
     {"decision", "risk_level", "score", "reason_codes", "matched_rules"}

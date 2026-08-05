@@ -66,7 +66,10 @@ _GRAPH_MODEL_SEMANTICS = {
         "workbench_translate",
         GRAPH_NODE_PROMPT_IDS["workbench_translate"],
         "GRAPH_TRANSLATE",
-        "A",
+        # Translation is a bounded transformation, not a deep-reasoning task.
+        # Tier A selects a reasoning model whose hidden reasoning can exhaust
+        # the small JSON response budget before any public content is emitted.
+        "B",
     ),
     "workbench_code_assist": GraphModelSemantic(
         "workbench_code_assist",

@@ -10,6 +10,16 @@ from typing import Any
 import pytest
 
 from host_brain.contracts.agent_runtime.work_order import WorkOrderV3
+from host_brain.contracts.agent_runtime.budget_policy import (
+    BudgetAmount,
+    BudgetExceededAction,
+    BudgetPolicy,
+)
+from host_brain.contracts.agent_runtime.control_route_execution_policy import (
+    CONTROL_ROUTE_BUDGET_MODE,
+    CONTROL_ROUTE_EXECUTION_POLICY_KEY,
+    freeze_control_route_execution_policy,
+)
 from host_brain.persistence.worker_projection_repository import (
     WORKER_PROJECTION_SCHEMA_VERSION,
     WorkerProjectionStore,
@@ -39,6 +49,7 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATIONS = (
     ROOT / "host_brain/audit/migrations/0086_task_runtime_worker_projection.sql",
     ROOT / "host_brain/audit/migrations/0114_task_runtime_tool_worker_projection.sql",
+    ROOT / "host_brain/audit/migrations/0127_worker_projection_immutability.sql",
 )
 
 
@@ -122,6 +133,30 @@ def _contracts(repository: _SchedulerAuthorityRepository) -> tuple[Any, ...]:
     node_id = "node-scheduler-plan"
     business_scope = "scheduler:runtime-heartbeat"
     grant_ref = "governor-grant://scheduler/request-plan"
+    review_ref = "review-waiver://governor-grant/scheduler-plan"
+    control_command_id = "scheduler.occurrence.execute"
+    control_policy = freeze_control_route_execution_policy(
+        surface=HostCommandSurface.SCHEDULER,
+        control_command_id=control_command_id,
+        target_id=definition.worker_key,
+        review_required=False,
+    )
+    budget_policy = BudgetPolicy(
+        scope=f"work-order:{work_order_id}",
+        limits=BudgetAmount(
+            token_count=1_000,
+            tool_call_count=1,
+            time_ms=30_000,
+            concurrency=1,
+            retry_count=1,
+            model_cost_micros=1_000_000,
+        ),
+        on_exceeded=BudgetExceededAction.BLOCK,
+        metadata={
+            "measurement_mode": CONTROL_ROUTE_BUDGET_MODE,
+            "control_policy_ref": control_policy["policy_ref"],
+        },
+    )
     work_order = WorkOrderV3(
         work_order_id=work_order_id,
         domain="organ_ops",
@@ -130,15 +165,26 @@ def _contracts(repository: _SchedulerAuthorityRepository) -> tuple[Any, ...]:
         input_pack={
             "occurrence_id": occurrence.occurrence_id,
             "definition_ref": definition_ref,
+            CONTROL_ROUTE_EXECUTION_POLICY_KEY: dict(control_policy),
         },
         allowed_actions=("delegate:host_core",),
         forbidden_actions=("invoke_scheduler_handler_before_acceptance",),
         acceptance_criteria=("Scheduler operation plan is canonical",),
         verification_plan={"required": True, "type": "scheduler_operation_plan"},
+        review_policy={
+            "review_required": False,
+            "durable_review_required": False,
+            "mode": "governor_grant_review_waiver",
+            "reason": "approved_scheduler_occurrence",
+            "waiver_authority": "governor_grant",
+            "waiver_ref": review_ref,
+        },
         metadata={
             "definition_revision": definition.definition_revision,
             "worker_key": definition.worker_key,
             "command_surface": HostCommandSurface.SCHEDULER.value,
+            "control_command_id": control_command_id,
+            CONTROL_ROUTE_EXECUTION_POLICY_KEY: dict(control_policy),
             "planning_lineage": {
                 "graph_id": graph_id,
                 "root_work_order_id": work_order_id,
@@ -158,10 +204,17 @@ def _contracts(repository: _SchedulerAuthorityRepository) -> tuple[Any, ...]:
         task_node_id=node_id,
         graph_revision=1,
         risk_level=2,
-        input_refs=(occurrence.occurrence_id, definition_ref, grant_ref),
+        input_refs=(
+            occurrence.occurrence_id,
+            definition_ref,
+            grant_ref,
+            control_policy["policy_ref"],
+        ),
+        budget_policy=budget_policy,
         business_idempotency_scope=business_scope,
         operation_fingerprint=fingerprint,
         approval_ref=grant_ref,
+        review_ref=review_ref,
     )
     work_order.validate()
     command = build_host_command(

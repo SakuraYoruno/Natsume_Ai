@@ -15,7 +15,6 @@ PRODUCTION_IMPORTS = {
     "host_brain/app/observability_runtime/command_composition.py": {"SQLiteSecureIngressStore"},
     "host_brain/skills/signed_intake_composition.py": {"SQLiteSecureIngressStore"},
     "host_brain/pentest/production_runtime.py": {"SQLiteSecureIngressStore"},
-    "host_brain/app/input_service_gateway.py": {"SQLiteSecureIngressStore"},
     "host_brain/persistence/pentest_ingress_authority_repository.py": {
         "SECURE_INGRESS_MIGRATION_ASSET_KEY",
         "SECURE_INGRESS_MIGRATION_SHA256",

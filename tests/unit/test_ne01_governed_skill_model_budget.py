@@ -191,6 +191,69 @@ def test_governed_skill_model_runtime_reduces_and_attests_every_call() -> None:
     }
 
 
+def test_sanitized_broker_usage_cannot_override_bound_budget_attestation() -> None:
+    composition, _requests = _composition(
+        usage={
+            "prompt_tokens": 8,
+            "completion_tokens": 5,
+            "total_tokens": 13,
+            "model_cost_micros": 17,
+        }
+    )
+    runtime = GovernedSkillModelBudgetRuntime(
+        attempt_service=composition.attempt_service,
+        model_budget_guard=_guard(),
+        task_request_id="request-governed-skill-model",
+    )
+    runtime.complete_sync(
+        prompt_id=EMERGENT_GROWTH_PATTERN_PROMPT_ID,
+        messages=({"role": "user", "content": "execute"},),
+        scene_type="EMERGENT_GROWTH",
+        cognitive_tier="B",
+        deadline_ms=5_000,
+    )
+    attestation = runtime.attestation()
+    assert attestation is not None
+
+    observations = _trusted_skill_budget_observations(
+        {
+            "result": {
+                "metadata": {
+                    "execution_authority": "canonical_agent_executor",
+                    "model_attempts": [
+                        {
+                            "schema_version": (
+                                "Natsume.model_runtime.budget_measurement.v1"
+                            ),
+                            "measurement_ref": "model-attempt://sanitized",
+                            "attempt_count": 1,
+                            "retry_count": 0,
+                            "token_count": "[REDACTED]",
+                            "model_cost_micros": "[REDACTED]",
+                        }
+                    ],
+                    "trace": {"tool_calls": []},
+                }
+            },
+            "governed_skill_model_budget_attestation": attestation,
+        },
+        execution_context=_execution_context(),
+    )
+    usage = build_worker_budget_usage(
+        usage_id="worker-budget://sanitized-broker-output",
+        observations=observations,
+        include_agent_tool_calls=True,
+    )
+
+    assert observations["model_attempts"] == attestation["model_attempts"]
+    assert usage is not None
+    assert usage.measurements == {
+        "retry_count": 0,
+        "token_count": 13,
+        "model_cost_micros": 17,
+    }
+
+
 def test_governed_skill_model_runtime_rejects_missing_provider_usage() -> None:
     composition, _requests = _composition(usage=None)
     runtime = GovernedSkillModelBudgetRuntime(

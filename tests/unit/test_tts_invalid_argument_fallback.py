@@ -6,12 +6,14 @@ import os
 import sys
 import wave
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from edge_client.actuators import tts_engine
 from edge_client.actuators.tts_engine import (
     _ModernSoVITSAdapter,
+    _PersistentProcessSoVITSAdapter,
     SoVITSModelManager,
     TtsConfig,
     TtsState,
@@ -22,6 +24,54 @@ from edge_client.actuators.tts_engine import (
     _synthesize_audio,
     make_sovits_synthesizer,
 )
+
+
+class _WritableWorkerStdin:
+    def write(self, _value: str) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+
+class _RunningWorkerProcess:
+    def __init__(self) -> None:
+        self.stdin = _WritableWorkerStdin()
+
+    def poll(self):  # noqa: ANN201
+        return None
+
+
+def test_persistent_worker_is_closed_after_synthesis_timeout(monkeypatch) -> None:
+    adapter = _PersistentProcessSoVITSAdapter(config=TtsConfig(device="cpu"))
+    process = _RunningWorkerProcess()
+    monkeypatch.setattr(adapter, "start", lambda: "ready")
+    monkeypatch.setattr(adapter, "_require_process", lambda: process)
+    monkeypatch.setattr(
+        adapter,
+        "_read_message",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("worker timeout")),
+    )
+    close = MagicMock()
+    monkeypatch.setattr(adapter, "close", close)
+
+    with pytest.raises(TimeoutError, match="worker timeout"):
+        adapter.synthesize(text="test", language="ja")
+
+    close.assert_called_once_with()
+
+
+def test_tts_manager_rejects_utterance_language_that_does_not_match_voice(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("EDGE_TTS_ALLOW_LANGUAGE_MISMATCH", raising=False)
+    manager = SoVITSModelManager(TtsConfig(language="ja", device="cpu"))
+
+    result = manager.synthesize("这是中文。", language="zh")
+
+    assert result.success is False
+    assert result.reason_code == "VOICE_SCHEMA_INVALID"
+    assert "configured=ja, requested=zh" in result.detail
 
 
 class _RetryModel:

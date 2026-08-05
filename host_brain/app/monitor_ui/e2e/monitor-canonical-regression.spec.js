@@ -1109,6 +1109,45 @@ test.describe('Canonical monitor regression coverage', () => {
     await expect.poll(() => new URL(page.url()).hash).toBe('#/life/pathologies')
   })
 
+  test('Cockpit keeps a healthy direct Runtime visible while Life Body rebuilds', async ({ page, baseURL }) => {
+    await stubCockpitApis(page)
+    await page.unroute('**/obs/life-body**')
+    await page.route('**/obs/life-body**', (route) => fulfillJson(route, {
+      window_minutes: 360,
+      timestamp: '2026-08-03T14:00:00Z',
+      meta: {
+        projection: {
+          available: false,
+          degraded_state: 'SOURCE_UNAVAILABLE',
+          reason_code: 'OBS_LIFE_BODY_ROOT_STALE',
+        },
+      },
+    }))
+    await page.unroute('**/obs/runtime-snapshot**')
+    let runtimeReads = 0
+    await page.route('**/obs/runtime-snapshot**', (route) => {
+      runtimeReads += 1
+      return fulfillJson(route, {
+        timestamp: 1_785_766_400_000,
+        sys_mode: 'normal',
+        background_runtime: { status: 'healthy' },
+        emotion_context: { emotion_tag: 'CALM' },
+        slot_status: { hard_state: 'live' },
+        runtime_summary: {
+          headline: 'canonical runtime is live',
+          reply_posture: { style: 'steady' },
+        },
+      })
+    })
+
+    await page.goto(monitorUrl(baseURL, '/cockpit'), { waitUntil: 'domcontentloaded' })
+
+    await expect(page.getByText('canonical runtime is live', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /待连接/ })).toHaveCount(0)
+    await expect(page.getByText('Runtime 待恢复', { exact: true })).toHaveCount(0)
+    await expect.poll(() => runtimeReads).toBeGreaterThan(0)
+  })
+
   test('Life timeline command rail follows filters and clears scope', async ({ page, baseURL }) => {
     await stubLifeTimelineApis(page)
     await page.goto(monitorUrl(baseURL, '/life/timeline'), { waitUntil: 'domcontentloaded' })
@@ -1144,7 +1183,7 @@ test.describe('Canonical monitor regression coverage', () => {
   })
 
 
-  test('Security Immune gate filters incidents and runs a manual hunt', async ({ page, baseURL }) => {
+  test('Security Immune gate filters incidents and keeps retired hunt read-only', async ({ page, baseURL }) => {
     await stubSecurityImmuneApis(page)
     await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
     await expect(page.getByRole('heading', { name: '安全免疫', exact: true })).toBeVisible()
@@ -1201,9 +1240,8 @@ test.describe('Canonical monitor regression coverage', () => {
     await gate.getByRole('button', { name: /Incidents/ }).click()
     await expect(page.locator('#security-immune-incidents')).toBeVisible()
 
-    await gate.getByRole('button', { name: 'Run Hunt' }).click()
-    await expect(page.getByText('Hunt 已完成')).toBeVisible()
-    await expect(page.getByText('manual_web_security_immune')).toBeVisible()
+    await expect(gate.getByRole('button', { name: 'Hunt 已迁移' })).toBeDisabled()
+    await expect(page.getByText('Manual Hunt 写入口已迁移')).toBeVisible()
   })
 
   test('Prompt config decision rail filters templates and surfaces overrides', async ({ page, baseURL }) => {
@@ -1406,7 +1444,7 @@ test.describe('Canonical monitor regression coverage', () => {
     await expect(gate).toBeVisible()
     await expect(gate.getByText('Gateway Routing Gate')).toBeVisible()
     await expect(gate.getByText('Platform Health')).toBeVisible()
-    await expect(gate.getByText('3/3 active，1 down，1 degraded。')).toBeVisible()
+    await expect(gate.getByText('3/3 active，1 down，1 degraded，0 unknown。')).toBeVisible()
 
     const handoff = page.getByRole('region', { name: 'Gateway Routing Handoff' })
     await expect(handoff).toBeVisible()
@@ -1429,14 +1467,14 @@ test.describe('Canonical monitor regression coverage', () => {
     await expect.poll(() => new URL(page.url()).hash).toBe('#/observability/trace')
   })
 
-  test('Body integration gate validates say text and sends through MateEngine', async ({ page, baseURL }) => {
+  test('Body integration keeps real health visible and retires direct MateEngine writes', async ({ page, baseURL }) => {
     await stubBodyIntegrationApis(page)
     await page.goto(monitorUrl(baseURL, '/integrations/body'), { waitUntil: 'domcontentloaded' })
 
     await expect(page.getByRole('heading', { name: '身体集成' })).toBeVisible()
     const gate = page.locator('[aria-label="Body Bridge Gate"]')
     await expect(gate).toBeVisible()
-    await expect(gate.getByText('身体动作链路可发送')).toBeVisible()
+    await expect(gate.getByText('身体桥在线，人工写入口已迁移')).toBeVisible()
     await expect(gate.getByText('3 个动作可见')).toBeVisible()
     await expect(gate.getByText('2 个事件类型可见')).toBeVisible()
     const handoff = page.getByRole('region', { name: 'Body Dispatch Handoff' })
@@ -1445,27 +1483,17 @@ test.describe('Canonical monitor regression coverage', () => {
     await expect(handoff.getByText('Capability Catalog')).toBeVisible()
     await expect(handoff.getByText('Current Intent')).toBeVisible()
     await expect(handoff.getByText('Dispatch Result')).toBeVisible()
-    await expect(handoff.getByText('3/4 ready')).toBeVisible()
-    await expect(handoff.getByText('ready to send')).toBeVisible()
+    await expect(handoff.getByText('2/4 ready')).toBeVisible()
+    await expect(handoff.getByText('migrated')).toBeVisible()
 
-    await gate.getByRole('button', { name: /定位动作控制台/ }).click()
+    await gate.getByRole('button', { name: /定位迁移说明/ }).click()
     await page.getByLabel('Body action').selectOption('say')
     const sayInput = page.getByLabel('Body say text')
     await sayInput.fill('')
-    await expect(sayInput).toHaveAttribute('aria-invalid', 'true')
-    await expect(page.getByRole('button', { name: '发送 say' })).toBeDisabled()
-    await expect(gate.getByText('Say 动作需要先填写文本')).toBeVisible()
-
-    await gate.getByRole('button', { name: /定位文本框/ }).click()
-    await expect(sayInput).toBeFocused()
+    await expect(sayInput).toHaveAttribute('aria-invalid', 'false')
+    await expect(page.getByRole('button', { name: '人工发送已迁移' })).toBeDisabled()
     await sayInput.fill('身体桥 smoke say')
-    await expect(page.getByRole('button', { name: '发送 say' })).toBeEnabled()
-    await page.getByRole('button', { name: '发送 say' }).click()
-
-    await expect(page.getByText('发送完成')).toBeVisible()
-    await expect(page.locator('pre').filter({ hasText: 'mate-smoke-say' })).toBeVisible()
-    await expect(handoff.getByText('4/4 ready')).toBeVisible()
-    await expect(handoff.getByText('mate-smoke-say', { exact: true })).toBeVisible()
+    await expect(page.getByText('MateEngine 人工直推已迁移')).toBeVisible()
   })
 
   test('Body integration gate locks dispatch when MateEngine health is degraded', async ({ page, baseURL }) => {
@@ -1480,8 +1508,8 @@ test.describe('Canonical monitor regression coverage', () => {
     const handoff = page.getByRole('region', { name: 'Body Dispatch Handoff' })
     await expect(handoff).toBeVisible()
     await expect(handoff.getByText('degraded')).toBeVisible()
-    await expect(handoff.getByText('locked', { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: '发送 state' })).toBeDisabled()
+    await expect(handoff.getByText('migrated', { exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: '人工发送已迁移' })).toBeDisabled()
   })
 
   test('Task Runtime replays a complex graph from plan to terminal cursor', async ({ page, baseURL }) => {

@@ -344,7 +344,7 @@ def _select_buffered_affective_candidate(
     expected_candidate_count: int,
     trace_stage_meta: dict[str, Any] | None = None,
 ) -> str:
-    """Select one safe local winner from a frozen two-candidate affective turn.
+    """Choose one safe local winner among a frozen two-candidate affective turn.
 
     Candidate generation is deliberately not an authority to choose a
     relationship repair or emotional expression.  The ModelAttempt retry gate
@@ -1731,6 +1731,11 @@ async def run_surface_main_chain_for_surface_reply_input(
                 compiled_request,
                 raw_output=str(response.content or ""),
                 current_messages=attempt.prompt.messages,
+                # Missing Japanese speech must earn one repair attempt, but it
+                # never blocks the visible Chinese reply after that attempt.
+                # The delivery layer then degrades voice explicitly instead of
+                # feeding Chinese text into a Japanese acoustic model.
+                allow_voice_degradation=int(attempt.attempt_index) > 1,
             )
             if not evaluation.retry:
                 return RetryDirective.accept()

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import threading
+import time
 import unicodedata
 from typing import Any, Callable, Mapping
 
@@ -14,7 +15,7 @@ from host_brain.runtime.degradation_authority import DegradationCapabilityPort
 
 from host_brain.app.host_route_ports import HostRoutePorts
 
-from natsume_contracts.identity import CredentialProofKind
+from natsume_contracts.identity import CredentialProofKind, PrincipalKind
 from host_brain.secure_ingress import (
     CredentialVerifierRegistry,
     FileEmergencyAuditSink,
@@ -25,7 +26,10 @@ from host_brain.secure_ingress import (
 )
 from host_brain.persistence.secure_ingress_repository import SQLiteSecureIngressStore
 
-from host_brain.observability.command_ports import ObsCommandPortRegistry
+from host_brain.observability.command_ports import (
+    DEFAULT_OBS_COMMAND_SPECS,
+    ObsCommandPortRegistry,
+)
 from host_brain.observability.command_outcome_journal import ObsCommandOutcomeJournal
 from host_brain.observability.command_router import ObsCommandRouter
 from .domain_command_ports import (
@@ -39,6 +43,7 @@ from host_brain.observability.shadow_ingress_state import ShadowIngressStateStor
 
 HOST_SECURE_INGRESS_MODE_ENV = "HOST_SECURE_INGRESS_MODE"
 HOST_SECURE_INGRESS_HMAC_SECRETS_ENV = "HOST_SECURE_INGRESS_HMAC_SECRETS_JSON"
+OPERATOR_QUERY_AUTH_BINDINGS_ENV = "NATSUME_OPERATOR_QUERY_AUTH_BINDINGS"
 HOST_OBS_COMMAND_OUTCOME_JOURNAL_PATH_ENV = (
     "HOST_OBS_COMMAND_OUTCOME_JOURNAL_PATH"
 )
@@ -47,6 +52,7 @@ OBS_COMMAND_COMPOSITION_CONSTRUCTION_FAILED = (
 )
 OBS_COMMAND_HMAC_SECRETS_INVALID = "OBS_COMMAND_HMAC_SECRETS_INVALID"
 OBS_COMMAND_HMAC_SECRETS_MISSING = "OBS_COMMAND_HMAC_SECRETS_MISSING"
+OBS_COMMAND_OPERATOR_AUTHORITY_INVALID = "OBS_COMMAND_OPERATOR_AUTHORITY_INVALID"
 _HMAC_KEY_ID_MAX_BYTES = 255
 _HMAC_SECRET_MIN_BYTES = 32
 _HMAC_SECRET_MAX_BYTES = 4_096
@@ -297,6 +303,84 @@ def _strict_hmac_secrets(env: Mapping[str, str]) -> dict[str, str]:
     return secrets
 
 
+def _configured_operator_hmac_authorities(
+    env: Mapping[str, str],
+    *,
+    secrets: Mapping[str, str],
+) -> tuple[dict[str, Any], ...]:
+    """Resolve local Operator BFF principals without exposing bearer tokens.
+
+    Read-only Monitor bindings need no command authority.  A binding that asks
+    for ``obs:write`` must name an HMAC key and may only receive command actions
+    whose complete scope set is present in that same binding.
+    """
+
+    raw = str(env.get(OPERATOR_QUERY_AUTH_BINDINGS_ENV) or "").strip()
+    if not raw:
+        return ()
+    try:
+        decoded = json.loads(raw, object_pairs_hook=_strict_json_object)
+    except Exception as exc:
+        raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID) from exc
+    if not isinstance(decoded, list):
+        raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID)
+
+    authorities: list[dict[str, Any]] = []
+    for item in decoded:
+        if not isinstance(item, dict):
+            raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID)
+        raw_scopes = item.get("scopes")
+        if not isinstance(raw_scopes, list) or not raw_scopes:
+            raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID)
+        scopes = tuple(sorted({str(value).strip() for value in raw_scopes}))
+        if not all(scopes):
+            raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID)
+        if "obs:write" not in scopes:
+            continue
+
+        principal_id = str(item.get("principal_id") or "").strip()
+        tenant_id = str(item.get("tenant_id") or "local").strip()
+        key_id = str(item.get("key_id") or "").strip()
+        try:
+            principal_kind = PrincipalKind(
+                str(item.get("principal_kind") or "service").strip().lower()
+            )
+        except ValueError as exc:
+            raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID) from exc
+        if (
+            not principal_id
+            or not tenant_id
+            or not key_id
+            or key_id not in secrets
+            or not _bounded_utf8(principal_id, maximum=255)
+            or not _bounded_utf8(tenant_id, maximum=255)
+            or not _bounded_utf8(key_id, maximum=_HMAC_KEY_ID_MAX_BYTES)
+        ):
+            raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID)
+
+        scope_set = frozenset(scopes)
+        allowed_actions = tuple(
+            sorted(
+                spec.action
+                for spec in DEFAULT_OBS_COMMAND_SPECS
+                if set(spec.required_scopes).issubset(scope_set)
+            )
+        )
+        if not allowed_actions:
+            raise ValueError(OBS_COMMAND_OPERATOR_AUTHORITY_INVALID)
+        authorities.append(
+            {
+                "principal_id": principal_id,
+                "principal_kind": principal_kind,
+                "tenant_id": tenant_id,
+                "key_id": key_id,
+                "granted_scopes": scopes,
+                "allowed_actions": allowed_actions,
+            }
+        )
+    return tuple(authorities)
+
+
 def _disabled_composition(
     *,
     global_mode: SecureIngressMode,
@@ -395,6 +479,25 @@ def build_obs_command_composition(
     owner_lease: _OutcomeJournalOwnerLease | None = None
     try:
         store = SQLiteSecureIngressStore(resolved_db_path)
+        operator_authorities = _configured_operator_hmac_authorities(
+            source,
+            secrets=secrets,
+        )
+        for authority in operator_authorities:
+            store.ensure_hmac_principal_authority(
+                principal_id=authority["principal_id"],
+                principal_kind=authority["principal_kind"],
+                key_id=authority["key_id"],
+                tenant_id=authority["tenant_id"],
+                granted_scopes=authority["granted_scopes"],
+                allowed_audiences=("obs",),
+                allowed_actions=authority["allowed_actions"],
+                secret_ref=(
+                    f"env://{HOST_SECURE_INGRESS_HMAC_SECRETS_ENV}"
+                    f"#{authority['key_id']}"
+                ),
+                at_ms=int(time.time() * 1000),
+            )
         outcome_journal = ObsCommandOutcomeJournal(resolved_outcome_journal_path)
         owner_lease = _OutcomeJournalOwnerLease(
             resolved_outcome_journal_path.resolve()

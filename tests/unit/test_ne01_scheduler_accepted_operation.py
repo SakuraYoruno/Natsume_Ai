@@ -276,6 +276,7 @@ class _Bundle:
         }
         self.handler_error: Exception | None = None
         workers = SchedulerWorkerRegistry()
+        self.workers = workers
 
         async def real_handler(**kwargs: Any) -> Any:
             self.calls.append(kwargs)
@@ -408,6 +409,38 @@ async def test_reconcile_absent_result_stays_unknown_and_never_calls_worker() ->
 
     assert bundle.calls == []
     assert bundle.results.append_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_can_promote_exact_worker_owned_receipt_without_effect_replay() -> None:
+    bundle = _Bundle()
+    reconcile_calls: list[dict[str, Any]] = []
+
+    async def read_only_reconciler(**kwargs: Any) -> dict[str, Any]:
+        reconcile_calls.append(kwargs)
+        return {
+            "status": "APPLIED",
+            "receipt_ref": "life-receipt://accepted-operation-one",
+        }
+
+    bundle.workers.register_reconciler(
+        bundle.definition.worker_key,
+        read_only_reconciler,
+    )
+
+    outcome = await bundle.operation.reconcile(bundle.payload)
+    replay = await bundle.operation.reconcile(bundle.payload)
+
+    assert outcome["status"] == "REPLAYED"
+    assert replay["status"] == "REPLAYED"
+    assert bundle.calls == []
+    assert len(reconcile_calls) == 1
+    assert bundle.results.append_calls == 1
+    assert bundle.results.record is not None
+    assert bundle.results.record["result"] == {
+        "status": "SUCCEEDED",
+        "receipt_ref": "life-receipt://accepted-operation-one",
+    }
 
 
 def _drift_payload(
