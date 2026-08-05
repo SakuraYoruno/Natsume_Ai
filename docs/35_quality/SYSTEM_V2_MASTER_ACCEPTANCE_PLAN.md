@@ -173,6 +173,8 @@ S0 退出条件：collection 0 error，覆盖工具可运行，候选 SHA 干净
 - 新增大于 800 行的混合职责文件为 0。
 - 不得通过扩大 `cohesive_large_files` 白名单掩盖失败。
 
+当前执行状态（2026-08-05）：15 个超限／未分类热点已经按职责拆分，未增加白名单，当前工作树 A03 为 `PASS`。该状态需要在提交后与 A01～A14 一起重跑并绑定 SHA；不能替代 A15 实服务验收。
+
 ### A04 七条 Universal Runtime 路线
 
 对 Chat、Skill、Plan、Delegate、Scheduler、Internal、Operator 逐条验证：

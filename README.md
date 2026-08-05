@@ -9,6 +9,8 @@
 
 > 这里的“数字生命”指一套具有连续状态、因果记忆、自主节律和具身表达的软件系统，不声称生物意识或人类心智已经被复刻。当前版本已接通 canonical Life 主链和文本交互；长期关系自然度、专属声线和远端 Avatar 联合体验仍在验证，整体状态为 `INCOMPLETE`。
 
+2026-08-05 的当前工程切片已把此前残留的大文件按真实职责拆开：Surface 的原生情感流、确定性交付和共享预算辅助不再挤在一个 adapter；Digital Life 的 self-affect 与 relationship reducer 分离；Task Acceptance、Operator effect、Embodiment command、TTS prosody、Tribe 事件订阅和 Life delivery 也各有独立边界。A01～A14 本地静态架构门禁已通过，但当前提交的 A15 全服务栈、PlanningSearch 收益与“更像人”的盲测仍未完成，因此没有升级总体完成状态。
+
 ## 她不会在你沉默时消失
 
 即使没有新消息，唯一的 Life Runtime 仍会按真实时间推进。默认每 60 秒一次的 `life_tick` 不调用大模型，也不会机械地给用户发消息；它负责让时间真正作用于七海：

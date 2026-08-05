@@ -167,12 +167,16 @@ def test_edge_queue_ack_waits_for_terminal_receipt_without_replay(tmp_path) -> N
 
 def test_sync_queue_has_no_fire_and_forget_edge_task() -> None:
     source = (ROOT / "host_brain/channels/embodiment.py").read_text(encoding="utf-8")
+    command_source = (
+        ROOT / "host_brain/channels/embodiment_commands.py"
+    ).read_text(encoding="utf-8")
+    combined = source + command_source
 
-    assert "_pending_tasks" not in source
-    assert "_on_submission_done" not in source
-    assert "loop.create_task(submit_embodiment_command" not in source
-    assert "_durable_outbox_authority" not in source
-    assert "EMBODIMENT_RUNTIME_REQUIRED" in source
+    assert "_pending_tasks" not in combined
+    assert "_on_submission_done" not in combined
+    assert "loop.create_task(submit_embodiment_command" not in combined
+    assert "_durable_outbox_authority" not in combined
+    assert "EMBODIMENT_RUNTIME_REQUIRED" in command_source
 
 
 def test_direct_submission_without_an_explicit_runtime_fails_closed() -> None:

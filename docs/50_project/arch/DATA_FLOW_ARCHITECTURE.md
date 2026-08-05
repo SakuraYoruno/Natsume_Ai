@@ -201,3 +201,22 @@ canonical Life journal
 ```
 
 旧 `emotion_context` 只用于历史兼容；新运行时不会为了适配 UI 再制造第二份情绪真相。
+
+## 10. 拆分后的对话与具身数据流
+
+```mermaid
+flowchart LR
+    OBS["用户观察"] --> FUSION["Affect Fusion"]
+    FUSION --> AFFECT["Affective Domain Reducer"]
+    AFFECT --> PLAN["Affective Turn Plan"]
+    PLAN --> STREAM["Native Sentence Stream"]
+    PLAN --> DET["Deterministic / Deferred Delivery"]
+    STREAM --> ACCEPT["Task Acceptance 或轻量 Life commit"]
+    DET --> ACCEPT
+    ACCEPT --> CMD["Embodiment Commands"]
+    CMD --> EDGE["Edge TTS / Avatar"]
+    EDGE --> RECEIPT["Terminal Receipt"]
+    RECEIPT --> AFTER["Relationship Aftereffect"]
+```
+
+`domain_reducer.py` 仍是 canonical 聚合入口，但 self-affect 与 relationship 的纯 reducer 已分开；`surface_main_chain_adapter.py` 仍是调用 facade，但不再内嵌整套流式生成和交付实现。数据流和 authority 没有因文件移动发生改变。

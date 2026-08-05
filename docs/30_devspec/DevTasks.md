@@ -37,6 +37,14 @@
 
 本切片不关闭 VTS 情绪热键、barge-in、常驻 ASR 噪声、PlanningSearch 收益、人类盲测或最终 SHA 故障矩阵。
 
+## 2026-08-05 Architecture 2.0 当前 SHA 前置门禁
+
+- [x] 将 migration catalog／覆盖合同推进到现有 `0153`，不改写历史 migration。
+- [x] 对 A03 报出的 15 个生产热点执行真实职责拆分，未扩大 cohesive 白名单。
+- [x] 当前工作树 A01～A14 静态架构门禁通过。
+- [x] 拆分后的受影响波次回归 306 项通过，pytest 全量收集通过。
+- [ ] 提交并绑定新 SHA 后执行 A15 完整服务栈与故障矩阵；通过前不宣称 Architecture 2.0 完成。
+
 ## P0：真实对话体验
 
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。

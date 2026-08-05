@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
-  "updated_at": "2026-08-04",
-  "commit_scope": "SYSTEM_V2_DUAL_STACK_REAL_ACCEPTANCE_REMEDIATION",
+  "updated_at": "2026-08-05",
+  "commit_scope": "SYSTEM_V2_CURRENT_SHA_ARCHITECTURE_GATE_CLOSEOUT",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -137,7 +137,17 @@
     }
   },
   "acceptance": {
-    "architecture_v2_current_sha": "NOT_RUN",
+    "architecture_v2_current_sha": "A01_A14_PASS_LOCAL_WORKTREE_A15_PENDING_COMMIT_SHA",
+    "architecture_static_gates": {
+      "status": "PASS_LOCAL_WORKTREE",
+      "range": "A01_A14",
+      "migration_catalog_head": "0153_terminal_prebudget_cancellation_classifier_correction.sql",
+      "a03_policy_whitelist_expanded": false,
+      "a03_reported_hotspots_remaining": 0,
+      "affected_wave_regression": "PASS_306",
+      "pytest_collection": "PASS",
+      "final_sha_full_stack_gate": "NOT_RUN"
+    },
     "planning_search_three_domain_benefit": "UNPROVEN",
     "digital_life_human_likeness": "NOT_RUN",
     "whole_system_python_line_coverage": "72.22_PERCENT_OFFLINE_STABLE_BELOW_75_GATE",
@@ -361,7 +371,7 @@
     "WHOLE_SYSTEM_COVERAGE_BELOW_GATE_LINE_72_22_BRANCH_55_08",
     "HIGH_RISK_COVERAGE_BELOW_GATE_LINE_78_49_BRANCH_61_75",
     "CHANGED_CODE_COVERAGE_BELOW_GATE_LINE_82_30_BRANCH_66_39",
-    "ARCHITECTURE_V2_CURRENT_SHA_ACCEPTANCE_NOT_RUN",
+    "ARCHITECTURE_V2_A15_CURRENT_SHA_FULL_STACK_NOT_RUN",
     "PLANNING_SEARCH_THREE_DOMAIN_BENEFIT_UNPROVEN",
     "EDGE_RESIDENT_ASR_NOISE_FLOOD",
     "EDGE_VTS_EMOTIONAL_HOTKEY_MAPPING_DEGRADED",
