@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from host_brain.app.surface_main_chain_adapter import (
+    _buffered_affective_candidate_messages,
     _select_buffered_affective_candidate,
+)
+from host_brain.app.surface_main_chain_support import (
+    _governed_model_budget_failure_reason,
 )
 from host_brain.digital_life.affective_turn_planner import (
     AffectiveTurnPlanError,
@@ -284,9 +289,88 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert selection["candidate_count"] == 2
     assert len(selection["candidate_digests"]) == 2
     assert "刚刚" not in str(selection)
+
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    paired_messages = _buffered_affective_candidate_messages(
+        [
+            {
+                "role": "system",
+                "content": "只输出一个 JSON 对象，不要候选。",
+            }
+        ],
+        candidate_count=2,
+    )
+    assert len(paired_messages) == 1
+    assert paired_messages[0]["role"] == "system"
+    assert "本条只替换前文" in paired_messages[-1]["content"]
+    assert '"tts_text_ja"' in paired_messages[-1]["content"]
+    repaired_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID",
+    )
+    assert len(repaired_messages) == 2
+    assert "上次输出不是恰好两个合法候选" in repaired_messages[-1]["content"]
+
+    paired_by_reply = {
+        "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",
+        "你不想现在说也没关系，我会把这件事认真放着。": "今は話したくないなら、それでいいよ。ちゃんと覚えておくから。",
+    }
+    paired_output = _select_buffered_affective_candidate(
+        raw_output=json.dumps(
+            {
+                "candidates": [
+                    {
+                        "reply_text": reply,
+                        "tts_text_ja": speech,
+                        "natsume_emotion_tag": "CALM",
+                        "user_emotion_tag": "SAD",
+                        "emotion_confidence": 0.7,
+                    }
+                    for reply, speech in paired_by_reply.items()
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=trace,
+    )
+    selected_pair = json.loads(paired_output)
+    assert selected_pair["reply_text"] in paired_by_reply
+    assert selected_pair["tts_text_ja"] == paired_by_reply[selected_pair["reply_text"]]
+    assert trace["affective_candidate_selection"]["selected_output_shape"] == "PAIRED_TEXT_VOICE"
+
+    missing_voice = {
+        "candidates": [
+            {"reply_text": "刚刚那句可能是我没接好。", "tts_text_ja": ""},
+            {"reply_text": "你不想现在说也没关系，我会把这件事认真放着。", "tts_text_ja": ""},
+        ]
+    }
+    with pytest.raises(RuntimeError, match="JAPANESE_SPEECH_TEXT_MISSING"):
+        _select_buffered_affective_candidate(
+            raw_output=json.dumps(missing_voice, ensure_ascii=False),
+            compiled_request=compiled,
+            expected_candidate_count=2,
+        )
     with pytest.raises(RuntimeError, match="AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID"):
         _select_buffered_affective_candidate(
             raw_output='{"candidates":["只有一条"]}',
             compiled_request=compiled,
             expected_candidate_count=2,
         )
+
+
+def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection() -> None:
+    assert (
+        _governed_model_budget_failure_reason(
+            RuntimeError("ATTEMPT_BUDGET_EXHAUSTED: retry requested")
+        )
+        == "MODEL_SEMANTIC_RETRY_EXHAUSTED"
+    )
+    assert (
+        _governed_model_budget_failure_reason(
+            RuntimeError("AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID")
+        )
+        == "AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID"
+    )

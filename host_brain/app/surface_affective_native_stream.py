@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import hashlib
+import json
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
@@ -191,15 +193,143 @@ def _buffered_affective_candidate_messages(
     messages: Sequence[Mapping[str, Any]],
     *,
     candidate_count: int | None,
+    retry_reason: str = "",
 ) -> list[dict[str, Any]]:
     copied = [dict(message) for message in messages]
     if candidate_count != 2:
         return copied
-    override = "DL-04 高歧义回合：只输出恰好 2 个候选，JSON 形状必须是 {\"candidates\":[\"候选1\",\"候选2\"]}。不要输出第三个候选、字段解释或情绪标签。"
-    if any(str(message.get("content") or "") == override for message in copied):
-        return copied
-    copied.append({"role": "system", "content": override})
+    if japanese_companion_voice_enabled():
+        override = (
+            "DL-04 高歧义回合：本条只替换前文的‘单个 JSON 对象／不要候选’输出形状，"
+            "其他事实、人格、边界和安全约束全部继续生效。只输出恰好 2 个成对候选，格式必须是 "
+            '{"candidates":['
+            '{"reply_text":"中文候选1","tts_text_ja":"同义自然日语候选1",'
+            '"natsume_emotion_tag":"NEUTRAL","user_emotion_tag":"NEUTRAL",'
+            '"emotion_confidence":0.0},'
+            '{"reply_text":"中文候选2","tts_text_ja":"同义自然日语候选2",'
+            '"natsume_emotion_tag":"NEUTRAL","user_emotion_tag":"NEUTRAL",'
+            '"emotion_confidence":0.0}]}'
+            "。每个候选都必须同时包含非空中文 reply_text 与自然日语 tts_text_ja；"
+            "不要输出第三个候选、字段解释、Markdown 或 JSON 外文字。"
+        )
+    else:
+        override = (
+            "DL-04 高歧义回合：本条只替换前文的单回复输出形状，其他事实、人格、边界和安全约束"
+            '全部继续生效。只输出恰好 2 个候选，JSON 形状必须是 {"candidates":'
+            '["候选1","候选2"]}。不要输出第三个候选、字段解释、情绪标签、Markdown 或 JSON 外文字。'
+        )
+    has_override = any(
+        "DL-04 高歧义回合：" in str(message.get("content") or "")
+        for message in copied
+    )
+    if not has_override:
+        for index in range(len(copied) - 1, -1, -1):
+            if str(copied[index].get("role") or "").strip().lower() != "system":
+                continue
+            prior = str(copied[index].get("content") or "").rstrip()
+            copied[index]["content"] = f"{prior}\n\n{override}" if prior else override
+            break
+        else:
+            copied.insert(0, {"role": "system", "content": override})
+    reason_code = str(retry_reason or "").split(":", 1)[0].strip().upper()
+    if reason_code and not any(
+        "DL-04 候选修复：" in str(message.get("content") or "")
+        for message in copied
+    ):
+        repair_by_reason = {
+            "AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID": (
+                "上次输出不是恰好两个合法候选；重新输出完整 candidates 数组。"
+            ),
+            "JAPANESE_SPEECH_TEXT_MISSING": (
+                "上次至少一个候选缺少自然日语 tts_text_ja；两个候选都必须补齐中日语配对。"
+            ),
+            "AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED": (
+                "上次候选违反当前关系或表达边界；重写两个更自然、克制且可直接发送的候选。"
+            ),
+        }
+        repair = (
+            "DL-04 候选修复："
+            + repair_by_reason.get(
+                reason_code,
+                f"上次输出违反 {reason_code}；按既定双候选形状重新生成。",
+            )
+            + "不要解释错误。"
+        )
+        copied.append({"role": "system", "content": repair})
     return copied
+
+
+def _buffered_affective_candidate_records(raw_output: str) -> list[dict[str, Any]]:
+    """Decode candidate text while retaining its paired Voice metadata.
+
+    Japanese companion mode uses one provider request for two complete
+    text/Voice alternatives.  Flattening those mappings into strings loses
+    ``tts_text_ja`` and makes the selected reply impossible to deliver with the
+    same semantic source.  Legacy plaintext candidate arrays remain accepted
+    for non-Voice deployments and older deterministic tests.
+    """
+
+    from host_brain.persona.surface.candidate_scoring import (  # noqa: PLC0415
+        parse_surface_candidates,
+    )
+    from host_brain.persona.surface_runtime import (  # noqa: PLC0415
+        parse_surface_generation_output,
+    )
+
+    raw = str(raw_output or "").strip()
+    if not raw:
+        return []
+    payload: Any = None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        try:
+            payload = ast.literal_eval(raw)
+        except (SyntaxError, ValueError):
+            payload = None
+
+    raw_candidates = payload.get("candidates") if isinstance(payload, Mapping) else None
+    records: list[dict[str, Any]] = []
+    if isinstance(raw_candidates, Sequence) and not isinstance(
+        raw_candidates,
+        (str, bytes, bytearray),
+    ):
+        for item in raw_candidates:
+            if isinstance(item, Mapping):
+                selected_payload = dict(item)
+                normalized = parse_surface_generation_output(
+                    json.dumps(selected_payload, ensure_ascii=False),
+                )
+                reply_text = str(normalized.get("reply_text") or "").strip()
+                if reply_text:
+                    records.append(
+                        {
+                            "reply_text": reply_text,
+                            "structured_payload": selected_payload,
+                            "normalized_payload": normalized,
+                        }
+                    )
+            else:
+                reply_text = str(item or "").strip()
+                if reply_text:
+                    records.append(
+                        {
+                            "reply_text": reply_text,
+                            "structured_payload": None,
+                            "normalized_payload": {},
+                        }
+                    )
+    if records:
+        return records[:5]
+    return [
+        {
+            "reply_text": candidate,
+            "structured_payload": None,
+            "normalized_payload": {},
+        }
+        for candidate in parse_surface_candidates(raw)
+        if str(candidate or "").strip()
+    ][:5]
 
 
 def _select_buffered_affective_candidate(
@@ -219,34 +349,58 @@ def _select_buffered_affective_candidate(
     """
 
     from host_brain.persona.surface.candidate_scoring import (  # noqa: PLC0415
-        parse_surface_candidates,
         score_isolated_surface_candidates,
         select_best_isolated_candidate,
     )
+    from host_brain.persona.surface_runtime import (  # noqa: PLC0415
+        _surface_hard_gate_violations,
+    )
 
-    candidates = parse_surface_candidates(raw_output)
-    if len(candidates) != expected_candidate_count:
+    records = _buffered_affective_candidate_records(raw_output)
+    if len(records) != expected_candidate_count:
         raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID")
+    candidates = [str(record.get("reply_text") or "") for record in records]
     scores = score_isolated_surface_candidates(compiled_request, candidates)
     selected = select_best_isolated_candidate(scores)
-    if (
-        selected is None
-        or bool(selected.hard_fail)
-        or tuple(selected.control_violations)
-    ):
+    if selected is None or bool(selected.hard_fail):
         raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
+    # ``control.must_include`` contains semantic guidance (for example,
+    # "自然确认会尊重空间"), not literal substrings.  The legacy scorer keeps
+    # those misses as ranking observations; the same deterministic hard gate
+    # used by normal Surface replies remains the actual blocking authority.
+    hard_gate_violations = _surface_hard_gate_violations(
+        compiled_request,
+        selected.text,
+    )
+    if hard_gate_violations:
+        raise RuntimeError(hard_gate_violations[0])
     gate = gate_stream_sentence(selected.text)
     if not gate.accepted:
         raise RuntimeError(gate.reason_code)
-    if isinstance(trace_stage_meta, dict):
-        selected_index = next(
-            (
-                index
-                for index, row in enumerate(scores)
-                if row is selected
-            ),
-            -1,
+    selected_index = next(
+        (index for index, row in enumerate(scores) if row is selected),
+        -1,
+    )
+    if selected_index < 0:
+        raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
+    selected_record = records[selected_index]
+    selected_payload = selected_record.get("structured_payload")
+    normalized_payload = selected_record.get("normalized_payload")
+    if isinstance(selected_payload, Mapping):
+        if japanese_companion_voice_enabled() and not str(
+            _safe_mapping(normalized_payload).get("tts_text_ja") or ""
+        ).strip():
+            raise RuntimeError("JAPANESE_SPEECH_TEXT_MISSING")
+        selected_payload = dict(selected_payload)
+        selected_payload["reply_text"] = gate.sentence
+        selected_output = json.dumps(
+            selected_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
+    else:
+        selected_output = gate.sentence
+    if isinstance(trace_stage_meta, dict):
         trace_stage_meta["affective_candidate_selection"] = {
             "schema_version": "affective_candidate_selection.v1",
             "candidate_count": len(scores),
@@ -254,12 +408,15 @@ def _select_buffered_affective_candidate(
             "selected_score": round(float(selected.score), 4),
             "selected_passed": bool(selected.passed),
             "selected_reason_codes": list(selected.reason_codes)[:16],
+            "selected_output_shape": (
+                "PAIRED_TEXT_VOICE" if isinstance(selected_payload, Mapping) else "TEXT"
+            ),
             "candidate_digests": [
                 hashlib.sha256(str(row.text).encode("utf-8")).hexdigest()
                 for row in scores
             ],
         }
-    return gate.sentence
+    return selected_output
 
 
 async def _native_affective_sentence_stream(

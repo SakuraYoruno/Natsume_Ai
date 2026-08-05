@@ -769,3 +769,5 @@ pwsh scripts/runtime/stop_docker_services.ps1 -ProjectName $DockerProject
 ## 21. 当前已知待验项
 
 截至 2026-08-06，真实 GPT-SoVITS 播放、父子分段终态、队列级 barge-in 和 VTS 人工授权等待的有界暂停已有目标 Edge 证据。VTS 当前仍未完成设备端授权且没有加载模型；声学自动打断、情绪 expression hotkey、完整性能样本、48 条三人盲测和跨 3 天主动／成长观察仍不能标记完成。后续验收从这些真实缺口继续，不重复已经稳定的 Docker、Monitor 路由和基础连接证明。
+
+高歧义多轮探针必须同时检查候选 cardinality 与中日语字段配对。若模型返回单回复或候选缺少 `tts_text_ja`，允许一次成对重试；最终失败必须报告语义重试原因，不能归类为预算超限。当前代码回归已通过，仍需在真实 Gateway 会话中重放“上轮没听懂／那件事让我不舒服”并核对文本、Voice、TaskGraph 和 aftereffect。

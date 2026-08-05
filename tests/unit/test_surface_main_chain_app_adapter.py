@@ -1317,7 +1317,7 @@ async def test_governed_surface_model_failure_rejects_without_approval_fallback(
     commit = events[0]
     assert commit["decision"] == "REJECT"
     assert commit["reason_code"] == "MODEL_PROVIDER_USAGE_REQUIRED"
-    assert commit["narrative"] == "受治理的模型预算未满足，当前节点已停止。"
+    assert commit["narrative"] == "模型调用未满足当前节点约束，当前节点已停止。"
     assert commit["audit_refs"]["trace_stage_meta"]["reply_source"] == "surface_main_chain_budget_reject"
 
 

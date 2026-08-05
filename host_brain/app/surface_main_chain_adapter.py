@@ -145,13 +145,15 @@ async def run_surface_main_chain_for_surface_reply_input(
                         expected_candidate_count=affective_candidate_count,
                     )
                 except RuntimeError as exc:
+                    retry_reason = str(exc).split(":", 1)[0]
                     repaired_messages = _buffered_affective_candidate_messages(
                         attempt.prompt.messages,
                         candidate_count=affective_candidate_count,
+                        retry_reason=retry_reason,
                     )
                     return RetryDirective(
                         retry=True,
-                        reason=str(exc).split(":", 1)[0],
+                        reason=retry_reason,
                         rendered_prompt=attempt.prompt.with_messages(repaired_messages),
                         reuse_target=True,
                         metadata={
@@ -483,7 +485,7 @@ async def surface_main_chain_sse_generator(
                     "done": True,
                     "decision": "REJECT",
                     "reason_code": reason_code,
-                    "narrative": "受治理的模型预算未满足，当前节点已停止。",
+                    "narrative": "模型调用未满足当前节点约束，当前节点已停止。",
                     "request_id": request_id,
                     "audit_refs": {
                         "request_id": request_id,

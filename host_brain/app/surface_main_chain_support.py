@@ -169,6 +169,10 @@ def _governed_model_budget_failure_reason(exc: BaseException) -> str:
     candidate = str(exc).split(":", 1)[0].strip().upper()
     if candidate.startswith("MODEL_"):
         return candidate
+    if candidate == "ATTEMPT_BUDGET_EXHAUSTED":
+        return "MODEL_SEMANTIC_RETRY_EXHAUSTED"
+    if candidate.startswith(("AFFECTIVE_", "JAPANESE_SPEECH_", "SURFACE_")):
+        return candidate
     return "MODEL_BUDGET_GUARD_REJECTED"
 
 
