@@ -9,21 +9,15 @@ included in the report.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
 import os
 from pathlib import Path
-import sys
 import time
 from typing import Any, Mapping
 import urllib.request
 import uuid
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from host_brain.channels.edge_transport import build_edge_envelope
-
 
 def _json_get(url: str, *, timeout_s: float = 10.0) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310
@@ -31,6 +25,46 @@ def _json_get(url: str, *, timeout_s: float = 10.0) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError("Edge response is not a JSON object")
     return dict(payload)
+
+
+def _build_edge_envelope(
+    *,
+    request_id: str,
+    payload: Mapping[str, Any],
+    shared_key: str,
+) -> dict[str, Any]:
+    """Build the production Edge envelope without importing the Host app graph.
+
+    The physical Edge acceptance machine intentionally installs only Edge
+    dependencies.  Importing ``host_brain.channels`` pulled the full Host
+    package (including its cryptography dependency) into an otherwise
+    standalone transport probe.  Keep this stdlib-only implementation byte
+    compatible with ``host_brain.channels.edge_transport``.
+    """
+
+    ts_ms = int(time.time() * 1000)
+    nonce = str(uuid.uuid4())
+    body = dict(payload)
+    canonical = json.dumps(
+        body,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    material = f"{request_id}\n{ts_ms}\n{nonce}\n{canonical}".encode("utf-8")
+    signature = hmac.new(
+        shared_key.encode("utf-8"),
+        material,
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "request_id": str(request_id),
+        "ts_ms": ts_ms,
+        "nonce": nonce,
+        "signature": signature,
+        "payload": body,
+    }
 
 
 def _post(
@@ -43,7 +77,7 @@ def _post(
     timeout_s: float,
 ) -> tuple[str, dict[str, Any], float]:
     request_id = f"{request_prefix}{uuid.uuid4().hex}"
-    envelope = build_edge_envelope(
+    envelope = _build_edge_envelope(
         request_id=request_id,
         payload=dict(payload),
         shared_key=shared_key,
@@ -102,6 +136,7 @@ def _voice_summary(result: Mapping[str, Any]) -> dict[str, Any]:
 def _health_summary(health: Mapping[str, Any]) -> dict[str, Any]:
     event = dict(health.get("event") or {})
     services = dict(event.get("services") or {})
+    resources = dict(event.get("resources") or {})
     asr = dict(_component(health, "asr").get("health") or {})
     tts = dict(_component(health, "tts").get("health") or {})
     playback = dict(_component(health, "tts_playback_device").get("health") or {})
@@ -114,6 +149,7 @@ def _health_summary(health: Mapping[str, Any]) -> dict[str, Any]:
         "tts_state": str(tts.get("state") or ""),
         "tts_backend": str(tts.get("backend") or ""),
         "playback_playing": bool(playback.get("playing")),
+        "voice_queue_depth": int(resources.get("queue_depth") or 0),
         "playback_error": playback.get("last_playback_error"),
         "vts_state": str(vts.get("state") or ""),
         "vts_detail": str(vts_component.get("detail") or ""),
@@ -200,6 +236,17 @@ def run_probe(*, base_url: str, expected_data_root: Path) -> dict[str, Any]:
         timeout_s=30.0,
     )
     post_summary = _health_summary(_json_get(f"{base}/v1/edge/health"))
+    settle_deadline = time.monotonic() + 5.0
+    while (
+        post_summary["playback_playing"]
+        or post_summary["voice_queue_depth"] > 0
+    ) and time.monotonic() < settle_deadline:
+        time.sleep(0.1)
+        post_summary = _health_summary(_json_get(f"{base}/v1/edge/health"))
+    barge_in_drained = bool(
+        not post_summary["playback_playing"]
+        and post_summary["voice_queue_depth"] == 0
+    )
 
     isolated_db = expected_data_root / "edge" / "embodiment_transport.sqlite3"
     long_summary = _voice_summary(long_result)
@@ -211,6 +258,7 @@ def run_probe(*, base_url: str, expected_data_root: Path) -> dict[str, Any]:
         and long_summary["success"]
         and barge_summary["success"]
         and barge_summary["reason_code"] == "VOICE_INTERRUPTED"
+        and barge_in_drained
         and isolated_db.is_file()
     )
     return {
@@ -238,6 +286,7 @@ def run_probe(*, base_url: str, expected_data_root: Path) -> dict[str, Any]:
             "request_id": barge_id,
             "elapsed_ms": barge_ms,
             **barge_summary,
+            "queue_drained": barge_in_drained,
         },
         "post_health": post_summary,
     }

@@ -153,6 +153,80 @@ class TestVoiceTtsQueueContract(unittest.TestCase):
             msg=self.ledger.voice_event_log,
         )
 
+    def test_segmented_synth_failure_cancels_remaining_segments(self) -> None:
+        """首段失败必须取消同一父请求的后续语音，不能从半句继续播放。"""
+        speak = _load_json(FIXTURES / "good" / "speak_valid.json")
+        first = {
+            **speak["payload"],
+            "utterance_id": "segment-1",
+            "text": "first segment",
+            "segment_parent_request_id": "voice-parent",
+            "segment_index": 1,
+            "segment_count": 2,
+        }
+        second = {
+            **speak["payload"],
+            "utterance_id": "segment-2",
+            "text": "second segment",
+            "segment_parent_request_id": "voice-parent",
+            "segment_index": 2,
+            "segment_count": 2,
+        }
+
+        def fail_first(speak_event: dict) -> dict:
+            if speak_event.get("utterance_id") == "segment-1":
+                raise RuntimeError("synth timeout")
+            return {"audio_ref": "mem://segment-2"}
+
+        queue = SpeechPlaybackQueue(rpc=self.rpc, synthesizer=fail_first)
+        queue.enqueue_speak(request_id="voice-parent", payload=first, ts_ms=self.now_ms)
+        queue.enqueue_speak(request_id="voice-parent::seg2", payload=second, ts_ms=self.now_ms)
+
+        failed = queue.start_next(ts_ms=self.now_ms + 1)
+
+        self.assertIsNotNone(failed)
+        self.assertFalse(failed.success)
+        self.assertEqual(EVENT_TTS_SYNTH_FAILED, failed.event["event_type"])
+        self.assertEqual("voice-parent", failed.event["segment_parent_request_id"])
+        self.assertEqual(1, failed.event["cancelled_queued_segments"])
+        self.assertEqual(0, queue.queue_depth)
+
+    def test_segmented_barge_in_cancels_remaining_segments(self) -> None:
+        """打断当前分段时必须同时清空该回复尚未播放的分段。"""
+        speak = _load_json(FIXTURES / "good" / "speak_valid.json")
+        barge = _load_json(FIXTURES / "good" / "barge_in_valid.json")
+        payloads = []
+        for index in (1, 2):
+            payloads.append(
+                {
+                    **speak["payload"],
+                    "utterance_id": f"segment-{index}",
+                    "text": f"segment {index}",
+                    "segment_parent_request_id": "voice-parent",
+                    "segment_index": index,
+                    "segment_count": 2,
+                }
+            )
+        queue = SpeechPlaybackQueue(
+            rpc=self.rpc,
+            synthesizer=lambda _: {"audio_ref": "mem://voice"},
+            playback_starter=lambda _s, _a: None,
+        )
+        queue.enqueue_speak(request_id="voice-parent", payload=payloads[0], ts_ms=self.now_ms)
+        queue.enqueue_speak(request_id="voice-parent::seg2", payload=payloads[1], ts_ms=self.now_ms)
+        self.assertTrue(queue.start_next(ts_ms=self.now_ms + 1).success)
+
+        interrupted = queue.handle_barge_in(
+            request_id=barge["request_id"],
+            payload=barge["payload"],
+            ts_ms=self.now_ms + 2,
+        )
+
+        self.assertEqual(VOICE_INTERRUPTED, interrupted.reason_code)
+        self.assertEqual("voice-parent", interrupted.event["segment_parent_request_id"])
+        self.assertEqual(1, interrupted.event["cancelled_queued_segments"])
+        self.assertEqual(0, queue.queue_depth)
+
 
 if __name__ == "__main__":
     unittest.main()

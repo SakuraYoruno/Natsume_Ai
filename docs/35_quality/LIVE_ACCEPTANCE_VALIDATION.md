@@ -162,3 +162,13 @@ Gateway 五路线首轮结果为 2 `PASS`、2 `WARN`、1 `FAIL`。失败路线�
 新的无 mock、无端口占位探针通过真实 HMAC 执行两段日语 GPT-SoVITS：短句合成、物理播放启动并在预期音频时长后回到非播放态；长句播放 350 ms 后提交 barge-in，返回 `ACCEPTED / VOICE_INTERRUPTED`。短句请求到播放启动 2641 ms，打断 RPC 16 ms，隔离具身库存在。该结果把“真实 TTS 与手动播放打断”提升为 `PASS`，但一个样本不能计算 p95，且短句 2641 ms 略高于 2500 ms 体验目标。
 
 VTube Studio 当前仍返回 API 51：设备端授权窗口已打开但未确认，同时没有加载角色模型，故 VTS 为 `RECONNECTING`，可见 Avatar 与 Voice／Avatar 起始偏差继续是 `ACCEPTANCE_PENDING_EXTERNAL`。本轮也没有用手动 RPC 结果冒充麦克风声学检测自动触发 barge-in。A15 总体仍为 `INCOMPLETE`。
+
+## 2026-08-06 A15 分段语音终态与 VTS 授权等待
+
+继续使用同一隔离 Edge 数据根做真实播放时，旧探针曾在 barge-in 返回 `VOICE_INTERRUPTED` 后立即记成功，却没有等待播放线程和队列终态；复查发现同一父回复的后续分段会恢复播放。另一个真实失败是首分段合成失败后，后续分段仍可播放，而 Host 父命令长期停在 `IN_DOUBT`。本切片把 `segment_parent_request_id/index/count` 贯通合成、播放和终态事件：任一前物理副作用失败会确定拒绝父命令并取消兄弟分段；barge-in 会取消当前播放和同父命令的全部排队分段。更新后的无 mock 探针必须在 5 秒内观察 `playing=false` 与 queue depth 0 才通过。
+
+目标 Edge 物理复验报告为 `PASS`：ASR／GPT-SoVITS 均 `READY`，短句和长句真实播放启动，barge-in 31 ms，终态 `queue_drained=true`、`playing=false`、queue depth 0；报告 SHA-256 为 `d06023042f8e912f7a72b9d3f16799a6f52e6277cd63ae31b4803bed01719efb`。31／62 ms 是已热缓存 admission 样本，不替代此前 2641 ms 冷样本，也不计算 p95。
+
+VTS 方面，API 51 表示设备端授权窗口已经打开。旧自动重连虽限制并发，仍会按退避周期创建连接并缓慢增加句柄；现在该状态进入硬暂停，只有 Edge 重启或显式 forced reconnect 才重新尝试。真实 health 为 `authentication_pending=true`、`reconnect_attempts=0`、`total_reconnect_failures=0`、`thread_alive=false`，因此不再制造后台请求风暴。因为用户尚未确认授权且没有加载模型，可见 Avatar 仍是 `ACCEPTANCE_PENDING_EXTERNAL`，不能记 PASS。
+
+同轮 Gateway 实测还暴露 Host 配对缺陷：中文正文触发问题预算修复时，Surface 删除结尾追问并清空 `tts_text_ja`，Acceptance 随后错误生成 `lang_hint=zh` 的 Voice intent，日语 Edge 正确以 `VOICE_SCHEMA_INVALID` 拒绝。代码现规定首个模型尝试遇到正文修复时必须重新生成中日配对；最终仍无合法日语时显式抑制 `VOICE`，只保留同一 `AffectiveTurnPlan` 的 Avatar transition／release。受影响单元与合同回归 177 项通过；提交后真实 Gateway→Host→Edge 重测前，该项为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

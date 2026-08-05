@@ -641,23 +641,74 @@ class DurableEmbodimentRuntime:
         return stored
 
     def complete_voice_playback(self, result: Any) -> EmbodimentReceipt | None:
-        """Bind a physical playback terminal event to its exact queued command."""
+        """Bind a segmented physical voice terminal to its parent command."""
 
         value = _mapping(result)
         event = dict(value.get("event") or {})
-        command_id = str(event.get("request_id") or "").strip()
+        command_id = str(
+            event.get("segment_parent_request_id")
+            or event.get("request_id")
+            or ""
+        ).strip()
         event_type = str(event.get("event_type") or "").strip().upper()
-        if not command_id or event_type not in {
+        supported_terminal = event_type in {
             "TTS_PLAYBACK_FINISHED",
             "TTS_PLAYBACK_INTERRUPTED",
-        }:
+            "TTS_SYNTH_FAILED",
+            "TTS_PLAYBACK_STARTED",
+        }
+        if not command_id or not supported_terminal:
             return None
+
+        result_success = bool(value.get("success"))
+        is_failure = not result_success and event_type in {
+            "TTS_SYNTH_FAILED",
+            "TTS_PLAYBACK_STARTED",
+        }
+        if is_failure and event.get("external_side_effects") is not False:
+            # A playback callback can fail after touching the device.  Keep the
+            # accepted queue receipt uncertain unless the actuator explicitly
+            # proves that no physical effect started.
+            return None
+
+        try:
+            segment_index = int(event.get("segment_index") or 1)
+            segment_count = int(event.get("segment_count") or 1)
+        except (TypeError, ValueError):
+            segment_index = segment_count = 1
+        if (
+            event_type == "TTS_PLAYBACK_FINISHED"
+            and segment_count > 1
+            and segment_index < segment_count
+        ):
+            return None
+
         with self._pending_voice_lock:
             command = self._pending_voice_commands.pop(command_id, None)
         if command is None:
             return None
         now = self.store.now_ms()
         interrupted = event_type == "TTS_PLAYBACK_INTERRUPTED"
+        if is_failure:
+            receipt = _receipt(
+                command,
+                accepted=False,
+                status="REJECTED",
+                reason_code=(
+                    str(value.get("reason_code") or "").strip()
+                    or "VOICE_SYNTH_FAILED"
+                ),
+                detail=str(value.get("detail") or "tts failed before physical playback"),
+                received_at_ms=now,
+                completed_at_ms=now,
+                event={
+                    **event,
+                    "external_side_effects": False,
+                    "physical_terminal": True,
+                    "interrupted": False,
+                },
+            )
+            return self.store.settle_accepted_command(command, receipt)
         receipt = _receipt(
             command,
             accepted=True,

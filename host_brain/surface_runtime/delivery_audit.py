@@ -202,7 +202,8 @@ def _submit_surface_foreground_completed(
         trace_stage_meta=trace_stage_meta,
     )
     tts_text_ja = ""
-    if result is not None and japanese_companion_voice_enabled():
+    japanese_voice = japanese_companion_voice_enabled()
+    if result is not None and japanese_voice:
         candidate = normalize_japanese_speech_text(
             getattr(result, "tts_text_ja", "")
         )
@@ -213,6 +214,11 @@ def _submit_surface_foreground_completed(
             narrative or ""
         ).strip():
             tts_text_ja = candidate
+    voice_suppressed_reason = (
+        "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
+        if japanese_voice and not tts_text_ja
+        else ""
+    )
     governor_result = _safe_mapping(
         getattr(agent_input, "governor_result", None)
     )
@@ -354,7 +360,14 @@ def _submit_surface_foreground_completed(
     ) or stream_mode == "native_sentence_stream"
     buffered_expression_segments: list[str] = []
     if affective_turn_plan and narrative and not sentence_delivery_already_staged:
-        if tts_text_ja:
+        if voice_suppressed_reason:
+            # Voice and Avatar are independent channels.  A missing same-call
+            # Japanese rendering suppresses only Voice; retain one canonical
+            # Avatar transition for the accepted turn instead of either
+            # feeding Chinese into a Japanese model or neutralising the body.
+            bounded = _bounded_expression_segments(str(narrative or "").strip())
+            buffered_expression_segments = bounded[:1]
+        elif tts_text_ja:
             # The first Japanese implementation is deliberately one same-call,
             # buffered utterance.  It keeps display/speech semantics frozen
             # together without guessing how independently punctuated Chinese
@@ -377,6 +390,7 @@ def _submit_surface_foreground_completed(
                 speech_language="ja" if tts_text_ja else None,
                 sentence_index=sentence_index,
                 created_at_ms=completed_at_ms,
+                channels=(frozenset({"AVATAR"}) if voice_suppressed_reason else None),
             )
             expression_intents.extend(intents)
             expression_receipts.extend(receipts)
@@ -408,6 +422,7 @@ def _submit_surface_foreground_completed(
             action="RELEASE",
             sent_sentence_count=sent_sentence_count,
             created_at_ms=completed_at_ms,
+            channels=(frozenset({"AVATAR"}) if voice_suppressed_reason else None),
         )
         expression_controls.extend(controls)
         expression_receipts.extend(receipts)
@@ -478,6 +493,14 @@ def _submit_surface_foreground_completed(
         "expression_delivery_intents": expression_intents,
         "expression_delivery_controls": expression_controls,
         "expression_delivery_receipts": expression_receipts,
+        **(
+            {
+                "expression_delivery_suppressed_reason": voice_suppressed_reason,
+                "expression_delivery_suppressed_channels": ["VOICE"],
+            }
+            if voice_suppressed_reason
+            else {}
+        ),
         "legacy_direct_embodiment_delivery_retired": bool(affective_turn_plan),
         "timings_ms": dict(timings_ms),
         "total_latency_ms": max(0, int(total_latency_ms or 0)),
@@ -651,6 +674,7 @@ def _expression_sentence_protocol(
     speech_language: str | None = None,
     sentence_index: int,
     created_at_ms: int,
+    channels: frozenset[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Compile one immutable sentence to paired Host-staged channels."""
 
@@ -665,6 +689,9 @@ def _expression_sentence_protocol(
         )
     except ValueError as exc:
         raise RuntimeError(f"AFFECTIVE_EXPRESSION_PROTOCOL_INVALID:{exc}") from exc
+    if channels is not None:
+        intents = tuple(intent for intent in intents if intent.channel in channels)
+        receipts = tuple(receipt for receipt in receipts if receipt.channel in channels)
     trace = expression_delivery_trace(intents, receipts)
     return (
         [intent.as_dict() for intent in intents],
@@ -731,6 +758,7 @@ def _expression_control_protocol(
     sent_sentence_count: int,
     created_at_ms: int,
     reason_code: str | None = None,
+    channels: frozenset[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """Compile cancel/release controls without resurrecting an Edge client."""
 
@@ -744,6 +772,9 @@ def _expression_control_protocol(
         )
     except ValueError as exc:
         raise RuntimeError(f"AFFECTIVE_EXPRESSION_CONTROL_INVALID:{exc}") from exc
+    if channels is not None:
+        intents = tuple(intent for intent in intents if intent.channel in channels)
+        receipts = tuple(receipt for receipt in receipts if receipt.channel in channels)
     trace = expression_delivery_trace(intents, receipts)
     return (
         [intent.as_dict() for intent in intents],

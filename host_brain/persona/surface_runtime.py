@@ -245,8 +245,9 @@ def evaluate_surface_model_response_for_retry(
     candidate = str(structured.get("reply_text") or "").strip()
     if candidate:
         violations = list(_surface_hard_gate_violations(request, candidate))
+        japanese_voice = japanese_companion_voice_enabled()
         if (
-            japanese_companion_voice_enabled()
+            japanese_voice
             and not allow_voice_degradation
             and not str(structured.get("tts_text_ja") or "").strip()
         ):
@@ -254,11 +255,14 @@ def evaluate_surface_model_response_for_retry(
         violations = list(dict.fromkeys(violations))
         if not violations:
             return SurfaceModelRetryEvaluation(retry=False, reason="accepted")
-        repaired = (
-            ""
-            if "JAPANESE_SPEECH_TEXT_MISSING" in violations
-            else _minimal_hard_gate_repair(request, candidate)
-        )
+        # A visible-only repair cannot prove that the paired Japanese speech
+        # still says the same thing.  On the first provider attempt, make the
+        # model regenerate both fields together.  The final attempt may still
+        # degrade Voice explicitly, but must never reuse a stale translation.
+        repaired = "" if (
+            "JAPANESE_SPEECH_TEXT_MISSING" in violations
+            or (japanese_voice and not allow_voice_degradation)
+        ) else _minimal_hard_gate_repair(request, candidate)
         if repaired and not _surface_hard_gate_violations(request, repaired):
             # SurfaceRuntime will apply the same deterministic repair locally.
             return SurfaceModelRetryEvaluation(retry=False, reason="deterministic_repair_available")

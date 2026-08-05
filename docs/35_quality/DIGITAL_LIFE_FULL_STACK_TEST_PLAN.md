@@ -543,6 +543,10 @@ ingress/request
 | AV-08 | VTS `1001 going away` | 一次即时恢复后进入有界退避，不刷错误风暴 |
 | AV-09 | VTS 进程重启 | Edge 不重启也恢复 `AUTHENTICATED` |
 | AV-10 | TTS worker 重启 | 新请求恢复，旧请求不重复播放 |
+| AV-11 | 多分段首段失败 | 父命令确定结算，未播兄弟分段全部取消 |
+| AV-12 | 多分段播放中打断 | 当前播放停止，同父命令队列归零，不恢复后续分段 |
+| AV-13 | 日语发声字段缺失 | 中文正文照常显示，Voice 不得收到中文，Avatar 可独立执行 |
+| AV-14 | VTS 等待人工授权 | 自动重连暂停，线程／失败计数／句柄不持续增长 |
 
 ### 13.3 人工试听
 
@@ -759,4 +763,4 @@ pwsh scripts/runtime/stop_docker_services.ps1 -ProjectName $DockerProject
 
 ## 21. 当前已知待验项
 
-截至 2026-08-04，VTS transport、真实 GPT-SoVITS 播放和口型链路已有局部真实通过证据；当前模型的情绪 expression hotkey 映射、barge-in、完整性能样本、48 条三人盲测和跨 3 天主动／成长观察仍不能标记完成。后续验收从这些真实缺口继续，不重复已经稳定的 Docker、Monitor 路由和基础连接证明。
+截至 2026-08-06，真实 GPT-SoVITS 播放、父子分段终态、队列级 barge-in 和 VTS 人工授权等待的有界暂停已有目标 Edge 证据。VTS 当前仍未完成设备端授权且没有加载模型；声学自动打断、情绪 expression hotkey、完整性能样本、48 条三人盲测和跨 3 天主动／成长观察仍不能标记完成。后续验收从这些真实缺口继续，不重复已经稳定的 Docker、Monitor 路由和基础连接证明。

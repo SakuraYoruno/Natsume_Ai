@@ -8,6 +8,7 @@ from edge_client.actuators.speech import (
     EVENT_TTS_PLAYBACK_FINISHED,
     EVENT_TTS_PLAYBACK_STARTED,
     EVENT_TTS_QUEUED,
+    EVENT_TTS_SYNTH_FAILED,
     S_VOICE_TTS_QUEUE,
     SpeechPlaybackQueue,
     SpeechQueueResult,
@@ -278,6 +279,32 @@ class TestEdgeVoicePipelineHelpers(unittest.TestCase):
         unsubscribe()
         self.assertIsNone(pipeline.complete_playback(ts_ms=2_001))
         self.assertEqual(len(observed), 1)
+
+    def test_playback_completion_observer_receives_pre_playback_failure(self) -> None:
+        self.queue._synthesizer = lambda _: (_ for _ in ()).throw(
+            RuntimeError("synth failed")
+        )
+        pipeline = self._build_pipeline()
+        observed: list[SpeechQueueResult] = []
+        pipeline.register_playback_completion_observer(observed.append)
+
+        result = pipeline.enqueue_speak(
+            request_id="embodiment-command-failed",
+            payload={
+                "session_id": "voice-session",
+                "utterance_id": "utterance-failed",
+                "text": "hello",
+                "segment_parent_request_id": "embodiment-command-failed",
+                "segment_index": 1,
+                "segment_count": 2,
+            },
+            auto_start=True,
+            background_start=False,
+        )
+
+        self.assertFalse(result.success)
+        self.assertEqual(1, len(observed))
+        self.assertEqual(EVENT_TTS_SYNTH_FAILED, observed[0].event["event_type"])
 
     def test_on_asr_rpc_result_flushes_and_report_helpers_guard_missing_session(self) -> None:
         pipeline = self._build_pipeline()

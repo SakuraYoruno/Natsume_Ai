@@ -535,6 +535,54 @@ def test_japanese_companion_voice_retries_missing_speech_once_then_degrades(
     assert degraded.retry is False
 
 
+def test_japanese_companion_voice_retries_paired_text_when_visible_repair_changes_meaning(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    request = surface_runtime_module._coerce_surface_request(  # noqa: SLF001
+        _payload(
+            user_message="帮我给三个步骤。",
+            reply_control_packet={
+                "response_move": "answer_directly",
+                "task_mode": "technical_help",
+                "emotional_tone": "steady_helpful",
+                "relationship_distance": "familiar",
+                "information_budget": "normal",
+                "question_budget": 0,
+                "facts": [],
+                "style_anchor": [],
+            },
+        )
+    )
+    raw = json.dumps(
+        {
+            "reply_text": "先列清单，再定优先级，最后执行。这样够简单吧？",
+            "tts_text_ja": "まず一覧にして、優先順位を決めてから進めよう。これなら簡単でしょ？",
+            "natsume_emotion_tag": "CALM",
+            "user_emotion_tag": "NEUTRAL",
+            "emotion_confidence": 0.5,
+        },
+        ensure_ascii=False,
+    )
+
+    first = evaluate_surface_model_response_for_retry(
+        request,
+        raw_output=raw,
+        current_messages=(),
+    )
+    final_attempt = evaluate_surface_model_response_for_retry(
+        request,
+        raw_output=raw,
+        current_messages=(),
+        allow_voice_degradation=True,
+    )
+
+    assert first.retry is True
+    assert "QUESTION_BUDGET_PROMPTING_USER" in first.violation_codes
+    assert final_attempt.retry is False
+    assert final_attempt.reason == "deterministic_repair_available"
+
+
 def test_parse_surface_generation_output_cleans_chat_punctuation_tail() -> None:
     parsed = parse_surface_generation_output(
         '{"reply_text":"老哥早上好呀～。","natsume_emotion_tag":"HAPPY","user_emotion_tag":"NEUTRAL","emotion_confidence":0.8}'

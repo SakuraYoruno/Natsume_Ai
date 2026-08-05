@@ -334,6 +334,104 @@ def test_queued_voice_receipt_settles_from_exact_playback_terminal_without_repla
     assert calls == [command.command_id]
 
 
+def test_segmented_voice_waits_for_last_physical_segment(tmp_path) -> None:
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    lease = store.open_session(session_id="host-session", owner_id="host", ttl_ms=10_000)
+    command = _voice_command(lease, key="voice-segmented")
+    runtime = DurableEmbodimentRuntime(store)
+    runtime.execute(
+        command,
+        lambda _: {
+            "success": True,
+            "status": "ACCEPTED",
+            "detail": "tts queued",
+        },
+    )
+
+    first = runtime.complete_voice_playback(
+        SpeechQueueResult(
+            success=True,
+            status="ACCEPTED",
+            reason_code=None,
+            stage="S_VOICE_TTS_PLAYBACK",
+            detail="segment 1 finished",
+            event={
+                "request_id": command.command_id,
+                "segment_parent_request_id": command.command_id,
+                "segment_index": 1,
+                "segment_count": 2,
+                "event_type": "TTS_PLAYBACK_FINISHED",
+            },
+        )
+    )
+    assert first is None
+    assert store.get_receipt(command_id=command.command_id).status == "ACCEPTED"
+
+    clock.value += 50
+    last = runtime.complete_voice_playback(
+        SpeechQueueResult(
+            success=True,
+            status="ACCEPTED",
+            reason_code=None,
+            stage="S_VOICE_TTS_PLAYBACK",
+            detail="segment 2 finished",
+            event={
+                "request_id": f"{command.command_id}::seg2",
+                "segment_parent_request_id": command.command_id,
+                "segment_index": 2,
+                "segment_count": 2,
+                "event_type": "TTS_PLAYBACK_FINISHED",
+            },
+        )
+    )
+
+    assert last is not None
+    assert last.status == "APPLIED"
+    assert last.event["segment_index"] == 2
+
+
+def test_segmented_voice_synth_failure_settles_rejected_without_physical_effect(tmp_path) -> None:
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    lease = store.open_session(session_id="host-session", owner_id="host", ttl_ms=10_000)
+    command = _voice_command(lease, key="voice-segment-failed")
+    runtime = DurableEmbodimentRuntime(store)
+    runtime.execute(
+        command,
+        lambda _: {
+            "success": True,
+            "status": "ACCEPTED",
+            "detail": "tts queued",
+        },
+    )
+
+    rejected = runtime.complete_voice_playback(
+        SpeechQueueResult(
+            success=False,
+            status="REJECTED",
+            reason_code="VOICE_SYNTH_FAILED",
+            stage="S_VOICE_TTS_SYNTH",
+            detail="segment 1 synth failed",
+            event={
+                "request_id": command.command_id,
+                "segment_parent_request_id": command.command_id,
+                "segment_index": 1,
+                "segment_count": 2,
+                "event_type": "TTS_SYNTH_FAILED",
+                "external_side_effects": False,
+                "cancelled_queued_segments": 1,
+            },
+        )
+    )
+
+    assert rejected is not None
+    assert rejected.accepted is False
+    assert rejected.status == "REJECTED"
+    assert rejected.reason_code == "VOICE_SYNTH_FAILED"
+    assert rejected.event["cancelled_queued_segments"] == 1
+
+
 @pytest.mark.parametrize("kind", ["voice", "avatar"])
 def test_expression_release_is_a_terminal_control_not_a_speak_request(kind: str) -> None:
     command = build_embodiment_command(
