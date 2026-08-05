@@ -715,7 +715,7 @@ _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
 _UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"不是第一次|每次(?:都|总)|以前(?:也|就|说过|见过)|上次|之前(?:也|就|说过|见过)"
     r"|老是这样|总是这样|又(?:这样|来了|说这种话|是这种)"
-    r"|陪你聊这么久|聊这么久|这么久|一直在这|一直陪|一直跟你"
+    r"|陪你聊这么久|聊这么久|一直在这|一直陪|一直跟你"
 )
 _JAPANESE_UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"(?:初めてじゃない|前にも|以前も|この前も|何度も|長い間|"

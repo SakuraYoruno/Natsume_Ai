@@ -188,3 +188,7 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 `767f21b5a` 加载后的同会话真实重放已经关闭该缺陷。第一轮“你上次完全没听懂我”在一次语义修复后 `APPROVE`；第二轮“那件事让我很不舒服”只调用一次 DeepSeek，14,375 ms、2,545 tokens，返回两个完整候选，本地选中索引 1，选择分 82.0，`selected_output_shape=PAIRED_TEXT_VOICE`。对应 TaskGraph 为 `COMPLETED`，Gateway `INPUT_COMPLETED/OK`，远端 GPT-SoVITS Voice receipt 为 `APPLIED`；Avatar 的表达命令仍受 VTS 外部授权／模型状态限制，不能计三模态通过。脱敏报告为 `paired_candidate_real_retest_1785958168879.json`，SHA-256 `a31a953be8f37735268ec2981e2e181b30cdc839cb400d2e731bd1c9a3704477`。这证明修复场景的生产接线，不替代其余情感族、72 场景和三人盲测。
 
 为避免再次把场景说明发送给七海，新增独立的 DL-07 可执行映射和真实 Gateway cohort runner。72 条覆盖仍由冻结基线定义，其中 48 条文本轨迹具备自然 setup；其余 24 条分别要求真实多模态 observation、主动消息 lifecycle、Host 重启／时间间隔或 Edge fault driver。runner 对每轮精确绑定 `conversation_id + msg_id`，保存 TaskGraph、模型 usage、情感计划和可用物理回执；自动通过固定保留 `HUMAN_REVIEW_PENDING`。42 项 manifest／探针定向回归通过，真实分层校准尚待运行。
+
+首轮分层校准随后真实执行了隐晦低落、空间边界、喜忧混合和亲密／现实关系边界四条轨迹。只有隐晦低落在结构门上通过，但实际第三句回复在用户已经拒绝方案后仍说“早点休息”，人工体验不能计通过；空间与亲密边界均未形成两候选；喜忧轨迹首句因 `UNSUPPORTED_SHARED_HISTORY` 两次语义拒绝而失败。所有新隔离主体的情感计划都停在 `self_affect_revision=0 / CALM / ACKNOWLEDGE`，证明问题不是语料评审苛刻，而是自然文本没有形成有效 canonical Appraisal。
+
+代码现以不增加模型调用的本地快路径修复该断点：TEXT observer 保存最多四个低置信情绪分量；隐晦不顺、好消息、不踏实、拒绝建议、安静／主动联系边界和现实关系自主均能进入对应 Appraisal。新增 `LISTEN` 与 `RESPECT_AUTONOMY` 两个陪伴动作；前者禁止方案、作息建议与追问，后者禁止排他、限制现实交往和赌气退出。共同历史门同时移除过宽的裸 `这么久` 命中，仍拦截 `陪你聊这么久` 等真正无依据的共同经历。AffectFusion、Planner、Surface 和重启相邻集 124 项通过；真实四组重测前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`，人感仍为 `NOT_RUN`。

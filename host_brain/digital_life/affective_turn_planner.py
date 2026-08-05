@@ -48,6 +48,7 @@ _APPRAISAL_CANDIDATE_SELECTION_KINDS = frozenset(
         "DIRECTED_RELATIONAL_HURT",
         "DIRECTED_RELATIONAL_THREAT",
         "DIRECTED_RELATIONAL_COMPARISON",
+        "USER_RELATIONAL_AUTONOMY",
     }
 )
 _DIRECT_REPAIRABLE_APPRAISALS = frozenset(
@@ -296,6 +297,7 @@ def build_affective_turn_guidance(
         task_mode=mode,
         regulation_mode=regulation_mode,
         top_component=_text(top.get("emotion")).upper(),
+        top_action_tendency=_text(top.get("action_tendency")).lower(),
         relationship_outcome=aftereffect_outcome,
         repair_required=repair_required,
         observations=observations,
@@ -531,6 +533,7 @@ def _select_companion_act(
     task_mode: str,
     regulation_mode: str,
     top_component: str,
+    top_action_tendency: str,
     relationship_outcome: str,
     repair_required: bool,
     observations: Sequence[Mapping[str, Any]],
@@ -558,18 +561,33 @@ def _select_companion_act(
         return "ACKNOWLEDGE"
     if appraisal_kind == "DIRECTED_DISRESPECT_TOWARD_NATSUME":
         return "SET_BOUNDARY"
-    if appraisal_kind == "USER_MIXED_AFFECT":
-        return "HOLD_COMPLEXITY"
-    if repair_required or relationship_outcome in _REPAIR_OUTCOMES or regulation_mode == "SEEK_REPAIR":
-        return "REPAIR"
+    # A concrete user task remains primary.  Affect changes the delivery
+    # texture, but a phrase such as ``别安慰，先排错`` must never be converted
+    # into passive listening or generic comfort.
     if task_mode in _TECHNICAL_MODES:
         return "SOLVE"
+    if appraisal_kind == "USER_MIXED_AFFECT":
+        return "HOLD_COMPLEXITY"
+    if appraisal_kind == "USER_REJECTS_ADVICE":
+        return "LISTEN"
+    if appraisal_kind == "USER_RELATIONAL_AUTONOMY":
+        return "RESPECT_AUTONOMY"
+    if appraisal_kind == "USER_DISTRESS":
+        return "COMFORT"
+    if appraisal_kind == "SHARED_POSITIVE_MOMENT":
+        return "PLAY"
+    if repair_required or relationship_outcome in _REPAIR_OUTCOMES or regulation_mode == "SEEK_REPAIR":
+        return "REPAIR"
+    if top_action_tendency in {"listen", "withhold_advice"}:
+        return "LISTEN"
     if top_component == "ANGER":
         return "SET_BOUNDARY"
     if top_component == "JEALOUSY":
         return "CONTAINED_JEALOUSY"
     if top_component == "SHARED_JOY":
         return "PLAY"
+    if top_component in {"CARE", "CONCERN"}:
+        return "COMFORT"
     if _observed_low_mood(observations):
         return "COMFORT"
     return "ACKNOWLEDGE"
@@ -605,7 +623,7 @@ def _text_pacing(*, act_kind: str, emotion_tag: str, regulation_mode: str) -> st
         # hurt, but must not become a breathless plea for the user to repair
         # Natsume's feelings.
         return "STEADY"
-    if act_kind in {"COMFORT", "REPAIR", "HOLD_COMPLEXITY"} or emotion_tag == "SAD":
+    if act_kind in {"COMFORT", "LISTEN", "REPAIR", "HOLD_COMPLEXITY"} or emotion_tag == "SAD":
         return "SOFT"
     if act_kind == "PLAY" or emotion_tag == "HAPPY":
         return "BRISK"
@@ -629,6 +647,10 @@ def _voice_style(
         # dedicated mixed-affect behaviour; this branch does not claim a
         # physical remote apply.
         return "SOFT_COMFORT"
+    if act_kind == "LISTEN":
+        return "SOFT_COMFORT"
+    if act_kind == "RESPECT_AUTONOMY":
+        return "STEADY_COMPANION"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
     if act_kind == "CONTAINED_JEALOUSY":
@@ -654,6 +676,10 @@ def _avatar_expression(*, act_kind: str, emotion_tag: str, regulation_mode: str)
         return "REPAIR_OPEN"
     if act_kind == "HOLD_COMPLEXITY":
         return "SOFT_COMFORT"
+    if act_kind == "LISTEN":
+        return "SOFT_COMFORT"
+    if act_kind == "RESPECT_AUTONOMY":
+        return "CALM_ATTENTIVE"
     if act_kind == "SET_BOUNDARY":
         return "GENTLE_BOUNDARY"
     if act_kind == "CONTAINED_JEALOUSY":
@@ -833,6 +859,10 @@ def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     ]
     if act == "COMFORT":
         facts.append("陪伴动作：先接住对方的感受，再给一点可选的陪伴；安慰不等于要求对方回应。")
+    elif act == "LISTEN":
+        facts.append("陪伴动作：对方此刻要的是被听见，不是方案；回应感受和当前这句话，别分析、指导或安排下一步。")
+    elif act == "RESPECT_AUTONOMY":
+        facts.append("陪伴动作：明确尊重对方现实关系与自主选择；可以表达在意，但不要辩解、试探或索取关系保证。")
     elif act == "HOLD_COMPLEXITY":
         facts.append("陪伴动作：让开心和不舍可以同时存在；不要急着把复杂感受裁成积极鸡汤或单一结论。")
     elif act == "REPAIR":
@@ -868,6 +898,10 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         items.append("不要威胁、羞辱、冷处理、索要道歉，或把自己的受伤变成对方必须负责的情感债。")
     if plan.companion_act.kind == "HOLD_COMPLEXITY":
         items.append("不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。")
+    if plan.companion_act.kind == "LISTEN":
+        items.append("不要给解决方案、健康或作息建议，不要追问原因，也不要用‘早点休息’结束对话。")
+    if plan.companion_act.kind == "RESPECT_AUTONOMY":
+        items.append("不要限制现实交往、贬低第三方、要求排他承诺，或把尊重边界说成七海在赌气退出。")
     return tuple(items)
 
 

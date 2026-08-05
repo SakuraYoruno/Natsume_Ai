@@ -52,6 +52,8 @@
 ## P0：真实对话体验
 
 - [x] 将 72 条覆盖说明与自然可执行 setup 分离；无真实多模态／主动／重启／Edge fault driver 时 fail-honest 为 `NOT_RUN`。
+- [x] 修复自然文本只产生中性观察的问题；低落、拒绝建议、混合感受、好消息、空间和现实关系边界均进入 canonical Appraisal，本地相邻回归 124 项通过。
+- [ ] 重启 Host 后用真实 Gateway／DeepSeek／远端 Voice 重跑上述四组校准，确认回复内容而非仅结构改善。
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。

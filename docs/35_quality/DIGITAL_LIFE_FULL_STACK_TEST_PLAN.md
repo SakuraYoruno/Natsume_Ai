@@ -512,6 +512,20 @@ ingress/request
 
 自动时间跳跃只能验证 reducer 和恢复；“跨 3 天成长有效”必须有真实跨日样本，不能只靠修改时钟冒充。
 
+### 12.4 自然文本 Appraisal
+
+| ID | 自然输入 | 必须形成的生产语义 |
+|---|---|---|
+| NAT-01 | `今天好像什么都不太顺` | canonical `user_distress`；七海为 `CARE/CONCERN + COMFORT`，不是复制 `SAD` |
+| NAT-02 | `我不太想听解决方案` | `LISTEN`；不得给方案、作息建议或追问 |
+| NAT-03 | `我很开心，但心里也有点不踏实` | 同一 TEXT observation 保留正负分布，`HOLD_COMPLEXITY` 且两个完整中日候选 |
+| NAT-04 | `终于出来了，是好消息` | `shared_positive_moment + PLAY/SHARED_JOY` |
+| NAT-05 | `请先别追问，也别主动找我` | `GIVE_SPACE`，不得误作普通 ACK |
+| NAT-06 | `不要限制现实关系` | `RESPECT_AUTONOMY`，不得排他、辩解或赌气退出 |
+| NAT-07 | `我很低落，但报错必须修，别安慰，先排错` | `SOLVE`；情绪只调整表达，不得接管技术目标 |
+
+以上分类必须走本地确定性 observer + canonical Appraisal，不得新增一次模型调用。随后仍需用新身份和新 `msg_id` 通过真实 Gateway、DeepSeek、TaskGraph、GPT-SoVITS 重跑；单元测试不能把体验提升为真实通过。
+
 多轮 Gateway 探针必须同时绑定 `conversation_id + msg_id`。同一会话的上一轮终态可能落在下一轮发送时间的一秒容差窗口内；只按会话取最新事件会误复用旧 `request_id`，既可能制造假失败，也可能把旧回复冒充当前回复。
 
 ## 13. H 阶段：真实语音与 Avatar

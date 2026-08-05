@@ -1443,6 +1443,32 @@ def test_surface_runtime_retries_unsupported_shared_duration() -> None:
     assert result.observation_codes == ()
 
 
+def test_surface_runtime_allows_duration_grounded_in_current_user_message() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        return json.dumps(
+            {
+                "reply_text": "等了这么久，终于是个好消息。嗯，这次可以先替你高兴一下。",
+                "natsume_emotion_tag": "HAPPY",
+                "user_emotion_tag": "HAPPY",
+                "emotion_confidence": 0.7,
+            },
+            ensure_ascii=False,
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(user_message="我等了很久的那个结果终于出来了，是好消息。")
+        )
+    )
+
+    assert len(calls) == 1
+    assert "等了这么久" in result.selected_text
+    assert "UNSUPPORTED_SHARED_HISTORY" not in result.observation_codes
+
+
 def test_surface_runtime_retries_unsupported_shared_always_present() -> None:
     calls: list[list[dict[str, str]]] = []
 

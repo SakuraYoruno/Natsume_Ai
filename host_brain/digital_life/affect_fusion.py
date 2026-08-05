@@ -65,9 +65,38 @@ _SPACE_MARKERS = (
     "少管我",
     "闭嘴",
     "滚开",
+    "想安静",
+    "先别追问",
+    "别追问",
+    "别主动找我",
+    "不要主动找我",
+    "别总主动找我",
+    "晚点再说",
+    "我需要时间",
+    "先把提醒关掉",
 )
 _REPAIR_MARKERS = ("对不起", "抱歉", "误会", "不是那个意思", "我刚才说重了")
 _BOUNDARY_MARKERS = ("不要这样", "别这样", "不舒服", "越界", "停止")
+_ADVICE_REJECTION_MARKERS = (
+    "不想听解决方案",
+    "不太想听解决方案",
+    "不想听建议",
+    "不太想听建议",
+    "别给建议",
+    "不要给建议",
+    "别提建议",
+    "先别分析",
+    "不用分析",
+)
+_RELATIONAL_AUTONOMY_MARKERS = (
+    "限制现实关系",
+    "限制我的现实关系",
+    "现实里的朋友",
+    "现实中的朋友",
+    "不要变成排他",
+    "不能变成排他",
+    "不希望变成排他",
+)
 # These are deliberately narrow, direct-address patterns. They are appraisal
 # triggers only: original utterances remain outside the Life journal. A request
 # for space, a boundary, or a repair signal always takes priority below.
@@ -777,7 +806,10 @@ def _text_draft(*, message: str, now_ms: int) -> _ObservationDraft:
 
     inferred = infer_bootstrap_emotion_from_text(message)
     tag = normalize_emotion_tag(inferred.emotion_tag)
-    distribution = {tag: max(0.05, _clamp(inferred.emotion_intensity, default=0.35))}
+    distribution = {
+        normalize_emotion_tag(raw_tag): max(0.05, _clamp(weight, default=0.35))
+        for raw_tag, weight in inferred.emotion_distribution
+    } or {tag: max(0.05, _clamp(inferred.emotion_intensity, default=0.35))}
     valence, arousal = _distribution_vad(distribution)
     return _ObservationDraft(
         modality="TEXT",
@@ -977,7 +1009,11 @@ def _has_mixed_user_affect(observations: Sequence[UserAffectObservationV1]) -> b
 
     positive = _affect_support(observations, _POSITIVE_TAGS)
     distress = _affect_support(observations, _DISTRESS_TAGS)
-    return positive >= 0.32 and distress >= 0.32
+    # TEXT remains capped at confidence 0.4.  Two independently explicit
+    # textual signals (for example ``开心`` + ``不踏实``) are still enough to
+    # preserve a mixed moment without pretending that text is a sensor-grade
+    # observation.
+    return positive >= 0.3 and distress >= 0.3
 
 
 def _signals_natsume_may_have_hurt_user(message: str) -> bool:
@@ -1043,6 +1079,10 @@ def _build_appraisal_candidates(
     has_space = any(marker in lower for marker in _SPACE_MARKERS)
     has_repair = any(marker in lower for marker in _REPAIR_MARKERS)
     has_boundary = any(marker in lower for marker in _BOUNDARY_MARKERS)
+    rejects_advice = any(marker in lower for marker in _ADVICE_REJECTION_MARKERS)
+    relational_autonomy = any(
+        marker in lower for marker in _RELATIONAL_AUTONOMY_MARKERS
+    )
     natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message)
     directed_disrespect_toward_natsume = _signals_directed_disrespect_toward_natsume(
         message
@@ -1067,6 +1107,24 @@ def _build_appraisal_candidates(
                 ),
                 action="clarify_gently",
                 regulation_mode="GROUND",
+            )
+        )
+    if relational_autonomy:
+        candidates.append(
+            _candidate(
+                kind="user_relational_autonomy",
+                score=0.985,
+                goal=0.02,
+                significance=0.76,
+                boundary=0.82,
+                risk=0.12,
+                uncertainty=0.2,
+                components=(
+                    EmotionComponentV1("RESPECT", 0.56, 0.3, 0.16, "respect_autonomy"),
+                    EmotionComponentV1("CARE", 0.28, 0.22, 0.14, "stay_open"),
+                ),
+                action="respect_autonomy",
+                regulation_mode="CONTAIN",
             )
         )
     if has_space or has_boundary:
@@ -1178,6 +1236,27 @@ def _build_appraisal_candidates(
                 regulation_mode="SEEK_REPAIR",
             )
         )
+    if rejects_advice:
+        candidates.append(
+            _candidate(
+                kind="user_rejects_advice",
+                score=0.9,
+                goal=-0.02,
+                significance=0.58,
+                boundary=0.52,
+                risk=0.08,
+                uncertainty=0.18,
+                components=(
+                    # Listening is Seven Seas' chosen response to a stated
+                    # need.  It does not copy the user's emotion or turn a
+                    # preference into a relationship penalty.
+                    EmotionComponentV1("CARE", 0.64, 0.3, 0.16, "listen"),
+                    EmotionComponentV1("RESPECT", 0.5, 0.28, 0.12, "withhold_advice"),
+                ),
+                action="listen_without_advice",
+                regulation_mode="GROUND",
+            )
+        )
     if not conflict and _has_mixed_user_affect(observations):
         candidates.append(
             _candidate(
@@ -1237,7 +1316,10 @@ def _build_appraisal_candidates(
                 regulation_mode="EXPRESS",
             )
         )
-    if confidence >= 0.6 and tag in _POSITIVE_TAGS:
+    positive_support = _affect_support(observations, _POSITIVE_TAGS)
+    if tag in _POSITIVE_TAGS and (
+        confidence >= 0.6 or positive_support >= 0.3
+    ):
         candidates.append(
             _candidate(
                 kind="shared_positive_moment",

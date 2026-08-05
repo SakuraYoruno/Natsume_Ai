@@ -18,6 +18,7 @@ class EmotionBootstrapResult:
     confidence: float
     source: str
     reason_codes: tuple[str, ...] = ()
+    emotion_distribution: tuple[tuple[str, float], ...] = ()
 
     @property
     def applied(self) -> bool:
@@ -32,6 +33,8 @@ _BOOTSTRAP_EMOTION_MARKERS: dict[str, tuple[str, ...]] = {
     "SAD": (
         "难受", "难过", "低落", "崩溃", "委屈", "想哭", "哭了", "撑不住", "不想动",
         "没力气", "好累", "累死", "心累", "失落", "孤独", "没人懂",
+        "不太顺", "不顺心", "诸事不顺", "提不起劲", "没精神", "不太想说",
+        "不想说", "就这样吧", "今天先到这里",
     ),
     "ANGRY": (
         "生气", "烦死", "烦躁", "气死", "火大", "别烦", "滚", "闭嘴", "讨厌你",
@@ -43,11 +46,12 @@ _BOOTSTRAP_EMOTION_MARKERS: dict[str, tuple[str, ...]] = {
     ),
     "ANXIOUS": (
         "焦虑", "慌", "紧张", "害怕", "怕", "担心", "不安", "完了", "怎么办",
-        "来不及", "压力好大",
+        "来不及", "压力好大", "不踏实", "心里没底", "悬着",
     ),
     "HAPPY": (
         "开心", "高兴", "舒服了", "好多了", "不错", "可以了", "好耶", "太好了",
-        "满意", "喜欢这个",
+        "满意", "喜欢这个", "好消息", "终于出来", "终于拿到", "终于过了",
+        "发布成功", "跑通了", "搞定了", "值得庆祝", "像做梦",
     ),
     "GRATEFUL": ("谢谢", "谢了", "多谢", "辛苦", "帮大忙", "感谢"),
     "LOVING": ("喜欢你", "想你", "抱抱", "贴贴", "爱你"),
@@ -71,6 +75,7 @@ def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
             confidence=0.0,
             source="text_bootstrap_empty",
             reason_codes=("EMPTY_TEXT",),
+            emotion_distribution=(("NEUTRAL", 0.35),),
         )
 
     scores: dict[str, float] = {}
@@ -91,6 +96,7 @@ def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
             confidence=0.0,
             source="text_bootstrap_no_signal",
             reason_codes=("NO_MARKER",),
+            emotion_distribution=(("NEUTRAL", 0.35),),
         )
 
     best_tag, best_score = max(scores.items(), key=lambda item: item[1])
@@ -100,7 +106,11 @@ def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
         reasons.setdefault(best_tag, []).append("phrase:怎么办")
 
     confidence = min(0.92, 0.46 + best_score * 0.16)
-    intensity = min(0.95, 0.42 + best_score * 0.12)
+    distribution = {
+        tag: round(min(0.95, 0.55 + score * 0.22), 4)
+        for tag, score in scores.items()
+    }
+    intensity = distribution[best_tag]
     if any(word in normalized for word in _BOOTSTRAP_INTENSIFIERS):
         confidence = min(0.95, confidence + 0.05)
         intensity = min(0.95, intensity + 0.08)
@@ -112,6 +122,7 @@ def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
             confidence=round(confidence, 4),
             source="text_bootstrap_low_confidence",
             reason_codes=tuple(reasons.get(best_tag, ())) or ("LOW_CONFIDENCE",),
+            emotion_distribution=(("NEUTRAL", 0.35),),
         )
 
     return EmotionBootstrapResult(
@@ -120,6 +131,9 @@ def infer_bootstrap_emotion_from_text(text: str) -> EmotionBootstrapResult:
         confidence=round(confidence, 4),
         source="text_bootstrap_fallback",
         reason_codes=tuple(reasons.get(best_tag, ()))[:4],
+        emotion_distribution=tuple(
+            sorted(distribution.items(), key=lambda item: (-item[1], item[0]))
+        )[:4],
     )
 
 

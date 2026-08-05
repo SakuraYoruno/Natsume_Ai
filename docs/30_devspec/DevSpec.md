@@ -38,7 +38,7 @@ flowchart TD
 | `SelfAffectStateV2` | mixed components、mood、need、energy、relationship safety、revision |
 | `EmotionEpisodeV1` | cause、object、action tendency、decay、unresolved、repair outcome |
 | `RegulationDecisionV1` | express、contain、delay、boundary 与理由 |
-| `CompanionActV1` | comfort、play、repair、set_boundary、give_space、silence 等 |
+| `CompanionActV1` | comfort、listen、play、repair、set_boundary、respect_autonomy、give_space、silence 等 |
 | `AffectiveTurnPlanV1` | 本轮观察、评价、自我状态、动作、表达与生成策略的冻结引用 |
 | `ExpressionPlanV1` | text prosody、TTS、Avatar、synchronization id |
 | `RelationalAftereffectV1` | helpful、misunderstood、boundary、repair、technical failure |
@@ -69,6 +69,10 @@ flowchart TD
 7. 后效应异步关联，但不能晚于下一轮状态读取。
 
 低置信、混合情绪、边界、冲突、修复或 distress 才进入深路径；最多两个候选、一次重试，超时回退到明确不确定性的快路径。日语声线开启时，每个候选必须同时包含中文显示正文和同义日语发声正文；本地选择后仍以一个完整配对对象进入 Surface，禁止先压成中文字符串再丢失 Voice 语义。
+
+文本 observer 必须保留同一句中的多标签分布，但置信度上限仍低于显式自述、声学和视觉观察。隐晦低落形成 `COMFORT`，拒绝建议形成 `LISTEN`，现实关系／非排他边界形成 `RESPECT_AUTONOMY`，明确好消息形成 `PLAY`；这些动作由 canonical Appraisal 产生，不允许 Surface 从原文临时伪造。`LISTEN` 必须禁止方案、作息建议和追问；`RESPECT_AUTONOMY` 必须禁止限制现实交往、贬低第三方和索取承诺。
+
+明确技术任务优先于低落、混合感受和“别安慰”等表达偏好：此时 CompanionAct 必须保持 `SOLVE`，关怀只改变措辞和三模态质感，不能把排错、写作或执行目标替换为陪聊。明确要求停止、空间或修复仍按各自边界处理。
 
 ## 6. 语音与 Avatar
 

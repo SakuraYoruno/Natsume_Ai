@@ -251,3 +251,16 @@ Life Body 必须从真实 `digital_life_runtime_snapshot.hard_state.emotion_tag`
 2026-08-04 当前证据：受影响 Python 30 passed、Monitor read-model 27 passed、生产构建通过、真实浏览器两条用例通过；真实签名 Gateway 三条新请求的最新有效桶 Reply Commit／Closed Loop／Completion 为 100%。整体仍按 `INCOMPLETE` 处理。
 
 Core Release manifest 合同必须把当前 migration catalog head 与完整 migration asset group 分开校验。新增 append-only migration 后，head 断言、通用 Runtime 的 `catalog_migration_head` 和机器状态必须在同一提交前进；历史七路线 `accepted_migration_head` 继续绑定原 receipt，禁止借 catalog 前进伪造重验收。当前 catalog head 为 `0153_terminal_prebudget_cancellation_classifier_correction.sql`。
+
+自然文本情感快路径的最小回归为：
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_dl02_affect_fusion.py `
+  tests/integration/test_dl02_affect_fusion_restart.py `
+  tests/unit/test_dl04_affective_turn_planner.py `
+  tests/unit/test_emotion_context_helpers_extra.py `
+  tests/unit/test_surface_runtime.py
+```
+
+断言不仅检查情绪标签，还检查 canonical appraisal kind、self/user 分离、`LISTEN`／`RESPECT_AUTONOMY`、候选数量以及模型调用次数。真实验收必须另行执行 `test_digital_life_live_cohort.py`，并人工阅读逐轮回复；结构通过不能覆盖“早点休息”等违背当前用户边界的内容。
