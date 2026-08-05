@@ -134,3 +134,9 @@ flowchart LR
 - 任何上一层证据都不能冒充下一层物理事实。
 
 观测系统必须消费当前唯一 authority，而不是要求生产继续制造已退役的 ACK／progress 事件来让仪表盘变绿。历史失败也不得被覆盖；当前改进应通过新的有时间边界的真实样本表现出来。
+
+## 13. 模块边界服务于生命连续性
+
+拆模块不是为了追求目录数量，而是避免一种文件同时承担“理解、状态折叠、交付、设备协议和恢复”后形成隐形第二 authority。当前代码按因果阶段分开：观察与融合、self-affect reducer、relationship reducer、Surface 生成、分句可见性、Expression delivery、设备命令和 terminal receipt 各自只拥有一段职责。
+
+这种分离不会把普通对话变成同步审计流水线。无副作用聊天仍以自然度和首字延迟为优先；只有跨进程、可能重复或需要恢复的 Voice、Avatar、Gateway 和 Operator effect 才保留紧凑持久边界。结构门禁证明的是职责没有重新混回巨石，不等于数字生命体验已经通过。

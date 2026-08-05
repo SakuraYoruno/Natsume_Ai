@@ -92,3 +92,17 @@
 | External Delivery | Gateway terminal／平台 ACK | 在存在真实平台证据时证明传输或送达终态 |
 
 Monitor 的 Closed Loop、Reply Outbox、Terminal 三组指标分别展示上述边界，禁止继续把 legacy ACK touch 当作当前主链的必要生产事件。
+
+## 10. 结构收口后的模块责任
+
+| 责任 | 生产模块 | 不再承担 |
+|---|---|---|
+| 情感流式生成 | `surface_affective_native_stream.py` | Life reducer、设备发送 |
+| 情感确定性／延期交付 | `surface_affective_delivery.py` | 模型候选生成 |
+| 自我情感折叠 | `affective_domain_reducer.py` | 关系 profile 和主动频率 |
+| 关系与主动后效应折叠 | `relationship_domain_reducer.py` | 用户观察融合 |
+| Operator Acceptance effect | `operator_acceptance_effects.py` | 通用 Chat／Skill effect 编译 |
+| Host 设备命令前门 | `embodiment_commands.py` | Edge 驱动和物理 I/O |
+| TTS 情绪韵律 | `edge_client/actuators/tts_prosody.py` | 模型生命周期与播放设备 |
+
+兼容入口仍从原模块重导出必要符号，以保持调用合同；新实现边界本身才是职责 owner。后续修改应直接进入对应模块，禁止把逻辑重新堆回 facade。

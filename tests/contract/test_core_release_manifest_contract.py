@@ -32,7 +32,7 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     assert manifest["schema_version"] == CORE_RELEASE_MANIFEST_SCHEMA_VERSION
     assert len(manifest["architecture_gates"]) == 15
     assert manifest["migration_head"].endswith(
-        "0152_evolution_policy_digest_scope.sql"
+        "0153_terminal_prebudget_cancellation_classifier_correction.sql"
     )
     migration_files = manifest["asset_groups"]["migrations"]["files"]
     assert (
@@ -163,6 +163,11 @@ def test_core_release_manifest_freezes_all_input_groups() -> None:
     )
     assert (
         "host_brain/audit/migrations/0152_evolution_policy_digest_scope.sql"
+        in migration_files
+    )
+    assert (
+        "host_brain/audit/migrations/"
+        "0153_terminal_prebudget_cancellation_classifier_correction.sql"
         in migration_files
     )
     assert (

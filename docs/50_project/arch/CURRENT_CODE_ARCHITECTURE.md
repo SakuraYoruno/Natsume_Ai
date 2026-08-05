@@ -124,3 +124,18 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 - `obs_routes_stats_input_humanoid.py` 将当前闭环定义为 canonical Reply Outbox commit 或有证据的 legacy terminal 信号；新样本不再依赖已退役的 ACK/progress 事件，旧样本仍按原事实保留。
 - `observability_runtime/life_body_source.py` 从 `digital_life_runtime_snapshot.hard_state.emotion_tag` 派生 `currentEmotion`；Monitor hook 同时兼容旧投影，但不再因缺少旧 `emotion_context` 显示待连接。
 - 当前真实新样本为三条签名 Gateway 路线，最新有效时间桶回复提交率、闭环率和完成率均为 100%；这不是全系统最终验收。
+
+## 11. 2026-08-05 职责边界收口
+
+本轮没有扩大 `core_architecture_policy.json` 的大文件白名单，而是把 A03 报出的 15 个热点拆成生产可复用的边界：
+
+| 原入口 | 新边界 |
+|---|---|
+| `surface_main_chain_adapter.py` | `surface_affective_native_stream.py`、`surface_affective_delivery.py`、`surface_main_chain_support.py` |
+| `domain_reducer.py` | `affective_domain_reducer.py`、`relationship_domain_reducer.py`、`domain_reducer_support.py` |
+| `acceptance_effects.py` | `operator_acceptance_effects.py`、`acceptance_effect_support.py` |
+| `governed_route_executors.py` | `governed_expression_delivery.py`、`governed_route_support.py` |
+| `embodiment.py` | `embodiment_commands.py` |
+| TTS、检索、迁移、Grant、Life delivery、terminal reconciliation、Tribe 订阅 | 分别进入同域的 prosody／projection／compiler／delivery／classifier／event-handler 模块 |
+
+当前工作树上的 A01～A14 静态架构门禁为 `PASS`，migration catalog head 为 `0153`。这只关闭静态职责和目录合同漂移；A15 必须绑定提交 SHA 重新启动真实 Docker、Host、OBS、Monitor、Gateway 和可用 Edge 后才能形成最终结论。

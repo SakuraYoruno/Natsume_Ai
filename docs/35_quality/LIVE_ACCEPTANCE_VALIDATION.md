@@ -132,3 +132,9 @@ Edge 总体仍为 `DEGRADED`，原因只剩当前模型没有兼容的情绪 exp
 同次真实 SQLite 检查确认 `digital_life_runtime_snapshot` 的当前结构以 `hard_state.emotion_tag` 保存 canonical self affect。Sidecar 重启后 `/obs/life-body` 为 `HEALTHY` 且 `derived.currentEmotion=NEUTRAL`；真实 Nginx Monitor Playwright 同时验证页面无“待连接”、“Runtime 待恢复”、Capability Forge 原始错误横幅或“主链存在断点”，并显示人格上下文“情绪 平静”。
 
 本地回归证据为：受影响 Python 30 passed，Monitor read-model 27 passed，Vite 生产构建通过，真实 `operator-session-live` 与 `core-release-real-interaction` 各 1 passed。这里的 Outbox commit 只证明 Host 已接受并持久提交 Gateway 回复，不能冒充外部平台物理 ACK。VTS 情绪热键、barge-in、常驻 ASR 噪声、长期盲测、PlanningSearch 三域收益和最终 commit 全栈故障矩阵仍未完成，整体保持 `INCOMPLETE`。
+
+## 2026-08-05 A01～A14 前置门禁
+
+在最新 `dev` 基线上纠正 migration head 到 `0153`，并对 A03 的 15 个大文件热点执行实体拆分。当前工作树静态 A01～A14 全部通过；Surface、Digital Life、Task Acceptance、Embodiment、TTS、Tribe 和持久化受影响波次回归 306 项通过，pytest 全量收集通过。
+
+这不是 A15：尚未以提交后的最终 SHA 重启 Docker、Host、OBS、Monitor、Gateway 和可用 Edge，也没有重跑 PlanningSearch 三域收益、72 场景、三人盲测或完整故障矩阵。因此本节证据只能标记为 `LOCAL_STATIC_PRECONDITION_PASS`，总体仍为 `INCOMPLETE`。

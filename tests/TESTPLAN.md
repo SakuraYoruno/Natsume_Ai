@@ -236,3 +236,5 @@ gateway_delivery_state     = OUTBOX_COMMITTED
 Life Body 必须从真实 `digital_life_runtime_snapshot.hard_state.emotion_tag` 派生 `derived.currentEmotion`，并以真实 OBS／Nginx Monitor 浏览器断言页面不存在“待连接／待恢复”。仅构造 fixture 或 hook 默认值不能算真实通过。
 
 2026-08-04 当前证据：受影响 Python 30 passed、Monitor read-model 27 passed、生产构建通过、真实浏览器两条用例通过；真实签名 Gateway 三条新请求的最新有效桶 Reply Commit／Closed Loop／Completion 为 100%。整体仍按 `INCOMPLETE` 处理。
+
+Core Release manifest 合同必须把当前 migration catalog head 与完整 migration asset group 分开校验。新增 append-only migration 后，head 断言、通用 Runtime 的 `catalog_migration_head` 和机器状态必须在同一提交前进；历史七路线 `accepted_migration_head` 继续绑定原 receipt，禁止借 catalog 前进伪造重验收。当前 catalog head 为 `0153_terminal_prebudget_cancellation_classifier_correction.sql`。
