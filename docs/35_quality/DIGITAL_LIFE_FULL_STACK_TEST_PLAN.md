@@ -528,6 +528,8 @@ ingress/request
 
 多轮 Gateway 探针必须同时绑定 `conversation_id + msg_id`。同一会话的上一轮终态可能落在下一轮发送时间的一秒容差窗口内；只按会话取最新事件会误复用旧 `request_id`，既可能制造假失败，也可能把旧回复冒充当前回复。
 
+同一轨迹的 Gateway `from_id` 也必须固定。Host 从发送者派生 `relationship_subject_id`；如果测试把 turn index 拼进 sender，即使 `conversation_id` 相同，每轮也会成为新用户。自动 verdict 必须比较所有回合的 `person_id` 和 TaskGraph `session_id`，任一漂移直接失败。
+
 ## 13. H 阶段：真实语音与 Avatar
 
 ### 13.1 八种陪伴动作

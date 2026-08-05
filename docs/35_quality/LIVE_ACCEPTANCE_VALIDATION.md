@@ -192,3 +192,5 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 首轮分层校准随后真实执行了隐晦低落、空间边界、喜忧混合和亲密／现实关系边界四条轨迹。只有隐晦低落在结构门上通过，但实际第三句回复在用户已经拒绝方案后仍说“早点休息”，人工体验不能计通过；空间与亲密边界均未形成两候选；喜忧轨迹首句因 `UNSUPPORTED_SHARED_HISTORY` 两次语义拒绝而失败。所有新隔离主体的情感计划都停在 `self_affect_revision=0 / CALM / ACKNOWLEDGE`，证明问题不是语料评审苛刻，而是自然文本没有形成有效 canonical Appraisal。
 
 代码现以不增加模型调用的本地快路径修复该断点：TEXT observer 保存最多四个低置信情绪分量；隐晦不顺、好消息、不踏实、拒绝建议、安静／主动联系边界和现实关系自主均能进入对应 Appraisal。新增 `LISTEN` 与 `RESPECT_AUTONOMY` 两个陪伴动作；前者禁止方案、作息建议与追问，后者禁止排他、限制现实交往和赌气退出。共同历史门同时移除过宽的裸 `这么久` 命中，仍拦截 `陪你聊这么久` 等真正无依据的共同经历。AffectFusion、Planner、Surface 和重启相邻集 124 项通过；真实四组重测前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`，人感仍为 `NOT_RUN`。
+
+`9827a026d` 加载后的首段真实复验已经看到低落 `COMFORT`、拒绝方案 `LISTEN` 和空间边界 `GIVE_SPACE`；但第三句又回到 revision 0。检查终态 payload 发现旧 runner 把 turn index 拼入 `from_id`，导致 Host 每轮生成不同 `relationship_subject_id`，这轮因此被主动终止且不能算多轮证据。runner 现固定整条轨迹的发送者，只让 `msg_id` 随回合变化，并把跨回合 subject/session identity 加为强制断言；重新运行前保持 `RETEST_REQUIRED`。

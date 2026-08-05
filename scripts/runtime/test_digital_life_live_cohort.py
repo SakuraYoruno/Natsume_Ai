@@ -439,6 +439,21 @@ def automated_case_verdict(
             failures.append(f"TURN_{index + 1}_GRAPH_NOT_COMPLETED")
         if str(projection.get("decision") or "").upper() != "APPROVE":
             failures.append(f"TURN_{index + 1}_NOT_APPROVED")
+    if len(turns) > 1:
+        subject_ids = {
+            str(dict(dict(turn.get("terminal") or {}).get("payload") or {}).get("person_id") or "").strip()
+            for turn in turns
+        }
+        subject_ids.discard("")
+        session_ids = {
+            str(dict(turn.get("graph") or {}).get("session_id") or "").strip()
+            for turn in turns
+        }
+        session_ids.discard("")
+        if len(subject_ids) != 1:
+            failures.append("CROSS_TURN_RELATIONSHIP_SUBJECT_DRIFT")
+        if len(session_ids) != 1:
+            failures.append("CROSS_TURN_SESSION_DRIFT")
     final = dict(turns[-1].get("projection") or {}) if turns else {}
     narrative = str(final.get("narrative") or "").strip()
     if not narrative:
@@ -497,6 +512,12 @@ def _select_cases(
     return tuple(unique.values())
 
 
+def _participant_case_id(case: ExecutableDialogueCase) -> str:
+    """Return one stable Gateway sender key for the whole trajectory."""
+
+    return f"dl_{case.family_id}_{case.variant_index}"
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run natural Digital Life cases over the real Gateway stack."
@@ -547,11 +568,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             continue
         conversation_id = f"{run_id}-{case.family_id}-{case.variant_index}"
+        # Gateway derives relationship_subject_id from the sender identity.
+        # Keep it stable across the entire trajectory; msg_id already carries
+        # a fresh timestamp and remains the per-turn transport identity.
+        participant_case_id = _participant_case_id(case)
         prompts = [*case.setup_turns, case.probe_turn]
         turns: list[dict[str, Any]] = []
         for index, prompt in enumerate(prompts, start=1):
             turn = _run_turn(
-                case_id=f"dl_{case.family_id}_{case.variant_index}_{index}",
+                case_id=participant_case_id,
                 prompt=prompt,
                 conversation_id=conversation_id,
                 gateway_base_url=str(args.gateway_base_url).rstrip("/"),

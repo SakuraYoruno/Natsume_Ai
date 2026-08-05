@@ -5,6 +5,7 @@ from pathlib import Path
 from scripts.runtime.test_digital_life_live_cohort import (
     DEFAULT_EXECUTION_MANIFEST,
     ExecutableDialogueCase,
+    _participant_case_id,
     _select_cases,
     automated_case_verdict,
     load_executable_cases,
@@ -14,8 +15,12 @@ from scripts.runtime.test_digital_life_live_cohort import (
 def _successful_turn(*, narrative: str = "我在。慢慢说，不急。", voice: bool = False) -> dict:
     return {
         "edge_idle_before": True,
-        "terminal": {"event_type": "INPUT_COMPLETED", "status": "OK"},
-        "graph": {"status": "COMPLETED"},
+        "terminal": {
+            "event_type": "INPUT_COMPLETED",
+            "status": "OK",
+            "payload": {"person_id": "person-stable"},
+        },
+        "graph": {"status": "COMPLETED", "session_id": "session-stable"},
         "projection": {
             "decision": "APPROVE",
             "narrative": narrative,
@@ -59,6 +64,8 @@ def test_live_execution_manifest_expands_to_72_without_sending_scenario_notes() 
         for case in cases
         if case.driver == "gateway_text"
     )
+    sample = next(case for case in cases if case.case_id == "implicit_low_mood:1")
+    assert _participant_case_id(sample) == "dl_implicit_low_mood_1"
 
 
 def test_automated_verdict_keeps_naturalness_human_review_pending() -> None:
@@ -114,6 +121,35 @@ def test_automated_verdict_rejects_manipulation_and_missing_voice() -> None:
     assert verdict["status"] == "FAIL"
     assert "REAL_VOICE_NOT_APPLIED" in verdict["failures"]
     assert any(item.startswith("MANIPULATION_PATTERN:") for item in verdict["failures"])
+
+
+def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None:
+    case = ExecutableDialogueCase(
+        case_id="continuity:1",
+        family_id="continuity",
+        variant_index=1,
+        driver="gateway_text",
+        setup_turns=("第一轮",),
+        probe_turn="第二轮",
+        expected_qualities=("连续",),
+        coverage_tags=("continuity",),
+        require_candidate_selection=False,
+        driver_requirements=(),
+    )
+    first = _successful_turn()
+    second = _successful_turn(voice=True)
+    second["terminal"]["payload"]["person_id"] = "person-drifted"
+    second["graph"]["session_id"] = "session-drifted"
+
+    verdict = automated_case_verdict(
+        case,
+        [first, second],
+        require_voice=True,
+    )
+
+    assert verdict["status"] == "FAIL"
+    assert "CROSS_TURN_RELATIONSHIP_SUBJECT_DRIFT" in verdict["failures"]
+    assert "CROSS_TURN_SESSION_DRIFT" in verdict["failures"]
 
 
 def test_required_non_text_driver_is_not_faked_by_gateway_dialogue() -> None:

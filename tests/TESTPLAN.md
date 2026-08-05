@@ -264,3 +264,5 @@ python -m pytest -q `
 ```
 
 断言不仅检查情绪标签，还检查 canonical appraisal kind、self/user 分离、`LISTEN`／`RESPECT_AUTONOMY`、候选数量以及模型调用次数。真实验收必须另行执行 `test_digital_life_live_cohort.py`，并人工阅读逐轮回复；结构通过不能覆盖“早点休息”等违背当前用户边界的内容。
+
+多轮 runner 的独立回归还必须断言：同一轨迹所有 webhook 使用同一个 sender，从而得到唯一 `relationship_subject_id`；每轮 `msg_id` 仍唯一；终态 payload 的 `person_id` 和 TaskGraph `session_id` 在全轨迹内各只有一个值。只固定 `conversation_id` 不足以证明关系连续性。
