@@ -1314,6 +1314,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("QUESTION_BUDGET_PROMPTING_USER")
     if _accepted_task_result_synthesis_clarification(request, value):
         codes.append("ACCEPTED_TASK_RESULT_CLARIFICATION")
+    if _accepted_task_result_synthesis_inadequate(request, value):
+        codes.append("ACCEPTED_TASK_RESULT_SYNTHESIS_INADEQUATE")
     if _unsupported_shared_history_hits(request, value):
         codes.append("UNSUPPORTED_SHARED_HISTORY")
     if _surface_internal_authorship_hits(request, value):
@@ -2490,14 +2492,78 @@ def _accepted_task_result_synthesis_clarification(
     return bool(_ACCEPTED_TASK_RESULT_CLARIFICATION_RE.search(str(text or "")))
 
 
+_ACCEPTED_RESULT_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+_ACCEPTED_RESULT_ASCII_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_.:/-]{2,}")
+
+
+def _accepted_result_compact_text(value: str) -> str:
+    return re.sub(r"[^\u3400-\u9fffA-Za-z0-9]+", "", str(value or "")).lower()
+
+
+def _accepted_result_anchors(value: str) -> tuple[str, ...]:
+    """Return small source-derived anchors without understanding the domain.
+
+    This gate is intentionally limited to terminal Task-result synthesis.  It
+    does not score ordinary conversation.  CJK trigrams tolerate light
+    paraphrasing while ASCII identifiers preserve concrete technical terms.
+    """
+
+    compact = _accepted_result_compact_text(value)
+    cjk = "".join(_ACCEPTED_RESULT_CJK_RE.findall(compact))
+    anchors: list[str] = []
+    for index in range(max(0, len(cjk) - 2)):
+        anchor = cjk[index : index + 3]
+        if anchor not in anchors:
+            anchors.append(anchor)
+        if len(anchors) >= 96:
+            break
+    for token in _ACCEPTED_RESULT_ASCII_TOKEN_RE.findall(str(value or "")):
+        normalized = token.lower()
+        if normalized not in anchors:
+            anchors.append(normalized)
+        if len(anchors) >= 112:
+            break
+    return tuple(anchors)
+
+
+def _accepted_task_result_synthesis_inadequate(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Reject a terminal answer that does not materially consume its inputs."""
+
+    results = _accepted_task_result_texts_from_request(request)
+    if not results:
+        return False
+    candidate = _accepted_result_compact_text(text)
+    source_chars = sum(len(_accepted_result_compact_text(item)) for item in results)
+    minimum_chars = min(
+        160 if len(results) > 1 else 96,
+        max(32 if len(results) == 1 else 40, int(source_chars * 0.12)),
+    )
+    if len(candidate) < minimum_chars:
+        return True
+    if len(results) == 1:
+        return False
+
+    covered_results = 0
+    for result in results:
+        anchors = _accepted_result_anchors(result)
+        if sum(1 for anchor in anchors if anchor in candidate) >= 2:
+            covered_results += 1
+    return covered_results < min(2, len(results))
+
+
 def _accepted_task_result_fallback(request: IsolatedSurfaceInput) -> str:
     results = _accepted_task_result_texts_from_request(request)
     if not results:
         return ""
-    for result in results:
-        if not result.lstrip().startswith(("{", "[")):
-            return result
-    return results[0]
+    if len(results) == 1:
+        return results[0]
+    sections = ["已完成结果如下："]
+    for index, result in enumerate(results, start=1):
+        sections.append(f"{index}. {result}")
+    return "\n\n".join(sections)
 
 
 def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
@@ -2524,6 +2590,7 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     if codes.intersection(
         {
             "ACCEPTED_TASK_RESULT_CLARIFICATION",
+            "ACCEPTED_TASK_RESULT_SYNTHESIS_INADEQUATE",
             "QUESTION_BUDGET_PROMPTING_USER",
         }
     ):
@@ -2880,6 +2947,7 @@ class SurfaceRuntime:
                 "AUTONOMOUS_SELF_EMPTY_ANSWER",
                 "AUTONOMOUS_SELF_MISSING_GROUNDING",
                 "AUTONOMOUS_SELF_TOO_THIN",
+                "ACCEPTED_TASK_RESULT_SYNTHESIS_INADEQUATE",
             }
             for code in hard_gate_observations
         )

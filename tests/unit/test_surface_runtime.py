@@ -133,6 +133,96 @@ def test_surface_runtime_replaces_plan_clarification_with_accepted_result() -> N
     assert accepted in rendered_prompt
 
 
+def test_surface_runtime_retries_thin_plan_synthesis_and_consumes_both_results() -> None:
+    calls: list[list[dict[str, str]]] = []
+    accepted = [
+        (
+            "信息架构审查：梳理全站路由、主导航与关键任务入口，逐页检查空状态、"
+            "加载状态和错误状态，并标注阻断用户完成任务的断点。"
+        ),
+        (
+            "交付验收：覆盖移动端响应式、键盘导航、ARIA 标签、Lighthouse 性能，"
+            "最后按严重程度与修复成本排序，形成可复测的审查报告。"
+        ),
+    ]
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["你可以先按这个框架跑一轮，有特殊需求我们再细化。"])
+        return _candidate_payload(
+            [
+                (
+                    "先做信息架构审查：梳理全站路由、主导航和关键任务入口，逐页核对空状态、"
+                    "加载状态、错误状态以及阻断任务的断点。随后进入交付验收，覆盖移动端响应式、"
+                    "键盘导航、ARIA 标签与 Lighthouse 性能；所有问题按严重程度和修复成本排序，"
+                    "输出带复测步骤的审查报告。执行时先跑关键路径，再补边界状态，最后复测高优先级问题。"
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="请给我一个完整的前端可用性审查方案",
+                accepted_task_results=accepted,
+                reply_control_packet={
+                    "response_move": "synthesize_accepted_task_results",
+                    "task_mode": "accepted_task_result_synthesis",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "detailed",
+                    "question_budget": 0,
+                    "facts": ["已有两份通过节点验收的任务结果。"],
+                    "must_not_do": ["不得丢弃已验收结果。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "ACCEPTED_TASK_RESULT_SYNTHESIS_INADEQUATE" in calls[1][-1]["content"]
+    assert "全站路由" in result.selected_text
+    assert "Lighthouse" in result.selected_text
+    assert not result.observation_codes
+
+
+def test_surface_runtime_external_retry_owner_falls_back_to_all_plan_results() -> None:
+    accepted = [
+        "第一部分：检查路由、导航、入口以及空状态和错误状态。",
+        "第二部分：检查响应式、无障碍和性能，按优先级交付审查报告。",
+    ]
+
+    def generate(_messages):  # noqa: ANN001
+        return _candidate_payload(["你可以先按这个框架跑一轮，有特殊需求我们再细化。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="给我完整审查方案",
+                accepted_task_results=accepted,
+                reply_control_packet={
+                    "response_move": "synthesize_accepted_task_results",
+                    "task_mode": "accepted_task_result_synthesis",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "detailed",
+                    "question_budget": 0,
+                    "facts": [],
+                    "must_not_do": [],
+                },
+            )
+        )
+    )
+
+    assert "第一部分" in result.selected_text
+    assert "第二部分" in result.selected_text
+    assert not result.observation_codes
+
+
 def test_surface_runtime_retries_auditory_check_without_text_grounding() -> None:
     calls: list[list[dict[str, str]]] = []
 
