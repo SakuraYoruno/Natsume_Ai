@@ -223,6 +223,51 @@ def test_surface_runtime_external_retry_owner_falls_back_to_all_plan_results() -
     assert not result.observation_codes
 
 
+def test_accepted_plan_keeps_long_user_facing_task_language() -> None:
+    accepted = [
+        "先梳理用户关键路径和页面入口，再检查状态覆盖。",
+        "最后输出可复测的问题清单、优先级和修复建议。",
+    ]
+    reply = (
+        "先梳理用户关键路径、全站导航和页面入口，再逐页检查加载、空状态与错误状态。"
+        "关键操作需要覆盖键盘导航、ARIA 标签、移动端断点和性能感知；高风险问题必须附复现步骤，"
+        "其余问题可以按修复成本排序。最终交付问题清单、优先级、责任组件和回归检查表，"
+        "这样既能指导修复，也能直接用于下一轮复测。"
+    )
+
+    parsed = parse_surface_generation_output(
+        _candidate_payload([reply]),
+        allow_task_content=True,
+    )
+
+    assert parsed["reply_text"] == reply
+
+    def generate(_messages):  # noqa: ANN001
+        return _candidate_payload([reply])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="给我一个完整审查方案",
+                accepted_task_results=accepted,
+                reply_control_packet={
+                    "response_move": "synthesize_accepted_task_results",
+                    "task_mode": "accepted_task_result_synthesis",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "detailed",
+                    "question_budget": 0,
+                    "facts": [],
+                    "must_not_do": [],
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == reply
+    assert not result.observation_codes
+
+
 def test_surface_runtime_retries_auditory_check_without_text_grounding() -> None:
     calls: list[list[dict[str, str]]] = []
 

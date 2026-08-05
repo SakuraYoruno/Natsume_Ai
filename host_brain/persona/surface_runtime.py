@@ -236,7 +236,12 @@ def evaluate_surface_model_response_for_retry(
 ) -> SurfaceModelRetryEvaluation:
     """Return a retry prompt without performing any model invocation."""
 
-    structured = parse_surface_generation_output(raw_output)
+    structured = parse_surface_generation_output(
+        raw_output,
+        allow_task_content=bool(
+            getattr(request, "accepted_task_results", None)
+        ),
+    )
     candidate = str(structured.get("reply_text") or "").strip()
     if candidate:
         violations = list(_surface_hard_gate_violations(request, candidate))
@@ -1096,18 +1101,27 @@ def strip_surface_process_preface(text: str) -> str:
     return visible_lines[-1] if visible_lines else value
 
 
-def _surface_internal_process_leak_hits(text: str) -> bool:
+def _surface_internal_process_leak_hits(
+    text: str,
+    *,
+    allow_task_content: bool = False,
+) -> bool:
     value = str(text or "").strip()
     if not value:
         return False
     if any(pattern.search(value) for pattern in _INTERNAL_LEAK_PATTERNS):
         return True
     marker_hits = sum(1 for marker in _PROCESS_LEAK_MARKERS if marker in value)
-    if marker_hits >= 2:
+    if not allow_task_content and marker_hits >= 2:
         return True
     if _PROCESS_FIELD_ASSIGN_RE.search(value) and len(value) >= 40:
         return True
-    if len(value) >= 100 and ("用户" in value) and any(token in value for token in ("必须", "不能", "需要", "根据", "最终")):
+    if (
+        not allow_task_content
+        and len(value) >= 100
+        and ("用户" in value)
+        and any(token in value for token in ("必须", "不能", "需要", "根据", "最终"))
+    ):
         return True
     return False
 
@@ -1168,13 +1182,20 @@ def _extract_surface_reply_text(payload: Mapping[str, Any]) -> str:
     return ""
 
 
-def parse_surface_generation_output(raw_output: Any) -> dict[str, Any]:
+def parse_surface_generation_output(
+    raw_output: Any,
+    *,
+    allow_task_content: bool = False,
+) -> dict[str, Any]:
     raw = str(raw_output or "").strip()
     emotion_mapping = load_runtime_emotion_mapping()
     payload = _load_json_object(raw)
     if isinstance(payload, Mapping):
         reply_text = _extract_surface_reply_text(payload)
-        if reply_text and _surface_internal_process_leak_hits(reply_text):
+        if reply_text and _surface_internal_process_leak_hits(
+            reply_text,
+            allow_task_content=allow_task_content,
+        ):
             reply_text = ""
         natsume_tag = _normalize_emotion_tag(
             payload.get("natsume_emotion_tag")
@@ -1209,7 +1230,14 @@ def parse_surface_generation_output(raw_output: Any) -> dict[str, Any]:
             ),
         }
 
-    reply_text = "" if _surface_internal_process_leak_hits(raw) else _clean_reply_text(raw)
+    reply_text = (
+        ""
+        if _surface_internal_process_leak_hits(
+            raw,
+            allow_task_content=allow_task_content,
+        )
+        else _clean_reply_text(raw)
+    )
     return {
         "reply_text": reply_text,
         "tts_text_ja": "",
@@ -2918,7 +2946,10 @@ class SurfaceRuntime:
                 "elapsed_ms": int((generate_finished - generate_started) * 1000),
             }
         )
-        structured = parse_surface_generation_output(raw_output)
+        structured = parse_surface_generation_output(
+            raw_output,
+            allow_task_content=bool(request.accepted_task_results),
+        )
         candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
         hard_gate_observations: tuple[str, ...] = ()
         if candidate_texts:
@@ -2987,7 +3018,10 @@ class SurfaceRuntime:
                     "elapsed_ms": int((retry_generate_finished - retry_generate_started) * 1000),
                 }
             )
-            structured = parse_surface_generation_output(raw_output)
+            structured = parse_surface_generation_output(
+                raw_output,
+                allow_task_content=bool(request.accepted_task_results),
+            )
             candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
             if candidate_texts:
                 hard_gate_observations = _surface_hard_gate_violations(request, candidate_texts[0])
@@ -3059,7 +3093,10 @@ class SurfaceRuntime:
                     "elapsed_ms": int((empty_retry_finished - empty_retry_started) * 1000),
                 }
             )
-            structured = parse_surface_generation_output(raw_output)
+            structured = parse_surface_generation_output(
+                raw_output,
+                allow_task_content=bool(request.accepted_task_results),
+            )
             candidate_texts = [structured["reply_text"]] if structured["reply_text"] else []
         candidates = tuple(
             SurfaceDirectCandidate(
