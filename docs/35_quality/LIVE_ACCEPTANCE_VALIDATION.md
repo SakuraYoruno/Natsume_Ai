@@ -210,3 +210,7 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 `28cc3b9ef` 加载后的报告 `dl-live-1785965355637.json`，SHA-256 `6b1470e8ebb3892d33f3a3eaa34350c34aeda0b4f7d5ac1ae79d1e6132c0f82c`，真实耗时 356.5 秒。空间边界、喜忧混合、亲密／吃醋三条均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，每条末轮 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；这是首次 3/3 自动结构通过。人工仍不能放行：“我也不是整天闲着”以忙碌反驳边界，“帮你一起哼回去”语义怪异且把害怕当作要赶走的对象，“不会变成麻烦的人”把一点吃味转成自我贬低。
 
 第四轮不再只追加词表，而是修正上游生成含义：`HOLD_COMPLEXITY` 从固定“开心和不舍”改为按当前观察同时接住害怕／不安；`GIVE_SPACE` 明确直接确认减少主动联系；`CONTAINED_JEALOUSY` 明确无需自贬为麻烦或负担。对应已观察短语仍由候选门禁与独立 runner 双侧覆盖。110 项定向测试通过；真实复验前只能写 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`e4c6fb564` 加载后的报告 `dl-live-1785966063542.json`，SHA-256 `e004cb49ef1e4d90028f49d8ca87c790e530a7b60200924b93fdd7e34c9b9f5f`，真实耗时 364.9 秒，自动计数为 2 通过、1 失败；三条末轮 Voice 均完成。空间边界回复“省得你嫌烦”虽得 80.5 分并自动通过，人工明确判为负罪施压；喜忧回复“能开心的事，有点怕也正常”人工较自然，却因 `LOW_CATCHINESS / WEAK_SCENE_GROUNDING` 得 77.75 分并使 `selected_passed=false`；吃醋回复基本守住非占有边界。此前一轮的 3/3 结构绿灯因此不能复用为体验结论。
+
+代码只补齐同一语义族漏网：“省得／免得你嫌烦”、自主场景“爱干嘛干嘛／别乱脑补”、混合场景“你还真矛盾／开心就好好开心”；生产门禁与独立 runner 分开覆盖，101 项定向测试通过。本轮之后停止用三条随机生成反复调正则，语言质量转入扩大 cohort、稳定基线对照和三人盲测；自动评分需要重新校准，不能把 catchiness 高低当成人感真相。
