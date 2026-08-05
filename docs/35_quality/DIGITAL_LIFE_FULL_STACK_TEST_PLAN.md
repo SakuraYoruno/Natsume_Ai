@@ -715,6 +715,8 @@ pwsh scripts/runtime/stop_docker_services.ps1 -ProjectName $DockerProject
 
 `$EdgeRuntime` 和 `$GatewayRuntime` 必须在远端测试会话开始时绑定到本轮隔离目录；若使用 SSH，由 Host 调用相同远端命令，不能在本机误停同端口的其他进程。
 
+Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目标 Obs／Monitor 停止器。显式 `RuntimeRoot` 下只有有效 PID 文件或命令行明确包含目标根的进程才可停止；PID 缺失时禁止按 18082／18180 等共享端口做全局兜底。验收应另建空 Sidecar 根执行一次停止命令，并确认主 Obs／Nginx PID 与健康端点前后不变。
+
 要求：
 
 - 默认保留 acceptance volume，方便复核；只有明确决定清理本轮 project 时才删除。

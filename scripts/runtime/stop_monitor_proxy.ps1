@@ -124,6 +124,7 @@ function Resolve-NginxExe {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$runtimeRootWasExplicit = -not [string]::IsNullOrWhiteSpace($RuntimeRoot)
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
   $fallbackEnv = Join-Path $repoRoot ".env.example"
@@ -185,7 +186,8 @@ foreach ($procId in $matchingPids) {
 
 $listeningPid = Get-ListeningPid -ProbePort $Port
 if ($null -ne $listeningPid) {
-  if ($null -eq $proxyPid -or [int]$listeningPid -eq [int]$proxyPid) {
+  $listenerMatchesScope = $matchingPids -contains [int]$listeningPid
+  if ($listenerMatchesScope -or (-not $runtimeRootWasExplicit -and $null -eq $proxyPid)) {
     Stop-ProcessTree -ProcessId ([int]$listeningPid) | Out-Null
   }
 }

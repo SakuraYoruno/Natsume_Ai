@@ -346,6 +346,41 @@ def test_host_listener_lookup_is_scoped_to_the_configured_bind_address() -> None
     assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in stop_source
 
 
+def test_explicit_host_stop_keeps_sidecar_children_scoped_to_runtime_root() -> None:
+    host = (ROOT / "scripts/runtime/stop_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    obs = (ROOT / "scripts/runtime/stop_obs_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    monitor = (ROOT / "scripts/runtime/stop_monitor_proxy.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    child_env = host.index("$childEnvFile = ")
+    stop_obs = host.index("$obsRaw = & $stopObsScript", child_env)
+    stop_monitor = host.index("$monitorRaw = & $stopMonitorScript", stop_obs)
+    remove_snapshot = host.index("Remove-Item -Path $runtimeEnvFile", stop_monitor)
+    assert child_env < stop_obs < stop_monitor < remove_snapshot
+    assert "-EnvFile $childEnvFile -RuntimeRoot $RuntimeRoot" in host
+    assert (
+        '-EnvFile $childEnvFile -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")'
+        in host
+    )
+
+    assert "$runtimeRootWasExplicit = " in obs
+    assert obs.count("if (-not $stopped -and -not $runtimeRootWasExplicit) {") == 2
+    assert "global process and port fallback disabled" in obs
+
+    assert "$runtimeRootWasExplicit = " in monitor
+    assert "$listenerMatchesScope = $matchingPids -contains [int]$listeningPid" in monitor
+    assert (
+        "$listenerMatchesScope -or "
+        "(-not $runtimeRootWasExplicit -and $null -eq $proxyPid)"
+        in monitor
+    )
+
+
 def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"

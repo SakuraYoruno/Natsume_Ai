@@ -234,3 +234,5 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 ## 2026-08-06 A15 Task Runtime rollback failure canary
 
 新增隔离进程 canary，使用完整 migration catalog 和真实 `ProcessTaskRuntimeContainer`／SQLite，不向正式 Host 暴露运行时 fault flag。Canary 只替换尚未启动的 cancellation continuation worker：协调器 `activate()` 成功后，worker `start()` 失败；回滚阶段协调器首次 `aclose()` 也失败。真实容器保持 `closed=false`、保留 bound runtime，并用 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED` 拒绝第二次激活。随后第一次容器 close 再次收到协调器关闭失败，只报告 `runtime_coordinator_quiescence` 且未提前关闭 Store；解除注入后第二次 close 完成，第三次 close 不增加调用。绑定 `8c3a91f66` 的收据报告 migration head `0153`、`PRAGMA integrity_check=ok`、TaskGraph 与 Outbox 均为 0、外部副作用为 0，临时库已删除；SHA-256 为 `7d8ff1bfe02f38f80a57c9ea11b75760d7e112c8685a116ee6c6b0a2c7ffd0fc`。该项结论为 `PASS_ISOLATED_PROCESS_LIFECYCLE_CANARY`，不冒充远端设备或 provider 自身的回滚测试。
+
+停止上述 Sidecar 时又发现隔离缺陷：Sidecar 没有启动 Obs，所以没有自己的 `obs.pid`；旧 `stop_obs_side.ps1` 随后按默认 18082 扫描并终止了主 Obs。主 Obs 已使用原验收 runtime snapshot 恢复。停止链现在会在删除 snapshot 前把它传给子停止器；显式 RuntimeRoot 下，Obs 没有有效 PID 时禁止进程名／端口全局兜底，Monitor 的端口兜底也必须由目标 Nginx prefix 证明归属。空 Sidecar 根真实复测前后主 Obs PID 13304、主 Nginx PID 40996 均不变，两个 HTTP 健康端点为 200；24 项停止／启动脚本回归通过。

@@ -303,3 +303,5 @@ python scripts/runtime/run_task_runtime_rollback_failure_canary.py `
 ```
 
 必须断言激活失败后 rollback close 失败不会把 Container 标成 closed，第二次 activate 以 `TASK_RUNTIME_LIFECYCLE_RETRY_REQUIRED` 阻断，第一次全容器 close 保留 Store，故障解除后的重试关闭成功，终态重复 close 为 no-op。Canary 使用完整迁移后的真实临时 SQLite，但不等价于远端设备或外部 provider 回滚。
+
+Sidecar 停机回归必须先记录主 Obs／Nginx PID，对一个没有 PID 文件的显式空 RuntimeRoot 调用 `stop_host_side.ps1`，再确认主 PID 未变且 `/health`、`/monitor/index.html` 继续返回 200。静态合同同时要求 `host.runtime.env` 在子停止器执行后才删除，显式 RuntimeRoot 的 Obs 禁止全局扫描，Monitor 仅停止命令行匹配目标 Nginx prefix 的监听进程。

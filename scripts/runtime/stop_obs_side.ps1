@@ -102,6 +102,7 @@ function Stop-ProcessTree {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$runtimeRootWasExplicit = -not [string]::IsNullOrWhiteSpace($RuntimeRoot)
 if (-not $EnvFile) {
   $defaultEnv = Join-Path $repoRoot ".env"
   $fallbackEnv = Join-Path $repoRoot ".env.example"
@@ -157,7 +158,7 @@ if (Test-Path -Path $PidFile) {
   Remove-Item -Path $PidFile -Force -ErrorAction SilentlyContinue
 }
 
-if (-not $stopped) {
+if (-not $stopped -and -not $runtimeRootWasExplicit) {
   $obsPids = @(Get-ObsProcessIds -ProbePort $Port)
   if ($obsPids.Count -gt 0) {
     $allStopped = $true
@@ -177,7 +178,7 @@ if (-not $stopped) {
   }
 }
 
-if (-not $stopped) {
+if (-not $stopped -and -not $runtimeRootWasExplicit) {
   $listeningPid = Get-ListeningPid -ProbePort $Port
   if ($null -ne $listeningPid) {
     if (Is-ObsProcess -ProcessId $listeningPid) {
@@ -196,6 +197,10 @@ if (-not $stopped) {
   } elseif (-not $detail) {
     $detail = "obs not running"
   }
+}
+
+if (-not $stopped -and $runtimeRootWasExplicit -and -not $detail) {
+  $detail = "scoped obs pid not found; global process and port fallback disabled"
 }
 
 $result = [ordered]@{

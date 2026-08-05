@@ -229,13 +229,17 @@ if ($remainingHostPids.Count -gt 0) {
   $detail = ("stopped residual host processes: {0}" -f (($remainingHostPids | Sort-Object -Unique) -join ","))
 }
 
-Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue
+$childEnvFile = if (Test-Path -LiteralPath $runtimeEnvFile -PathType Leaf) {
+  $runtimeEnvFile
+} else {
+  $EnvFile
+}
 
 $obsProcessResult = $null
 $stopObsScript = Join-Path $PSScriptRoot "stop_obs_side.ps1"
 if (Test-Path -Path $stopObsScript) {
   try {
-    $obsRaw = & $stopObsScript -EnvFile $EnvFile -RuntimeRoot $RuntimeRoot
+    $obsRaw = & $stopObsScript -EnvFile $childEnvFile -RuntimeRoot $RuntimeRoot
     $obsJson = ($obsRaw | Out-String).Trim()
     if ($obsJson) {
       try {
@@ -263,7 +267,7 @@ $monitorProxyResult = $null
 $stopMonitorScript = Join-Path $PSScriptRoot "stop_monitor_proxy.ps1"
 if (Test-Path -Path $stopMonitorScript) {
   try {
-    $monitorRaw = & $stopMonitorScript -EnvFile $EnvFile -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")
+    $monitorRaw = & $stopMonitorScript -EnvFile $childEnvFile -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")
     $monitorJson = ($monitorRaw | Out-String).Trim()
     if ($monitorJson) {
       try {
@@ -286,6 +290,8 @@ if (Test-Path -Path $stopMonitorScript) {
     }
   }
 }
+
+Remove-Item -Path $runtimeEnvFile -Force -ErrorAction SilentlyContinue
 
 $result = [ordered]@{
   side = "host"
