@@ -463,3 +463,5 @@ python -m pytest -q `
 ```
 
 真实复验先只跑用户对七海生气、低落中的技术任务、共同喜悦／混合情绪和一个隐晦低落对照。四类均无空回复、无维护 Review、无 `ACTION_PREVIEW_DRIFT` 且低质量首候选确实触发一次修复后，才重跑完整 48 条。人感结论仍要求三名评审盲测；自动 48/48 也只能进入人工评审，不能直接标记“像人”。本计划明确排除 Pentest、渗透和网络安全专项，统一记录 `NOT_RUN_USER_SKIPPED`。
+
+首次四类定向真实复验报告 SHA-256 为 `a7f8c8f411d2cd7a4c60b74e8cb1bbc5a83d740ae6b5b491af1befcf69adf4c9`，结果 3 条自动待人工、1 条失败。回归必须继续证明：独立的“你真烦”仍允许七海形成克制边界；同一句若是在评价上一条 accepted response，则 durable aftereffect 为 `MISUNDERSTOOD`、Appraisal 为 `NATSUME_MAY_HAVE_HURT_USER`、CompanionAct 为 `REPAIR`；显式“闭嘴／给我空间”仍优先 `GIVE_SPACE`。修复状态下“被你这么说我很委屈／扎心”与“不烦你了／当我没说”等受害转移或赌气退出必须触发一次语义修复。当前三个全文件回归为 131 passed，真实新 SHA 重跑前不得覆盖旧失败证据。

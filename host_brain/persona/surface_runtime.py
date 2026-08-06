@@ -732,10 +732,15 @@ _ASCII_TILDE_RE = re.compile(r"~")
 _WAVE_MARKER_RE = re.compile(r"[~～]")
 _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
     r"不管就不管|不管不管|爱理不理|不管了|不帮了|不帮你了|你自己处理|偏不管|偏不帮|懒得管|(?:先)?不吵你"
+    r"|(?:那|以后)?我(?:就)?不烦你了|我闭嘴(?:总行了吧)?|算我多管闲事|当我没说|以后不找你了"
     r"|(?:我还以为|是不是|难道是).{0,8}(?:嫌我烦|烦我)|嫌我烦"
     r"|好好好|不找你不找你|我(?:本来|又|才)?(?:也)?不是.{0,8}(?:黏人|粘人|纠缠)|谁稀罕找你"
     r"|我(?:也)?省点力气|我(?:也)?不是整天闲着|我(?:也)?(?:很忙|有事要忙)"
     r"|(?:省得|免得).{0,6}(?:你)?嫌(?:我)?烦"
+)
+_REPAIR_SELF_VICTIMIZATION_RE = re.compile(
+    r"(?:被你|你这么|你这样).{0,10}(?:扎心|伤到|弄得难受|弄得委屈)"
+    r"|(?:我也|我还).{0,8}(?:受伤|难过|委屈).{0,8}(?:了|啊|呢)"
 )
 _BOUNDARY_COUNTER_PRESSURE_RE = re.compile(
     r"(?:但|不过|可是|只是).{0,30}(?:想我|找我|开口|回复|回应|主动)"
@@ -1452,6 +1457,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("ASCII_TILDE_TEXT_STYLE")
     if _boundary_sour_withdrawal_hits(request, value):
         codes.append("BOUNDARY_SOUR_WITHDRAWAL")
+    if _repair_self_victimization_hits(request, value):
+        codes.append("RELATIONAL_REPAIR_SELF_VICTIMIZATION")
     if _boundary_counter_pressure_hits(request, value):
         codes.append("BOUNDARY_COUNTER_PRESSURE")
     if _relationship_doubt_dismissive_hits(request, value):
@@ -2637,10 +2644,26 @@ def _boundary_sour_withdrawal_hits(request: IsolatedSurfaceInput, text: str) -> 
             "pushed_away_boundary",
         }
         or _canonical_affective_guidance_active(request, "GIVE_SPACE")
+        or _canonical_affective_guidance_active(request, "REPAIR")
+        or _canonical_affective_guidance_active(request, "SET_BOUNDARY")
     )
     if not active:
         return ()
     return tuple(dict.fromkeys(match.group(0) for match in _BOUNDARY_SOUR_WITHDRAWAL_RE.finditer(str(text or ""))))
+
+
+def _repair_self_victimization_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "REPAIR"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _REPAIR_SELF_VICTIMIZATION_RE.finditer(str(text or ""))
+        )
+    )
 
 
 def _boundary_counter_pressure_hits(
@@ -2818,6 +2841,8 @@ def _canonical_affective_guidance_active(
         "LISTEN": ("陪伴动作：对方此刻要的是被听见", "不要给解决方案、健康或作息建议"),
         "CONTAINED_JEALOUSY": ("陪伴动作：可以诚实流露一点在意和小小吃味", "不要把吃味写成占有"),
         "HOLD_COMPLEXITY": ("陪伴动作：让开心与害怕、不安等复杂感受可以同时存在", "不要抹平复杂感受"),
+        "REPAIR": ("陪伴动作：先承认可能没有接住", "不要要求原谅"),
+        "SET_BOUNDARY": ("陪伴动作：可以诚实承认被刺到", "不把自己的委屈变成对方的义务"),
     }.get(str(companion_act or "").upper(), ())
     return bool(markers) and any(marker in context for marker in markers)
 

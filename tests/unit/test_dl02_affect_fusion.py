@@ -410,6 +410,25 @@ def test_user_signal_that_natsume_hurt_them_freezes_repair_without_mirroring_sad
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
 
+def test_direct_missed_user_statement_freezes_repair_instead_of_generic_distress(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-natsume-missed-user"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="你上次完全没听懂我。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "natsume_may_have_hurt_user"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "REPAIR"
+    assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
+
+
 def test_clear_disrespect_toward_natsume_forms_contained_hurt_and_a_gentle_boundary(
     tmp_path: Path,
 ) -> None:

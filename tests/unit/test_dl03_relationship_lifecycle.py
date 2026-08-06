@@ -152,6 +152,44 @@ def test_explicit_stop_persists_a_boundary_even_when_it_contains_disrespect(
     }
 
 
+def test_annoyance_after_an_accepted_reply_is_feedback_and_keeps_repair_open(
+    tmp_path: Path,
+) -> None:
+    relationship, fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="accepted-before-annoyance",
+        response_receipt=_accepted_foreground(command_id="before-annoyance"),
+        response_text="我明白，不舒服的话不用马上说清楚。",
+    )
+
+    result = fusion.resolve_request(
+        request_body=_request("你真烦。"),
+        request_id="user-annoyed-after-reply",
+    )
+    relationship_context = result.as_emotion_context()["affective_life"][
+        "relationship_life"
+    ]
+    affective = reader.get_snapshot(result.scope.aggregate_id).state["affective"]
+    guidance = build_affective_turn_guidance(
+        emotion_context=result.as_emotion_context(),
+        request_id="user-annoyed-after-reply",
+        workspace_id=result.scope.workspace_id,
+        relationship_subject_id=result.scope.relationship_subject_id,
+        session_id=result.scope.session_id,
+        created_at_ms=NOW,
+    )
+
+    assert relationship_context["aftereffect"]["outcome"] == "MISUNDERSTOOD"
+    assert relationship_context["state"]["repair_required"] is True
+    assert affective["last_appraisal"]["event_kind"] == "natsume_may_have_hurt_user"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "REPAIR"
+    assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
+
+
 def test_aftereffect_is_exactly_replayed_and_does_not_cross_workspace(
     tmp_path: Path,
 ) -> None:

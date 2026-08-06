@@ -871,6 +871,55 @@ def test_surface_runtime_retries_boundary_do_not_disturb_exit() -> None:
     assert "不吵你" not in result.selected_text
 
 
+def test_surface_runtime_retries_repair_self_victimization_and_sour_exit() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply_text": "哈，被你这么一说我还真有点扎心。行吧，那我不烦你了。",
+                    "natsume_emotion_tag": "HURT",
+                    "user_emotion_tag": "ANGRY",
+                    "emotion_confidence": 0.5,
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "reply_text": "嗯，是我刚才没接住。你不用现在原谅我。",
+                "natsume_emotion_tag": "CALM",
+                "user_emotion_tag": "ANGRY",
+                "emotion_confidence": 0.5,
+            },
+            ensure_ascii=False,
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="你真烦。",
+                reply_control_packet={
+                    "task_mode": "relationship_repair",
+                    "response_move": "repair_open",
+                    "emotional_tone": "gentle_direct",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+                    "must_not_do": ["不要要求原谅、替自己辩解。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "RELATIONAL_REPAIR_SELF_VICTIMIZATION" in calls[1][-1]["content"]
+    assert "BOUNDARY_SOUR_WITHDRAWAL" in calls[1][-1]["content"]
+    assert result.selected_text == "嗯，是我刚才没接住。你不用现在原谅我。"
+
+
 @pytest.mark.parametrize(
     ("user_message", "facts", "must_not_do", "bad_reply", "good_reply", "reason_code"),
     [

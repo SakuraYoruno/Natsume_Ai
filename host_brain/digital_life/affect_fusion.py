@@ -96,7 +96,7 @@ _SPACE_MARKERS = (
     "先把提醒关掉",
 )
 _REPAIR_MARKERS = ("对不起", "抱歉", "误会", "不是那个意思", "我刚才说重了")
-_BOUNDARY_MARKERS = ("不要这样", "别这样", "不舒服", "越界", "停止")
+_BOUNDARY_MARKERS = ("不要这样", "别这样", "越界", "停止")
 _ADVICE_REJECTION_MARKERS = (
     "不想听解决方案",
     "不太想听解决方案",
@@ -126,6 +126,10 @@ _JEALOUSY_DISCLOSURE_MARKERS = (
 # triggers only: original utterances remain outside the Life journal. A request
 # for space, a boundary, or a repair signal always takes priority below.
 _NATSUME_HARM_MARKERS = (
+    "没听懂我",
+    "没有听懂我",
+    "没理解我",
+    "曲解了我",
     "伤到我",
     "伤害我",
     "让我受伤",
@@ -1178,13 +1182,19 @@ def _build_appraisal_candidates(
     relational_autonomy = any(
         marker in lower for marker in _RELATIONAL_AUTONOMY_MARKERS
     )
-    natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message)
-    directed_disrespect_toward_natsume = _signals_directed_disrespect_toward_natsume(
-        message
-    )
     aftereffect = _safe_mapping(relationship_aftereffect)
     aftereffect_outcome = _text(aftereffect.get("outcome"), limit=64).upper()
     aftereffect_id = _text(aftereffect.get("aftereffect_id"), limit=240)
+    directed_disrespect_toward_natsume = _signals_directed_disrespect_toward_natsume(
+        message
+    )
+    response_may_have_missed_user = bool(aftereffect_id) and aftereffect_outcome in {
+        "MISUNDERSTOOD",
+        "BOUNDARY",
+    }
+    natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message) or (
+        response_may_have_missed_user and not has_space
+    )
     candidates: list[_AppraisalCandidate] = []
     if conflict:
         candidates.append(
@@ -1265,6 +1275,11 @@ def _build_appraisal_candidates(
                 ),
                 action="repair_open",
                 regulation_mode="SEEK_REPAIR",
+                evidence_refs=(
+                    (f"relationship-aftereffect://{aftereffect_id}",)
+                    if response_may_have_missed_user
+                    else ()
+                ),
             )
         )
     if directed_disrespect_toward_natsume:

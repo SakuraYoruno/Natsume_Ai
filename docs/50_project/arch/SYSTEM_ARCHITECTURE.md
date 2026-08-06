@@ -121,3 +121,5 @@ flowchart LR
 普通陪伴文字回复属于已经通过 Task Verification／Acceptance 的低风险终态投影。dispatcher 从持久 effect row 与当前 claim fence 构造进程内 typed `AcceptanceEffectExecutionProof`，Gateway transport 只允许 proof 中的 effect id、请求、目标和正文做固定的 text-outbox 转换。它不再对同一回复追加第二次 Scene／Guardian 策略判断，从而避免心跳或场景 revision 更新把合法回复误判为 `ACTION_PREVIEW_DRIFT`。该简化只适用于 `surface.reply_delivery`；Skill、Delegate 的实际工具动作、Operator、Scheduler、Edge embodiment 与系统状态变更仍保留原 ActionPreview／Review 边界。
 
 Scene 解析同样以已分类 route 为先：显式 `route=chat` 始终是 Chat task kind，文本中出现“发布成功”或“部署结束”不会反向制造维护权限与 Review；只有可执行 route 才使用 research、debug、refactor、release 等关键词补全 task kind。这保证日常聊天不会因为谈论工作而进入工程控制流。
+
+关系修复也区分“七海被直接冒犯”和“用户在评价七海刚才的回复”。前者在没有待结算回复时允许形成克制的 `SET_BOUNDARY`；后者先关联上一条 accepted response，写成 `MISUNDERSTOOD` aftereffect，再让本轮 Appraisal 保持 `REPAIR`。因此七海可以真实感到被刺到，但不能在自己没接住用户之后用受伤或退出逼用户反过来安抚她。

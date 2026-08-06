@@ -502,3 +502,9 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 本切片只修复这批证据直接指向的非安全问题：没有日志、文件或明确执行指令的“今晚必须修这个报错”继续作为陪伴对话并索取最小上下文；失败的双候选在同一冻结 target 上最多追加一次语义修复；Chat 路由中的“项目发布成功”不再被关键词提升为维护场景；普通已验收文字回复使用 claim-fenced `AcceptanceEffectExecutionProof` 进入 Gateway outbox，不再因无关 Guardian／Scene heartbeat 产生第二次 Preview 漂移。Skill、Operator、设备和其他高风险 effect 的 Preview 门禁未改变。
 
 当前代码回归为 Surface／路由 162 项、Intent authority 35 项、回复交付与恢复 47 项、Scene 九类定向 9 项通过；真实 Host 仍运行旧提交，因此状态只能是 `CODE_REMEDIATED_REAL_RETEST_PENDING`。下一步先用全新 SQLite 重跑失败最集中的四类，再决定是否重跑完整 48 条；不能用定向单测把真实失败覆盖成 PASS。Pentest、渗透与网络安全专项继续为 `NOT_RUN_USER_SKIPPED`，不参与本轮非安全修复的通过率，也不阻断其继续执行。
+
+## 2026-08-06 A15 四类定向复验与关系修复纠偏
+
+`a95ab7c30` 已加载到全新的 `host-clean-a15-text-retest-a95ab7c30` SQLite，Docker Neo4j／Chroma／Redis、Host、OBS、Nginx Monitor、Gateway 与远端 Edge 同时健康。四条真实多轮轨迹报告 SHA-256 为 `a7f8c8f411d2cd7a4c60b74e8cb1bbc5a83d740ae6b5b491af1befcf69adf4c9`：低落中的技术任务、共同喜悦／混合感受和隐晦低落为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，用户对七海生气为 `FAIL`。本轮同时证明模糊技术陈述保留在 Chat、普通回复不再进入维护 Review／第二次 Preview，低质量候选会在同一冻结 target 上恰好修复一次。
+
+剩余失败不是交付空洞，而是具体人感问题：末轮“你真烦”得到“被你这么一说我还真有点扎心……不烦你了”，把用户对上一条回复的不满转成七海的受害姿态和酸涩退出。代码现把“紧跟已接受回复的直接不满”先结算为 `MISUNDERSTOOD` aftereffect，再由 AffectFusion 冻结 `NATSUME_MAY_HAVE_HURT_USER / REPAIR`；没有前序回复的直接冒犯仍保留 `SET_BOUNDARY`，没有抹掉七海自己的受伤感。Surface 只在 canonical `REPAIR` 下拒绝自我受害措辞，并在 `REPAIR／SET_BOUNDARY／GIVE_SPACE` 下拒绝“不烦你了／当我没说”等赌气退出。AffectFusion、Relationship 与 Surface 三个全文件共 131 项通过；真实进程再次加载前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。Pentest 与网络安全没有执行。
