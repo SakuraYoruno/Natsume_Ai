@@ -84,6 +84,59 @@ def test_compile_reply_control_packet_keeps_memory_and_affect_compressed() -> No
     assert compiled.trace["surface_boundary"] == "ReplyControlPacket"
 
 
+def test_compile_reply_control_packet_prioritizes_dialogue_and_affect_within_bound() -> None:
+    compiled = compile_reply_control_packet(
+        task_control={
+            "facts": [
+                "低优先事实一",
+                "低优先事实二",
+                "低优先事实三",
+                "低优先事实四",
+                "真实最近对话窗口：用户: 我有点不踏实。 / Natsume: 我记得。",
+                "陪伴动作：让开心与不安同时存在。",
+                "上下文连续性：上一轮的开心和不踏实仍同时成立。",
+            ],
+            "affective_continuity_kind": "MIXED_AFFECT_RESULT_CONTINUATION",
+        },
+        necessary_facts=["必要事实：用户刚拿到 offer。"],
+        max_facts=4,
+    )
+
+    assert compiled.packet.facts == [
+        "真实最近对话窗口：用户: 我有点不踏实。 / Natsume: 我记得。",
+        "陪伴动作：让开心与不安同时存在。",
+        "上下文连续性：上一轮的开心和不踏实仍同时成立。",
+        "必要事实：用户刚拿到 offer。",
+    ]
+    assert (
+        compiled.packet.affective_continuity_kind
+        == "MIXED_AFFECT_RESULT_CONTINUATION"
+    )
+
+
+def test_compile_reply_control_packet_keeps_delegate_result_within_fact_bound() -> None:
+    compiled = compile_reply_control_packet(
+        task_control={
+            "facts": [
+                "低优先事实一",
+                "低优先事实二",
+                "低优先事实三",
+                "低优先事实四",
+                "子代理执行状态：已完成",
+                "子代理任务：只读安全扫描",
+                "子代理结果片段1：9/tcp discard 开放。",
+            ],
+        },
+        max_facts=3,
+    )
+
+    assert compiled.packet.facts == [
+        "子代理执行状态：已完成",
+        "子代理任务：只读安全扫描",
+        "子代理结果片段1：9/tcp discard 开放。",
+    ]
+
+
 def test_compile_reply_control_packet_rejects_raw_context_keys() -> None:
     with pytest.raises(ValueError, match="forbidden raw context"):
         compile_reply_control_packet(

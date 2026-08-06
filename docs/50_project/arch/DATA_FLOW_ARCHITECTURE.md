@@ -70,9 +70,9 @@ flowchart LR
 
 候选选择顺序固定为“逐候选关系／安全／Voice 完整性门禁 → 在合格集合内评分择优 → 交付”。某个高分候选带追问、否定复杂感受或关系防御时，只淘汰该候选；只有所有候选都不合格时才触发语义重试或终止，不能让一个坏候选拖掉另一个可发送候选。
 
-近期对话从 SQLite 按 canonical `turn_index` 取回后再恢复正序，不能按跨机器 `ts_ms` 排列，否则时钟偏差会把两条用户消息或两条回复错误相邻并被同角色去重。当前轮没有新 appraisal 时，Fusion 只在活跃 episode 与窄文本标记同时匹配时输出 `MINIMIZED_UNRESOLVED_AFFECT` 或 `MIXED_AFFECT_RESULT_CONTINUATION`；Planner 消费 enum 而非历史正文。空间边界的 counter-pressure 在候选 Gate 直接拒绝。这条链路不增加模型调用，也不把日常对话改造成同步审计事务。
+近期对话的两条 SQLite 读取路径都按 canonical `turn_index` 取回后再恢复正序，不能按跨机器 `ts_ms` 排列，否则时钟偏差会把两条用户消息或两条回复错误相邻。当前轮没有新 appraisal 时，Fusion 只在活跃 episode 与窄文本标记同时匹配时输出 `MINIMIZED_UNRESOLVED_AFFECT` 或 `MIXED_AFFECT_RESULT_CONTINUATION`；Planner 消费 enum 而非历史正文。空间边界的 counter-pressure 在候选 Gate 直接拒绝。这条链路不增加模型调用，也不把日常对话改造成同步审计事务。
 
-真实 `6160c4564` trace 已证明 enum 和对话顺序都到达生成入口，但模型仍可忽略提示。因此单回复和双候选在本地交付前还验证与 enum 对应的最小语义：前者拒绝虚假收束，后者拒绝完全丢失混合感受。失败进入原有一次 repair；没有新增第二条状态链、写事务或额外重试额度。
+`6160c4564` 与 `eb2f68d29` trace 证明 enum 到达截断前 Planner，却也暴露最终 packet 仍丢失后置约束。packet compiler 现在在原 8 条上限内先选必要事实、最近对话、陪伴动作、情感连续性及已完成的子代理结果，并把 enum 作为 typed control 传到单回复／双候选 Gate。前者拒绝虚假收束，后者拒绝完全丢失混合感受；失败进入原有一次 repair，没有新增第二条状态链、写事务或额外重试额度。
 
 低风险 Companion Profile 不旁路这条链路。五条跨日至少三天、helpfulness 下界不低于 0.85 且无边界违规的 canonical aftereffect 只能创建可回滚 canary；接下来的五次强后效应把同一候选自动激活。Planner 将 profile 变成文本 style anchor，ExpressionPlan 同步缩放 Voice rate 与 Avatar motion。Rollback 只能恢复 active profile 自带的 exact predecessor，不能由调用者指定任意历史版本。A15 隔离 SQLite canary 已验证 Host 协议上的 `文本策略改变 + Voice 1.0→1.15 + Avatar 0.5→0.8`，并在 rollback 后全部恢复；它没有执行模型生成和远端设备。
 

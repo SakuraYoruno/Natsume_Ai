@@ -41,6 +41,7 @@ class ReplyControlPacket(_StrictModel):
     must_not_do: list[str] = Field(default_factory=list)
     facts: list[str] = Field(default_factory=list)
     style_anchor: list[str] = Field(default_factory=list)
+    affective_continuity_kind: str = ""
 
     # --- Inner-state leakage fields (life-feel renovation) ---
     # Abstracted inner-life signals so the surface LLM can feel the character's

@@ -2827,6 +2827,11 @@ def _canonical_affective_continuity_active(
     continuity_kind: str,
 ) -> bool:
     control = getattr(request, "control", None)
+    typed_kind = str(
+        getattr(control, "affective_continuity_kind", "") or ""
+    ).strip().upper()
+    if typed_kind == str(continuity_kind or "").upper():
+        return True
     context = "\n".join(
         str(item or "")
         for item in [

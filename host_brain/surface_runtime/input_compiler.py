@@ -515,6 +515,7 @@ def _apply_affective_turn_guidance(
     control["facts"] = merge("facts", guidance.facts)
     control["must_not_do"] = merge("must_not_do", guidance.must_not_do)
     control["style_anchor"] = merge("style_anchor", guidance.style_anchor)
+    control["affective_continuity_kind"] = guidance.continuity_kind
     if isinstance(trace_stage_meta, dict):
         trace_stage_meta["affective_turn_plan"] = guidance.plan.as_dict()
         trace_stage_meta["affective_turn_guidance"] = guidance.trace()

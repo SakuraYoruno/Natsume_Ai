@@ -108,6 +108,42 @@ def test_conversation_queries_honor_current_request_boundaries(
     assert [row["content"] for row in turns] == ["收到", "项目事实：alpha"]
 
 
+def test_conversation_window_uses_turn_index_across_clock_skew(
+    runtime_read_db: Path,
+) -> None:
+    with sqlite3.connect(runtime_read_db) as conn:
+        conn.executemany(
+            """
+            INSERT INTO conversation_turn(
+                turn_id, session_id, person_id, request_id, role, content,
+                ts_ms, turn_index, lang, corrupted, metadata, created_at_ms
+            ) VALUES (?, 'session-skew', 'person-1', ?, ?, ?, ?, ?, 'zh', 0, '{}', ?)
+            """,
+            [
+                ("skew-1", "skew-old-1", "user", "第一句", 100, 1, 100),
+                ("skew-2", "skew-old-1", "assistant", "第一答", 500, 2, 500),
+                ("skew-3", "skew-old-2", "user", "第二句", 200, 3, 200),
+                ("skew-4", "skew-old-2", "assistant", "第二答", 600, 4, 600),
+                ("skew-5", "skew-current", "user", "当前句", 300, 5, 300),
+            ],
+        )
+        conn.commit()
+
+    repository = RuntimeReadRepository(runtime_read_db)
+    turns = repository.recent_conversation_turns_before_request(
+        session_id="session-skew",
+        request_id="skew-current",
+        limit=4,
+    )
+
+    assert [row["content"] for row in turns] == [
+        "第二答",
+        "第二句",
+        "第一答",
+        "第一句",
+    ]
+
+
 def test_dream_memory_topics_intents_and_last_interaction_are_semantic_reads(
     runtime_read_db: Path,
 ) -> None:
