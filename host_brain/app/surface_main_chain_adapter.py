@@ -111,6 +111,16 @@ async def run_surface_main_chain_for_surface_reply_input(
         trace_stage_meta=trace_stage_meta,
     )
     compiled_request = compile_surface_main_chain_input(surface_input).request
+    affective_turn_plan = affective_turn_plan_from_trace(trace_stage_meta)
+    canonical_repair_context = (
+        str(
+            _safe_mapping(affective_turn_plan.get("companion_act")).get("kind")
+            or ""
+        )
+        .strip()
+        .upper()
+        == "REPAIR"
+    )
     _record_surface_memory_guard_packet(
         agent_input=agent_input,
         surface_input=surface_input,
@@ -158,6 +168,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                         attempt.prompt.messages,
                         candidate_count=affective_candidate_count,
                         retry_reason=retry_reason,
+                        canonical_repair_context=canonical_repair_context,
                     )
                     return RetryDirective(
                         retry=True,
@@ -184,6 +195,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                         attempt.prompt.messages,
                         candidate_count=affective_candidate_count,
                         retry_reason=retry_reason,
+                        canonical_repair_context=canonical_repair_context,
                     )
                     return RetryDirective(
                         retry=True,

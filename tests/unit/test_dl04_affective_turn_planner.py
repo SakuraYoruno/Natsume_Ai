@@ -457,6 +457,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         ],
         candidate_count=2,
         retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_repair_context=True,
     )
     assert "本轮是关系修复" in repair_quality_messages[-1]["content"]
     assert "不要写七海被扎心、受伤或委屈" in repair_quality_messages[-1]["content"]

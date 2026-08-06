@@ -542,3 +542,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 两条自动失败分别是：`你上次完全没听懂我` 已生成 canonical `NATSUME_MAY_HAVE_HURT_USER / REPAIR`，但两次真实模型候选都追问并命中零问句预算，TaskGraph 以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 终止；裂痕轨迹虽然给出“你不用急着原谅我”，关系状态却因“道歉了但事情没过去”未被识别而没有进入双候选择优。自动通过中另有两条人工不可接受：“后台已经在跑了”没有任何 Task 状态来源；“别喝太多，早点回来”违背同轮 `RESPECT_AUTONOMY`。因此本次 6/8 不能按结构结果写成人感 6/8。
 
 当前代码只在既有文本快路径增加四个有界语义：`弄反了` 进入七海承担责任的 Appraisal；“还没原谅／道歉不等于翻篇”等显式语句即使没有既存 rupture flag 也写为 `REPAIR_UNRESOLVED`；canonical repair 的零问句违规使用一条不索取解释的确定性承担句，避免再花一次模型调用后整轮沉默；没有 server-authored Task 状态时拒绝“后台在跑／我盯着／有结果马上告诉你”，`RESPECT_AUTONOMY` 同时拒绝回家、等待和饮酒管束。它没有新增表、审计、同步写或模型调用。DL-02／DL-03、Surface Runtime、原生情感候选和相邻 adapter 共 279 项通过，`compileall` 与 `git diff --check` 通过。真实重启并重跑八条前状态仍为 `CODE_REMEDIATED_REAL_RETEST_PENDING`；完整 48 条和三人盲评继续阻断“像人”与 A15 完成声明。
+
+`5ce09586c` 的全新隔离库复验报告 SHA-256 为 `ff0d618f5d5dcd86edef919db1bb5c7fc749e9d0d728b1d9086185be8c94aa88`，自动结果提升为 7 条待人工、1 条失败，writer probe 仍为 21 个 accepted turn、零 legacy delta。任务轨迹返回“把报错和相关代码贴过来”，关系自主轨迹移除了饮酒／回家要求，裂痕轨迹进入双候选并返回“先把你的意思听明白再说”；这三项代码根因已由真实正文关闭。
+
+剩余 `user_angry_at_natsume:3` 的 canonical Appraisal 和 CompanionAct 均为 `REPAIR`。第一次真实双候选被判 `AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR`；第二次仍全部违反发送门禁，所以没有坏文本外发，但 TaskGraph 以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 失败。现有质量重试提示只泛化要求“避免连续追问”，没有针对该零问句修复回合明确禁止问号和索取重述。当前补丁直接消费冻结 `AffectiveTurnPlanV1` 的类型化 `REPAIR`，不再搜索编译后提示词中的中文片段，并把既有第二次尝试限定为两个中日配对陈述句：具体承担、不得追问哪里没听懂、不得要求用户现在重新解释；模型次数仍最多两次。Surface app adapter、原生情感流与 DL-04 planner 共 69 项通过。新进程单条复验前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

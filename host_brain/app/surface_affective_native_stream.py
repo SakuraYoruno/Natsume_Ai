@@ -194,6 +194,7 @@ def _buffered_affective_candidate_messages(
     *,
     candidate_count: int | None,
     retry_reason: str = "",
+    canonical_repair_context: bool = False,
 ) -> list[dict[str, Any]]:
     copied = [dict(message) for message in messages]
     if candidate_count != 2:
@@ -260,9 +261,6 @@ def _buffered_affective_candidate_messages(
                 "只承认具体没接住，不辩解、不索取安抚。"
             ),
         }
-        message_context = "\n".join(
-            str(message.get("content") or "") for message in copied
-        )
         repair = (
             "DL-04 候选修复："
             + repair_by_reason.get(
@@ -273,12 +271,13 @@ def _buffered_affective_candidate_messages(
         )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
-            and "陪伴动作：先承认可能没有接住" in message_context
+            and canonical_repair_context
         ):
             repair += (
                 "本轮是关系修复：两个候选都把重心放在七海刚才没有接住和用户当前的不满；"
                 "不要写七海被扎心、受伤或委屈，也不要用‘不烦你了’、‘当我没说’、"
-                "‘我闭嘴’表达退出。"
+                "‘我闭嘴’表达退出。本轮 question_budget=0：两个候选都只用陈述句承担，"
+                "不得写问号、追问哪里没听懂，或要求用户现在重新解释。"
             )
         copied.append({"role": "system", "content": repair})
     return copied

@@ -593,6 +593,13 @@ async def test_buffered_affective_quality_floor_gets_one_semantic_repair(
         _agent_input(
             workspace_id="workspace-a",
             user_message="我有点不想说了。",
+            render_policy={
+                "primary_topic": "relationship_repair",
+                "interaction_move": "repair",
+                "response_goal": "承认没接住并留出空间",
+                "response_form": "text",
+                "max_questions": 0,
+            },
             emotion_context=context,
         ),
         ports=surface_runtime_ports_factory(),
@@ -600,7 +607,11 @@ async def test_buffered_affective_quality_floor_gets_one_semantic_repair(
     )
 
     assert len(provider_calls) == 2
+    assert trace["affective_turn_plan"]["companion_act"]["kind"] == "REPAIR"
     assert "没有达到当前关系和场景的质量下限" in str(
+        provider_calls[1]["messages"][-1]["content"]
+    )
+    assert "不得写问号、追问哪里没听懂" in str(
         provider_calls[1]["messages"][-1]["content"]
     )
     assert "没接好" in result.selected_text or "不催你" in result.selected_text
