@@ -1101,12 +1101,22 @@ def test_surface_runtime_replaces_unprovided_future_work_continuation() -> None:
     assert result.observation_codes == ()
 
 
-def test_surface_runtime_replaces_unprovided_in_progress_future_callback() -> None:
+@pytest.mark.parametrize(
+    "bad_reply",
+    [
+        "我在这盯着，出结果就喊你。",
+        "我在后台盯着，卡住了喊我。",
+        "先按这三条盯着，有问题我马上喊你。",
+    ],
+)
+def test_surface_runtime_replaces_unprovided_in_progress_future_callback(
+    bad_reply: str,
+) -> None:
     calls: list[list[dict[str, str]]] = []
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
-        return _candidate_payload(["我在这盯着，出结果就喊你。"])
+        return _candidate_payload([bad_reply])
 
     result = asyncio.run(
         SurfaceRuntime(
@@ -1370,6 +1380,14 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
             ["不要要求原谅、替自己辩解。"],
             "好，先这样。我不会催你，但也没打算就这么算了。",
+            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+        ),
+        (
+            "你已经道歉了，但我还没有觉得这件事过去了。",
+            ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+            ["不要要求原谅、替自己辩解。"],
+            "你不原谅也没关系，我会一直做到你愿意为止。",
             "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
         ),

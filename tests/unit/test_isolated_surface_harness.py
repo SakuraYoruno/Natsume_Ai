@@ -3322,6 +3322,38 @@ def test_relationship_repair_pause_is_complete_scene_grounding() -> None:
     assert rows[0].score >= 80.0
 
 
+def test_hold_complexity_does_not_inherit_generic_boundary_repair_penalty() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "hold_complexity_boundary_false_positive",
+            "soul_md": SOUL,
+            "user_message": "我还是有点不踏实。",
+            "reply_control_packet": {
+                "response_move": "hold_complexity",
+                "task_mode": "emotional_support",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：让开心与害怕、不安等复杂感受可以同时存在；分别接住它们，不要急着裁成积极鸡汤或单一结论。"
+                ],
+                "must_not_do": [
+                    "不要抹平复杂感受，也不要越过关系边界。"
+                ],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "太好了，真的为你高兴！不过我也知道，那种不踏实的感觉不会马上就走。"
+        ],
+    )
+
+    assert rows[0].passed
+    assert "BOUNDARY_REPAIR_COUNTER_PRESSURE" not in rows[0].reason_codes
+
+
 def test_back_memory_overdisplay_is_soft_penalized() -> None:
     request = build_isolated_surface_input(
         {

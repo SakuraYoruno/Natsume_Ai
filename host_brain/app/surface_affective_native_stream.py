@@ -273,10 +273,14 @@ def _buffered_affective_candidate_messages(
             "MIXED_AFFECT_CONTINUITY_DROPPED": (
                 "上次候选只承接了眼前的好消息，丢掉了上一轮仍未消失的不安。"
                 "两个候选都要自然保留开心与不安两条线，不要只说恭喜或像做梦。"
+                "reply_text 分别参考‘开心是真的，那点不踏实也还在。’和"
+                "‘我替你高兴，也知道不安不会马上消失。’的含义。"
             ),
             "MIXED_AFFECT_DISMISSAL": (
                 "上次候选把不安说成应该先放着或以后再管。两个候选都要承认开心与"
-                "不安可以同时存在，不要赶走、搁置或贬低其中一面。"
+                "不安可以同时存在，不要赶走、搁置或贬低其中一面。reply_text 分别参考"
+                "‘开心是真的，不安也是真的。’和‘我替你高兴，也接得住那点害怕。’；"
+                "不得写‘先放着／以后再说／等它来了再说’。"
             ),
             "ADDRESS_BOUNDARY_DEFENSIVE": (
                 "上次候选用‘不叫就不叫’或‘反正怎么叫都是你’防御称呼边界。"
@@ -315,6 +319,9 @@ def _buffered_affective_candidate_messages(
                 "‘我闭嘴’表达退出。本轮 question_budget=0：两个候选都只用陈述句承担，"
                 "不得写问号、追问哪里没听懂，或要求用户现在重新解释。"
                 "也不得写‘你先说／你先讲／你说说看’，把修复劳动推回给用户。"
+                "两个 reply_text 分别参考‘是我没接住。对不起，我先不解释。’和"
+                "‘这次是我理解错了。我会把你的不舒服记住。’；不得写‘好吧／行吧／"
+                "不烦你／我不说了／我闭嘴’。"
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
@@ -322,7 +329,9 @@ def _buffered_affective_candidate_messages(
         ):
             repair += (
                 "本轮必须延续喜忧并存：两个候选都要分别写出真实的开心，以及上一轮"
-                "仍未消失的不安／不踏实；不能只写恭喜、像做梦或终于成功。"
+                "仍未消失的不安／不踏实；不能只写恭喜、像做梦或终于成功。reply_text "
+                "分别参考‘开心是真的，那点不踏实也还在。’和‘我替你高兴，也知道不安"
+                "不会马上消失。’的含义。"
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
@@ -500,6 +509,7 @@ def _select_buffered_affective_candidate(
             "UNPROVIDED_NOTIFICATION_ACTION",
             "UNPROVIDED_WORK_STATE_CLAIM",
             "RELATIONAL_AUTONOMY_PRESSURE",
+            "BOUNDARY_SOUR_WITHDRAWAL",
         }
         has_repair_trigger = bool(
             set(surface_violations).intersection(
@@ -511,6 +521,7 @@ def _select_buffered_affective_candidate(
                     "UNPROVIDED_NOTIFICATION_ACTION",
                     "UNPROVIDED_WORK_STATE_CLAIM",
                     "RELATIONAL_AUTONOMY_PRESSURE",
+                    "BOUNDARY_SOUR_WITHDRAWAL",
                 }
             )
         )

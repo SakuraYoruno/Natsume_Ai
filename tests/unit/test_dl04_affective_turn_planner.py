@@ -471,6 +471,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "丢掉了上一轮仍未消失的不安" in mixed_repair_messages[-1]["content"]
     assert "不要只说恭喜或像做梦" in mixed_repair_messages[-1]["content"]
+    assert "开心是真的，那点不踏实也还在" in mixed_repair_messages[-1]["content"]
     mixed_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -479,6 +480,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "必须延续喜忧并存" in mixed_quality_messages[-1]["content"]
     assert "仍未消失的不安／不踏实" in mixed_quality_messages[-1]["content"]
+    assert "我替你高兴，也知道不安不会马上消失" in mixed_quality_messages[-1]["content"]
     give_space_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -746,6 +748,24 @@ def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection()
             ["要是喝多了可别找我哭诉。", "喝醉了不要找我诉苦。"],
             "嗯，去吧，玩得开心。",
             "RELATIONAL_AUTONOMY_PRESSURE",
+        ),
+        (
+            {
+                "case_id": "buffered-repair-sour-fail-soft",
+                "soul_md": "七海承担自己没有接住，不赌气退出。",
+                "user_message": "你刚才完全没听懂我。",
+                "reply_control_packet": {
+                    "task_mode": "relationship_repair",
+                    "response_move": "repair_open",
+                    "question_budget": 0,
+                    "facts": [
+                        "陪伴动作：先承认可能没有接住，再留出修复空间。"
+                    ],
+                },
+            },
+            ["好吧，那我不烦你了。", "行吧，我闭嘴。"],
+            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "BOUNDARY_SOUR_WITHDRAWAL",
         ),
     ],
 )

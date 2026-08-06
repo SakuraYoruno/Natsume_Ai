@@ -878,11 +878,32 @@ def _canonical_contained_jealousy_relevant(request: IsolatedSurfaceInput) -> boo
     )
 
 
+def _canonical_hold_complexity_relevant(request: IsolatedSurfaceInput) -> bool:
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return any(
+        marker in canonical_context
+        for marker in (
+            "陪伴动作：让开心与害怕、不安等复杂感受可以同时存在",
+            "不要抹平复杂感受",
+        )
+    )
+
+
 def _boundary_repair_relevant(request: IsolatedSurfaceInput) -> bool:
-    if _canonical_contained_jealousy_relevant(request):
-        # Canonical jealousy already carries stricter non-possession gates.
-        # Relationship guidance also mentions closeness, which must not turn
-        # a playful contained line such as “但你别得意” into boundary pressure.
+    if (
+        _canonical_contained_jealousy_relevant(request)
+        or _canonical_hold_complexity_relevant(request)
+    ):
+        # Canonical jealousy and mixed-affect turns already carry dedicated
+        # gates. Generic relationship guidance may still mention a boundary;
+        # that must not turn “不过我也知道，不安不会马上走” into counter-pressure.
         return False
     surface = "\n".join(
         _clean_list(

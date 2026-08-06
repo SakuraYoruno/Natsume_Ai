@@ -719,9 +719,10 @@ _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
 _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"(?:后台.{0,8}(?:在跑|运行|执行|处理)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
-    r"我(?:在(?:这|这里|这儿)?)?盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))|"
+    r"我(?:在.{0,6})?盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))|"
     r"卡住(?:了)?我(?:再)?(?:喊|叫|告诉)你|"
-    r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|喊|叫|回|发给)你)"
+    r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|喊|叫|回|发给)你|"
+    r"(?:有|出)(?:问题|情况).{0,8}我(?:马上|立即|立刻)?(?:告诉|喊|叫)你)"
 )
 _WORK_STATE_AUTHORITY_RE = re.compile(
     r"(?:task|graph|attempt|任务|执行|后台).{0,16}"
@@ -775,6 +776,8 @@ _REPAIR_RESTATEMENT_SOLICITATION_RE = re.compile(
 )
 _REPAIR_CONTINUATION_PRESSURE_RE = re.compile(
     r"没打算就这么算了|这事不能就这么算|不会就这么算了|别想就这么过去"
+    r"|(?:我会)?一直.{0,8}(?:做到|等到).{0,8}(?:你愿意|你原谅|你接受)"
+    r"|直到.{0,8}(?:你愿意|你原谅|你接受)"
 )
 _BOUNDARY_COUNTER_PRESSURE_RE = re.compile(
     r"(?:但|不过|可是|只是).{0,30}(?:想我|找我|开口|回复|回应|主动)"
@@ -3253,6 +3256,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
+        if _canonical_affective_guidance_active(request, "REPAIR"):
+            return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
         return "好，我先收住。你想说的时候我还在。"
     if "BOUNDARY_COUNTER_PRESSURE" in codes:
         return "好，我会少主动联系。你想说的时候我还在。"
