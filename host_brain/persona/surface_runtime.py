@@ -720,6 +720,7 @@ _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"(?:后台.{0,8}(?:在跑|运行|执行|处理)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
     r"我盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))|"
+    r"卡住(?:了)?我(?:再)?(?:喊|叫|告诉)你|"
     r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|回|发给)你)"
 )
 _WORK_STATE_AUTHORITY_RE = re.compile(
@@ -730,7 +731,8 @@ _WORK_STATE_AUTHORITY_RE = re.compile(
 _RELATIONAL_AUTONOMY_PRESSURE_RE = re.compile(
     r"(?:快去快回|快点回来|早点回来|别让我等太久|回来陪我|等你回来陪我|别跑|"
     r"(?:别|不要|少)喝(?:太)?多|别(?:玩|待)?太晚|"
-    r"回来.{0,8}(?:跟我|告诉我|说一声|报个平安))"
+    r"回来.{0,8}(?:跟我|告诉我|说一声|报个平安)|"
+    r"(?:要是|如果)?(?:喝多|喝醉)(?:了)?可?(?:别|不要)找我)"
 )
 _UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"不是第一次|每次(?:都|总)|以前(?:也|就|说过|见过)|上次|之前(?:也|就|说过|见过)"
@@ -786,7 +788,7 @@ _UNPROVIDED_NOTIFICATION_ACTION_RE = re.compile(
     r"(?:消息)?(?:提醒|通知)"
 )
 _UNPROVIDED_NOTIFICATION_IMPLICIT_ACK_RE = re.compile(
-    r"(?:已经|给你|这就|刚刚)?关(?:掉|闭|了|好)(?:[，,。.!！]|$)"
+    r"(?:已经|给你|这就|刚刚)?关(?:(?:掉|闭|好)(?:了)?|了)(?:[，,。.!！]|$)"
 )
 _NOTIFICATION_ACTION_AUTHORITY_RE = re.compile(
     r"(?:提醒|通知).{0,12}(?:已关闭|已经关闭|已暂停|已经暂停|已取消|已经取消)"

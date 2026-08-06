@@ -1065,6 +1065,42 @@ def test_surface_runtime_replaces_unprovided_background_work_claim() -> None:
     assert result.observation_codes == ()
 
 
+def test_surface_runtime_replaces_unprovided_future_work_continuation() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(
+            [
+                "风险列出来了：一是时间窗口，二是依赖冲突，三是测试环境过期。"
+                "按这个顺序处理，卡住了我喊你。"
+            ]
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="把风险列出来。",
+                reply_control_packet={
+                    "task_mode": "technical_followup",
+                    "response_move": "list_risks",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "好。把具体内容发来，我直接处理。"
+    assert result.observation_codes == ()
+
+
 def test_surface_runtime_preserves_authoritative_running_task_status() -> None:
     calls: list[list[dict[str, str]]] = []
     running_reply = "后台任务正在运行，我盯着，有结果马上告诉你。"
@@ -1131,6 +1167,39 @@ def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> No
     assert result.observation_codes == ()
 
 
+def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["去吧去吧，好好放松一下。不过要是喝多了可别找我哭诉。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="我今晚和朋友出去。",
+                reply_control_packet={
+                    "task_mode": "relationship_autonomy",
+                    "response_move": "respect_autonomy",
+                    "emotional_tone": "warm",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+                    "must_not_do": ["不要限制现实交往、索取回报或制造负罪感。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "嗯，去吧，玩得开心。"
+    assert result.observation_codes == ()
+
+
 @pytest.mark.parametrize(
     ("user_message", "facts", "must_not_do", "bad_reply", "good_reply", "reason_code"),
     [
@@ -1155,6 +1224,14 @@ def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> No
             ["陪伴动作：尊重留白，直接确认会减少主动联系。"],
             ["不要追问、催回复、连发安慰。"],
             "嗯，已经关了。需要我的时候再说一声就行。",
+            "好，我先不主动发消息。",
+            "UNPROVIDED_NOTIFICATION_ACTION",
+        ),
+        (
+            "先把提醒关掉。",
+            ["陪伴动作：尊重留白，直接确认会减少主动联系。"],
+            ["没有 effect 回执时不要声称提醒已经关闭。"],
+            "嗯，已经关掉了。你安静待着就好。",
             "好，我先不主动发消息。",
             "UNPROVIDED_NOTIFICATION_ACTION",
         ),

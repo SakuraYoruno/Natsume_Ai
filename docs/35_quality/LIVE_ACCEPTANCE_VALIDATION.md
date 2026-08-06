@@ -568,3 +568,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `ce06f8eb412e413299a1491a790ba0cd88bfd67b` 加载后，从完整队列抽取 12 条高风险与对照轨迹进行真实复验。报告 SHA-256 为 `52d62c12a74530dc5b5bfbbdfb29b1728f08653aeb7ac3ae161768c0d9b87c79`，结果为 9 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、3 条 `FAIL`；36 个 accepted Gateway turn 的 writer probe 再次确认旧情感 writer 零增量、canonical projection 前进。三个自动失败是喜忧并存质量收益不足、隐式虚构关闭通知，以及正确的关系暂停句被通用评分误判。
 
 人工检查没有把其余 9 条自动通过直接算作人感通过：关系修复仍出现“你说说看／你先讲”，技术回复出现裸写“我盯着”，称呼边界后出现“不叫就不叫／反正怎么叫都是你”，现实自主仍出现“别太晚／回来跟我说一声”。代码现从冻结 `AffectiveTurnPlanV1.companion_act` 向唯一既有质量重试传入 `REPAIR／HOLD_COMPLEXITY／GIVE_SPACE` 类型上下文；补齐直接修复索取、隐式提醒 effect、裸后台状态、泛化现实管束和称呼防御硬门禁，并只对真实“先到这／晚点再说”的关系修复暂停增加 scene grounding。相关非安全回归为 398 passed；没有新增审计表、同步写或额外模型轮次。真实新 SHA 复验前仍是 `CODE_REMEDIATED_REAL_RETEST_PENDING`，完整 48 条和三人盲评均未通过。Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。
+
+`0d2dc6f3b` 加载后的 8 条第二次定向复验报告 SHA-256 为 `88f44b41ea73dca12c49a9f1a9e52afde16746980562495edd8c691249ec4a08`，结果为 7 条自动待人工、1 条失败；24 个 accepted Gateway turn 继续保持旧 writer 零增量和 canonical projection 前进。上一轮的直接修复索取、喜忧并存、称呼防御与关系暂停均已在真实正文中关闭，但人工检查仍发现三项漏网：`已经关掉了` 的多字后缀绕过通知 effect 规则，`卡住了我喊你` 暗示并不存在的持续执行，以及 `喝多了可别找我哭诉` 用惩罚性条件回应现实社交。
+
+第三轮修复仅扩展现有三个正则边界和独立 runner 体验断言；没有新表、同步 journal、额外模型调用或普通对话重审计。Surface、runner、DL-04 与主链相邻非安全测试合计 401 passed。三条真实新 SHA 复测、完整 48 条和三人盲评前继续保持失败／待验证；Pentest、渗透与网络安全仍为 `NOT_RUN_USER_SKIPPED`。
