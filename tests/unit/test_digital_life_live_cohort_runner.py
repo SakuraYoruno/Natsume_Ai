@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,89 @@ def _successful_turn(*, narrative: str = "我在。慢慢说，不急。", voice
             else []
         ),
     }
+
+
+def _create_writer_probe_database(path: Path) -> None:
+    with sqlite3.connect(path) as connection:
+        for table_name in (
+            *live_cohort.LEGACY_AFFECT_WRITER_TABLES,
+            *live_cohort.CANONICAL_AFFECT_WRITER_TABLES,
+        ):
+            connection.execute(
+                f'CREATE TABLE "{table_name}" (id INTEGER PRIMARY KEY)'
+            )
+
+
+def test_affect_writer_probe_proves_zero_legacy_delta_and_canonical_progress(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    emotion_root = tmp_path / "emotion"
+    emotion_root.mkdir()
+    (emotion_root / "default.json").write_text('{"mood":"old"}', encoding="utf-8")
+    _create_writer_probe_database(db_path)
+    before = live_cohort._affect_writer_snapshot(
+        db_path=db_path,
+        legacy_emotion_root=emotion_root,
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("INSERT INTO affective_life_event_v1 DEFAULT VALUES")
+        connection.execute("INSERT INTO relationship_life_event_v1 DEFAULT VALUES")
+    after = live_cohort._affect_writer_snapshot(
+        db_path=db_path,
+        legacy_emotion_root=emotion_root,
+    )
+
+    probe = live_cohort._build_affect_writer_probe(
+        before=before,
+        after=after,
+        outcomes=[{"turns": [_successful_turn()]}],
+    )
+
+    assert probe["status"] == (
+        "PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS"
+    )
+    assert set(probe["legacy_table_deltas"].values()) == {0}
+    assert probe["canonical_table_deltas"]["affective_life_event_v1"] == 1
+    assert probe["canonical_table_deltas"]["relationship_life_event_v1"] == 1
+    assert probe["changed_legacy_file_refs"] == []
+
+
+def test_affect_writer_probe_fails_on_legacy_table_or_file_mutation(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    emotion_root = tmp_path / "emotion"
+    emotion_root.mkdir()
+    legacy_file = emotion_root / "default.json"
+    legacy_file.write_text('{"mood":"old"}', encoding="utf-8")
+    _create_writer_probe_database(db_path)
+    before = live_cohort._affect_writer_snapshot(
+        db_path=db_path,
+        legacy_emotion_root=emotion_root,
+    )
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("INSERT INTO affective_life_event_v1 DEFAULT VALUES")
+        connection.execute("INSERT INTO relationship_life_event_v1 DEFAULT VALUES")
+        connection.execute("INSERT INTO bond_events DEFAULT VALUES")
+    legacy_file.write_text('{"mood":"changed"}', encoding="utf-8")
+    after = live_cohort._affect_writer_snapshot(
+        db_path=db_path,
+        legacy_emotion_root=emotion_root,
+    )
+
+    probe = live_cohort._build_affect_writer_probe(
+        before=before,
+        after=after,
+        outcomes=[{"turns": [_successful_turn()]}],
+    )
+
+    assert probe["status"] == "FAIL"
+    assert "LEGACY_WRITER_TABLE_DELTA_NONZERO" in probe["failures"]
+    assert "LEGACY_EMOTION_FILE_CHANGED" in probe["failures"]
+    assert probe["legacy_table_deltas"]["bond_events"] == 1
+    assert len(probe["changed_legacy_file_refs"]) == 1
+    assert "default.json" not in str(probe)
 
 
 def test_live_execution_manifest_expands_to_72_without_sending_scenario_notes() -> None:

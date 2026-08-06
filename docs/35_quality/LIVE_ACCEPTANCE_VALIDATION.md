@@ -284,3 +284,5 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 最终轮使用同一 `synchronization_id` 创建四条 expression effect，远端 `voice.speak` 收到 `TTS_PLAYBACK_FINISHED/APPLIED`，Voice release 与 Avatar release 也为 `APPLIED`；`avatar.set_expression` 仍以 `VTS_CONNECTION_FAILED` 拒绝。runner 只在 probe turn 收集物理 expression，故该证据是“一条轨迹三轮文本全部完成、最终轮 Voice 完成”，不是三轮语音覆盖。自动 verdict 为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；回复仍需人工判断自然度。
 
 non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_VOICE`，但实时体验仍未达标：Host 整轮 latency 为 11,145／12,715／7,739 ms，远高于普通文本首可见 token 的目标，且三轮没有独立首 token 时间戳。下一步应拆分 3～4 秒确定性／轮询开销和语义修复比例，而不是重新打开隐藏思考或继续扩大 Token cap。A15 总体继续为 `INCOMPLETE`。
+
+为把旧情感 writer 清零从人工观察变成正式收据，cohort report 升级为 v2：运行前后读取八张退役表的存在性与行数、扫描旧 emotion JSON 的脱敏 size／mtime／SHA-256，并记录五张 canonical journal 的行数变化。只有至少一个 Gateway turn 完整经过 TaskGraph／Acceptance、Affective 与 Relationship journal 都正向推进、旧表和旧文件全零增量时才可通过；缺表、旧文件变化、旧表增量或只有失败请求均不能通过。runner 与相邻 writer cutover 回归 41 项通过，真实新 SHA cohort 尚未运行，故状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

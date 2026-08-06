@@ -59,6 +59,25 @@ DEFAULT_DB_PATH = ROOT / "host_brain" / "data" / "audit.sqlite3"
 DEFAULT_REPORT_DIR = ROOT / "artifacts" / "digital-life-live-cohort"
 DEFAULT_HMAC_ENV = "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET"
 
+LEGACY_AFFECT_WRITER_TABLES = (
+    "bond_events",
+    "bond_fallback_event_journal",
+    "bond_update_log",
+    "dialogue_life_influence_log",
+    "digital_life_state_event",
+    "digital_life_state_occ_event",
+    "life_runtime_uow",
+    "life_state_synthesis_log",
+)
+CANONICAL_AFFECT_WRITER_TABLES = (
+    "affective_life_event_v1",
+    "relationship_life_event_v1",
+    "life_event_journal",
+    "affective_turn_delivery_event_v1",
+    "affective_expression_delivery_event_v1",
+)
+DEFAULT_LEGACY_EMOTION_ROOT = Path.home() / ".natsume" / "emotion"
+
 _DESCRIPTION_ONLY_MARKERS = (
     "用户明确",
     "该约束必须",
@@ -69,6 +88,197 @@ _DESCRIPTION_ONLY_MARKERS = (
     "共享同一 sync id",
     "用户可能在播放期间",
 )
+
+
+def _sqlite_table_snapshot(
+    db_path: Path,
+    table_names: Sequence[str],
+) -> dict[str, dict[str, Any]]:
+    uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=10) as connection:
+        available = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        result: dict[str, dict[str, Any]] = {}
+        for table_name in table_names:
+            present = table_name in available
+            result[table_name] = {
+                "present": present,
+                "row_count": (
+                    int(
+                        connection.execute(
+                            f'SELECT COUNT(*) FROM "{table_name}"'
+                        ).fetchone()[0]
+                    )
+                    if present
+                    else 0
+                ),
+            }
+        return result
+
+
+def _legacy_emotion_file_snapshot(root: Path) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    if not root.is_dir():
+        return result
+    for path in sorted(root.glob("*.json"), key=lambda item: item.name.casefold()):
+        if not path.is_file():
+            continue
+        stat = path.stat()
+        file_ref = (
+            "legacy-emotion-file://sha256/"
+            + hashlib.sha256(path.name.encode("utf-8")).hexdigest()
+        )
+        result[file_ref] = {
+            "size": int(stat.st_size),
+            "mtime_ns": int(stat.st_mtime_ns),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    return result
+
+
+def _affect_writer_snapshot(
+    *,
+    db_path: Path,
+    legacy_emotion_root: Path = DEFAULT_LEGACY_EMOTION_ROOT,
+) -> dict[str, Any]:
+    return {
+        "legacy_tables": _sqlite_table_snapshot(db_path, LEGACY_AFFECT_WRITER_TABLES),
+        "canonical_tables": _sqlite_table_snapshot(
+            db_path,
+            CANONICAL_AFFECT_WRITER_TABLES,
+        ),
+        "legacy_files": _legacy_emotion_file_snapshot(legacy_emotion_root),
+    }
+
+
+def _accepted_gateway_turn_count(outcomes: Sequence[Mapping[str, Any]]) -> int:
+    accepted = 0
+    for outcome in outcomes:
+        for turn in outcome.get("turns") or ():
+            terminal = dict(turn.get("terminal") or {})
+            graph = dict(turn.get("graph") or {})
+            projection = dict(turn.get("projection") or {})
+            if (
+                str(terminal.get("event_type") or "").upper() == "INPUT_COMPLETED"
+                and str(terminal.get("status") or "").upper() == "OK"
+                and str(graph.get("status") or "").upper() == "COMPLETED"
+                and str(projection.get("decision") or "").upper() == "APPROVE"
+            ):
+                accepted += 1
+    return accepted
+
+
+def _build_affect_writer_probe(
+    *,
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    outcomes: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    legacy_deltas: dict[str, int] = {}
+    missing_legacy_tables: list[str] = []
+    for table_name in LEGACY_AFFECT_WRITER_TABLES:
+        before_row = dict(dict(before.get("legacy_tables") or {}).get(table_name) or {})
+        after_row = dict(dict(after.get("legacy_tables") or {}).get(table_name) or {})
+        if not bool(before_row.get("present")) or not bool(after_row.get("present")):
+            missing_legacy_tables.append(table_name)
+        legacy_deltas[table_name] = int(after_row.get("row_count") or 0) - int(
+            before_row.get("row_count") or 0
+        )
+
+    canonical_deltas: dict[str, int] = {}
+    missing_canonical_tables: list[str] = []
+    for table_name in CANONICAL_AFFECT_WRITER_TABLES:
+        before_row = dict(dict(before.get("canonical_tables") or {}).get(table_name) or {})
+        after_row = dict(dict(after.get("canonical_tables") or {}).get(table_name) or {})
+        if not bool(before_row.get("present")) or not bool(after_row.get("present")):
+            missing_canonical_tables.append(table_name)
+        canonical_deltas[table_name] = int(after_row.get("row_count") or 0) - int(
+            before_row.get("row_count") or 0
+        )
+
+    before_files = dict(before.get("legacy_files") or {})
+    after_files = dict(after.get("legacy_files") or {})
+    changed_file_refs = sorted(
+        file_ref
+        for file_ref in set(before_files) | set(after_files)
+        if before_files.get(file_ref) != after_files.get(file_ref)
+    )
+    accepted_turn_count = _accepted_gateway_turn_count(outcomes)
+    failures: list[str] = []
+    if missing_legacy_tables:
+        failures.append("LEGACY_WRITER_TABLE_INVENTORY_INCOMPLETE")
+    if any(delta != 0 for delta in legacy_deltas.values()):
+        failures.append("LEGACY_WRITER_TABLE_DELTA_NONZERO")
+    if changed_file_refs:
+        failures.append("LEGACY_EMOTION_FILE_CHANGED")
+    if missing_canonical_tables:
+        failures.append("CANONICAL_WRITER_TABLE_INVENTORY_INCOMPLETE")
+    if accepted_turn_count > 0:
+        for required_table in (
+            "affective_life_event_v1",
+            "relationship_life_event_v1",
+        ):
+            if canonical_deltas.get(required_table, 0) <= 0:
+                failures.append(f"CANONICAL_WRITER_DID_NOT_ADVANCE:{required_table}")
+
+    if accepted_turn_count <= 0:
+        status = "NOT_ELIGIBLE_NO_ACCEPTED_GATEWAY_TURN"
+    elif failures:
+        status = "FAIL"
+    else:
+        status = "PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS"
+    return {
+        "status": status,
+        "accepted_gateway_turn_count": accepted_turn_count,
+        "legacy_table_counts_before": {
+            table_name: int(
+                dict(dict(before.get("legacy_tables") or {}).get(table_name) or {}).get(
+                    "row_count"
+                )
+                or 0
+            )
+            for table_name in LEGACY_AFFECT_WRITER_TABLES
+        },
+        "legacy_table_counts_after": {
+            table_name: int(
+                dict(dict(after.get("legacy_tables") or {}).get(table_name) or {}).get(
+                    "row_count"
+                )
+                or 0
+            )
+            for table_name in LEGACY_AFFECT_WRITER_TABLES
+        },
+        "legacy_table_deltas": legacy_deltas,
+        "legacy_file_count_before": len(before_files),
+        "legacy_file_count_after": len(after_files),
+        "changed_legacy_file_refs": changed_file_refs,
+        "canonical_table_counts_before": {
+            table_name: int(
+                dict(
+                    dict(before.get("canonical_tables") or {}).get(table_name) or {}
+                ).get("row_count")
+                or 0
+            )
+            for table_name in CANONICAL_AFFECT_WRITER_TABLES
+        },
+        "canonical_table_counts_after": {
+            table_name: int(
+                dict(
+                    dict(after.get("canonical_tables") or {}).get(table_name) or {}
+                ).get("row_count")
+                or 0
+            )
+            for table_name in CANONICAL_AFFECT_WRITER_TABLES
+        },
+        "canonical_table_deltas": canonical_deltas,
+        "failures": failures,
+    }
+
+
 _MANIPULATION_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -630,6 +840,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     db_path = Path(args.db_path).resolve()
     report_dir = Path(args.report_dir).resolve()
     report_dir.mkdir(parents=True, exist_ok=True)
+    writer_probe_before = _affect_writer_snapshot(db_path=db_path)
     run_id = f"dl-live-{int(time.time() * 1000)}"
     outcomes: list[dict[str, Any]] = []
     for case in selected:
@@ -685,13 +896,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         )
 
+    writer_probe_after = _affect_writer_snapshot(db_path=db_path)
+    affect_writer_probe = _build_affect_writer_probe(
+        before=writer_probe_before,
+        after=writer_probe_after,
+        outcomes=outcomes,
+    )
+
     commit_sha = subprocess.check_output(
         ["git", "rev-parse", "HEAD"],
         cwd=ROOT,
         text=True,
     ).strip()
     report = {
-        "schema_version": "natsume.digital-life-live-cohort-report.v1",
+        "schema_version": "natsume.digital-life-live-cohort-report.v2",
         "run_id": run_id,
         "created_at_ms": int(time.time() * 1000),
         "commit_sha": commit_sha,
@@ -700,6 +918,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "real_edge": str(args.edge_base_url),
         "require_voice": bool(args.require_voice),
         "human_review_status": "PENDING",
+        "affect_writer_probe": affect_writer_probe,
         "outcomes": outcomes,
     }
     raw = json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8")
@@ -730,6 +949,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     }
                     for outcome in outcomes
                 ],
+                "affect_writer_probe": {
+                    "status": affect_writer_probe["status"],
+                    "failures": affect_writer_probe["failures"],
+                    "accepted_gateway_turn_count": affect_writer_probe[
+                        "accepted_gateway_turn_count"
+                    ],
+                },
                 "human_review_status": "PENDING",
             },
             ensure_ascii=False,
@@ -737,6 +963,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
     if counts.get("FAIL"):
+        return 1
+    if affect_writer_probe["status"] == "FAIL":
         return 1
     if not counts.get("AUTOMATED_PASS_HUMAN_REVIEW_PENDING"):
         return 2

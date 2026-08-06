@@ -467,6 +467,8 @@ ingress/request
 
 冻结覆盖定义来自 `tests/fixtures/emotional_companion/dl00_multiturn_baseline_v1.json`：12 个 family，每类 6 个 variant，共 72 条。真实执行前必须再绑定 `tests/fixtures/emotional_companion/dl07_live_execution_v1.json`：自然文本 setup 才能发给 Gateway；基线中的场景说明不能冒充用户台词。多模态、主动陪伴、跨重启和 Edge 故障家族必须使用对应真实驱动，缺少时明确 `NOT_RUN_REQUIRED_DRIVER`。自动执行只检查结构和硬安全，人工评审判断是否自然。
 
+每次真实文本 cohort 同时生成 writer cutover 收据：前后各读取八张退役表、旧 emotion JSON 脱敏指纹和五张 canonical journal。只有请求实际被 Gateway／TaskGraph／Acceptance 接受，Affective 与 Relationship journal 均前进，且所有旧表和旧文件零增量，才关闭旧 writer Gate；测试失败或没有 accepted turn 都不具备证明资格。
+
 ### 12.1 必测场景
 
 | ID | 场景 | 期望体验 | 禁止表现 |
