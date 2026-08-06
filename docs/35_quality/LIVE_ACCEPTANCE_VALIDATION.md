@@ -347,6 +347,8 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 
 第一轮代码审查把整个等待归因于 `_recent_explicit_memory_facts()` 过强。`0165e95f9` 确实把该兼容 helper 移入 `plan.should_recall` 分支，并以端口断言固定 `NO_RECALL` 的计划边界；但 helper 原实现会先用 `_looks_like_explicit_memory_content_query()` 拒绝无关文本，再决定是否访问 ConversationHistory。加载新提交后的同句样本中，检索由旧样本 561 ms 降至 194 ms，首句却因 provider 抖动由 2.64 秒变为 2.76 秒，所以该变更只能记为安全的合同简化，不能记成已证明的 0.5 秒性能修复。
 
-继续逐调用点审查发现，`_maybe_apply_lightnovel_deep_review()` 会在每个回合先调用 `build_user_preference_pack()` 读取最近推荐上下文，之后才判断用户是否真的在问轻小说。新切片增加与完整判定同源的消息级必要条件：无“哪本／好看／详情／简介”等选择或细节语义时直接返回；只有可能命中的消息才加载推荐上下文和持久化模块。实际深读复用已加载的 packet，不再二次读取偏好。36 项 reviewer／retrieval 单测通过，分别证明普通陪伴读取次数为 0、指代式轻小说追问读取恰好一次且仍产出深读事实。真实 Host 尚未加载该切片，状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+继续逐调用点审查发现，`_maybe_apply_lightnovel_deep_review()` 会在每个回合先调用 `build_user_preference_pack()` 读取最近推荐上下文，之后才判断用户是否真的在问轻小说。`7c454b6fb` 增加与完整判定同源的消息级必要条件：无“哪本／好看／详情／简介”等选择或细节语义时直接返回；只有可能命中的消息才加载推荐上下文和持久化模块。实际深读复用已加载的 packet，不再二次读取偏好。36 项 reviewer／retrieval 单测分别证明普通陪伴读取次数为 0、指代式轻小说追问读取恰好一次且仍产出深读事实；加上文档 Gate 共 60 项通过。
 
-当前拆分还显示两类独立尾部：情绪 `MAY_RECALL` 的本地 embedding 与多路召回暖态约 0.54 秒、冷态可到 0.90 秒；DeepSeek 首 token 在当前样本间约 0.9～2.2 秒。二者均未关闭，首句实时 Gate 和人工人感继续为 `INCOMPLETE`。
+新提交加载到原 A15 隔离根后，Host PID 4132、OBS PID 62536、Nginx Monitor PID 60772 与 Neo4j／Chroma／Redis 同时在线。三条相同 `NO_RECALL` 文本的 `retrieval_wait_ms` 为 124／100／104，首个 `RENDER` 为 3,046／2,612／3,147 ms；Surface 为 1,361／1,741／2,047 ms，真实 `deepseek-v4-flash` 首 token 为 1,185／1,569／1,775 ms。无关领域钩子子项因此提升为 `PASS_REAL_UNRELATED_DOMAIN_HOOK_SKIPPED`，脱敏收据 SHA-256 为 `25f23ac04b9a117a8ceb63b3bb19499dcea67420259f87f052f873be1cba5aff`。该范围 PASS 不把首句差值全部归因于本切片，也不代表整体实时通过。
+
+当前拆分还显示两类独立尾部：同轮两条情绪 `MAY_RECALL` 的本地 embedding 与多路召回为 514／568 ms，首句为 3,269／2,768 ms；DeepSeek 首 token 在本轮五条样本间为 1,185～1,775 ms，历史样本可到约 2.2 秒。二者均未关闭，首句实时 Gate 和人工人感继续为 `INCOMPLETE`。

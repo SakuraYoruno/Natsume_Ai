@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_ORDINARY_CHAT_IRRELEVANT_LIGHTNOVEL_CONTEXT_READ_CODE_REMEDIATED_REAL_RETEST_PENDING",
+  "commit_scope": "A15_ORDINARY_CHAT_IRRELEVANT_LIGHTNOVEL_CONTEXT_READ_REAL_RETEST_PASS_SCOPE_BOUND",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -26,8 +26,8 @@
       "status": "WIRED",
       "governance_mode": "LIGHTWEIGHT",
       "no_recall_plan_short_circuit": "CODE_COMPLETE_LIVE_CAUSAL_BENEFIT_UNPROVEN",
-      "irrelevant_lightnovel_context_read": "CODE_REMEDIATED_REAL_RETEST_PENDING",
-      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, but live evidence did not prove that change caused the previously observed 0.5-second wait. Unrelated companion turns now also skip the durable light-novel recommendation context read; a restarted real-stack retest is pending."
+      "irrelevant_lightnovel_context_read": "PASS_REAL_FULL_STACK_SCOPE_BOUND",
+      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, but live evidence did not prove that change alone caused the previously observed 0.5-second wait. On 7c454b6fb, unrelated companion turns also skip the durable light-novel recommendation context read; three real NO_RECALL samples measured 100-124 ms retrieval wait. MAY_RECALL remains 514-568 ms and the end-to-end realtime gate remains open."
     },
     "user_self_affect_separation": {
       "status": "WIRED",
