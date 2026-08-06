@@ -200,6 +200,8 @@ flowchart LR
 
 当前方案显示中文文本、生成日语语音。各通道独立失败与降级，不反向修改七海情绪。
 
+GPT-SoVITS persistent worker 的所有权从 `Popen` 成功开始，到 Manager 接收 READY 后才转为长期驻留。READY 超时、加载拒绝或进程异常必须先终止并等待子进程退出，再返回 TTS 失败；不得让后续请求并行堆叠新的模型 runtime。合成超时同样先释放当前 worker，下一请求才重建。该生命周期不增加 Host 对话审计，也不改变同一 expression intent／receipt identity。
+
 ## 5. 主动陪伴
 
 ```text

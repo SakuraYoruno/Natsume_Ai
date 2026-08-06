@@ -1735,19 +1735,35 @@ class _PersistentProcessSoVITSAdapter:
         with self._lock:
             if self._process is not None and self._process.poll() is None:
                 return "already running"
-            self._start_process_locked()
-            ready = self._read_message(
-                expected_event="ready",
-                request_id=None,
-                timeout_s=_env_float("EDGE_TTS_WORKER_START_TIMEOUT_S", 120.0, min_value=5.0, max_value=300.0),
-            )
-            if not bool(ready.get("success")):
-                raise RuntimeError(str(ready.get("detail") or "persistent worker failed to start"))
-            detail = str(ready.get("detail") or "ready")
-            load_s = ready.get("load_s")
-            if load_s is not None:
-                detail = f"{detail}; load_s={load_s}"
-            return detail
+            try:
+                self._start_process_locked()
+                ready = self._read_message(
+                    expected_event="ready",
+                    request_id=None,
+                    timeout_s=_env_float(
+                        "EDGE_TTS_WORKER_START_TIMEOUT_S",
+                        120.0,
+                        min_value=5.0,
+                        max_value=300.0,
+                    ),
+                )
+                if not bool(ready.get("success")):
+                    raise RuntimeError(
+                        str(ready.get("detail") or "persistent worker failed to start")
+                    )
+                detail = str(ready.get("detail") or "ready")
+                load_s = ready.get("load_s")
+                if load_s is not None:
+                    detail = f"{detail}; load_s={load_s}"
+                return detail
+            except Exception:
+                # A ready timeout used to leave the model process alive while
+                # the manager discarded this adapter.  Every later request
+                # then spawned another GPU-resident worker until Edge ran out
+                # of RAM/VRAM.  Startup owns the child until READY, so every
+                # unsuccessful startup must synchronously release it.
+                self.close()
+                raise
 
     def synthesize(
         self,

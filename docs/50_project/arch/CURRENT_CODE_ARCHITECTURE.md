@@ -77,6 +77,8 @@ Surface packet 继续保持最多 8 条事实，但不再机械保留前 8 条�
 
 当前语言策略为中文文本展示、日语 TTS。Host 通过 `ExpressionPlan` 选择 voice profile；目标 Edge 使用 `configs/voice/gpt_sovits_nanami_v4.json` 与 GPT-SoVITS V4 权重生成语音。
 
+Edge 的 persistent TTS adapter 在子进程发出 `ready` 前拥有该进程的唯一生命周期责任。启动、模型加载、READY 等待或 READY 拒绝任一步失败，都必须在返回 Manager 之前同步 `close()`；不能把超时 worker 留给 GC，也不能让下一次合成在旧 worker 仍占 RAM／VRAM 时继续创建新进程。合成阶段的超时沿用同一 fail-closed 回收规则，下一次请求才允许启动一个干净 worker。
+
 ## 5. Governed Task Runtime
 
 `host_brain/task_runtime/` 仍负责所有有副作用路线：
