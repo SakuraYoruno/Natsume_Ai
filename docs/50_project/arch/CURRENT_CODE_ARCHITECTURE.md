@@ -191,3 +191,5 @@ Code 收益队列复用已有 `CodePlanningDomain → GoalPlanningService → Co
 Code prompt 还拥有独立、server-owned generation profile：temperature 0、top-p 0.8、max tokens 600、thinking disabled。它不是调用方可覆盖的 metadata，而由 production route catalog 根据 prompt identity 注入；execution profile 同时绑定这些值，避免 provider 默认推理预算变化后仍沿用旧实验身份。
 
 固定题号与 durable workload identity 分离。配置中的题号用于跨版本比较；Code ledger 注册身份为 `<题号>@<cohort_version>`，对应 workload/baseline ref 也包含版本。这样 cohort 升级会追加新 registration，而不是让同一 ID 绑定不同 evidence 或覆盖旧失败。
+
+filesystem identity 也与业务 identity 分离。Windows 下的 runtime directory 与 bare/worktree run component 只使用固定长度 SHA-256 前缀，避免深 acceptance 根目录触发路径上限；完整 commit、namespace、config 和 workload identity 仍由 receipt/ledger 绑定，短目录名不承担审计语义。

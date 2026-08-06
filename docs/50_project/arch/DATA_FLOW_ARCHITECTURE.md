@@ -377,3 +377,5 @@ flowchart LR
 Code 模型请求通过共享 attestation boundary 进入 canonical ModelAttempt，但 scene 固定为 `CODE_BENCHMARK`。runner 把实际 route timeout 与 request deadline 写入 execution profile；这避免 Code 任务继承普通短请求的全局超时，也使改变超时后的实验无法复用旧 cohort identity。
 
 production route catalog 还按 `code.benefit.execution.json` 注入冻结的 non-thinking generation profile。prompt identity、scene、generation、route timeout 与 request deadline 共同构成 Code execution profile digest；任一项变化都要求新 cohort 版本和新运行身份。
+
+进入 Git sandbox 前，语义 run identity 会导出一个固定长度 filesystem digest。bare repo 与 detached worktree 只使用该短组件；ledger 仍保存完整 workload/run/receipt 绑定，从而同时满足 Windows 路径边界和可追踪性。

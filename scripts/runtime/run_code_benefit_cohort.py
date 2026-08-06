@@ -186,7 +186,10 @@ async def _run_live(args: argparse.Namespace) -> int:
     output_dir = args.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     receipt_path = output_dir / f"code-{args.run_namespace}-{commit_sha[:10]}.json"
-    runtime_root = output_dir / f"code-runtime-{args.run_namespace}-{commit_sha[:10]}"
+    runtime_identity = hashlib.sha256(
+        f"{commit_sha}:{args.run_namespace}:{cohort.config_digest}".encode("utf-8")
+    ).hexdigest()[:16]
+    runtime_root = output_dir / f"code-runtime-{runtime_identity}"
     randomization_seed = secrets.token_bytes(32)
     randomization_seed_digest = hashlib.sha256(randomization_seed).hexdigest()
     started_at_ms = int(time.time() * 1000)
@@ -205,6 +208,7 @@ async def _run_live(args: argparse.Namespace) -> int:
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
         "model_scene_type": CODE_BENCHMARK_SCENE_TYPE,
         "model_timeout_ms": int(args.model_timeout_ms),
+        "runtime_identity": runtime_identity,
         "members": [],
         "planned_arm_orders": {},
     }

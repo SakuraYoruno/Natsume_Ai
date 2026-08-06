@@ -407,7 +407,12 @@ def prepare_code_workload(
         execution_budget=execution_budget,
         controlled_verification_plan=verification_plan,
     )
-    run_id = f"code-{run_namespace}-{definition.module_name}"[:120]
+    run_identity = hashlib.sha256(
+        (
+            f"{cohort.config_digest}:{run_namespace}:{definition.workload_id}"
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    run_id = f"code-{definition.module_name}-{run_identity}"
     return PreparedCodeWorkloadV1(
         definition=definition,
         snapshot=snapshot,

@@ -420,3 +420,5 @@ Code 外部请求必须携带 `CODE_BENCHMARK` scene；共享 attestation adapte
 production route catalog 必须为 `code.benefit.execution.json` 返回 temperature 0、top-p 0.8、max tokens 600、thinking disabled，且这些参数必须进入 execution profile digest。首轮完整 cohort 中途失败后，后续修复必须升级 cohort/profile identity并完整重跑；不得只拼接失败前的通过成员。
 
 Code 的 durable workload ID 必须绑定 cohort version；同一固定题号升级 cohort 后应产生新 registration，不得触发旧 identity 的 evidence drift，也不得覆盖旧行。测试必须断言 20 个 prepared workload 均使用 `<题号>@<cohort_version>`，而模型 prompt 仍只接收任务内容、不接收 ledger 历史。
+
+Code filesystem-facing runtime/run component 必须为固定长度摘要，不得直接拼接最长 60 字符 namespace。测试需断言 20 个 run ID 唯一且不超过 40 字符；真实预检必须在深 acceptance 数据根下完成 bare clone、双 worktree、清理和 receipt，才算关闭 Windows 路径问题。

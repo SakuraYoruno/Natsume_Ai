@@ -76,6 +76,9 @@ def test_generated_source_commit_and_search_paths_are_deterministic(tmp_path: Pa
         == f"{item.definition.workload_id}@{cohort.cohort_version}"
         for item in prepared
     )
+    assert len({item.run_spec.run_id for item in prepared}) == 20
+    assert all(len(item.run_spec.run_id) <= 40 for item in prepared)
+    assert all("unit" not in item.run_spec.run_id for item in prepared)
 
 
 def test_model_prompt_excludes_hidden_cases_and_registered_prompt_is_json(tmp_path: Path) -> None:
