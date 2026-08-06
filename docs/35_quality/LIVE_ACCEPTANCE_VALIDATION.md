@@ -252,3 +252,11 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 输入包含仅用于本次合成验证的 text/audio/image/video sentinel。Fusion 返回 `RAW_MODALITY_OMITTED`，Visual TTL 被收紧到 3000 ms；直接绕过 Fusion 提交包含 `raw_audio` 的 LifeCommand 被 reducer 拒绝且没有留下 receipt。Canary 随后扫描 affective command、1026 条 Life event、四个 canonical snapshot 与 projection intent，禁止字段和 sentinel 命中均为 0。最终 active episode 与 component 均已自然衰减为 0，snapshot 从 13,370 bytes 降至 9,281 bytes，最大 event payload 28,881 bytes；新建 Repository 实例重放后 snapshot 与 digest 完全一致，SQLite integrity 为 `ok`。
 
 脱敏收据 SHA-256 为 `ddc09b5bce7a6974a58205634b0c7518d25e6cc113d7ebd7d53e06283f3ca584`，状态为 `PASS_REAL_SQLITE_SCOPE_PRIVACY_BOUNDED_REPLAY`。60,060,000 ms 只表示模拟事件时间，实际执行约 59 秒，不能写成 16 小时墙钟 soak；它也不替代旧情感 writer 使用量归零、profile apply／rollback、人工人感盲测或三模态验收。A15 总体继续为 `INCOMPLETE`。
+
+## 2026-08-06 A15 Companion Profile Host 行为与精确回滚
+
+绑定提交 `e508411924bf28a358e08b729e02bd72b47f4bb0` 的隔离 canary 使用完整 migration catalog、真实临时 SQLite 和生产 RelationshipLifecycle、CompanionProfileLifecycle、AffectFusion、AffectiveTurnPlanner、Expression Delivery。五条相互独立、跨五个 UTC day、helpfulness 为 0.95 且无边界违规的 aftereffect 建立候选；Planner 随即选择 `CANARY` profile，并把“不要追加追问”等文本 style policy、Voice rate `1.0 → 1.15` 与 Avatar motion `0.5 → 0.8` 写入同一冻结计划及 Host staged intent。
+
+后续五次同门槛 aftereffect 形成五条 `CANARY_INTERACTION`，生命周期自动激活原候选，没有创建第二个 profile。主动 rollback 不接受调用者指定历史目标，只恢复候选自带的 exact predecessor；下一轮 Planner 的 profile identity、style policy、Voice rate 和 Avatar motion 全部回到 baseline。投影顺序精确为 `CANARY_STARTED → 5×CANARY_INTERACTION → ACTIVATED → ROLLED_BACK`，SQLite immutable trigger 拒绝更新，新 Repository 重放与最终 snapshot 相同，integrity 为 `ok`。
+
+脱敏收据 SHA-256 为 `acdf52ff5cfd6c6e53ff71f268273e2dcbaeb59bd906a1c614afdc5d572f3bde`，状态为 `PASS_REAL_SQLITE_PROFILE_HOST_BEHAVIOR_EXACT_ROLLBACK`。本轮没有调用模型或远端 Edge，故只把 Host 行为协议标为 PASS；“实际生成措辞发生可感知改变”和远端 Voice／Avatar 物理执行仍为 `NOT_TESTED_HOST_PROTOCOL_ONLY`。旧情感 writer、人工人感、VTS 与其他 A15 Gate 仍未完成，总体继续为 `INCOMPLETE`。

@@ -68,6 +68,19 @@ flowchart LR
 
 候选选择顺序固定为“逐候选关系／安全／Voice 完整性门禁 → 在合格集合内评分择优 → 交付”。某个高分候选带追问、否定复杂感受或关系防御时，只淘汰该候选；只有所有候选都不合格时才触发语义重试或终止，不能让一个坏候选拖掉另一个可发送候选。
 
+低风险 Companion Profile 不旁路这条链路。五条跨日至少三天、helpfulness 下界不低于 0.85 且无边界违规的 canonical aftereffect 只能创建可回滚 canary；接下来的五次强后效应把同一候选自动激活。Planner 将 profile 变成文本 style anchor，ExpressionPlan 同步缩放 Voice rate 与 Avatar motion。Rollback 只能恢复 active profile 自带的 exact predecessor，不能由调用者指定任意历史版本。A15 隔离 SQLite canary 已验证 Host 协议上的 `文本策略改变 + Voice 1.0→1.15 + Avatar 0.5→0.8`，并在 rollback 后全部恢复；它没有执行模型生成和远端设备。
+
+```mermaid
+flowchart LR
+    E["5 条跨日强 aftereffect"] --> C["Reversible profile canary"]
+    C --> P["Planner style anchors"]
+    C --> V["Voice rate"]
+    C --> A["Avatar motion"]
+    C --> I["5 次 canary interaction"]
+    I --> X["Auto activate same profile"]
+    X --> R["Exact predecessor rollback"]
+```
+
 ## 3. 有副作用的任务
 
 ```mermaid

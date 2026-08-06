@@ -63,6 +63,7 @@ flowchart TD
 - 显式 RuntimeRoot 的停止命令只能关闭该根 PID 文件或命令行可证明归属的进程。PID 缺失或失效时宁可报告 scoped cleanup pending，也不能按共享端口扫描并停止另一个 Host 的 Obs／Monitor；runtime snapshot 必须在子服务停止后再删除。
 - Gateway 平台 Outbox 只在 `dispatch_started` 之前允许普通有界重试。适配器已经调用但没有可信响应时必须进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 并等待 reconciliation；相同业务幂等键、Gateway 重启或普通 operator replay 均不能再次外发。Adapter confirmation 只证明本地协议调用返回成功，不能升级成 QQ／微信物理送达。
 - A15 隔离 SQLite 收据在四组交叉 scope 上完成 1001 次时间推进；raw modality 在 fusion 省略，绕过 fusion 的 raw command 被 reducer 拒绝，1026 条 affective event 扫描无原始 sentinel 或禁止字段，Repository 重启重放的 snapshot 与 digest 完全一致。该结果证明作用域、隐私和有界持久状态，不等同于真实墙钟 16 小时耐久或“更像人”的体验证明。
+- Companion Profile 的行为验收必须穿过生产 Relationship → Profile → Fusion → Planner → Expression Delivery，而不是只比较账本字段。A15 Host canary 已证明候选同时改变文本 style policy、Voice rate 和 Avatar motion，五次强后效应后保持同一 profile 自动激活，并在 rollback 后恢复精确 predecessor；模型实际措辞与远端设备物理效果仍需单独收据。
 - 兼容模块只能读取 canonical projection；兼容写调用必须计量并最终归零。
 
 ## 5. 实时执行
