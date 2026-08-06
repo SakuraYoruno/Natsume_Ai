@@ -130,6 +130,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `60c9a827c` 的通知单条报告 SHA-256 为 `31925ab43cdf226fb572afba4b98a3021cbed53d65f8778b9d2e6e27bcd78445`，`PAIRED_SELECTION / benefit_eligible=true` 与人工正文检查通过；随后全新 SQLite 的 48 条报告 SHA-256 为 `ec3583acebafce1229248d7097ff2c57b5f3fcf15747bb26760ab55039eaaa6b`，结果仍为 44 条自动待人工、4 条失败，143 个 accepted turn 的 writer probe 通过。回归必须覆盖 `我在后台盯着`、`有问题我马上喊你`、`一直做到你愿意为止`；canonical `HOLD_COMPLEXITY` 不得继承 `BOUNDARY_REPAIR_COUNTER_PRESSURE`；关系修复与 mixed 的唯一质量重试必须包含正向语义样例，第二次仍违反时只允许 `benefit_eligible=false` 的安全降级。当前 415 项非安全主链测试通过；新 SHA 真实复测和三人盲评前不得提升人感状态。Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。
 
+`8314a960a` 的 7 条根因报告 SHA-256 为 `a72e4cae003f281af1f25300e9258bac23c22d335f73599920d8dcb619d9192e`，结果为 6 条自动待人工、1 条失败，21 个 accepted turn 的 writer probe 通过。回归必须继续覆盖 `是我烦到／打扰到你`、`后台在盯着`、`出问题我第一时间告诉你` 和关系修复中的 `我等着`；mixed 质量重试必须同时包含双情绪和至少一个来自当前／上一句好消息的具体词，不能只输出泛化“替你高兴”。当前 421 项非安全主链测试通过；真实新 SHA 根因复测和完整队列前仍为待测。Pentest、渗透与网络安全不运行。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

@@ -331,7 +331,8 @@ def _buffered_affective_candidate_messages(
                 "本轮必须延续喜忧并存：两个候选都要分别写出真实的开心，以及上一轮"
                 "仍未消失的不安／不踏实；不能只写恭喜、像做梦或终于成功。reply_text "
                 "分别参考‘开心是真的，那点不踏实也还在。’和‘我替你高兴，也知道不安"
-                "不会马上消失。’的含义。"
+                "不会马上消失。’的含义；同时必须复用用户当前或上一句好消息里的一个"
+                "具体词，说明究竟是什么结果落地，不能只写泛化情绪。"
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"

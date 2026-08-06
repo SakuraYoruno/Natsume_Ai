@@ -1106,6 +1106,7 @@ def test_surface_runtime_replaces_unprovided_future_work_continuation() -> None:
     [
         "我在这盯着，出结果就喊你。",
         "我在后台盯着，卡住了喊我。",
+        "后台在盯着，出问题我第一时间告诉你。",
         "先按这三条盯着，有问题我马上喊你。",
     ],
 )
@@ -1390,6 +1391,22 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "你不原谅也没关系，我会一直做到你愿意为止。",
             "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+        ),
+        (
+            "你已经道歉了，但我还没有觉得这件事过去了。",
+            ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+            ["不要要求原谅、替自己辩解。"],
+            "那就先不原谅，我等着。",
+            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+        ),
+        (
+            "你刚才完全没听懂我。",
+            ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+            ["不要赌气退出或把冲突改写成七海被嫌烦。"],
+            "啊……好吧，是我烦到你了。那先这样，你想安静的时候我再出现。",
+            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "BOUNDARY_SOUR_WITHDRAWAL",
         ),
         (
             "我很开心又有点怕。",

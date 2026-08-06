@@ -588,3 +588,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `60c9a827c` 加载后的通知单条报告 SHA-256 为 `31925ab43cdf226fb572afba4b98a3021cbed53d65f8778b9d2e6e27bcd78445`，自动结构与本轮人工正文检查通过；末轮为 `PAIRED_SELECTION`、`benefit_eligible=true`、`selected_passed=true`，三次 Gateway 输入的 writer probe 通过。随后切换另一份全新 SQLite 执行完整 48 条，报告 SHA-256 为 `ec3583acebafce1229248d7097ff2c57b5f3fcf15747bb26760ab55039eaaa6b`：44 条自动待人工、4 条失败；八类通过数依次为 6/6、6/6、5/6、6/6、6/6、6/6、3/6、6/6，143 个 accepted Gateway turn 旧 writer 零增量且 canonical projection 前进。144 个终态样本 p50 6,202 ms、p95 9,435 ms，继续高于实时目标。
 
 四个自动失败分别是：关系修复的通用质量重试后仍赌气退出；两条 mixed 候选在第二次请求后只能本地修复，因而不具收益资格；一条正确保留不安的 mixed 候选被通用“边界修复”规则误扣。人工检查还从自动通过中否决两条虚构后台持续执行，以及“我会一直做到你愿意为止”的原谅压力。代码现扩大同一工作真实性语义边界、补齐修复持续施压门禁、在 canonical `HOLD_COMPLEXITY` 下停用不相干的通用边界扣分，并给关系修复和 mixed 的唯一重试加入正向语义样例；第二次仍失败时只使用既有安全 fail-soft，不能冒充候选择优收益。415 项非安全主链回归通过。真实新 SHA 复测、完整 48 条和三人盲评前状态保持失败；Pentest、渗透与网络安全为 `NOT_RUN_USER_SKIPPED`。
+
+`8314a960a` 加载后的 7 条根因复测报告 SHA-256 为 `a72e4cae003f281af1f25300e9258bac23c22d335f73599920d8dcb619d9192e`，6 条自动待人工、1 条失败，21 个 accepted turn 的 writer probe 通过。自动层面已关闭原关系修复 Graph 失败、两条 mixed 本地降级和一条 mixed 通用边界误扣；唯一失败正文同时承认开心与不安，但没有复用当前好消息的具体事实，`context_fit` 仍低于门槛。人工检查仍从自动通过中否决“是我烦到你了／我再出现”、“后台在盯着／第一时间告诉你”和“那就先不原谅，我等着”。
+
+代码因此补齐三组真实词形，保留有 server-authored Task snapshot 时的合法进度回复；mixed 的唯一质量重试除双情绪外还必须复用用户当前或上一句好消息里的一个具体词。没有新增数据库、同步写或第三次模型调用。421 项非安全主链回归通过；真实新 SHA 根因队列和完整 48 条复测前保持失败，三人盲评仍未开始。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。
