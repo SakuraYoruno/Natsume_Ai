@@ -328,3 +328,11 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 整体性能没有随之越级通过。三轮 Host latency 为 11,657／10,137／10,075 ms；前两轮分别经历 2,875+1,797 ms 与 1,500+2,327 ms 的两次模型尝试，第三轮单次模型为 1,266 ms，但远端 Gateway attempt 的 `dispatch_started_at_ms` 校正约 1,496 ms 时钟偏移后，比 Host HTTP start 早约 2,287 ms。随后远端到 Host 的 12 次 health 探针为 15～81 ms，因此该单样本只能记作 transport／进程调度抖动，不能推成稳定网络缺陷。当前性能阻断改为 `ORDINARY_CHAT_END_TO_END_LATENCY_ABOVE_GATE_FIXED_OVERHEAD_AND_PROVIDER_REPAIR`；人工评审仍为 `PENDING`。
 
 进一步对 Surface `prompt_build_ms` 做生产代码与真实语料同条件基准，确认默认 lexical-first 路径会在每个新场景遍历约 3.4 万条安全可用台词，并逐条重建 `SurfaceOriginalQuote`；三场景首次／新查询分别耗时 1,171／676／714 ms。修复没有关闭原作语料，而是默认只保留七海本人约 3.5 千条安全台词作为运行候选、缓存解析对象，并把 `question_budget` 绑定到 few-shot 选择，避免零问句回合继续注入问句样本；无合格本地样本时直接省略风格参考，不再隐式触发本环境首次 8.5 秒且空结果的向量回退。修复后相同三场景为 458／31／36 ms，205 项 Surface 定向测试通过。该数据是代码级真实语料基准，不是完整 Gateway 延迟结论；实际服务加载新提交后的状态仍为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+## 2026-08-06 A15 OBS Task 投影写锁公平性
+
+`61a9b9a75` 加载后先保留原 2.72 GB 库，再在 `host-clean-61a9b9a75` 隔离根创建全新 canonical SQLite，排除历史库体积作为单一解释。OBS 开启时的三轮报告为 `dl-live-1785993815497.json`，SHA-256 `ce1892859f0f488723fc67bc6e58696ee1b06e39c6aad1ccd2254bcbfd10042d5`；Host 终态 7,296／10,197／5,437 ms。第二轮 Attempt 在 `1785993825938` 启动，Surface 在 `1785993828837` 完成，worker projection 记录 `created_ts_ms=1785993828994`，BudgetUsage 直到 `1785993831874` 才落库，相隔 2,880 ms。该 Attempt 未达到 30 秒心跳周期，故不是 heartbeat sleeper。
+
+同库关闭 OBS 后的对照报告为 `dl-live-1785994204620.json`，SHA-256 `0fb651bebb0e06db7c946f78588fffe77c4855b14cc79239b7ff137703f7a36f`；三轮 worker projection 到后续 artifact 仅 233／229／312 ms。重新启动 OBS 后直接查询 `task_execution` current 文档，单次波次从 index 到 36 个详情的更新时间跨 3,007 ms；旧批次上限 64 会在当前 36 个图规模下连续执行全部 SQLite 写事务，等待中的 Host writer 被重复抢占。无 OBS 对照只用于定位，不能计为正式服务栈性能 PASS；第二轮远端 TTS 另有约 96.5 秒物理执行尖峰，也不混入 Host 根因结论。
+
+修复将 Task 详情批次上限收窄为 16；缺失文档仍优先，所以新 Task 首波可见，既有 36 个详情约 45 秒轮转一次。每次派生 projection 提交后，OBS 线程显式留下 5 ms 无写锁窗口；Chat worker projection 则在线程中持久化并在 caller cancellation 时等待写入终局，避免 SQLite busy wait 冻结其他 ASGI 协程，同时不产生失联后台写。定向测试先证明 16／64 分批、17 次公平让锁以及阻塞 projection 时事件循环仍可推进。真实 Host／OBS 新 SHA 复验完成前，本项为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

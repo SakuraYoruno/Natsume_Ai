@@ -133,6 +133,8 @@ flowchart LR
 
 Gateway 入站聊天属于“实时生成 + 有副作用交付”的交界：消息经 Secure Ingress 后编译为紧凑单节点 TaskGraph，聊天生成仍只执行一次，Acceptance 再原子写入可见对话和 Gateway Outbox。直接网页／本地聊天继续走低延迟实时链，不承担这层外部投递账本。
 
+OBS 的 Task 读模型不在交互事务中同步构造。Sidecar 每 15 秒读取 canonical Task 索引，优先补齐新图，再按最旧 freshness 每波刷新最多 16 个详情；每次派生写提交后让出 5 ms canonical writer window。这样 Monitor 最终一致地看到 TaskGraph／Budget／Verification／Acceptance，同时等待写入 worker projection 的 Host 不会被一整波派生事务连续饿死。worker projection 本身在线程持久化，但 Task Runtime 必须等待其完成，不能把未落库 COMMIT 交给 Verification。
+
 Gateway INBOX 固定请求体与 Host 幂等键；即使第一次 HTTP 响应丢失，Secure Ingress 和 HostCommand repository 也只返回既有图的精确结果，因此可以有界重试。向 QQ 等平台发送的 OUTBOX 不具备同等可证明语义，dispatch 开始后的未知结果必须进入对账隔离，不能盲目重发。
 
 INBOX 与 OUTBOX 由同一 app-local Delivery Runtime 管理，但不共用执行线程。`gateway-durable-inbox` 只领取并向 Host 交付冻结入站；`gateway-durable-outbox` 只执行平台发送。两个方向各自使用 `worker_id:inbox/outbox`、Lease 与 fencing token。平台调用阻塞或进入 uncertain DLQ 不会阻塞下一条用户消息被 Host 接管，停止信号和 readiness 仍由同一 Runtime 统一收口。

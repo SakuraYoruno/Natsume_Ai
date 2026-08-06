@@ -67,17 +67,20 @@ def test_task_projection_renews_fence_during_long_materialization(tmp_path: Path
     assert lease is not None
 
     with store.bind_leader_lease(lease):
+        cooperative_yields: list[float] = []
         result = refresh_task_projections(
             _SlowTaskSource(clock, execution_count=80),  # type: ignore[arg-type]
             QueryProjectionWorker(store),
+            cooperative_write_yield=cooperative_yields.append,
         )
 
     assert result == {
         "index_count": 1,
         "indexed_execution_count": 80,
-        "execution_count": 64,
-        "deferred_execution_count": 16,
+        "execution_count": 16,
+        "deferred_execution_count": 64,
         "review_count": 0,
     }
-    assert clock["now"] == 65_000
-    assert len(store.list(TASK_EXECUTION_KIND, limit=100)) == 65
+    assert clock["now"] == 17_000
+    assert len(store.list(TASK_EXECUTION_KIND, limit=100)) == 17
+    assert cooperative_yields == [0.005] * 17

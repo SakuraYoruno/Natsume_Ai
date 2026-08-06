@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from host_brain.agent_runtime.operator_read_model import OperatorReadModelService
@@ -29,7 +29,8 @@ SESSION_KIND = "session"
 SESSION_INDEX_KEY = "index"
 DEFAULT_OPERATOR_PROJECTION_MAX_AGE_MS = 300_000
 _TASK_PROJECTION_LEASE_RENEWAL_BATCH = 16
-_TASK_PROJECTION_REFRESH_BATCH_LIMIT = 64
+_TASK_PROJECTION_REFRESH_BATCH_LIMIT = 16
+_TASK_PROJECTION_COOPERATIVE_WRITE_YIELD_SECONDS = 0.005
 
 
 def upsert_monotonic_projection(
@@ -256,6 +257,11 @@ class ProjectionOperatorReadModelService:
 def refresh_task_projections(
     source: OperatorReadModelService,
     worker: QueryProjectionWorker,
+    *,
+    cooperative_write_yield: Callable[[float], None] = time.sleep,
+    cooperative_write_yield_seconds: float = (
+        _TASK_PROJECTION_COOPERATIVE_WRITE_YIELD_SECONDS
+    ),
 ) -> dict[str, int]:
     """Independent worker entry; never invoked by a query service."""
 
@@ -264,6 +270,19 @@ def refresh_task_projections(
     def renew_lease() -> None:
         if callable(renew_bound_lease):
             renew_bound_lease()
+
+    def yield_canonical_writer() -> None:
+        """Leave a bounded lock-free window for latency-sensitive Host writes.
+
+        Obs and Host intentionally share the canonical SQLite database.  A
+        task projection wave therefore must not reacquire ``BEGIN IMMEDIATE``
+        dozens of times without giving an already-waiting Task Runtime writer
+        a scheduling window.  This runs only in the Obs projection thread.
+        """
+
+        delay = max(0.0, float(cooperative_write_yield_seconds))
+        if delay > 0:
+            cooperative_write_yield(delay)
 
     renew_lease()
     index_payload = _payload(source.list_executions(limit=500))
@@ -277,6 +296,7 @@ def refresh_task_projections(
         observed_cursor=index_cursor,
         source_ref="task-runtime-background-worker",
     )
+    yield_canonical_writer()
     execution_count = 0
     review_count = 0
     candidates: list[tuple[int, int, int, Mapping[str, Any]]] = []
@@ -327,6 +347,7 @@ def refresh_task_projections(
             observed_cursor=execution_cursor,
             source_ref="task-runtime-background-worker",
         )
+        yield_canonical_writer()
         execution_count += 1
         for review in list(value.get("reviews") or []):
             if not isinstance(review, Mapping):
@@ -346,6 +367,7 @@ def refresh_task_projections(
                 observed_cursor=review_cursor,
                 source_ref="task-review-background-worker",
             )
+            yield_canonical_writer()
             review_count += 1
     return {
         "index_count": 1,

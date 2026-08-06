@@ -81,7 +81,7 @@
 - [x] 验证 VTS 人工授权等待不会触发无界自动重连或句柄增长。
 - [x] 关闭 OBS 派生 projection journal 写放大。`636252264` 真实 30 秒样本把 2,996,490 bytes 原始公开载荷压到 410,858 bytes，降低 86.3%。一小时检查点首轮如实暴露 7 条同实例 lineage revision 误写，失败报告 SHA-256 为 `ad4d8c178a66e0040b147b1c8fa6c6129be443b954fbc73bfecbdcb544a7b00c`；收窄到只强制 `source_instance_id` 切换后，第二轮 49.084 秒窗口有 192 个 current 文档刷新、31 个 source cursor 推进，既存未到期文档和同实例 lineage 新增历史均为 0，唯一新行是新 TaskGraph 的 6,872-byte 必要首快照，Host／OBS／Monitor 前后均为 200，page count 增量为 0。报告 SHA-256 为 `92baff1b2117e5d95a47e534a2c908642b47be4d7db56e9f144beae663f563e4`；既有历史未做破坏性清理。
 - [x] 复验普通聊天最小同步提交与后台连续推进。`55d60a384` 的真实三轮中，第二轮在上一轮后台尚余 3,824 ms 时进入 Host，HostCommand／Graph、Attempt 和 history 均在上一轮后台结束前推进；六类 effect exact-once、末轮 Voice 完成且旧 writer 增量为 0。报告 SHA-256 为 `33eb1871d040578ea50185ee82732c7e37589eb2763182af3dcbda04ac798a75`。
-- [ ] 压缩普通聊天模型前固定开销与语义修复比例。当前 Host latency 仍为 11,657／10,137／10,075 ms；前两轮各有一次 hard-gate repair，第三轮 Gateway→Host 有约 2.29 秒单次传输抖动。代码已先关闭 Surface 每轮重建约 3.4 万条可用 Galgame 台词对象的热点：默认只索引七海本人台词、缓存解析对象，并让 few-shot 遵守本轮 question budget；同一真实语料三场景冷／新查询从 1,171／676／714 ms 降到 458／31／36 ms。Input worker 只增加一条非持久阶段耗时日志，不新增普通聊天账本写入；真实 Host／Gateway 复验前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+- [ ] 压缩普通聊天模型前固定开销与语义修复比例。`61a9b9a75` 隔离新库真实复验中暖态 Surface prompt build 已降为 55～60 ms，单次 DeepSeek 为 1,297～1,438 ms，但 Host 终态仍为 7,296／10,197／5,437 ms。第二轮 worker projection 写在 OBS 连续刷新 32 个 Task 详情的 3,007 ms 波次内等待 2,880 ms；停止 OBS 后同段降为 229～312 ms。代码现把 Task 详情每波上限收窄为 16、每次派生写后让出 5 ms，并把 worker projection 写移出 ASGI 事件循环。定向回归通过后必须重启 Host／OBS，以同一三轮真实 Gateway cohort 验证锁等待与整轮延迟；复验前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
 
 ## P1：情感生命清零项
 
