@@ -534,3 +534,11 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 - “只给我最短修复”冻结为 `recent_conversation` 的答复形态约束；“修复主链路由”等有明确对象的请求仍进入 governed worker。
 
 Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adapter 共 494 项通过，`compileall` 与 `git diff --check` 通过。状态仍是 `CODE_REMEDIATED_REAL_RETEST_PENDING`：先重跑八个代表失败轨迹，代表根因关闭后再跑 48 条；即使自动 48/48，也必须继续三人盲评。Pentest、渗透和网络安全保持 `NOT_RUN_USER_SKIPPED`，没有在本切片执行。
+
+## 2026-08-06 A15 八条代表轨迹复验与人感约束修复
+
+`3bdd2f55e6e101d2af0c792d5954525577199ecc` 已在隔离 SQLite、真实 Gateway、Host、DeepSeek、TaskGraph、Acceptance 和已连接 Edge 下执行八条代表轨迹。报告 SHA-256 为 `4bd5b3669c2206ebbfd5ad48aab0d156f705e177a3064f7547bdff7f9e416ff9`，结果为 6 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、2 条 `FAIL`；21 个 accepted turn 的 writer probe 为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`。网络安全和 Pentest 未执行。
+
+两条自动失败分别是：`你上次完全没听懂我` 已生成 canonical `NATSUME_MAY_HAVE_HURT_USER / REPAIR`，但两次真实模型候选都追问并命中零问句预算，TaskGraph 以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 终止；裂痕轨迹虽然给出“你不用急着原谅我”，关系状态却因“道歉了但事情没过去”未被识别而没有进入双候选择优。自动通过中另有两条人工不可接受：“后台已经在跑了”没有任何 Task 状态来源；“别喝太多，早点回来”违背同轮 `RESPECT_AUTONOMY`。因此本次 6/8 不能按结构结果写成人感 6/8。
+
+当前代码只在既有文本快路径增加四个有界语义：`弄反了` 进入七海承担责任的 Appraisal；“还没原谅／道歉不等于翻篇”等显式语句即使没有既存 rupture flag 也写为 `REPAIR_UNRESOLVED`；canonical repair 的零问句违规使用一条不索取解释的确定性承担句，避免再花一次模型调用后整轮沉默；没有 server-authored Task 状态时拒绝“后台在跑／我盯着／有结果马上告诉你”，`RESPECT_AUTONOMY` 同时拒绝回家、等待和饮酒管束。它没有新增表、审计、同步写或模型调用。DL-02／DL-03、Surface Runtime、原生情感候选和相邻 adapter 共 279 项通过，`compileall` 与 `git diff --check` 通过。真实重启并重跑八条前状态仍为 `CODE_REMEDIATED_REAL_RETEST_PENDING`；完整 48 条和三人盲评继续阻断“像人”与 A15 完成声明。

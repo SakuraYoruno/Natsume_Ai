@@ -327,6 +327,31 @@ def test_unresolved_rupture_survives_neutral_followups_until_explicit_acceptance
     assert state["repair_required"] is True
 
 
+def test_explicit_unresolved_repair_opens_rupture_without_a_prior_flag(
+    tmp_path: Path,
+) -> None:
+    relationship, _fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="reply-apology",
+        response_receipt=_accepted_foreground(command_id="foreground-apology"),
+        response_text="对不起，是我没接住。",
+    )
+
+    unresolved = relationship.record_followup(
+        request_body=_request("你已经道歉了，但我还没有觉得这件事过去了。"),
+        request_id="explicit-unresolved",
+    )
+
+    assert unresolved.aftereffect is not None
+    assert unresolved.aftereffect.outcome == "REPAIR_UNRESOLVED"
+    scope = RelationshipScope.from_request(_request("", session_id="other-session"))
+    state = reader.get_snapshot(scope.aggregate_id).state["relationship_v2"]
+    assert state["repair_required"] is True
+
+
 def test_user_accepted_repair_reopens_foreground_without_restoring_proactive_permission(
     tmp_path: Path,
 ) -> None:

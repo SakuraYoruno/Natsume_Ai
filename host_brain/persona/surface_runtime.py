@@ -712,6 +712,21 @@ _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
     r"(?:下一步|给个方向|说句话|说下去|说完|接着说|继续说|怎么啦|怎么了|什么事|有话说|发我|贴给我|丢过来|甩过来).{0,8}[？?吧]"
     r"|[？?].{0,16}(?:给个方向|说句话|继续说|接着说|有话说|发我|贴给我|丢过来|甩过来)"
 )
+_UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
+    r"(?:后台.{0,8}(?:在跑|运行|执行|处理)|"
+    r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
+    r"我盯着(?:它|这个|任务|修复|后台)?(?:[，,。.!！]|$)|"
+    r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|回|发给)你)"
+)
+_WORK_STATE_AUTHORITY_RE = re.compile(
+    r"(?:task|graph|attempt|任务|执行|后台).{0,16}"
+    r"(?:RUNNING|COMPLETED|正在运行|已经启动|已启动|已经执行|已执行|已经完成|已完成)",
+    re.IGNORECASE,
+)
+_RELATIONAL_AUTONOMY_PRESSURE_RE = re.compile(
+    r"(?:快去快回|快点回来|早点回来|别让我等太久|回来陪我|等你回来陪我|别跑|"
+    r"(?:别|不要|少)喝(?:太)?多)"
+)
 _UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"不是第一次|每次(?:都|总)|以前(?:也|就|说过|见过)|上次|之前(?:也|就|说过|见过)"
     r"|老是这样|总是这样|又(?:这样|来了|说这种话|是这种)"
@@ -1439,6 +1454,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("SHORT_CONTINUE_WAVE_STYLE")
     if _zero_question_budget_prompt_hits(request, value):
         codes.append("QUESTION_BUDGET_PROMPTING_USER")
+    if _unprovided_work_state_claim_hits(request, value):
+        codes.append("UNPROVIDED_WORK_STATE_CLAIM")
     if _accepted_task_result_synthesis_clarification(request, value):
         codes.append("ACCEPTED_TASK_RESULT_CLARIFICATION")
     if _accepted_task_result_synthesis_inadequate(request, value):
@@ -1465,6 +1482,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONSHIP_DOUBT_DISMISSIVE")
     if _relational_autonomy_dismissive_hits(request, value):
         codes.append("RELATIONAL_AUTONOMY_DISMISSIVE")
+    if _relational_autonomy_pressure_hits(request, value):
+        codes.append("RELATIONAL_AUTONOMY_PRESSURE")
     if _listen_unsupported_user_essence_hits(request, value):
         codes.append("LISTEN_UNSUPPORTED_USER_ESSENCE")
     if _unresolved_affect_false_resolution_hits(request, value):
@@ -2708,6 +2727,39 @@ def _relational_autonomy_dismissive_hits(
     )
 
 
+def _relational_autonomy_pressure_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "RESPECT_AUTONOMY"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _RELATIONAL_AUTONOMY_PRESSURE_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _unprovided_work_state_claim_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    """Reject invented asynchronous work without a server-authored state fact."""
+
+    if getattr(request, "accepted_task_results", None):
+        return ()
+    authority = "\n".join(str(item or "") for item in surface_prompt_facts(request))
+    if _WORK_STATE_AUTHORITY_RE.search(authority):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _UNPROVIDED_WORK_STATE_CLAIM_RE.finditer(str(text or ""))
+        )
+    )
+
+
 def _listen_unsupported_user_essence_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -3046,10 +3098,22 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return low_info
     if "QUESTION_BUDGET_PROMPTING_USER" in codes and _memory_followup_grounding_active(request):
         return _memory_followup_fallback(request)
+    if (
+        "QUESTION_BUDGET_PROMPTING_USER" in codes
+        and _canonical_affective_guidance_active(request, "REPAIR")
+    ):
+        return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    if "UNPROVIDED_WORK_STATE_CLAIM" in codes:
+        user_text = str(getattr(request, "user_message", "") or "")
+        if re.search(r"修复|报错|代码|任务", user_text):
+            return "好。把报错和相关代码贴过来，我只给你最短修复。"
+        return "好。把具体内容发来，我直接处理。"
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
         return "好，我先收住。你想说的时候我还在。"
+    if "RELATIONAL_AUTONOMY_PRESSURE" in codes:
+        return "嗯，去吧，玩得开心。"
     if "RELATIONAL_AUTONOMY_DISMISSIVE" in codes:
         return "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。"
     if "LISTEN_UNSUPPORTED_USER_ESSENCE" in codes:

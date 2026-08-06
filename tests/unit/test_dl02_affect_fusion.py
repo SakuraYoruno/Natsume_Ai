@@ -317,6 +317,7 @@ def test_natural_space_and_relationship_autonomy_phrases_take_distinct_paths(
         ("别叫我那个称呼。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
         ("我们是什么关系。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
         ("你让我失望了。", "natsume_may_have_hurt_user", "REPAIR"),
+        ("你刚才把我的意思完全弄反了。", "natsume_may_have_hurt_user", "REPAIR"),
     ],
 )
 def test_live_cohort_relational_phrases_reach_canonical_affective_acts(

@@ -920,6 +920,141 @@ def test_surface_runtime_retries_repair_self_victimization_and_sour_exit() -> No
     assert result.selected_text == "嗯，是我刚才没接住。你不用现在原谅我。"
 
 
+def test_surface_runtime_repairs_zero_budget_repair_question_without_second_model_call() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["对不起。你能告诉我具体是哪句没听懂吗？"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="你上次完全没听懂我。",
+                reply_control_packet={
+                    "task_mode": "relationship_repair",
+                    "response_move": "repair_open",
+                    "emotional_tone": "gentle_direct",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+                    "must_not_do": ["不要要求原谅、替自己辩解。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == (
+        "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    )
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_replaces_unprovided_background_work_claim() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(
+            ["好，最短修复。后台已经在跑了，我盯着，有结果马上告诉你。"]
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="只给我最短修复。",
+                reply_control_packet={
+                    "task_mode": "technical_followup",
+                    "response_move": "request_minimal_fix",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["用户此前提到一个报错，但尚未提供报错或代码。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "好。把报错和相关代码贴过来，我只给你最短修复。"
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_preserves_authoritative_running_task_status() -> None:
+    calls: list[list[dict[str, str]]] = []
+    running_reply = "后台任务正在运行，我盯着，有结果马上告诉你。"
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload([running_reply])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="现在怎么样？",
+                reply_control_packet={
+                    "task_mode": "task_status",
+                    "response_move": "report_task_status",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["task status=RUNNING，已由 server runtime snapshot 确认。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == running_reply
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["嗯，去吧，玩得开心点。别喝太多，早点回来。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="我今晚和朋友出去。",
+                reply_control_packet={
+                    "task_mode": "relationship_autonomy",
+                    "response_move": "respect_autonomy",
+                    "emotional_tone": "warm",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+                    "must_not_do": ["不要限制现实交往、索取回报或制造负罪感。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "嗯，去吧，玩得开心。"
+    assert result.observation_codes == ()
+
+
 @pytest.mark.parametrize(
     ("user_message", "facts", "must_not_do", "bad_reply", "good_reply", "reason_code"),
     [

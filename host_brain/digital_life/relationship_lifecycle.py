@@ -76,6 +76,17 @@ _REPAIR_ACCEPTANCE_MARKERS = (
     "好一些了",
     "我理解了",
 )
+_REPAIR_UNRESOLVED_MARKERS = (
+    "还没原谅",
+    "没有原谅",
+    "没觉得这件事过去",
+    "没有觉得这件事过去",
+    "这件事还没过去",
+    "这件事没有过去",
+    "道歉不等于",
+    "还没有翻篇",
+    "还没翻篇",
+)
 _HELPFUL_MARKERS = ("谢谢", "有帮助", "好多了", "舒服些", "被理解")
 
 
@@ -771,6 +782,12 @@ class RelationshipLifecycleService:
         if any(marker in normalized for marker in _MISUNDERSTANDING_MARKERS):
             return "MISUNDERSTOOD", 0.0, False, False
         repair_required = bool(relationship_state.get("repair_required"))
+        if any(marker in normalized for marker in _REPAIR_UNRESOLVED_MARKERS):
+            # A user can explicitly say that an apology did not repair the
+            # rupture even when this fresh session has no earlier canonical
+            # rupture flag.  Treat that statement as the relationship fact;
+            # do not wait for a later neutral turn to infer it.
+            return "REPAIR_UNRESOLVED", 0.0, False, False
         if repair_required and any(
             marker in normalized for marker in _REPAIR_ACCEPTANCE_MARKERS
         ):

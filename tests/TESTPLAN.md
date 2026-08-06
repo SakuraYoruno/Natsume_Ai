@@ -106,6 +106,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 代码级非安全回归必须覆盖：未明确接受时裂痕不清零；fresh positive Appraisal 保留 mixed episode；冻结队列中的空间／自主／失望短句产生两个候选；canonical 克制吃味不触发 `BOUNDARY_REPAIR_COUNTER_PRESSURE`；“只给我最短修复”走 Chat，而带明确对象的修复仍走 worker。当前 494 项相关测试通过。网络安全和 Pentest 不在本轮命令中，状态固定为 `NOT_RUN_USER_SKIPPED`。
 
+`3bdd2f55e` 的八条代表轨迹报告 SHA-256 为 `4bd5b3669c2206ebbfd5ad48aab0d156f705e177a3064f7547bdff7f9e416ff9`，自动 6 条待人工、2 条失败；21 个 accepted turn 的 canonical writer probe 通过。后续回归除结构断言外必须人工检查并阻断两类“自动过、人感错”的正文：没有 Task authority 却宣称后台已运行，以及 `RESPECT_AUTONOMY` 下要求少喝酒或早点回家。代码回归还必须证明：显式未原谅可从无 rupture flag 状态打开 `REPAIR_UNRESOLVED`；canonical repair 的零问句违规无需第二次模型调用即可得到不索取解释的安全承担句；有 server-authored `task ... RUNNING` fact 时真实运行状态不被误拦。当前 279 项非安全相关回归通过，新 SHA 真实重启前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：
