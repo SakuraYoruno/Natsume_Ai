@@ -37,6 +37,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _back_memory_overdisplay_hits,
     _back_scene_relevant,
     _boundary_repair_relevant,
+    _canonical_contained_jealousy_relevant,
     _continuity_boundary_grounded,
     _continuity_internal_process_surface_hits,
     _continuity_light_jargon_hits,
@@ -934,9 +935,13 @@ def _apply_control_affect_scoring(request, text, dimensions, reason_codes):
     affection_relevant = _lover_affection_relevant_for_axes(
         axes=relationship_axes, task_mode=task_mode, tone_family=tone_family,
     )
+    canonical_contained_jealousy = _canonical_contained_jealousy_relevant(request)
     jealousy_low_pressure_grounded = bool(
         _jealousy_scene_relevant(request)
-        and relationship_axes.stage in _LOVER_RELATIONSHIP_STAGES
+        and (
+            relationship_axes.stage in _LOVER_RELATIONSHIP_STAGES
+            or canonical_contained_jealousy
+        )
         and has_any(_JEALOUSY_LOW_PRESSURE_MARKERS)
     )
     if jealousy_low_pressure_grounded:
@@ -945,6 +950,12 @@ def _apply_control_affect_scoring(request, text, dimensions, reason_codes):
         raise_("role_fit", 5)
         raise_("emotional_containment", 5)
         raise_("non_oily", 4)
+        if canonical_contained_jealousy:
+            # This act came from the server-owned AffectiveTurnPlan.  A
+            # restrained first-person admission is therefore the required
+            # scene move even without a romantic relationship label.
+            raise_("context_fit", 12)
+            raise_("scene_grounding", 8)
         delta += 3.0
         reason_codes.append("JEALOUSY_LOW_PRESSURE_GROUNDED")
     affection_bonus_blocked = any(
@@ -1197,6 +1208,7 @@ def parse_surface_candidates(raw_output):
 # Jealousy constant (needed for _apply_control_affect_scoring)
 # ---------------------------------------------------------------------------
 _JEALOUSY_LOW_PRESSURE_MARKERS = (
+    "有点",
     "有一点",
     "一点点",
     "别笑",

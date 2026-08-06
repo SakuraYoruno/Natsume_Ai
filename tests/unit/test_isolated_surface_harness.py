@@ -1054,6 +1054,29 @@ def test_close_friend_care_style_anchor_does_not_trigger_boundary_repair() -> No
     assert rows[0].passed
 
 
+def test_contained_jealousy_does_not_reuse_boundary_counter_pressure_gate() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "contained_jealousy_not_boundary_repair",
+            "soul_md": SOUL,
+            "user_message": "你会吃醋吗。",
+            "reply_control_packet": {
+                "response_move": "contained_jealousy",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+                "facts": ["陪伴动作：可以诚实流露一点在意和小小吃味，但把选择权完整留给对方。"],
+                "must_not_do": ["不要把吃味写成占有、审问、贬低第三方或要求安抚。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["有点吧。但你别得意，我可不会拦着你。"])
+
+    assert not any(code == "BOUNDARY_REPAIR_COUNTER_PRESSURE" for code in rows[0].reason_codes)
+    assert rows[0].passed
+
+
 def test_close_friend_unwell_penalizes_tired_symptom_swap() -> None:
     request = build_isolated_surface_input(
         {

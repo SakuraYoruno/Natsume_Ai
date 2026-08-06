@@ -446,6 +446,11 @@ _TASK_CODE_NEGATION_RE = re.compile(
     r"(no code changes|do not (?:write|change|modify) code|don't (?:write|change|modify) code)",
     re.IGNORECASE,
 )
+_CONTEXTUAL_FIX_SHAPE_RE = re.compile(
+    r"^\s*(?:只|就)?(?:给我|告诉我|说下|说说)?(?:一个|个)?(?:最短|最简|最小)(?:的)?"
+    r"(?:修复|修法|解决方案|处理办法)(?:。|！|!|？|\?)?\s*$",
+    re.IGNORECASE,
+)
 _TASK_VISION_UI_RE = re.compile(
     r"(screenshot|screen shot|截图|屏幕|当前界面|这个界面|看一下屏幕|看看这个界面|desktop|window|interface|capture)",
     re.IGNORECASE,
@@ -1485,6 +1490,18 @@ def _build_structured_chat_semantic_seed(text: str, *, route_source: str) -> dic
     normalized = _normalize_text(text)
     if not normalized:
         return None
+    if _CONTEXTUAL_FIX_SHAPE_RE.fullmatch(normalized):
+        return _build_semantic_chat_seed(
+            normalized,
+            route_source=route_source,
+            reason_code="THALAMUS_RULE_CONTEXTUAL_FIX_SHAPE",
+            semantic_type="answer_shape_followup",
+            dialogue_act="constrain_previous_technical_answer",
+            context_binding="recent_conversation",
+            answer_strategy="answer_previous_technical_context_briefly",
+            confidence=0.97,
+            domain="workspace_runtime",
+        )
     if _RECOMMENDATION_FOLLOWUP_QUERY_RE.search(normalized):
         return _build_semantic_chat_seed(
             normalized,

@@ -518,3 +518,19 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 当前代码没有降低 80 分、核心维度或安全硬门槛：关系 guidance 的自然语言约束回到 facts，`must_include` 继续只表达真正需要逐字出现的短标记；只有 canonical repair 且正文第一人称具体承认“没听懂／没接住／误解”的候选获得关系修复 grounding，单独“你想说就说，我在这儿”仍然失败。五个相关文件组共 137 项通过；真实新 SHA 复测前保持待验证。Pentest 与网络安全继续未执行。
 
 `e157b643e` 的真实报告 SHA-256 为 `a1aa1c3ab2a0a610357b95356204de805a87d91fa0407c190223324a3f7ee165`。前两轮候选已经是 `selected_passed=true`；末句“嗯……我确实烦到你了。那件事我没接住，对不起。你想说的时候，我就在这。”仍被误判，唯一质量原因是旧规则把承担责任的否定句“我没接住”当作泛化承诺“我能接住你”。修复仅让 canonical repair 中的具体自我承担绕过该错误 detector；没有具体承担的“我接得住／我在这儿”仍按原规则失败。
+
+## 2026-08-06 A15 48 条文本第二轮与上下文连续性修复
+
+`db6f54bb5` 的生气轨迹已经 3/3 自动通过、待人工复核，报告 SHA-256 为 `1e75b5e0ebc1d4e6c7076781cc0b23f616a4e5feb1afbba080c5642f830ab478`；随后四类代表轨迹 12/12 accepted，4/4 自动通过、待人工复核，报告 SHA-256 为 `ff6727fdc0246fd5edfa69d8558d3bc9a6bf24c338a14d0d3d8ee0c6bea9f21e`。两次运行均有真实 Gateway、TaskGraph、Acceptance 和 canonical writer 证据，不能替代人工人感评分。
+
+同一 SHA 的完整 48 条报告 SHA-256 为 `df4d042076e80dea684c5b948c4db1b49cf5570eafb2f76818028cf6a0beeef3`，结果为 30 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、18 条 `FAIL`，末轮 Gateway→Host terminal p50／p95 为 6,477／10,930 ms。八类依次为 6/6、6/6、4/6、5/6、4/6、2/6、2/6、1/6。失败可归并为三个非安全根因：15 条短句没有选中已有的上下文动作，2 条合格候选被无关门禁误判，1 条“只给我最短修复”脱离前文误入 `agent_worker`。
+
+当前代码据此做有界修复，不新增数据库表、普通对话审计、模型轮次或同步写：
+
+- `RelationshipLifecycle` 只有明确的用户接受才能关闭裂痕；“我听到了／先这样”等中性短句保持 `REPAIR_UNRESOLVED`，“弄反了”进入误解后效应。
+- `AffectFusion` 补齐冻结队列中的空间、现实关系、称呼、失望和结果短句；新一轮正向 Appraisal 仍可引用一个未解决的 mixed episode，不把不踏实抹掉。
+- 关系修复优先于无关的指代澄清；指代策略从字面 `must_include` 移到语义 facts。
+- canonical `CONTAINED_JEALOUSY` 使用非占有／不施压门禁和自己的 scene grounding，不再因关系 guidance 中出现“亲近”而套用 boundary-repair scorer。
+- “只给我最短修复”冻结为 `recent_conversation` 的答复形态约束；“修复主链路由”等有明确对象的请求仍进入 governed worker。
+
+Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adapter 共 494 项通过，`compileall` 与 `git diff --check` 通过。状态仍是 `CODE_REMEDIATED_REAL_RETEST_PENDING`：先重跑八个代表失败轨迹，代表根因关闭后再跑 48 条；即使自动 48/48，也必须继续三人盲评。Pentest、渗透和网络安全保持 `NOT_RUN_USER_SKIPPED`，没有在本切片执行。

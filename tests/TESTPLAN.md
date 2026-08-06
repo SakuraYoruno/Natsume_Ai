@@ -88,6 +88,24 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 当前正式样本绑定 `4f4008060`：3 个 accepted turn，八张退役表全为 `0→0`，4 个旧文件零变化；五张 canonical 表分别 +8／+6／+22／+3／+12。该收据关闭旧 writer 运行使用量，不替代 48 条盲测、profile 物理行为或长期 soak。
 
+48 条第二轮报告 SHA-256 为 `df4d042076e80dea684c5b948c4db1b49cf5570eafb2f76818028cf6a0beeef3`，30 条自动待人工、18 条失败。下一轮真实复验先固定以下代表轨迹，确认四类根因都关闭后才重跑完整队列：
+
+```powershell
+python scripts/runtime/test_digital_life_live_cohort.py `
+  --case user_angry_at_natsume:3 `
+  --case user_angry_at_natsume:5 `
+  --case task_with_low_mood:2 `
+  --case space_and_boundary:2 `
+  --case rupture_and_repair:1 `
+  --case shared_joy_and_mixed_feeling:2 `
+  --case intimacy_and_jealousy_boundary:1 `
+  --case intimacy_and_jealousy_boundary:3 `
+  --db-path <fresh-acceptance-audit.sqlite3> `
+  --report-dir <fresh-acceptance-evidence-dir>
+```
+
+代码级非安全回归必须覆盖：未明确接受时裂痕不清零；fresh positive Appraisal 保留 mixed episode；冻结队列中的空间／自主／失望短句产生两个候选；canonical 克制吃味不触发 `BOUNDARY_REPAIR_COUNTER_PRESSURE`；“只给我最短修复”走 Chat，而带明确对象的修复仍走 worker。当前 494 项相关测试通过。网络安全和 Pentest 不在本轮命令中，状态固定为 `NOT_RUN_USER_SKIPPED`。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

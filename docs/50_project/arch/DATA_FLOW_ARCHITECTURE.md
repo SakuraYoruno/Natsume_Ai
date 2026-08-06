@@ -414,3 +414,20 @@ flowchart LR
 关系 guidance 中的完整自然语言约束进入 `facts/style` 平面，只有真正要求逐字出现的短标记才能进入 `must_include`。候选评分仅在 canonical `REPAIR` 且文本由七海第一人称具体承认“没听懂／没接住／误解”时认定修复已落地；因此后接一句克制的在场表达不会被技术场景模板误杀，缺少具体承担的泛化安慰仍不能通过。
 
 同一个 repair grounding 也区分语义方向：否定完成的“我没接住”表示承认失败，不进入 emotional-containment 模板；肯定能力的“我能接住／我接得住”仍受原门禁约束。该判断发生在本地评分，不新增模型调用、同步存储或普通对话审计。
+
+第二轮 48 条真实文本暴露的连续性缺口按下面的轻量读路径收口：
+
+```mermaid
+flowchart LR
+    U["本轮短句"] --> R["读取 canonical Relationship / Affect head"]
+    R --> C{"未解决关系或 mixed episode?"}
+    C -->|"关系裂痕"| A["REPAIR / GIVE_SPACE / RESPECT_AUTONOMY"]
+    C -->|"喜忧并存 + 新结果"| M["HOLD_COMPLEXITY"]
+    C -->|"无相关连续性"| N["本轮普通 Appraisal"]
+    A --> P["冻结 AffectiveTurnPlan"]
+    M --> P
+    N --> P
+    P --> S["Surface 生成与既有本地 Gate"]
+```
+
+这条路径只读已有有界 head，并复用原来的 Life／Relationship 写入；不会为每轮建立新审计记录。只有明确接受才关闭裂痕，新的正向结果也不能覆盖仍活跃的 mixed episode。指代澄清属于 facts，关系修复优先时会被抑制；canonical 克制吃味由非占有门禁评分，不借“亲近”自动升级关系。

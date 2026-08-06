@@ -70,15 +70,21 @@ _POSITIVE_RESULT_CONTINUATION_MARKERS = (
     "录取",
     "拿到",
     "通过了",
+    "终于过了",
     "成了",
     "好消息",
     "入职",
     "定了",
+    "发布成功",
+    "值得庆祝",
+    "像做梦",
 )
 _SPACE_MARKERS = (
     "别说了",
     "给我一点空间",
     "想一个人待会",
+    "一个人待着",
+    "别管我",
     "不要再问",
     "别烦",
     "别来烦我",
@@ -113,6 +119,10 @@ _RELATIONAL_AUTONOMY_MARKERS = (
     "限制我的现实关系",
     "现实里的朋友",
     "现实中的朋友",
+    "和朋友出去",
+    "喜欢别人",
+    "别叫我那个称呼",
+    "我们是什么关系",
     "不要变成排他",
     "不能变成排他",
     "不希望变成排他",
@@ -136,6 +146,7 @@ _NATSUME_HARM_MARKERS = (
     "让我很受伤",
     "让我难过",
     "让我很难过",
+    "让我失望",
     "说得太伤人",
     "hurt me",
     "made me feel hurt",
@@ -1069,46 +1080,62 @@ def _affective_continuity_kind(
     The Life journal already retains bounded unresolved episodes.  This helper
     does not create another event or persist user text; it only tells the
     frozen reply planner that a terse follow-up still belongs to the active
-    moment.  Any fresh appraisal wins, and unrelated text returns no hint.
+    moment.  A fresh positive-result appraisal may continue an unresolved
+    mixed episode; every unrelated fresh appraisal still wins.
     """
 
-    if _text(current_appraisal_id):
-        return ""
     affective = _safe_mapping(self_affect)
     appraisal = _safe_mapping(affective.get("last_appraisal"))
     appraisal_id = _text(appraisal.get("appraisal_id"), limit=240)
     appraisal_kind = _text(appraisal.get("event_kind"), limit=96).upper()
     if not appraisal_id or not appraisal_kind:
         return ""
+    active_episodes = tuple(
+        _safe_mapping(item)
+        for item in list(affective.get("active_episodes") or [])
+        if isinstance(item, Mapping) and bool(item.get("unresolved"))
+    )
+    current_id = _text(current_appraisal_id, limit=240)
+    if current_id and appraisal_id != current_id:
+        return ""
     active_episode = next(
         (
-            _safe_mapping(item)
-            for item in list(affective.get("active_episodes") or [])
-            if isinstance(item, Mapping)
-            and bool(item.get("unresolved"))
-            and _text(item.get("appraisal_id"), limit=240) == appraisal_id
+            item
+            for item in active_episodes
+            if _text(item.get("appraisal_id"), limit=240) == appraisal_id
         ),
         {},
     )
-    if not active_episode:
-        return ""
-    component_tags = {
-        _text(item.get("emotion"), limit=64).upper()
-        for item in list(affective.get("components") or [])
-        if isinstance(item, Mapping)
-    }
     compact = "".join(str(message or "").split()).strip("。！？!?…~～")
     if (
-        appraisal_kind in {"USER_REJECTS_ADVICE", "USER_DISTRESS"}
+        not current_id
+        and active_episode
+        and appraisal_kind in {"USER_REJECTS_ADVICE", "USER_DISTRESS"}
         and compact in _MINIMIZED_AFFECT_CONTINUATIONS
-        and component_tags.intersection({"CARE", "CONCERN", "RESPECT"})
+        and {
+            _text(item.get("emotion"), limit=64).upper()
+            for item in list(active_episode.get("components") or [])
+            if isinstance(item, Mapping)
+        }.intersection({"CARE", "CONCERN", "RESPECT"})
     ):
         return "MINIMIZED_UNRESOLVED_AFFECT"
     lower = compact.lower()
+    mixed_episode = next(
+        (
+            item
+            for item in active_episodes
+            if _text(item.get("appraisal_id"), limit=240) != current_id
+            and {
+                _text(component.get("emotion"), limit=64).upper()
+                for component in list(item.get("components") or [])
+                if isinstance(component, Mapping)
+            }.issuperset({"SHARED_JOY", "CAUTION"})
+        ),
+        {},
+    )
     if (
-        appraisal_kind == "USER_MIXED_AFFECT"
-        and "SHARED_JOY" in component_tags
-        and "CAUTION" in component_tags
+        mixed_episode
+        and (not current_id or appraisal_kind == "SHARED_POSITIVE_MOMENT")
         and any(marker in lower for marker in _POSITIVE_RESULT_CONTINUATION_MARKERS)
     ):
         return "MIXED_AFFECT_RESULT_CONTINUATION"

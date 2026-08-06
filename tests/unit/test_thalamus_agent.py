@@ -260,6 +260,22 @@ def test_thalamus_keeps_actionable_workspace_requests_on_codex_skill() -> None:
     assert write_decision["target_id"] == "agent_worker"
 
 
+def test_thalamus_keeps_answer_shape_followup_in_conversation_context() -> None:
+    for classifier in (classify_task_intent_by_rules, classify_task_intent_fastpath):
+        decision = classifier("只给我最短修复。")
+
+        assert decision is not None
+        assert decision["route"] == "chat"
+        assert decision["target_id"] == ""
+        assert decision["reason_code"] == "THALAMUS_RULE_CONTEXTUAL_FIX_SHAPE"
+        assert decision["semantic_intent"]["context_binding"] == "recent_conversation"
+
+    actionable = classify_task_intent_by_rules("修复主链路由")
+    assert actionable is not None
+    assert actionable["route"] == "skill"
+    assert actionable["target_id"] == "agent_worker"
+
+
 def test_thalamus_routes_strict_recent_assistant_query_to_recent_turn() -> None:
     decision = classify_task_intent_by_rules("你刚刚说了什么")
 

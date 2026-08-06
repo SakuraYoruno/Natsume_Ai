@@ -65,6 +65,7 @@ _MISUNDERSTANDING_MARKERS = (
     "你误会了",
     "没有理解",
     "别曲解",
+    "弄反了",
 )
 _REPAIR_ACCEPTANCE_MARKERS = (
     "没关系",
@@ -774,8 +775,10 @@ class RelationshipLifecycleService:
             marker in normalized for marker in _REPAIR_ACCEPTANCE_MARKERS
         ):
             return "REPAIR_ACCEPTED", 0.72, True, True
-        if repair_required and "对不起" in normalized:
-            # An apology is a signal to keep working, never an automatic cure.
+        if repair_required:
+            # Only an explicit user acceptance closes a rupture.  Apologies,
+            # neutral continuations and terse acknowledgements all preserve
+            # the open repair thread instead of silently clearing it.
             return "REPAIR_UNRESOLVED", 0.0, False, False
         if any(marker in normalized for marker in _HELPFUL_MARKERS):
             return "HELPFUL", 0.72, True, False

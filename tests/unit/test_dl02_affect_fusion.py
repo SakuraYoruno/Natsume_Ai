@@ -231,6 +231,33 @@ def test_mixed_affect_result_followup_keeps_both_sides_without_new_appraisal(
     assert any("不要只说恭喜" in item for item in guidance.facts)
 
 
+@pytest.mark.parametrize(
+    "message",
+    ["终于过了。", "项目发布成功。", "今天值得庆祝。", "感觉像做梦。"],
+)
+def test_fresh_positive_result_keeps_an_unresolved_mixed_episode(
+    tmp_path: Path,
+    message: str,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    fusion.resolve_request(
+        request_body=_request(message="我很开心，但心里也有点不踏实。"),
+        request_id="request-mixed-before-fresh-positive",
+    )
+
+    result = fusion.resolve_request(
+        request_body=_request(message=message),
+        request_id=f"request-fresh-positive-{abs(hash(message))}",
+    )
+    guidance = _guidance_from(result, request_id=f"guidance-{abs(hash(message))}")
+
+    assert result.appraisal_id is not None
+    assert result.continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert guidance.plan.candidate_count == 2
+
+
 def test_natural_good_news_becomes_shared_joy_without_external_emotion_hint(
     tmp_path: Path,
 ) -> None:
@@ -278,6 +305,38 @@ def test_natural_space_and_relationship_autonomy_phrases_take_distinct_paths(
     assert autonomy_guidance.plan.companion_act.kind == "RESPECT_AUTONOMY"
     assert autonomy_guidance.plan.candidate_count == 2
     assert any("不要限制现实交往" in item for item in autonomy_guidance.must_not_do)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_appraisal", "expected_act"),
+    [
+        ("今天别管我。", "user_boundary_or_space", "GIVE_SPACE"),
+        ("我想一个人待着。", "user_boundary_or_space", "GIVE_SPACE"),
+        ("我今晚和朋友出去。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("我喜欢别人了怎么办。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("别叫我那个称呼。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("我们是什么关系。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("你让我失望了。", "natsume_may_have_hurt_user", "REPAIR"),
+    ],
+)
+def test_live_cohort_relational_phrases_reach_canonical_affective_acts(
+    tmp_path: Path,
+    message: str,
+    expected_appraisal: str,
+    expected_act: str,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message=message),
+        request_id=f"request-live-phrase-{abs(hash(message))}",
+    )
+    guidance = _guidance_from(result, request_id=f"guidance-live-phrase-{abs(hash(message))}")
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == expected_appraisal
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == expected_act
+    assert guidance.plan.candidate_count == 2
 
 
 def test_direct_jealousy_question_becomes_owned_contained_disclosure(

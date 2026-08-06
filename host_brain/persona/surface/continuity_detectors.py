@@ -860,7 +860,30 @@ def _short_continue_unprovided_tech_detail_hits(
     )
 
 
+def _canonical_contained_jealousy_relevant(request: IsolatedSurfaceInput) -> bool:
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return any(
+        marker in canonical_context
+        for marker in (
+            "陪伴动作：可以诚实流露一点在意和小小吃味",
+            "不要把吃味写成占有",
+        )
+    )
+
+
 def _boundary_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_contained_jealousy_relevant(request):
+        # Canonical jealousy already carries stricter non-possession gates.
+        # Relationship guidance also mentions closeness, which must not turn
+        # a playful contained line such as “但你别得意” into boundary pressure.
+        return False
     surface = "\n".join(
         _clean_list(
             [

@@ -288,6 +288,45 @@ def test_repair_requires_later_user_acknowledgement_and_never_uses_raw_text(
     assert first_reply.event_id
 
 
+def test_unresolved_rupture_survives_neutral_followups_until_explicit_acceptance(
+    tmp_path: Path,
+) -> None:
+    relationship, _fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="reply-misread",
+        response_receipt=_accepted_foreground(command_id="foreground-misread"),
+        response_text="我明白了。",
+    )
+    misunderstood = relationship.record_followup(
+        request_body=_request("你刚才把我的意思完全弄反了。"),
+        request_id="misread-followup",
+    )
+    assert misunderstood.aftereffect is not None
+    assert misunderstood.aftereffect.outcome == "MISUNDERSTOOD"
+
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="reply-repair-open",
+        response_receipt=_accepted_foreground(command_id="foreground-repair-open"),
+        response_text="是我没接住。",
+    )
+    neutral = relationship.record_followup(
+        request_body=_request("我听到了。"),
+        request_id="neutral-followup",
+    )
+
+    assert neutral.aftereffect is not None
+    assert neutral.aftereffect.outcome == "REPAIR_UNRESOLVED"
+    scope = RelationshipScope.from_request(_request("", session_id="other-session"))
+    state = reader.get_snapshot(scope.aggregate_id).state["relationship_v2"]
+    assert state["repair_required"] is True
+
+
 def test_user_accepted_repair_reopens_foreground_without_restoring_proactive_permission(
     tmp_path: Path,
 ) -> None:

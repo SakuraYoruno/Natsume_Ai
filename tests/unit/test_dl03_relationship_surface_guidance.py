@@ -159,3 +159,53 @@ def test_surface_compiler_does_not_inject_stale_space_constraints_after_repair_a
     assert not any("明确要求空间" in item for item in payload.task_control["facts"])
     assert not any("不要求立刻回应" in item for item in payload.task_control["facts"])
     assert trace["relationship_life_guidance"]["proactive_permission"] == "DENIED"
+
+
+def test_repair_guidance_suppresses_unrelated_reference_clarification(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    agent_input = _agent_input(emotion_context=_trusted_boundary_context())
+    agent_input.user_message = "这不是第一次。"
+    agent_input.intent_draft = {
+        "conversation_understanding": {"recommended_action": "clarify_reference"}
+    }
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        agent_input,
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta={},
+    )
+
+    assert payload.task_control["task_mode"] != "reference_clarification"
+    assert not any("引用对象不唯一" in item for item in payload.task_control["must_include"])
+    assert any("上一轮触及了用户边界" in item for item in payload.task_control["facts"])
+
+
+def test_reference_clarification_is_semantic_fact_not_literal_requirement(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    agent_input = _agent_input(emotion_context=_trusted_repair_acceptance_context())
+    agent_input.user_message = "你说的是哪一本？"
+    agent_input.intent_draft = {
+        "conversation_understanding": {"recommended_action": "clarify_reference"}
+    }
+
+    payload = build_surface_main_chain_input_from_surface_reply_input(
+        agent_input,
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta={},
+    )
+
+    assert payload.task_control["task_mode"] == "reference_clarification"
+    assert any("引用对象不唯一" in item for item in payload.task_control["facts"])
+    assert not any("引用对象不唯一" in item for item in payload.task_control["must_include"])
