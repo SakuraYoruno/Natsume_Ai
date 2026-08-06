@@ -382,3 +382,5 @@ python -m pytest -q `
 `7c454b6fb` 的真实复验满足无关领域钩子子项：60 项定向代码／文档 Gate 通过，Host／OBS／Monitor 与三个 Docker 依赖同时在线时，三条相同 `NO_RECALL` 的 preference-pack 单测调用数为 0，真实 `retrieval_wait_ms` 为 100～124、首个 `RENDER` 为 2,612～3,147 ms；指代式轻小说单测读取一次并保留 deep-review evidence。收据 SHA-256 为 `25f23ac04b9a117a8ceb63b3bb19499dcea67420259f87f052f873be1cba5aff`。配对 `MAY_RECALL` 仍为 514／568 ms，因此整体实时 Gate 不得随该子项升级。
 
 Surface recall service 的生命周期回归必须在同一 Agent Runtime application scope 内连续取得 factory 两次：两次对象 identity 相同，builder 只执行一次，并且注入对象必须是 canonical EpisodicStore 的 Chroma client。不得以模块全局 singleton 实现，也不得由 RecallFusionService 关闭借用的 client。真实复测要在重启 Host 后运行至少两条 `MAY_RECALL`，同时查询 `retrieval_event_log` 的 route latency；只允许把 service/client 构造差值归入本子项，不得用 provider 波动冒充检索收益。
+
+`f0aa50a58` 的 104 项回归与真实复测满足该子项：三条 `MAY_RECALL` 检索为 316／351／508 ms，route ledger 为 74／91／79 ms；修复前中位 541 ms、修复后中位 351 ms。收据 SHA-256 为 `e1c8a0f9110be096dbb8c2f29fec1a945dd52482b009a805f30f6c85f2fcafd8`。本 PASS 只关闭服务和 client 重建；508 ms 尾部、2,964～4,712 ms 首句及 provider 1,443～1,797 ms 均继续失败。

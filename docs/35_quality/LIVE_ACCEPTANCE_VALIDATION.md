@@ -355,4 +355,6 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 
 对两个 `MAY_RECALL` request 的 canonical `retrieval_event_log` 继续拆分，真实 route ledger 分别只记录 125／63 ms；同环境独立暖态基准中，Qwen3-Embedding-0.6B 的第二、三次单句编码为 91.1／91.7 ms。审查 composition 后确认每次 `_run_retrieval()` 都调用新 factory，`RecallFusionServiceContract` 又会新建 `PersistentChromaClient`；对同一 Docker Chroma 的暖态 client 构造五次为 63.9～73.5 ms，首个进程冷构造为 1,161 ms。Host 已拥有 canonical `EpisodicStore.chroma`，这次重复 ownership 没有语义价值。
 
-新切片在 `AgentRuntimeApplicationScope` 内以锁保护一个 lifespan-bound RecallFusionService，并注入现有 EpisodicStore Chroma client；并发请求共享无状态服务，而连接仍由 Host authority owner 统一关闭。定向测试重复调用 factory 两次，断言 builder 只执行一次且拿到同一 client；与召回回归合计 28 项通过。真实进程尚未加载，所以本项保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+`f0aa50a58` 在 `AgentRuntimeApplicationScope` 内以锁保护一个 lifespan-bound RecallFusionService，并注入现有 EpisodicStore Chroma client；并发请求共享无状态服务，而连接仍由 Host authority owner 统一关闭。定向测试重复调用 factory 两次，断言 builder 只执行一次且拿到同一 client；生命周期、召回和文档回归共 104 项通过。
+
+重启后的 Host PID 3500、OBS PID 12432、Monitor PID 52800 与三个 Docker 依赖同时在线。相同情绪文本三次 `MAY_RECALL` 的 `retrieval_wait_ms` 为 316／351／508，route ledger 为 74／91／79 ms；修复前两条检索为 514／568 ms，中位数从 541 ms 降到 351 ms，下降约 35%。一条 `NO_RECALL` 对照为 118 ms。服务／client 重建子项因此提升为 `PASS_REAL_APP_LOCAL_RECALL_SERVICE_REUSE`，收据 SHA-256 为 `e1c8a0f9110be096dbb8c2f29fec1a945dd52482b009a805f30f6c85f2fcafd8`。首句为 2,964～4,712 ms且仍有 508 ms 检索尾部，所以整体实时结论保持 `INCOMPLETE`。
