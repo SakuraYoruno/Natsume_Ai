@@ -468,3 +468,11 @@ version-bound identity 修复后的第二次 v2 预检完成了两只真实 Deep
 文件 SHA-256 为 `9c9938f15d303f5699debc60af5d7ebf09b417f70b4fd2824e8115cf12062170`，自校验 receipt digest 为 `81a72b602aceda2a8c020092ed0daa55d964182050a26416915b33607b92058f`，cohort spec digest 为 `16a8c8ea0f649d4b79622b14b404111cfa11dc983276f6baffeb0309e451fe92`，report digest 为 `978dff4352ac088cfa94ec0688a8fd238a1a44faf6b8ecec4806d893f8bd4a6f`。
 
 SQLite reopen 得到 20 workload registration、21 run spec、42 arm execution、21 terminal receipt、21 cleanup receipt、1 cohort registration、20 member evidence 和 1 report；完整 cohort 的 40 个模型 request 均各有一条 started 与 succeeded audit。private bare 与 worktree 目录均为空，protected source Git 状态干净；registration、terminal 和 member JSON 中 `权威规格` 命中为 0，外层文件中 selected evidence 与 hidden cases 命中为 0。Code 域因此提升为 `PASS_REAL_20_PAIRED_EXTERNAL`，PlanningSearch 总状态为 `PARTIAL_RESEARCH_CODE_PASS_PENTEST_PENDING`。
+
+## 2026-08-06 A15 数字生命文本队列计时边界修正
+
+在 48 条文本体验队列前的三轮真实预检中，Gateway→Host→DeepSeek→TaskGraph 均完成，且 canonical affect writer 前进、legacy writer 增量为 0；但脚本总耗时 176.3 秒。其中末轮在未要求 Voice 的情况下仍轮询 physical Expression receipt 90 秒，并且每轮都会要求远端 Edge 处于 Voice idle。这个时间不属于文本响应，也会让一条纯文本体验用例因远端设备繁忙误判失败。
+
+runner 现将三个边界显式分离：文本模式不等待 Edge，只对 Expression storage 做一次即时快照；`--require-voice` 模式才等待物理 Voice/Avatar；外部微信客户端投递不由该 runner 推断。与此同时，自动通过条件被收紧为必须从 canonical Acceptance Effect 读到 user turn 和 `surface.reply_delivery` 均为 `COMMITTED`，并取得真实 `gateway-outbox://` receipt。报告新增 Gateway HTTP、Host terminal、TaskGraph、模型调用和最小 Acceptance prefix 的逐段耗时，因此 TaskGraph 完成不能再冒充消息已进入 Gateway durable outbox。
+
+23 项 runner 定向单测已通过。该切片仅为 `CODE_REMEDIATED_REAL_RETEST_PENDING`；修正后的真实预检、48 条文本队列及三人盲评尚未完成。Pentest、渗透和网络安全专项按用户范围明确记为 `NOT_RUN_USER_SKIPPED`，不得写成 PASS，也不阻断其余非安全验收继续执行。

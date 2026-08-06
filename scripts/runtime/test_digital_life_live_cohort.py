@@ -58,6 +58,8 @@ DEFAULT_EXECUTION_MANIFEST = (
 DEFAULT_DB_PATH = ROOT / "host_brain" / "data" / "audit.sqlite3"
 DEFAULT_REPORT_DIR = ROOT / "artifacts" / "digital-life-live-cohort"
 DEFAULT_HMAC_ENV = "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET"
+DEFAULT_TEXT_EXPRESSION_WAIT_S = 0.0
+DEFAULT_VOICE_EXPRESSION_WAIT_S = 90.0
 
 LEGACY_AFFECT_WRITER_TABLES = (
     "bond_events",
@@ -557,6 +559,142 @@ def _fetch_model_attempts(db_path: Path, request_id: str) -> list[dict[str, Any]
         connection.close()
 
 
+def _fetch_realtime_reply_delivery(
+    db_path: Path,
+    *,
+    graph_id: str,
+    graph_revision: int,
+) -> dict[str, Any]:
+    """Read the minimal realtime Chat commit prefix from canonical storage.
+
+    A completed TaskGraph is not proof that the visible reply reached Gateway's
+    durable outbox.  This probe deliberately stops at that local delivery
+    boundary: an external WeChat/QQ/Telegram client is a separate acceptance
+    scope and must never be inferred from the Host receipt.
+    """
+
+    result: dict[str, Any] = {
+        "scope": "GATEWAY_DURABLE_OUTBOX_INTAKE",
+        "status": "MISSING",
+        "user_turn_status": "MISSING",
+        "surface_delivery_status": "MISSING",
+        "surface_receipt_ref": None,
+        "surface_commit_latency_ms": None,
+        "user_to_surface_commit_ms": None,
+        "external_platform_delivery_status": "NOT_ASSERTED_BY_TEXT_COHORT",
+    }
+    if not graph_id or int(graph_revision or 0) < 1:
+        return result
+    connection = sqlite3.connect(str(db_path))
+    connection.row_factory = sqlite3.Row
+    try:
+        table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'task_runtime_acceptance_effect_intent'
+            """
+        ).fetchone()
+        if table is None:
+            return result
+        rows = connection.execute(
+            """
+            SELECT effect_type, status, reason_code, receipt_ref,
+                   created_ts_ms, updated_ts_ms, committed_ts_ms
+            FROM task_runtime_acceptance_effect_intent
+            WHERE graph_id = ? AND graph_revision = ?
+              AND effect_type IN (
+                  'conversation.user_turn',
+                  'surface.reply_delivery'
+              )
+            ORDER BY created_ts_ms, effect_id
+            """,
+            (str(graph_id), int(graph_revision)),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    by_type = {str(row["effect_type"]): dict(row) for row in rows}
+    user_turn = by_type.get("conversation.user_turn") or {}
+    surface = by_type.get("surface.reply_delivery") or {}
+    user_status = str(user_turn.get("status") or "MISSING").upper()
+    surface_status = str(surface.get("status") or "MISSING").upper()
+    surface_receipt_ref = str(surface.get("receipt_ref") or "").strip() or None
+    surface_created = int(surface.get("created_ts_ms") or 0)
+    surface_committed = int(surface.get("committed_ts_ms") or 0)
+    user_committed = int(user_turn.get("committed_ts_ms") or 0)
+    result.update(
+        {
+            "status": (
+                "COMMITTED"
+                if user_status == "COMMITTED"
+                and surface_status == "COMMITTED"
+                and surface_receipt_ref is not None
+                else "INCOMPLETE"
+            ),
+            "user_turn_status": user_status,
+            "surface_delivery_status": surface_status,
+            "surface_reason_code": surface.get("reason_code"),
+            "surface_receipt_ref": surface_receipt_ref,
+            "surface_commit_latency_ms": (
+                max(0, surface_committed - surface_created)
+                if surface_created > 0 and surface_committed > 0
+                else None
+            ),
+            "user_to_surface_commit_ms": (
+                max(0, surface_committed - user_committed)
+                if user_committed > 0 and surface_committed > 0
+                else None
+            ),
+        }
+    )
+    return result
+
+
+def _build_turn_timing(
+    *,
+    webhook: Mapping[str, Any],
+    terminal: Mapping[str, Any] | None,
+    graph: Mapping[str, Any] | None,
+    model_attempts: Sequence[Mapping[str, Any]],
+    reply_delivery: Mapping[str, Any],
+) -> dict[str, Any]:
+    terminal_payload = dict((terminal or {}).get("payload") or {})
+    provider_latency_ms = sum(
+        int(item.get("latency_ms") or 0)
+        for item in model_attempts
+        if str(item.get("status") or "").lower()
+        in {"succeeded", "rejected", "failed"}
+    )
+    sent_ts_ms = int(webhook.get("sent_ts_ms") or 0)
+    terminal_ts_ms = int((terminal or {}).get("ts_ms") or 0)
+    return {
+        "gateway_webhook_http_ms": int(webhook.get("latency_ms") or 0),
+        "gateway_send_to_host_terminal_ms": (
+            max(0, terminal_ts_ms - sent_ts_ms)
+            if sent_ts_ms > 0 and terminal_ts_ms > 0
+            else None
+        ),
+        "host_reported_terminal_ms": (
+            int(terminal_payload.get("latency_ms"))
+            if terminal_payload.get("latency_ms") is not None
+            else None
+        ),
+        "task_graph_ms": (
+            int((graph or {}).get("total_latency_ms"))
+            if (graph or {}).get("total_latency_ms") is not None
+            else None
+        ),
+        "provider_attempt_terminal_ms": provider_latency_ms,
+        "surface_commit_latency_ms": reply_delivery.get(
+            "surface_commit_latency_ms"
+        ),
+        "user_to_surface_commit_ms": reply_delivery.get(
+            "user_to_surface_commit_ms"
+        ),
+    }
+
+
 def _wait_for_terminal(
     *,
     db_path: Path,
@@ -591,11 +729,16 @@ def _run_turn(
     timeout_s: int,
     require_voice: bool,
     collect_expression: bool,
+    expression_wait_s: float,
 ) -> dict[str, Any]:
-    idle = _wait_for_edge_voice_idle(
-        edge_base_url=edge_base_url,
-        settle_s=30,
-        http_timeout_s=8,
+    idle = (
+        _wait_for_edge_voice_idle(
+            edge_base_url=edge_base_url,
+            settle_s=30,
+            http_timeout_s=8,
+        )
+        if require_voice
+        else {"idle": None, "reason": "voice_not_required"}
     )
     live_case = LiveCase(
         case_id=case_id,
@@ -616,7 +759,7 @@ def _run_turn(
     if webhook_failure is not None:
         return {
             "prompt": prompt,
-            "edge_idle_before": bool(idle.get("idle")),
+            "edge_idle_before": idle.get("idle"),
             "webhook": {
                 key: webhook.get(key)
                 for key in (
@@ -635,6 +778,16 @@ def _run_turn(
             "projection": {},
             "model_attempts": [],
             "expression": [],
+            "reply_delivery": {
+                "scope": "GATEWAY_DURABLE_OUTBOX_INTAKE",
+                "status": "MISSING",
+                "external_platform_delivery_status": (
+                    "NOT_ASSERTED_BY_TEXT_COHORT"
+                ),
+            },
+            "timing": {
+                "gateway_webhook_http_ms": int(webhook.get("latency_ms") or 0)
+            },
         }
     terminal = _wait_for_terminal(
         db_path=db_path,
@@ -658,11 +811,17 @@ def _run_turn(
             db_path=db_path,
             graph_id=str(graph.get("graph_id") or ""),
             graph_revision=int(graph.get("graph_revision") or 0),
-            deadline=time.time() + 90,
+            deadline=time.time() + max(0.0, float(expression_wait_s)),
         )
+    reply_delivery = _fetch_realtime_reply_delivery(
+        db_path,
+        graph_id=str((graph or {}).get("graph_id") or ""),
+        graph_revision=int((graph or {}).get("graph_revision") or 0),
+    )
+    model_attempts = _fetch_model_attempts(db_path, request_id) if request_id else []
     return {
         "prompt": prompt,
-        "edge_idle_before": bool(idle.get("idle")),
+        "edge_idle_before": idle.get("idle"),
         "webhook": {
             key: webhook.get(key)
             for key in (
@@ -678,8 +837,16 @@ def _run_turn(
         "request_id": request_id,
         "graph": graph,
         "projection": _fetch_worker_projection(db_path, request_id) if request_id else {},
-        "model_attempts": _fetch_model_attempts(db_path, request_id) if request_id else [],
+        "model_attempts": model_attempts,
         "expression": expression,
+        "reply_delivery": reply_delivery,
+        "timing": _build_turn_timing(
+            webhook=webhook,
+            terminal=terminal,
+            graph=graph,
+            model_attempts=model_attempts,
+            reply_delivery=reply_delivery,
+        ),
     }
 
 
@@ -705,7 +872,7 @@ def automated_case_verdict(
         projection = dict(turn.get("projection") or {})
         if str(turn.get("intake_failure") or "").strip():
             failures.append(f"TURN_{index + 1}_GATEWAY_WEBHOOK_NOT_ACCEPTED")
-        if not bool(turn.get("edge_idle_before")):
+        if require_voice and not bool(turn.get("edge_idle_before")):
             failures.append(f"TURN_{index + 1}_EDGE_NOT_IDLE")
         if str(terminal.get("event_type") or "").upper() != "INPUT_COMPLETED":
             failures.append(f"TURN_{index + 1}_INPUT_NOT_COMPLETED")
@@ -713,6 +880,11 @@ def automated_case_verdict(
             failures.append(f"TURN_{index + 1}_INPUT_NOT_OK")
         if str(graph.get("status") or "").upper() != "COMPLETED":
             failures.append(f"TURN_{index + 1}_GRAPH_NOT_COMPLETED")
+        reply_delivery = dict(turn.get("reply_delivery") or {})
+        if str(reply_delivery.get("status") or "").upper() != "COMMITTED":
+            failures.append(f"TURN_{index + 1}_GATEWAY_OUTBOX_NOT_COMMITTED")
+        if not str(reply_delivery.get("surface_receipt_ref") or "").strip():
+            failures.append(f"TURN_{index + 1}_SURFACE_RECEIPT_MISSING")
         if str(projection.get("decision") or "").upper() != "APPROVE":
             failures.append(f"TURN_{index + 1}_NOT_APPROVED")
         narrative = str(projection.get("narrative") or "").strip()
@@ -818,6 +990,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout-s", type=int, default=180)
     parser.add_argument("--webhook-hmac-env", default=DEFAULT_HMAC_ENV)
     parser.add_argument("--require-voice", action="store_true")
+    parser.add_argument(
+        "--expression-wait-s",
+        type=float,
+        default=None,
+        help=(
+            "Wait for physical expression receipts on the final turn. "
+            "Defaults to 90 seconds with --require-voice and one immediate "
+            "snapshot for text-only cohorts."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -840,6 +1022,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     db_path = Path(args.db_path).resolve()
     report_dir = Path(args.report_dir).resolve()
     report_dir.mkdir(parents=True, exist_ok=True)
+    expression_wait_s = max(
+        0.0,
+        float(
+            args.expression_wait_s
+            if args.expression_wait_s is not None
+            else (
+                DEFAULT_VOICE_EXPRESSION_WAIT_S
+                if args.require_voice
+                else DEFAULT_TEXT_EXPRESSION_WAIT_S
+            )
+        ),
+    )
     writer_probe_before = _affect_writer_snapshot(db_path=db_path)
     run_id = f"dl-live-{int(time.time() * 1000)}"
     outcomes: list[dict[str, Any]] = []
@@ -873,6 +1067,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 timeout_s=int(args.timeout_s),
                 require_voice=bool(args.require_voice),
                 collect_expression=index == len(prompts),
+                expression_wait_s=expression_wait_s,
             )
             turns.append(turn)
             terminal = dict(turn.get("terminal") or {})
@@ -917,6 +1112,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "real_gateway": str(args.gateway_base_url),
         "real_edge": str(args.edge_base_url),
         "require_voice": bool(args.require_voice),
+        "expression_wait_s": expression_wait_s,
+        "delivery_evidence_scope": "GATEWAY_DURABLE_OUTBOX_INTAKE",
+        "external_platform_delivery_status": "NOT_TESTED_BY_THIS_RUNNER",
         "human_review_status": "PENDING",
         "affect_writer_probe": affect_writer_probe,
         "outcomes": outcomes,

@@ -25,6 +25,10 @@ def _successful_turn(*, narrative: str = "我在。慢慢说，不急。", voice
             "payload": {"person_id": "person-stable"},
         },
         "graph": {"status": "COMPLETED", "session_id": "session-stable"},
+        "reply_delivery": {
+            "status": "COMMITTED",
+            "surface_receipt_ref": "gateway-outbox://id/test",
+        },
         "projection": {
             "decision": "APPROVE",
             "narrative": narrative,
@@ -367,8 +371,129 @@ def test_live_turn_fails_immediately_when_gateway_rejects_webhook(
         timeout_s=180,
         require_voice=False,
         collect_expression=False,
+        expression_wait_s=0,
     )
 
     assert turn["webhook"]["http_status"] == 401
     assert "HTTP 401" in turn["intake_failure"]
     assert turn["terminal"] is None
+
+
+def test_text_turn_does_not_wait_for_edge_or_physical_expression(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        live_cohort,
+        "_wait_for_edge_voice_idle",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("text-only cohort must not wait for Edge")
+        ),
+    )
+    monkeypatch.setattr(
+        live_cohort,
+        "_send_gateway_webhook",
+        lambda **_kwargs: {
+            "sent_ts_ms": 100,
+            "msg_id": "probe-1",
+            "conversation_id": "conversation-1",
+            "http_status": 200,
+            "body": {"status": "accepted"},
+            "latency_ms": 7,
+            "transport_error": None,
+        },
+    )
+    monkeypatch.setattr(
+        live_cohort,
+        "_wait_for_terminal",
+        lambda **_kwargs: {
+            "event_type": "INPUT_COMPLETED",
+            "status": "OK",
+            "request_id": "request-1",
+            "ts_ms": 200,
+            "payload": {"latency_ms": 90},
+        },
+    )
+    monkeypatch.setattr(
+        live_cohort,
+        "_fetch_graph_by_request_id",
+        lambda **_kwargs: {
+            "graph_id": "graph-1",
+            "graph_revision": 1,
+            "status": "COMPLETED",
+            "total_latency_ms": 40,
+        },
+    )
+    monkeypatch.setattr(
+        live_cohort,
+        "_fetch_worker_projection",
+        lambda *_args, **_kwargs: {"decision": "APPROVE", "narrative": "我在。"},
+    )
+    monkeypatch.setattr(live_cohort, "_fetch_model_attempts", lambda *_args: [])
+    monkeypatch.setattr(
+        live_cohort,
+        "_fetch_realtime_reply_delivery",
+        lambda *_args, **_kwargs: {
+            "status": "COMMITTED",
+            "surface_receipt_ref": "gateway-outbox://id/test",
+            "surface_commit_latency_ms": 5,
+            "user_to_surface_commit_ms": 3,
+        },
+    )
+    observed_deadlines: list[float] = []
+
+    def _expression_snapshot(**kwargs: object) -> list[dict]:
+        observed_deadlines.append(float(kwargs["deadline"]))
+        return []
+
+    monkeypatch.setattr(
+        live_cohort,
+        "_poll_companion_expression_rows",
+        _expression_snapshot,
+    )
+
+    before = live_cohort.time.time()
+    turn = live_cohort._run_turn(
+        case_id="implicit_low_mood_1",
+        prompt="没事。",
+        conversation_id="conversation-1",
+        gateway_base_url="http://127.0.0.1:19000",
+        edge_base_url="http://127.0.0.1:17800",
+        webhook_hmac_secret="x" * 32,
+        db_path=tmp_path / "audit.sqlite3",
+        timeout_s=180,
+        require_voice=False,
+        collect_expression=True,
+        expression_wait_s=0,
+    )
+
+    assert turn["edge_idle_before"] is None
+    assert observed_deadlines and observed_deadlines[0] <= before + 0.1
+    assert turn["reply_delivery"]["status"] == "COMMITTED"
+    assert turn["timing"]["gateway_send_to_host_terminal_ms"] == 100
+
+
+def test_automated_verdict_requires_real_gateway_outbox_receipt() -> None:
+    case = ExecutableDialogueCase(
+        case_id="delivery:1",
+        family_id="delivery",
+        variant_index=1,
+        driver="gateway_text",
+        setup_turns=(),
+        probe_turn="在吗？",
+        expected_qualities=("可见",),
+        coverage_tags=("delivery",),
+        require_candidate_selection=False,
+        driver_requirements=(),
+    )
+    turn = _successful_turn()
+    turn["reply_delivery"] = {
+        "status": "INCOMPLETE",
+        "surface_receipt_ref": None,
+    }
+
+    verdict = automated_case_verdict(case, [turn], require_voice=False)
+
+    assert verdict["status"] == "FAIL"
+    assert "TURN_1_GATEWAY_OUTBOX_NOT_COMMITTED" in verdict["failures"]
+    assert "TURN_1_SURFACE_RECEIPT_MISSING" in verdict["failures"]
