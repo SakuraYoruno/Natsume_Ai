@@ -448,6 +448,19 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "没有达到当前关系和场景的质量下限" in quality_repaired_messages[-1]["content"]
     assert "反向施压" in quality_repaired_messages[-1]["content"]
+    repair_quality_messages = _buffered_affective_candidate_messages(
+        [
+            {
+                "role": "system",
+                "content": "陪伴动作：先承认可能没有接住，再留出修复空间。",
+            }
+        ],
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+    )
+    assert "本轮是关系修复" in repair_quality_messages[-1]["content"]
+    assert "不要写七海被扎心、受伤或委屈" in repair_quality_messages[-1]["content"]
+    assert "不烦你了" in repair_quality_messages[-1]["content"]
 
     paired_by_reply = {
         "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",

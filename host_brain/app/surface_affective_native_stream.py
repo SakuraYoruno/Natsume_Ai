@@ -251,7 +251,18 @@ def _buffered_affective_candidate_messages(
                 "用户刚说的事，避免套话式拉开距离、反向施压和连续追问；让语境贴合度与"
                 "分寸感足以直接发送。"
             ),
+            "BOUNDARY_SOUR_WITHDRAWAL": (
+                "上次候选用赌气退出回应关系反馈。不要写‘不烦你了’、‘当我没说’、"
+                "‘我闭嘴’或类似撤退；直接承认这次没接住，并把回应选择权留给用户。"
+            ),
+            "RELATIONAL_REPAIR_SELF_VICTIMIZATION": (
+                "上次候选把修复重心转成七海自己受伤。不要强调被扎心、委屈或难过；"
+                "只承认具体没接住，不辩解、不索取安抚。"
+            ),
         }
+        message_context = "\n".join(
+            str(message.get("content") or "") for message in copied
+        )
         repair = (
             "DL-04 候选修复："
             + repair_by_reason.get(
@@ -260,6 +271,15 @@ def _buffered_affective_candidate_messages(
             )
             + "不要解释错误。"
         )
+        if (
+            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            and "陪伴动作：先承认可能没有接住" in message_context
+        ):
+            repair += (
+                "本轮是关系修复：两个候选都把重心放在七海刚才没有接住和用户当前的不满；"
+                "不要写七海被扎心、受伤或委屈，也不要用‘不烦你了’、‘当我没说’、"
+                "‘我闭嘴’表达退出。"
+            )
         copied.append({"role": "system", "content": repair})
     return copied
 

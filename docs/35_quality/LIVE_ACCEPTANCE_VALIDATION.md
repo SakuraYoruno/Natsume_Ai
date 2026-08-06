@@ -508,3 +508,7 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 `a95ab7c30` 已加载到全新的 `host-clean-a15-text-retest-a95ab7c30` SQLite，Docker Neo4j／Chroma／Redis、Host、OBS、Nginx Monitor、Gateway 与远端 Edge 同时健康。四条真实多轮轨迹报告 SHA-256 为 `a7f8c8f411d2cd7a4c60b74e8cb1bbc5a83d740ae6b5b491af1befcf69adf4c9`：低落中的技术任务、共同喜悦／混合感受和隐晦低落为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，用户对七海生气为 `FAIL`。本轮同时证明模糊技术陈述保留在 Chat、普通回复不再进入维护 Review／第二次 Preview，低质量候选会在同一冻结 target 上恰好修复一次。
 
 剩余失败不是交付空洞，而是具体人感问题：末轮“你真烦”得到“被你这么一说我还真有点扎心……不烦你了”，把用户对上一条回复的不满转成七海的受害姿态和酸涩退出。代码现把“紧跟已接受回复的直接不满”先结算为 `MISUNDERSTOOD` aftereffect，再由 AffectFusion 冻结 `NATSUME_MAY_HAVE_HURT_USER / REPAIR`；没有前序回复的直接冒犯仍保留 `SET_BOUNDARY`，没有抹掉七海自己的受伤感。Surface 只在 canonical `REPAIR` 下拒绝自我受害措辞，并在 `REPAIR／SET_BOUNDARY／GIVE_SPACE` 下拒绝“不烦你了／当我没说”等赌气退出。AffectFusion、Relationship 与 Surface 三个全文件共 131 项通过；真实进程再次加载前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。Pentest 与网络安全没有执行。
+
+`c27224c60` 加载后的单轨迹报告 SHA-256 为 `423c812340c39efb69ef84f689706692a1c2c6c100dc92d946fce91dfd97ec15`。前两轮完成，三轮 `CompanionAct` 均已是 `REPAIR`；末轮第二次模型输出仍命中 `BOUNDARY_SOUR_WITHDRAWAL`，因而没有把坏文本发出，但 TaskGraph 以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 失败。该结果关闭了错误 `SET_BOUNDARY`，没有关闭可用回复。
+
+下一切片仍不增加模型尝试：既有唯一一次质量修复在 canonical `REPAIR` 下显式禁止“被扎心／受伤／委屈”和“不烦你了／当我没说／我闭嘴”，要求候选只承认刚才没接住；关系距离 scorer 同时修复单字“抱”的子串误判，`抱歉／抱怨` 不再被算作身体亲密，`抱一下／抱你` 仍保持原门禁。DL-04、Surface adapter 与 Affect Control 共 78 项通过；真实再测前继续为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
