@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_SURFACE_PACKET_PRIORITY_CODE_REMEDIATED_REAL_RETEST_PENDING",
+  "commit_scope": "A15_AFFECTIVE_CONTINUITY_REAL_TEXT_ACCEPTED_EDGE_TTS_REMEDIATION_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -31,10 +31,10 @@
       "context_stage_timing": "CODE_COMPLETE_REAL_RETEST_PENDING",
       "buffered_companion_model_lane": "PASS_REAL_FULL_STACK_SCOPE_BOUND",
       "buffered_companion_model_lane_receipt_sha256": "d383bf20246ed5f701ce72b9a66572bcf9eb9de0a23c62c9b86d683be2a4b9b0",
-      "canonical_conversation_turn_order": "CODE_COMPLETE_DUAL_READ_PATH_REAL_RETEST_PENDING",
-      "affective_episode_continuity": "CODE_COMPLETE_TYPED_PACKET_REAL_RETEST_PENDING",
+      "canonical_conversation_turn_order": "PASS_REAL_TASK_ARTIFACT_CANONICAL_ALTERNATION_SCOPE_BOUND",
+      "affective_episode_continuity": "PASS_REAL_TYPED_PACKET_AND_OUTPUT_SCOPE_BOUND",
       "boundary_counter_pressure_gate": "PASS_REAL_SEMANTIC_RETRY_SAFE_OUTPUT_SCOPE_BOUND",
-      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, and unrelated companion turns skip the durable light-novel recommendation context read. RecallFusionService has app-local lifespan and reuses the canonical EpisodicStore Chroma client. On 09e828149 all three post-change samples used CHAT_SURFACE_REALTIME/B and deepseek-v4-flash; the lane defect is closed. The 6160c4564 and eb2f68d29 real cohorts proved bounded continuity enums reached the pre-compile planner, but also disproved the earlier inference that deduped_same_role_count=0 meant the final prompt was ordered and constrained. A second RuntimeReadRepository still sorted by cross-machine ts_ms, and the bounded packet compiler kept the first eight generic task facts while dropping later recent-dialogue and affective facts. The current code orders both read paths by canonical turn_index, prioritizes recent dialogue and affective constraints without raising the eight-fact bound, and carries continuity as a typed packet field. The boundary counter-pressure gate did trigger a real semantic retry and selected a safe output. A third real retest is pending, so realtime and human-likeness remain open."
+      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, and unrelated companion turns skip the durable light-novel recommendation context read. RecallFusionService has app-local lifespan and reuses the canonical EpisodicStore Chroma client. On 09e828149 all three post-change samples used CHAT_SURFACE_REALTIME/B and deepseek-v4-flash; the lane defect is closed. The 6160c4564 and eb2f68d29 real cohorts proved bounded continuity enums reached the pre-compile planner, but also disproved the earlier inference that deduped_same_role_count=0 meant the final prompt was ordered and constrained. A second RuntimeReadRepository still sorted by cross-machine ts_ms, and the bounded packet compiler kept the first eight generic task facts while dropping later recent-dialogue and affective facts. Commit 4127752f0 orders both read paths by canonical turn_index, prioritizes recent dialogue and affective constraints without raising the eight-fact bound, and carries continuity as a typed packet field. The third real cohort preserved alternating recent dialogue in the Task artifact and produced safe low-mood, boundary and mixed-affect replies without semantic repair. The narrow text slice is accepted; the required broader blind cohort and current Edge TTS failure keep human-likeness and full acceptance open."
     },
     "user_self_affect_separation": {
       "status": "WIRED",
@@ -176,7 +176,7 @@
       "final_sha_full_stack_gate": "NOT_RUN"
     },
     "planning_search_three_domain_benefit": "UNPROVEN",
-    "digital_life_human_likeness": "FAIL_REAL_THREE_FAMILY_COHORT_ONE_OF_THREE_HUMAN_PASS_PACKET_PRIORITY_CODE_REMEDIATED_REAL_RETEST_PENDING",
+    "digital_life_human_likeness": "PARTIAL_REAL_THREE_FAMILY_SINGLE_REVIEWER_3_OF_3_TEXT_PASS_BLIND_COHORT_PENDING",
     "whole_system_python_line_coverage": "72.22_PERCENT_OFFLINE_STABLE_BELOW_75_GATE",
     "whole_system_python_branch_coverage": "55.08_PERCENT_OFFLINE_STABLE_BELOW_65_GATE",
     "whole_system_python_coverage_scope": "FULL_PRODUCTION_SOURCE_DENOMINATOR_WITH_UNIT_CONTRACT_INTEGRATION_SECURITY_AND_LOCAL_E2E; REAL_DOCKER_PROVIDER_HARDWARE_RUNTIME_PROBES_PENDING",
@@ -361,7 +361,7 @@
     "local_cuda_voice_variant_b": "PASS",
     "target_edge_vts_transport_recovery": "PASS",
     "target_edge_tts_mouth_sync": "HISTORICAL_PASS_CURRENT_A15_NOT_TESTED_VTS_MODEL_NOT_LOADED",
-    "target_edge_tts_avatar": "ACCEPTANCE_PENDING_EXTERNAL_VTS_AUTH_DIALOG_MODEL_NOT_LOADED",
+    "target_edge_tts_avatar": "FAIL_CURRENT_TTS_PERSISTENT_WORKER_TIMEOUT_AND_VTS_AUTH_PENDING_HISTORICAL_PLAYBACK_SCOPE_BOUND",
     "gateway_live_translate_route": "PASS_REAL_GATEWAY_TASKGRAPH_ACCEPTANCE_OUTBOX",
     "gateway_live_memory_store_route": "PASS_REAL_GATEWAY_TASKGRAPH_ACCEPTANCE_OUTBOX",
     "gateway_live_planning_search_route": "PASS_REAL_GATEWAY_TASKGRAPH_TERMINAL_SYNTHESIS_655_CHARS",
@@ -378,8 +378,8 @@
     "gateway_live_probe_terminal_diagnostics": "PASS_EXACT_MESSAGE_BOUND_REAL_TWO_TURN",
     "gateway_callback_secret_runtime_parity": "PASS_HOST_EDGE_SHA256_MATCH_REMOTE_GATEWAY_RESTARTED_EDGE_UNCHANGED",
     "digital_life_live_cohort_rejected_webhook_fail_fast": "PASS_HTTP_REJECTION_DOES_NOT_POLL_HOST_TIMEOUT",
-    "digital_life_gateway_companion_latest_cohort": "FAIL_ONE_OF_THREE_AUTOMATED_ONE_OF_THREE_HUMAN_PASS_PACKET_PRIORITY_CODE_REMEDIATED_REAL_RETEST_PENDING",
-    "digital_life_gateway_companion_latest_cohort_report_sha256": "b813705664942dc0fa9524cf915873e4891b5f6aab08d71fd218f9b7e7a62ebb",
+    "digital_life_gateway_companion_latest_cohort": "FAIL_EDGE_IDLE_ONLY_TWO_OF_THREE_AUTOMATED_THREE_OF_THREE_SINGLE_REVIEWER_TEXT_PASS",
+    "digital_life_gateway_companion_latest_cohort_report_sha256": "a818e4cbaa4f190c05f23d1cbe6396d71618caacc771c7ac334aa93b4353a6bf",
     "digital_life_gateway_companion_realtime_lane": "PASS_REAL_DEEPSEEK_NON_THINKING_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_VOICE",
     "digital_life_gateway_companion_realtime_lane_regression": "PASS_193_TARGETED_UNIT_CONTRACT_INTEGRATION",
     "digital_life_gateway_companion_realtime_first_retest": "FAIL_FLASH_ROUTE_CONFIRMED_192_TOKENS_EXHAUSTED_IN_REASONING_CONTENT",
@@ -545,7 +545,7 @@
     "REAL_PROVIDER_LATENCY_TARGET_NOT_MET",
     "MULTI_TURN_HUMAN_BLIND_TEST_NOT_RUN",
     "FULL_DIGITAL_LIFE_FAILURE_MATRIX_PENDING",
-    "DIGITAL_LIFE_LIVE_COHORT_LATEST_RESULT_1_OF_3_AUTOMATED_PASS_1_OF_3_HUMAN_PASS_PACKET_PRIORITY_CODE_REMEDIATED_REAL_RETEST_PENDING",
+    "DIGITAL_LIFE_LIVE_COHORT_LATEST_RESULT_2_OF_3_AUTOMATED_PASS_3_OF_3_SINGLE_REVIEWER_TEXT_PASS_EDGE_TTS_IDLE_FAILURE",
     "DIGITAL_LIFE_LANGUAGE_QUALITY_REQUIRES_BROADER_COHORT_AND_HUMAN_BLIND_REVIEW"
   ]
 }
