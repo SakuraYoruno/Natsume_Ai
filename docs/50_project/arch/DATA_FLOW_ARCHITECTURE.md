@@ -222,12 +222,14 @@ Gateway 页面同样区分服务进程、durable transport 与平台通道详情
 canonical ledgers
 → OBS public projection
 ├→ current document：普通 JSON，直接服务 Monitor 查询
-└→ immutable history：小对象保持旧 JSON；大对象使用有界 zlib/base64 envelope
+└→ immutable recovery checkpoints：默认每 kind/key 每小时至多一个
+   ├→ Host source instance lineage：逐次精确记录，不限频
+   ├→ 小对象保持旧 JSON；大对象使用有界 zlib/base64 envelope
    → size + source digest 校验
    → rebuild / history reader 透明解码
 ```
 
-压缩只作用于派生 projection history。解压后的公开载荷必须与 journal `source_digest` 一致，声明大小超过上限、编码损坏、尾随数据或摘要漂移均以 `OPERATOR_PROJECTION_DATA_INVALID` 阻断；canonical 账本和当前 Monitor 读路径不经过该 envelope。
+压缩和检查点间隔只作用于派生 projection history。检查点之间的最新公开文档与 source cursor 仍原子持久化，Monitor freshness 不会降成小时级；极端情况下从 journal rebuild 最多恢复到上一个检查点，随后由下一次 source refresh 追平。解压后的公开载荷必须与 journal `source_digest` 一致，声明大小超过上限、编码损坏、尾随数据或摘要漂移均以 `OPERATOR_PROJECTION_DATA_INVALID` 阻断；canonical 账本和当前 Monitor 读路径不经过该 envelope。
 
 ## 8. 数据保留
 

@@ -198,6 +198,18 @@ def _public_degraded_detail(value: str | None) -> str | None:
     return str(sanitized)[:1000] if sanitized is not None else None
 
 
+def _state_signature(row: sqlite3.Row | None) -> tuple[int, int, int, str, int] | None:
+    if row is None:
+        return None
+    return (
+        int(row["projection_version"]),
+        int(row["projection_cursor"]),
+        int(row["source_cursor"]),
+        str(row["source_digest"]),
+        int(row["updated_ts_ms"]),
+    )
+
+
 class QueryProjectionStore:
     """Migration-first projection repository with no domain-specific branches.
 
@@ -211,13 +223,53 @@ class QueryProjectionStore:
         db_path: str | Path,
         *,
         clock: Callable[[], int] | None = None,
+        journal_checkpoint_interval_ms: int = 0,
+        exact_journal_kinds: Iterable[str] = (),
     ) -> None:
         raw = str(db_path or "").strip()
         if not raw:
             raise ValueError("db_path is required")
         self.db_path = raw
         self._clock = clock or (lambda: int(time.time() * 1000))
+        self._journal_checkpoint_interval_ms = max(
+            0,
+            int(journal_checkpoint_interval_ms),
+        )
+        self._exact_journal_kinds = frozenset(
+            str(kind).strip() for kind in exact_journal_kinds if str(kind).strip()
+        )
         self._assert_schema()
+
+    def _journal_checkpoint_due(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        projection_kind: str,
+        current: sqlite3.Row | None,
+        operation_now: int,
+    ) -> bool:
+        if (
+            current is None
+            or self._journal_checkpoint_interval_ms <= 0
+            or projection_kind in self._exact_journal_kinds
+        ):
+            return True
+        journal = conn.execute(
+            """
+            SELECT observed_ts_ms
+            FROM operator_query_projection_journal
+            WHERE cursor = ?
+            """,
+            (int(current["journal_cursor"]),),
+        ).fetchone()
+        if journal is None:
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection current references a missing journal checkpoint",
+            )
+        checkpoint_ts_ms = int(journal["observed_ts_ms"])
+        elapsed_ms = int(operation_now) - checkpoint_ts_ms
+        return elapsed_ms < 0 or elapsed_ms >= self._journal_checkpoint_interval_ms
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10.0)
@@ -655,34 +707,44 @@ class QueryProjectionStore:
                         PROJECTION_CURSOR_CONFLICT,
                         "the current source cursor is already bound to a different digest",
                     )
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO operator_query_projection_journal(
-                    schema_version, projection_kind, document_key, source_cursor,
-                    source_digest, source_payload_json, source_ref, observed_ts_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    OPERATOR_PROJECTION_SCHEMA_VERSION,
-                    projection_kind,
-                    document_key,
-                    cursor,
-                    source_hash,
-                    _encode_journal_payload(body, source_digest=source_hash),
-                    source_reference,
-                    operation_now,
-                ),
+            checkpoint_due = self._journal_checkpoint_due(
+                conn,
+                projection_kind=projection_kind,
+                current=current,
+                operation_now=operation_now,
             )
-            journal = conn.execute(
-                """
-                SELECT cursor FROM operator_query_projection_journal
-                WHERE projection_kind = ? AND document_key = ?
-                  AND source_cursor = ? AND source_digest = ?
-                """,
-                (projection_kind, document_key, cursor, source_hash),
-            ).fetchone()
-            assert journal is not None
-            journal_cursor = int(journal[0])
+            if checkpoint_due:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO operator_query_projection_journal(
+                        schema_version, projection_kind, document_key, source_cursor,
+                        source_digest, source_payload_json, source_ref, observed_ts_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        OPERATOR_PROJECTION_SCHEMA_VERSION,
+                        projection_kind,
+                        document_key,
+                        cursor,
+                        source_hash,
+                        _encode_journal_payload(body, source_digest=source_hash),
+                        source_reference,
+                        operation_now,
+                    ),
+                )
+                journal = conn.execute(
+                    """
+                    SELECT cursor FROM operator_query_projection_journal
+                    WHERE projection_kind = ? AND document_key = ?
+                      AND source_cursor = ? AND source_digest = ?
+                    """,
+                    (projection_kind, document_key, cursor, source_hash),
+                ).fetchone()
+                assert journal is not None
+                journal_cursor = int(journal[0])
+            else:
+                assert current is not None
+                journal_cursor = int(current["journal_cursor"])
             unchanged = bool(
                 current
                 and str(current["source_digest"]) == source_hash
@@ -818,6 +880,8 @@ class QueryProjectionStore:
         *,
         source_ref: str = "projection-rebuild",
         _expected_journal_cursor: int | None = None,
+        _expected_current_state: tuple[int, int, int, str, int] | None | object = _UNCONDITIONAL_CURRENT,
+        _allow_source_cursor_regression: bool = False,
     ) -> dict[str, Any]:
         projection_kind = self._required(kind, "kind")
         source_reference = self._required(source_ref, "source_ref")
@@ -863,6 +927,23 @@ class QueryProjectionStore:
                         PROJECTION_CURSOR_CONFLICT,
                         "projection journal advanced while rebuild snapshot was materialized",
                     )
+            current_state = conn.execute(
+                """
+                SELECT projection_version, projection_cursor, source_cursor,
+                       source_digest, updated_ts_ms
+                FROM operator_query_projection_state
+                WHERE projection_kind = ?
+                """,
+                (projection_kind,),
+            ).fetchone()
+            if (
+                _expected_current_state is not _UNCONDITIONAL_CURRENT
+                and _state_signature(current_state) != _expected_current_state
+            ):
+                raise QueryProjectionError(
+                    PROJECTION_CURSOR_CONFLICT,
+                    "projection current changed while rebuild snapshot was materialized",
+                )
             current_rows = {
                 str(row["document_key"]): row
                 for row in conn.execute(
@@ -875,18 +956,14 @@ class QueryProjectionStore:
                     (projection_kind,),
                 ).fetchall()
             }
-            current_state = conn.execute(
-                """
-                SELECT projection_version
-                FROM operator_query_projection_state
-                WHERE projection_kind = ?
-                """,
-                (projection_kind,),
-            ).fetchone()
             shadow: list[tuple[str, dict[str, Any], int, str, str, int, int]] = []
             for key, body, source_cursor, source_hash, payload_digest in prepared:
                 old = current_rows.get(key)
-                if old is not None and source_cursor < int(old["source_cursor"]):
+                if (
+                    old is not None
+                    and source_cursor < int(old["source_cursor"])
+                    and not _allow_source_cursor_regression
+                ):
                     raise QueryProjectionError(
                         PROJECTION_CURSOR_REGRESSION,
                         f"rebuild source cursor {source_cursor} is older than current cursor {int(old['source_cursor'])}",
@@ -970,7 +1047,9 @@ class QueryProjectionStore:
                     for item in sorted(shadow, key=lambda value: value[0])
                 ]
             )
-            generation_version = int(current_state[0] if current_state else 0) + 1
+            generation_version = (
+                int(current_state["projection_version"] if current_state else 0) + 1
+            )
             conn.execute(
                 """
                 INSERT INTO operator_query_projection_state(
@@ -1061,6 +1140,7 @@ class QueryProjectionStore:
 
         projection_kind = self._required(kind, "kind")
         with self._connect() as conn:
+            conn.execute("BEGIN")
             rows = conn.execute(
                 """
                 WITH kind_journal AS (
@@ -1083,6 +1163,16 @@ class QueryProjectionStore:
                 """,
                 (projection_kind, projection_kind),
             ).fetchall()
+            current_state = conn.execute(
+                """
+                SELECT projection_version, projection_cursor, source_cursor,
+                       source_digest, updated_ts_ms
+                FROM operator_query_projection_state
+                WHERE projection_kind = ?
+                """,
+                (projection_kind,),
+            ).fetchone()
+            expected_current_state = _state_signature(current_state)
         journal_head = int(rows[0]["rebuild_head"]) if rows else 0
         sources: list[tuple[str, Mapping[str, Any], int, str]] = []
         for row in rows:
@@ -1103,6 +1193,8 @@ class QueryProjectionStore:
             sources,
             source_ref=source_ref,
             _expected_journal_cursor=journal_head,
+            _expected_current_state=expected_current_state,
+            _allow_source_cursor_regression=True,
         )
 
 

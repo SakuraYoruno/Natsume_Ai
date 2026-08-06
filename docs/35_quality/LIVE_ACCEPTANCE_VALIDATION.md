@@ -301,4 +301,8 @@ non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_
 
 代码现在保留 `operator_query_projection_document.payload_json` 为普通公开 JSON，只在 immutable journal 中把超过 8 KiB 且不超过 16 MiB 的载荷写成 zlib/base64 JSON envelope，并绑定原始 byte size 与既有 source digest。历史读取和 journal rebuild 同时支持旧对象行与新 envelope；解压有 16 MiB 上限，并拒绝非法 base64、非终止 zlib stream、尾随数据、大小或摘要漂移。7 项重放／隐私／原子切换定向集成、110 项相邻 QueryProjectionStore unit 与 1 项修正后的 composition 精确端口用例均通过；首次相邻运行暴露的唯一失败是测试 fixture 未纳入生产已经显式注入的 `episodic_store`，现已同步。
 
-当前只标记 `CODE_REMEDIATED_REAL_RETEST_PENDING`。必须重启真实 OBS，验证新大行确实采用 envelope、总压缩率、Monitor 查询、临时库重放和同链路延迟后，才能关闭该缺陷；既有 1.93 GB 历史不会被破坏性改写或冒充已经缩小。
+`636252264` 加载后的真实 OBS PID 60936、Host 和 Nginx Monitor 均健康。30,008 ms 样本新增 46 行，其中 11 条为压缩 envelope、35 条为小 JSON，摘要错误为 0；声明原始载荷 2,996,490 bytes，实际保存 410,858 bytes，降低 86.289%。最大 Gateway source 从 893,866 bytes 压到约 79 KiB，session 从 698,586 bytes 压到约 123 KiB。脱敏报告 `obs-projection-compression-1785985583283.json` 的 SHA-256 为 `dc55ab31e384845feba3381b6265ac06f4792706300831e98c11f86f803828ce`，不包含 payload body。
+
+该结果关闭“大载荷未压缩”，但没有关闭“每次刷新都追加历史”：压缩后 30 秒仍产生 46 条派生 journal row。当前代码继续把独立 OBS 的 projection history 改为默认每 kind/key 每小时一个恢复检查点，检查点之间的 current document、source cursor 和 freshness 仍原子更新；`obs_internal_host_source_lineage` 永久绕过限频。journal rebuild 可以有界恢复到上一个检查点，且通过 state signature 拒绝未写 journal 的并发 current 变化。27 项 checkpoint／composition 集与 40 项 Store／Host lineage 集通过。
+
+检查点代码真实重启前仍标记 `CODE_REMEDIATED_REAL_RETEST_PENDING`。既有 1.93 GB 历史不会被破坏性改写或冒充已经缩小；后续只验证新窗口不再增长、Monitor freshness 和 rebuild 边界，不对 canonical Life／Task／Gateway 数据做清理。

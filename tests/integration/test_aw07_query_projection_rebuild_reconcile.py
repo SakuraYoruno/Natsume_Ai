@@ -150,6 +150,130 @@ def test_compressed_projection_journal_fails_closed_on_digest_tamper(tmp_path):
     assert invalid.value.reason_code == PROJECTION_DATA_INVALID
 
 
+def test_projection_history_checkpoint_bounds_refresh_writes_and_rebuilds_last_checkpoint(
+    tmp_path,
+):
+    db_path = tmp_path / "projection-checkpoint.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw07-projection-checkpoint"
+    )
+    assert migrated.success, migrated
+    clock = [1_000]
+    store = QueryProjectionStore(
+        db_path,
+        clock=lambda: clock[0],
+        journal_checkpoint_interval_ms=60_000,
+    )
+
+    first = store.upsert("session", "index", {"status": "A"}, source_cursor=1)
+    clock[0] = 2_000
+    current = store.upsert("session", "index", {"status": "B"}, source_cursor=2)
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM operator_query_projection_journal"
+        ).fetchone()[0] == 1
+    assert current.payload == {"status": "B"}
+    assert current.source_cursor == 2
+    assert current.projection_cursor == first.projection_cursor
+
+    rebuilt = store.rebuild_from_journal("session")
+    assert rebuilt["rebuilt_count"] == 1
+    restored = store.get("session", "index")
+    assert restored is not None
+    assert restored.payload == {"status": "A"}
+    assert restored.source_cursor == 1
+
+    clock[0] = 61_001
+    latest = store.upsert("session", "index", {"status": "C"}, source_cursor=3)
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM operator_query_projection_journal"
+        ).fetchone()[0] == 2
+    assert latest.payload == {"status": "C"}
+    assert store.rebuild_from_journal("session")["rebuilt_count"] == 1
+    assert store.get("session", "index").payload == {"status": "C"}
+
+
+def test_exact_projection_kind_bypasses_history_checkpoint_interval(tmp_path):
+    db_path = tmp_path / "projection-exact-kind.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw07-projection-exact-kind"
+    )
+    assert migrated.success, migrated
+    clock = [1_000]
+    store = QueryProjectionStore(
+        db_path,
+        clock=lambda: clock[0],
+        journal_checkpoint_interval_ms=60_000,
+        exact_journal_kinds=("obs_internal_host_source_lineage",),
+    )
+
+    store.upsert(
+        "obs_internal_host_source_lineage",
+        "runtime",
+        {"source_instance_id": "host-a", "source_revision": 1},
+        source_cursor=1,
+    )
+    clock[0] = 2_000
+    store.upsert(
+        "obs_internal_host_source_lineage",
+        "runtime",
+        {"source_instance_id": "host-b", "source_revision": 1},
+        source_cursor=2,
+    )
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM operator_query_projection_journal"
+        ).fetchone()[0] == 2
+    assert store.journal_text_values(
+        "obs_internal_host_source_lineage",
+        "runtime",
+        "source_instance_id",
+    ) == frozenset({"host-a", "host-b"})
+
+
+def test_checkpointed_rebuild_rejects_unjournaled_concurrent_current_change(
+    tmp_path,
+    monkeypatch,
+):
+    db_path = tmp_path / "projection-checkpoint-race.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw07-projection-checkpoint-race"
+    )
+    assert migrated.success, migrated
+    clock = [1_000]
+    rebuilding_store = QueryProjectionStore(
+        db_path,
+        clock=lambda: clock[0],
+        journal_checkpoint_interval_ms=60_000,
+    )
+    competing_store = QueryProjectionStore(
+        db_path,
+        clock=lambda: clock[0],
+        journal_checkpoint_interval_ms=60_000,
+    )
+    rebuilding_store.upsert("trace", "current", {"status": "A"}, source_cursor=1)
+    original_rebuild = rebuilding_store.rebuild
+
+    def advance_current_without_checkpoint(kind, documents, **kwargs):  # noqa: ANN001
+        clock[0] = 2_000
+        competing_store.upsert(
+            "trace",
+            "current",
+            {"status": "B"},
+            source_cursor=2,
+        )
+        return original_rebuild(kind, documents, **kwargs)
+
+    monkeypatch.setattr(rebuilding_store, "rebuild", advance_current_without_checkpoint)
+    with pytest.raises(QueryProjectionError) as conflict:
+        rebuilding_store.rebuild_from_journal("trace")
+    assert conflict.value.reason_code == PROJECTION_CURSOR_CONFLICT
+    assert rebuilding_store.get("trace", "current").payload == {"status": "B"}
+
+
 def test_all_projection_writes_remove_task_session_trace_bodies_before_sqlite(tmp_path):
     db_path = tmp_path / "public-projection.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(request_id="aw07-privacy")

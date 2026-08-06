@@ -7,6 +7,7 @@ both ASGI applications happen to run in one interpreter.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,6 +36,9 @@ from host_brain.app.obs_projection_jobs import (
     build_explicit_obs_projection_callbacks,
 )
 from host_brain.app.observability_runtime.host_read_transport import HostReadTransport
+from host_brain.app.observability_runtime.host_projection_sources import (
+    HOST_SOURCE_LINEAGE_KIND,
+)
 
 
 OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
@@ -59,6 +63,19 @@ OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "task-runtime",
     "trace",
 )
+DEFAULT_OBS_PROJECTION_JOURNAL_CHECKPOINT_INTERVAL_MS = 3_600_000
+
+
+def _projection_journal_checkpoint_interval_ms() -> int:
+    raw = str(
+        os.environ.get("OBS_PROJECTION_JOURNAL_CHECKPOINT_INTERVAL_MS")
+        or DEFAULT_OBS_PROJECTION_JOURNAL_CHECKPOINT_INTERVAL_MS
+    ).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        value = DEFAULT_OBS_PROJECTION_JOURNAL_CHECKPOINT_INTERVAL_MS
+    return min(86_400_000, max(0, value))
 
 @dataclass(frozen=True, slots=True)
 class ObsProjectionJob:
@@ -234,7 +251,13 @@ def build_default_obs_application_ports(
         initialize_schema=False,
     )
     try:
-        store = QueryProjectionStore(db_path)
+        store = QueryProjectionStore(
+            db_path,
+            journal_checkpoint_interval_ms=(
+                _projection_journal_checkpoint_interval_ms()
+            ),
+            exact_journal_kinds=(HOST_SOURCE_LINEAGE_KIND,),
+        )
         metrics = MetricsCollector(ledger=ledger)
         life_reader = LifeSnapshotReader(LifeCommandRepository.from_ledger(ledger))
 
