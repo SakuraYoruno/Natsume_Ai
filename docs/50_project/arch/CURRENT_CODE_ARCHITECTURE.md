@@ -170,10 +170,12 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 
 Research 的可验收单位不是一个共享 profile prompt，而是两个预注册 arm。baseline 和 selected 可以共享 provider、model、budget 与冻结 corpus，却必须分别绑定自己的 candidate path、source set、graph/path digest 和渲染后的 prompt digest。外部模型 receipt 只有与对应 arm 的 durable prompt identity 精确一致时才可进入配对终态；调用者临时提交的摘要不具 authority。
 
-0107 以前的 RunSpec 没有 per-arm 字段，读取时仍使用历史 `profile.prompt_digest`，序列化也不补空字段，从而保持既有 canonical JSON 和 exact replay。新真实 cohort 必须先渲染两只 arm、持久预注册各自摘要，再允许任何外部请求开始。当前只完成这条生产合同修复，A15 原始收益 ledger 仍为空。
+0107 以前的 RunSpec 没有 per-arm 字段，读取时仍使用历史 `profile.prompt_digest`，序列化也不补空字段，从而保持既有 canonical JSON 和 exact replay。新真实 cohort 必须先渲染两只 arm、持久预注册各自摘要，再允许任何外部请求开始。A15 Research 已按该合同完成单题预检和 24 题正式队列；Code 与 Pentest 仍待验收。
 
 Research 的货币成本不从 token 总数随意估算。Vault-backed provider adapter 只对已知官方 endpoint、已知模型和完整 provider-owned cache token breakdown 应用代码侧版本化价目；生成 `model_cost_micros` 的同时把 cost policy digest 写入 transport measurement。其他 provider／代理仍必须自己回传 canonical cost，否则 benefit evidence fail-closed。普通对话只多携带已有 usage 中的一个成本整数和策略摘要，不增加模型调用、数据库事务或同步审计步骤。
 
 真实双臂完成后，回答正文不会进入 0107 或 0136。runner 只把新鲜结果封装为没有序列化接口的进程内 transient output，交给独立隐藏质量评审；paired terminal replay 的 transient 列表固定为空。隐藏评审看不到 arm role，使用另一条 canonical 外部 ModelAttempt，并把自己的 prompt、transport、usage、cost 和响应摘要绑定到质量 receipt。这样既能实际评估内容，也不会把私人研究正文扩散成永久审计数据。
 
 固定队列不是在测试代码里伪造 selected path。每题先把同一三来源 snapshot 交给公共 `GoalPlanningService`：NEVER 形成 secondary quick-answer baseline，AUTO 必须实际触发条件 L3 并选择 primary 与 independent。随后 source IDs 才解析为冻结正文和 citation options。expected points 不在 snapshot 或执行 prompt 中，只由独立隐藏评审读取，因此搜索器和执行模型不能直接看到评分答案。
+
+`1c9c2b2bd` 的 24 题真实队列已形成可重开 SQLite 验证的权威证据：质量均值提升 0.85416667、bootstrap 95% 下界 0.75、两臂 citation validity 均为 1.0、严重错误为 0、成本比 1.32215978、p95 延迟比 0.98756943。最终 report 允许提出 promotion proposal，但生产影响位仍为 false；搜索服务没有自行把 L3 切为生产 authority。Research 通过满足了非 Pentest 第二领域的必要收益条件，不代表 Code／Pentest 或 PlanningSearch 总体验收完成。

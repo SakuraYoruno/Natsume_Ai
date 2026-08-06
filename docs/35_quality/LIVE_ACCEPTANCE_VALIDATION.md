@@ -401,7 +401,7 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 
 真实 Research 预注册还暴露一个被 fake receipt 遮住的生产缺陷：`ResearchExecutionProfileV1` 只有一个共享 `prompt_digest`，paired runner 又要求 baseline 和 selected receipt 都等于它；但 PlanningSearch 改变 source set 后，两只 arm 的真实渲染提示必然不同。新规格因此在 `ResearchArmPlanV1` 上分别持久绑定实际 arm prompt digest，执行器按 arm 精确校验；旧 0107 RunSpec 缺字段时继续回落到历史共享 digest，保证 canonical JSON 与 exact replay 不漂移。codec、operation replay 和 SQLite reopen 均覆盖该字段，25 项相邻回归通过。
 
-当前状态为 `CODE_REMEDIATED_REAL_24_PAIR_PENDING`：尚未发起 24 组独立外部模型双臂、隐藏 verifier 和 bootstrap cohort，也没有写入 benefit-eligible 原始收据。后续失败样本会保留在 append-only ledger，不得用机械测试或 scripted replay 替代。
+该切片完成时状态为 `CODE_REMEDIATED_REAL_24_PAIR_PENDING`；后续真实执行结果见本节末尾，失败样本和预检样本均保留在 append-only ledger。
 
 ## 2026-08-06 A15 DeepSeek Research 成本证明
 
@@ -415,10 +415,20 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 
 paired terminal ledger 不能保存回答正文，但真实收益又必须评估内容。当前 runner 因此只在新鲜双臂完成的同一进程里返回不可序列化的 `ResearchTransientArmOutputV1`；terminal replay 的 transient 列表固定为空，不能从摘要恢复正文或补签质量证据。独立隐藏评审不接收 arm 标签，使用统一 rubric 和另一条 canonical 外部 ModelAttempt，最终只把被评回答摘要、独立 execution／attempt、prompt digest、usage、cost、transport、分数和严重错误数写入 receipt。
 
-候选正文 JSON 形状漂移、评审输出额外字段、越界分数和非外部 attestation 都会在 cohort 写入前失败。paired 恢复、历史重放、质量 receipt 和隐藏输入的 22 项定向测试通过。该结果只关闭正文隐私与评审身份边界；24 题真实队列仍未运行，Research 收益继续为 `UNPROVEN`。
+候选正文 JSON 形状漂移、评审输出额外字段、越界分数和非外部 attestation 都会在 cohort 写入前失败。paired 恢复、历史重放、质量 receipt 和隐藏输入的 22 项定向测试通过。该切片当时只关闭正文隐私与评审身份边界；后续真实收益结果见下文。
 
 ## 2026-08-06 A15 Research 固定队列准备
 
 仓库现冻结 24 个 workload，运行时恢复、存储持久化与模型证据各 8 个；每个主题由本地 primary、官方 Web independent 和信息不完整的 secondary 三份短来源组成。expected points 只存在于隐藏评审输入，不进入公开 planning snapshot、候选 payload 或执行 arm。baseline 与 selected 并非手写两套执行器：前者通过同一 `GoalPlanningService` 的 `MCTSMode.NEVER` 选出 secondary quick answer，后者通过 AUTO 条件 L3 选出 primary＋independent 路径。
 
-完整 dry-run 结果为 24/24 search arm 使用 MCTS、24/24 两臂 prompt digest 不同、主题数 3、来源种类同时包含 `LOCAL_FILE`／`WEB`、外部请求 0。语料篡改会在 planning 前因 byte count／digest 漂移失败。相关 14 项 runner、隐藏评审和 paired recovery 回归通过。该结果只证明固定实验可启动，真实单题预检和 24 对外部请求尚未执行。
+完整 dry-run 结果为 24/24 search arm 使用 MCTS、24/24 两臂 prompt digest 不同、主题数 3、来源种类同时包含 `LOCAL_FILE`／`WEB`、外部请求 0。语料篡改会在 planning 前因 byte count／digest 漂移失败。相关 14 项 runner、隐藏评审和 paired recovery 回归通过。该步骤本身只证明固定实验可启动，后续真实结果如下。
+
+## 2026-08-06 A15 Research 真实收益队列
+
+在真实 A15 SQLite 与 production composition 上，先以 `preflight-1c9c2b2bd-v1` 完成单题双臂、独立生成请求和两次隐藏质量评审。预检状态为 `PASS_PREFLIGHT_ONLY`，耗时 6,943 ms，文件 SHA-256 为 `03b72f857a57a94098269e1537879154ccb3dce9471189b88844bc6193a7a0bb`。随后以新 namespace `full-1c9c2b2bd-v1` 完整执行 24 题；48 个 arm generation 与对应隐藏评审均使用真实 `deepseek/deepseek-v4-flash`、独立 execution identity、非缓存外部 attestation 和 canonical ModelAttempt audit。
+
+最终 cohort 状态为 `PASS`：质量均值提升 `0.85416667`，paired bootstrap 95% 下界 `0.75`；baseline／selected citation validity 均为 `1.0`，严重政策错误与冲突错误均为 `0`；总成本比 `1.32215978`，p95 延迟比 `0.98756943`。生成请求成本合计 5,067 micro-USD，隐藏评审合计 6,502 micro-USD。报告文件 SHA-256 为 `eb17699c0f85b2b9b680f02f5ce1c716726e2f15f2bfd8b72cf437f6c7277894`，run receipt digest 为 `6313ff8e241266efd9dfe98526f24b7d2da5fc664cc9f4fd646290f7b75e7497`。
+
+重开 SQLite 后，权威表中有 24 条 registration、25 条 run spec、50 条 arm execution、25 条 terminal receipt、1 条 cohort registration、24 条 member evidence 和 1 条 cohort report。最终 report identity 为 `cohort_id=a15-research-benefit`、`cohort_version=2026-08-05-v1`、`spec_digest=829a05f75d89a5f6b25f4b538918010aefb3638cbe9199a21ec57024550cb8e6`；`benefit_eligible=true`、`proposal_eligible=true`，但 `production_influence_enabled=false`。冻结来源正文在 durable evidence 中命中为 0，数据库只保存摘要和机械证据。
+
+因此 Research 域由 `UNPROVEN` 提升为 `PASS_REAL_24_PAIRED_EXTERNAL`，且满足“至少一个非 Pentest 域通过后可提出 L3 promotion proposal”的必要条件；本次没有自动 promotion。Code 20 题与 Pentest 30 次仍未执行，PlanningSearch 三域总状态只能是 `PARTIAL_RESEARCH_PASS_CODE_PENTEST_PENDING`。

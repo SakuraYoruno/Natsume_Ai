@@ -348,3 +348,5 @@ flowchart LR
 回答正文只沿上图的进程内质量分支存在，不能写入 paired ledger；重启后终态只能精确重放公开 receipt，不能补造隐藏评审。质量评审使用统一 rubric 且不接收 arm role，持久化的是被评响应摘要、分数、错误计数和评审模型 attestation。
 
 固定 24 题在进入图中 `baseline source set`／`PlanningSearch selected path` 前共用同一三来源 snapshot。baseline 仅关闭 L3，search 使用 AUTO；两者的差异由公共搜索结果产生。期望覆盖点位于图外的隐藏 verifier 输入，不参与 source ranking 或正文生成。
+
+真实 A15 运行后，这条链路在 SQLite 中形成 24 registration、25 run spec（含预检）、50 arm execution、25 terminal receipt、24 cohort member 和 1 cohort report。24 题的质量提升、citation、成本、延迟与严重错误门槛全部通过；报告只把 `proposal_eligible` 置为 true，`production_influence_enabled` 仍为 false，因此“实验通过”和“生产切流”保持两件独立的事。

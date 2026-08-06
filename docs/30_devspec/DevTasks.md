@@ -62,8 +62,9 @@
 - [x] 补齐官方 DeepSeek V4 provider-owned token usage 的版本化成本换算；真实 canonical Research 探针形成 51 tokens／9 micro-USD／零工具调用的 benefit-eligible attestation，代理和不完整 usage fail-closed。
 - [x] 补齐 Research 隐藏质量评审边界：新鲜双臂正文只在同进程短暂传递，终态 ledger 和 cohort receipt 只保存摘要；隐藏评审独立走 canonical 外部 ModelAttempt，并绑定自己的 prompt digest、usage、cost、transport 与响应摘要。22 项相邻回归通过。
 - [x] 冻结 24 题 Research 真实收益队列：运行时恢复、存储持久化、模型证据各 8 题，每题含本地与官方 Web 来源；24/24 baseline 使用 secondary，24/24 search 由真实 AUTO L3 选择 primary＋independent，dry-run 外部调用为 0。
-- [ ] 在提交后的新 SHA 上用独立 run namespace 执行单题真实双臂＋隐藏评审预检；通过后再运行完整 24 题，失败结果保留在 append-only ledger。
-- [ ] 运行 24 组真实 Research baseline／PlanningSearch 配对并写入原始 ledger、隐藏 verifier 与 cohort 报告；当前 A15 各 PlanningSearch 权威表均为 0，机械回归 300 passed 不能代替收益证明。
+- [x] 在 `1c9c2b2bd` 上以独立 namespace 完成单题真实双臂＋隐藏评审预检；状态 `PASS_PREFLIGHT_ONLY`，报告 SHA-256 为 `03b72f857a57a94098269e1537879154ccb3dce9471189b88844bc6193a7a0bb`。
+- [x] 完成 24 组真实 Research baseline／PlanningSearch 配对。质量均值提升 0.85416667、bootstrap 95% 下界 0.75、citation validity 1.0、成本比 1.32215978、p95 延迟比 0.98756943、严重错误 0，最终状态 `PASS`；报告 SHA-256 为 `eb17699c0f85b2b9b680f02f5ce1c716726e2f15f2bfd8b72cf437f6c7277894`。只生成 promotion proposal 资格，未启用生产影响。
+- [ ] 运行 Code 20 个固定任务与 Pentest 30 次授权实验；两域没有真实最终 cohort 前，PlanningSearch 三域总状态保持 `PARTIAL_RESEARCH_PASS_CODE_PENTEST_PENDING`。
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。

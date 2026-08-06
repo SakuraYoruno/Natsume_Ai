@@ -64,7 +64,7 @@ flowchart LR
 | Architecture 静态 Gate | 大量切片已通过，状态文件仍包含不同时点的 PASS/FAIL 文本 | 必须在同一干净 SHA 重新采集 |
 | PlanningSearch 实现 | 通用 Service 已接入 Plan/Pentest，相关测试定义约 451 个 | 证明代码和合同存在，不证明真实收益 |
 | PlanningSearch shadow | 10 个 fixture 场景的 scripted/shadow 报告 | `SIMULATION_SHADOW`，无 promotion 资格 |
-| Research／Code／Pentest 真实收益 | 未找到 24／20／30 固定队列的合格最终回执 | 0/3 域通过 |
+| Research／Code／Pentest 真实收益 | Research 24 题真实外部双臂已通过；Code 20 题与 Pentest 30 次待执行 | 1/3 域通过，三域总状态仍为 PARTIAL |
 | 数字生命工程链 | Affect、关系、语音、Avatar 有大量定向测试和局部实测 | `WIRED_PARTIAL` |
 | 72 条情感场景 | 机器状态为 `MEASUREMENT_PENDING` | 0/72 完成正式测量 |
 | 48 条多轮人工盲测 | 机器状态为 `NOT_RUN` | 0/48 完成正式评审 |
@@ -435,7 +435,7 @@ Secure Ingress
 | 轴 | PASS 条件 | 当前基线 |
 |---|---|---|
 | A Architecture 2.0 | A01～A15 全部绑定最终 SHA 通过 | `NOT_RUN_CURRENT_SHA` |
-| B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `BENEFIT_UNPROVEN` |
+| B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `RESEARCH_PASS_CODE_PENTEST_PENDING` |
 | C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `MEASUREMENT_PENDING` |
 | D 真实全栈 | 本地强制服务、路线、故障、恢复、性能和回滚通过 | `RETEST_REQUIRED_FINAL_SHA` |
 | 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `UNKNOWN` |

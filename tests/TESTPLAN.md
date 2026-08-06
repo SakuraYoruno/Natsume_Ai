@@ -410,3 +410,5 @@ Provider 成本测试必须覆盖 DeepSeek V4 Flash／Pro 的 cache hit、cache 
 Research hidden verifier 回归必须证明：新鲜 paired run 才提供进程内正文，数据库不出现正文；terminal replay 的 transient output 为空；评审输入没有 `BASELINE/SELECTED` 身份；评审 prompt digest 和 external attestation 精确进入 receipt；候选或评审 JSON 漂移、越界 score 均在写 cohort 前拒绝。
 
 固定 Research 队列的无外部调用 Gate 必须加载全部 24 题并断言：至少三个 topic；同时含本地与 Web source kind；每题 baseline 只选 secondary；每题 selected 由 AUTO L3 选择 primary＋independent；两臂 rendered prompt digest 不同；source byte count 或 digest 被改动时在 planning 前失败。dry-run 的 `external_calls` 必须为 0，不能计入收益。
+
+`1c9c2b2bd` 已在真实 A15 SQLite 上完成该队列的单题预检和 24 题正式运行。正式报告 SHA-256 为 `eb17699c0f85b2b9b680f02f5ce1c716726e2f15f2bfd8b72cf437f6c7277894`：质量均值提升 0.85416667、bootstrap 95% 下界 0.75、citation validity 1.0、成本比 1.32215978、p95 延迟比 0.98756943、严重错误 0。后续回归必须继续检查 receipt digest 自校验、SQLite reopen、来源正文不落 durable ledger 和 `production_influence_enabled=false`；Code 20 题与 Pentest 30 次仍是独立未完成 Gate。
