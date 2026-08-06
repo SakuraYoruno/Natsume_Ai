@@ -291,4 +291,6 @@ non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_
 
 本收据只关闭该 acceptance 数据根、当前运行窗口中的旧 writer 使用量；它不证明语言已经自然，也不证明远端 VTS。当前三轮 Host latency 仍为 13,112／8,655／8,795 ms，第一轮发生一次语义修复；A15 总体保持 `INCOMPLETE`。
 
-继续对这三轮的远端 Gateway SQLite 做方向时间线核对后发现：第一轮 Reply Outbox 在 16.06 秒的平台调用后以 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 进入 DLQ；第二轮 Inbox 已在此期间提交，却直到 Outbox 返回后才获得 claim。根因是 `GatewayDeliveryRuntime` 原先由一个 worker 先跑 Inbox batch、再同步跑 Outbox batch。当前代码已改为独立 `gateway-durable-inbox` 与 `gateway-durable-outbox` 线程，两个方向继续使用原稳定 worker ID 后缀、Lease、fencing token 和原 DLQ 语义；新增合同测试让 Outbox 故意阻塞并确认 Inbox 在释放前已完成。该证据当前只到 `CODE_REMEDIATED_REAL_RETEST_PENDING`，必须部署远端 Gateway 并绑定新时间线后才能关闭性能缺陷。
+继续对这三轮的远端 Gateway SQLite 做方向时间线核对后发现：第一轮 Reply Outbox 在 16.06 秒的平台调用后以 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 进入 DLQ；第二轮 Inbox 已在此期间提交，却直到 Outbox 返回后才获得 claim。根因是 `GatewayDeliveryRuntime` 原先由一个 worker 先跑 Inbox batch、再同步跑 Outbox batch。当前代码已改为独立 `gateway-durable-inbox` 与 `gateway-durable-outbox` 线程，两个方向继续使用原稳定 worker ID 后缀、Lease、fencing token 和原 DLQ 语义；新增合同测试让 Outbox 故意阻塞并确认 Inbox 在释放前已完成。
+
+`4c66d61b8` 部署后的远端复验报告为 `dl-live-1785982868337.json`，SHA-256 `8709a206ce052a2eeb597f6ba549d3e5f98315efa3d62245a682555267208992`。同一 `:outbox` attempt 从 `1785982875004` 到 `1785982891062` 持续 16,075 ms 并进入 uncertain DLQ；其间两个 `:inbox` attempt 分别在持久化后 118／197 ms 开始，第一条在 Outbox 终态前 15,604 ms 已被领取。三轮均 `INPUT_COMPLETED/OK`、TaskGraph `COMPLETED`、Acceptance `APPROVE`，末轮 Voice 为 `APPLIED`。方向阻塞项提升为 `PASS_REAL_BLOCKING_OUTBOX_OVERLAPPED_INBOX_PROGRESS`；回复“嗯，那就好。我这边也正好闲着。”仍需人工评审，微信物理送达也没有因此变成 PASS。
