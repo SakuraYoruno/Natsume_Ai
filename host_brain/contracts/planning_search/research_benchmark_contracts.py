@@ -198,6 +198,7 @@ class ResearchArmPlanV1:
     source_ids: tuple[str, ...]
     graph_digest: str
     path_digest: str
+    prompt_digest: str | None = None
     generated_by: str = "RESEARCH_SUCCESSOR_CATALOG"
 
     def __post_init__(self) -> None:
@@ -206,6 +207,12 @@ class ResearchArmPlanV1:
         object.__setattr__(self, "source_ids", tuple(sorted(set(_text(item, "source_ids[]", 120) for item in self.source_ids))))
         object.__setattr__(self, "graph_digest", _digest(self.graph_digest, "graph_digest"))
         object.__setattr__(self, "path_digest", _digest(self.path_digest, "path_digest"))
+        if self.prompt_digest is not None:
+            object.__setattr__(
+                self,
+                "prompt_digest",
+                _digest(self.prompt_digest, "prompt_digest"),
+            )
         if self.generated_by != "RESEARCH_SUCCESSOR_CATALOG":
             raise ResearchBenchmarkContractError("ResearchArmPlan must come from the Research successor catalog")
 
@@ -216,6 +223,7 @@ class ResearchArmPlanV1:
         result: SearchResult,
         *,
         binding: ResearchCorpusBindingV1,
+        prompt_digest: str | None = None,
     ) -> "ResearchArmPlanV1":
         if not isinstance(result, SearchResult) or not result.selected_path:
             raise ResearchBenchmarkContractError("Research arm requires a selected SearchResult path")
@@ -233,10 +241,11 @@ class ResearchArmPlanV1:
             source_ids=source_ids,
             graph_digest=_json_digest({"virtual_state": result.virtual_state_digest, "path": candidate_ids}),
             path_digest=result.trace_digest,
+            prompt_digest=prompt_digest,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "arm_id": self.arm_id,
             "candidate_ids": list(self.candidate_ids),
             "source_ids": list(self.source_ids),
@@ -244,6 +253,13 @@ class ResearchArmPlanV1:
             "path_digest": self.path_digest,
             "generated_by": self.generated_by,
         }
+        # Legacy 0107 RunSpecs predate per-arm rendered prompts.  Omitting the
+        # absent field preserves their canonical JSON and exact replay, while
+        # every new heterogeneous A/B run can bind its actual prompt before
+        # any external request starts.
+        if self.prompt_digest is not None:
+            payload["prompt_digest"] = self.prompt_digest
+        return payload
 
 
 @dataclass(frozen=True, slots=True)

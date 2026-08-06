@@ -191,13 +191,19 @@ def _binding() -> ResearchCorpusBindingV1:
     )
 
 
-def _plan(arm_id: str, candidate: str) -> ResearchArmPlanV1:
+def _plan(
+    arm_id: str,
+    candidate: str,
+    *,
+    prompt_digest: str | None = None,
+) -> ResearchArmPlanV1:
     return ResearchArmPlanV1(
         arm_id=arm_id,
         candidate_ids=(candidate,),
         source_ids=("primary",),
         graph_digest="4" * 64,
         path_digest="5" * 64,
+        prompt_digest=prompt_digest,
     )
 
 
@@ -206,6 +212,7 @@ def _ledger_and_run(
     *,
     randomization_draw: int = 0,
     pair_max_tokens: int = 200,
+    arm_prompt_digests: dict[str, str] | None = None,
 ) -> tuple[SQLiteResearchShadowLedger, str]:
     db_path = tmp_path / "d20c-paired.sqlite3"
     result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
@@ -232,8 +239,16 @@ def _ledger_and_run(
     ):
         run_id = ledger.preregister_randomized_run(
             registration_id=registration_id,
-            baseline=_plan("baseline", "research.baseline"),
-            selected=_plan("selected", "research.selected"),
+            baseline=_plan(
+                "baseline",
+                "research.baseline",
+                prompt_digest=(arm_prompt_digests or {}).get("baseline"),
+            ),
+            selected=_plan(
+                "selected",
+                "research.selected",
+                prompt_digest=(arm_prompt_digests or {}).get("selected"),
+            ),
             cohort_run_key=f"d20c-paired-{randomization_draw}-{pair_max_tokens}",
         )
     return ledger, run_id
@@ -535,6 +550,47 @@ async def test_d20c_runner_rejects_prompt_profile_drift_and_marks_reconciliation
     assert operation is not None
     assert operation.state is ResearchArmOperationState.RECONCILIATION_REQUIRED
     assert ledger.get_arm_execution(run_id=run_id, role="BASELINE") is None
+
+
+async def test_d20c_runner_accepts_distinct_preregistered_arm_prompt_digests(tmp_path) -> None:
+    baseline_digest = "7" * 64
+    selected_digest = "8" * 64
+    ledger, run_id = _ledger_and_run(
+        tmp_path,
+        arm_prompt_digests={
+            "baseline": baseline_digest,
+            "selected": selected_digest,
+        },
+    )
+    reopened = SQLiteResearchShadowLedger(ledger.db_path).get_paired_run_spec(
+        run_id=run_id
+    )
+    assert reopened.baseline.prompt_digest == baseline_digest
+    assert reopened.selected.prompt_digest == selected_digest
+    assert reopened.profile.prompt_digest == PROMPT_DIGEST
+
+    audit = _AuditLookup()
+    service = _CanonicalModelService(
+        audit=audit,
+        prompt_digests={
+            "baseline": baseline_digest,
+            "selected": selected_digest,
+        },
+    )
+    result = await _runner(
+        ledger=ledger,
+        audit=audit,
+        service=service,
+        outputs=[],
+        factory=_VerifierFactory(),
+    ).execute_preregistered(
+        run_id=run_id,
+        arm_inputs=_inputs(),
+        owner_id="worker-distinct-prompts",
+    )
+
+    assert result.receipt.baseline_model.prompt_digest == baseline_digest
+    assert result.receipt.selected_model.prompt_digest == selected_digest
 
 
 async def test_d20c_runner_rejects_pair_budget_after_both_durable_arms(tmp_path) -> None:

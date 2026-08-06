@@ -542,18 +542,22 @@ def _assert_model_matches_spec(
     expected_execution_id: str,
 ) -> None:
     attestation = model.attestation
+    expected_prompt_digest = _expected_arm_prompt_digest(
+        spec=spec,
+        arm_id=expected_arm_id,
+    )
     if (
         model.execution_id != expected_execution_id
         or model.arm_id != expected_arm_id
         or model.evidence_class != "ATTESTED_EXTERNAL"
         or not model.benefit_eligible
-        or model.prompt_digest != spec.profile.prompt_digest
+        or model.prompt_digest != expected_prompt_digest
         or model.total_tokens is None
         or model.tool_call_count is None
         or attestation is None
     ):
         raise ResearchPairedExecutionError(
-            "Research arm evidence does not bind the preregistered execution profile"
+            "Research arm evidence does not bind the preregistered execution profile and arm prompt"
         )
     if (
         model.total_tokens > spec.budget.arm_max_tokens
@@ -561,6 +565,31 @@ def _assert_model_matches_spec(
         or attestation.total_latency_ms > spec.budget.arm_max_wall_time_ms
     ):
         raise ResearchPairedExecutionError("Research arm evidence exceeded its preregistered budget")
+
+
+def _expected_arm_prompt_digest(
+    *,
+    spec: ResearchPairedRunSpecSnapshot,
+    arm_id: str,
+) -> str:
+    """Resolve the durable rendered prompt identity for one A/B arm.
+
+    Older RunSpecs intentionally omit the field and retain their historical
+    shared-profile behavior.  New real cohorts bind each arm separately so a
+    PlanningSearch-selected source set can differ from the baseline without
+    trusting transient caller input.
+    """
+
+    matches = tuple(
+        plan
+        for plan in (spec.baseline, spec.selected)
+        if plan.arm_id == arm_id
+    )
+    if len(matches) != 1:
+        raise ResearchPairedExecutionError(
+            "Research arm identity does not bind exactly one preregistered plan"
+        )
+    return matches[0].prompt_digest or spec.profile.prompt_digest
 
 
 def _assert_pair_budget(

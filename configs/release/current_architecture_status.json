@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_EDGE_TTS_WORKER_LEAK_CODE_REMEDIATED_REAL_RETEST_PENDING",
+  "commit_scope": "A15_RESEARCH_PER_ARM_PROMPT_BINDING_CODE_REMEDIATED_REAL_24_PAIR_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -176,6 +176,9 @@
       "final_sha_full_stack_gate": "NOT_RUN"
     },
     "planning_search_three_domain_benefit": "UNPROVEN",
+    "planning_search_mechanical_regression": "PASS_300_WITH_1_CLASSIFIED_WINDOWS_SYMLINK_PRIVILEGE_SKIP",
+    "planning_search_research_source_ledger_a15_before": "ZERO_ALL_TABLES",
+    "planning_search_research_arm_prompt_binding": "CODE_REMEDIATED_PER_ARM_DURABLE_DIGEST_REAL_24_PAIR_PENDING",
     "digital_life_human_likeness": "PARTIAL_REAL_THREE_FAMILY_SINGLE_REVIEWER_3_OF_3_TEXT_PASS_BLIND_COHORT_PENDING",
     "whole_system_python_line_coverage": "72.22_PERCENT_OFFLINE_STABLE_BELOW_75_GATE",
     "whole_system_python_branch_coverage": "55.08_PERCENT_OFFLINE_STABLE_BELOW_65_GATE",

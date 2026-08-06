@@ -165,3 +165,9 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 | TTS、检索、迁移、Grant、Life delivery、terminal reconciliation、Tribe 订阅 | 分别进入同域的 prosody／projection／compiler／delivery／classifier／event-handler 模块 |
 
 当前工作树上的 A01～A14 静态架构门禁为 `PASS`，migration catalog head 为 `0153`。这只关闭静态职责和目录合同漂移；A15 必须绑定提交 SHA 重新启动真实 Docker、Host、OBS、Monitor、Gateway 和可用 Edge 后才能形成最终结论。
+
+## 12. PlanningSearch Research 的双臂身份
+
+Research 的可验收单位不是一个共享 profile prompt，而是两个预注册 arm。baseline 和 selected 可以共享 provider、model、budget 与冻结 corpus，却必须分别绑定自己的 candidate path、source set、graph/path digest 和渲染后的 prompt digest。外部模型 receipt 只有与对应 arm 的 durable prompt identity 精确一致时才可进入配对终态；调用者临时提交的摘要不具 authority。
+
+0107 以前的 RunSpec 没有 per-arm 字段，读取时仍使用历史 `profile.prompt_digest`，序列化也不补空字段，从而保持既有 canonical JSON 和 exact replay。新真实 cohort 必须先渲染两只 arm、持久预注册各自摘要，再允许任何外部请求开始。当前只完成这条生产合同修复，A15 原始收益 ledger 仍为空。

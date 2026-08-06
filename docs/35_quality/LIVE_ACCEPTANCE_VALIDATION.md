@@ -394,3 +394,11 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 在新 session 上使用全新 effect 重跑 `implicit_low_mood:1` 三轮真实 Gateway→Host→DeepSeek→TaskGraph→Edge 链路，三轮 webhook、TaskGraph、Acceptance 均完成，legacy affect writer 增量为 0；最终 `voice.speak` 为 `APPLIED`，terminal receipt 为 `TTS_PLAYBACK_FINISHED`，`voice.release` 也为 `APPLIED`。Avatar transition 仍按真实外部状态以 `VTS_CONNECTION_FAILED` 拒绝，没有被 Voice 成功覆盖。报告 SHA-256 为 `3fbd674e9f828a67f434f2cfef5acb950dbf53643be03c0a86fcd35f206f5f3a`，自动状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，末句“嗯，那就先这样待着吧。”仍保留人工评审。
 
 随后在不停止主 Edge 的独立真实进程探针中将 READY timeout 强制为 5 秒。探针于 8.234 秒返回预期 `TimeoutError`，adapter 持有的子进程已释放；再次清点仍只有原 worker PID 34580，可用内存约 23.6GB，显存 2861/8192MB。脱敏生命周期收据 SHA-256 为 `3e8024afd135f69d6e6dac693e71539100481c9b584b040d9f59a2b37ce3f607`。本项由 `CODE_REMEDIATED_REAL_RETEST_PENDING` 提升为 `PASS_REAL_REMOTE_SINGLE_WORKER_PHYSICAL_PLAYBACK_AND_TIMEOUT_RECLAIM`；VTS、声学 barge-in、48 条三人盲测和整体 A15 继续为未完成。
+
+## 2026-08-06 A15 PlanningSearch Research 双臂提示绑定
+
+对当前隔离 A15 SQLite 直接清点后，Research registration／run／arm／terminal receipt、Code workload／run／arm／receipt、Pentest calibration 与三域 cohort registration／member／report／promotion 表均为 0。随后完整机械回归执行 38 个 PlanningSearch 测试文件，结果为 300 passed、1 skipped；唯一 skip 是 Windows `WinError 1314` 符号链接权限，不是搜索收益样本。该结果只证明合同、ledger、编译、验证和恢复机制可运行，不能把三域收益提升为 PASS。
+
+真实 Research 预注册还暴露一个被 fake receipt 遮住的生产缺陷：`ResearchExecutionProfileV1` 只有一个共享 `prompt_digest`，paired runner 又要求 baseline 和 selected receipt 都等于它；但 PlanningSearch 改变 source set 后，两只 arm 的真实渲染提示必然不同。新规格因此在 `ResearchArmPlanV1` 上分别持久绑定实际 arm prompt digest，执行器按 arm 精确校验；旧 0107 RunSpec 缺字段时继续回落到历史共享 digest，保证 canonical JSON 与 exact replay 不漂移。codec、operation replay 和 SQLite reopen 均覆盖该字段，25 项相邻回归通过。
+
+当前状态为 `CODE_REMEDIATED_REAL_24_PAIR_PENDING`：尚未发起 24 组独立外部模型双臂、隐藏 verifier 和 bootstrap cohort，也没有写入 benefit-eligible 原始收据。后续失败样本会保留在 append-only ledger，不得用机械测试或 scripted replay 替代。

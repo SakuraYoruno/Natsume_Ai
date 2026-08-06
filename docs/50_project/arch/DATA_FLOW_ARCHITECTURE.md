@@ -318,3 +318,23 @@ flowchart LR
 Surface 的本地门禁只读取本轮冻结计划与已有 facts，不写 self affect，也不新增模型调用。边界、防御、混合情绪抹平和无依据物理共处只会让当前候选进入一次既有语义修复；显式事实已经说明见面或同处时，“当面”类措辞不会被误拦截。最终 runner 使用独立规则读取持久 projection，避免生产门禁自己给自己签发体验通过。
 
 计划层向 Surface 传递的不是固定情绪模板：`HOLD_COMPLEXITY` 必须携带本轮观察到的害怕／不安语义，`GIVE_SPACE` 携带直接减少主动联系的动作，`CONTAINED_JEALOUSY` 携带“感受属于七海、选择权属于用户”的边界。候选层只能润色和筛选，不能把这些动作改写成忙碌反驳、赶走负面情绪或自贬为负担。
+
+## 11. Research PlanningSearch 配对数据流
+
+```mermaid
+flowchart LR
+    C["冻结 corpus binding"] --> B["baseline source set"]
+    C --> S["PlanningSearch selected path"]
+    B --> PB["渲染 baseline messages"]
+    S --> PS["渲染 selected messages"]
+    PB --> DB["持久 arm prompt digest"]
+    PS --> DS["持久 arm prompt digest"]
+    DB --> MB["独立外部模型请求"]
+    DS --> MS["独立外部模型请求"]
+    MB --> VB["fresh corpus citation verifier"]
+    MS --> VS["fresh corpus citation verifier"]
+    VB --> L["append-only paired receipt"]
+    VS --> L
+```
+
+预注册顺序固定为：搜索／基线确定 source set，渲染实际 messages，计算并持久保存每只 arm 的 prompt digest，然后才允许外部调用。receipt 必须逐 arm 精确匹配 execution ID、prompt digest、provider transport identity、usage 和预算；旧规格只有在字段确实不存在时才使用历史共享 digest。这样 search arm 改变资料组合不会被误判为请求漂移，也不能用临时调用参数替换 ledger 中的输入身份。
