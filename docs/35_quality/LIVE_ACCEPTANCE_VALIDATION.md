@@ -310,3 +310,11 @@ non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_
 `59efa3714` 加载后的第二次真实复验通过。Obs PID 45628 与未重启的 Host、Nginx Monitor 在 49.084 秒窗口前后均返回 HTTP 200；192 个 current 文档的 `updated_ts_ms` 和 freshness 继续推进，31 个 source cursor 变化。journal 仅新增 1 行、6,872 bytes，经窗口前身份集合核对为新 Scheduler TaskGraph 的首个必要检查点；既存未到期文档的刷新历史为 0，同一 Host 实例 revision 历史为 0，SQLite page count 增量为 0。脱敏报告 `obs-projection-hourly-checkpoint-v2-1785987656774.json` 的 SHA-256 为 `92baff1b2117e5d95a47e534a2c908642b47be4d7db56e9f144beae663f563e4`。
 
 因此 OBS 派生 history 的“大载荷重复保存”和“轮询逐条追加”两项均按真实进程关闭；这不等于整体延迟、长期 SQLite maintenance 或既有 1.93 GB 历史已经完成。旧历史继续只读保留，不做破坏性清理，也不对 canonical Life／Task／Gateway 数据改写。
+
+## 2026-08-06 A15 普通聊天同步边界
+
+OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.json`，SHA-256 `7feaf1a42a919e1abf829f62f00e0d3b4c7e37d8c196ff08fb66226ead58d81a`。Host／OBS／Monitor／Gateway／Edge 五项前置探针均为 HTTP 200，三轮 TaskGraph 与 Acceptance 完成，writer probe 为零旧 authority 增量，末轮 Voice 得到 `TTS_PLAYBACK_FINISHED/APPLIED`；VTS 仍按外部授权未完成拒绝。三轮 Host 终态为 13,115／15,349／7,971 ms，因此报告只证明投影优化没有破坏链路，不能证明实时门槛通过。
+
+持久账本时间线把主因收窄到回复后的同步 effect 链。代表轮的 provider latency 为 1,719 ms，但随后依次等待 `conversation.user_turn`、`life.conversation_turn_recorded`、`life.foreground_completed`、`host.companion_expression_enqueue` 和 `surface.reply_delivery`，到 `INPUT_COMPLETED` 又消耗约 7.7 秒。普通无副作用陪伴没有理由等全部派生投影后才让文本可见。
+
+当前实现不删除任何 durable intent，也不恢复松散 `create_task`。Acceptance 编译器把可信 `command.route_type` 写入用户轮次；只有 `route_type=chat` 且恰好一个用户轮次、一个 Surface delivery 的图，才同步执行 `conversation.user_turn → surface.reply_delivery`。Life、foreground、expression、explicit memory 与 preference 继续保留在同一持久队列，Surface 提交后通过 app-local `AcceptanceEffectRuntime.wake()` 立即恢复；用户轮次失败时禁止越过并发送回复。无标记旧图、Plan、Skill 和控制路线仍使用原完整顺序。47 项定向 compiler／dispatcher／Runtime 合同与 1 项真实 SQLite／生产组合集成通过；集成同时确认 Gateway intake 前已有用户轮次、尚无 Life projection，后台 drain 后 Life／Expression／Preference 全部收敛。真实进程尚未加载本改动，故状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，A15 总体仍为 `INCOMPLETE`。

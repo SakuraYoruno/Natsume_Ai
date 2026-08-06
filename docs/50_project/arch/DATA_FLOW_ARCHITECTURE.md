@@ -245,20 +245,24 @@ canonical ledgers
 
 ## 9. Gateway 回复与生命体情绪观测流
 
-```text
-signed Gateway webhook
-→ Durable inbox
-→ HostCommand / immutable TaskGraph
-→ model / skill / delegate / plan
-→ Verification / Acceptance
-→ surface.reply_delivery
-→ Gateway Reply Outbox COMMITTED
-→ INPUT_COMPLETED {authority, state}
-→ OBS closed-loop projection
-→ Monitor
+```mermaid
+flowchart LR
+    GW["Signed Gateway webhook"] --> IN["Durable inbox"]
+    IN --> GRAPH["HostCommand / immutable TaskGraph"]
+    GRAPH --> EXEC["Model / Skill / Delegate / Plan"]
+    EXEC --> ACCEPT["Verification / Acceptance<br/>durable effect intents"]
+    ACCEPT --> SYNC["Chat 同步前缀<br/>user turn → Surface delivery"]
+    SYNC --> OUT["Gateway Reply Outbox COMMITTED<br/>INPUT_COMPLETED"]
+    ACCEPT --> WAKE["立即唤醒后台恢复"]
+    WAKE --> BG["Life → foreground → expression<br/>memory / preference"]
+    OUT --> OBS["OBS closed-loop projection"]
+    BG --> OBS
+    OBS --> MON["Monitor"]
 ```
 
 这条链到 `OUTBOX_COMMITTED` 只证明 Host 已经完成可恢复提交。Gateway 实际 dispatch、未知外部副作用对账、平台 ACK 和用户可见性是后续独立阶段，缺少后续回执时不得推断为已送达。
+
+上述短前缀只对编译器可信标记的普通 Chat 生效。用户轮次未提交时不得发送 Surface；后台 effect 仍在同一 SQLite 队列中按原语义顺序完成，进程退出后也由同一恢复 owner 接管。Plan、Skill、Delegate 控制动作和旧账本不会因为存在 Surface delivery 自动获得快速路径。
 
 ```text
 canonical Life journal

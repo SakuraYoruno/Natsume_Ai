@@ -86,6 +86,8 @@ Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Disp
 
 这些机制不得被重新加到无副作用的普通闲聊首字路径中。
 
+Gateway Chat 因跨进程投递仍会生成紧凑 TaskGraph 和 durable Acceptance Effect，但它不再同步执行全部派生投影。编译器把可信 `route_type=chat` 固化在 `conversation.user_turn`；dispatcher 只同步提交 canonical 用户轮次和 `surface.reply_delivery`，随后唤醒唯一 app-local recovery Runtime，继续处理 Life、foreground affect、Expression、Memory 与 preference。用户轮次提交失败会阻断 delivery；未标记旧图以及 Plan、Skill、Operator 等路线仍保持完整 effect 顺序。这样保留重启恢复与幂等，不让普通对话承担所有后台状态更新的墙钟时间。
+
 ## 6. Host、OBS 与 Composition
 
 `host_brain/composition/` 构造 Host、Life、Task Runtime 等 app-local 对象图。OBS 通过显式 projection ports 读取 canonical store；Monitor UI 只消费读模型和提交 Operator 命令，不拥有业务状态。

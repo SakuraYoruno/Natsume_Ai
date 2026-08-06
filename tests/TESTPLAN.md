@@ -352,4 +352,15 @@ Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Pla
 
 `c6a6e0b36` 的三轮真实校准已关闭“默认 thinking 耗尽正文预算”断点：三轮图和 Acceptance 全部完成，最终轮 Voice 物理回执为 `APPLIED`。该报告仍不能关闭实时门槛或人感门槛；整轮 Host latency 为 7,739～12,715 ms，前两轮各需一次 `surface_hard_gate_repair`，必须继续测量首 token、确定性链路和语义修复比例。
 
+普通 Chat 的 Acceptance 延迟回归命令为：
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_gr06_acceptance_effect_compiler.py `
+  tests/integration/test_gr06_acceptance_effect_dispatcher.py `
+  tests/unit/test_ne01_acceptance_effect_runtime.py
+```
+
+合同必须证明：可信 `route_type=chat` 只同步提交 `conversation.user_turn` 与 `surface.reply_delivery`；用户轮次失败时 delivery 不得越过；无标记图仍执行完整 Life／foreground 前缀；可见 delivery 后唯一 app-local recovery Runtime 能在长轮询超时前被唤醒。真实复验还必须检查文本终态提前、后台 Life／Expression／Memory／Preference 最终全部 `COMMITTED`、末轮 Voice receipt 存在、重复 effect 为 0，并保留 VTS 外部状态。即使 47 项定向合同与 1 项生产组合集成通过，真实 Host 未加载时状态也只能是 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
 HTTP 集成断言还要区分“自包含的小代码片段”和“需要 Workspace 的代码任务”：前者应留在实时 Chat，以 inline-code semantic 直接回答，不应启动 `agent_inspect`；包含文件、仓库、调试、测试或修改语义的任务才进入 Governed Agent Runtime。不得用已经退役的可变 process-service 测试桥注册 Skill 后声称生产 app-local Container 已被覆盖。

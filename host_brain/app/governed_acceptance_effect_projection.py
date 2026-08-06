@@ -6,6 +6,11 @@ from collections.abc import Mapping
 from typing import Any
 
 
+_REALTIME_REPLY_PREFIX_TYPES = frozenset(
+    {"conversation.user_turn", "surface.reply_delivery"}
+)
+
+
 async def dispatch_accepted_effects(
     event: Mapping[str, Any],
     dispatcher: Any,
@@ -73,10 +78,7 @@ async def dispatch_accepted_effects(
                 "delivery_committed": delivery_committed,
                 "background_pending": sum(
                     str(row.get("effect_type") or "")
-                    in {
-                        "conversation.preference_signal",
-                        "memory.explicit_store",
-                    }
+                    not in _REALTIME_REPLY_PREFIX_TYPES
                     and str(row.get("status") or "")
                     not in {"COMMITTED", "FAILED"}
                     for row in results
