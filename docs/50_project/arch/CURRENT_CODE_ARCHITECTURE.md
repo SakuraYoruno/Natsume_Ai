@@ -73,6 +73,8 @@ flowchart TB
 
 多轮连续性以 `conversation_turn.turn_index` 为 canonical 顺序；`ts_ms` 只描述各进程观察到的墙钟时间，不能覆盖跨 Host／Gateway／Edge 的轮序。Fusion 在本轮没有新 appraisal 时，只能从仍活跃且未解决的 canonical episode 派生受控 continuity enum；它不会复制历史原文、创建第二份 self-affect 或增加 journal 写入。Planner 将该 enum 冻结进同一 `AffectiveTurnPlan`，让“没事”仍保留未解决低落、让新好消息同时承接此前不安。`GIVE_SPACE` 的候选还会在本地硬拒绝要求用户主动想念／联系的反向施压，不能只靠软分数带过。
 
+真实模型仍可能忽略已经进入 prompt 的连续性。Surface 因此只在对应 server-authored continuity marker 存在时增加两项输出约束：未解决低落不能被宣布为“那就好／一切正常”，混合结果必须至少保留一处不安、没底、顾虑或慢慢消化的语义。命中后复用既有唯一语义重试和最终确定性降级；没有 marker 的普通聊天不执行这两个 Gate。
+
 当前语言策略为中文文本展示、日语 TTS。Host 通过 `ExpressionPlan` 选择 voice profile；目标 Edge 使用 `configs/voice/gpt_sovits_nanami_v4.json` 与 GPT-SoVITS V4 权重生成语音。
 
 ## 5. Governed Task Runtime

@@ -72,6 +72,8 @@ flowchart LR
 
 近期对话从 SQLite 按 canonical `turn_index` 取回后再恢复正序，不能按跨机器 `ts_ms` 排列，否则时钟偏差会把两条用户消息或两条回复错误相邻并被同角色去重。当前轮没有新 appraisal 时，Fusion 只在活跃 episode 与窄文本标记同时匹配时输出 `MINIMIZED_UNRESOLVED_AFFECT` 或 `MIXED_AFFECT_RESULT_CONTINUATION`；Planner 消费 enum 而非历史正文。空间边界的 counter-pressure 在候选 Gate 直接拒绝。这条链路不增加模型调用，也不把日常对话改造成同步审计事务。
 
+真实 `6160c4564` trace 已证明 enum 和对话顺序都到达生成入口，但模型仍可忽略提示。因此单回复和双候选在本地交付前还验证与 enum 对应的最小语义：前者拒绝虚假收束，后者拒绝完全丢失混合感受。失败进入原有一次 repair；没有新增第二条状态链、写事务或额外重试额度。
+
 低风险 Companion Profile 不旁路这条链路。五条跨日至少三天、helpfulness 下界不低于 0.85 且无边界违规的 canonical aftereffect 只能创建可回滚 canary；接下来的五次强后效应把同一候选自动激活。Planner 将 profile 变成文本 style anchor，ExpressionPlan 同步缩放 Voice rate 与 Avatar motion。Rollback 只能恢复 active profile 自带的 exact predecessor，不能由调用者指定任意历史版本。A15 隔离 SQLite canary 已验证 Host 协议上的 `文本策略改变 + Voice 1.0→1.15 + Avatar 0.5→0.8`，并在 rollback 后全部恢复；它没有执行模型生成和远端设备。
 
 ```mermaid

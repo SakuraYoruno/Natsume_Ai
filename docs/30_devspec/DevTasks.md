@@ -55,7 +55,7 @@
 - [x] 修复自然文本只产生中性观察的问题；低落、拒绝建议、混合感受、好消息、空间和现实关系边界均进入 canonical Appraisal，本地相邻回归 124 项通过。
 - [ ] 用更广真实 Gateway／DeepSeek／远端 Voice cohort 与三人盲测确认语言质量。`e4c6fb564` 三轨迹为 2 自动通过、1 失败；自动低分的“有点怕也正常”人工更自然，自动通过的“省得你嫌烦”却明显不合格。已补齐同义边界／自主／混合退化门禁（101 项定向测试通过），但不再用三条反复抽样冒充“像人”证明；下一步进入其余 A15 强制项并保留人感未证状态。
 - [x] 修复真实多轮 runner 每回合改变发送者、把同一会话伪装成多个用户的问题；新增 subject/session 漂移 fail-closed。
-- [ ] 复验三类多轮情感连续性修复。最新真实报告 SHA-256 `c19bc40c293ca6bf9c931178258cd2284d0ff4374e0f3e4ead90b269e085578a` 自动仅 1/3 通过、人工 3/3 失败；根因分别是跨机器时间戳打乱 canonical 轮序、未解决 episode 未进入下一轮计划、空间边界反向施压仅扣分未淘汰。代码现按 `turn_index` 读取对话，只传递受控 continuity enum，并对 `GIVE_SPACE` counter-pressure fail-closed；323 项相邻测试通过。Host 加载新提交并以同一 cohort 真实复验前不得勾选。
+- [ ] 复验三类多轮情感连续性修复。首份报告 SHA-256 `c19bc40c293ca6bf9c931178258cd2284d0ff4374e0f3e4ead90b269e085578a` 定位到轮序、continuity 和边界候选三处断点。`6160c4564` 真实复验（SHA-256 `58b871de4dcc9efee488f441f674f9affc87822e1174237a5af113c0b4d07215`）已证明 canonical 轮序 `deduped=0`、两个 continuity enum 到达 Planner，空间边界正文也安全；但低落仍被说成“一切正常”，混合结果仍被说成“可以松口气”，人工只通过 1/3。第二层代码用 continuity-scoped Gate 拒绝这两类输出，141 项测试通过；同 cohort 再次真实复验前不得勾选。
 - [x] 修复 Gateway 401 等入口拒绝仍轮询 180 秒的问题；A15 双机回调 HMAC 摘要已重新对齐并只重启远端 Gateway，未重启 Edge。
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。

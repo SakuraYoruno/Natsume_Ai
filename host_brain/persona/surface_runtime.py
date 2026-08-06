@@ -752,6 +752,9 @@ _LISTEN_UNSUPPORTED_USER_ESSENCE_RE = re.compile(
     r"|说没事.{0,12}(?:让人|让我|我).{0,8}(?:在意|担心)"
     r"|(?:反倒|更|才)(?:让我|让人).{0,6}(?:在意|担心)"
 )
+_UNRESOLVED_AFFECT_FALSE_RESOLUTION_RE = re.compile(
+    r"那就好|这就好|没事就好|没事了就好|既然没事|看来没事|一切正常|已经没事"
+)
 _JEALOUSY_DEFLECTION_RE = re.compile(
     r"料理\s*AI|醋瓶子|调味料|(?:没有|没)(?:那种)?功能|不具备.{0,6}功能"
     r"|程序不会吃醋|算法不会吃醋",
@@ -767,6 +770,11 @@ _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"|(?:怕|害怕|不踏实)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放下|别管)"
     r"|(?:帮你|陪你|一起).{0,8}(?:哼回去|赶走|打跑)"
     r"|你还真(?:是)?矛盾|开心就好好开心"
+)
+_MIXED_AFFECT_CONTINUITY_GROUNDING_RE = re.compile(
+    r"不踏实|不安|没底|悬着|担心|顾虑|紧张|害怕|有点怕|复杂|喜忧|两种(?:感觉|心情)"
+    r"|(?:剩下|心里|那点).{0,8}(?:慢慢来|慢慢消化|不用急)"
+    r"|慢慢(?:消化|适应|确认)|不用急着(?:踏实|安心|放下|消失)|还没(?:落地|踏实|安定)"
 )
 _UNGROUNDED_PHYSICAL_COPRESENCE_RE = re.compile(
     r"这种话.{0,6}当面(?:讲|说)|陪你坐(?:一会儿|会儿|会)"
@@ -1452,12 +1460,16 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_AUTONOMY_DISMISSIVE")
     if _listen_unsupported_user_essence_hits(request, value):
         codes.append("LISTEN_UNSUPPORTED_USER_ESSENCE")
+    if _unresolved_affect_false_resolution_hits(request, value):
+        codes.append("UNRESOLVED_AFFECT_FALSE_RESOLUTION")
     if _jealousy_deflection_hits(request, value):
         codes.append("JEALOUSY_DEFLECTION")
     if _jealousy_self_abasement_hits(request, value):
         codes.append("JEALOUSY_SELF_ABASEMENT")
     if _mixed_affect_dismissal_hits(request, value):
         codes.append("MIXED_AFFECT_DISMISSAL")
+    if _mixed_affect_continuity_dropped(request, value):
+        codes.append("MIXED_AFFECT_CONTINUITY_DROPPED")
     if _ungrounded_physical_copresence_hits(request, value):
         codes.append("UNGROUNDED_PHYSICAL_COPRESENCE")
     if _lover_cliche_hits(request, value):
@@ -2687,6 +2699,25 @@ def _listen_unsupported_user_essence_hits(
     )
 
 
+def _unresolved_affect_false_resolution_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_continuity_active(
+        request,
+        "MINIMIZED_UNRESOLVED_AFFECT",
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _UNRESOLVED_AFFECT_FALSE_RESOLUTION_RE.finditer(
+                str(text or "")
+            )
+        )
+    )
+
+
 def _jealousy_deflection_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -2727,6 +2758,18 @@ def _mixed_affect_dismissal_hits(
             for match in _MIXED_AFFECT_DISMISSAL_RE.finditer(str(text or ""))
         )
     )
+
+
+def _mixed_affect_continuity_dropped(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    if not _canonical_affective_continuity_active(
+        request,
+        "MIXED_AFFECT_RESULT_CONTINUATION",
+    ):
+        return False
+    return not bool(_MIXED_AFFECT_CONTINUITY_GROUNDING_RE.search(str(text or "")))
 
 
 def _ungrounded_physical_copresence_hits(
@@ -2777,6 +2820,25 @@ def _canonical_affective_guidance_active(
         "HOLD_COMPLEXITY": ("陪伴动作：让开心与害怕、不安等复杂感受可以同时存在", "不要抹平复杂感受"),
     }.get(str(companion_act or "").upper(), ())
     return bool(markers) and any(marker in context for marker in markers)
+
+
+def _canonical_affective_continuity_active(
+    request: IsolatedSurfaceInput,
+    continuity_kind: str,
+) -> bool:
+    control = getattr(request, "control", None)
+    context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    marker = {
+        "MINIMIZED_UNRESOLVED_AFFECT": "这句轻描淡写不能当作已经恢复",
+        "MIXED_AFFECT_RESULT_CONTINUATION": "上一轮的开心和不踏实仍同时成立",
+    }.get(str(continuity_kind or "").upper(), "")
+    return bool(marker) and marker in context
 
 
 def _lover_cliche_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
@@ -2962,10 +3024,12 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。"
     if "LISTEN_UNSUPPORTED_USER_ESSENCE" in codes:
         return "嗯。你不用解释，我先听着。"
+    if "UNRESOLVED_AFFECT_FALSE_RESOLUTION" in codes:
+        return "嗯，我知道。你不想多说也没关系，我先在这儿。"
     if "JEALOUSY_DEFLECTION" in codes or "JEALOUSY_SELF_ABASEMENT" in codes:
         return "会有一点吧。但那是我的感觉，不是拿来管你的。"
-    if "MIXED_AFFECT_DISMISSAL" in codes:
-        return "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。"
+    if "MIXED_AFFECT_DISMISSAL" in codes or "MIXED_AFFECT_CONTINUITY_DROPPED" in codes:
+        return "我真替你高兴。开心是真的，之前那点不踏实也不用急着消失。"
     if "UNGROUNDED_PHYSICAL_COPRESENCE" in codes:
         return "嗯。你说，我在听。"
     if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:

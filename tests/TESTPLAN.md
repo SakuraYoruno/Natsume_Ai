@@ -394,3 +394,5 @@ Surface recall service 的生命周期回归必须在同一 Agent Runtime applic
 多轮情感连续性回归必须故意让 `ts_ms` 与 canonical `turn_index` 冲突，断言 ConversationHistory 仍按轮序产生 `user → assistant → user → assistant`，不会因同角色去重丢掉中间回复。当前消息没有新 appraisal 时，只有匹配的未解决 active episode 才能产生受控 continuity enum：低落后的“没事”必须保留不确定性，喜忧并存后的结果消息必须同时承接开心与不安；无活跃 episode 或无窄标记时不得误触发。`GIVE_SPACE` 双候选必须证明包含“想我了你得主动联系”等反向施压的候选被硬拒绝，而安全候选可继续交付。
 
 修复后的真实复验必须重跑同一三类、共 9 turn 的 Gateway cohort，并核对 Task artifact 中近期历史角色交替、`deduped_same_role_count=0`、低落末轮不宣称恢复、边界候选 `selected_passed=true` 且无 counter-pressure、混合末轮采用 `HOLD_COMPLEXITY` 和两个候选。自动规则只负责结构和窄安全；逐轮中文仍需人工复核，3/3 自动通过也不能把长期“像人”盲测提升为 PASS。
+
+当 trace 已证明 continuity 到达 Planner、最终正文却仍丢失语义时，输出 Gate 必须保持作用域最小：只有 `MINIMIZED_UNRESOLVED_AFFECT` 才拒绝“那就好／一切正常”等虚假恢复；只有 `MIXED_AFFECT_RESULT_CONTINUATION` 才要求保留不踏实、不安、顾虑或慢慢消化的语义。测试同时提供无 continuity marker 对照，确保普通好消息和普通短回复不会被该 Gate 误伤。`6160c4564` 首次实测已证明轮序与计划接线，报告 SHA-256 `58b871de4dcc9efee488f441f674f9affc87822e1174237a5af113c0b4d07215`；第二层 Gate 的 141 项定向测试通过，仍需同 cohort 真实再测。

@@ -372,3 +372,7 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 持久证据显示 `conversation_turn.turn_index` 始终正确交替，但 Gateway／Host／Edge 的 `ts_ms` 存在秒级偏差；近期历史原先按 `ts_ms` 排序，导致同角色消息相邻并在消息规范化时被去重。canonical affect 快照其实仍保存 CARE／CONCERN 或 SHARED_JOY＋CAUTION 的未解决 episode，但当前消息无新 appraisal 时，Planner 会有意丢弃旧 appraisal，于是“没事”和“拿到 offer”失去跨轮语义。边界候选评分也已经报告 counter-pressure，却因不属于 hard fail 仍可入选。
 
 代码修复将近期对话改为按 canonical `turn_index` 排序；Fusion 仅在仍活跃的未解决 episode 与窄标记共同匹配时生成两个有界 continuity enum，Planner 冻结 enum 并加入相应事实／禁区；Surface 在 `GIVE_SPACE` 下硬拒绝反向联系要求。修复没有新增数据库表、journal、普通对话写入或模型调用。56 项直接单元测试与 267 项相邻 conversation／Surface／集成测试通过；真实 Host 尚未加载该提交，同一 cohort 复验前只记为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`6160c4564` 加载后重跑同一 9 轮，报告 SHA-256 为 `58b871de4dcc9efee488f441f674f9affc87822e1174237a5af113c0b4d07215`。所有轮次进入真实 TaskGraph，旧 writer 仍为 0；低落和混合末轮 trace 的 conversation history 均为 4 turns、`deduped_same_role_count=0`，continuity enum 分别为 `MINIMIZED_UNRESOLVED_AFFECT`／`MIXED_AFFECT_RESULT_CONTINUATION`，CompanionAct 分别为 `LISTEN`／`HOLD_COMPLEXITY`。这证明轮序和 Planner 接线已真实生效。
+
+体验仍失败：低落末轮仍回复“嗯，那就好。我这边也一切正常”，混合末轮回复“恭喜你！这下可以松口气了吧”。空间边界正文“知道了。那我就不老打扰你了，有事再叫我”人工可接受且 `selected_passed=true`，但该场景三个 turn 的 `edge_idle_before=false`，所以自动 verdict 仍失败。第二层修复仅在 canonical continuity marker 已存在时新增 `UNRESOLVED_AFFECT_FALSE_RESOLUTION` 与 `MIXED_AFFECT_CONTINUITY_DROPPED`，命中后走既有一次 semantic repair；141 项定向测试通过，真实再测前总体维持失败。

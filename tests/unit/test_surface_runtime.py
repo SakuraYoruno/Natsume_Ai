@@ -947,6 +947,17 @@ def test_surface_runtime_retries_boundary_do_not_disturb_exit() -> None:
             "LISTEN_UNSUPPORTED_USER_ESSENCE",
         ),
         (
+            "没事。",
+            [
+                "陪伴动作：对方此刻要的是被听见，不是方案。",
+                "上下文连续性：对方刚才的低落或拒绝方案尚未明确收束；这句轻描淡写不能当作已经恢复。",
+            ],
+            ["不要把‘没事、没什么、还好’直接解释成一切正常。"],
+            "嗯，那就好。我这边也一切正常。",
+            "嗯，我知道。你不想多说也没关系，我先在这儿。",
+            "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
+        ),
+        (
             "你会吃醋吗。",
             ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
             ["不要把吃味写成占有、审问、贬低第三方或要求安抚。"],
@@ -995,6 +1006,17 @@ def test_surface_runtime_retries_boundary_do_not_disturb_exit() -> None:
             "MIXED_AFFECT_DISMISSAL",
         ),
         (
+            "我拿到 offer 了。",
+            [
+                "陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。",
+                "上下文连续性：结果已经更具体，但上一轮的开心和不踏实仍同时成立。",
+            ],
+            ["不要只说恭喜。"],
+            "恭喜你！这下可以松口气了吧。",
+            "我真替你高兴。开心是真的，之前那点不踏实也不用急着消失。",
+            "MIXED_AFFECT_CONTINUITY_DROPPED",
+        ),
+        (
             "我想先说清楚一件事。",
             [],
             [],
@@ -1040,6 +1062,54 @@ def test_surface_runtime_retries_canonical_affective_quality_failures(
     assert reason_code in calls[1][-1]["content"]
     assert result.selected_text == good_reply
     assert reason_code not in result.observation_codes
+
+
+@pytest.mark.parametrize(
+    ("user_message", "facts", "reply"),
+    [
+        (
+            "检查结束了，一切正常。",
+            ["陪伴动作：对方此刻要的是被听见，不是方案。"],
+            "那就好，一切正常就放心了。",
+        ),
+        (
+            "我拿到 offer 了。",
+            ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
+            "恭喜你！这下可以松口气了吧。",
+        ),
+    ],
+)
+def test_continuity_output_gates_require_exact_server_marker(
+    user_message: str,
+    facts: list[str],
+    reply: str,
+) -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload([reply])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message=user_message,
+                reply_control_packet={
+                    "response_move": "reply_current_turn",
+                    "task_mode": "default_text",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": facts,
+                    "must_not_do": [],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == reply
 
 
 def test_surface_runtime_allows_explicitly_grounded_physical_copresence() -> None:
