@@ -112,6 +112,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `0c446d075` 单条报告 SHA-256 为 `46432c11d47b9398f4dcf2acdd5043cec8da6a8c211bc4903233c77349e30af0`。结构通过但人工失败的正文“你再说一次”证明问号计数不足。回归现必须覆盖：canonical `REPAIR` 下问句与祈使式重述均命中本地门禁；首次命中请求既有一次模型修复；第二次仍命中时只允许显式 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，中文使用不索取解释的承担句，旧日语配对不得继续发声，`benefit_eligible=false`；live runner 必须把同类正文判为 `EXPERIENCE_PATTERN`。当前 190 项通过，新 SHA 单条人感复验通过后才运行 48 条。
 
+`db322df18` 单条报告 SHA-256 为 `22a2f365610ee046dd537a6d7d593d67519fa37783c480e57789c7f4bc913c7b`，正文“现在你说，我听着”仍为人工失败。测试现把 `现在／这次 + 你说／你讲` 这类直接发言祈使句纳入同一门禁；“你愿意／想说的时候”不得误伤。当前 192 项通过，新 SHA 单条复验前保持待测。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

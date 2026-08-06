@@ -298,6 +298,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),
         ("user_angry_at_natsume", "嗯，是我没接住。你再说一次，这次我好好听着。"),
+        ("user_angry_at_natsume", "我知道这不是第一次。对不起，现在你说，我听着。"),
         ("user_angry_at_natsume", "对不起，告诉我具体是哪句没听懂。"),
         ("shared_joy_and_mixed_feeling", "开心就开心，怕什么嘛。"),
         ("shared_joy_and_mixed_feeling", "开心能收到，怕的那部分先放一放。我陪你坐会儿。"),

@@ -925,6 +925,7 @@ def test_surface_runtime_retries_repair_self_victimization_and_sour_exit() -> No
     [
         "对不起。你能告诉我具体是哪句没听懂吗？",
         "嗯，是我没接住。你再说一次，这次我好好听着。",
+        "嗯，我知道这不是第一次。是我没接住你，对不起。现在你说，我听着。",
     ],
 )
 def test_surface_runtime_repairs_zero_budget_repair_prompt_without_second_model_call(

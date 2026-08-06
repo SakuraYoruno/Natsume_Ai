@@ -262,7 +262,7 @@ def _buffered_affective_candidate_messages(
             ),
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT": (
                 "上次候选把修复责任推回给用户重述。只承担七海没有接住；不要要求用户"
-                "再说一次、重新解释或指出哪里没听懂。"
+                "现在开口、再说一次、重新解释或指出哪里没听懂。"
             ),
         }
         repair = (

@@ -550,3 +550,5 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `0c446d075` 已在全新隔离 Host SQLite、真实 Gateway 和真实 DeepSeek 上复验该三轮轨迹，报告 SHA-256 为 `46432c11d47b9398f4dcf2acdd5043cec8da6a8c211bc4903233c77349e30af0`，3 个 accepted turn 与 canonical writer probe 均通过。但最终正文是“嗯，是我没接住。你再说一次，这次我好好听着。”：它绕过了只统计问号的 `question_budget=0`，仍把修复劳动交给用户，因此自动结构通过、人工体验失败。
 
 后续代码不继续堆提示词：Surface hard gate 在类型化 `REPAIR` 下新增 `RELATIONAL_REPAIR_SOLICITS_RESTATEMENT`，覆盖“再说一次／重新解释／告诉我哪里没听懂”等无问号祈使式索取。首次命中沿用唯一一次模型修复；第二次仍只含重述索取时，本地 fail-soft 改为不要求当前解释的承担句，同时去掉不再同义的日语 Voice payload，标记 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY` 与 `benefit_eligible=false`。真实 cohort runner 也独立把这类正文判失败，避免再次以自动绿灯盖住人感问题。Surface、DL-04、app adapter 与 runner 共 190 项通过；新 SHA 真实复验前不提升状态。
+
+`db322df18` 的全新隔离进程复验报告 SHA-256 为 `22a2f365610ee046dd537a6d7d593d67519fa37783c480e57789c7f4bc913c7b`，3 个 accepted turn 和 writer probe 通过，最终正文为“嗯，我知道这不是第一次。是我没接住你，对不起。现在你说，我听着。”。虽然它不再要求“再说一次”，但“现在你说”仍直接安排用户开口，人工体验继续失败。当前规则因此补充直接发言祈使句，允许“你愿意／想说的时候”这种自主时机；192 项非安全回归通过，新 SHA 复验前仍不算关闭。
