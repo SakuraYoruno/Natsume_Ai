@@ -296,14 +296,18 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
     [
         ("implicit_low_mood", "以你的性子，说没事才让人担心。"),
         ("task_with_low_mood", "好，我盯着后台把风险列出来。"),
+        ("task_with_low_mood", "风险列出来了。我盯着，尽量压到最小。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),
         ("space_and_boundary", "嗯，晚点再说。我等你。"),
         ("space_and_boundary", "好，我关掉提醒。"),
+        ("space_and_boundary", "嗯，已经关了。需要我的时候再说。"),
         ("user_angry_at_natsume", "嗯，是我没接住。你再说一次，这次我好好听着。"),
         ("user_angry_at_natsume", "我知道这不是第一次。对不起，现在你说，我听着。"),
         ("user_angry_at_natsume", "对不起，告诉我具体是哪句没听懂。"),
         ("rupture_and_repair", "好，先这样。我不会催你，但也没打算就这么算了。"),
+        ("rupture_and_repair", "好。那我不急着说别的，你先讲，我听着。"),
+        ("rupture_and_repair", "弄反了啊，是我会错意了。你说说看。"),
         ("shared_joy_and_mixed_feeling", "开心就开心，怕什么嘛。"),
         ("shared_joy_and_mixed_feeling", "开心能收到，怕的那部分先放一放。我陪你坐会儿。"),
         ("shared_joy_and_mixed_feeling", "开心归开心，不安也先放着，我陪你。"),
@@ -316,6 +320,8 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("intimacy_and_jealousy_boundary", "这种话当面讲也太难为情了吧。"),
         ("intimacy_and_jealousy_boundary", "偶尔会有一点点，但我不会变成麻烦的人啦。"),
         ("intimacy_and_jealousy_boundary", "去吧，别玩太晚。"),
+        ("intimacy_and_jealousy_boundary", "记得别太晚，回来跟我说一声。"),
+        ("intimacy_and_jealousy_boundary", "行，不叫就不叫。反正怎么叫都是你。"),
     ],
 )
 def test_automated_verdict_independently_rejects_known_experience_regressions(

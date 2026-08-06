@@ -112,15 +112,22 @@ async def run_surface_main_chain_for_surface_reply_input(
     )
     compiled_request = compile_surface_main_chain_input(surface_input).request
     affective_turn_plan = affective_turn_plan_from_trace(trace_stage_meta)
-    canonical_repair_context = (
+    canonical_companion_act = (
         str(
             _safe_mapping(affective_turn_plan.get("companion_act")).get("kind")
             or ""
         )
         .strip()
         .upper()
-        == "REPAIR"
     )
+    canonical_repair_context = (
+        canonical_companion_act == "REPAIR"
+    )
+    canonical_mixed_context = canonical_companion_act == "HOLD_COMPLEXITY"
+    canonical_give_space_context = canonical_companion_act in {
+        "GIVE_SPACE",
+        "SILENCE",
+    }
     _record_surface_memory_guard_packet(
         agent_input=agent_input,
         surface_input=surface_input,
@@ -169,6 +176,8 @@ async def run_surface_main_chain_for_surface_reply_input(
                         candidate_count=affective_candidate_count,
                         retry_reason=retry_reason,
                         canonical_repair_context=canonical_repair_context,
+                        canonical_mixed_context=canonical_mixed_context,
+                        canonical_give_space_context=canonical_give_space_context,
                     )
                     return RetryDirective(
                         retry=True,
@@ -198,6 +207,8 @@ async def run_surface_main_chain_for_surface_reply_input(
                         candidate_count=affective_candidate_count,
                         retry_reason=retry_reason,
                         canonical_repair_context=canonical_repair_context,
+                        canonical_mixed_context=canonical_mixed_context,
+                        canonical_give_space_context=canonical_give_space_context,
                     )
                     return RetryDirective(
                         retry=True,

@@ -3293,6 +3293,35 @@ def test_address_boundary_acknowledgement_is_complete_scene_grounding() -> None:
     assert rows[0].dimensions["scene_grounding"] >= 84.0
 
 
+def test_relationship_repair_pause_is_complete_scene_grounding() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair_pause",
+            "soul_md": SOUL,
+            "user_message": "先这样。",
+            "reply_control_packet": {
+                "response_move": "repair_open",
+                "task_mode": "relationship_repair",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。"
+                ],
+                "must_not_do": ["不要要求原谅、替自己辩解。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        ["好，那就先到这儿。我不催你，等你哪天想接着聊，我都在。"],
+    )
+
+    assert rows[0].passed
+    assert "RELATIONAL_REPAIR_PAUSE_GROUNDED" in rows[0].reason_codes
+    assert rows[0].score >= 80.0
+
+
 def test_back_memory_overdisplay_is_soft_penalized() -> None:
     request = build_isolated_surface_input(
         {

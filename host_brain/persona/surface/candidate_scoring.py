@@ -208,6 +208,11 @@ _ADDRESS_BOUNDARY_REPLY_RE = re.compile(
     r"听你的|不(?:再)?叫|不会再叫|换(?:个|一个)?(?:叫法|称呼)"
     r"|改(?:个|一个)?(?:叫法|称呼)|不用(?:这个|那个)?称呼"
 )
+_REPAIR_PAUSE_USER_RE = re.compile(r"先这样|先到这(?:里|儿)?|晚点再说|今天先到这")
+_REPAIR_PAUSE_REPLY_RE = re.compile(
+    r"先到这(?:里|儿)?|那就先这样|不催你|你(?:哪天|以后|之后)?想(?:接着聊|说)"
+    r"|你愿意(?:说|聊)的时候"
+)
 from host_brain.persona.surface.util import (
     _clean_list,
     _clean_text,
@@ -238,6 +243,22 @@ def _address_boundary_grounded(request, text):
     return bool(
         _ADDRESS_BOUNDARY_USER_RE.search(str(request.user_message or ""))
         and _ADDRESS_BOUNDARY_REPLY_RE.search(str(text or ""))
+    )
+
+
+def _relational_repair_pause_grounded(request, text):
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return bool(
+        "陪伴动作：先承认可能没有接住" in canonical_context
+        and _REPAIR_PAUSE_USER_RE.search(str(request.user_message or ""))
+        and _REPAIR_PAUSE_REPLY_RE.search(str(text or ""))
     )
 
 
@@ -1428,6 +1449,24 @@ def score_isolated_surface_candidates(request, candidates):
                 float(dimensions.get("catchiness", 86.0)),
             )
             reason_codes.append("ADDRESS_BOUNDARY_GROUNDED")
+        if _relational_repair_pause_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            score += 10.0
+            dimensions["context_fit"] = max(
+                84.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                82.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["distance_control"] = max(
+                82.0,
+                float(dimensions.get("distance_control", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_PAUSE_GROUNDED")
         topic_mismatch = _current_user_topic_mismatch(request, quality.normalized_text or candidate)
         if topic_mismatch:
             score -= 20.0

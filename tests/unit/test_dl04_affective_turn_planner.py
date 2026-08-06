@@ -462,6 +462,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "本轮是关系修复" in repair_quality_messages[-1]["content"]
     assert "不要写七海被扎心、受伤或委屈" in repair_quality_messages[-1]["content"]
     assert "不烦你了" in repair_quality_messages[-1]["content"]
+    assert "你先说／你先讲／你说说看" in repair_quality_messages[-1]["content"]
     mixed_repair_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -469,6 +470,22 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "丢掉了上一轮仍未消失的不安" in mixed_repair_messages[-1]["content"]
     assert "不要只说恭喜或像做梦" in mixed_repair_messages[-1]["content"]
+    mixed_quality_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_mixed_context=True,
+    )
+    assert "必须延续喜忧并存" in mixed_quality_messages[-1]["content"]
+    assert "仍未消失的不安／不踏实" in mixed_quality_messages[-1]["content"]
+    give_space_quality_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_give_space_context=True,
+    )
+    assert "没有真实 effect 回执" in give_space_quality_messages[-1]["content"]
+    assert "不得声称已经关掉提醒／通知" in give_space_quality_messages[-1]["content"]
 
     paired_by_reply = {
         "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",

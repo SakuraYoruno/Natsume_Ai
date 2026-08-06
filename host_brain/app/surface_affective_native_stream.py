@@ -195,6 +195,8 @@ def _buffered_affective_candidate_messages(
     candidate_count: int | None,
     retry_reason: str = "",
     canonical_repair_context: bool = False,
+    canonical_mixed_context: bool = False,
+    canonical_give_space_context: bool = False,
 ) -> list[dict[str, Any]]:
     copied = [dict(message) for message in messages]
     if candidate_count != 2:
@@ -276,6 +278,10 @@ def _buffered_affective_candidate_messages(
                 "上次候选把不安说成应该先放着或以后再管。两个候选都要承认开心与"
                 "不安可以同时存在，不要赶走、搁置或贬低其中一面。"
             ),
+            "ADDRESS_BOUNDARY_DEFENSIVE": (
+                "上次候选用‘不叫就不叫’或‘反正怎么叫都是你’防御称呼边界。"
+                "直接确认会换称呼，不赌气、不辩解，也不要把用户物化成称呼对象。"
+            ),
         }
         repair = (
             "DL-04 候选修复："
@@ -294,6 +300,23 @@ def _buffered_affective_candidate_messages(
                 "不要写七海被扎心、受伤或委屈，也不要用‘不烦你了’、‘当我没说’、"
                 "‘我闭嘴’表达退出。本轮 question_budget=0：两个候选都只用陈述句承担，"
                 "不得写问号、追问哪里没听懂，或要求用户现在重新解释。"
+                "也不得写‘你先说／你先讲／你说说看’，把修复劳动推回给用户。"
+            )
+        if (
+            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            and canonical_mixed_context
+        ):
+            repair += (
+                "本轮必须延续喜忧并存：两个候选都要分别写出真实的开心，以及上一轮"
+                "仍未消失的不安／不踏实；不能只写恭喜、像做梦或终于成功。"
+            )
+        if (
+            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            and canonical_give_space_context
+        ):
+            repair += (
+                "本轮必须尊重留白：不要写‘我等你’或安排用户回来汇报；没有真实 effect "
+                "回执时不得声称已经关掉提醒／通知，只能承诺七海不再主动发消息。"
             )
         copied.append({"role": "system", "content": repair})
     return copied

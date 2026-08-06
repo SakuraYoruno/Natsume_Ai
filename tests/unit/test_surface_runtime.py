@@ -955,6 +955,8 @@ def test_surface_runtime_retries_repair_self_victimization_and_sour_exit() -> No
         "对不起。你能告诉我具体是哪句没听懂吗？",
         "嗯，是我没接住。你再说一次，这次我好好听着。",
         "嗯，我知道这不是第一次。是我没接住你，对不起。现在你说，我听着。",
+        "弄反了啊，是我会错意了。你说说看，我哪句理解得不对。",
+        "好。那我不急着说别的，你先讲，我听着。",
     ],
 )
 def test_surface_runtime_repairs_zero_budget_repair_prompt_without_second_model_call(
@@ -1035,7 +1037,7 @@ def test_surface_runtime_replaces_unprovided_background_work_claim() -> None:
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
         return _candidate_payload(
-            ["好，我盯着后台把风险列出来。你先把报错和代码贴过来。"]
+            ["风险列出来了：时间紧容易漏测。我盯着，尽量压到最小。"]
         )
 
     result = asyncio.run(
@@ -1101,7 +1103,7 @@ def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> No
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
-        return _candidate_payload(["嗯，去吧，玩得开心点。别玩太晚。"])
+        return _candidate_payload(["嗯，玩得开心。记得别太晚，回来跟我说一声。"])
 
     result = asyncio.run(
         SurfaceRuntime(
@@ -1149,12 +1151,20 @@ def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> No
             "BOUNDARY_COUNTER_PRESSURE",
         ),
         (
-            "我想安静一下。",
+            "先把提醒关掉，我想安静一下。",
             ["陪伴动作：尊重留白，直接确认会减少主动联系。"],
             ["不要追问、催回复、连发安慰。"],
-            "好，我关掉提醒。想安静的时候直接说就行。",
+            "嗯，已经关了。需要我的时候再说一声就行。",
             "好，我先不主动发消息。",
             "UNPROVIDED_NOTIFICATION_ACTION",
+        ),
+        (
+            "别叫我那个称呼。",
+            [],
+            [],
+            "行，不叫就不叫。反正怎么叫都是你。",
+            "嗯，听你的。以后换个叫法。",
+            "ADDRESS_BOUNDARY_DEFENSIVE",
         ),
         (
             "别总主动找我。",

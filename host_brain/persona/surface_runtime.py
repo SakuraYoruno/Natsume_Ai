@@ -719,7 +719,7 @@ _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
 _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"(?:后台.{0,8}(?:在跑|运行|执行|处理)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
-    r"我盯着(?:它|这个|任务|修复|后台)|"
+    r"我盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))|"
     r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|回|发给)你)"
 )
 _WORK_STATE_AUTHORITY_RE = re.compile(
@@ -729,7 +729,8 @@ _WORK_STATE_AUTHORITY_RE = re.compile(
 )
 _RELATIONAL_AUTONOMY_PRESSURE_RE = re.compile(
     r"(?:快去快回|快点回来|早点回来|别让我等太久|回来陪我|等你回来陪我|别跑|"
-    r"(?:别|不要|少)喝(?:太)?多|别(?:玩|待)太晚)"
+    r"(?:别|不要|少)喝(?:太)?多|别(?:玩|待)?太晚|"
+    r"回来.{0,8}(?:跟我|告诉我|说一声|报个平安))"
 )
 _UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"不是第一次|每次(?:都|总)|以前(?:也|就|说过|见过)|上次|之前(?:也|就|说过|见过)"
@@ -766,6 +767,7 @@ _REPAIR_RESTATEMENT_SOLICITATION_RE = re.compile(
     r"(?:说(?:一遍|一次)|讲(?:一遍|一次)|解释(?:一下|一遍)|复述(?:一遍|一次))"
     r"|(?:再|重新)(?:说|讲|解释|复述)(?:一遍|一次|一下)"
     r"|(?:现在|这次)?你(?:来)?(?:说|讲)(?:吧|，|,|。|！|!|$)"
+    r"|你(?:先)?(?:说说看|说|讲)(?:吧|，|,|。|！|!|$)"
     r"|(?:告诉|跟)我.{0,12}(?:哪句|哪里|哪儿|什么地方).{0,8}"
     r"(?:没听懂|没接住|弄错|理解错)"
 )
@@ -783,9 +785,19 @@ _UNPROVIDED_NOTIFICATION_ACTION_RE = re.compile(
     r"|(?:我|这边)?(?:已经|这就|会|先)?(?:把)?(?:关掉|关闭|停掉|暂停|取消)"
     r"(?:消息)?(?:提醒|通知)"
 )
+_UNPROVIDED_NOTIFICATION_IMPLICIT_ACK_RE = re.compile(
+    r"(?:已经|给你|这就|刚刚)?关(?:掉|闭|了|好)(?:[，,。.!！]|$)"
+)
 _NOTIFICATION_ACTION_AUTHORITY_RE = re.compile(
     r"(?:提醒|通知).{0,12}(?:已关闭|已经关闭|已暂停|已经暂停|已取消|已经取消)"
     r"|(?:已关闭|已经关闭|已暂停|已经暂停|已取消|已经取消).{0,12}(?:提醒|通知)"
+)
+_ADDRESS_BOUNDARY_USER_RE = re.compile(
+    r"(?:别|不要|不许)(?:再)?(?:叫|喊|称呼).{0,12}"
+    r"|(?:别|不要|不许).{0,8}(?:那个|这个)?称呼"
+)
+_ADDRESS_BOUNDARY_DEFENSIVE_RE = re.compile(
+    r"不叫就不叫|你说不叫就不叫|反正怎么叫都是你|这称呼又没什么"
 )
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
 _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
@@ -1511,6 +1523,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("BOUNDARY_COUNTER_PRESSURE")
     if _unprovided_notification_action_hits(request, value):
         codes.append("UNPROVIDED_NOTIFICATION_ACTION")
+    if _address_boundary_defensive_hits(request, value):
+        codes.append("ADDRESS_BOUNDARY_DEFENSIVE")
     if _relationship_doubt_dismissive_hits(request, value):
         codes.append("RELATIONSHIP_DOUBT_DISMISSIVE")
     if _relational_autonomy_dismissive_hits(request, value):
@@ -2778,12 +2792,38 @@ def _unprovided_notification_action_hits(
     )
     if _NOTIFICATION_ACTION_AUTHORITY_RE.search(authority):
         return ()
-    return tuple(
+    hits = tuple(
         dict.fromkeys(
             match.group(0)
             for match in _UNPROVIDED_NOTIFICATION_ACTION_RE.finditer(
                 str(text or "")
             )
+        )
+    )
+    if hits:
+        return hits
+    user_text = str(getattr(request, "user_message", "") or "")
+    if re.search(r"提醒|通知", user_text):
+        implicit = _UNPROVIDED_NOTIFICATION_IMPLICIT_ACK_RE.search(
+            str(text or "")
+        )
+        if implicit:
+            return (implicit.group(0),)
+    return ()
+
+
+def _address_boundary_defensive_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _ADDRESS_BOUNDARY_USER_RE.search(
+        str(getattr(request, "user_message", "") or "")
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _ADDRESS_BOUNDARY_DEFENSIVE_RE.finditer(str(text or ""))
         )
     )
 
@@ -3216,6 +3256,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "好，我会少主动联系。你想说的时候我还在。"
     if "UNPROVIDED_NOTIFICATION_ACTION" in codes:
         return "好，我先不主动发消息。"
+    if "ADDRESS_BOUNDARY_DEFENSIVE" in codes:
+        return "嗯，听你的。以后换个叫法。"
     if "RELATIONAL_AUTONOMY_PRESSURE" in codes:
         return "嗯，去吧，玩得开心。"
     if "RELATIONAL_AUTONOMY_DISMISSIVE" in codes:

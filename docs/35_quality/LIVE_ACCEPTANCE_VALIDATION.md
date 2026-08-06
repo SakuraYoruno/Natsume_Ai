@@ -562,3 +562,9 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 四个自动失败有明确非安全根因：普通安慰连续生成追问后没有确定性收口；陈述句“我听到了”被宽泛正则误判为听力探针；“感觉像做梦”在喜忧连续性中两轮都只承接喜悦；“听你的，换个叫法”是正确边界回应，却因通用短句评分被判 scene grounding 和 catchiness 不足。44 条自动通过也没有被当作人感通过：人工抽查另外否决了“我盯着后台”“我关掉提醒”“我等你”“没打算就这么算了”“不安先放着”和“别玩太晚”等正文。
 
 当前修复只作用于既有文本生成链：听力探针必须带明确疑问意图；canonical `COMFORT`、`REPAIR` 与 mixed continuity 在唯一重试耗尽后可使用窄、本地、无 Voice 冒充的安全正文；没有 accepted effect 时禁止宣称后台执行或关闭提醒；留白、修复、现实自主与复杂情绪新增对应反模式；称呼边界的简短尊重句获得真实 scene grounding。独立 live runner 同步识别上述人工退化。Surface、DL-04、app adapter、候选评分和 runner 共 388 项非安全回归通过，`compileall` 与 `git diff --check` 通过。真实新 SHA 代表轨迹和完整 48 条尚未重跑，三人盲评仍未开始，所以 `digital_life_human_likeness` 保持 `FAIL/PENDING_HUMAN_REVIEW`。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。
+
+## 2026-08-06 A15 完整 48 条后的定向复验与第二轮纠偏
+
+`ce06f8eb412e413299a1491a790ba0cd88bfd67b` 加载后，从完整队列抽取 12 条高风险与对照轨迹进行真实复验。报告 SHA-256 为 `52d62c12a74530dc5b5bfbbdfb29b1728f08653aeb7ac3ae161768c0d9b87c79`，结果为 9 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、3 条 `FAIL`；36 个 accepted Gateway turn 的 writer probe 再次确认旧情感 writer 零增量、canonical projection 前进。三个自动失败是喜忧并存质量收益不足、隐式虚构关闭通知，以及正确的关系暂停句被通用评分误判。
+
+人工检查没有把其余 9 条自动通过直接算作人感通过：关系修复仍出现“你说说看／你先讲”，技术回复出现裸写“我盯着”，称呼边界后出现“不叫就不叫／反正怎么叫都是你”，现实自主仍出现“别太晚／回来跟我说一声”。代码现从冻结 `AffectiveTurnPlanV1.companion_act` 向唯一既有质量重试传入 `REPAIR／HOLD_COMPLEXITY／GIVE_SPACE` 类型上下文；补齐直接修复索取、隐式提醒 effect、裸后台状态、泛化现实管束和称呼防御硬门禁，并只对真实“先到这／晚点再说”的关系修复暂停增加 scene grounding。相关非安全回归为 398 passed；没有新增审计表、同步写或额外模型轮次。真实新 SHA 复验前仍是 `CODE_REMEDIATED_REAL_RETEST_PENDING`，完整 48 条和三人盲评均未通过。Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。
