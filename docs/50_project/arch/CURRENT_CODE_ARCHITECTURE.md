@@ -189,3 +189,5 @@ Code 收益队列复用已有 `CodePlanningDomain → GoalPlanningService → Co
 外部 attestation 复用同一 canonical ModelAttempt 边界，但 Code 请求保留自己的 `CODE_BENCHMARK` scene 和通用 planning metadata，不再伪装成 Research 请求。runner 的实际 route timeout 默认 30 秒、外层 request deadline 为 90 秒；两者都进入 execution profile digest，若操作者更改 timeout，cohort identity 也随之改变，不能与旧证据混用。
 
 Code prompt 还拥有独立、server-owned generation profile：temperature 0、top-p 0.8、max tokens 600、thinking disabled。它不是调用方可覆盖的 metadata，而由 production route catalog 根据 prompt identity 注入；execution profile 同时绑定这些值，避免 provider 默认推理预算变化后仍沿用旧实验身份。
+
+固定题号与 durable workload identity 分离。配置中的题号用于跨版本比较；Code ledger 注册身份为 `<题号>@<cohort_version>`，对应 workload/baseline ref 也包含版本。这样 cohort 升级会追加新 registration，而不是让同一 ID 绑定不同 evidence 或覆盖旧失败。

@@ -285,6 +285,12 @@ def prepare_code_workload(
     runtime: CodeBenchmarkRuntimeRootsV1,
     run_namespace: str,
 ) -> PreparedCodeWorkloadV1:
+    benchmark_workload_id = (
+        f"{definition.workload_id}@{cohort.cohort_version}"
+    )
+    benchmark_ref_root = (
+        f"benchmark://a15/code/{cohort.cohort_version}/{definition.workload_id}"
+    )
     original_source = (runtime.source_repository / definition.relative_module_path).read_text(
         encoding="utf-8"
     )
@@ -380,10 +386,10 @@ def prepare_code_workload(
         max_model_cost_micros=1_000_000,
     )
     workload = DomainBenchmarkWorkload(
-        workload_id=definition.workload_id,
+        workload_id=benchmark_workload_id,
         domain=CODE_DOMAIN,
-        workload_ref=f"benchmark://a15/code/{definition.workload_id}",
-        baseline_ref=f"benchmark://a15/code/{definition.workload_id}/baseline",
+        workload_ref=benchmark_ref_root,
+        baseline_ref=f"{benchmark_ref_root}/baseline",
         verifier_refs=(verification_plan.plan_ref,),
         isolation={
             "sandbox_mode": CODE_HISTORICAL_BENCHMARK_MODE,
@@ -513,7 +519,7 @@ async def execute_prepared_code_workload(
     )
     terminal_digest = _digest_json(receipt.to_dict())
     return CodeCohortPairedEvidenceV1(
-        workload_id=prepared.definition.workload_id,
+        workload_id=prepared.workload.workload_id,
         run_id=receipt.spec.run_id,
         terminal_receipt_digest=terminal_digest,
         terminal_receipt=receipt,

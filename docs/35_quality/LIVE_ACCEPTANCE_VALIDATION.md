@@ -450,3 +450,5 @@ paired terminal ledger 不能保存回答正文，但真实收益又必须评估
 随后首轮 20 题完整运行没有被包装成通过。前 5 题都得到 baseline 失败、selected 通过；第 6 题 baseline 在 30,015 ms 触发真实 `PROVIDER_TIMEOUT`，完成数停在 5/20，状态 `FAIL`，文件 SHA-256 为 `272638f91ffbb5b10a449ce725e25750b6de3ab80a7aec383b917641b5ecce8d`。已完成成员、失败 RunSpec 和 canonical model audit 全部保留。
 
 失败进一步暴露新 Code prompt 没有 production generation profile，因而仍继承 provider 宽泛默认，简单错误规格也可能耗尽隐藏推理时间。固定队列升级为 `2026-08-06-v2`；Code prompt 现冻结 temperature 0、top-p 0.8、max tokens 600、`thinking_mode=disabled`，并把 generation 参数纳入 `a15-code-full-file-json-v2` execution profile digest。98 项相邻回归和 v2 20/20 dry-run 通过；配置摘要为 `170bc196add828676c00b6af79d98153dbc09f48c67227be78b0952cfa0d8cea`，profile digest 为 `cdedce854508661e46540b011eb9c7005519eb23cf89f7217e866537cfde5302`。v2 必须使用新 commit、新 namespace 和完整 20 题重新预注册，禁止复用或挑选 v1 的 5 个成功成员。
+
+v2 第一次新 SHA 预检在任何外部模型调用前 fail-closed：Code ledger 发现同一 `workload_id` 正被绑定到新的 cohort/config evidence，返回 `CODE_BENCHMARK_REPLAY_DRIFT`。根因是只升级了 cohort version，却没有升级 durable workload registration identity。修复后 ledger identity 使用 `<固定题号>@<cohort_version>`，workload ref 与 baseline ref 也包含 cohort version；公共题号仍由配置保留，但 v1/v2 不再争用同一写身份。该失败没有模型成本，不删除也不改写原 ledger 行。

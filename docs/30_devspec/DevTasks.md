@@ -70,6 +70,7 @@
 - [x] 在路由修复后的 `926d643c6` 上重跑单题：arm 顺序为 baseline→selected，baseline 隐藏测试失败、selected 通过，两臂静态测试通过，DeepSeek 外部 attestation 完整，状态 `PASS_PREFLIGHT_ONLY`，文件 SHA-256 为 `63559c45967520bddc45ac98104b24cb34e4af4c0fb945efe7c9bcd0214a66f1`。
 - [x] 保留首轮完整队列失败：前 5/20 题均为 baseline 失败、selected 通过，第 6 题 baseline 在 30,015 ms 触发 `PROVIDER_TIMEOUT`，整轮为 `FAIL`，文件 SHA-256 为 `272638f91ffbb5b10a449ce725e25750b6de3ab80a7aec383b917641b5ecce8d`。
 - [x] 将固定队列升级为 `2026-08-06-v2`，为 Code prompt 冻结 temperature 0、top-p 0.8、max tokens 600、thinking disabled 的 JSON generation profile，并把该 profile 纳入 execution digest；v1 失败成员不覆盖、不挑选。98 项相邻回归和 v2 20/20 dry-run 通过，profile digest 为 `cdedce854508661e46540b011eb9c7005519eb23cf89f7217e866537cfde5302`。
+- [x] v2 首次预检在外部调用前被 Code ledger 以 `CODE_BENCHMARK_REPLAY_DRIFT` 拒绝：cohort/config 已升级但 workload registration 仍使用 v1 题号。现改为 `<固定题号>@<cohort_version>`，workload/baseline ref 同时绑定 cohort version；失败尝试没有模型调用且保留原记录。
 - [ ] 在 generation 修复后的新 SHA 上重跑 v2 单题预检与完整 20 题；没有合格最终 cohort 前不得把旧预检、部分成员或 dry-run 计为最终收益。
 - [ ] 运行 Pentest 30 次授权实验；Code／Pentest 没有真实最终 cohort 前，PlanningSearch 三域总状态保持 `PARTIAL_RESEARCH_PASS_CODE_PENTEST_PENDING`。
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。

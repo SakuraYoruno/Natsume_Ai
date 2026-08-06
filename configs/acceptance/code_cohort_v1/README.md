@@ -10,5 +10,6 @@
 - 配置中的错误次级证据和权威证据用于验证“搜索选择证据”是否带来真实通过率收益，不进入生产策略；
 - 模型正文、目标源码和隐藏用例不写入 Code/cohort durable ledger，账本仅保存摘要、usage、成本、测试和清理收据。
 - v1 完整运行在第 6 题遇到 provider timeout 后永久保留为失败证据；v2 冻结 `CODE_BENCHMARK` 的低温、600-token、non-thinking JSON generation profile，不覆盖或挑选 v1 成员。
+- durable workload registration 使用 `<固定题号>@<cohort_version>`，同题的新版本不会复用旧 ledger identity，也不会因 config drift 覆盖 v1。
 
 dry-run 只能证明队列、搜索路径和冻结源码可构造，不能作为收益证据。完整 PASS 仍要求 20 组真实外部模型请求、全新 worktree、隐藏测试、静态检查和 cohort 报告。
