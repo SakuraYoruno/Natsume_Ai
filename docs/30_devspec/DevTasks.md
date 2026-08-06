@@ -56,6 +56,7 @@
 - [ ] 用更广真实 Gateway／DeepSeek／远端 Voice cohort 与三人盲测确认语言质量。`e4c6fb564` 三轨迹为 2 自动通过、1 失败；自动低分的“有点怕也正常”人工更自然，自动通过的“省得你嫌烦”却明显不合格。已补齐同义边界／自主／混合退化门禁（101 项定向测试通过），但不再用三条反复抽样冒充“像人”证明；下一步进入其余 A15 强制项并保留人感未证状态。
 - [x] 修复真实多轮 runner 每回合改变发送者、把同一会话伪装成多个用户的问题；新增 subject/session 漂移 fail-closed。
 - [x] 修复 Gateway 401 等入口拒绝仍轮询 180 秒的问题；A15 双机回调 HMAC 摘要已重新对齐并只重启远端 Gateway，未重启 Edge。
+- [ ] 复验普通 Gateway 陪伴实时模型通道。提交 `7355c20fa` 的真实三轮报告前两轮完成，第三轮在 DeepSeek Pro 调用 45,280 ms 后以 `MODEL_PROVIDER_USAGE_UNPROVEN` 拒绝；代码已把无前序 Task artifact 的普通 Gateway Chat 切到 Tier B／`CHAT_SURFACE_REALTIME`，并在可见输出前允许一次受 Task budget 约束的同 target transport retry。新 SHA 尚未重启 Host 和重跑同一轨迹，不得勾选。
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。
@@ -79,7 +80,7 @@
 
 ## P1：情感生命清零项
 
-- [ ] 在真实运行中观察兼容情感 writer 使用量，确认旧 writer 为 0。
+- [ ] 在真实运行中观察兼容情感 writer 使用量，确认旧 writer 为 0。`7355c20fa` 的三轮窗口中八张旧情感表增量为 0、四个旧 JSON 的 size／mtime／SHA-256 未变化，canonical journal 正常前进；但该轨迹只有两轮成功、一轮模型失败，修复后完整成功 cohort 与正式 receipt 仍待执行，所以这里只记 `PARTIAL_SCOPE_BOUND_ZERO_DELTA`。
 - [ ] 验证 profile apply → canary → rollback 会改变并恢复下一轮文本、TTS 和 Avatar。绑定 `e50841192` 的生产 Relationship/Profile/Fusion/Planner/Expression Delivery canary 已证明候选把文本 style policy、Voice rate `1.0 → 1.15`、Avatar motion `0.5 → 0.8` 写入下一轮 Host 协议，五次 canary 后保持并自动激活，rollback 恢复精确 baseline；收据 SHA-256 为 `acdf52ff5cfd6c6e53ff71f268273e2dcbaeb59bd906a1c614afdc5d572f3bde`。真实模型措辞和远端物理效果尚未执行，所以本项暂不勾选。
 - [x] 验证长期运行状态有界，原始音视频和用户正文不会进入 affect journal。绑定 `0195d1968` 的隔离真实 SQLite／生产 AffectFusion 收据完成 1001 次时间推进、1026 条 affective event 和 Repository 重启重放；快照由 13,370 bytes 衰减至 9,281 bytes，raw sentinel 与禁止字段命中均为 0，SHA-256 为 `ddc09b5bce7a6974a58205634b0c7518d25e6cc113d7ebd7d53e06283f3ca584`。
 - [x] 验证跨用户、workspace、session 泄漏为 0。同一收据使用四组交叉 scope，得到四个不同 aggregate；主 scope 的 1001 次推进没有改变其余三个 digest，scope violation 为 0。

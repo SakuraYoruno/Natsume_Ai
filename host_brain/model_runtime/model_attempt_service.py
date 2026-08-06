@@ -286,6 +286,10 @@ class ModelAttemptService:
         prompt = prepared.prompt
         last_error_code = "MODEL_ROUTE_EXHAUSTED"
         last_error_message = "model route exhausted without a successful attempt"
+        previsibility_transport_retries = int(
+            request.previsibility_transport_retries
+        )
+        availability_first = previsibility_transport_retries > 0
 
         while len(attempts) < budget and target_index < len(prepared.route.targets):
             remaining_ms = self._remaining_ms(prepared.deadline_at)
@@ -414,24 +418,26 @@ class ModelAttemptService:
             except AttemptAuditError:
                 raise
             except TimeoutError as exc:
+                timeout_status = (
+                    AttemptStatus.TIMED_OUT
+                    if availability_first or guard is None
+                    else AttemptStatus.REJECTED
+                )
+                timeout_error_code = (
+                    "PROVIDER_TIMEOUT"
+                    if availability_first or guard is None
+                    else "MODEL_PROVIDER_USAGE_UNPROVEN"
+                )
                 terminal = self._terminal_record(
                     started,
                     started_monotonic=started_monotonic,
-                    status=(
-                        AttemptStatus.REJECTED
-                        if guard is not None
-                        else AttemptStatus.TIMED_OUT
-                    ),
-                    error_code=(
-                        "MODEL_PROVIDER_USAGE_UNPROVEN"
-                        if guard is not None
-                        else "PROVIDER_TIMEOUT"
-                    ),
+                    status=timeout_status,
+                    error_code=timeout_error_code,
                     error_message=_safe_error_message(exc),
                 )
                 await self._audit(terminal)
                 attempts.append(terminal)
-                if guard is not None:
+                if guard is not None and not availability_first:
                     return ModelAttemptResult(
                         request_id=request.request_id,
                         success=False,
@@ -442,29 +448,41 @@ class ModelAttemptService:
                     )
                 last_error_code = "PROVIDER_TIMEOUT"
                 last_error_message = "provider attempt timed out"
+                if (
+                    previsibility_transport_retries > 0
+                    and len(attempts) < budget
+                ):
+                    previsibility_transport_retries -= 1
+                    retry_reason = "previsibility_transport_retry:provider_timeout"
+                    continue
             except Exception as exc:
+                provider_error_code = str(
+                    getattr(exc, "code", type(exc).__name__.upper())
+                ).strip() or "PROVIDER_ERROR"
+                provider_failure_status = (
+                    AttemptStatus.FAILED
+                    if availability_first or guard is None
+                    else AttemptStatus.REJECTED
+                )
+                audited_error_code = (
+                    provider_error_code
+                    if availability_first or guard is None
+                    else "MODEL_PROVIDER_USAGE_UNPROVEN"
+                )
                 terminal = self._terminal_record(
                     started,
                     started_monotonic=started_monotonic,
-                    status=(
-                        AttemptStatus.REJECTED
-                        if guard is not None
-                        else AttemptStatus.FAILED
-                    ),
-                    error_code=(
-                        "MODEL_PROVIDER_USAGE_UNPROVEN"
-                        if guard is not None
-                        else type(exc).__name__.upper()
-                    ),
+                    status=provider_failure_status,
+                    error_code=audited_error_code,
                     error_message=(
-                        "guarded provider call failed without canonical usage"
-                        if guard is not None
-                        else _safe_error_message(exc)
+                        _safe_error_message(exc)
+                        if availability_first or guard is None
+                        else "guarded provider call failed without canonical usage"
                     ),
                 )
                 await self._audit(terminal)
                 attempts.append(terminal)
-                if guard is not None:
+                if guard is not None and not availability_first:
                     return ModelAttemptResult(
                         request_id=request.request_id,
                         success=False,
@@ -473,8 +491,18 @@ class ModelAttemptService:
                         error_code="MODEL_PROVIDER_USAGE_UNPROVEN",
                         error_message="guarded provider call failed without canonical usage",
                     )
-                last_error_code = terminal.error_code or "PROVIDER_ERROR"
+                last_error_code = provider_error_code
                 last_error_message = terminal.error_message or "provider attempt failed"
+                if (
+                    previsibility_transport_retries > 0
+                    and len(attempts) < budget
+                ):
+                    previsibility_transport_retries -= 1
+                    retry_reason = (
+                        "previsibility_transport_retry:"
+                        f"{last_error_code.lower()}"
+                    )
+                    continue
 
             target_index += 1
             retry_reason = f"provider_fallback:{last_error_code.lower()}"

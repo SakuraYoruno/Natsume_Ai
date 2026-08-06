@@ -731,6 +731,47 @@ async def test_chat_executor_uses_canonical_runtime_context_for_companion_scope(
 
 
 @pytest.mark.asyncio
+async def test_gateway_companion_chat_uses_realtime_lane_without_plan_artifacts() -> None:
+    captured: dict[str, Any] = {}
+
+    async def stream(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        yield {
+            "phase": "COMMIT",
+            "done": True,
+            "decision": "REJECT",
+            "reason_code": "TEST_TERMINAL",
+            "narrative": "本测试只检查模型通道选择。",
+        }
+
+    executor = FrozenChatRouteExecutor(
+        ports=object(),
+        stream_chat_with_context=stream,
+    )
+    _ = [
+        event
+        async for event in executor.execute_stream(
+            _frozen(
+                route="chat",
+                target_id="surface_reply",
+                input_pack={
+                    "user_message": "今天有点累。",
+                    "runtime_context_schema": "natsume.runtime-context.request.v1",
+                    "workspace_id": "tenant:local",
+                    "subject_id": "subject:owner",
+                    "request_body": {
+                        "input_source": "GATEWAY",
+                    },
+                },
+                budget=_active_budget(),
+            )
+        )
+    ]
+
+    assert captured["trace_stage_meta"]["runtime_path"] == "realtime_companion"
+
+
+@pytest.mark.asyncio
 async def test_chat_executor_rejects_incomplete_canonical_runtime_scope() -> None:
     async def stream(**_kwargs):  # noqa: ANN003
         yield {

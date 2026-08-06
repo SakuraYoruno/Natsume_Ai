@@ -499,6 +499,66 @@ async def test_surface_main_chain_binds_frozen_governed_budget_to_model_attempt(
     assert request.metadata["model_node_id"] == "node::chat"
 
 
+@pytest.mark.asyncio
+async def test_buffered_gateway_companion_uses_realtime_model_profile(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """Structured output must not force ordinary Gateway chat onto tier A."""
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    captured_requests: list[object] = []
+
+    class _CapturingModelAttemptService:
+        async def complete(self, request):  # noqa: ANN001
+            captured_requests.append(request)
+            return SimpleNamespace(
+                success=True,
+                content=_candidate_payload(["先陪你安静一会儿。"]),
+            )
+
+    monkeypatch.setattr(
+        "host_brain.composition.process_services.get_model_attempt_service",
+        lambda: _CapturingModelAttemptService(),
+    )
+    monkeypatch.setattr(
+        "host_brain.model_runtime.trace.model_attempt_result_trace",
+        lambda _result: {
+            "success": True,
+            "attempt_ids": ["attempt::model-realtime"],
+            "budget_measurement": {
+                "token_count": 12,
+                "completion_tokens": 4,
+            },
+        },
+    )
+    trace: dict[str, object] = {
+        "runtime_path": "realtime_companion",
+        "governed_model_budget": _governed_model_budget_payload(deadline_ms=321),
+    }
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "先陪你安静一会儿。"
+    request = captured_requests[0]
+    assert request.scene_type == "CHAT_SURFACE_REALTIME"
+    assert request.cognitive_tier == "B"
+    assert request.previsibility_transport_retries == 1
+    assert request.metadata["route_lane"] == "realtime_companion"
+    assert trace["surface_model_route"] == {
+        "scene_type": "CHAT_SURFACE_REALTIME",
+        "cognitive_tier": "B",
+        "route_lane": "realtime_companion",
+    }
+
+
 def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_context(
     monkeypatch,
     surface_runtime_ports_factory,

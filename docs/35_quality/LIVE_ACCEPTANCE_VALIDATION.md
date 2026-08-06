@@ -260,3 +260,13 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 后续五次同门槛 aftereffect 形成五条 `CANARY_INTERACTION`，生命周期自动激活原候选，没有创建第二个 profile。主动 rollback 不接受调用者指定历史目标，只恢复候选自带的 exact predecessor；下一轮 Planner 的 profile identity、style policy、Voice rate 和 Avatar motion 全部回到 baseline。投影顺序精确为 `CANARY_STARTED → 5×CANARY_INTERACTION → ACTIVATED → ROLLED_BACK`，SQLite immutable trigger 拒绝更新，新 Repository 重放与最终 snapshot 相同，integrity 为 `ok`。
 
 脱敏收据 SHA-256 为 `acdf52ff5cfd6c6e53ff71f268273e2dcbaeb59bd906a1c614afdc5d572f3bde`，状态为 `PASS_REAL_SQLITE_PROFILE_HOST_BEHAVIOR_EXACT_ROLLBACK`。本轮没有调用模型或远端 Edge，故只把 Host 行为协议标为 PASS；“实际生成措辞发生可感知改变”和远端 Voice／Avatar 物理执行仍为 `NOT_TESTED_HOST_PROTOCOL_ONLY`。旧情感 writer、人工人感、VTS 与其他 A15 Gate 仍未完成，总体继续为 `INCOMPLETE`。
+
+## 2026-08-06 A15 普通 Gateway 陪伴实时模型通道纠偏
+
+重新对齐 Host 与远端 Unified Gateway 的 callback HMAC 后，只重启 Gateway、未重启 Edge；Host／Gateway／Edge health 均为 200。随后在提交 `7355c20fa` 上以同一稳定主体执行三轮真实 Gateway 对话。报告 `dl-live-1785977020027.json` 的 SHA-256 为 `54289a4e93b360e77ef1a43aae8eb3c98333d66ad6207f176027f1a57bc274f6`：前两轮经真实 DeepSeek `deepseek-v4-pro` 完成，整轮分别耗时 25,375 ms 与 16,764 ms；第三轮 provider 在 45,280 ms 后失败，TaskGraph 以 `MODEL_PROVIDER_USAGE_UNPROVEN` 正确拒绝，整条轨迹为 `FAIL`。这不是入口超时：第三轮 webhook 22 ms 即返回 200，失败发生在模型调用边界。
+
+该失败证明普通个人陪伴仍错误沿用质量优先的 Tier A／Pro 通道，而且首次 transport failure 会立即终止对话。代码纠偏只作用于 `input_source=GATEWAY`、无前序 accepted artifact 的单节点陪伴回复：模型场景改为 `CHAT_SURFACE_REALTIME`、Tier B（DeepSeek 默认 `deepseek-v4-flash`），沿用 server-owned 15 秒 target timeout，并允许在任何文本可见前、现有 Task retry budget 内对同一冻结 target 最多重试一次。含前序 Task artifact 的 Plan 终局综合、深路径候选和其他受治理模型调用仍保持 Tier A。成功响应依旧必须提供 canonical token usage；本改动没有降低 Acceptance、Outbox 或外部副作用约束。
+
+同一真实窗口内，八张已退役情感表的写入增量均为 0，四个旧 `~/.natsume/emotion/*.json` 的大小、mtime 与 SHA-256 均未变化；canonical affective／relationship／Life journal 则随两条成功和一条失败请求正常前进。该观察只能标为 `PARTIAL_SCOPE_BOUND_ZERO_DELTA`：修复提交加载后的完整成功 cohort 与正式脱敏 receipt 尚未生成，因此旧 writer 清零项仍不封板。当前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，不是 PASS。
+
+本地回归覆盖 ModelAttempt、server-owned route catalog、原生情感流、冻结 Chat executor、Surface main chain、Universal Host Runtime 与 HTTP Skill／Chat 路由，共 129 项通过；`compileall`、JSON 解析和 `git diff --check` 同时通过。这里的本地结果只证明接线与回归边界，不能替代下一次真实 DeepSeek／Gateway／Edge 运行。

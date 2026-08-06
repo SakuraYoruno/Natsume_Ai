@@ -205,11 +205,23 @@ async def run_surface_main_chain_for_surface_reply_input(
         model_deadline_ms = _surface_model_deadline_ms(governed_model_budget)
         if governed_model_budget is not None and model_deadline_ms <= 0:
             raise RuntimeError("MODEL_BUDGET_DEADLINE_EXHAUSTED")
+        model_scene_type, model_cognitive_tier, model_route_lane = (
+            _surface_model_request_profile(
+                trace_stage_meta,
+                realtime_eligible=affective_candidate_count is None,
+            )
+        )
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["surface_model_route"] = {
+                "scene_type": model_scene_type,
+                "cognitive_tier": model_cognitive_tier,
+                "route_lane": model_route_lane,
+            }
         result = await ports.model_attempt_service().complete(
             ModelAttemptRequest(
                 request_id=request_id or "surface-main-chain",
-                scene_type="CHAT_SURFACE",
-                cognitive_tier="A",
+                scene_type=model_scene_type,
+                cognitive_tier=model_cognitive_tier,
                 prompt=PromptRef(
                     prompt_id,
                     {
@@ -222,8 +234,12 @@ async def run_surface_main_chain_for_surface_reply_input(
                 deadline_ms=model_deadline_ms,
                 foreground=True,
                 retry_evaluator=_retry_evaluator,
+                previsibility_transport_retries=(
+                    1 if model_route_lane == "realtime_companion" else 0
+                ),
                 metadata={
                     "chain": "surface_main",
+                    "route_lane": model_route_lane,
                     **(
                         {"model_node_id": governed_model_budget.node_id}
                         if governed_model_budget is not None

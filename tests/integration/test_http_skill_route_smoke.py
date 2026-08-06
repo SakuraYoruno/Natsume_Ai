@@ -14,7 +14,6 @@ import host_brain.app.asgi as host_api
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.skills.builtin_registry import build_builtin_skill_registry
-from host_brain.skills.agent_runtime_registry import AgentRuntimeSkillProvider
 
 
 async def _fake_run_retrieval(*args, **kwargs) -> tuple[dict[str, Any], list[dict[str, Any]]]:  # noqa: ANN002, ANN003
@@ -250,7 +249,6 @@ def test_http_chat_route_infers_session_summary_from_natural_language(monkeypatc
 
 def test_http_chat_route_pauses_inferred_agent_worker_for_review(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
-    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
     def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
@@ -288,9 +286,8 @@ def test_http_chat_route_pauses_inferred_agent_worker_for_review(monkeypatch, tm
         _close_client(client, ledger)
 
 
-def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(monkeypatch, tmp_path: Path) -> None:
+def test_http_chat_route_keeps_lightweight_snippet_in_realtime_chat(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
-    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
     def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
@@ -317,22 +314,20 @@ def test_http_chat_route_uses_lightweight_codex_mode_for_simple_snippet_request(
         assert response.status_code == 200
 
         events = _parse_sse_events(response)
-        commit_event = _governed_commit(events)
+        commit_event = [event for event in events if event.get("phase") == "COMMIT"][-1]
 
-        assert commit_event["route_type"] == "skill"
-        assert commit_event["target_id"] == "agent_inspect"
         assert commit_event["decision"] == "APPROVE"
-        assert "dedupe_by_frequency" in str(commit_event.get("narrative") or "")
-        work_order = captured["payload"]["work_order"]
-        assert work_order["run_mode"] == "inspect"
-        assert work_order["workspace"] == {"strategy": "temp_workspace"}
+        assert commit_event.get("governed") is not True
+        assert "execution_receipt" not in commit_event
+        trace_stage_meta = commit_event["audit_refs"]["trace_stage_meta"]
+        assert trace_stage_meta["runtime_path"] == "realtime_companion"
+        assert captured == {}
     finally:
         _close_client(client, ledger)
 
 
 def test_http_chat_route_pauses_inferred_agent_self_heal_for_review(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
-    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: dict[str, Any] = {}
 
     def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
@@ -499,7 +494,6 @@ def test_http_chat_route_rejects_caller_provided_skill_plan(monkeypatch, tmp_pat
 
 def test_http_chat_route_rejects_caller_provided_skill_plan(monkeypatch, tmp_path: Path) -> None:
     client, ledger = _build_client(monkeypatch, canonical_root=tmp_path)
-    deps.get_process_service_container().skill_registry.register_decorated(AgentRuntimeSkillProvider())
     captured: list[dict[str, Any]] = []
 
     def _fake_dispatch(payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:

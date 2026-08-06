@@ -63,6 +63,7 @@ def _request(
     foreground: bool = True,
     retry_evaluator=None,
     model_budget_guard: ModelBudgetGuard | None = None,
+    previsibility_transport_retries: int = 0,
 ) -> ModelAttemptRequest:
     return ModelAttemptRequest(
         request_id=request_id,
@@ -74,6 +75,7 @@ def _request(
         foreground=foreground,
         retry_evaluator=retry_evaluator,
         model_budget_guard=model_budget_guard,
+        previsibility_transport_retries=previsibility_transport_retries,
     )
 
 
@@ -508,6 +510,65 @@ async def test_provider_failure_falls_through_route_with_one_global_budget() -> 
     assert calls == ["first", "second"]
     assert route.calls == 1
     assert result.attempts[1].retry_reason.startswith("provider_fallback:")
+
+
+async def test_guarded_realtime_call_retries_transport_before_visibility() -> None:
+    route = _CountingRoutePolicy(
+        RouteDecision(
+            "route-realtime-previsibility-retry",
+            (ProviderTarget("deepseek", "deepseek", "deepseek-v4-flash"),),
+            "ordinary companion realtime lane",
+            max_attempts=2,
+        )
+    )
+    calls: list[int] = []
+
+    async def _complete(attempt):  # noqa: ANN001
+        calls.append(attempt.attempt_index)
+        if len(calls) == 1:
+            raise TimeoutError("provider stalled before returning a response")
+        return ProviderResponse(
+            content="我在。先不急着解释。",
+            usage={"total_tokens": 16, "completion_tokens": 7},
+        )
+
+    audit = InMemoryAttemptAuditRepository()
+    service = ModelAttemptService(
+        prompt_registry=_registry(),
+        route_policy=route,
+        provider_adapters=ProviderAdapterRegistry(
+            [CallableProviderAdapter("deepseek", complete_fn=_complete)]
+        ),
+        audit_repository=audit,
+    )
+
+    result = await service.complete(
+        _request(
+            model_budget_guard=_model_budget_guard(
+                max_provider_attempts=2,
+                required_usage_dimensions=("token_count", "completion_tokens"),
+            ),
+            previsibility_transport_retries=1,
+        )
+    )
+
+    assert result.success is True
+    assert result.content == "我在。先不急着解释。"
+    assert calls == [1, 2]
+    assert [record.status for record in result.attempts] == [
+        AttemptStatus.TIMED_OUT,
+        AttemptStatus.SUCCEEDED,
+    ]
+    assert result.attempts[0].error_code == "PROVIDER_TIMEOUT"
+    assert result.attempts[1].retry_reason == (
+        "previsibility_transport_retry:provider_timeout"
+    )
+    assert [record.status for record in audit.records()] == [
+        AttemptStatus.STARTED,
+        AttemptStatus.TIMED_OUT,
+        AttemptStatus.STARTED,
+        AttemptStatus.SUCCEEDED,
+    ]
 
 
 async def test_provider_error_audit_redacts_credentials() -> None:

@@ -341,3 +341,7 @@ python scripts/runtime/run_companion_profile_behavior_acceptance.py `
 ```
 
 Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Planner/Expression Delivery 组件：五条跨至少三天、helpfulness 下界不低于 0.85 且无边界违规的 aftereffect 才能开始；候选必须真实改变下一轮文本生成约束、Voice rate 和 Avatar motion，五次后效应后保持同一候选并自动激活；rollback 必须恢复精确前代的 profile identity、文本策略和两通道参数。该收据只证明 Host 生成与协议接线，不得冒充模型实际措辞或远端 Voice／Avatar 物理执行。
+
+普通 Gateway 陪伴的模型可用性回归必须同时验证：`input_source=GATEWAY` 且没有 canonical accepted predecessor artifact 时，冻结后的 Chat trace 选择 `realtime_companion`，实际 `ModelAttemptRequest` 使用 `CHAT_SURFACE_REALTIME`／Tier B；含前序 artifact 的 Plan 终局综合和深路径候选仍使用质量优先 Tier A。Tier B 的 server-owned target timeout 默认 15 秒；transport 在文本可见前失败时，只能在同一冻结 target 和现有 Task retry budget 内额外尝试一次，不能生成第二张图或重复 delivery。成功 provider response 仍必须带 canonical token usage，缺 usage 的成功响应不得因“陪伴优先”而通过。
+
+HTTP 集成断言还要区分“自包含的小代码片段”和“需要 Workspace 的代码任务”：前者应留在实时 Chat，以 inline-code semantic 直接回答，不应启动 `agent_inspect`；包含文件、仓库、调试、测试或修改语义的任务才进入 Governed Agent Runtime。不得用已经退役的可变 process-service 测试桥注册 Skill 后声称生产 app-local Container 已被覆盖。
