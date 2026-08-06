@@ -48,6 +48,8 @@ from host_brain.planning_search.attested_external_research_adapter import (
     AttestedExternalResearchAdapter,
 )
 from host_brain.planning_search.code_benefit_experiment import (
+    CODE_BENCHMARK_SCENE_TYPE,
+    DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS,
     CODE_HIDDEN_VERIFIER_PROFILE_DIGEST,
     CODE_STATIC_VERIFIER_PROFILE_DIGEST,
     CodeBenefitExperimentError,
@@ -83,6 +85,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--run-namespace", default="")
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument(
+        "--model-timeout-ms",
+        type=int,
+        default=DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS,
+    )
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -106,11 +113,16 @@ def _load_environment(args: argparse.Namespace) -> None:
         load_env_file(path.expanduser().resolve(), override=True, required=True)
     for path in args.secret_env_file:
         load_env_file(path.expanduser().resolve(), override=True, required=True)
+    os.environ[
+        f"HOST_MODEL_ROUTE_SCENE_{CODE_BENCHMARK_SCENE_TYPE}_TIMEOUT_MS"
+    ] = str(args.model_timeout_ms)
 
 
 def _validate_args(args: argparse.Namespace) -> None:
     if not 1 <= int(args.limit) <= 20:
         raise ValueError("--limit must be within 1..20")
+    if not 10_000 <= int(args.model_timeout_ms) <= 90_000:
+        raise ValueError("--model-timeout-ms must be within 10000..90000")
     if args.dry_run:
         return
     if args.db is None or args.output_dir is None:
@@ -160,6 +172,8 @@ def _dry_run(args: argparse.Namespace) -> int:
         ),
         "external_calls": 0,
         "worktrees_executed": 0,
+        "model_scene_type": CODE_BENCHMARK_SCENE_TYPE,
+        "model_timeout_ms": int(args.model_timeout_ms),
     }
     print(json.dumps(output, ensure_ascii=False, sort_keys=True))
     return 0
@@ -189,6 +203,8 @@ async def _run_live(args: argparse.Namespace) -> int:
         "randomization_seed_digest": randomization_seed_digest,
         "started_at_ms": started_at_ms,
         "remote_ci": "NOT_RUN_ACCOUNT_QUOTA",
+        "model_scene_type": CODE_BENCHMARK_SCENE_TYPE,
+        "model_timeout_ms": int(args.model_timeout_ms),
         "members": [],
         "planned_arm_orders": {},
     }
@@ -240,6 +256,7 @@ async def _run_live(args: argparse.Namespace) -> int:
                 external_adapter=external_adapter,
                 arm_order=arm_order,
                 execution_namespace=args.run_namespace,
+                model_timeout_ms=args.model_timeout_ms,
             )
             evidence_rows.append(evidence)
             summary = sanitized_code_member_summary(evidence, arm_order=arm_order)
@@ -261,6 +278,7 @@ async def _run_live(args: argparse.Namespace) -> int:
                 randomization_seed_digest=randomization_seed_digest,
                 prepared_rows=prepared_rows,
                 evidence_rows=evidence_rows,
+                model_timeout_ms=args.model_timeout_ms,
             )
             receipt["cohort_spec_digest"] = spec.spec_digest
             receipt["cohort_report"] = report.to_dict()
@@ -300,6 +318,7 @@ def _seal_full_cohort(
     randomization_seed_digest: str,
     prepared_rows: list[Any],
     evidence_rows: list[Any],
+    model_timeout_ms: int,
 ) -> tuple[CodeBenefitCohortSpecV1, Any]:
     provider_models = {
         (arm.attestation.provider, arm.attestation.model)
@@ -331,7 +350,9 @@ def _seal_full_cohort(
         planning_algorithm_version=cohort.planning_algorithm_version,
         execution_provider=provider,
         execution_model=model,
-        execution_profile_digest=code_execution_profile_digest(),
+        execution_profile_digest=code_execution_profile_digest(
+            model_timeout_ms=model_timeout_ms
+        ),
         execution_budget_digest=next(iter(budget_digests)),
         hidden_verifier_profile_digest=CODE_HIDDEN_VERIFIER_PROFILE_DIGEST,
         static_verifier_profile_digest=CODE_STATIC_VERIFIER_PROFILE_DIGEST,

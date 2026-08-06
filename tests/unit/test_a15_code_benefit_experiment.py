@@ -13,6 +13,7 @@ from host_brain.planning_search.code_benefit_experiment import (
     CodeBenefitExperimentError,
     _execution_messages,
     _parse_model_source,
+    code_execution_profile_digest,
     create_fixed_code_source_repository,
     load_fixed_code_cohort,
     prepare_code_workload,
@@ -125,3 +126,11 @@ def test_runtime_root_cannot_be_reused(tmp_path: Path) -> None:
 
     with pytest.raises(CodeBenefitExperimentError, match="already exists"):
         create_fixed_code_source_repository(cohort=cohort, runtime_root=root)
+
+
+def test_execution_profile_binds_the_code_route_timeout() -> None:
+    assert code_execution_profile_digest() != code_execution_profile_digest(
+        model_timeout_ms=45_000
+    )
+    with pytest.raises(CodeBenefitExperimentError, match="timeout"):
+        code_execution_profile_digest(model_timeout_ms=9_999)

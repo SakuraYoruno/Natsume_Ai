@@ -68,6 +68,9 @@ from host_brain.planning_search.contracts import MCTSMode, PlanningGoal, SearchB
 
 FIXED_CODE_COHORT_SCHEMA = "natsume.code-benefit-fixed-cohort.v1"
 CODE_EXECUTION_PROFILE_ID = "a15-code-full-file-json-v1"
+CODE_BENCHMARK_SCENE_TYPE = "CODE_BENCHMARK"
+DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS = 30_000
+CODE_BENCHMARK_REQUEST_DEADLINE_MS = 90_000
 CODE_HIDDEN_VERIFIER_PROFILE_DIGEST = hashlib.sha256(
     b"natsume.a15.code-hidden-pytest.v1"
 ).hexdigest()
@@ -425,6 +428,7 @@ async def execute_prepared_code_workload(
     external_adapter: AttestedExternalResearchAdapter,
     arm_order: Sequence[str],
     execution_namespace: str,
+    model_timeout_ms: int = DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS,
 ) -> CodeCohortPairedEvidenceV1:
     order = tuple(str(item or "").strip().upper() for item in arm_order)
     if len(order) != 2 or set(order) != {"BASELINE", "SELECTED"}:
@@ -467,8 +471,9 @@ async def execute_prepared_code_workload(
                 arm=arm,
                 evidence_text=evidence_text,
             ),
-            deadline_ms=90_000,
+            deadline_ms=CODE_BENCHMARK_REQUEST_DEADLINE_MS,
             cognitive_tier="RESEARCH",
+            scene_type=CODE_BENCHMARK_SCENE_TYPE,
         )
         replacement, parsed = _parse_model_source(run.output_text)
         model_outputs[role] = CodeArmModelOutputV1(
@@ -513,11 +518,17 @@ async def execute_prepared_code_workload(
             role="BASELINE",
             receipt=receipt,
             model_output=model_outputs["BASELINE"],
+            execution_profile_digest=code_execution_profile_digest(
+                model_timeout_ms=model_timeout_ms
+            ),
         ),
         selected=_benefit_evidence(
             role="SELECTED",
             receipt=receipt,
             model_output=model_outputs["SELECTED"],
+            execution_profile_digest=code_execution_profile_digest(
+                model_timeout_ms=model_timeout_ms
+            ),
         ),
         owner_randomized_run=True,
         independent_fresh_worktrees=True,
@@ -539,11 +550,20 @@ def sanitized_code_member_summary(
     }
 
 
-def code_execution_profile_digest() -> str:
+def code_execution_profile_digest(
+    *,
+    model_timeout_ms: int = DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS,
+) -> str:
+    normalized_timeout_ms = int(model_timeout_ms)
+    if not 10_000 <= normalized_timeout_ms <= CODE_BENCHMARK_REQUEST_DEADLINE_MS:
+        raise CodeBenefitExperimentError("Code model timeout is outside the frozen range")
     return _digest_json(
         {
             "profile_id": CODE_EXECUTION_PROFILE_ID,
             "prompt_id": CODE_BENEFIT_EXECUTION_PROMPT_ID,
+            "scene_type": CODE_BENCHMARK_SCENE_TYPE,
+            "model_timeout_ms": normalized_timeout_ms,
+            "request_deadline_ms": CODE_BENCHMARK_REQUEST_DEADLINE_MS,
             "system": _MODEL_SYSTEM,
             "output": {"content": "complete Python source"},
             "cache_policy": "NONE",
@@ -568,6 +588,7 @@ def _benefit_evidence(
     role: str,
     receipt: Any,
     model_output: CodeArmModelOutputV1,
+    execution_profile_digest: str,
 ) -> CodeArmBenefitEvidenceV1:
     arm_evidence = (
         receipt.run.baseline_evidence if role == "BASELINE" else receipt.run.selected_evidence
@@ -602,7 +623,7 @@ def _benefit_evidence(
         model_execution_id=run.execution_id,
         model_attempt_ids=run.model_receipt.attempt_ids,
         model_output_digest=run.attestation.response_digest,
-        execution_profile_digest=code_execution_profile_digest(),
+        execution_profile_digest=execution_profile_digest,
         hidden_verifier_execution_id=(
             f"hidden-{receipt.spec.run_id}-{role.lower()}"
         )[:160],
@@ -847,6 +868,9 @@ def _digest_json(value: Any) -> str:
 
 __all__ = [
     "CODE_EXECUTION_PROFILE_ID",
+    "CODE_BENCHMARK_SCENE_TYPE",
+    "CODE_BENCHMARK_REQUEST_DEADLINE_MS",
+    "DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS",
     "CODE_HIDDEN_VERIFIER_PROFILE_DIGEST",
     "CODE_STATIC_VERIFIER_PROFILE_DIGEST",
     "FIXED_CODE_COHORT_SCHEMA",

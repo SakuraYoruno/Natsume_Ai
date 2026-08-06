@@ -440,3 +440,7 @@ paired terminal ledger 不能保存回答正文，但真实收益又必须评估
 真实 runner 会在任何外部调用前把 workload 与 paired RunSpec 预注册到现有 Code ledger；owner 先生成随机种子并逐题冻结 arm 顺序，再以同一 provider/model/budget 发起两次独立 canonical ModelAttempt。模型只返回目标文件的完整 JSON 源码，结果在进程内应用到两个全新 detached worktree；每只 arm 分别执行隐藏行为 pytest 和 AST 静态 pytest。受控 receipt 只保存 argv/output digest、退出码、耗时、diff、外部 usage/cost/transport 与清理证明，不持久模型源码或隐藏用例正文。终态 replay 没有模型正文时明确要求新 namespace，不会重复外部调用冒充恢复。
 
 当前状态为 `CODE_COMPLETE_REAL_PREFLIGHT_PENDING`。队列、随机执行顺序、sandbox、ledger、cohort evaluator、SQLite 集成和 prompt registry 相邻回归共 50 项通过；真实单题和 20 题尚未执行，因此 Code 收益仍为 `UNPROVEN`，PlanningSearch 三域总状态不变。
+
+`e3094cfbd` 的真实预检保留了三次互不覆盖的运行。v1 与 v2 都是 selected 请求成功、baseline 在 8,000 ms 发生 `PROVIDER_TIMEOUT`，分别以 `FAIL` 写入外层收据和 canonical model audit；v3 通过隔离进程显式设为 30,000 ms 后完成两臂，baseline 隐藏测试失败、selected 隐藏测试通过，静态检查均由受控 worktree 执行，状态为 `PASS_PREFLIGHT_ONLY`。v3 文件 SHA-256 为 `147da7fffe5937379ed8da80c53127ac22a1a4dcfa0432ca584a807cfaa269a4`。
+
+该结果揭示的不是模型凭据故障，而是 Code benchmark 误用了 `RESEARCH` scene，并继承面向短请求的全局 8 秒上限。修复后 Code 请求使用独立 `CODE_BENCHMARK` scene；runner 显式拥有 30 秒默认 route timeout，并把 scene、route timeout 和 90 秒 request deadline 纳入 execution profile digest 与脱敏收据。Research 的默认 scene、metadata 和行为保持不变；57 项 Code／attestation／ledger／SQLite／文档回归与修复后 20/20 dry-run 通过。由于修复改变了代码与 profile identity，v3 只作为缺陷复现／修复依据；最终 20 题必须在修复后的新 commit SHA 上重新预检和执行。

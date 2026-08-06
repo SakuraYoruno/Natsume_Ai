@@ -65,7 +65,9 @@
 - [x] 在 `1c9c2b2bd` 上以独立 namespace 完成单题真实双臂＋隐藏评审预检；状态 `PASS_PREFLIGHT_ONLY`，报告 SHA-256 为 `03b72f857a57a94098269e1537879154ccb3dce9471189b88844bc6193a7a0bb`。
 - [x] 完成 24 组真实 Research baseline／PlanningSearch 配对。质量均值提升 0.85416667、bootstrap 95% 下界 0.75、citation validity 1.0、成本比 1.32215978、p95 延迟比 0.98756943、严重错误 0，最终状态 `PASS`；报告 SHA-256 为 `eb17699c0f85b2b9b680f02f5ce1c716726e2f15f2bfd8b72cf437f6c7277894`。只生成 promotion proposal 资格，未启用生产影响。
 - [x] 冻结并实现 Code 20 题真实收益入口：20/20 baseline 关闭 L3、20/20 selected 由公共 Code PlanningSearch AUTO 条件 MCTS 选择 safe path；确定性源提交、随机 arm 顺序、独立外部请求、fresh detached worktree、隐藏 pytest、静态 pytest、清理收据和 cohort ledger 均已接线。dry-run 外部调用与 worktree 执行为 0，50 项相邻回归通过。
-- [ ] 在提交后的新 SHA 上执行 Code 单题真实预检与完整 20 题；没有合格最终 cohort 前不得把 dry-run 计为收益。
+- [x] 在 `e3094cfbd` 上完成 Code 单题真实预检：v1/v2 的 selected 均成功、baseline 均在 8 秒 provider 上限超时，失败收据保留；v3 显式使用 30 秒上限后 baseline 隐藏测试失败、selected 通过，状态 `PASS_PREFLIGHT_ONLY`，报告 SHA-256 为 `147da7fffe5937379ed8da80c53127ac22a1a4dcfa0432ca584a807cfaa269a4`。
+- [x] 修复预检发现的路由边界：Code 不再冒用最终 `RESEARCH` scene，改用 `CODE_BENCHMARK`；runner 默认模型上限 30 秒并把 scene、timeout 与 90 秒 request deadline 绑定进 execution profile 和外层收据，Research 默认调用保持兼容；57 项相邻回归和修复后 20/20 dry-run 通过。
+- [ ] 在路由修复后的新 SHA 上重跑 Code 单题预检与完整 20 题；没有合格最终 cohort 前不得把旧预检或 dry-run 计为最终收益。
 - [ ] 运行 Pentest 30 次授权实验；Code／Pentest 没有真实最终 cohort 前，PlanningSearch 三域总状态保持 `PARTIAL_RESEARCH_PASS_CODE_PENTEST_PENDING`。
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。

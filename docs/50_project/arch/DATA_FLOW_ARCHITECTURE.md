@@ -360,8 +360,8 @@ flowchart LR
     G --> S["selected: AUTO 条件 L3"]
     B --> O["owner 随机冻结 arm 顺序"]
     S --> O
-    O --> MB["独立外部模型请求 B"]
-    O --> MS["独立外部模型请求 S"]
+    O --> MB["CODE_BENCHMARK 外部请求 B"]
+    O --> MS["CODE_BENCHMARK 外部请求 S"]
     MB --> WB["fresh detached worktree B"]
     MS --> WS["fresh detached worktree S"]
     WB --> HB["隐藏 pytest + 静态 pytest"]
@@ -373,3 +373,5 @@ flowchart LR
 ```
 
 预注册必须发生在第一条外部请求之前；真实调用发生后若进程丢失模型正文，不能从摘要恢复源码或重复调用同一 execution identity。runner 只允许使用新 namespace 重新实验，并保留旧模型 audit／失败证据。隐藏 cases 不进入模型消息，模型 replacement 不进入 durable ledger；最终证据只绑定 response digest、attempt、provider/model、成本、两个 verifier receipt、diff 和 worktree cleanup。
+
+Code 模型请求通过共享 attestation boundary 进入 canonical ModelAttempt，但 scene 固定为 `CODE_BENCHMARK`。runner 把实际 route timeout 与 request deadline 写入 execution profile；这避免 Code 任务继承普通短请求的全局超时，也使改变超时后的实验无法复用旧 cohort identity。

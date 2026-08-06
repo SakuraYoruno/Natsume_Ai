@@ -150,6 +150,33 @@ async def test_d20c_adapter_builds_attested_receipt_from_one_fresh_canonical_att
     assert audit.request_ids == ["research-execution-1", "research-execution-1"]
 
 
+async def test_shared_attestation_boundary_preserves_a_code_benchmark_scene() -> None:
+    result = _result()
+    audit = _AuditLookup(())
+    service = _AttemptService(result, audit=audit)
+    adapter = AttestedExternalResearchAdapter(
+        model_attempt_service=service,
+        attempt_audit_lookup=audit,
+    )
+
+    await adapter.execute(
+        execution_id="research-execution-1",
+        arm_id="selected",
+        prompt_id="code.prompt",
+        messages=({"role": "user", "content": "Return one bounded source file."},),
+        deadline_ms=30_000,
+        scene_type="CODE_BENCHMARK",
+    )
+
+    request = service.requests[0]
+    assert request.scene_type == "CODE_BENCHMARK"
+    assert request.metadata == {
+        "planning_external_execution_id": "research-execution-1",
+        "planning_arm_id": "selected",
+        "planning_scene_type": "CODE_BENCHMARK",
+    }
+
+
 async def test_d20c_adapter_never_replays_an_execution_with_prior_canonical_audit() -> None:
     result = _result()
     service = _AttemptService(result)
