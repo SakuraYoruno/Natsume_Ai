@@ -388,3 +388,5 @@ Surface recall service 的生命周期回归必须在同一 Agent Runtime applic
 下一轮真实探针必须从 COMMIT `audit_refs.trace_stage_meta` 读取 `context_pipeline_ms`、`user_preference_pack_ms` 与 `retrieval_runtime_timings_ms`；后者包含 plan、embedding、service resolve、recall 和 review 字段。各字段必须是非负整数，retrieval total 不小于其顺序关键段；这些字段不得通过新增数据库 audit event 获得。只有数据确认的主段才能进入下一性能修复。
 
 双候选模型车道回归必须构造 `runtime_path=realtime_companion + BUFFERED_CANDIDATE_SELECTION + candidate_count=2`，断言模型请求仍为 `CHAT_SURFACE_REALTIME／B／realtime_companion`；对照的 governed／Task trace 仍为 `CHAT_SURFACE／A／surface_reply`。真实复验至少包含一条低置信安静陪伴消息，并记录实际模型、provider first token、首个 RENDER、context pipeline 和 retrieval；不得用单元断言覆盖真实 provider 25 秒级回归。
+
+`09e828149` 的 110 项本地回归与三条真实 HTTP 样本满足模型车道子项：全部使用 `deepseek-v4-flash`，provider 首 token 为 1,834～2,157 ms、首个 RENDER 为 3,360～4,263 ms，收据 SHA-256 为 `d383bf20246ed5f701ce72b9a66572bcf9eb9de0a23c62c9b86d683be2a4b9b0`。本 PASS 不覆盖首句实时门槛或候选体验质量；两条 `PAIRED_SELECTION` 的 `selected_passed=false` 必须继续作为失败样本处理。

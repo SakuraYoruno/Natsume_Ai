@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_REALTIME_BUFFERED_COMPANION_TIER_B_CODE_COMPLETE_REAL_RETEST_PENDING",
+  "commit_scope": "A15_REALTIME_BUFFERED_COMPANION_TIER_B_REAL_RETEST_PASS_SCOPE_BOUND",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -29,8 +29,9 @@
       "irrelevant_lightnovel_context_read": "PASS_REAL_FULL_STACK_SCOPE_BOUND",
       "surface_recall_service_lifetime": "PASS_REAL_FULL_STACK_SCOPE_BOUND",
       "context_stage_timing": "CODE_COMPLETE_REAL_RETEST_PENDING",
-      "buffered_companion_model_lane": "CODE_COMPLETE_REAL_RETEST_PENDING",
-      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, but live evidence did not prove that change alone caused the previously observed 0.5-second wait. On 7c454b6fb, unrelated companion turns also skip the durable light-novel recommendation context read; three real NO_RECALL samples measured 100-124 ms retrieval wait. On f0aa50a58, RecallFusionService has app-local lifespan and reuses the canonical EpisodicStore Chroma client; MAY_RECALL median retrieval fell from 541 ms to 351 ms, but a 508 ms tail remains. Existing response trace now separates plan, embedding, service, route, domain review, general preference pack and context total without additional database writes. A d1777f109 live sample then exposed a larger defect: a normal quiet-companion turn used deepseek-v4-pro and needed 24999 ms to first provider token because buffered candidate selection downgraded the realtime route identity. Code now keeps every server-owned realtime_companion wording path on Tier B while preserving two-candidate local selection; real retest is pending."
+      "buffered_companion_model_lane": "PASS_REAL_FULL_STACK_SCOPE_BOUND",
+      "buffered_companion_model_lane_receipt_sha256": "d383bf20246ed5f701ce72b9a66572bcf9eb9de0a23c62c9b86d683be2a4b9b0",
+      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, but live evidence did not prove that change alone caused the previously observed 0.5-second wait. On 7c454b6fb, unrelated companion turns also skip the durable light-novel recommendation context read; three real NO_RECALL samples measured 100-124 ms retrieval wait. On f0aa50a58, RecallFusionService has app-local lifespan and reuses the canonical EpisodicStore Chroma client; MAY_RECALL median retrieval fell from 541 ms to 351 ms, but a 508 ms tail remains. Existing response trace now separates plan, embedding, service, route, domain review, general preference pack and context total without additional database writes. A d1777f109 live sample then exposed a larger defect: a normal quiet-companion turn used deepseek-v4-pro and needed 24999 ms to first provider token because buffered candidate selection downgraded the realtime route identity. On 09e828149 all three post-change samples used CHAT_SURFACE_REALTIME/B and deepseek-v4-flash; provider first token was 1834-2157 ms and first render was 3360-4263 ms. The lane defect is closed, but two paired samples still had selected_passed=false and the overall realtime/human-likeness gates remain open."
     },
     "user_self_affect_separation": {
       "status": "WIRED",
