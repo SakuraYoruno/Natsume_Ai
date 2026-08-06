@@ -80,7 +80,8 @@
 - [x] 验证分段 TTS 合成失败会结算父命令并取消兄弟分段，打断后队列归零。
 - [x] 验证 VTS 人工授权等待不会触发无界自动重连或句柄增长。
 - [x] 关闭 OBS 派生 projection journal 写放大。`636252264` 真实 30 秒样本把 2,996,490 bytes 原始公开载荷压到 410,858 bytes，降低 86.3%。一小时检查点首轮如实暴露 7 条同实例 lineage revision 误写，失败报告 SHA-256 为 `ad4d8c178a66e0040b147b1c8fa6c6129be443b954fbc73bfecbdcb544a7b00c`；收窄到只强制 `source_instance_id` 切换后，第二轮 49.084 秒窗口有 192 个 current 文档刷新、31 个 source cursor 推进，既存未到期文档和同实例 lineage 新增历史均为 0，唯一新行是新 TaskGraph 的 6,872-byte 必要首快照，Host／OBS／Monitor 前后均为 200，page count 增量为 0。报告 SHA-256 为 `92baff1b2117e5d95a47e534a2c908642b47be4d7db56e9f144beae663f563e4`；既有历史未做破坏性清理。
-- [ ] 复验普通聊天最小同步提交与连续轮次响应。`652ade828` 的真实三轮已证明 Surface 在 effect 创建后 1.22～1.69 秒提交、Host 终态只晚 54～82 ms，六类 effect 最终各提交一次、末轮 Voice 完成且旧 writer 增量为 0；报告 SHA-256 为 `8170667ce02b37e31d35e30cc8c95eeb84ebde6f350ea0afff1e93bd30ecc017`。但上一轮后台 Life／Expression／Preference 仍在 ASGI 事件循环执行同步 SQLite，连续输入会在下一轮 effect 创建前多等约 3～5 秒。代码已把两个 Life 同步主体移入 worker thread，111 项受影响测试通过；必须加载新提交再跑同一真实三轮，确认连续输入不再被后台链阻塞后才勾选。
+- [x] 复验普通聊天最小同步提交与后台连续推进。`55d60a384` 的真实三轮中，第二轮在上一轮后台尚余 3,824 ms 时进入 Host，HostCommand／Graph、Attempt 和 history 均在上一轮后台结束前推进；六类 effect exact-once、末轮 Voice 完成且旧 writer 增量为 0。报告 SHA-256 为 `33eb1871d040578ea50185ee82732c7e37589eb2763182af3dcbda04ac798a75`。
+- [ ] 压缩普通聊天模型前固定开销与语义修复比例。当前 Host latency 仍为 11,657／10,137／10,075 ms；前两轮各有一次 hard-gate repair，第三轮 Gateway→Host 有约 2.29 秒单次传输抖动。需要独立计时 ingress→HostCommand、Graph→model、provider、model→effect、Surface 和网络段，不能把剩余延迟继续算到已关闭的 Life event-loop 问题上。
 
 ## P1：情感生命清零项
 
