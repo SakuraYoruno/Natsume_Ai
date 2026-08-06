@@ -87,6 +87,8 @@ PENTEST_KNOWLEDGE_EXTRACT_PROMPT_ID = "pentest.knowledge.extract.json"
 PENTEST_COGNITIVE_HYPOTHESES_PROMPT_ID = "pentest.cognitive.hypotheses.json"
 PENTEST_PACK_PLAN_PROMPT_ID = "pentest.pack.plan.json"
 STARTUP_MODEL_WARMUP_PROMPT_ID = "startup.model_warmup.text"
+RESEARCH_EXECUTION_PROMPT_ID = "research.execution.citation.json"
+RESEARCH_QUALITY_VERIFIER_PROMPT_ID = "research.quality.hidden.json"
 
 
 def _compiled_messages(values: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
@@ -196,6 +198,8 @@ def register_live_prompt_bindings(registry: PromptRegistry) -> PromptRegistry:
         (PENTEST_COGNITIVE_HYPOTHESES_PROMPT_ID, "json_object"),
         (PENTEST_PACK_PLAN_PROMPT_ID, "json_object"),
         (STARTUP_MODEL_WARMUP_PROMPT_ID, "text"),
+        (RESEARCH_EXECUTION_PROMPT_ID, "json_object"),
+        (RESEARCH_QUALITY_VERIFIER_PROMPT_ID, "json_object"),
     ):
         registry.register_renderer(
             prompt_id,
@@ -243,6 +247,8 @@ __all__ = [
     "SELF_REFLECTION_MOOD_PROMPT_ID",
     "SELF_REFLECTION_STYLE_TREND_PROMPT_ID",
     "STARTUP_MODEL_WARMUP_PROMPT_ID",
+    "RESEARCH_EXECUTION_PROMPT_ID",
+    "RESEARCH_QUALITY_VERIFIER_PROMPT_ID",
     "EMOTION_REACTIVITY_PROMPT_ID",
     "SURFACE_MAIN_JSON_PROMPT_ID",
     "SURFACE_MAIN_TEXT_PROMPT_ID",

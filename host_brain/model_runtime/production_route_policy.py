@@ -15,7 +15,12 @@ from host_brain.model_runtime.contracts import (
     sha256_digest,
 )
 from host_brain.model_runtime.production_provider_adapters import production_adapter_id
-from host_brain.model_runtime.live_prompts import GRAPH_NODE_PROMPT_IDS, TRIBE_PROMPT_IDS
+from host_brain.model_runtime.live_prompts import (
+    GRAPH_NODE_PROMPT_IDS,
+    RESEARCH_EXECUTION_PROMPT_ID,
+    RESEARCH_QUALITY_VERIFIER_PROMPT_ID,
+    TRIBE_PROMPT_IDS,
+)
 from host_brain.model_runtime.route_catalog import ServerRouteCatalog
 from host_brain.model_runtime.route_policy import (
     CallableRoutePolicy,
@@ -87,6 +92,18 @@ _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
 }
 
 _PROMPT_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
+    RESEARCH_EXECUTION_PROMPT_ID: {
+        "temperature": 0.1,
+        "top_p": 0.8,
+        "max_tokens": 900,
+        "thinking_mode": "disabled",
+    },
+    RESEARCH_QUALITY_VERIFIER_PROMPT_ID: {
+        "temperature": 0.0,
+        "top_p": 0.8,
+        "max_tokens": 240,
+        "thinking_mode": "disabled",
+    },
     GRAPH_NODE_PROMPT_IDS["chat_direct_ja"]: {"temperature": 0.45, "max_tokens": 420},
     GRAPH_NODE_PROMPT_IDS["core_reasoner_primary"]: {"temperature": 0.35, "max_tokens": 420},
     GRAPH_NODE_PROMPT_IDS["core_reasoner_secondary"]: {"temperature": 0.30, "max_tokens": 360},

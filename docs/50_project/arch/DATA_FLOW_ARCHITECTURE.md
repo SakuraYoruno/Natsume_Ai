@@ -338,3 +338,5 @@ flowchart LR
 ```
 
 预注册顺序固定为：搜索／基线确定 source set，渲染实际 messages，计算并持久保存每只 arm 的 prompt digest，然后才允许外部调用。receipt 必须逐 arm 精确匹配 execution ID、prompt digest、provider transport identity、usage 和预算；旧规格只有在字段确实不存在时才使用历史共享 digest。这样 search arm 改变资料组合不会被误判为请求漂移，也不能用临时调用参数替换 ledger 中的输入身份。
+
+成本数据流为 `provider usage → cache hit/miss 一致性检查 → endpoint/model 价目匹配 → micro-USD 向上取整 → ModelAttempt audit → Research attestation`。价目不匹配或 usage 不完整时流程停在“成本未知”，不会用 0 继续进入收益比较。工具计数同样来自请求能力边界：请求没有 tools 才能证明为 0。

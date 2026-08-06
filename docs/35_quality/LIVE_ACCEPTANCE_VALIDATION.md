@@ -402,3 +402,11 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 真实 Research 预注册还暴露一个被 fake receipt 遮住的生产缺陷：`ResearchExecutionProfileV1` 只有一个共享 `prompt_digest`，paired runner 又要求 baseline 和 selected receipt 都等于它；但 PlanningSearch 改变 source set 后，两只 arm 的真实渲染提示必然不同。新规格因此在 `ResearchArmPlanV1` 上分别持久绑定实际 arm prompt digest，执行器按 arm 精确校验；旧 0107 RunSpec 缺字段时继续回落到历史共享 digest，保证 canonical JSON 与 exact replay 不漂移。codec、operation replay 和 SQLite reopen 均覆盖该字段，25 项相邻回归通过。
 
 当前状态为 `CODE_REMEDIATED_REAL_24_PAIR_PENDING`：尚未发起 24 组独立外部模型双臂、隐藏 verifier 和 bootstrap cohort，也没有写入 benefit-eligible 原始收据。后续失败样本会保留在 append-only ledger，不得用机械测试或 scripted replay 替代。
+
+## 2026-08-06 A15 DeepSeek Research 成本证明
+
+当前官方 DeepSeek V4 API 返回 `prompt_cache_hit_tokens`、`prompt_cache_miss_tokens`、`prompt_tokens`、`completion_tokens` 和 `total_tokens`，但不直接返回本次货币金额。D20c 原适配器要求 `model_cost_micros` 和 `tool_call_count`，所以此前普通成功调用仍不能成为 Research benefit evidence。
+
+生产 provider adapter 现只在 HTTPS 官方 `api.deepseek.com`、模型为 `deepseek-v4-flash`／`deepseek-v4-pro`、cache hit + miss 与 prompt token 完全相等时，应用版本化 `deepseek-v4-usd-2026-07-24` 价目并向上取整到 micro-USD；价目来源为 `https://api-docs.deepseek.com/quick_start/pricing`。请求协议没有暴露 tools 时，`tool_call_count=0` 是请求结构事实。代理地址、未知模型、缺字段或计数不一致都不会得到成本值。
+
+在当前 A15 SQLite、真实 production composition 与 canonical `ModelAttemptService` 上执行一次全新 Research 探针，结果为 `deepseek-v4-flash`、51 total tokens、9 micro-USD、828 ms provider latency、844 ms total latency、外部 transport identity 有效、工具调用 0，最终 model receipt 的 `benefit_eligible=true`。该探针只关闭成本／usage attestation 阻断，不是 Research 配对或收益结果。

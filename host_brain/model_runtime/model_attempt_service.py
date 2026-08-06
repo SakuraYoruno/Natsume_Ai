@@ -222,6 +222,11 @@ def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict
     external = metadata.get("transport_external")
     if isinstance(external, bool):
         result["transport_external"] = external
+    cost_policy_digest = str(metadata.get("model_cost_policy_digest") or "").strip().lower()
+    if len(cost_policy_digest) == 64 and all(
+        char in "0123456789abcdef" for char in cost_policy_digest
+    ):
+        result["model_cost_policy_digest"] = cost_policy_digest
     return result
 
 
