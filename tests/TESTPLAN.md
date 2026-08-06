@@ -316,3 +316,15 @@ python scripts/runtime/run_gateway_outbox_network_recovery_acceptance.py `
 ```
 
 Canary 必须使用完整 migration catalog、真实临时 SQLite、生产 `GatewayDeliveryRuntime`／`OutboundDispatcher`／`QQAdapter` 和真实 loopback HTTP socket。适配器选择失败发生在 `dispatch_started` 前，可以有界重试；OneBot peer 可用后只允许一次 HTTP。若 peer 已读取请求但丢失响应，则 Outbox 必须进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN`／DLQ，重复提交、进程重启和无 reconciliation 的 operator replay 均不得再次发送。Loopback peer 不是 QQ／微信客户端，其成功响应或本地 DLQ 都不能作为物理平台送达证明。
+
+Digital Life 情感作用域、隐私和有界重放的独立命令为：
+
+```powershell
+python -m pytest -q tests/integration/test_digital_life_scope_privacy_acceptance.py
+python scripts/runtime/run_digital_life_scope_privacy_acceptance.py `
+  --run-id <acceptance-run-id> `
+  --event-count 1001 `
+  --receipt <isolated-evidence-path>
+```
+
+正式收据必须使用完整 migration catalog、真实临时 SQLite、生产 `AffectFusionService`／`LifeCommandService`／`LifeCommandRepository`。四组 scope 需要同时改变 user、workspace 和 session，并确认主 scope 的 1001 条事件不会改变其他 scope digest；raw audio/image/video observation 应在 fusion 被省略，绕过 fusion 的 raw command 也必须被 reducer 拒绝。扫描范围包括 affective command、Life event、canonical snapshot 和 projection intent；不得出现原始正文 sentinel 或禁止字段。最终 snapshot 最多 4 个 active episode、8 个 component、每个 episode 16 个 evidence ref，并在新 Repository 重启重放后得到完全相同 digest。

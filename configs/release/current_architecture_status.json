@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_GATEWAY_OUTBOX_NETWORK_RECOVERY_PASS_CONTINUING_FAILURE_MATRIX",
+  "commit_scope": "A15_DIGITAL_LIFE_SCOPE_PRIVACY_CANARY_CODE_READY_CONTINUING_FAILURE_MATRIX",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -390,6 +390,7 @@
     "gateway_outbox_network_recovery": "PASS_REAL_SQLITE_LOOPBACK_HTTP_SAFE_RETRY_EXACT_ONCE_RESPONSE_LOSS_FAIL_CLOSED",
     "gateway_outbox_network_recovery_evidence_sha256": "c878cda4f2b3d428f8bbad04b55a03f72be6f8ac4b43e8a923435af20c5c17b2",
     "gateway_physical_platform_delivery": "NOT_TESTED_PLATFORM_CLIENT_UNAVAILABLE",
+    "digital_life_scope_privacy_bounded_replay": "CODE_READY_REAL_SQLITE_TEST_PENDING_COMMITTED_SHA_RECEIPT",
     "docker_host_obs_monitor_gateway_full_stack": "RUNNING_CURRENT_SHA_DOCKER_RESTORED_PERSISTENCE_PASS_MONITOR_TEXT_VOICE_PASS_VTS_PENDING_EXTERNAL",
     "real_provider_performance": "INCOMPLETE",
     "fixed_72_scenarios": "EXECUTION_SPEC_READY_STABLE_SUBJECT_ASSERTED_48_GATEWAY_TEXT_24_REAL_DRIVER_REQUIRED_MEASUREMENT_PENDING",

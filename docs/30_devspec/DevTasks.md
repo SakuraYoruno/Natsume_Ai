@@ -80,8 +80,8 @@
 
 - [ ] 在真实运行中观察兼容情感 writer 使用量，确认旧 writer 为 0。
 - [ ] 验证 profile apply → canary → rollback 会改变并恢复下一轮文本、TTS 和 Avatar。
-- [ ] 验证长期运行状态有界，原始音视频和用户正文不会进入 affect journal。
-- [ ] 验证跨用户、workspace、session 泄漏为 0。
+- [ ] 验证长期运行状态有界，原始音视频和用户正文不会进入 affect journal。隔离真实 SQLite／生产 AffectFusion canary 已实现，待提交后以 1001 条事件和重启收据绑定当前 SHA。
+- [ ] 验证跨用户、workspace、session 泄漏为 0。四组交叉作用域 canary 已实现，待提交后绑定当前 SHA 收据。
 
 ## 完成定义
 
