@@ -307,4 +307,6 @@ non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_
 
 修正后只有 Host `source_instance_id` 切换会强制写 lineage，同一实例 revision 进入小时检查点；历史仍足以保存全部退役实例并拒绝 replay。新文档首快照继续保留，不被误判为刷新写放大。journal rebuild 可以有界恢复到上一个检查点，且通过 state signature 拒绝未写 journal 的并发 current 变化；29 项重建／检查点／Host lineage 定向测试通过。
 
-收窄后的检查点代码第二次真实重启前仍标记 `CODE_REMEDIATED_REAL_RETEST_PENDING`。既有 1.93 GB 历史不会被破坏性改写或冒充已经缩小；后续按“既存且未到期文档不新增、实例切换与新文档首快照允许”的精确口径验证 Monitor freshness 和写入边界，不对 canonical Life／Task／Gateway 数据做清理。
+`59efa3714` 加载后的第二次真实复验通过。Obs PID 45628 与未重启的 Host、Nginx Monitor 在 49.084 秒窗口前后均返回 HTTP 200；192 个 current 文档的 `updated_ts_ms` 和 freshness 继续推进，31 个 source cursor 变化。journal 仅新增 1 行、6,872 bytes，经窗口前身份集合核对为新 Scheduler TaskGraph 的首个必要检查点；既存未到期文档的刷新历史为 0，同一 Host 实例 revision 历史为 0，SQLite page count 增量为 0。脱敏报告 `obs-projection-hourly-checkpoint-v2-1785987656774.json` 的 SHA-256 为 `92baff1b2117e5d95a47e534a2c908642b47be4d7db56e9f144beae663f563e4`。
+
+因此 OBS 派生 history 的“大载荷重复保存”和“轮询逐条追加”两项均按真实进程关闭；这不等于整体延迟、长期 SQLite maintenance 或既有 1.93 GB 历史已经完成。旧历史继续只读保留，不做破坏性清理，也不对 canonical Life／Task／Gateway 数据改写。

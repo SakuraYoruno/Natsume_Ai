@@ -79,7 +79,7 @@
 - [x] 验证 Sidecar 停止隔离：显式空 RuntimeRoot 不再按 18082／18180 全局兜底，主 Obs 与 Nginx PID 均保持不变且健康端点继续为 200。
 - [x] 验证分段 TTS 合成失败会结算父命令并取消兄弟分段，打断后队列归零。
 - [x] 验证 VTS 人工授权等待不会触发无界自动重连或句柄增长。
-- [ ] 关闭 OBS 派生 projection journal 写放大。`636252264` 真实 30 秒样本把 2,996,490 bytes 原始公开载荷压到 410,858 bytes，降低 86.3%。一小时恢复检查点首轮 39.1 秒真实复验中 135 个 current 文档持续更新，但仍新增 7 条同一 Host 实例 revision lineage 和 1 条新 TaskGraph 首快照，故如实判为 `FAIL`；报告 SHA-256 为 `ad4d8c178a66e0040b147b1c8fa6c6129be443b954fbc73bfecbdcb544a7b00c`。代码现只在 Host `source_instance_id` 切换时强制写 lineage，同实例 revision 限频，新文档首快照仍保留；29 项重建／检查点／Host lineage 定向测试通过，第二次真实 OBS 重启复验完成前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+- [x] 关闭 OBS 派生 projection journal 写放大。`636252264` 真实 30 秒样本把 2,996,490 bytes 原始公开载荷压到 410,858 bytes，降低 86.3%。一小时检查点首轮如实暴露 7 条同实例 lineage revision 误写，失败报告 SHA-256 为 `ad4d8c178a66e0040b147b1c8fa6c6129be443b954fbc73bfecbdcb544a7b00c`；收窄到只强制 `source_instance_id` 切换后，第二轮 49.084 秒窗口有 192 个 current 文档刷新、31 个 source cursor 推进，既存未到期文档和同实例 lineage 新增历史均为 0，唯一新行是新 TaskGraph 的 6,872-byte 必要首快照，Host／OBS／Monitor 前后均为 200，page count 增量为 0。报告 SHA-256 为 `92baff1b2117e5d95a47e534a2c908642b47be4d7db56e9f144beae663f563e4`；既有历史未做破坏性清理。
 
 ## P1：情感生命清零项
 
