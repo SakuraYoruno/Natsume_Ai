@@ -187,3 +187,5 @@ Code 收益队列复用已有 `CodePlanningDomain → GoalPlanningService → Co
 模型输出只作为进程内单文件 replacement 存活。worktree 的路径策略最多允许修改一个目标 Python 文件；隐藏行为测试与 AST 静态测试由两个独立 pytest 子进程执行，最后由既有 cleanup receipt 证明 protected source、private bare 和 worktree 已收口。Code/cohort ledger 只记录摘要、外部 transport、usage/cost、测试、diff 与清理证据。该边界仍明确是 trusted-process worktree，不宣称 OS/container 或网络隔离，也不会自动影响生产策略。
 
 外部 attestation 复用同一 canonical ModelAttempt 边界，但 Code 请求保留自己的 `CODE_BENCHMARK` scene 和通用 planning metadata，不再伪装成 Research 请求。runner 的实际 route timeout 默认 30 秒、外层 request deadline 为 90 秒；两者都进入 execution profile digest，若操作者更改 timeout，cohort identity 也随之改变，不能与旧证据混用。
+
+Code prompt 还拥有独立、server-owned generation profile：temperature 0、top-p 0.8、max tokens 600、thinking disabled。它不是调用方可覆盖的 metadata，而由 production route catalog 根据 prompt identity 注入；execution profile 同时绑定这些值，避免 provider 默认推理预算变化后仍沿用旧实验身份。

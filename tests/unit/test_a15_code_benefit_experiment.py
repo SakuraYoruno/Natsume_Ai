@@ -7,6 +7,7 @@ import pytest
 
 from host_brain.model_runtime.live_prompts import (
     CODE_BENEFIT_EXECUTION_PROMPT_ID,
+    CODE_BENEFIT_GENERATION_PARAMETERS,
     build_live_production_prompt_registry,
 )
 from host_brain.planning_search.code_benefit_experiment import (
@@ -134,3 +135,9 @@ def test_execution_profile_binds_the_code_route_timeout() -> None:
     )
     with pytest.raises(CodeBenefitExperimentError, match="timeout"):
         code_execution_profile_digest(model_timeout_ms=9_999)
+    assert dict(CODE_BENEFIT_GENERATION_PARAMETERS) == {
+        "temperature": 0.0,
+        "top_p": 0.8,
+        "max_tokens": 600,
+        "thinking_mode": "disabled",
+    }

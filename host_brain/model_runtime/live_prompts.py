@@ -8,6 +8,7 @@ they cross the model-attempt boundary.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
 
 from host_brain.model_runtime.contracts import OutputContract
@@ -90,6 +91,14 @@ STARTUP_MODEL_WARMUP_PROMPT_ID = "startup.model_warmup.text"
 RESEARCH_EXECUTION_PROMPT_ID = "research.execution.citation.json"
 RESEARCH_QUALITY_VERIFIER_PROMPT_ID = "research.quality.hidden.json"
 CODE_BENEFIT_EXECUTION_PROMPT_ID = "code.benefit.execution.json"
+CODE_BENEFIT_GENERATION_PARAMETERS = MappingProxyType(
+    {
+        "temperature": 0.0,
+        "top_p": 0.8,
+        "max_tokens": 600,
+        "thinking_mode": "disabled",
+    }
+)
 
 
 def _compiled_messages(values: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
@@ -252,6 +261,7 @@ __all__ = [
     "RESEARCH_EXECUTION_PROMPT_ID",
     "RESEARCH_QUALITY_VERIFIER_PROMPT_ID",
     "CODE_BENEFIT_EXECUTION_PROMPT_ID",
+    "CODE_BENEFIT_GENERATION_PARAMETERS",
     "EMOTION_REACTIVITY_PROMPT_ID",
     "SURFACE_MAIN_JSON_PROMPT_ID",
     "SURFACE_MAIN_TEXT_PROMPT_ID",

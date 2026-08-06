@@ -416,3 +416,5 @@ Research hidden verifier 回归必须证明：新鲜 paired run 才提供进程�
 Code 固定队列 dry-run 必须加载全部 20 题并从同一配置生成确定性 Git commit，断言 baseline 未进入 `code.patch.safe`、selected 20/20 实际触发条件 MCTS 并选择 safe path、两臂 virtual state digest 相同，且外部请求和 worktree 执行均为 0。真实执行必须在第一条模型调用前预注册 workload/RunSpec，由 owner 随机冻结 arm 顺序；每只 arm 使用独立 canonical external attempt、fresh detached worktree、隐藏 pytest 和静态 pytest。终态报告还必须断言 provider/model/budget 一致、源码和隐藏 cases 不落账本、protected source 未改变、worktree 清理完成且 production influence 为 false。dry-run 或 scripted executor 不能计入 20 题收益。
 
 Code 外部请求必须携带 `CODE_BENCHMARK` scene；共享 attestation adapter 的 Research 默认 metadata 不得被改变。runner 的 route timeout 必须位于 10～90 秒内，并与 90 秒 request deadline 一起进入 execution profile digest 和外层 receipt。任何 timeout 变化都必须形成不同 profile identity；provider timeout 的失败 audit 必须保留，不能用同一 execution ID 盲目重试。
+
+production route catalog 必须为 `code.benefit.execution.json` 返回 temperature 0、top-p 0.8、max tokens 600、thinking disabled，且这些参数必须进入 execution profile digest。首轮完整 cohort 中途失败后，后续修复必须升级 cohort/profile identity并完整重跑；不得只拼接失败前的通过成员。

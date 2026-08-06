@@ -67,7 +67,10 @@
 - [x] 冻结并实现 Code 20 题真实收益入口：20/20 baseline 关闭 L3、20/20 selected 由公共 Code PlanningSearch AUTO 条件 MCTS 选择 safe path；确定性源提交、随机 arm 顺序、独立外部请求、fresh detached worktree、隐藏 pytest、静态 pytest、清理收据和 cohort ledger 均已接线。dry-run 外部调用与 worktree 执行为 0，50 项相邻回归通过。
 - [x] 在 `e3094cfbd` 上完成 Code 单题真实预检：v1/v2 的 selected 均成功、baseline 均在 8 秒 provider 上限超时，失败收据保留；v3 显式使用 30 秒上限后 baseline 隐藏测试失败、selected 通过，状态 `PASS_PREFLIGHT_ONLY`，报告 SHA-256 为 `147da7fffe5937379ed8da80c53127ac22a1a4dcfa0432ca584a807cfaa269a4`。
 - [x] 修复预检发现的路由边界：Code 不再冒用最终 `RESEARCH` scene，改用 `CODE_BENCHMARK`；runner 默认模型上限 30 秒并把 scene、timeout 与 90 秒 request deadline 绑定进 execution profile 和外层收据，Research 默认调用保持兼容；57 项相邻回归和修复后 20/20 dry-run 通过。
-- [ ] 在路由修复后的新 SHA 上重跑 Code 单题预检与完整 20 题；没有合格最终 cohort 前不得把旧预检或 dry-run 计为最终收益。
+- [x] 在路由修复后的 `926d643c6` 上重跑单题：arm 顺序为 baseline→selected，baseline 隐藏测试失败、selected 通过，两臂静态测试通过，DeepSeek 外部 attestation 完整，状态 `PASS_PREFLIGHT_ONLY`，文件 SHA-256 为 `63559c45967520bddc45ac98104b24cb34e4af4c0fb945efe7c9bcd0214a66f1`。
+- [x] 保留首轮完整队列失败：前 5/20 题均为 baseline 失败、selected 通过，第 6 题 baseline 在 30,015 ms 触发 `PROVIDER_TIMEOUT`，整轮为 `FAIL`，文件 SHA-256 为 `272638f91ffbb5b10a449ce725e25750b6de3ab80a7aec383b917641b5ecce8d`。
+- [x] 将固定队列升级为 `2026-08-06-v2`，为 Code prompt 冻结 temperature 0、top-p 0.8、max tokens 600、thinking disabled 的 JSON generation profile，并把该 profile 纳入 execution digest；v1 失败成员不覆盖、不挑选。98 项相邻回归和 v2 20/20 dry-run 通过，profile digest 为 `cdedce854508661e46540b011eb9c7005519eb23cf89f7217e866537cfde5302`。
+- [ ] 在 generation 修复后的新 SHA 上重跑 v2 单题预检与完整 20 题；没有合格最终 cohort 前不得把旧预检、部分成员或 dry-run 计为最终收益。
 - [ ] 运行 Pentest 30 次授权实验；Code／Pentest 没有真实最终 cohort 前，PlanningSearch 三域总状态保持 `PARTIAL_RESEARCH_PASS_CODE_PENTEST_PENDING`。
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。

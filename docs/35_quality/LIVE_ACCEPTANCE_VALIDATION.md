@@ -444,3 +444,9 @@ paired terminal ledger 不能保存回答正文，但真实收益又必须评估
 `e3094cfbd` 的真实预检保留了三次互不覆盖的运行。v1 与 v2 都是 selected 请求成功、baseline 在 8,000 ms 发生 `PROVIDER_TIMEOUT`，分别以 `FAIL` 写入外层收据和 canonical model audit；v3 通过隔离进程显式设为 30,000 ms 后完成两臂，baseline 隐藏测试失败、selected 隐藏测试通过，静态检查均由受控 worktree 执行，状态为 `PASS_PREFLIGHT_ONLY`。v3 文件 SHA-256 为 `147da7fffe5937379ed8da80c53127ac22a1a4dcfa0432ca584a807cfaa269a4`。
 
 该结果揭示的不是模型凭据故障，而是 Code benchmark 误用了 `RESEARCH` scene，并继承面向短请求的全局 8 秒上限。修复后 Code 请求使用独立 `CODE_BENCHMARK` scene；runner 显式拥有 30 秒默认 route timeout，并把 scene、route timeout 和 90 秒 request deadline 纳入 execution profile digest 与脱敏收据。Research 的默认 scene、metadata 和行为保持不变；57 项 Code／attestation／ledger／SQLite／文档回归与修复后 20/20 dry-run 通过。由于修复改变了代码与 profile identity，v3 只作为缺陷复现／修复依据；最终 20 题必须在修复后的新 commit SHA 上重新预检和执行。
+
+路由修复提交 `926d643c6` 的新单题预检不再需要手工环境覆盖：实际 scene 为 `CODE_BENCHMARK`、timeout 为 30,000 ms，随机顺序 baseline→selected；baseline 隐藏测试失败、selected 通过，两臂静态检查通过，状态 `PASS_PREFLIGHT_ONLY`。文件 SHA-256 为 `63559c45967520bddc45ac98104b24cb34e4af4c0fb945efe7c9bcd0214a66f1`。
+
+随后首轮 20 题完整运行没有被包装成通过。前 5 题都得到 baseline 失败、selected 通过；第 6 题 baseline 在 30,015 ms 触发真实 `PROVIDER_TIMEOUT`，完成数停在 5/20，状态 `FAIL`，文件 SHA-256 为 `272638f91ffbb5b10a449ce725e25750b6de3ab80a7aec383b917641b5ecce8d`。已完成成员、失败 RunSpec 和 canonical model audit 全部保留。
+
+失败进一步暴露新 Code prompt 没有 production generation profile，因而仍继承 provider 宽泛默认，简单错误规格也可能耗尽隐藏推理时间。固定队列升级为 `2026-08-06-v2`；Code prompt 现冻结 temperature 0、top-p 0.8、max tokens 600、`thinking_mode=disabled`，并把 generation 参数纳入 `a15-code-full-file-json-v2` execution profile digest。98 项相邻回归和 v2 20/20 dry-run 通过；配置摘要为 `170bc196add828676c00b6af79d98153dbc09f48c67227be78b0952cfa0d8cea`，profile digest 为 `cdedce854508661e46540b011eb9c7005519eb23cf89f7217e866537cfde5302`。v2 必须使用新 commit、新 namespace 和完整 20 题重新预注册，禁止复用或挑选 v1 的 5 个成功成员。

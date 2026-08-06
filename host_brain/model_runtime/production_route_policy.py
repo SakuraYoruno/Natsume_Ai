@@ -16,6 +16,8 @@ from host_brain.model_runtime.contracts import (
 )
 from host_brain.model_runtime.production_provider_adapters import production_adapter_id
 from host_brain.model_runtime.live_prompts import (
+    CODE_BENEFIT_EXECUTION_PROMPT_ID,
+    CODE_BENEFIT_GENERATION_PARAMETERS,
     GRAPH_NODE_PROMPT_IDS,
     RESEARCH_EXECUTION_PROMPT_ID,
     RESEARCH_QUALITY_VERIFIER_PROMPT_ID,
@@ -92,6 +94,7 @@ _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
 }
 
 _PROMPT_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
+    CODE_BENEFIT_EXECUTION_PROMPT_ID: dict(CODE_BENEFIT_GENERATION_PARAMETERS),
     RESEARCH_EXECUTION_PROMPT_ID: {
         "temperature": 0.1,
         "top_p": 0.8,

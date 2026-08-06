@@ -20,7 +20,10 @@ from host_brain.contracts.planning_search.code_benefit_cohort import (
     CodeArmBenefitEvidenceV1,
     CodeCohortPairedEvidenceV1,
 )
-from host_brain.model_runtime.live_prompts import CODE_BENEFIT_EXECUTION_PROMPT_ID
+from host_brain.model_runtime.live_prompts import (
+    CODE_BENEFIT_EXECUTION_PROMPT_ID,
+    CODE_BENEFIT_GENERATION_PARAMETERS,
+)
 from host_brain.orchestration.goal_planning import GoalPlanningRequest, GoalPlanningService
 from host_brain.persistence.code_benchmark_ledger_repository import (
     SQLiteCodeHistoricalBenchmarkLedger,
@@ -67,7 +70,7 @@ from host_brain.planning_search.contracts import MCTSMode, PlanningGoal, SearchB
 
 
 FIXED_CODE_COHORT_SCHEMA = "natsume.code-benefit-fixed-cohort.v1"
-CODE_EXECUTION_PROFILE_ID = "a15-code-full-file-json-v1"
+CODE_EXECUTION_PROFILE_ID = "a15-code-full-file-json-v2"
 CODE_BENCHMARK_SCENE_TYPE = "CODE_BENCHMARK"
 DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS = 30_000
 CODE_BENCHMARK_REQUEST_DEADLINE_MS = 90_000
@@ -564,6 +567,7 @@ def code_execution_profile_digest(
             "scene_type": CODE_BENCHMARK_SCENE_TYPE,
             "model_timeout_ms": normalized_timeout_ms,
             "request_deadline_ms": CODE_BENCHMARK_REQUEST_DEADLINE_MS,
+            "generation_parameters": dict(CODE_BENEFIT_GENERATION_PARAMETERS),
             "system": _MODEL_SYSTEM,
             "output": {"content": "complete Python source"},
             "cache_policy": "NONE",
