@@ -35,7 +35,17 @@ SUPPORTED_PRODUCTION_PROVIDERS = frozenset(
     {"openai", "openai_compatible", "gemini", "deepseek", "codex", "minimax"}
 )
 _GENERATION_KEYS = frozenset(
-    {"temperature", "top_p", "top_k", "max_tokens", "stop", "seed", "presence_penalty", "frequency_penalty"}
+    {
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "seed",
+        "presence_penalty",
+        "frequency_penalty",
+        "thinking_mode",
+    }
 )
 
 
@@ -87,6 +97,13 @@ def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
             "unsupported generation parameters: " + ", ".join(sorted(str(item) for item in unknown))
         )
     params = {str(key): value for key, value in source.items()}
+    if "thinking_mode" in params:
+        thinking_mode = str(params["thinking_mode"] or "").strip().lower()
+        if thinking_mode not in {"enabled", "disabled"}:
+            raise ProductionProviderConfigurationError(
+                "thinking_mode must be enabled or disabled"
+            )
+        params["thinking_mode"] = thinking_mode
     guard = request.model_budget_guard
     if guard is None:
         return params
@@ -103,9 +120,28 @@ def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[st
     """Keep the hard cap internal to the first-party transport adapter."""
 
     params = _generation_parameters(request)
+    if str(request.target.provider or "").strip().lower() != "deepseek":
+        # ``thinking_mode`` is provider-neutral route metadata.  It must never
+        # leak as an unsupported request field to another provider.
+        params.pop("thinking_mode", None)
     guard = request.model_budget_guard
     if guard is not None:
         params["_natsume_hard_max_output_tokens"] = guard.max_output_tokens
+    return params
+
+
+def _provider_payload_generation_parameters(
+    request: ProviderAttemptRequest,
+) -> dict[str, Any]:
+    """Map typed route hints to an injected provider's public payload."""
+
+    params = _generation_parameters(request)
+    thinking_mode = params.pop("thinking_mode", None)
+    if (
+        thinking_mode is not None
+        and str(request.target.provider or "").strip().lower() == "deepseek"
+    ):
+        params["thinking"] = {"type": thinking_mode}
     return params
 
 
@@ -134,7 +170,7 @@ def production_provider_payload(
     response_format = request.prompt.output_contract.response_format()
     if response_format is not None:
         payload["response_format"] = response_format
-    payload.update(_generation_parameters(request))
+    payload.update(_provider_payload_generation_parameters(request))
     if require_final_usage:
         # This is an explicit transport capability request, not a token/cost
         # estimate.  The binding must still return a terminal response with

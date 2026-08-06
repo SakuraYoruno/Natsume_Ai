@@ -272,3 +272,9 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 本地回归覆盖 ModelAttempt、server-owned route catalog、原生情感流、冻结 Chat executor、Surface main chain、Universal Host Runtime 与 HTTP Skill／Chat 路由，共 129 项通过；`compileall`、JSON 解析和 `git diff --check` 同时通过。这里的本地结果只证明接线与回归边界，不能替代下一次真实 DeepSeek／Gateway／Edge 运行。
 
 `8cbdadb7d` 加载后的首轮真实复验确认模型已经切换到 `deepseek-v4-flash`，webhook 63 ms、整轮 11,062 ms；但两个 provider attempt 都以约 3 秒返回真实 usage 后 `finish_reason=length`，192 个 completion tokens 全部落在 `reasoning_content`，可发布 content 为空，最终以 `OUTPUT_SCHEMA_INVALID`／`MODEL_BUDGET_GUARD_REJECTED` 停止。报告 `dl-live-1785979370271.json` 的 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。该证据说明路由和 fail-fast 已生效，失败来自纯短文本上限与“中文正文 + 日语 TTS 配对 JSON”不兼容。场景上限现提高到 640 tokens，仍由单 attempt 15 秒 timeout 和 Task 总预算双重约束；新修复再次真实复验前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`555beb8a7` 加载后的第二轮报告为 `dl-live-1785979799452.json`，SHA-256 `571e2e356df59e258d1eb608b37ca3be888b51de955d193269a5f9e9be8befd1`。第一轮 Flash 在 8,875 ms 返回 623 completion tokens，生成“唔，不顺的日子是这样的。不过你还能说出来，说明还没糟透嘛。”并完成 TaskGraph／Acceptance，Host 总耗时 15,795 ms。第二轮则连续两次各耗尽 640 completion tokens，provider latency 分别为 9,687／9,719 ms，正文仍为空，图以 `MODEL_BUDGET_GUARD_REJECTED` 失败，Host 总耗时 24,270 ms。提高 cap 因此只能偶然成功，不能作为稳定修复。
+
+代码现把 `thinking_mode` 建成只由服务端 route catalog 冻结的枚举，普通 `CHAT_SURFACE_REALTIME` 设为 `disabled`；只有 DeepSeek provider adapter 会把它映射为公开请求字段 `thinking.type=disabled`，其他 provider 删除该提示。Plan、Research 与深路径候选保持原有模型场景和思考策略。该改动不降低 schema、usage、Task budget、Acceptance 或 Voice receipt 要求；新 SHA 重启 Host 并完成同一三轮真实复验前，状态为 `CODE_REMEDIATED_NON_THINKING_REAL_RETEST_PENDING`。
+
+本地相邻回归覆盖 ModelAttempt、route catalog、provider transport、LLM payload、原生情感流、Surface main chain、HTTP Chat／Skill 与 Universal Runtime，共 193 项通过。该计数只作为代码接线证据，不能替代真实 DeepSeek 请求和远端 Voice receipt。

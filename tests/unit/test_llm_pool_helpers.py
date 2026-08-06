@@ -548,6 +548,40 @@ def test_openai_compat_payload_keeps_other_model_token_cap() -> None:
     assert payload["max_tokens"] == 220
 
 
+def test_openai_compat_payload_maps_typed_deepseek_thinking_mode() -> None:
+    payload = helpers._build_openai_compat_payload(
+        provider_name="deepseek",
+        model_id="deepseek-v4-flash",
+        messages=[{"role": "user", "content": "陪我说两句"}],
+        gen_params={"thinking_mode": "disabled", "max_tokens": 640},
+    )
+
+    assert payload["thinking"] == {"type": "disabled"}
+    assert "thinking_mode" not in payload
+
+
+def test_openai_compat_payload_does_not_leak_thinking_mode_to_other_provider() -> None:
+    payload = helpers._build_openai_compat_payload(
+        provider_name="gemini",
+        model_id="gemini-2.5-flash-lite",
+        messages=[{"role": "user", "content": "陪我说两句"}],
+        gen_params={"thinking_mode": "disabled", "max_tokens": 640},
+    )
+
+    assert "thinking" not in payload
+    assert "thinking_mode" not in payload
+
+
+def test_openai_compat_payload_rejects_invalid_thinking_mode() -> None:
+    with pytest.raises(ValueError, match="thinking_mode"):
+        helpers._build_openai_compat_payload(
+            provider_name="deepseek",
+            model_id="deepseek-v4-flash",
+            messages=[{"role": "user", "content": "陪我说两句"}],
+            gen_params={"thinking_mode": "sometimes"},
+        )
+
+
 def test_complete_prompt_with_pool_rejects_empty_prompt_before_provider_call() -> None:
     with pytest.raises(RuntimeError, match="empty llm prompt"):
         helpers.complete_prompt_with_pool_sync(

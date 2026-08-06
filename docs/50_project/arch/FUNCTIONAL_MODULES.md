@@ -38,7 +38,7 @@
 | 能力 | 主要实现 | 边界 |
 |---|---|---|
 | Surface 对话 | `host_brain/surface_runtime/` | 普通闲聊轻量执行 |
-| 模型路由 | `host_brain/model_runtime/` | 真实 provider、预算与降级 |
+| 模型路由 | `host_brain/model_runtime/` | 真实 provider、预算与降级；实时陪伴的 typed thinking hint 只在 DeepSeek adapter 边界映射 |
 | Life context | `surface_runtime/life_context.py` | 只读 canonical Life projection |
 | Memory grounding | `surface_runtime/memory_context.py`、`memory_grounding.py` | 只取必要摘要，不写 self affect |
 | 长期记忆 | `host_brain/memory/` | person 与 workspace namespace 分离 |

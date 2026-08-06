@@ -69,6 +69,8 @@ Ingress → observation/fusion → appraisal/fold → AffectiveTurnPlan
 
 该链只保留幂等交付、关系连续性和必要的错误证据。本地／HTTP 普通闲聊不创建复杂 TaskGraph；来自 Gateway 的聊天因为需要产生可恢复的外部回信，会编译为单节点受管图，由 Acceptance 生成唯一 delivery intent。它不会把整段日常对话升级成多节点任务规划。
 
+模型路由同样按体验分层：普通 Gateway 陪伴使用 `CHAT_SURFACE_REALTIME`／Tier B，并由服务端为支持该能力的 DeepSeek transport 显式关闭 thinking；Plan、Research 和深路径候选不继承该设置。`thinking_mode` 只存在于冻结的 route metadata，在 provider adapter 边界转换为供应商字段，其他 provider 会删除该提示而不是收到未知参数。
+
 ### 受管执行主链
 
 ```text

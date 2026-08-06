@@ -81,6 +81,71 @@ def test_route_boundary_normalizes_sdk_max_output_tokens_alias() -> None:
     }
 
 
+def test_route_boundary_normalizes_and_validates_thinking_mode() -> None:
+    decision = route_decision_from_graph_runtime(
+        _runtime(
+            provider_name="deepseek",
+            model_id="deepseek-v4-flash",
+            agent_gen_params={"thinking_mode": " DISABLED ", "max_tokens": 640},
+        ),
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+    )
+
+    assert decision.targets[0].metadata["generation_parameters"] == {
+        "thinking_mode": "disabled",
+        "max_tokens": 640,
+    }
+    with pytest.raises(RouteNotConfiguredError, match="thinking_mode"):
+        route_decision_from_graph_runtime(
+            _runtime(agent_gen_params={"thinking_mode": "sometimes"}),
+            scene_type="CHAT_SURFACE_REALTIME",
+            cognitive_tier="B",
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_id", "expected_thinking"),
+    (
+        ("deepseek", "deepseek-v4-flash", {"type": "disabled"}),
+        ("gemini", "gemini-test", None),
+    ),
+)
+def test_provider_payload_maps_thinking_mode_only_for_deepseek(
+    provider: str,
+    model_id: str,
+    expected_thinking: dict[str, str] | None,
+) -> None:
+    target = route_decision_from_graph_runtime(
+        _runtime(
+            provider_name=provider,
+            model_id=model_id,
+            agent_gen_params={"thinking_mode": "disabled", "max_tokens": 640},
+        ),
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id=f"request-thinking-{provider}",
+        attempt_id=f"attempt-thinking-{provider}",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    payload = production_provider_payload(request, stream=False)
+
+    assert "thinking_mode" not in payload
+    if expected_thinking is None:
+        assert "thinking" not in payload
+    else:
+        assert payload["thinking"] == expected_thinking
+
+
 def test_server_owned_tier_and_cloud_lanes_choose_route_without_request_hints(monkeypatch) -> None:
     monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_A_MODEL_ID", raising=False)
     monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_C_MODEL_ID", raising=False)

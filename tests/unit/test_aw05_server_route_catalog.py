@@ -157,6 +157,7 @@ def test_realtime_companion_uses_tier_b_without_surface_pro_override(monkeypatch
         prompt_id="surface.main_chain.live.json",
     )
     assert production_realtime["generation_parameters"]["max_tokens"] == 640
+    assert production_realtime["generation_parameters"]["thinking_mode"] == "disabled"
 
 
 def test_realtime_companion_accepts_dedicated_provider_override(monkeypatch) -> None:  # noqa: ANN001
