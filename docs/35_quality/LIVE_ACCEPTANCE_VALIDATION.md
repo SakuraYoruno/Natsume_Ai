@@ -432,3 +432,11 @@ paired terminal ledger 不能保存回答正文，但真实收益又必须评估
 重开 SQLite 后，权威表中有 24 条 registration、25 条 run spec、50 条 arm execution、25 条 terminal receipt、1 条 cohort registration、24 条 member evidence 和 1 条 cohort report。最终 report identity 为 `cohort_id=a15-research-benefit`、`cohort_version=2026-08-05-v1`、`spec_digest=829a05f75d89a5f6b25f4b538918010aefb3638cbe9199a21ec57024550cb8e6`；`benefit_eligible=true`、`proposal_eligible=true`，但 `production_influence_enabled=false`。冻结来源正文在 durable evidence 中命中为 0，数据库只保存摘要和机械证据。
 
 因此 Research 域由 `UNPROVEN` 提升为 `PASS_REAL_24_PAIRED_EXTERNAL`，且满足“至少一个非 Pentest 域通过后可提出 L3 promotion proposal”的必要条件；本次没有自动 promotion。Code 20 题与 Pentest 30 次仍未执行，PlanningSearch 三域总状态只能是 `PARTIAL_RESEARCH_PASS_CODE_PENTEST_PENDING`。
+
+## 2026-08-06 A15 Code 固定收益队列准备
+
+仓库新增 20 个固定小型 Python 修复任务。配置只冻结任务目标、错误次级证据、权威证据和隐藏输入输出；runner 在 acceptance 忽略目录中生成确定性的干净 Git 源提交。外部模型只看到当前源码、任务目标和 PlanningSearch 选中的证据，不接收隐藏 cases。baseline 使用同一 Code domain 的 `MCTSMode.NEVER`，selected 使用 AUTO 条件 L3；完整 dry-run 得到 20/20 baseline 未进入 safe patch、20/20 selected 触发 MCTS 并选择 safe patch、20/20 虚拟状态身份一致，外部请求 0、worktree 执行 0。
+
+真实 runner 会在任何外部调用前把 workload 与 paired RunSpec 预注册到现有 Code ledger；owner 先生成随机种子并逐题冻结 arm 顺序，再以同一 provider/model/budget 发起两次独立 canonical ModelAttempt。模型只返回目标文件的完整 JSON 源码，结果在进程内应用到两个全新 detached worktree；每只 arm 分别执行隐藏行为 pytest 和 AST 静态 pytest。受控 receipt 只保存 argv/output digest、退出码、耗时、diff、外部 usage/cost/transport 与清理证明，不持久模型源码或隐藏用例正文。终态 replay 没有模型正文时明确要求新 namespace，不会重复外部调用冒充恢复。
+
+当前状态为 `CODE_COMPLETE_REAL_PREFLIGHT_PENDING`。队列、随机执行顺序、sandbox、ledger、cohort evaluator、SQLite 集成和 prompt registry 相邻回归共 50 项通过；真实单题和 20 题尚未执行，因此 Code 收益仍为 `UNPROVEN`，PlanningSearch 三域总状态不变。

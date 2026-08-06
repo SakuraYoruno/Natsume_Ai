@@ -8,6 +8,8 @@ production influence.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from host_brain.planning_search.code_benchmark_ledger import (
     CodeBenchmarkRunReceipt,
     CodeBenchmarkRunSpec,
@@ -75,6 +77,7 @@ class ControlledCodeBenchmarkExperimentService:
         baseline_executor: CodeBenchmarkArmExecutor,
         selected_executor: CodeBenchmarkArmExecutor,
         verifier: ControlledCodeBenchmarkVerifier,
+        arm_order: Sequence[str] = ("BASELINE", "SELECTED"),
     ) -> CodeBenchmarkRunReceipt:
         if not isinstance(registration, CodeBenchmarkWorkloadRegistration):
             raise TypeError("registration must be CodeBenchmarkWorkloadRegistration")
@@ -131,6 +134,7 @@ class ControlledCodeBenchmarkExperimentService:
             baseline_executor=baseline_executor,
             selected_executor=selected_executor,
             verifier=verifier,
+            arm_order=arm_order,
         )
         self._require_controlled_receipts(run, "paired verification")
         receipt = CodeBenchmarkRunReceipt(spec=stored_spec, run=run)

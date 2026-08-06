@@ -350,3 +350,26 @@ flowchart LR
 固定 24 题在进入图中 `baseline source set`／`PlanningSearch selected path` 前共用同一三来源 snapshot。baseline 仅关闭 L3，search 使用 AUTO；两者的差异由公共搜索结果产生。期望覆盖点位于图外的隐藏 verifier 输入，不参与 source ranking 或正文生成。
 
 真实 A15 运行后，这条链路在 SQLite 中形成 24 registration、25 run spec（含预检）、50 arm execution、25 terminal receipt、24 cohort member 和 1 cohort report。24 题的质量提升、citation、成本、延迟与严重错误门槛全部通过；报告只把 `proposal_eligible` 置为 true，`production_influence_enabled` 仍为 false，因此“实验通过”和“生产切流”保持两件独立的事。
+
+## 12. Code PlanningSearch 配对数据流
+
+```mermaid
+flowchart LR
+    C["冻结 20 题配置"] --> G["确定性 Git 源提交"]
+    G --> B["baseline: MCTS NEVER"]
+    G --> S["selected: AUTO 条件 L3"]
+    B --> O["owner 随机冻结 arm 顺序"]
+    S --> O
+    O --> MB["独立外部模型请求 B"]
+    O --> MS["独立外部模型请求 S"]
+    MB --> WB["fresh detached worktree B"]
+    MS --> WS["fresh detached worktree S"]
+    WB --> HB["隐藏 pytest + 静态 pytest"]
+    WS --> HS["隐藏 pytest + 静态 pytest"]
+    HB --> L["cleanup-gated Code ledger"]
+    HS --> L
+    L --> R["20 题 cohort report"]
+    R --> P["proposal-only；生产影响 false"]
+```
+
+预注册必须发生在第一条外部请求之前；真实调用发生后若进程丢失模型正文，不能从摘要恢复源码或重复调用同一 execution identity。runner 只允许使用新 namespace 重新实验，并保留旧模型 audit／失败证据。隐藏 cases 不进入模型消息，模型 replacement 不进入 durable ledger；最终证据只绑定 response digest、attempt、provider/model、成本、两个 verifier receipt、diff 和 worktree cleanup。

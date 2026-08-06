@@ -179,3 +179,9 @@ Research 的货币成本不从 token 总数随意估算。Vault-backed provider 
 固定队列不是在测试代码里伪造 selected path。每题先把同一三来源 snapshot 交给公共 `GoalPlanningService`：NEVER 形成 secondary quick-answer baseline，AUTO 必须实际触发条件 L3 并选择 primary 与 independent。随后 source IDs 才解析为冻结正文和 citation options。expected points 不在 snapshot 或执行 prompt 中，只由独立隐藏评审读取，因此搜索器和执行模型不能直接看到评分答案。
 
 `1c9c2b2bd` 的 24 题真实队列已形成可重开 SQLite 验证的权威证据：质量均值提升 0.85416667、bootstrap 95% 下界 0.75、两臂 citation validity 均为 1.0、严重错误为 0、成本比 1.32215978、p95 延迟比 0.98756943。最终 report 允许提出 promotion proposal，但生产影响位仍为 false；搜索服务没有自行把 L3 切为生产 authority。Research 通过满足了非 Pentest 第二领域的必要收益条件，不代表 Code／Pentest 或 PlanningSearch 总体验收完成。
+
+## 13. PlanningSearch Code 的真实 worktree 边界
+
+Code 收益队列复用已有 `CodePlanningDomain → GoalPlanningService → CodeHistoricalBenchmarkSandbox → ControlledCodeBenchmarkVerifier → SQLiteCodeHistoricalBenchmarkLedger`，没有建立第二套搜索器或测试账本。20 个任务从一份配置生成同一确定性 Git 源提交；baseline 仅关闭 L3，selected 必须由 AUTO 条件 MCTS 选择 catalog 中的 safe patch。owner 随机冻结两臂执行顺序，两次模型请求和两个 detached worktree 均不共享输出、缓存或临时文件。
+
+模型输出只作为进程内单文件 replacement 存活。worktree 的路径策略最多允许修改一个目标 Python 文件；隐藏行为测试与 AST 静态测试由两个独立 pytest 子进程执行，最后由既有 cleanup receipt 证明 protected source、private bare 和 worktree 已收口。Code/cohort ledger 只记录摘要、外部 transport、usage/cost、测试、diff 与清理证据。该边界仍明确是 trusted-process worktree，不宣称 OS/container 或网络隔离，也不会自动影响生产策略。

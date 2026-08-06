@@ -249,6 +249,7 @@ class CodeHistoricalBenchmarkSandbox:
         baseline_executor: CodeBenchmarkArmExecutor,
         selected_executor: CodeBenchmarkArmExecutor,
         verifier: CodeBenchmarkVerifier,
+        arm_order: Sequence[str] = ("BASELINE", "SELECTED"),
     ) -> CodeHistoricalBenchmarkRun:
         """Execute two trusted arms from one commit and derive a shadow report.
 
@@ -267,6 +268,14 @@ class CodeHistoricalBenchmarkSandbox:
             selected_executor=selected_executor,
             verifier=verifier,
         )
+        normalized_arm_order = tuple(str(value or "").strip().upper() for value in arm_order)
+        if (
+            len(normalized_arm_order) != 2
+            or set(normalized_arm_order) != {"BASELINE", "SELECTED"}
+        ):
+            raise CodeBenchmarkSandboxError(
+                "arm_order must contain BASELINE and SELECTED exactly once"
+            )
         source_before = self._source_fingerprint()
         private_bare = self._source.private_bare_root / normalized_run_id
         run_root = self._source.worktree_root / normalized_run_id
@@ -298,24 +307,24 @@ class CodeHistoricalBenchmarkSandbox:
             )
             private_before = _git_refs_digest(private_bare)
             run_root.mkdir(mode=0o700)
-            baseline_evidence, baseline_outcome = self._run_arm(
-                private_bare=private_bare,
-                run_root=run_root,
-                arm=baseline,
-                path_policy=path_policy,
-                executor=baseline_executor,
-                verifier=verifier,
-                opened_targets=opened_targets,
-            )
-            selected_evidence, selected_outcome = self._run_arm(
-                private_bare=private_bare,
-                run_root=run_root,
-                arm=selected,
-                path_policy=path_policy,
-                executor=selected_executor,
-                verifier=verifier,
-                opened_targets=opened_targets,
-            )
+            arm_inputs = {
+                "BASELINE": (baseline, baseline_executor),
+                "SELECTED": (selected, selected_executor),
+            }
+            observed: dict[str, tuple[CodeBenchmarkArmEvidence, Any]] = {}
+            for role in normalized_arm_order:
+                arm, executor = arm_inputs[role]
+                observed[role] = self._run_arm(
+                    private_bare=private_bare,
+                    run_root=run_root,
+                    arm=arm,
+                    path_policy=path_policy,
+                    executor=executor,
+                    verifier=verifier,
+                    opened_targets=opened_targets,
+                )
+            baseline_evidence, baseline_outcome = observed["BASELINE"]
+            selected_evidence, selected_outcome = observed["SELECTED"]
             _assert_private_directory(
                 private_bare,
                 self._source.private_bare_root,

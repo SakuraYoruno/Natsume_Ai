@@ -412,3 +412,5 @@ Research hidden verifier 回归必须证明：新鲜 paired run 才提供进程�
 固定 Research 队列的无外部调用 Gate 必须加载全部 24 题并断言：至少三个 topic；同时含本地与 Web source kind；每题 baseline 只选 secondary；每题 selected 由 AUTO L3 选择 primary＋independent；两臂 rendered prompt digest 不同；source byte count 或 digest 被改动时在 planning 前失败。dry-run 的 `external_calls` 必须为 0，不能计入收益。
 
 `1c9c2b2bd` 已在真实 A15 SQLite 上完成该队列的单题预检和 24 题正式运行。正式报告 SHA-256 为 `eb17699c0f85b2b9b680f02f5ce1c716726e2f15f2bfd8b72cf437f6c7277894`：质量均值提升 0.85416667、bootstrap 95% 下界 0.75、citation validity 1.0、成本比 1.32215978、p95 延迟比 0.98756943、严重错误 0。后续回归必须继续检查 receipt digest 自校验、SQLite reopen、来源正文不落 durable ledger 和 `production_influence_enabled=false`；Code 20 题与 Pentest 30 次仍是独立未完成 Gate。
+
+Code 固定队列 dry-run 必须加载全部 20 题并从同一配置生成确定性 Git commit，断言 baseline 未进入 `code.patch.safe`、selected 20/20 实际触发条件 MCTS 并选择 safe path、两臂 virtual state digest 相同，且外部请求和 worktree 执行均为 0。真实执行必须在第一条模型调用前预注册 workload/RunSpec，由 owner 随机冻结 arm 顺序；每只 arm 使用独立 canonical external attempt、fresh detached worktree、隐藏 pytest 和静态 pytest。终态报告还必须断言 provider/model/budget 一致、源码和隐藏 cases 不落账本、protected source 未改变、worktree 清理完成且 production influence 为 false。dry-run 或 scripted executor 不能计入 20 题收益。
