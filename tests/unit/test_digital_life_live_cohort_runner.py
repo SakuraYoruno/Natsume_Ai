@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import sqlite3
 from pathlib import Path
 
@@ -128,6 +129,44 @@ def test_affect_writer_probe_fails_on_legacy_table_or_file_mutation(
     assert probe["legacy_table_deltas"]["bond_events"] == 1
     assert len(probe["changed_legacy_file_refs"]) == 1
     assert "default.json" not in str(probe)
+
+
+def test_affect_writer_probe_waits_for_background_relationship_convergence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _create_writer_probe_database(db_path)
+    before = live_cohort._affect_writer_snapshot(
+        db_path=db_path,
+        legacy_emotion_root=tmp_path / "missing-emotion",
+    )
+    partial = copy.deepcopy(before)
+    partial["canonical_tables"]["affective_life_event_v1"]["row_count"] += 1
+    complete = copy.deepcopy(partial)
+    complete["canonical_tables"]["relationship_life_event_v1"]["row_count"] += 1
+    snapshots = iter((partial, complete))
+    monkeypatch.setattr(
+        live_cohort,
+        "_affect_writer_snapshot",
+        lambda **_kwargs: next(snapshots),
+    )
+    monkeypatch.setattr(live_cohort.time, "sleep", lambda _seconds: None)
+
+    after, probe, settle = live_cohort._wait_for_affect_writer_probe(
+        before=before,
+        db_path=db_path,
+        outcomes=[{"turns": [_successful_turn()]}],
+        timeout_s=30,
+    )
+
+    assert after == complete
+    assert probe["status"] == (
+        "PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS"
+    )
+    assert settle["status"] == "CONVERGED"
+    assert settle["poll_count"] == 2
+    assert settle["included_in_turn_latency"] is False
 
 
 def test_live_execution_manifest_expands_to_72_without_sending_scenario_notes() -> None:

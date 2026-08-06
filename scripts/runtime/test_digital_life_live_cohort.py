@@ -60,6 +60,7 @@ DEFAULT_REPORT_DIR = ROOT / "artifacts" / "digital-life-live-cohort"
 DEFAULT_HMAC_ENV = "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET"
 DEFAULT_TEXT_EXPRESSION_WAIT_S = 0.0
 DEFAULT_VOICE_EXPRESSION_WAIT_S = 90.0
+DEFAULT_BACKGROUND_SETTLE_S = 30.0
 
 LEGACY_AFFECT_WRITER_TABLES = (
     "bond_events",
@@ -279,6 +280,49 @@ def _build_affect_writer_probe(
         "canonical_table_deltas": canonical_deltas,
         "failures": failures,
     }
+
+
+def _wait_for_affect_writer_probe(
+    *,
+    before: Mapping[str, Any],
+    db_path: Path,
+    outcomes: Sequence[Mapping[str, Any]],
+    timeout_s: float,
+    poll_interval_s: float = 1.0,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Wait only for canonical background projections, never for the reply."""
+
+    started = time.monotonic()
+    deadline = started + max(0.0, float(timeout_s))
+    polls = 0
+    while True:
+        polls += 1
+        after = _affect_writer_snapshot(db_path=db_path)
+        probe = _build_affect_writer_probe(
+            before=before,
+            after=after,
+            outcomes=outcomes,
+        )
+        failures = [str(item) for item in probe.get("failures") or ()]
+        recoverable = bool(failures) and all(
+            item.startswith("CANONICAL_WRITER_DID_NOT_ADVANCE:")
+            for item in failures
+        )
+        remaining_s = deadline - time.monotonic()
+        if probe.get("status") != "FAIL" or not recoverable or remaining_s <= 0:
+            waited_ms = int((time.monotonic() - started) * 1000)
+            return after, probe, {
+                "status": (
+                    "CONVERGED"
+                    if probe.get("status") != "FAIL"
+                    else "TIMEOUT_OR_NONRECOVERABLE_FAILURE"
+                ),
+                "timeout_s": max(0.0, float(timeout_s)),
+                "waited_ms": waited_ms,
+                "poll_count": polls,
+                "included_in_turn_latency": False,
+            }
+        time.sleep(min(max(0.01, float(poll_interval_s)), remaining_s))
 
 
 _MANIPULATION_PATTERNS = tuple(
@@ -1009,6 +1053,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "snapshot for text-only cohorts."
         ),
     )
+    parser.add_argument(
+        "--background-settle-s",
+        type=float,
+        default=DEFAULT_BACKGROUND_SETTLE_S,
+        help=(
+            "Post-cohort wait for canonical affect/relationship projections. "
+            "This is reported separately and never counted as turn latency."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1101,11 +1154,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         )
 
-    writer_probe_after = _affect_writer_snapshot(db_path=db_path)
-    affect_writer_probe = _build_affect_writer_probe(
+    _writer_probe_after, affect_writer_probe, background_convergence = (
+        _wait_for_affect_writer_probe(
         before=writer_probe_before,
-        after=writer_probe_after,
+        db_path=db_path,
         outcomes=outcomes,
+        timeout_s=max(0.0, float(args.background_settle_s)),
+        )
     )
 
     commit_sha = subprocess.check_output(
@@ -1126,6 +1181,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "delivery_evidence_scope": "GATEWAY_DURABLE_OUTBOX_INTAKE",
         "external_platform_delivery_status": "NOT_TESTED_BY_THIS_RUNNER",
         "relationship_subject_isolation": "FRESH_PER_RUN_CASE_TRAJECTORY",
+        "background_convergence": background_convergence,
         "human_review_status": "PENDING",
         "affect_writer_probe": affect_writer_probe,
         "outcomes": outcomes,

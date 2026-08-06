@@ -82,6 +82,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 报告逐轮保存 Gateway HTTP、Gateway→Host terminal、TaskGraph、模型 attempt、Surface commit 和 user-turn→Surface commit 的独立耗时。不得把 Expression 后处理轮询时间并入“首个文本可见”延迟，也不得用 TaskGraph `COMPLETED` 代替真实回复投递回执。
 
+由于 realtime Chat 在可见回复后异步提交 Life／Relationship projection，runner 在整个 cohort 结束后最多等待 30 秒 canonical writer 收敛，并把 `background_convergence.waited_ms` 单列；该等待不得写入任何 turn latency。只有“canonical writer 尚未前进”可以继续轮询，legacy writer 变化、inventory 缺失等非收敛类失败必须立即失败，禁止等待掩盖。
+
 报告 schema v2 还必须在 cohort 前后读取八张退役 affect writer 表、`~/.natsume/emotion/*.json` 的脱敏指纹，以及 `affective_life_event_v1`、`relationship_life_event_v1` 等五张 canonical 表。存在 accepted Gateway turn 时，任何旧表增量、旧文件新增／删除／变更、缺失 inventory 或 canonical Affective／Relationship 不前进都令 probe `FAIL`；没有 accepted turn 只能是 `NOT_ELIGIBLE`，不能用失败请求证明 writer 清零。
 
 当前正式样本绑定 `4f4008060`：3 个 accepted turn，八张退役表全为 `0→0`，4 个旧文件零变化；五张 canonical 表分别 +8／+6／+22／+3／+12。该收据关闭旧 writer 运行使用量，不替代 48 条盲测、profile 物理行为或长期 soak。
