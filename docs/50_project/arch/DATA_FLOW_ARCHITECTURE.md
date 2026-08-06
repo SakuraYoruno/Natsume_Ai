@@ -381,3 +381,5 @@ production route catalog 还按 `code.benefit.execution.json` 注入冻结的 no
 进入 Git sandbox 前，语义 run identity 会导出一个固定长度 filesystem digest。bare repo 与 detached worktree 只使用该短组件；ledger 仍保存完整 workload/run/receipt 绑定，从而同时满足 Windows 路径边界和可追踪性。
 
 两臂共享的 objective 不包含目标语义；差异只在 `PlanningSearch selected evidence`。隐藏 cases 位于模型数据流之外，因此 baseline 若通过只能来自其自身生成能力，而不能来自题名泄漏；v2 的泄漏收据被排除，v3 才重新进入收益测量。
+
+v3 的 20 条 member evidence 经 authority resolver 重开 Code terminal receipt 后写入 cohort ledger；seal 得到 pass-rate gain 1.0、静态与 diff-risk 不退化。report 的 proposal 位为 true、production influence 位为 false，后续 promotion 仍需独立 Review／策略切流。

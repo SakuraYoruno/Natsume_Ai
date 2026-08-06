@@ -195,3 +195,5 @@ Code prompt 还拥有独立、server-owned generation profile：temperature 0、
 filesystem identity 也与业务 identity 分离。Windows 下的 runtime directory 与 bare/worktree run component 只使用固定长度 SHA-256 前缀，避免深 acceptance 根目录触发路径上限；完整 commit、namespace、config 和 workload identity 仍由 receipt/ledger 绑定，短目录名不承担审计语义。
 
 benchmark objective 必须是中性的，不能把隐藏目标写进任务名称。v3 的 20 题共享同一 frozen objective；baseline 与 selected 的唯一语义差异来自 PlanningSearch 选中的 evidence。正确规则位于 selected evidence 和独立隐藏 verifier，baseline 不能从 objective、module 名或 cases 反推出答案。
+
+`3eaa5486b` 的生产接线已形成真实收益证据：20 题 selected 全部通过隐藏／静态测试，baseline 隐藏测试全部失败；40 个 canonical external request、40 个 fresh worktree 和 20 个 cohort member 可从 SQLite 重开。最终 report 只开放 promotion proposal，执行器与搜索服务没有自动取得 production influence。

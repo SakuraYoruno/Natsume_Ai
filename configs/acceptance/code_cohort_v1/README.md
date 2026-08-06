@@ -12,4 +12,4 @@
 - v1 完整运行在第 6 题遇到 provider timeout 后永久保留为失败证据；v2 冻结 `CODE_BENCHMARK` 的低温、600-token、non-thinking JSON generation profile，但预检暴露 objective 泄漏正确语义；v3 改用统一中性 objective，不覆盖或挑选旧成员。
 - durable workload registration 使用 `<固定题号>@<cohort_version>`，同题的新版本不会复用旧 ledger identity，也不会因 config drift 覆盖 v1。
 
-dry-run 只能证明队列、搜索路径和冻结源码可构造，不能作为收益证据。完整 PASS 仍要求 20 组真实外部模型请求、全新 worktree、隐藏测试、静态检查和 cohort 报告。
+dry-run 只能证明队列、搜索路径和冻结源码可构造，不能作为收益证据。`3eaa5486b` 的 v3 已完成 20 组真实双臂、40 个外部模型请求、40 个 fresh worktree 的隐藏／静态验证并得到 `PASS`；完整文件 SHA-256 为 `9c9938f15d303f5699debc60af5d7ebf09b417f70b4fd2824e8115cf12062170`，生产影响仍为 false。

@@ -424,3 +424,5 @@ Code 的 durable workload ID 必须绑定 cohort version；同一固定题号升
 Code filesystem-facing runtime/run component 必须为固定长度摘要，不得直接拼接最长 60 字符 namespace。测试需断言 20 个 run ID 唯一且不超过 40 字符；真实预检必须在深 acceptance 数据根下完成 bare clone、双 worktree、清理和 receipt，才算关闭 Windows 路径问题。
 
 固定 Code objective 必须严格等于中性合同，不能包含任一任务的正确操作名称。loader 对 descriptive objective fail-closed；测试断言 20 题 objective 完全一致。预检若 baseline 与 selected 同时通过，只能说明 cohort 无判别力，不能计作 PlanningSearch 收益，必须修订版本后完整重跑。
+
+`3eaa5486b` 的 v3 真实证据已通过：20/20 baseline hidden fail、20/20 selected hidden pass，两臂 static 20/20，diff-risk 均值相同。回归必须继续校验文件 receipt digest、SQLite reopen 的 20 member／1 report、40 started＋40 succeeded model audit、空 private/worktree 目录、干净 protected source，以及 durable JSON 不含 selected evidence／hidden cases；任何一项失败都不得沿用本次 PASS。

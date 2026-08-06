@@ -64,7 +64,7 @@ flowchart LR
 | Architecture 静态 Gate | 大量切片已通过，状态文件仍包含不同时点的 PASS/FAIL 文本 | 必须在同一干净 SHA 重新采集 |
 | PlanningSearch 实现 | 通用 Service 已接入 Plan/Pentest，相关测试定义约 451 个 | 证明代码和合同存在，不证明真实收益 |
 | PlanningSearch shadow | 10 个 fixture 场景的 scripted/shadow 报告 | `SIMULATION_SHADOW`，无 promotion 资格 |
-| Research／Code／Pentest 真实收益 | Research 24 题真实外部双臂已通过；Code v1 完整队列失败、v2 预检暴露 objective 泄漏，v3 中性队列待重跑；Pentest 30 次待执行 | 1/3 域通过，三域总状态仍为 PARTIAL |
+| Research／Code／Pentest 真实收益 | Research 24 题与 Code v3 20 题真实外部双臂均已通过；Pentest 30 次待执行 | 2/3 域通过，三域总状态仍为 PARTIAL |
 | 数字生命工程链 | Affect、关系、语音、Avatar 有大量定向测试和局部实测 | `WIRED_PARTIAL` |
 | 72 条情感场景 | 机器状态为 `MEASUREMENT_PENDING` | 0/72 完成正式测量 |
 | 48 条多轮人工盲测 | 机器状态为 `NOT_RUN` | 0/48 完成正式评审 |

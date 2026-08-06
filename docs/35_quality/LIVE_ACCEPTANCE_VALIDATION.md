@@ -458,3 +458,13 @@ version-bound identity 修复后的第二次 v2 预检完成了两只真实 Deep
 短路径修复后的 v2 第三次预检成功完成了两只模型请求、两个 fresh worktree、隐藏测试、静态测试与清理，证明 Windows 路径缺陷关闭；但 baseline 和 selected 隐藏测试均为 true。报告 SHA-256 为 `41a6584882ad883c064555b9cc71982bc52df930bb863336c656dfc53424e71c`。原因是 objective 自己写出“整数绝对值语义”，模型无需 selected evidence 也能猜出正确实现；这是 benchmark 判别力失败，不能用 `PASS_PREFLIGHT_ONLY` 标签冒充搜索收益。
 
 固定队列因此升级为 `2026-08-06-v3`，配置摘要为 `b1c1e97eba049c57c70e54f64528d143896df7ae204d7b4328c003a3f65f75b7`。20 个 objective 统一为中性合同，只要求依据本轮选中证据实现，并明确禁止根据题号或常识猜测；正确业务语义只存在于 selected evidence 和模型不可见的隐藏 cases。loader 会对任何 descriptive objective 漂移 fail-closed，33 项定向回归与 20/20 dry-run 通过；v2 两臂都通过的收据永久保留但不计收益。
+
+## 2026-08-06 A15 Code v3 真实收益通过
+
+`3eaa5486b` 的 v3 单题预检重新得到有效判别：baseline 隐藏测试失败、selected 通过，两臂静态检查通过；DeepSeek latency 为 844／811 ms，文件 SHA-256 为 `224c24147f1daafe608d2df2878fa58f23a801eac291df634d27c5356bcbe544`。随后以新 namespace 完整重跑 20 题，没有复用 v1/v2 成员。
+
+完整结果为 20/20 baseline 隐藏测试失败、20/20 selected 通过；baseline／selected pass rate 为 0／1，提升 1.0，静态检查率均为 1.0，mean diff-risk 均为 0.1。模型 Token 总数为 5,254／6,622，成本为 493／783 micro-USD；mean latency 为 889.55／1,020.8 ms，最大值为 1,358／1,375 ms。完整运行耗时 113,520 ms，满足通过率提升路线，成本上升不影响该互斥门槛。最终状态 `PASS`、`benefit_eligible=true`、`proposal_eligible=true`、`production_influence_enabled=false`。
+
+文件 SHA-256 为 `9c9938f15d303f5699debc60af5d7ebf09b417f70b4fd2824e8115cf12062170`，自校验 receipt digest 为 `81a72b602aceda2a8c020092ed0daa55d964182050a26416915b33607b92058f`，cohort spec digest 为 `16a8c8ea0f649d4b79622b14b404111cfa11dc983276f6baffeb0309e451fe92`，report digest 为 `978dff4352ac088cfa94ec0688a8fd238a1a44faf6b8ecec4806d893f8bd4a6f`。
+
+SQLite reopen 得到 20 workload registration、21 run spec、42 arm execution、21 terminal receipt、21 cleanup receipt、1 cohort registration、20 member evidence 和 1 report；完整 cohort 的 40 个模型 request 均各有一条 started 与 succeeded audit。private bare 与 worktree 目录均为空，protected source Git 状态干净；registration、terminal 和 member JSON 中 `权威规格` 命中为 0，外层文件中 selected evidence 与 hidden cases 命中为 0。Code 域因此提升为 `PASS_REAL_20_PAIRED_EXTERNAL`，PlanningSearch 总状态为 `PARTIAL_RESEARCH_CODE_PASS_PENTEST_PENDING`。
