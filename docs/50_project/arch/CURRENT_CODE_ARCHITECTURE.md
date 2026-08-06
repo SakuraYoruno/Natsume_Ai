@@ -86,7 +86,9 @@ Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Disp
 
 这些机制不得被重新加到无副作用的普通闲聊首字路径中。
 
-普通实时 Chat 的记忆规划先产生 `NO_RECALL／MAY_RECALL／MUST_RECALL`，再决定是否访问长期记忆。`NO_RECALL` 不再为了检查一个不可能使用的短期显式记忆捷径而提前读取 ConversationHistory；Surface 仍按自己的连续性合同读取一次有界近期窗口。这样删除的是重复 SQLite IO，不是关系连续性或显式记忆召回。
+普通实时 Chat 的记忆规划先产生 `NO_RECALL／MAY_RECALL／MUST_RECALL`，再决定是否访问长期记忆。`NO_RECALL` 在计划边界不再进入短期显式记忆兼容 helper；该 helper 旧实现本身也有内容级短路，因此此处是 authority 和调用合同收敛，不能单独作为已证明的 SQLite 性能收益。Surface 仍按自己的连续性合同读取一次有界近期窗口，不删除关系连续性或显式记忆召回。
+
+轻小说深读是普通召回之后的领域增强，不属于所有陪伴回合的固定前置步骤。消息先通过无 IO 的必要条件判定；只有可能在询问选书或详情时，才读取 durable 最近推荐上下文并运行 packet-aware 完整判定。无关陪伴消息不会读取推荐偏好或加载深读持久化模块；真正的指代追问只读取一次上下文，仍保留 cache、网页深读和 evidence 回写。
 
 Gateway Chat 因跨进程投递仍会生成紧凑 TaskGraph 和 durable Acceptance Effect，但它不再同步执行全部派生投影。编译器把可信 `route_type=chat` 固化在 `conversation.user_turn`；dispatcher 只同步提交 canonical 用户轮次和 `surface.reply_delivery`，随后唤醒唯一 app-local recovery Runtime，继续处理 Life、foreground affect、Expression、Memory 与 preference。Dispatcher 在 worker thread 调用同步 handler；两个保留异步调用合同的 Life handler 还会把内部同步 SQLite 主体显式交给 worker thread，避免后台恢复阻塞下一轮 ASGI admission。用户轮次提交失败会阻断 delivery；未标记旧图以及 Plan、Skill、Operator 等路线仍保持完整 effect 顺序。这样保留重启恢复与幂等，不让普通对话承担所有后台状态更新的墙钟时间。
 

@@ -12,6 +12,7 @@ import pytest
 from host_brain.agent_runtime.lightnovel_deep_reviewer import (
     _cards_signature,
     _extract_cards,
+    may_deep_review_lightnovel_selection,
     review_lightnovel_selection_from_memory_packet,
     should_deep_review_lightnovel_selection,
 )
@@ -129,6 +130,9 @@ def test_lightnovel_deep_review_fetches_detail_pages_and_builds_fact(monkeypatch
 
 
 def test_lightnovel_deep_review_requires_selection_query_and_recommendation_packet() -> None:
+    assert may_deep_review_lightnovel_selection(user_message="这三本哪本好看？")
+    assert may_deep_review_lightnovel_selection(user_message="刚才第二本的详情")
+    assert not may_deep_review_lightnovel_selection(user_message="今天有点累，安静陪我一句。")
     assert should_deep_review_lightnovel_selection(
         user_message="这三本哪本好看？",
         packet={"facts": ["记忆线索：可比较证据：1. A｜详情：https://www.lightnovel.fun/cn/detail/1"]},

@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_ORDINARY_CHAT_NO_RECALL_DUPLICATE_HISTORY_READ_CODE_REMEDIATED_REAL_RETEST_PENDING",
+  "commit_scope": "A15_ORDINARY_CHAT_IRRELEVANT_LIGHTNOVEL_CONTEXT_READ_CODE_REMEDIATED_REAL_RETEST_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -25,8 +25,9 @@
     "realtime_companion_chat": {
       "status": "WIRED",
       "governance_mode": "LIGHTWEIGHT",
-      "no_recall_duplicate_history_read": "CODE_REMEDIATED_REAL_RETEST_PENDING",
-      "note": "Direct no-effect chat keeps the realtime path. Gateway chat uses a compact governed TaskGraph because its accepted reply is an external durable effect."
+      "no_recall_plan_short_circuit": "CODE_COMPLETE_LIVE_CAUSAL_BENEFIT_UNPROVEN",
+      "irrelevant_lightnovel_context_read": "CODE_REMEDIATED_REAL_RETEST_PENDING",
+      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, but live evidence did not prove that change caused the previously observed 0.5-second wait. Unrelated companion turns now also skip the durable light-novel recommendation context read; a restarted real-stack retest is pending."
     },
     "user_self_affect_separation": {
       "status": "WIRED",

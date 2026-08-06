@@ -133,7 +133,9 @@ flowchart LR
 
 Gateway 入站聊天属于“实时生成 + 有副作用交付”的交界：消息经 Secure Ingress 后编译为紧凑单节点 TaskGraph，聊天生成仍只执行一次，Acceptance 再原子写入可见对话和 Gateway Outbox。直接网页／本地聊天继续走低延迟实时链，不承担这层外部投递账本。
 
-直接聊天的上下文准备遵守“先计划、后读取”：`NO_RECALL` 直接生成跳过包，不访问 ConversationHistory 或语义嵌入；`MAY_RECALL／MUST_RECALL` 才检查近期显式记忆并进入对应召回预算。近期对话连续性仍由 Surface 的有界 history window 独立消费，避免一次普通闲聊为了同一历史读两遍 SQLite。
+直接聊天的上下文准备遵守“先计划、后读取”：`NO_RECALL` 直接生成跳过包，不进入显式记忆 helper 或语义嵌入；`MAY_RECALL／MUST_RECALL` 才检查近期显式记忆并进入对应召回预算。近期对话连续性仍由 Surface 的有界 history window 独立消费。旧显式记忆 helper 对无关文本本已有内容级短路，所以这个计划级收敛只证明调用边界，不把一次真实样本差值冒充确定的 SQLite 收益。
+
+召回后的领域增强同样先做廉价必要条件。普通情绪陪伴直接跳过轻小说最近推荐上下文；“刚才第二本的详情”等可能指代推荐的消息才读取 durable preference pack，补齐 recommendation packet 后执行完整 light-novel predicate。深读与 evidence 回写复用同一 packet，避免一轮内重复读取。
 
 OBS 的 Task 读模型不在交互事务中同步构造。Sidecar 每 15 秒读取 canonical Task 索引，优先补齐新图，再按最旧 freshness 每波刷新最多 16 个详情；每次派生写提交后让出 5 ms canonical writer window。这样 Monitor 最终一致地看到 TaskGraph／Budget／Verification／Acceptance，同时等待写入 worker projection 的 Host 不会被一整波派生事务连续饿死。worker projection 本身在线程持久化，但 Task Runtime 必须等待其完成，不能把未落库 COMMIT 交给 Verification。
 

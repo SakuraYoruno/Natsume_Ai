@@ -646,6 +646,81 @@ def test_chat_retrieval_helpers_do_not_import_process_service_locator() -> None:
 
 
 @pytest.mark.asyncio
+async def test_lightnovel_review_skips_preference_ledger_for_unrelated_companion_turn() -> None:
+    calls: list[dict[str, object]] = []
+    packet = SimpleNamespace(as_dict=lambda: {"facts": [], "trace": {}})
+
+    result = await helpers._maybe_apply_lightnovel_deep_review(
+        packet=packet,
+        message="今天有点累，安静陪我一句。",
+        request_id="req-companion-no-lightnovel",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        life_memory_store=_LIFE_MEMORY_STORE,
+        build_user_preference_pack=lambda **kwargs: calls.append(dict(kwargs)),
+    )
+
+    assert result is packet
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_lightnovel_review_reads_recent_recommendation_once_for_anaphoric_query(monkeypatch) -> None:
+    from host_brain.persona.surface_memory_recall import SurfaceMemoryRecallPacket
+
+    calls: list[dict[str, object]] = []
+
+    def build_pack(**kwargs):  # noqa: ANN003, ANN202
+        calls.append(dict(kwargs))
+        return {
+            "recent_recommendation_context": {
+                "referenced_item": {
+                    "rank": 2,
+                    "title": "与神在河岸",
+                    "detail_url": "https://www.lightnovel.fun/cn/detail/2",
+                    "selection_reason": "奇幻身份钩子",
+                },
+                "items": [],
+            }
+        }
+
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        lambda **_kwargs: {
+            "status": "OK",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_OK",
+            "fact": "网页深读结果：第二本《与神在河岸》有可读详情证据。",
+            "selected": {"index": 2, "title": "与神在河岸"},
+            "items": [{"index": 2}],
+            "evidence_refs": ["https://www.lightnovel.fun/cn/detail/2"],
+            "cached": True,
+            "source": "cache",
+        },
+    )
+    packet = SurfaceMemoryRecallPacket(
+        query="刚才第二本的详情",
+        reason_code="SURFACE_MEMORY_RECALL_SKIPPED",
+        trace={"skipped": True},
+    )
+
+    result = await helpers._maybe_apply_lightnovel_deep_review(
+        packet=packet,
+        message="刚才推荐的第二本详情",
+        request_id="req-lightnovel-anaphoric",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        life_memory_store=_LIFE_MEMORY_STORE,
+        build_user_preference_pack=build_pack,
+    )
+
+    assert len(calls) == 1
+    assert result.trace["lightnovel_deep_review"]["status"] == "OK"
+    assert result.facts[0].startswith("网页深读结果")
+
+
+@pytest.mark.asyncio
 async def test_run_retrieval_applies_lightnovel_deep_review_before_surface(monkeypatch) -> None:
     class _RecallService:
         def recall(self, **_kwargs):  # noqa: ANN003

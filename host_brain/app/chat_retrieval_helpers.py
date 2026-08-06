@@ -276,11 +276,11 @@ async def _run_retrieval(
         )
         plan = plan_surface_memory_recall(context)
         embedding_model_id = ""
-        # ``NO_RECALL`` is the common low-latency companion path.  Do not read
-        # ConversationHistory merely to prove that a plan which already
-        # rejected recall has no recent explicit-memory shortcut.  Surface
-        # independently reads its bounded continuity window later, so this
-        # eager lookup was duplicate SQLite work on every ordinary turn.
+        # ``NO_RECALL`` is the common low-latency companion path.  Make the
+        # plan-level short circuit explicit instead of entering the separate
+        # explicit-memory compatibility helper.  That helper already rejects
+        # unrelated messages before querying history; this is therefore a
+        # contract simplification, not by itself a measured latency win.
         short_term_memory_facts = (
             _recent_explicit_memory_facts(
                 message=message,
@@ -836,17 +836,17 @@ async def _maybe_apply_lightnovel_deep_review(
     build_user_preference_pack: Callable[..., Any] | None,
 ) -> Any:
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
         from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
-            review_lightnovel_selection_from_memory_packet,
+            may_deep_review_lightnovel_selection,
             should_deep_review_lightnovel_selection,
         )
-        from host_brain.app.observability_persist import (  # noqa: PLC0415
-            persist_life_action_event_memory,
-        )
-
     except Exception:
+        return packet
+    # Do not query the durable recommendation/preference ledger on every
+    # ordinary companion turn.  The message predicate is a necessary (not
+    # sufficient) condition; the full packet-aware predicate still decides
+    # whether a deep review is allowed after contextual enrichment.
+    if not may_deep_review_lightnovel_selection(user_message=message):
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
     packet_payload = _recent_lightnovel_delivery_packet_payload(
@@ -857,6 +857,17 @@ async def _maybe_apply_lightnovel_deep_review(
         build_user_preference_pack=build_user_preference_pack,
     )
     if not should_deep_review_lightnovel_selection(user_message=message, packet=packet_payload):
+        return packet
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+            review_lightnovel_selection_from_memory_packet,
+        )
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
+    except Exception:
         return packet
     started_ms = int(time.time() * 1000)
     try:
@@ -889,13 +900,6 @@ async def _maybe_apply_lightnovel_deep_review(
     fact = str(review.get("fact") or "").strip()
     if not fact:
         return packet
-    packet_payload = _recent_lightnovel_delivery_packet_payload(
-        packet_payload=packet.as_dict() if hasattr(packet, "as_dict") else packet_payload,
-        message=message,
-        person_id=person_id,
-        session_id=session_id,
-        build_user_preference_pack=build_user_preference_pack,
-    )
     previous_facts = list(getattr(packet, "facts", ()) or [])
     anchor_fact = _lightnovel_recommendation_anchor_fact(packet_payload)
     if anchor_fact and (
