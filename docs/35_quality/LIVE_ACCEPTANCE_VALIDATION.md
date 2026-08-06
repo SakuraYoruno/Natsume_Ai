@@ -486,3 +486,9 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 运行期采样定位到远端 Edge 重连后向新 Host 重放了 11,868 条 `ASR_CHUNK`。旧路径把每条 chunk 写入 `voice_event_log`，再同步派生 Life Memory episode/evidence，多条 asyncio worker 因 SQLite 写事务互相等待，Host 与 OBS 日志出现 `database is locked`。这既是普通对话延迟热点，也违反“原始／分块语音不进入长期情感记忆”的边界。
 
 本次窄修复保留最终 ASR 的实时桥接语义，但不持久化 `ASR_CHUNK`；低频语音终态仍写 `voice_event_log`，所有 voice operational event 停止派生 Life Memory。Affective Life、Relationship、Surface delivery 和 Expression receipt 的 canonical writer 均未改变。直接受影响回归为 95 passed，SQLite／时间线／RPC 合同及 OBS 相邻回归再通过 116 项，合计 211 passed；状态暂为 `CODE_REMEDIATED_REAL_RESTART_RETEST_PENDING`，必须在另一份全新 Host SQLite 上重启并确认 chunk 落盘与 voice→Life anchor 均为 0，才能继续 48 条队列。Pentest 与网络安全保持 `NOT_RUN_USER_SKIPPED`。
+
+`d0e36af0a` 随后以全新 `host-clean-a15-final2-d0e36af0a` 数据根真实重启 Host、OBS 与 Nginx Monitor，继续连接真实 Docker、Gateway 和远端 Edge。重连后 Host 保留 11 条低频 INPUT／TTS 终态，`ASR_CHUNK=0`、Life episode 初始为 0、`voice://event/` evidence 为 0；Host、OBS、Monitor、Gateway、Edge 五个入口均返回 200。该结果将两项代码状态提升为真实重启通过。
+
+第一次三轮复测的第三轮在 Host 终态瞬间把尚为 `PENDING` 的 `surface.reply_delivery` 误报为失败；同一 durable effect 约 6.3 秒后已经 `COMMITTED` 并生成 `gateway-outbox://` receipt，因此这是 runner 单次快照缺陷，不是回复丢失。runner 现对最小 reply delivery prefix 做最长 30 秒有界轮询，durable `FAILED` 仍立即失败，并把等待单列为非用户延迟；26 项 runner 回归通过。
+
+修正后报告 SHA-256 为 `005728c7b412a2ada46c6a72780d1e9534eaed1e519c424ecd8c10fa33c2d5c9`，三轮均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，Gateway durable outbox 3/3，canonical affect／relationship 增量分别为 8／5，legacy writer 为 0。Gateway→Host terminal 为 7,548／5,864／6,273 ms，surface commit 为 911／1,230／1,326 ms；锁争用已消除，但整体仍未达到实时数字生命目标，48 条队列与人工盲评继续待跑。

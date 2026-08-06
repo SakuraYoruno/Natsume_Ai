@@ -61,6 +61,7 @@ DEFAULT_HMAC_ENV = "NATSUME_WECHAT_GATEWAY_CALLBACK_HMAC_SECRET"
 DEFAULT_TEXT_EXPRESSION_WAIT_S = 0.0
 DEFAULT_VOICE_EXPRESSION_WAIT_S = 90.0
 DEFAULT_BACKGROUND_SETTLE_S = 30.0
+DEFAULT_REPLY_DELIVERY_WAIT_S = 30.0
 
 LEGACY_AFFECT_WRITER_TABLES = (
     "bond_events",
@@ -695,6 +696,47 @@ def _fetch_realtime_reply_delivery(
     return result
 
 
+def _poll_realtime_reply_delivery(
+    db_path: Path,
+    *,
+    graph_id: str,
+    graph_revision: int,
+    timeout_s: float,
+) -> dict[str, Any]:
+    """Wait for the asynchronous Acceptance Effect prefix to settle.
+
+    INPUT_COMPLETED is emitted when the governed graph reaches its terminal
+    state.  The visible reply effect is intentionally drained in the
+    background, so a single read at that boundary can observe PENDING even
+    though the exact effect commits a few seconds later.  This wait belongs to
+    evidence collection and is reported separately from user-visible latency.
+    """
+
+    started = time.monotonic()
+    deadline = started + max(0.0, float(timeout_s))
+    last: dict[str, Any] = {}
+    while True:
+        last = _fetch_realtime_reply_delivery(
+            db_path,
+            graph_id=graph_id,
+            graph_revision=graph_revision,
+        )
+        status = str(last.get("status") or "").upper()
+        user_status = str(last.get("user_turn_status") or "").upper()
+        surface_status = str(last.get("surface_delivery_status") or "").upper()
+        if status == "COMMITTED" or "FAILED" in {user_status, surface_status}:
+            break
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    last["delivery_convergence_wait_ms"] = max(
+        0,
+        int((time.monotonic() - started) * 1000),
+    )
+    last["delivery_convergence_included_in_turn_latency"] = False
+    return last
+
+
 def _build_turn_timing(
     *,
     webhook: Mapping[str, Any],
@@ -736,6 +778,9 @@ def _build_turn_timing(
         "user_to_surface_commit_ms": reply_delivery.get(
             "user_to_surface_commit_ms"
         ),
+        "delivery_convergence_wait_ms": reply_delivery.get(
+            "delivery_convergence_wait_ms"
+        ),
     }
 
 
@@ -774,6 +819,7 @@ def _run_turn(
     require_voice: bool,
     collect_expression: bool,
     expression_wait_s: float,
+    reply_delivery_wait_s: float = DEFAULT_REPLY_DELIVERY_WAIT_S,
 ) -> dict[str, Any]:
     idle = (
         _wait_for_edge_voice_idle(
@@ -857,10 +903,11 @@ def _run_turn(
             graph_revision=int(graph.get("graph_revision") or 0),
             deadline=time.time() + max(0.0, float(expression_wait_s)),
         )
-    reply_delivery = _fetch_realtime_reply_delivery(
+    reply_delivery = _poll_realtime_reply_delivery(
         db_path,
         graph_id=str((graph or {}).get("graph_id") or ""),
         graph_revision=int((graph or {}).get("graph_revision") or 0),
+        timeout_s=max(0.0, float(reply_delivery_wait_s)),
     )
     model_attempts = _fetch_model_attempts(db_path, request_id) if request_id else []
     return {
@@ -1062,6 +1109,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "This is reported separately and never counted as turn latency."
         ),
     )
+    parser.add_argument(
+        "--reply-delivery-wait-s",
+        type=float,
+        default=DEFAULT_REPLY_DELIVERY_WAIT_S,
+        help=(
+            "Wait for the asynchronous surface.reply_delivery Acceptance "
+            "Effect. This evidence wait is reported separately and is not "
+            "counted as user-visible turn latency."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1130,6 +1187,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 require_voice=bool(args.require_voice),
                 collect_expression=index == len(prompts),
                 expression_wait_s=expression_wait_s,
+                reply_delivery_wait_s=max(
+                    0.0,
+                    float(args.reply_delivery_wait_s),
+                ),
             )
             turns.append(turn)
             terminal = dict(turn.get("terminal") or {})
@@ -1178,6 +1239,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "real_edge": str(args.edge_base_url),
         "require_voice": bool(args.require_voice),
         "expression_wait_s": expression_wait_s,
+        "reply_delivery_wait_s": max(0.0, float(args.reply_delivery_wait_s)),
         "delivery_evidence_scope": "GATEWAY_DURABLE_OUTBOX_INTAKE",
         "external_platform_delivery_status": "NOT_TESTED_BY_THIS_RUNNER",
         "relationship_subject_isolation": "FRESH_PER_RUN_CASE_TRAJECTORY",

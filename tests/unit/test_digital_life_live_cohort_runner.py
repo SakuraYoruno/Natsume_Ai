@@ -478,12 +478,13 @@ def test_text_turn_does_not_wait_for_edge_or_physical_expression(
     monkeypatch.setattr(live_cohort, "_fetch_model_attempts", lambda *_args: [])
     monkeypatch.setattr(
         live_cohort,
-        "_fetch_realtime_reply_delivery",
+        "_poll_realtime_reply_delivery",
         lambda *_args, **_kwargs: {
             "status": "COMMITTED",
             "surface_receipt_ref": "gateway-outbox://id/test",
             "surface_commit_latency_ms": 5,
             "user_to_surface_commit_ms": 3,
+            "delivery_convergence_wait_ms": 4,
         },
     )
     observed_deadlines: list[float] = []
@@ -517,6 +518,73 @@ def test_text_turn_does_not_wait_for_edge_or_physical_expression(
     assert observed_deadlines and observed_deadlines[0] <= before + 0.1
     assert turn["reply_delivery"]["status"] == "COMMITTED"
     assert turn["timing"]["gateway_send_to_host_terminal_ms"] == 100
+    assert turn["timing"]["delivery_convergence_wait_ms"] == 4
+
+
+def test_reply_delivery_poll_waits_for_background_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    states = iter(
+        (
+            {
+                "status": "INCOMPLETE",
+                "user_turn_status": "COMMITTED",
+                "surface_delivery_status": "PENDING",
+            },
+            {
+                "status": "COMMITTED",
+                "user_turn_status": "COMMITTED",
+                "surface_delivery_status": "COMMITTED",
+                "surface_receipt_ref": "gateway-outbox://id/settled",
+            },
+        )
+    )
+    monkeypatch.setattr(
+        live_cohort,
+        "_fetch_realtime_reply_delivery",
+        lambda *_args, **_kwargs: next(states),
+    )
+    monkeypatch.setattr(live_cohort.time, "sleep", lambda _seconds: None)
+
+    result = live_cohort._poll_realtime_reply_delivery(
+        tmp_path / "audit.sqlite3",
+        graph_id="graph-1",
+        graph_revision=1,
+        timeout_s=30,
+    )
+
+    assert result["status"] == "COMMITTED"
+    assert result["surface_receipt_ref"] == "gateway-outbox://id/settled"
+    assert result["delivery_convergence_wait_ms"] >= 0
+    assert result["delivery_convergence_included_in_turn_latency"] is False
+
+
+def test_reply_delivery_poll_stops_on_durable_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        live_cohort,
+        "_fetch_realtime_reply_delivery",
+        lambda *_args, **_kwargs: {
+            "status": "INCOMPLETE",
+            "user_turn_status": "COMMITTED",
+            "surface_delivery_status": "FAILED",
+            "surface_reason_code": "DELIVERY_REJECTED",
+        },
+    )
+
+    result = live_cohort._poll_realtime_reply_delivery(
+        tmp_path / "audit.sqlite3",
+        graph_id="graph-1",
+        graph_revision=1,
+        timeout_s=30,
+    )
+
+    assert result["surface_delivery_status"] == "FAILED"
+    assert result["surface_reason_code"] == "DELIVERY_REJECTED"
+    assert result["delivery_convergence_wait_ms"] < 1000
 
 
 def test_automated_verdict_requires_real_gateway_outbox_receipt() -> None:
