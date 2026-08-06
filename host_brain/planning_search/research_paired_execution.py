@@ -104,6 +104,33 @@ class ResearchPairedExecutionResult:
     receipt_ref: str
     receipt: PairedResearchRunReceiptV1
     replayed_terminal_receipt: bool
+    transient_outputs: tuple["ResearchTransientArmOutputV1", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchTransientArmOutputV1:
+    """Process-local output needed by a same-run hidden quality verifier.
+
+    This type deliberately has no serialization method.  A restarted process
+    can reopen the public terminal receipt but cannot reconstruct response
+    bodies from the Research ledger; it must start a new preregistered cohort
+    version rather than pretending a missing quality judgement was replayed.
+    """
+
+    role: str
+    run: AttestedExternalResearchRun
+
+    def __post_init__(self) -> None:
+        role = str(self.role or "").strip().upper()
+        if role not in {"BASELINE", "SELECTED"}:
+            raise ResearchPairedExecutionError(
+                "transient Research output role must be BASELINE or SELECTED"
+            )
+        if not isinstance(self.run, AttestedExternalResearchRun):
+            raise ResearchPairedExecutionError(
+                "transient Research output must bind an attested external run"
+            )
+        object.__setattr__(self, "role", role)
 
 
 class ResearchPairedExecutionRunner:
@@ -176,6 +203,7 @@ class ResearchPairedExecutionRunner:
                 receipt_ref=terminal.receipt_ref,
                 receipt=terminal.receipt,
                 replayed_terminal_receipt=True,
+                transient_outputs=(),
             )
 
         if not spec.owner_randomized:
@@ -188,6 +216,7 @@ class ResearchPairedExecutionRunner:
             )
         inputs = _arm_inputs(arm_inputs)
         verifier_instances: list[ResearchCitationVerifierPort] = []
+        transient_runs: dict[str, AttestedExternalResearchRun] = {}
         for role in spec.arm_order:
             await self._ensure_arm_evidence(
                 spec=spec,
@@ -195,6 +224,7 @@ class ResearchPairedExecutionRunner:
                 runtime_input=inputs[role],
                 owner_id=normalized_owner_id,
                 verifier_instances=verifier_instances,
+                transient_runs=transient_runs,
             )
 
         baseline = self._ledger.get_arm_execution(run_id=spec.run_id, role="BASELINE")
@@ -213,6 +243,11 @@ class ResearchPairedExecutionRunner:
             receipt_ref=receipt_ref,
             receipt=receipt,
             replayed_terminal_receipt=False,
+            transient_outputs=tuple(
+                ResearchTransientArmOutputV1(role=role, run=transient_runs[role])
+                for role in ("BASELINE", "SELECTED")
+                if role in transient_runs
+            ),
         )
 
     async def _ensure_arm_evidence(
@@ -223,6 +258,7 @@ class ResearchPairedExecutionRunner:
         runtime_input: ResearchArmRuntimeInputV1,
         owner_id: str,
         verifier_instances: list[ResearchCitationVerifierPort],
+        transient_runs: dict[str, AttestedExternalResearchRun],
     ) -> ResearchArmExecutionSnapshot:
         plan = spec.baseline if role == "BASELINE" else spec.selected
         execution_id = self.execution_id_for(
@@ -346,6 +382,7 @@ class ResearchPairedExecutionRunner:
                 arm=persisted,
                 expected_execution_id=started.execution_id,
             )
+            transient_runs[role] = external_run
             return persisted
         except Exception as exc:
             recovered = self._recover_after_started_failure(
@@ -674,4 +711,5 @@ __all__ = [
     "ResearchPairedExecutionError",
     "ResearchPairedExecutionResult",
     "ResearchPairedExecutionRunner",
+    "ResearchTransientArmOutputV1",
 ]

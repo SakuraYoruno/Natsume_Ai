@@ -102,6 +102,7 @@ class ResearchQualityVerifierReceiptV1:
     severe_conflict_errors: int
     evidence_class: str
     hidden_verifier: bool
+    verifier_prompt_digest: str | None = None
     attestation_ref: str | None = None
     attestation: ExternalProviderRunAttestationV1 | None = None
     production_influence_enabled: bool = False
@@ -173,6 +174,11 @@ class ResearchQualityVerifierReceiptV1:
         object.__setattr__(self, "evidence_class", evidence_class)
         if not isinstance(self.hidden_verifier, bool):
             raise ResearchBenefitCohortError("hidden_verifier must be a boolean")
+        verifier_prompt_digest = (
+            None
+            if self.verifier_prompt_digest is None
+            else _digest(self.verifier_prompt_digest, "verifier_prompt_digest")
+        )
         attestation_ref = (
             None
             if self.attestation_ref is None
@@ -187,9 +193,13 @@ class ResearchQualityVerifierReceiptV1:
                 "attestation must be ExternalProviderRunAttestationV1"
             )
         if evidence_class == "ATTESTED_EXTERNAL":
-            if attestation_ref is None or attestation is None:
+            if (
+                attestation_ref is None
+                or attestation is None
+                or verifier_prompt_digest is None
+            ):
                 raise ResearchBenefitCohortError(
-                    "attested quality evidence requires the exact provider attestation"
+                    "attested quality evidence requires prompt identity and the exact provider attestation"
                 )
             if (
                 attestation.execution_id != verifier_execution_id
@@ -209,6 +219,7 @@ class ResearchQualityVerifierReceiptV1:
             )
         object.__setattr__(self, "attestation_ref", attestation_ref)
         object.__setattr__(self, "attestation", attestation)
+        object.__setattr__(self, "verifier_prompt_digest", verifier_prompt_digest)
         object.__setattr__(self, "production_influence_enabled", False)
 
     @property
@@ -216,6 +227,7 @@ class ResearchQualityVerifierReceiptV1:
         return (
             self.evidence_class == "ATTESTED_EXTERNAL"
             and self.hidden_verifier
+            and self.verifier_prompt_digest is not None
             and self.attestation is not None
             and self.attestation.transport_identity_digest is not None
             and self.attestation.transport_external is True
@@ -242,6 +254,7 @@ class ResearchQualityVerifierReceiptV1:
             "severe_conflict_errors": self.severe_conflict_errors,
             "evidence_class": self.evidence_class,
             "hidden_verifier": self.hidden_verifier,
+            "verifier_prompt_digest": self.verifier_prompt_digest,
             "attestation_ref": self.attestation_ref,
             "benefit_eligible": self.benefit_eligible,
             "production_influence_enabled": False,

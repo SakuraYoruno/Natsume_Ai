@@ -406,3 +406,5 @@ Persistent TTS worker 必须分别注入 READY timeout、READY 拒绝、synthesi
 Research paired execution 必须允许 baseline 与 selected 使用不同的 durable arm prompt digest，因为两者的 source set 本来就可能不同。测试需要覆盖：预注册后关闭并重开 SQLite，两个 digest 仍分别存在；每只外部模型 receipt 只接受对应 arm digest；交换、缺失或调用时临时替换都拒绝。仅对字段不存在的历史 0107 RunSpec 才允许回落到共享 `profile.prompt_digest`，且重新序列化必须保持旧 canonical JSON。A15 的 300 passed、1 个 Windows 符号链接权限 skip 只属于机械回归；Research 24 配对、Code 20 任务和 Pentest 30 运行均必须有真实原始 ledger 后才能评价收益。
 
 Provider 成本测试必须覆盖 DeepSeek V4 Flash／Pro 的 cache hit、cache miss 和 completion 价目、micro-USD 向上取整、官方 endpoint 限定、prompt token 和 cache breakdown 一致性、代理／未知模型／缺字段 fail-closed。没有 tools 字段的生产请求可证明 `tool_call_count=0`；不能从模型正文猜测。真实 D20c 预检还必须经过 canonical ModelAttempt audit，并同时出现 token、cost、provider latency、transport identity 和单次 started／succeeded 记录。
+
+Research hidden verifier 回归必须证明：新鲜 paired run 才提供进程内正文，数据库不出现正文；terminal replay 的 transient output 为空；评审输入没有 `BASELINE/SELECTED` 身份；评审 prompt digest 和 external attestation 精确进入 receipt；候选或评审 JSON 漂移、越界 score 均在写 cohort 前拒绝。

@@ -367,6 +367,11 @@ async def test_d20c_runner_executes_persisted_order_and_exact_terminal_replay(tm
     )
 
     assert result.replayed_terminal_receipt is False
+    assert [item.role for item in result.transient_outputs] == ["BASELINE", "SELECTED"]
+    assert [item.run.output_text for item in result.transient_outputs] == [
+        "private-output::baseline::do-not-persist",
+        "private-output::selected::do-not-persist",
+    ]
     assert result.receipt.arm_order == ("SELECTED", "BASELINE")
     assert service.calls == ["selected", "baseline"]
     assert [instance_id for instance_id, _, _ in factory.calls] == [1, 2]
@@ -391,6 +396,7 @@ async def test_d20c_runner_executes_persisted_order_and_exact_terminal_replay(tm
         owner_id="worker-b",
     )
     assert replay.replayed_terminal_receipt is True
+    assert replay.transient_outputs == ()
     assert replay.receipt_ref == result.receipt_ref
     assert service.calls == ["selected", "baseline"]
 

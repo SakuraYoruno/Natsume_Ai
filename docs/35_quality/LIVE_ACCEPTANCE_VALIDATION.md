@@ -410,3 +410,9 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 生产 provider adapter 现只在 HTTPS 官方 `api.deepseek.com`、模型为 `deepseek-v4-flash`／`deepseek-v4-pro`、cache hit + miss 与 prompt token 完全相等时，应用版本化 `deepseek-v4-usd-2026-07-24` 价目并向上取整到 micro-USD；价目来源为 `https://api-docs.deepseek.com/quick_start/pricing`。请求协议没有暴露 tools 时，`tool_call_count=0` 是请求结构事实。代理地址、未知模型、缺字段或计数不一致都不会得到成本值。
 
 在当前 A15 SQLite、真实 production composition 与 canonical `ModelAttemptService` 上执行一次全新 Research 探针，结果为 `deepseek-v4-flash`、51 total tokens、9 micro-USD、828 ms provider latency、844 ms total latency、外部 transport identity 有效、工具调用 0，最终 model receipt 的 `benefit_eligible=true`。该探针只关闭成本／usage attestation 阻断，不是 Research 配对或收益结果。
+
+## 2026-08-06 A15 Research 隐藏质量评审边界
+
+paired terminal ledger 不能保存回答正文，但真实收益又必须评估内容。当前 runner 因此只在新鲜双臂完成的同一进程里返回不可序列化的 `ResearchTransientArmOutputV1`；terminal replay 的 transient 列表固定为空，不能从摘要恢复正文或补签质量证据。独立隐藏评审不接收 arm 标签，使用统一 rubric 和另一条 canonical 外部 ModelAttempt，最终只把被评回答摘要、独立 execution／attempt、prompt digest、usage、cost、transport、分数和严重错误数写入 receipt。
+
+候选正文 JSON 形状漂移、评审输出额外字段、越界分数和非外部 attestation 都会在 cohort 写入前失败。paired 恢复、历史重放、质量 receipt 和隐藏输入的 22 项定向测试通过。该结果只关闭正文隐私与评审身份边界；24 题真实队列仍未运行，Research 收益继续为 `UNPROVEN`。
