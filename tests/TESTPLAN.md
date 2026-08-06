@@ -467,3 +467,5 @@ python -m pytest -q `
 首次四类定向真实复验报告 SHA-256 为 `a7f8c8f411d2cd7a4c60b74e8cb1bbc5a83d740ae6b5b491af1befcf69adf4c9`，结果 3 条自动待人工、1 条失败。回归必须继续证明：独立的“你真烦”仍允许七海形成克制边界；同一句若是在评价上一条 accepted response，则 durable aftereffect 为 `MISUNDERSTOOD`、Appraisal 为 `NATSUME_MAY_HAVE_HURT_USER`、CompanionAct 为 `REPAIR`；显式“闭嘴／给我空间”仍优先 `GIVE_SPACE`。修复状态下“被你这么说我很委屈／扎心”与“不烦你了／当我没说”等受害转移或赌气退出必须触发一次语义修复。当前三个全文件回归为 131 passed，真实新 SHA 重跑前不得覆盖旧失败证据。
 
 `c27224c60` 的单轨迹报告 SHA-256 为 `423c812340c39efb69ef84f689706692a1c2c6c100dc92d946fce91dfd97ec15`：错误边界已消失、坏文本被挡住，但末轮 `MODEL_SEMANTIC_RETRY_EXHAUSTED`，仍为 FAIL。新增回归必须断言 canonical `REPAIR` 的质量重试提示明确排除自我受害和赌气退出；`抱歉／抱怨` 对物理亲密 marker 为零命中，而 `抱一下／抱你` 仍命中。相关 78 项通过后仍须加载新 SHA 重跑同一轨迹，不能把“没有发送坏话”写成“已经有好回复”。
+
+`8e2050588` 的真实报告 SHA-256 为 `7fcff942d2aff874ad6f95b546fd7cd2dc7a007262abb2edbb295f51cdd99e8d`：末句安全可用、三轮均完成，但自动门禁因字面 `must_include` 误用和缺少关系修复 grounding 仍为 FAIL。回归必须同时证明：Relationship guidance 的完整语义指导位于 facts 且不会制造字面缺失；“我没听懂／没接住”在 canonical repair 下通过；只有“我在这儿”的泛化回复仍失败；80 分与核心维度阈值不降低。当前相关 137 项通过，下一步仍须以全新数据库加载新 SHA 重跑。

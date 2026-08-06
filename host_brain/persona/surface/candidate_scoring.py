@@ -67,6 +67,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _presence_repair_relevant,
     _quiet_presence_relevant,
     _raw_context_backfill_requested,
+    _relational_repair_grounded,
     _short_continue_memory_overdisplay_hits,
     _short_continue_unprovided_tech_detail_hits,
     _self_doubt_scene_relevant,
@@ -1361,6 +1362,21 @@ def score_isolated_surface_candidates(request, candidates):
             dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
             dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 12.0)
             reason_codes.append("MISPLACED_SUPPORT_TEMPLATE")
+        if _relational_repair_grounded(request, quality.normalized_text or candidate):
+            # Concrete ownership is the scene grounding for a repair turn.  A
+            # generic presence sentence does not enter this branch, while an
+            # explicit "我没听懂/没接住" should not be scored like an unrelated
+            # continuity acknowledgement.
+            score += 15.0
+            dimensions["context_fit"] = max(
+                78.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                78.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_GROUNDED")
         topic_mismatch = _current_user_topic_mismatch(request, quality.normalized_text or candidate)
         if topic_mismatch:
             score -= 20.0

@@ -512,3 +512,7 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 `c27224c60` 加载后的单轨迹报告 SHA-256 为 `423c812340c39efb69ef84f689706692a1c2c6c100dc92d946fce91dfd97ec15`。前两轮完成，三轮 `CompanionAct` 均已是 `REPAIR`；末轮第二次模型输出仍命中 `BOUNDARY_SOUR_WITHDRAWAL`，因而没有把坏文本发出，但 TaskGraph 以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 失败。该结果关闭了错误 `SET_BOUNDARY`，没有关闭可用回复。
 
 下一切片仍不增加模型尝试：既有唯一一次质量修复在 canonical `REPAIR` 下显式禁止“被扎心／受伤／委屈”和“不烦你了／当我没说／我闭嘴”，要求候选只承认刚才没接住；关系距离 scorer 同时修复单字“抱”的子串误判，`抱歉／抱怨` 不再被算作身体亲密，`抱一下／抱你` 仍保持原门禁。DL-04、Surface adapter 与 Affect Control 共 78 项通过；真实再测前继续为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`8e2050588` 的新隔离库真实报告 SHA-256 为 `7fcff942d2aff874ad6f95b546fd7cd2dc7a007262abb2edbb295f51cdd99e8d`。三轮 Gateway／TaskGraph／Acceptance 与 canonical writer 均完成，末句为“嗯，我可能又没懂。你想说就说，我在这儿。”，没有自我受害、赌气退出或空回复；自动结果仍因 `DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED` 为 FAIL。复算证明两个安全修复句分别被一条完整的语义指导误判为缺失字面 `must_include`，末句还被技术连续对话规则误扣 `MISPLACED_SUPPORT_TEMPLATE`。
+
+当前代码没有降低 80 分、核心维度或安全硬门槛：关系 guidance 的自然语言约束回到 facts，`must_include` 继续只表达真正需要逐字出现的短标记；只有 canonical repair 且正文第一人称具体承认“没听懂／没接住／误解”的候选获得关系修复 grounding，单独“你想说就说，我在这儿”仍然失败。五个相关文件组共 137 项通过；真实新 SHA 复测前保持待验证。Pentest 与网络安全继续未执行。

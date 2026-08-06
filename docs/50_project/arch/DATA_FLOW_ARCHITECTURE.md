@@ -410,3 +410,5 @@ flowchart LR
 下一条用户消息到达时，Relationship 会先把它与上一条 accepted response 关联。若“你真烦／没听懂我／让我不舒服”等反馈命中且没有明确要求停止或离开，aftereffect 记为 `MISUNDERSTOOD`，AffectFusion 以该 durable ref 生成修复 Appraisal；只有没有待评价回复的独立冒犯才进入七海自身的克制边界。该分流复用既有 Relationship journal，不新增普通对话审计或同步模型调用。
 
 `REPAIR` 的唯一一次候选重试还会把失败原因翻译成具体生成约束：承认“刚才没接住”，不把焦点转成七海被伤到，也不用赌气退出。关系 scorer 会把“抱歉”与真实身体亲密分开，避免正常道歉被错误扣到亲密越界；第二次仍命中硬门禁时继续 fail-closed，不新增第三次 provider 调用。
+
+关系 guidance 中的完整自然语言约束进入 `facts/style` 平面，只有真正要求逐字出现的短标记才能进入 `must_include`。候选评分仅在 canonical `REPAIR` 且文本由七海第一人称具体承认“没听懂／没接住／误解”时认定修复已落地；因此后接一句克制的在场表达不会被技术场景模板误杀，缺少具体承担的泛化安慰仍不能通过。

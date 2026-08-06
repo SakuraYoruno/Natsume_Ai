@@ -100,7 +100,8 @@ def test_boundary_guidance_never_converts_space_into_relational_debt() -> None:
     assert guidance.proactive_permission == "DENIED"
     assert guidance.aftereffect_outcome == "BOUNDARY"
     assert any("明确要求空间" in item for item in guidance.facts)
-    assert any("不要求立刻回应" in item for item in guidance.must_include)
+    assert any("不要求立刻回应" in item for item in guidance.facts)
+    assert guidance.must_include == ()
     assert any("负罪施压" in item for item in guidance.must_not_do)
     assert "relationship-user-input://" not in str(guidance.trace())
 
@@ -112,7 +113,7 @@ def test_denied_proactive_permission_does_not_constrain_a_reengaged_foreground_t
     assert guidance.aftereffect_outcome == "REPAIR_ACCEPTED"
     assert any("可以自然回暖" in item for item in guidance.facts)
     assert not any("明确要求空间" in item for item in guidance.facts)
-    assert not any("不要求立刻回应" in item for item in guidance.must_include)
+    assert not any("不要求立刻回应" in item for item in guidance.facts)
 
 
 def test_surface_compiler_injects_canonical_boundary_constraints(
@@ -132,7 +133,8 @@ def test_surface_compiler_injects_canonical_boundary_constraints(
     )
 
     assert any("明确要求空间" in item for item in payload.task_control["facts"])
-    assert any("不要求立刻回应" in item for item in payload.task_control["must_include"])
+    assert any("不要求立刻回应" in item for item in payload.task_control["facts"])
+    assert payload.task_control["must_include"] == []
     assert any("负罪施压" in item for item in payload.task_control["must_not_do"])
     assert trace["relationship_life_guidance"]["aftereffect_outcome"] == "BOUNDARY"
 
@@ -155,5 +157,5 @@ def test_surface_compiler_does_not_inject_stale_space_constraints_after_repair_a
 
     assert any("可以自然回暖" in item for item in payload.task_control["facts"])
     assert not any("明确要求空间" in item for item in payload.task_control["facts"])
-    assert not any("不要求立刻回应" in item for item in payload.task_control["must_include"])
+    assert not any("不要求立刻回应" in item for item in payload.task_control["facts"])
     assert trace["relationship_life_guidance"]["proactive_permission"] == "DENIED"

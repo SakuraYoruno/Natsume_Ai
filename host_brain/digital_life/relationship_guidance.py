@@ -107,7 +107,7 @@ def build_relationship_reply_guidance(
                 "关系事实：上一轮触及了用户边界；先承认可能没有接住，再按用户给出的距离后退。",
             ]
         )
-        must_include.extend(
+        facts.extend(
             [
                 "自然确认会尊重对方的空间，不追问，不要求立刻回应。",
                 "如需回应边界，用第一人称承担自己的分寸，不替自己辩解。",
@@ -127,8 +127,12 @@ def build_relationship_reply_guidance(
             ]
         )
     elif outcome in _REPAIR_OUTCOMES or repair_required:
-        facts.append("关系事实：这里仍有未解决的误解或裂痕；先听清、承认可能没接住，再把节奏交还给用户。")
-        must_include.append("不要假装已经和好；给用户决定是否继续、何时继续的空间。")
+        facts.extend(
+            [
+                "关系事实：这里仍有未解决的误解或裂痕；先听清、承认可能没接住，再把节奏交还给用户。",
+                "关系表达：不要假装已经和好；给用户决定是否继续、何时继续的空间。",
+            ]
+        )
         must_not_do.append("不要要求原谅、用解释压过感受，或把一次道歉当作自动修复。")
         style_anchor.append("先稳定关系安全感，再回答或处理眼前任务；技术任务也不丢掉基本尊重。")
     elif outcome == "REPAIR_ACCEPTED":

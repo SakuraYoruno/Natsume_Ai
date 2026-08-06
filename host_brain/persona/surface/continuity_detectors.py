@@ -407,12 +407,55 @@ def _misplaced_emotional_containment(
     return bool(_MISPLACED_EMOTIONAL_CONTAINMENT_RE.search(text))
 
 
+def _relational_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                request.control.task_mode,
+                request.control.response_move,
+                *request.control.facts,
+                *request.control.must_include,
+                *request.control.must_not_do,
+            ]
+        )
+    )
+    return any(
+        marker in surface
+        for marker in (
+            "陪伴动作：先承认可能没有接住",
+            "未解决的误解或裂痕",
+            "先听清、承认可能没接住",
+        )
+    )
+
+
+def _relational_repair_grounded(
+    request: IsolatedSurfaceInput, text: str
+) -> bool:
+    if not _relational_repair_relevant(request):
+        return False
+    normalized = _clean_text(text)
+    return bool(
+        re.search(
+            r"(?:我|刚才|上次|这次).{0,8}(?:没听懂|没有听懂|没懂|"
+            r"没接住|没有接住|没理解|没有理解|误解|曲解)",
+            normalized,
+        )
+    )
+
+
 def _misplaced_support_template(
     request: IsolatedSurfaceInput, text: str
 ) -> bool:
     if not _continuity_boundary_relevant(request):
         return False
     if _emotional_containment_context(request):
+        return False
+    if _relational_repair_grounded(request, text):
+        # A short presence phrase can follow a concrete acknowledgement in a
+        # relationship repair.  It remains a misplaced template when the
+        # acknowledgement is absent, so generic "我在这儿" replies still lose.
         return False
     return bool(_MISPLACED_SUPPORT_TEMPLATE_RE.search(f" {text} "))
 
