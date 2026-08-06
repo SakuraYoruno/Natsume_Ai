@@ -241,6 +241,78 @@ def test_denied_proactive_permission_does_not_silence_an_active_user_turn() -> N
     assert guidance.plan.companion_act.kind == "COMFORT"
 
 
+def test_space_candidate_counter_pressure_is_rejected_before_selection(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    soul = "你是七海。真诚、有分寸，不操控用户。"
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=soul, runtime_full_text=soul),
+    )
+    context = _context()
+    life = context["affective_life"]
+    life["appraisal_id"] = "appraisal-space"
+    life["self_affect"]["last_appraisal"] = {
+        "appraisal_id": "appraisal-space",
+        "event_kind": "user_boundary_or_space",
+    }
+    life["self_affect"]["last_regulation"] = {
+        "regulation_id": "regulation-space",
+        "mode": "GIVE_SPACE",
+        "reason_refs": ["appraisal://appraisal-space"],
+    }
+    agent = SimpleNamespace(
+        request_id="dl04-space-counter-pressure",
+        workspace_id="workspace-a",
+        person_id="person-a",
+        session_id="session-a",
+        ts_ms=1_900_000_000_000,
+        user_message="别总主动找我。",
+        render_policy={
+            "primary_topic": "daily_chat",
+            "interaction_move": "reply_current_turn",
+        },
+        emotion_context=context,
+        emotion_snapshot={},
+        bond_summary={},
+        retrieval_summary={"status": "SKIPPED"},
+        llm_runtime={"available": True},
+        attachments=[],
+        multimodal_observations={},
+        response_form="text",
+    )
+    trace: dict[str, object] = {}
+    surface_input = build_surface_main_chain_input_from_surface_reply_input(
+        agent,
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+    compiled = compile_surface_main_chain_input(surface_input).request
+
+    selected = _select_buffered_affective_candidate(
+        raw_output=json.dumps(
+            {
+                "candidates": [
+                    "行吧。不过你要是想我了，可得自己开口。",
+                    "好，我会少主动联系，不打扰你。",
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=trace,
+    )
+
+    assert selected == "好，我会少主动联系，不打扰你。"
+    selection = trace["affective_candidate_selection"]
+    assert selection["selected_index"] == 1
+    assert selection["rejected_candidate_reason_codes"] == [
+        ["BOUNDARY_COUNTER_PRESSURE"]
+    ]
+
+
 def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     monkeypatch,
     surface_runtime_ports_factory,

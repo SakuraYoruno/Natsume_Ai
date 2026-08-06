@@ -55,6 +55,26 @@ _TTL_MS = {
 }
 _DISTRESS_TAGS = frozenset({"SAD", "ANXIOUS", "ANGRY", "FRUSTRATED"})
 _POSITIVE_TAGS = frozenset({"HAPPY", "EXCITED", "GRATEFUL", "LOVING"})
+_MINIMIZED_AFFECT_CONTINUATIONS = frozenset(
+    {
+        "没事",
+        "没什么",
+        "还好",
+        "算了",
+        "不用了",
+        "就这样",
+    }
+)
+_POSITIVE_RESULT_CONTINUATION_MARKERS = (
+    "offer",
+    "录取",
+    "拿到",
+    "通过了",
+    "成了",
+    "好消息",
+    "入职",
+    "定了",
+)
 _SPACE_MARKERS = (
     "别说了",
     "给我一点空间",
@@ -194,6 +214,7 @@ class AffectFusionResult:
     self_affect: Mapping[str, Any]
     receipts: tuple[LifeCommandReceipt, ...]
     reason_codes: tuple[str, ...]
+    continuity_kind: str = ""
     relationship_state: Mapping[str, Any] | None = None
     relationship_aftereffect: Mapping[str, Any] | None = None
     companion_profile: Mapping[str, Any] | None = None
@@ -221,6 +242,10 @@ class AffectFusionResult:
                 "candidate_count": self.candidate_count,
                 "retry_count": self.retry_count,
                 "appraisal_id": self.appraisal_id,
+                # Bounded, privacy-minimised continuity selected from the
+                # current short utterance and the still-active canonical
+                # episode.  No transcript text enters this hand-off.
+                "continuity_kind": self.continuity_kind,
                 "reason_codes": list(self.reason_codes),
                 "receipt_refs": [
                     f"life-command://{receipt.command_id}"
@@ -559,6 +584,13 @@ class AffectFusionService:
 
         snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
         affective = _safe_mapping(snapshot.state.get("affective"))
+        continuity_kind = _affective_continuity_kind(
+            message=_text(getattr(request_body, "message", None), limit=8_000),
+            self_affect=affective,
+            current_appraisal_id=appraisal_id,
+        )
+        if continuity_kind:
+            reason_codes.append(f"AFFECTIVE_CONTINUITY:{continuity_kind}")
         return AffectFusionResult(
             scope=scope,
             observations=tuple(observations),
@@ -571,6 +603,7 @@ class AffectFusionService:
             self_affect=affective,
             receipts=tuple(receipts),
             reason_codes=tuple(dict.fromkeys(reason_codes))[:8],
+            continuity_kind=continuity_kind,
             relationship_state=relationship_state,
             relationship_aftereffect=relationship_aftereffect,
             companion_profile=companion_profile,
@@ -1019,6 +1052,63 @@ def _has_mixed_user_affect(observations: Sequence[UserAffectObservationV1]) -> b
     # preserve a mixed moment without pretending that text is a sensor-grade
     # observation.
     return positive >= 0.3 and distress >= 0.3
+
+
+def _affective_continuity_kind(
+    *,
+    message: str,
+    self_affect: Mapping[str, Any],
+    current_appraisal_id: str | None,
+) -> str:
+    """Keep only two short-lived, semantically explicit affect continuations.
+
+    The Life journal already retains bounded unresolved episodes.  This helper
+    does not create another event or persist user text; it only tells the
+    frozen reply planner that a terse follow-up still belongs to the active
+    moment.  Any fresh appraisal wins, and unrelated text returns no hint.
+    """
+
+    if _text(current_appraisal_id):
+        return ""
+    affective = _safe_mapping(self_affect)
+    appraisal = _safe_mapping(affective.get("last_appraisal"))
+    appraisal_id = _text(appraisal.get("appraisal_id"), limit=240)
+    appraisal_kind = _text(appraisal.get("event_kind"), limit=96).upper()
+    if not appraisal_id or not appraisal_kind:
+        return ""
+    active_episode = next(
+        (
+            _safe_mapping(item)
+            for item in list(affective.get("active_episodes") or [])
+            if isinstance(item, Mapping)
+            and bool(item.get("unresolved"))
+            and _text(item.get("appraisal_id"), limit=240) == appraisal_id
+        ),
+        {},
+    )
+    if not active_episode:
+        return ""
+    component_tags = {
+        _text(item.get("emotion"), limit=64).upper()
+        for item in list(affective.get("components") or [])
+        if isinstance(item, Mapping)
+    }
+    compact = "".join(str(message or "").split()).strip("。！？!?…~～")
+    if (
+        appraisal_kind in {"USER_REJECTS_ADVICE", "USER_DISTRESS"}
+        and compact in _MINIMIZED_AFFECT_CONTINUATIONS
+        and component_tags.intersection({"CARE", "CONCERN", "RESPECT"})
+    ):
+        return "MINIMIZED_UNRESOLVED_AFFECT"
+    lower = compact.lower()
+    if (
+        appraisal_kind == "USER_MIXED_AFFECT"
+        and "SHARED_JOY" in component_tags
+        and "CAUTION" in component_tags
+        and any(marker in lower for marker in _POSITIVE_RESULT_CONTINUATION_MARKERS)
+    ):
+        return "MIXED_AFFECT_RESULT_CONTINUATION"
+    return ""
 
 
 def _signals_natsume_may_have_hurt_user(message: str) -> bool:

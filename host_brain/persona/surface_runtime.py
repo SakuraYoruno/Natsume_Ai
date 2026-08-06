@@ -737,6 +737,10 @@ _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
     r"|我(?:也)?省点力气|我(?:也)?不是整天闲着|我(?:也)?(?:很忙|有事要忙)"
     r"|(?:省得|免得).{0,6}(?:你)?嫌(?:我)?烦"
 )
+_BOUNDARY_COUNTER_PRESSURE_RE = re.compile(
+    r"(?:但|不过|可是|只是).{0,30}(?:想我|找我|开口|回复|回应|主动)"
+    r"|(?:想我|找我).{0,12}(?:自己|得|要).{0,8}(?:开口|说|联系)"
+)
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
 _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
     r"别瞎想|别多想|你想多了|少胡思乱想|别把我想得|爱多管闲事"
@@ -1440,6 +1444,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("ASCII_TILDE_TEXT_STYLE")
     if _boundary_sour_withdrawal_hits(request, value):
         codes.append("BOUNDARY_SOUR_WITHDRAWAL")
+    if _boundary_counter_pressure_hits(request, value):
+        codes.append("BOUNDARY_COUNTER_PRESSURE")
     if _relationship_doubt_dismissive_hits(request, value):
         codes.append("RELATIONSHIP_DOUBT_DISMISSIVE")
     if _relational_autonomy_dismissive_hits(request, value):
@@ -2623,6 +2629,20 @@ def _boundary_sour_withdrawal_hits(request: IsolatedSurfaceInput, text: str) -> 
     if not active:
         return ()
     return tuple(dict.fromkeys(match.group(0) for match in _BOUNDARY_SOUR_WITHDRAWAL_RE.finditer(str(text or ""))))
+
+
+def _boundary_counter_pressure_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "GIVE_SPACE"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _BOUNDARY_COUNTER_PRESSURE_RE.finditer(str(text or ""))
+        )
+    )
 
 
 def _relationship_doubt_dismissive_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:

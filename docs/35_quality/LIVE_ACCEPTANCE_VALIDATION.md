@@ -364,3 +364,11 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 加载 `d1777f109` 后的真实 HTTP 流进一步否定了“当前首句主要被召回拖慢”的判断。一条安静陪伴消息在 802 ms 已进入 Cortex，但直到 26,777 ms 才出现首个 RENDER；COMMIT 中 provider `first_token_ms=24,999`、模型为 `deepseek-v4-pro`，而 context pipeline 为 613 ms、retrieval 为 468 ms。根因是高歧义双候选让 buffered Surface 调用方把 `realtime_eligible` 置为 false，进而从 `CHAT_SURFACE_REALTIME／B` 漂移到 `CHAT_SURFACE／A`。修复只取消这项错误耦合，不取消双候选、边界 Gate 或 Task 路线的质量模型；110 项本地代码、集成和文档 Gate 通过。
 
 `09e828149` 重启 Host／OBS／Monitor 后，三个 Docker 依赖与既有 Gateway／远端 Edge 保持在线。三条真实样本的模型车道均为 `CHAT_SURFACE_REALTIME／B／realtime_companion`，provider／model 均为 `deepseek／deepseek-v4-flash`；首 token 为 2,157／1,834／1,981 ms，首个 RENDER 为 4,263／3,360／3,633 ms。相对同句错误 Pro 样本，首 token 降低 22,842 ms。该子项记为 `PASS_REAL_BUFFERED_COMPANION_TIER_B`，收据 SHA-256 为 `d383bf20246ed5f701ce72b9a66572bcf9eb9de0a23c62c9b86d683be2a4b9b0`。两条真实双候选均完成 `PAIRED_SELECTION`，但 `selected_passed=false`；首句仍高于体验门槛，因此整体实时和人感状态保持 `INCOMPLETE`。
+
+## 2026-08-06 A15 三类情感连续性失败与代码修复
+
+在相同实时模型车道上继续执行隐晦低落／空间边界／喜忧并存三类真实 Gateway 多轮 cohort，共 9 个 accepted turn；TaskGraph、Acceptance 和远端 Voice 主链可达，旧情感 writer 增量为 0。报告 SHA-256 为 `c19bc40c293ca6bf9c931178258cd2284d0ff4374e0f3e4ead90b269e085578a`。自动规则仅 1/3 通过，人工复核 3/3 均失败：末轮分别把“没事”误判成“一切正常”、以“想我了可得自己开口”反向要求用户、只说“恭喜”而丢失此前的不踏实。该结果将 `digital_life_human_likeness` 从未运行纠正为真实失败，不能被 TaskGraph 成功或 Voice 完成覆盖。
+
+持久证据显示 `conversation_turn.turn_index` 始终正确交替，但 Gateway／Host／Edge 的 `ts_ms` 存在秒级偏差；近期历史原先按 `ts_ms` 排序，导致同角色消息相邻并在消息规范化时被去重。canonical affect 快照其实仍保存 CARE／CONCERN 或 SHARED_JOY＋CAUTION 的未解决 episode，但当前消息无新 appraisal 时，Planner 会有意丢弃旧 appraisal，于是“没事”和“拿到 offer”失去跨轮语义。边界候选评分也已经报告 counter-pressure，却因不属于 hard fail 仍可入选。
+
+代码修复将近期对话改为按 canonical `turn_index` 排序；Fusion 仅在仍活跃的未解决 episode 与窄标记共同匹配时生成两个有界 continuity enum，Planner 冻结 enum 并加入相应事实／禁区；Surface 在 `GIVE_SPACE` 下硬拒绝反向联系要求。修复没有新增数据库表、journal、普通对话写入或模型调用。56 项直接单元测试与 267 项相邻 conversation／Surface／集成测试通过；真实 Host 尚未加载该提交，同一 cohort 复验前只记为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

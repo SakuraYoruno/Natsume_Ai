@@ -174,8 +174,12 @@ def test_advice_rejection_becomes_listening_and_survives_one_ambiguous_followup(
         request_id="request-ambiguous-after-advice-boundary",
     )
     assert ambiguous.appraisal_id is None
+    assert ambiguous.continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT"
     assert ambiguous_guidance is not None
     assert ambiguous_guidance.plan.companion_act.kind == "LISTEN"
+    assert ambiguous_guidance.continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT"
+    assert any("不能当作已经恢复" in item for item in ambiguous_guidance.facts)
+    assert any("不要把‘没事" in item for item in ambiguous_guidance.must_not_do)
 
 
 def test_natural_mixed_affect_preserves_both_signals_and_selects_two_candidates(
@@ -198,6 +202,33 @@ def test_natural_mixed_affect_preserves_both_signals_and_selects_two_candidates(
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
     assert guidance.plan.candidate_count == 2
+
+
+def test_mixed_affect_result_followup_keeps_both_sides_without_new_appraisal(
+    tmp_path: Path,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    fusion.resolve_request(
+        request_body=_request(message="我很开心，但心里也有点不踏实。"),
+        request_id="request-mixed-before-result",
+    )
+
+    result = fusion.resolve_request(
+        request_body=_request(message="我拿到 offer 了。"),
+        request_id="request-mixed-result-followup",
+    )
+    guidance = _guidance_from(
+        result,
+        request_id="request-mixed-result-followup",
+    )
+
+    assert result.appraisal_id is None
+    assert result.continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
+    assert guidance is not None
+    assert guidance.continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
+    assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert guidance.plan.candidate_count == 2
+    assert any("不要只说恭喜" in item for item in guidance.facts)
 
 
 def test_natural_good_news_becomes_shared_joy_without_external_emotion_hint(

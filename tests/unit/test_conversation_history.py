@@ -54,6 +54,29 @@ def test_fetch_for_messages_filters_corrupted_turns() -> None:
     assert [(turn.role, turn.content) for turn in turns] == [("user", "一")]
 
 
+def test_fetch_for_messages_uses_canonical_turn_order_across_clock_skew() -> None:
+    repository = _repository()
+    _append(repository, request_id="r1", role="user", content="第一句", ts_ms=100)
+    _append(repository, request_id="r1", role="assistant", content="第一答", ts_ms=500)
+    _append(repository, request_id="r2", role="user", content="第二句", ts_ms=200)
+    _append(repository, request_id="r2", role="assistant", content="第二答", ts_ms=600)
+
+    window = ConversationHistory(repository).fetch_window_for_messages(
+        session_id="sess",
+        max_turns=10,
+    )
+
+    assert [(turn.role, turn.content) for turn in window.recent_turns] == [
+        ("user", "第一句"),
+        ("assistant", "第一答"),
+        ("user", "第二句"),
+        ("assistant", "第二答"),
+    ]
+    assert window.deduped_same_role_count == 0
+    assert window.oldest_ts_ms == 100
+    assert window.newest_ts_ms == 600
+
+
 def test_fetch_window_for_messages_builds_older_summary() -> None:
     repository = _repository()
     history = ConversationHistory(repository)

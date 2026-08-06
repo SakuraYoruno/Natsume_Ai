@@ -124,8 +124,12 @@ class ConversationHistory:
                     exclude_request_id=exclude_request_id,
                 )
 
-        oldest_ts_ms = int(filtered[0].ts_ms) if filtered else None
-        newest_ts_ms = int(filtered[-1].ts_ms) if filtered else None
+        # ``turn_index`` is the canonical per-session order.  Gateway, Host
+        # and remote Edge clocks may differ by a few seconds, so the first or
+        # last turn in dialogue order is not necessarily the minimum or
+        # maximum source timestamp.
+        oldest_ts_ms = min((int(turn.ts_ms) for turn in filtered), default=None)
+        newest_ts_ms = max((int(turn.ts_ms) for turn in filtered), default=None)
         window = ConversationWindow(
             recent_turns=filtered,
             older_summary=older_summary,

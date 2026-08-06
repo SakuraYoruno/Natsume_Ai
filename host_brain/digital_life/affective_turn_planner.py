@@ -138,6 +138,7 @@ class AffectiveTurnGuidance:
     facts: tuple[str, ...]
     must_not_do: tuple[str, ...]
     style_anchor: tuple[str, ...]
+    continuity_kind: str = ""
 
     def trace(self) -> dict[str, Any]:
         """Small auditable view; no raw user body or private evidence body."""
@@ -154,6 +155,7 @@ class AffectiveTurnGuidance:
             "companion_act": self.plan.companion_act.kind,
             "generation_mode": self.plan.generation_mode,
             "candidate_count": self.plan.candidate_count,
+            "continuity_kind": self.continuity_kind,
             "text_pacing": self.plan.expression_plan.text_pacing,
             "companion_profile_id": self.plan.companion_profile_id,
             "companion_profile_digest": self.plan.companion_profile_digest,
@@ -293,6 +295,13 @@ def build_affective_turn_guidance(
         for item in list(life.get("user_observations") or [])
         if isinstance(item, Mapping)
     )[:8]
+    continuity_kind = _text(life.get("continuity_kind"), limit=96).upper()
+    if continuity_kind not in {
+        "",
+        "MINIMIZED_UNRESOLVED_AFFECT",
+        "MIXED_AFFECT_RESULT_CONTINUATION",
+    }:
+        continuity_kind = ""
     mode = _text(task_mode).lower()
     act_kind = _select_companion_act(
         task_mode=mode,
@@ -303,6 +312,7 @@ def build_affective_turn_guidance(
         repair_required=repair_required,
         observations=observations,
         appraisal_kind=appraisal_kind,
+        continuity_kind=continuity_kind,
     )
     high_ambiguity = (
         conflict
@@ -310,6 +320,7 @@ def build_affective_turn_guidance(
         or aftereffect_outcome in _REPAIR_OUTCOMES
         or regulation_mode in {"SEEK_REPAIR", "GIVE_SPACE"}
         or appraisal_kind in _APPRAISAL_CANDIDATE_SELECTION_KINDS
+        or continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
         or _has_low_confidence_or_conflicting_observation(observations)
     )
     generation_mode = "BUFFERED_CANDIDATE_SELECTION" if high_ambiguity else "STREAM_ONE"
@@ -326,6 +337,7 @@ def build_affective_turn_guidance(
         "regulation_id": regulation_id,
         "appraisal_id": appraisal_id,
         "appraisal_kind": appraisal_kind,
+        "continuity_kind": continuity_kind,
         "affect_repair_target": (
             repair_target.as_dict() if repair_target is not None else None
         ),
@@ -432,9 +444,17 @@ def build_affective_turn_guidance(
     )
     return AffectiveTurnGuidance(
         plan=plan,
-        facts=_facts_for_plan(plan),
-        must_not_do=_must_not_for_plan(plan),
-        style_anchor=(*_style_for_plan(plan), *_profile_style_anchors(profile.preferences)),
+        facts=(*_facts_for_plan(plan), *_continuity_facts(continuity_kind)),
+        must_not_do=(
+            *_must_not_for_plan(plan),
+            *_continuity_must_not_do(continuity_kind),
+        ),
+        style_anchor=(
+            *_style_for_plan(plan),
+            *_continuity_style(continuity_kind),
+            *_profile_style_anchors(profile.preferences),
+        ),
+        continuity_kind=continuity_kind,
     )
 
 
@@ -539,6 +559,7 @@ def _select_companion_act(
     repair_required: bool,
     observations: Sequence[Mapping[str, Any]],
     appraisal_kind: str,
+    continuity_kind: str = "",
 ) -> str:
     if regulation_mode in {"GIVE_SPACE", "QUIET_PRESENCE"}:
         return "GIVE_SPACE" if regulation_mode != "QUIET_PRESENCE" else "SILENCE"
@@ -567,6 +588,10 @@ def _select_companion_act(
     # into passive listening or generic comfort.
     if task_mode in _TECHNICAL_MODES:
         return "SOLVE"
+    if continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION":
+        return "HOLD_COMPLEXITY"
+    if continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT":
+        return "LISTEN"
     if appraisal_kind == "USER_MIXED_AFFECT":
         return "HOLD_COMPLEXITY"
     if appraisal_kind == "USER_REJECTS_ADVICE":
@@ -906,6 +931,38 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     if plan.companion_act.kind == "RESPECT_AUTONOMY":
         items.append("不要限制现实交往、贬低第三方、要求排他承诺，或把尊重边界说成七海在赌气退出。")
     return tuple(items)
+
+
+def _continuity_facts(continuity_kind: str) -> tuple[str, ...]:
+    if continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT":
+        return (
+            "上下文连续性：对方刚才的低落或拒绝方案尚未明确收束；这句轻描淡写不能当作已经恢复。保留不确定，安静接住，不拆穿也不追问。",
+        )
+    if continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION":
+        return (
+            "上下文连续性：结果已经更具体，但上一轮的开心和不踏实仍同时成立；真心庆祝时也轻轻护住那点没落地的不安，不要只说恭喜。",
+        )
+    return ()
+
+
+def _continuity_must_not_do(continuity_kind: str) -> tuple[str, ...]:
+    if continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT":
+        return (
+            "不要把‘没事、没什么、还好’直接解释成一切正常，也不要宣布对方已经好了。",
+        )
+    return ()
+
+
+def _continuity_style(continuity_kind: str) -> tuple[str, ...]:
+    if continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT":
+        return (
+            "像熟悉的人听出对方在收口：不审问，也不装作没看见；一句有温度的留白就够。",
+        )
+    if continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION":
+        return (
+            "先真心替对方高兴，再顺手护住那点没落地的不安；不要写成贺卡。",
+        )
+    return ()
 
 
 def _style_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
