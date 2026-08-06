@@ -597,7 +597,7 @@ async def _native_affective_sentence_stream(
     sent_sentence_count = 0
     sentence_receipts: list[dict[str, Any]] = []
     model_scene_type, model_cognitive_tier, model_route_lane = (
-        _surface_model_request_profile(trace, realtime_eligible=True)
+        _surface_model_request_profile(trace)
     )
     trace["surface_model_route"] = {
         "scene_type": model_scene_type,

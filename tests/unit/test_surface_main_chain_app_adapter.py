@@ -11,6 +11,9 @@ from host_brain.app.surface_main_chain_adapter import (
     run_surface_main_chain_for_surface_reply_input,
     surface_main_chain_sse_generator as _surface_main_chain_sse_generator,
 )
+from host_brain.app.surface_main_chain_support import (
+    _surface_model_request_profile,
+)
 from host_brain.surface_runtime.eligibility import surface_main_chain_enabled
 from host_brain.surface_runtime.input_compiler import build_surface_main_chain_input_from_surface_reply_input
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
@@ -211,6 +214,29 @@ def _candidate_payload(candidates: list[str]) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def test_realtime_companion_buffered_candidate_selection_stays_tier_b() -> None:
+    """双候选择优不能把普通陪伴静默升级到高延迟 A 档模型。"""
+
+    assert _surface_model_request_profile(
+        {
+            "runtime_path": "realtime_companion",
+            "affective_turn_plan": {
+                "generation_mode": "BUFFERED_CANDIDATE_SELECTION",
+                "candidate_count": 2,
+            },
+        }
+    ) == ("CHAT_SURFACE_REALTIME", "B", "realtime_companion")
+    assert _surface_model_request_profile(
+        {
+            "runtime_path": "governed_task",
+            "affective_turn_plan": {
+                "generation_mode": "BUFFERED_CANDIDATE_SELECTION",
+                "candidate_count": 2,
+            },
+        }
+    ) == ("CHAT_SURFACE", "A", "surface_reply")
 
 
 def _surface_json_result(text: str, *, final_provider: str = "mock", final_model: str = "mock-chat") -> SimpleNamespace:

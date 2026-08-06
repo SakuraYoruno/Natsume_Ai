@@ -48,21 +48,21 @@ def _surface_model_deadline_ms(governed_model_budget: Any | None) -> int:
 
 def _surface_model_request_profile(
     trace_stage_meta: Mapping[str, Any] | None,
-    *,
-    realtime_eligible: bool,
 ) -> tuple[str, str, str]:
     """Select the server-owned model lane at the actual ModelAttempt boundary.
 
     Route projection alone is insufficient because the Surface main chain
-    creates the canonical ModelAttemptRequest itself.  Only the ordinary
-    native sentence stream may use the low-latency companion lane; buffered
-    repair/ambiguity and governed nodes retain the quality-first Surface lane.
+    creates the canonical ModelAttemptRequest itself.  The server-owned
+    ``runtime_path`` determines whether this is ordinary companionship or a
+    quality-first execution route.  A two-candidate wording pass may stay
+    buffered without silently upgrading an ordinary companion turn from the
+    latency-bounded B lane to the A-lane model.
     """
 
     runtime_path = str(
         _safe_mapping(trace_stage_meta).get("runtime_path") or ""
     ).strip().lower()
-    if realtime_eligible and runtime_path == "realtime_companion":
+    if runtime_path == "realtime_companion":
         return "CHAT_SURFACE_REALTIME", "B", "realtime_companion"
     return "CHAT_SURFACE", "A", "surface_reply"
 

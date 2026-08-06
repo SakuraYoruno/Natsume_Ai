@@ -206,10 +206,7 @@ async def run_surface_main_chain_for_surface_reply_input(
         if governed_model_budget is not None and model_deadline_ms <= 0:
             raise RuntimeError("MODEL_BUDGET_DEADLINE_EXHAUSTED")
         model_scene_type, model_cognitive_tier, model_route_lane = (
-            _surface_model_request_profile(
-                trace_stage_meta,
-                realtime_eligible=affective_candidate_count is None,
-            )
+            _surface_model_request_profile(trace_stage_meta)
         )
         if isinstance(trace_stage_meta, dict):
             trace_stage_meta["surface_model_route"] = {

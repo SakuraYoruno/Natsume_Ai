@@ -346,7 +346,7 @@ python scripts/runtime/run_companion_profile_behavior_acceptance.py `
 
 Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Planner/Expression Delivery 组件：五条跨至少三天、helpfulness 下界不低于 0.85 且无边界违规的 aftereffect 才能开始；候选必须真实改变下一轮文本生成约束、Voice rate 和 Avatar motion，五次后效应后保持同一候选并自动激活；rollback 必须恢复精确前代的 profile identity、文本策略和两通道参数。该收据只证明 Host 生成与协议接线，不得冒充模型实际措辞或远端 Voice／Avatar 物理执行。
 
-普通 Gateway 陪伴的模型可用性回归必须同时验证：`input_source=GATEWAY` 且没有 canonical accepted predecessor artifact 时，冻结后的 Chat trace 选择 `realtime_companion`，实际 `ModelAttemptRequest` 使用 `CHAT_SURFACE_REALTIME`／Tier B；含前序 artifact 的 Plan 终局综合和深路径候选仍使用质量优先 Tier A。Tier B 的 server-owned target timeout 默认 15 秒；transport 在文本可见前失败时，只能在同一冻结 target 和现有 Task retry budget 内额外尝试一次，不能生成第二张图或重复 delivery。成功 provider response 仍必须带 canonical token usage，缺 usage 的成功响应不得因“陪伴优先”而通过。
+普通 Gateway 陪伴的模型可用性回归必须同时验证：`input_source=GATEWAY` 且没有 canonical accepted predecessor artifact 时，冻结后的 Chat trace 选择 `realtime_companion`，实际 `ModelAttemptRequest` 使用 `CHAT_SURFACE_REALTIME`／Tier B；普通陪伴的 `BUFFERED_CANDIDATE_SELECTION` 仍必须留在这一车道，不能因候选数量升级到 Tier A。含前序 artifact 的 Plan 终局综合及其他非陪伴复杂执行继续使用质量优先 Tier A。Tier B 的 server-owned target timeout 默认 15 秒；transport 在文本可见前失败时，只能在同一冻结 target 和现有 Task retry budget 内额外尝试一次，不能生成第二张图或重复 delivery。成功 provider response 仍必须带 canonical token usage，缺 usage 的成功响应不得因“陪伴优先”而通过。
 
 `CHAT_SURFACE_REALTIME` 当前冻结为 640 output tokens，并使用服务端 typed `thinking_mode=disabled`。Route boundary 只接受 `enabled/disabled`；DeepSeek provider adapter 必须把它转换为顶层 `thinking={"type":"disabled"}`，OpenAI、Gemini、Minimax 等 provider 必须删除提示而不是收到未知字段。Plan、Research 和高歧义深路径不得继承普通陪伴的 non-thinking 配置。回归仍要拒绝 `finish_reason=length` 且只有 `reasoning_content` 的空正文，不能把 reasoning 当用户可见回复；真实复验同时记录 completion token、content presence、provider latency 与最终 Voice receipt。
 
@@ -386,3 +386,5 @@ Surface recall service 的生命周期回归必须在同一 Agent Runtime applic
 `f0aa50a58` 的 104 项回归与真实复测满足该子项：三条 `MAY_RECALL` 检索为 316／351／508 ms，route ledger 为 74／91／79 ms；修复前中位 541 ms、修复后中位 351 ms。收据 SHA-256 为 `e1c8a0f9110be096dbb8c2f29fec1a945dd52482b009a805f30f6c85f2fcafd8`。本 PASS 只关闭服务和 client 重建；508 ms 尾部、2,964～4,712 ms 首句及 provider 1,443～1,797 ms 均继续失败。
 
 下一轮真实探针必须从 COMMIT `audit_refs.trace_stage_meta` 读取 `context_pipeline_ms`、`user_preference_pack_ms` 与 `retrieval_runtime_timings_ms`；后者包含 plan、embedding、service resolve、recall 和 review 字段。各字段必须是非负整数，retrieval total 不小于其顺序关键段；这些字段不得通过新增数据库 audit event 获得。只有数据确认的主段才能进入下一性能修复。
+
+双候选模型车道回归必须构造 `runtime_path=realtime_companion + BUFFERED_CANDIDATE_SELECTION + candidate_count=2`，断言模型请求仍为 `CHAT_SURFACE_REALTIME／B／realtime_companion`；对照的 governed／Task trace 仍为 `CHAT_SURFACE／A／surface_reply`。真实复验至少包含一条低置信安静陪伴消息，并记录实际模型、provider first token、首个 RENDER、context pipeline 和 retrieval；不得用单元断言覆盖真实 provider 25 秒级回归。

@@ -69,6 +69,8 @@ flowchart TB
 
 `host_brain/surface_runtime/` 负责普通对话上下文、记忆 grounding、情感计划和流式输出。`affective_streaming.py` 管理稳定分句与打断；`life_context.py` 和 `life_projection.py` 读取 canonical Life 状态。纯文本回复不再把双方情绪重置为 `NEUTRAL`。冲突／修复深路径在一次外部模型调用中生成两个候选；日语声线模式保留每个候选的中文正文、日语正文和情绪字段，确定性选择后才交给统一 Surface 解析与交付。
 
+双候选是措辞选择策略，不是模型车道 authority。`runtime_path=realtime_companion` 由 Host 在路由承诺后写入，单回复和 buffered 双候选都使用 `CHAT_SURFACE_REALTIME／Tier B`；只有不属于普通陪伴的 Task／复杂执行 Surface 才使用 `CHAT_SURFACE／Tier A`。这样保留关系边界与候选择优，不会因为低置信情绪观察把日常对话静默升级到高延迟 Pro 模型。
+
 当前语言策略为中文文本展示、日语 TTS。Host 通过 `ExpressionPlan` 选择 voice profile；目标 Edge 使用 `configs/voice/gpt_sovits_nanami_v4.json` 与 GPT-SoVITS V4 权重生成语音。
 
 ## 5. Governed Task Runtime
