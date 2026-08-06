@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_OBS_PROJECTION_HISTORY_HOURLY_CHECKPOINT_CODE_REMEDIATED_REAL_RETEST_PENDING",
+  "commit_scope": "A15_OBS_PROJECTION_LINEAGE_CHECKPOINT_SCOPE_CODE_REMEDIATED_REAL_RETEST_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -397,7 +397,7 @@
     "gateway_directional_worker_blocking_outbox_ms": 16075,
     "gateway_directional_worker_overlapped_inbox_claim_delay_ms": "118_TO_197",
     "gateway_directional_worker_first_inbox_progress_before_outbox_terminal_ms": 15604,
-    "obs_projection_journal_storage_amplification": "COMPRESSION_REAL_PASS_HOURLY_CHECKPOINT_CODE_REMEDIATED_REAL_RETEST_PENDING",
+    "obs_projection_journal_storage_amplification": "COMPRESSION_REAL_PASS_SCOPED_HOURLY_CHECKPOINT_CODE_REMEDIATED_REAL_RETEST_PENDING",
     "obs_projection_journal_baseline_table_mib": 1930.3,
     "obs_projection_journal_baseline_five_second_rows": 25,
     "obs_projection_journal_baseline_five_second_payload_bytes": 1640149,
@@ -411,10 +411,11 @@
     "obs_projection_journal_compression_real_retest_stored_bytes": 410858,
     "obs_projection_journal_compression_real_retest_uncompressed_bytes": 2996490,
     "obs_projection_journal_checkpoint_interval_ms": 3600000,
-    "obs_projection_journal_checkpoint_exact_kinds": [
-      "obs_internal_host_source_lineage"
-    ],
-    "obs_projection_journal_checkpoint_regression": "PASS_27_CHECKPOINT_COMPOSITION_PLUS_40_STORE_LINEAGE_TESTS",
+    "obs_projection_journal_checkpoint_forced_transition": "HOST_SOURCE_INSTANCE_ID_CHANGE",
+    "obs_projection_journal_checkpoint_same_instance_revision": "HOURLY",
+    "obs_projection_journal_checkpoint_first_real_retest": "FAIL_7_SAME_INSTANCE_LINEAGE_REVISIONS_PLUS_1_NEW_TASK_FIRST_CHECKPOINT_CURRENT_DOCUMENTS_AND_HTTP_HEALTHY",
+    "obs_projection_journal_checkpoint_first_real_retest_report_sha256": "ad4d8c178a66e0040b147b1c8fa6c6129be443b954fbc73bfecbdcb544a7b00c",
+    "obs_projection_journal_checkpoint_regression": "PASS_29_REBUILD_CHECKPOINT_AND_HOST_LINEAGE_FOCUSED_TESTS",
     "digital_life_real_multiturn_smoke": "REAL_STABLE_SUBJECT_SELECTIVE_3_CASE_2_AUTOMATED_PASS_1_FAIL_ALL_HUMAN_REVIEW_PENDING_LANGUAGE_QUALITY_UNPROVEN",
     "digital_life_real_multiturn_report_sha256": "e004cb49ef1e4d90028f49d8ca87c790e530a7b60200924b93fdd7e34c9b9f5f",
     "digital_life_real_multiturn_previous_full_report_sha256": "6c5c12f21e39f956af39d3466d5805a871a978864a25aa9864620653844b3871",

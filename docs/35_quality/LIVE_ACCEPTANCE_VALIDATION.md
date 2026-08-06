@@ -303,6 +303,8 @@ non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_
 
 `636252264` 加载后的真实 OBS PID 60936、Host 和 Nginx Monitor 均健康。30,008 ms 样本新增 46 行，其中 11 条为压缩 envelope、35 条为小 JSON，摘要错误为 0；声明原始载荷 2,996,490 bytes，实际保存 410,858 bytes，降低 86.289%。最大 Gateway source 从 893,866 bytes 压到约 79 KiB，session 从 698,586 bytes 压到约 123 KiB。脱敏报告 `obs-projection-compression-1785985583283.json` 的 SHA-256 为 `dc55ab31e384845feba3381b6265ac06f4792706300831e98c11f86f803828ce`，不包含 payload body。
 
-该结果关闭“大载荷未压缩”，但没有关闭“每次刷新都追加历史”：压缩后 30 秒仍产生 46 条派生 journal row。当前代码继续把独立 OBS 的 projection history 改为默认每 kind/key 每小时一个恢复检查点，检查点之间的 current document、source cursor 和 freshness 仍原子更新；`obs_internal_host_source_lineage` 永久绕过限频。journal rebuild 可以有界恢复到上一个检查点，且通过 state signature 拒绝未写 journal 的并发 current 变化。27 项 checkpoint／composition 集与 40 项 Store／Host lineage 集通过。
+该结果关闭“大载荷未压缩”，但没有关闭“每次刷新都追加历史”：压缩后 30 秒仍产生 46 条派生 journal row。独立 OBS 随后启用默认每 kind/key 每小时一个恢复检查点，检查点之间的 current document、source cursor 和 freshness 仍原子更新。第一次真实重启后的 39.105 秒窗口里，Host／OBS／Monitor 前后均为 HTTP 200，135 个文档 `updated_ts_ms`、134 个 freshness、33 个 source cursor 持续推进；但 journal 仍新增 8 行，因此判为 `FAIL`，不能越级封板。新增行精确分解为 7 条同一 Host 实例 revision lineage 和 1 条新 Scheduler TaskGraph 的必要首快照；脱敏失败报告 SHA-256 为 `ad4d8c178a66e0040b147b1c8fa6c6129be443b954fbc73bfecbdcb544a7b00c`。
 
-检查点代码真实重启前仍标记 `CODE_REMEDIATED_REAL_RETEST_PENDING`。既有 1.93 GB 历史不会被破坏性改写或冒充已经缩小；后续只验证新窗口不再增长、Monitor freshness 和 rebuild 边界，不对 canonical Life／Task／Gateway 数据做清理。
+修正后只有 Host `source_instance_id` 切换会强制写 lineage，同一实例 revision 进入小时检查点；历史仍足以保存全部退役实例并拒绝 replay。新文档首快照继续保留，不被误判为刷新写放大。journal rebuild 可以有界恢复到上一个检查点，且通过 state signature 拒绝未写 journal 的并发 current 变化；29 项重建／检查点／Host lineage 定向测试通过。
+
+收窄后的检查点代码第二次真实重启前仍标记 `CODE_REMEDIATED_REAL_RETEST_PENDING`。既有 1.93 GB 历史不会被破坏性改写或冒充已经缩小；后续按“既存且未到期文档不新增、实例切换与新文档首快照允许”的精确口径验证 Monitor freshness 和写入边界，不对 canonical Life／Task／Gateway 数据做清理。

@@ -79,7 +79,7 @@
 - [x] 验证 Sidecar 停止隔离：显式空 RuntimeRoot 不再按 18082／18180 全局兜底，主 Obs 与 Nginx PID 均保持不变且健康端点继续为 200。
 - [x] 验证分段 TTS 合成失败会结算父命令并取消兄弟分段，打断后队列归零。
 - [x] 验证 VTS 人工授权等待不会触发无界自动重连或句柄增长。
-- [ ] 关闭 OBS 派生 projection journal 写放大。`636252264` 真实 30 秒样本把 2,996,490 bytes 原始公开载荷压到 410,858 bytes，降低 86.3%，46 条新行摘要全部有效；但派生历史仍随刷新增长。当前代码已增加默认一小时恢复检查点：Monitor 当前文档继续刷新，只有历史 checkpoint 限频，Host source lineage 仍逐次精确记录；27 项 checkpoint／composition 集和 40 项 Store／lineage 单测通过，真实 OBS 重启复验完成前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+- [ ] 关闭 OBS 派生 projection journal 写放大。`636252264` 真实 30 秒样本把 2,996,490 bytes 原始公开载荷压到 410,858 bytes，降低 86.3%。一小时恢复检查点首轮 39.1 秒真实复验中 135 个 current 文档持续更新，但仍新增 7 条同一 Host 实例 revision lineage 和 1 条新 TaskGraph 首快照，故如实判为 `FAIL`；报告 SHA-256 为 `ad4d8c178a66e0040b147b1c8fa6c6129be443b954fbc73bfecbdcb544a7b00c`。代码现只在 Host `source_instance_id` 切换时强制写 lineage，同实例 revision 限频，新文档首快照仍保留；29 项重建／检查点／Host lineage 定向测试通过，第二次真实 OBS 重启复验完成前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
 
 ## P1：情感生命清零项
 

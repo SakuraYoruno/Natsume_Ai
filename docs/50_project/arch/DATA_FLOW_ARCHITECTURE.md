@@ -223,7 +223,7 @@ canonical ledgers
 → OBS public projection
 ├→ current document：普通 JSON，直接服务 Monitor 查询
 └→ immutable recovery checkpoints：默认每 kind/key 每小时至多一个
-   ├→ Host source instance lineage：逐次精确记录，不限频
+   ├→ Host source instance 切换：强制记录；同实例 revision 按小时检查点
    ├→ 小对象保持旧 JSON；大对象使用有界 zlib/base64 envelope
    → size + source digest 校验
    → rebuild / history reader 透明解码

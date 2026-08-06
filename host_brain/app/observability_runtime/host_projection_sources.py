@@ -390,6 +390,11 @@ class AuthenticatedHostProjectionSources:
                 current_cursor = int(
                     getattr(current_document, "source_cursor", 0) or 0
                 )
+                instance_transition = bool(
+                    current is None
+                    or incoming["source_instance_id"]
+                    != str(current.get("source_instance_id") or "")
+                )
                 source_cursor = (
                     current_cursor
                     if current is not None
@@ -410,6 +415,7 @@ class AuthenticatedHostProjectionSources:
                             int(snapshot.evidence_ts_ms),
                             local_now_ms,
                         ),
+                        force_journal_checkpoint=instance_transition,
                     )
                     return
                 except QueryProjectionError as exc:

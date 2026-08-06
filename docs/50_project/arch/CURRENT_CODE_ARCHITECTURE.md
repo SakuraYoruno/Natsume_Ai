@@ -90,7 +90,7 @@ Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Disp
 
 `host_brain/composition/` 构造 Host、Life、Task Runtime 等 app-local 对象图。OBS 通过显式 projection ports 读取 canonical store；Monitor UI 只消费读模型和提交 Operator 命令，不拥有业务状态。
 
-独立 OBS composition 为派生 projection store 启用一小时恢复检查点，而 Host 进程内其他 Store 保持原合同。该策略不降低当前文档刷新频率；`obs_internal_host_source_lineage` 被列为 exact kind，继续保存每次 source instance 迁移，防止旧实例重放。大检查点再使用透明压缩，避免个人运行环境因 Monitor 历史重复快照持续膨胀。
+独立 OBS composition 为派生 projection store 启用一小时恢复检查点，而 Host 进程内其他 Store 保持原合同。该策略不降低当前文档刷新频率；`AuthenticatedHostProjectionSources` 只在 `source_instance_id` 切换时强制写 lineage，同一实例的 revision 进入普通检查点。这样仍保存每个退役实例并防止旧实例重放，又不会把 Host 的普通轮询变成逐次历史。大检查点再使用透明压缩，避免个人运行环境因 Monitor 历史重复快照持续膨胀。
 
 `host_brain/app/asgi.py` 只保留 Host composition root 与 lifespan 顺序，当前 1396 行并继续受 `<1400` Gate 约束。Scheduler 的主动任务、Life tick/reconciliation、Life/Embodiment outbox drain 和两个轻量 pump 集中在 `host_scheduler_runtime_handlers.py`；该对象只持有 app-local handler 与后台 task 生命周期，Scheduler ledger、Life journal 和 Embodiment outbox 仍分别是 durable authority。
 

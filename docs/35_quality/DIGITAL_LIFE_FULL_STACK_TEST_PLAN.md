@@ -645,7 +645,7 @@ PlanningSearch 集成夹具必须让不同节点返回可区分、足以验证�
 
 - Host／OBS／Edge 内存没有持续无界增长。
 - 记录 `operator_query_projection_journal` 的行数、载荷字节与数据库文件增量；超过 8 KiB 的新历史检查点必须使用可重放压缩 envelope，同一批新行的总存储载荷相对声明的原始公开 JSON 至少降低 70%。
-- OBS 当前文档持续反映最新投影，但派生历史默认每小时至多为每个 kind/key 增加一个恢复检查点；`obs_internal_host_source_lineage` 不得被限频。30 秒稳定窗口若没有检查点到期或 lineage 变化，journal 新增应为 0。
+- OBS 当前文档持续反映最新投影，但派生历史默认每小时至多为每个 kind/key 增加一个恢复检查点；Host `source_instance_id` 切换必须强制写 lineage，同一实例的 revision 刷新不得绕过限频。新 kind/key 可以写首个必要检查点；稳定窗口对窗口前已存在、未到期且没有实例切换的文档，journal 新增必须为 0。
 - 从压缩历史在临时库重建当前文档，逐项核对 source digest；损坏 base64、超限声明、尾随压缩数据和摘要漂移必须 fail-closed，不能影响运行中的 canonical 库。
 - scheduler 不产生高频空转。
 - VTS frame 与错误计数比例稳定，断线后不出现错误风暴。

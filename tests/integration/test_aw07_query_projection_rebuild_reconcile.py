@@ -195,7 +195,7 @@ def test_projection_history_checkpoint_bounds_refresh_writes_and_rebuilds_last_c
     assert store.get("session", "index").payload == {"status": "C"}
 
 
-def test_exact_projection_kind_bypasses_history_checkpoint_interval(tmp_path):
+def test_forced_projection_transition_bypasses_history_checkpoint_interval(tmp_path):
     db_path = tmp_path / "projection-exact-kind.sqlite3"
     migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
         request_id="aw07-projection-exact-kind"
@@ -206,7 +206,6 @@ def test_exact_projection_kind_bypasses_history_checkpoint_interval(tmp_path):
         db_path,
         clock=lambda: clock[0],
         journal_checkpoint_interval_ms=60_000,
-        exact_journal_kinds=("obs_internal_host_source_lineage",),
     )
 
     store.upsert(
@@ -219,8 +218,16 @@ def test_exact_projection_kind_bypasses_history_checkpoint_interval(tmp_path):
     store.upsert(
         "obs_internal_host_source_lineage",
         "runtime",
-        {"source_instance_id": "host-b", "source_revision": 1},
+        {"source_instance_id": "host-a", "source_revision": 2},
         source_cursor=2,
+    )
+    clock[0] = 3_000
+    store.upsert(
+        "obs_internal_host_source_lineage",
+        "runtime",
+        {"source_instance_id": "host-b", "source_revision": 1},
+        source_cursor=3,
+        force_journal_checkpoint=True,
     )
 
     with sqlite3.connect(db_path) as conn:

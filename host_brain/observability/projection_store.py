@@ -224,7 +224,6 @@ class QueryProjectionStore:
         *,
         clock: Callable[[], int] | None = None,
         journal_checkpoint_interval_ms: int = 0,
-        exact_journal_kinds: Iterable[str] = (),
     ) -> None:
         raw = str(db_path or "").strip()
         if not raw:
@@ -235,28 +234,23 @@ class QueryProjectionStore:
             0,
             int(journal_checkpoint_interval_ms),
         )
-        self._exact_journal_kinds = frozenset(
-            str(kind).strip() for kind in exact_journal_kinds if str(kind).strip()
-        )
         self._assert_schema()
 
-    def _journal_checkpoint_due(
+    def _journal_checkpoint_required(
         self,
         conn: sqlite3.Connection,
         *,
-        projection_kind: str,
         current: sqlite3.Row | None,
         operation_now: int,
+        source_cursor: int,
+        source_digest: str,
+        force: bool,
     ) -> bool:
-        if (
-            current is None
-            or self._journal_checkpoint_interval_ms <= 0
-            or projection_kind in self._exact_journal_kinds
-        ):
+        if current is None:
             return True
         journal = conn.execute(
             """
-            SELECT observed_ts_ms
+            SELECT source_cursor, source_digest, observed_ts_ms
             FROM operator_query_projection_journal
             WHERE cursor = ?
             """,
@@ -267,6 +261,16 @@ class QueryProjectionStore:
                 PROJECTION_DATA_INVALID,
                 "projection current references a missing journal checkpoint",
             )
+        if (
+            int(journal["source_cursor"]) == int(source_cursor)
+            and str(journal["source_digest"]) == str(source_digest)
+        ):
+            # An identical immutable checkpoint already represents this
+            # materialized state. Avoid INSERT OR IGNORE because SQLite would
+            # still advance AUTOINCREMENT and dirty the WAL on every refresh.
+            return False
+        if force or self._journal_checkpoint_interval_ms <= 0:
+            return True
         checkpoint_ts_ms = int(journal["observed_ts_ms"])
         elapsed_ms = int(operation_now) - checkpoint_ts_ms
         return elapsed_ms < 0 or elapsed_ms >= self._journal_checkpoint_interval_ms
@@ -599,6 +603,7 @@ class QueryProjectionStore:
         degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
         degraded_detail: str | None = None,
         freshness_ts_ms: int | None = None,
+        force_journal_checkpoint: bool = False,
     ) -> ProjectionDocument:
         """Atomically compare the current document and commit its successor."""
 
@@ -612,6 +617,7 @@ class QueryProjectionStore:
             degraded_state=degraded_state,
             degraded_detail=degraded_detail,
             freshness_ts_ms=freshness_ts_ms,
+            force_journal_checkpoint=force_journal_checkpoint,
             _expected_current=expected_current,
         )
 
@@ -627,6 +633,7 @@ class QueryProjectionStore:
         degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
         degraded_detail: str | None = None,
         freshness_ts_ms: int | None = None,
+        force_journal_checkpoint: bool = False,
         _expected_current: ProjectionDocument | None | object = _UNCONDITIONAL_CURRENT,
     ) -> ProjectionDocument:
         projection_kind = self._required(kind, "kind")
@@ -707,13 +714,15 @@ class QueryProjectionStore:
                         PROJECTION_CURSOR_CONFLICT,
                         "the current source cursor is already bound to a different digest",
                     )
-            checkpoint_due = self._journal_checkpoint_due(
+            checkpoint_required = self._journal_checkpoint_required(
                 conn,
-                projection_kind=projection_kind,
                 current=current,
                 operation_now=operation_now,
+                source_cursor=cursor,
+                source_digest=source_hash,
+                force=bool(force_journal_checkpoint),
             )
-            if checkpoint_due:
+            if checkpoint_required:
                 conn.execute(
                     """
                     INSERT OR IGNORE INTO operator_query_projection_journal(

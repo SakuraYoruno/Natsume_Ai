@@ -36,11 +36,6 @@ from host_brain.app.obs_projection_jobs import (
     build_explicit_obs_projection_callbacks,
 )
 from host_brain.app.observability_runtime.host_read_transport import HostReadTransport
-from host_brain.app.observability_runtime.host_projection_sources import (
-    HOST_SOURCE_LINEAGE_KIND,
-)
-
-
 OBS_PROJECTION_JOBS_MIGRATED_TO_EXPLICIT_PORTS = (
     "bio-ops-metadata",
     "capability-forge-operator",
@@ -256,7 +251,6 @@ def build_default_obs_application_ports(
             journal_checkpoint_interval_ms=(
                 _projection_journal_checkpoint_interval_ms()
             ),
-            exact_journal_kinds=(HOST_SOURCE_LINEAGE_KIND,),
         )
         metrics = MetricsCollector(ledger=ledger)
         life_reader = LifeSnapshotReader(LifeCommandRepository.from_ledger(ledger))
