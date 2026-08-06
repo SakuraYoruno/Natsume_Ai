@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_OBS_TASK_PROJECTION_WRITER_FAIRNESS_PASS_REAL_END_TO_END_LATENCY_INCOMPLETE",
+  "commit_scope": "A15_ORDINARY_CHAT_NO_RECALL_DUPLICATE_HISTORY_READ_CODE_REMEDIATED_REAL_RETEST_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -25,6 +25,7 @@
     "realtime_companion_chat": {
       "status": "WIRED",
       "governance_mode": "LIGHTWEIGHT",
+      "no_recall_duplicate_history_read": "CODE_REMEDIATED_REAL_RETEST_PENDING",
       "note": "Direct no-effect chat keeps the realtime path. Gateway chat uses a compact governed TaskGraph because its accepted reply is an external durable effect."
     },
     "user_self_affect_separation": {

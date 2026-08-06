@@ -376,3 +376,5 @@ python -m pytest -q `
 断言每波 80 个索引候选只刷新 16 个详情、其余 64 个明确 deferred；index 加 16 个详情后必须产生 17 次 5 ms cooperative writer window。阻塞 projection writer 的测试必须同时证明事件循环协程在 100 ms 内仍可推进。真实复验必须保持 Host、OBS、Monitor、Gateway、Edge 全部运行，比较 worker projection `created_ts_ms` 到 BudgetUsage／artifact 的间隔以及 `task_execution` 波次跨度；关闭 OBS 的样本只能用于因果对照，不能替代完整栈结论。
 
 `ead903f66` 的真实复验已满足该子项：三个 Docker 容器与五端服务同时在线，Task 详情每波最多 16 个、index 加详情最多 17 个；三轮 projection 到后预算为 187／94／49 ms，到 artifact 为 1,054／269／246 ms。报告 `dl-live-1785995815718.json` 的 SHA-256 为 `7415951164753cd00c68d55b40b35167e30feefe93d02503f259dee34f2f06ce`。该 PASS 只覆盖 writer fairness；TaskGraph 4,899～4,903 ms、Host 终态 6,509～7,159 ms、一次语义修复和人工评审 `PENDING` 继续阻断整体实时 Gate。
+
+本地实时 Chat 还必须单独测量 HTTP headers、首个 `PRESENCE`、首个非空 `RENDER` 和 `COMMIT`，不得把 Gateway 的完整 durable terminal 当成首 Token。对 `NO_RECALL` 输入，单测必须注入可观测 ConversationHistory port 并断言读取次数为 0；`MAY_RECALL／MUST_RECALL` 的近期显式记忆、语义检索和 Surface continuity 回归必须继续通过。代码修复后的真实复验需要在 Host、OBS、Monitor 同时运行时比较 `retrieval_wait_ms` 和首句可见时间，关闭 OBS 的样本只用于因果对照。

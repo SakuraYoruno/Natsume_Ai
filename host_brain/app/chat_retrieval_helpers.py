@@ -276,11 +276,20 @@ async def _run_retrieval(
         )
         plan = plan_surface_memory_recall(context)
         embedding_model_id = ""
-        short_term_memory_facts = _recent_explicit_memory_facts(
-            message=message,
-            session_id=session_id,
-            request_id=request_id,
-            conversation_history=conversation_history,
+        # ``NO_RECALL`` is the common low-latency companion path.  Do not read
+        # ConversationHistory merely to prove that a plan which already
+        # rejected recall has no recent explicit-memory shortcut.  Surface
+        # independently reads its bounded continuity window later, so this
+        # eager lookup was duplicate SQLite work on every ordinary turn.
+        short_term_memory_facts = (
+            _recent_explicit_memory_facts(
+                message=message,
+                session_id=session_id,
+                request_id=request_id,
+                conversation_history=conversation_history,
+            )
+            if plan.should_recall
+            else []
         )
         if plan.should_recall and short_term_memory_facts:
             packet = SurfaceMemoryRecallPacket(

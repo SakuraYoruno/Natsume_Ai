@@ -511,6 +511,13 @@ async def test_run_retrieval_skips_low_signal_short_turn_without_embedding(monke
 
 @pytest.mark.asyncio
 async def test_run_retrieval_skips_generic_plain_answer_without_memory_hint(monkeypatch) -> None:
+    history_reads: list[str] = []
+
+    class _History:
+        def fetch_recent_turns(self, *, session_id, max_turns, exclude_request_id=None):  # noqa: ANN001
+            history_reads.append(str(session_id))
+            return []
+
     def _unexpected_embed(_query):  # noqa: ANN001
         raise AssertionError("generic daily turns should not build embeddings")
 
@@ -531,9 +538,11 @@ async def test_run_retrieval_skips_generic_plain_answer_without_memory_hint(monk
         emotion_tag="NEUTRAL",
         render_target_lang="zh",
         intent_draft={"route": "plain_answer"},
+        conversation_history=_History(),
     )
 
     assert evidence_items == []
+    assert history_reads == []
     assert summary["status"] == "SKIPPED"
     assert summary["query_plan"]["recall_policy"] == "NO_RECALL"
     assert summary["surface_memory_recall_packet"]["trace"]["plan"]["reason"] == "no_memory_recall_needed"

@@ -340,3 +340,9 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 `ead903f66` 加载后的正式复验报告为 `dl-live-1785995815718.json`，SHA-256 `7415951164753cd00c68d55b40b35167e30feefe93d02503f259dee34f2f06ce`。Host、OBS、Nginx Monitor、Gateway、远端 Edge 与三个真实 Docker 容器同时在线；OBS daemon 连续成功且无失败波次。三轮 worker projection 到 `WORKER_USAGE` 落盘分别为 187／94／49 ms，远低于修复前 2,880 ms；到 artifact 为 1,054／269／246 ms。current 文档实际轮转的详情批次最大为 16，index 加详情最大为 17，证明配置没有只停留在单测。
 
 三轮 TaskGraph 分别为 4,899／4,903／4,736 ms，Host 终态为 7,040／7,159／6,509 ms；自动陪伴结构和旧 writer 清零通过，末轮远端 Voice 到达 `TTS_PLAYBACK_FINISHED/APPLIED`。本项因此提升为 `PASS_REAL_FULL_STACK_WRITER_FAIRNESS`。整体实时 Gate 仍失败：第二轮有一次模型语义修复，首轮 artifact 冷态尾部仍为 1,054 ms，VTS 为外部连接拒绝，人工自然度评审仍为 `PENDING`；A15 总体继续为 `INCOMPLETE`。
+
+## 2026-08-06 A15 本地实时对话首句拆分
+
+在五端服务与 Docker 保持在线时直接请求本地 `/v1/chat`，三轮首个可见 `RENDER` 分别约为 4.52／5.76／2.98 秒；另一个带公开 timing trace 的样本为 3.80 秒。Surface 自身的真实 DeepSeek 流约占 1.6～1.7 秒，而 Cortex 的 `NO_RECALL` 检索阶段仍等待 0.54～0.56 秒。短暂停止 OBS 后该等待仍为 0.54 秒，说明它不是上一项派生 writer 饥饿的残留。
+
+代码审查确认 `_run_retrieval()` 在 `plan.should_recall=false` 时仍无条件调用 `_recent_explicit_memory_facts()`，读取一次 ConversationHistory 后才构造跳过结果；Surface 随后还会读取真正需要的近期对话，因此这次 IO 没有体验价值。修复只把历史读取移入 `should_recall` 分支，不删长期记忆、不缩短显式召回预算，也不改变情感与关系上下文。19 项召回单测通过，其中新增断言保证 `NO_RECALL` 不触碰 history port。当前运行 Host 仍是旧提交，状态只能是 `CODE_REMEDIATED_REAL_RETEST_PENDING`；模型 provider 抖动、首句安全分段和人工人感仍继续阻断实时 Gate。
