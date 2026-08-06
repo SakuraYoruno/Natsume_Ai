@@ -244,3 +244,11 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 未知结果路线由 peer 完整读取请求后主动断开连接而不返回 HTTP response。唯一 Attempt 已 `dispatch_started=1`，Outbox 随即进入 `DLQ / GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN`。之后把 peer 恢复为成功模式，再执行同键重复提交、Gateway runtime 重启和普通 operator replay，peer 请求数仍保持 1；普通 replay 被 `GATEWAY_TRANSPORT_REPLAY_REQUIRES_RECONCILIATION` 拒绝，`replay_count=0`。最终 SQLite `integrity_check=ok`，两条 Outbox 分别为 1 个 `ACKED` 与 1 个需要 reconciliation 的 `DLQ`。定向 canary 1 项与相邻 Gateway／Store／QQ 回归 150 项通过，脱敏收据 SHA-256 为 `c878cda4f2b3d428f8bbad04b55a03f72be6f8ac4b43e8a923435af20c5c17b2`。
 
 该结果记为 `PASS_LOCAL_PROTOCOL_RECOVERY_AND_FAIL_CLOSED`。Loopback peer 不是 QQ／微信客户端，`ACKED` 只代表 adapter confirmation，DLQ 也不代表物理送达；真实平台客户端当前不可用，因此 `physical_platform_delivery=NOT_TESTED_PLATFORM_CLIENT_UNAVAILABLE`。A15 总体仍受覆盖率、PlanningSearch 收益、VTS、声学打断、实时延迟和人工盲测等 Gate 阻断，继续为 `INCOMPLETE`。
+
+## 2026-08-06 A15 Digital Life 作用域、隐私与有界重放
+
+绑定提交 `0195d1968ab6ff7b609198f8d1ec3a433dd89200` 的隔离 canary 使用完整 migration catalog、真实临时 SQLite 和生产 `AffectFusionService`／`LifeCommandService`／`LifeCommandRepository`。四组输入分别改变 workspace、relationship subject 与 session，最终得到四个不同 aggregate；只对主 aggregate 执行 1001 次、每次 60 秒的确定性时间推进后，其余三个 scope 的 digest 均未变化，scope violation 为 0。
+
+输入包含仅用于本次合成验证的 text/audio/image/video sentinel。Fusion 返回 `RAW_MODALITY_OMITTED`，Visual TTL 被收紧到 3000 ms；直接绕过 Fusion 提交包含 `raw_audio` 的 LifeCommand 被 reducer 拒绝且没有留下 receipt。Canary 随后扫描 affective command、1026 条 Life event、四个 canonical snapshot 与 projection intent，禁止字段和 sentinel 命中均为 0。最终 active episode 与 component 均已自然衰减为 0，snapshot 从 13,370 bytes 降至 9,281 bytes，最大 event payload 28,881 bytes；新建 Repository 实例重放后 snapshot 与 digest 完全一致，SQLite integrity 为 `ok`。
+
+脱敏收据 SHA-256 为 `ddc09b5bce7a6974a58205634b0c7518d25e6cc113d7ebd7d53e06283f3ca584`，状态为 `PASS_REAL_SQLITE_SCOPE_PRIVACY_BOUNDED_REPLAY`。60,060,000 ms 只表示模拟事件时间，实际执行约 59 秒，不能写成 16 小时墙钟 soak；它也不替代旧情感 writer 使用量归零、profile apply／rollback、人工人感盲测或三模态验收。A15 总体继续为 `INCOMPLETE`。

@@ -50,6 +50,18 @@ sequenceDiagram
 
 关键不变量：用户 observation 不直接写 self affect；纯文本回合不重置为中性；已交付分句不重复；技术失败不当作关系拒绝。
 
+情感聚合键由 `workspace_id + relationship_subject_id + session_id` 共同派生，不能只按 person 或 workspace 复用。A15 隔离 canary 在四组交叉 scope 上创建四个 aggregate，并只对主 scope 推进 1001 次时间事件；其他 scope digest 保持不变。Fusion 会省略 raw audio/image/video，reducer 也拒绝携带 raw 字段的旁路 command；完整 affective command、event、snapshot 与 projection intent 扫描未命中合成隐私 sentinel。重启时使用新 Repository 从同一 SQLite 重放，最终 snapshot 与 digest 完全一致。
+
+```mermaid
+flowchart LR
+    O["Scoped observations"] --> F["AffectFusion · omit raw modality"]
+    F --> C["Validated LifeCommand"]
+    C --> J["Canonical Life journal"]
+    J --> S["Bounded snapshot · 4 episodes / 8 components / 16 refs"]
+    S --> R["Repository restart + exact replay"]
+    X["Raw-field bypass command"] -->|"reducer rejects"| B["No receipt / no journal mutation"]
+```
+
 自然中文先经进程内纯函数 observer 形成低置信、多标签 observation；`AffectFusionService` 再把“不顺”“好消息＋不踏实”“不要建议”和“不要限制现实关系”分别评价为 distress、mixed affect、listen boundary 与 relational autonomy。只有 Appraisal reducer 能改变七海自己的 component。该快路径不调用模型；模型只在冻结后的 `AffectiveTurnPlan` 内完成措辞。
 
 普通低风险回合生成一个回复；冲突、边界和修复等深路径在同一次请求中生成两个候选。中文文本＋日语声线模式下，候选是两个完整的配对对象而不是两个裸中文字符串；本地评分只决定选择哪一个，不能重新生成情绪，也不能丢掉选中候选的日语发声字段。首轮候选数量错误会触发唯一一次语义修复；第二轮若只有一个完整且安全的中日配对对象，可以明确降级发送但不计双候选通过，避免私人陪伴因输出形状问题整轮沉默。其余连续协议或安全失败仍记录为语义重试耗尽，不伪装成 Token／成本预算超限。

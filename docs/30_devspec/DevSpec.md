@@ -52,6 +52,7 @@ flowchart TD
 - reducer 必须确定性；相同事件序列和时间输入得到相同 digest。
 - 快照最多保存 4 个 active episode、8 个 emotion component 和 16 个 evidence ref。
 - 原始音视频、用户正文和 raw thought 不进入 affect journal。
+- Affect aggregate 必须同时绑定 `workspace_id + relationship_subject_id + session_id`；任何一个维度变化都产生不同 aggregate，时间推进和重放不能改变其他 scope 的 digest。
 - accepted response 可创建 provisional relationship episode；下一次输入形成 aftereffect。
 - delivery intent 与本地接受状态保持幂等；已展示、已播放或已外发内容不得重放。
 - 有副作用节点的执行 Grant 必须至少覆盖冻结时间预算，再额外保留一个恢复扫描窗口；不得与 Worker Lease 同时或更早到期，否则 pre-Operation 崩溃会形成不可恢复的 `RUNNING` 节点。
@@ -61,6 +62,7 @@ flowchart TD
 - Task Runtime 激活后的回滚关闭如果失败，Container 必须保留 bound runtime 和全部 Store，设置 lifecycle retry fence，并拒绝再次 activate；只有协调器、continuation 和 outbox 都证明静默后才允许关闭基础设施。成功重试后的重复 close 必须是 no-op。
 - 显式 RuntimeRoot 的停止命令只能关闭该根 PID 文件或命令行可证明归属的进程。PID 缺失或失效时宁可报告 scoped cleanup pending，也不能按共享端口扫描并停止另一个 Host 的 Obs／Monitor；runtime snapshot 必须在子服务停止后再删除。
 - Gateway 平台 Outbox 只在 `dispatch_started` 之前允许普通有界重试。适配器已经调用但没有可信响应时必须进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 并等待 reconciliation；相同业务幂等键、Gateway 重启或普通 operator replay 均不能再次外发。Adapter confirmation 只证明本地协议调用返回成功，不能升级成 QQ／微信物理送达。
+- A15 隔离 SQLite 收据在四组交叉 scope 上完成 1001 次时间推进；raw modality 在 fusion 省略，绕过 fusion 的 raw command 被 reducer 拒绝，1026 条 affective event 扫描无原始 sentinel 或禁止字段，Repository 重启重放的 snapshot 与 digest 完全一致。该结果证明作用域、隐私和有界持久状态，不等同于真实墙钟 16 小时耐久或“更像人”的体验证明。
 - 兼容模块只能读取 canonical projection；兼容写调用必须计量并最终归零。
 
 ## 5. 实时执行
