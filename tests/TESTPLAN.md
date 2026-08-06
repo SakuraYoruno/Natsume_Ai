@@ -78,6 +78,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 脚本始终以 `conversation_id + msg_id` 绑定每轮终态。多模态、主动、跨重启或 Edge 故障场景缺少真实驱动时必须为 `NOT_RUN_REQUIRED_DRIVER`；自动结构通过仍固定为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，不能替代盲测。
 
+Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
+
 工程断言：
 
 - 用户情绪误写为七海情绪：0。

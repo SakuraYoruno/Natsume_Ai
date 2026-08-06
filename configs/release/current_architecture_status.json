@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_COMPANION_PROFILE_HOST_BEHAVIOR_ROLLBACK_PASS_CONTINUING_FAILURE_MATRIX",
+  "commit_scope": "A15_GATEWAY_CALLBACK_SECRET_PARITY_AND_LIVE_COHORT_FAIL_FAST",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -367,6 +367,8 @@
     "gateway_live_code_generation": "PASS_REAL_GATEWAY_HOST_TASKGRAPH_EDGE_VOICE_AVATAR_PENDING_EXTERNAL",
     "governed_worker_rejection_diagnostics": "UNIT_PASS_SEMANTIC_RETRY_REASON_FIXED_REAL_SUCCESS_PATH_CONFIRMED_FAILURE_INJECTION_PENDING",
     "gateway_live_probe_terminal_diagnostics": "PASS_EXACT_MESSAGE_BOUND_REAL_TWO_TURN",
+    "gateway_callback_secret_runtime_parity": "PASS_HOST_EDGE_SHA256_MATCH_REMOTE_GATEWAY_RESTARTED_EDGE_UNCHANGED",
+    "digital_life_live_cohort_rejected_webhook_fail_fast": "PASS_HTTP_REJECTION_DOES_NOT_POLL_HOST_TIMEOUT",
     "digital_life_real_multiturn_smoke": "REAL_STABLE_SUBJECT_SELECTIVE_3_CASE_2_AUTOMATED_PASS_1_FAIL_ALL_HUMAN_REVIEW_PENDING_LANGUAGE_QUALITY_UNPROVEN",
     "digital_life_real_multiturn_report_sha256": "e004cb49ef1e4d90028f49d8ca87c790e530a7b60200924b93fdd7e34c9b9f5f",
     "digital_life_real_multiturn_previous_full_report_sha256": "6c5c12f21e39f956af39d3466d5805a871a978864a25aa9864620653844b3871",

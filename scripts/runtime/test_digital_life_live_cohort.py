@@ -39,6 +39,7 @@ from scripts.runtime.test_gateway_live_matrix import (  # noqa: E402
     LiveCase,
     _fetch_gateway_event_by_conversation,
     _fetch_graph_by_request_id,
+    _gateway_webhook_failure,
     _poll_companion_expression_rows,
     _send_gateway_webhook,
     _wait_for_edge_voice_idle,
@@ -401,6 +402,30 @@ def _run_turn(
         conversation_id=conversation_id,
         timeout_s=timeout_s,
     )
+    webhook_failure = _gateway_webhook_failure(dict(webhook))
+    if webhook_failure is not None:
+        return {
+            "prompt": prompt,
+            "edge_idle_before": bool(idle.get("idle")),
+            "webhook": {
+                key: webhook.get(key)
+                for key in (
+                    "sent_ts_ms",
+                    "msg_id",
+                    "conversation_id",
+                    "http_status",
+                    "latency_ms",
+                    "transport_error",
+                )
+            },
+            "intake_failure": webhook_failure,
+            "terminal": None,
+            "request_id": "",
+            "graph": None,
+            "projection": {},
+            "model_attempts": [],
+            "expression": [],
+        }
     terminal = _wait_for_terminal(
         db_path=db_path,
         conversation_id=conversation_id,
@@ -468,6 +493,8 @@ def automated_case_verdict(
         terminal = dict(turn.get("terminal") or {})
         graph = dict(turn.get("graph") or {})
         projection = dict(turn.get("projection") or {})
+        if str(turn.get("intake_failure") or "").strip():
+            failures.append(f"TURN_{index + 1}_GATEWAY_WEBHOOK_NOT_ACCEPTED")
         if not bool(turn.get("edge_idle_before")):
             failures.append(f"TURN_{index + 1}_EDGE_NOT_IDLE")
         if str(terminal.get("event_type") or "").upper() != "INPUT_COMPLETED":

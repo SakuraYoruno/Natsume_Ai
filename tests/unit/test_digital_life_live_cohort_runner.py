@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.runtime import test_digital_life_live_cohort as live_cohort
 from scripts.runtime.test_digital_life_live_cohort import (
     DEFAULT_EXECUTION_MANIFEST,
     ExecutableDialogueCase,
@@ -239,3 +240,51 @@ def test_required_non_text_driver_is_not_faked_by_gateway_dialogue() -> None:
     assert verdict["status"] == "NOT_RUN_REQUIRED_DRIVER"
     assert verdict["experience_status"] == "HUMAN_REVIEW_PENDING"
     assert verdict["driver_requirements"]
+
+
+def test_live_turn_fails_immediately_when_gateway_rejects_webhook(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        live_cohort,
+        "_wait_for_edge_voice_idle",
+        lambda **_kwargs: {"idle": True},
+    )
+    monkeypatch.setattr(
+        live_cohort,
+        "_send_gateway_webhook",
+        lambda **_kwargs: {
+            "sent_ts_ms": 1,
+            "msg_id": "probe-1",
+            "conversation_id": "conversation-1",
+            "http_status": 401,
+            "body": {"reason_code": "GW_WEBHOOK_SIGNATURE_INVALID"},
+            "latency_ms": 7,
+            "transport_error": None,
+        },
+    )
+    monkeypatch.setattr(
+        live_cohort,
+        "_wait_for_terminal",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("rejected webhook must not consume the Host polling timeout")
+        ),
+    )
+
+    turn = live_cohort._run_turn(
+        case_id="implicit_low_mood_1",
+        prompt="没事。",
+        conversation_id="conversation-1",
+        gateway_base_url="http://127.0.0.1:19000",
+        edge_base_url="http://127.0.0.1:17800",
+        webhook_hmac_secret="x" * 32,
+        db_path=tmp_path / "audit.sqlite3",
+        timeout_s=180,
+        require_voice=False,
+        collect_expression=False,
+    )
+
+    assert turn["webhook"]["http_status"] == 401
+    assert "HTTP 401" in turn["intake_failure"]
+    assert turn["terminal"] is None
