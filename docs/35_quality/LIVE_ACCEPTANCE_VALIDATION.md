@@ -278,3 +278,9 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 代码现把 `thinking_mode` 建成只由服务端 route catalog 冻结的枚举，普通 `CHAT_SURFACE_REALTIME` 设为 `disabled`；只有 DeepSeek provider adapter 会把它映射为公开请求字段 `thinking.type=disabled`，其他 provider 删除该提示。Plan、Research 与深路径候选保持原有模型场景和思考策略。该改动不降低 schema、usage、Task budget、Acceptance 或 Voice receipt 要求；新 SHA 重启 Host 并完成同一三轮真实复验前，状态为 `CODE_REMEDIATED_NON_THINKING_REAL_RETEST_PENDING`。
 
 本地相邻回归覆盖 ModelAttempt、route catalog、provider transport、LLM payload、原生情感流、Surface main chain、HTTP Chat／Skill 与 Universal Runtime，共 193 项通过。该计数只作为代码接线证据，不能替代真实 DeepSeek 请求和远端 Voice receipt。
+
+`c6a6e0b36` 加载后的第三轮报告为 `dl-live-1785981013921.json`，SHA-256 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。三轮 Gateway webhook 分别为 95／41／102 ms，TaskGraph 均为 `COMPLETED`、节点均被 Acceptance 接受；DeepSeek Flash 的实际 attempt latency 为 1,407～2,467 ms，completion 为 69～128 tokens，没有再出现 `reasoning_content` 耗尽 640 tokens。前两轮首候选各触发一次 `SEMANTIC_RETRY_REQUESTED / surface_hard_gate_repair`，第二次候选成功；第三轮一次成功。
+
+最终轮使用同一 `synchronization_id` 创建四条 expression effect，远端 `voice.speak` 收到 `TTS_PLAYBACK_FINISHED/APPLIED`，Voice release 与 Avatar release 也为 `APPLIED`；`avatar.set_expression` 仍以 `VTS_CONNECTION_FAILED` 拒绝。runner 只在 probe turn 收集物理 expression，故该证据是“一条轨迹三轮文本全部完成、最终轮 Voice 完成”，不是三轮语音覆盖。自动 verdict 为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；回复仍需人工判断自然度。
+
+non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_VOICE`，但实时体验仍未达标：Host 整轮 latency 为 11,145／12,715／7,739 ms，远高于普通文本首可见 token 的目标，且三轮没有独立首 token 时间戳。下一步应拆分 3～4 秒确定性／轮询开销和语义修复比例，而不是重新打开隐藏思考或继续扩大 Token cap。A15 总体继续为 `INCOMPLETE`。

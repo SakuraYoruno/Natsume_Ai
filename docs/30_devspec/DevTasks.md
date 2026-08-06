@@ -57,7 +57,7 @@
 - [x] 修复真实多轮 runner 每回合改变发送者、把同一会话伪装成多个用户的问题；新增 subject/session 漂移 fail-closed。
 - [x] 修复 Gateway 401 等入口拒绝仍轮询 180 秒的问题；A15 双机回调 HMAC 摘要已重新对齐并只重启远端 Gateway，未重启 Edge。
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。
-- [ ] 复验实时配对 JSON 的 non-thinking 路径。640-token 报告 SHA-256 为 `571e2e356df59e258d1eb608b37ca3be888b51de955d193269a5f9e9be8befd1`：第一轮 Flash 在 8,875 ms 返回 623 completion tokens 并完成 Task Acceptance；第二轮两次各耗尽 640 tokens、正文为空，Host 总耗时 24,270 ms。代码现只为 DeepSeek `CHAT_SURFACE_REALTIME` 显式关闭 thinking，其他 provider 和 Plan／Research 不继承；必须重启 Host，以三轮新请求验证正文、usage、日语 Voice、Task Acceptance 和旧 writer 零增量。
+- [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。
