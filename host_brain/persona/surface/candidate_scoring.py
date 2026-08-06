@@ -200,6 +200,14 @@ _ALLOWED_RHETORICAL_QUESTION_SEGMENTS = frozenset({
 })
 _QUESTION_SEGMENT_SPLIT_RE = re.compile(r"[。.!！?？\n\r，,；;：:]")
 _INFO_SEEKING_QUESTION_RE = re.compile(r"(?:什么|怎么|为什么|哪|哪里|哪儿|谁|几|多少|吗|么|是不是|有没有|能不能|可不可以|要不要)")
+_ADDRESS_BOUNDARY_USER_RE = re.compile(
+    r"(?:别|不要|不许)(?:再)?(?:叫|喊|称呼).{0,12}"
+    r"|(?:别|不要|不许).{0,8}(?:那个|这个)?称呼"
+)
+_ADDRESS_BOUNDARY_REPLY_RE = re.compile(
+    r"听你的|不(?:再)?叫|不会再叫|换(?:个|一个)?(?:叫法|称呼)"
+    r"|改(?:个|一个)?(?:叫法|称呼)|不用(?:这个|那个)?称呼"
+)
 from host_brain.persona.surface.util import (
     _clean_list,
     _clean_text,
@@ -222,6 +230,15 @@ def _back_landing_hits(request, text):
     if _back_busy_done_relevant(request):
         return [marker for marker in _BACK_BUSY_DONE_LANDING_MARKERS if _relationship_marker_hit(text, marker)]
     return []
+
+
+def _address_boundary_grounded(request, text):
+    """Recognise a concise, non-defensive acknowledgement of an address boundary."""
+
+    return bool(
+        _ADDRESS_BOUNDARY_USER_RE.search(str(request.user_message or ""))
+        and _ADDRESS_BOUNDARY_REPLY_RE.search(str(text or ""))
+    )
 
 
 def _back_stage_texture_hits(request, text):
@@ -1389,6 +1406,28 @@ def score_isolated_surface_candidates(request, candidates):
                 float(dimensions.get("scene_grounding", 86.0)),
             )
             reason_codes.append("RELATIONAL_REPAIR_GROUNDED")
+        if _address_boundary_grounded(request, quality.normalized_text or candidate):
+            # A short acknowledgement is the correct complete answer here;
+            # generic prose scoring otherwise mistakes brevity for weak scene
+            # grounding and encourages unnecessary justification.
+            score += 18.0
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                84.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["distance_control"] = max(
+                84.0,
+                float(dimensions.get("distance_control", 86.0)),
+            )
+            dimensions["catchiness"] = max(
+                78.0,
+                float(dimensions.get("catchiness", 86.0)),
+            )
+            reason_codes.append("ADDRESS_BOUNDARY_GROUNDED")
         topic_mismatch = _current_user_topic_mismatch(request, quality.normalized_text or candidate)
         if topic_mismatch:
             score -= 20.0

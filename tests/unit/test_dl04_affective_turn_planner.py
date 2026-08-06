@@ -462,6 +462,13 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "本轮是关系修复" in repair_quality_messages[-1]["content"]
     assert "不要写七海被扎心、受伤或委屈" in repair_quality_messages[-1]["content"]
     assert "不烦你了" in repair_quality_messages[-1]["content"]
+    mixed_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="MIXED_AFFECT_CONTINUITY_DROPPED",
+    )
+    assert "丢掉了上一轮仍未消失的不安" in mixed_repair_messages[-1]["content"]
+    assert "不要只说恭喜或像做梦" in mixed_repair_messages[-1]["content"]
 
     paired_by_reply = {
         "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",
@@ -572,6 +579,67 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert locally_repaired_selection["benefit_eligible"] is False
     assert locally_repaired_selection["selected_output_shape"] == (
         "SINGLE_TEXT_VOICE_DEGRADED"
+    )
+
+    mixed_context = _context()
+    mixed_context["affective_life"]["continuity_kind"] = (
+        "MIXED_AFFECT_RESULT_CONTINUATION"
+    )
+    mixed_agent = SimpleNamespace(
+        request_id="dl04-mixed-continuity",
+        workspace_id="workspace-a",
+        person_id="person-a",
+        session_id="session-a",
+        ts_ms=1_900_000_000_000,
+        user_message="感觉像做梦。",
+        render_policy={
+            "primary_topic": "daily_chat",
+            "interaction_move": "reply_current_turn",
+        },
+        emotion_context=mixed_context,
+        emotion_snapshot={},
+        bond_summary={},
+        retrieval_summary={"status": "SKIPPED"},
+        llm_runtime={"available": True},
+        attachments=[],
+        multimodal_observations={},
+        response_form="text",
+    )
+    mixed_trace: dict[str, object] = {}
+    mixed_input = build_surface_main_chain_input_from_surface_reply_input(
+        mixed_agent,
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=mixed_trace,
+    )
+    mixed_compiled = compile_surface_main_chain_input(mixed_input).request
+    mixed_output = _select_buffered_affective_candidate(
+        raw_output=json.dumps(
+            {
+                "candidates": [
+                    {
+                        "reply_text": "真的像做梦一样，太好了。",
+                        "tts_text_ja": "本当に夢みたい。よかったね。",
+                    },
+                    {
+                        "reply_text": "像梦一样，终于拿到了。",
+                        "tts_text_ja": "夢みたいだね。やっと手に入った。",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        compiled_request=mixed_compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=mixed_trace,
+        allow_single_degradation=True,
+    )
+    assert mixed_output == "我真替你高兴。开心是真的，之前那点不踏实也不用急着消失。"
+    mixed_selection = mixed_trace["affective_candidate_selection"]
+    assert mixed_selection["selection_status"] == "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
+    assert mixed_selection["benefit_eligible"] is False
+    assert any(
+        "MIXED_AFFECT_CONTINUITY_DROPPED" in code
+        for code in mixed_selection["selected_reason_codes"]
     )
 
 

@@ -554,3 +554,11 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `db322df18` 的全新隔离进程复验报告 SHA-256 为 `22a2f365610ee046dd537a6d7d593d67519fa37783c480e57789c7f4bc913c7b`，3 个 accepted turn 和 writer probe 通过，最终正文为“嗯，我知道这不是第一次。是我没接住你，对不起。现在你说，我听着。”。虽然它不再要求“再说一次”，但“现在你说”仍直接安排用户开口，人工体验继续失败。当前规则因此补充直接发言祈使句，允许“你愿意／想说的时候”这种自主时机；192 项非安全回归通过，新 SHA 复验前仍不算关闭。
 
 `9372ab1e3` 的第三次全新隔离复验报告 SHA-256 为 `b75df4864b63eefdde912be757c8a7a943b1b2388e87059328cb3db5d4424aec`，自动状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，writer probe 为 3 个 accepted turn、零 legacy delta、canonical progress。人工逐轮正文检查得到：“是我没听懂。对不起，先不解释；你愿意再说的时候，我认真听。”、“上次是我没接住，对不起。那件事让你不舒服，我记住了，你想说的时候我都在。”、“嗯，我知道。上次是我没接住，这次我会好好听。”。三轮均承担具体失误、不反击、不催用户重述，单条回归关闭；完整 48 条与独立多人盲评仍待完成。
+
+## 2026-08-06 A15 完整 48 条第三轮与人工抽查纠偏
+
+`aab6cb3f61decd4fb6836c706c4c106aae57acca` 已在全新 Host SQLite、真实 Gateway、Host、DeepSeek、TaskGraph、Acceptance、Docker 依赖和已连接 Edge 上运行完整 48 条文本场景。报告 SHA-256 为 `5188c8441eb7ecda6fb119e956ad30ffa201719a7ad0fa5dc8940ad4066acbbe`，自动结果为 44 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、4 条 `FAIL`；八类通过数依次为 5/6、6/6、6/6、6/6、6/6、5/6、5/6、5/6。writer probe 覆盖 139 个 accepted Gateway turn，旧情感 writer 零增量且 canonical projection 前进。142 个有效 terminal 样本的 p50／p95 为 6,629／10,595 ms；这仍没有达到实时门槛。
+
+四个自动失败有明确非安全根因：普通安慰连续生成追问后没有确定性收口；陈述句“我听到了”被宽泛正则误判为听力探针；“感觉像做梦”在喜忧连续性中两轮都只承接喜悦；“听你的，换个叫法”是正确边界回应，却因通用短句评分被判 scene grounding 和 catchiness 不足。44 条自动通过也没有被当作人感通过：人工抽查另外否决了“我盯着后台”“我关掉提醒”“我等你”“没打算就这么算了”“不安先放着”和“别玩太晚”等正文。
+
+当前修复只作用于既有文本生成链：听力探针必须带明确疑问意图；canonical `COMFORT`、`REPAIR` 与 mixed continuity 在唯一重试耗尽后可使用窄、本地、无 Voice 冒充的安全正文；没有 accepted effect 时禁止宣称后台执行或关闭提醒；留白、修复、现实自主与复杂情绪新增对应反模式；称呼边界的简短尊重句获得真实 scene grounding。独立 live runner 同步识别上述人工退化。Surface、DL-04、app adapter、候选评分和 runner 共 388 项非安全回归通过，`compileall` 与 `git diff --check` 通过。真实新 SHA 代表轨迹和完整 48 条尚未重跑，三人盲评仍未开始，所以 `digital_life_human_likeness` 保持 `FAIL/PENDING_HUMAN_REVIEW`。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。

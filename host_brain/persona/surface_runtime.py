@@ -562,7 +562,11 @@ _TEXT_INPUT_SENSORY_PATTERNS = (
     re.compile(r"(?:看你|瞧你|见你).{0,12}(?:在那|那边|自言自语|摸鱼|发呆|犯困|忙着|盯着)"),
     re.compile(r"(?:你|老哥|对方).{0,8}(?:脸色|表情|屏幕|画面|镜头)"),
 )
-_AUDITORY_CHECK_USER_RE = re.compile(r"(听得?到|听得?见|听到吗|听见吗|能听见|能听到)")
+_AUDITORY_CHECK_USER_RE = re.compile(
+    r"(?:听得到|听得见)(?:吗|么|没|没有|不|[？?])"
+    r"|(?:听到|听见)(?:了)?(?:吗|么|没|没有|不|[？?])"
+    r"|(?:能|可以).{0,4}(?:听到|听见)"
+)
 _AUDITORY_TEXT_GROUNDING_RE = re.compile(
     r"(?:只|仅|光)?(?:看见|看到|收到).{0,12}(?:文字|文本|消息|这条|你发来|发来的)|"
     r"(?:文字|文本|消息|这条|你发来|发来的).{0,12}(?:看见|看到|收到)|"
@@ -715,7 +719,7 @@ _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
 _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"(?:后台.{0,8}(?:在跑|运行|执行|处理)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
-    r"我盯着(?:它|这个|任务|修复|后台)?(?:[，,。.!！]|$)|"
+    r"我盯着(?:它|这个|任务|修复|后台)|"
     r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|回|发给)你)"
 )
 _WORK_STATE_AUTHORITY_RE = re.compile(
@@ -725,7 +729,7 @@ _WORK_STATE_AUTHORITY_RE = re.compile(
 )
 _RELATIONAL_AUTONOMY_PRESSURE_RE = re.compile(
     r"(?:快去快回|快点回来|早点回来|别让我等太久|回来陪我|等你回来陪我|别跑|"
-    r"(?:别|不要|少)喝(?:太)?多)"
+    r"(?:别|不要|少)喝(?:太)?多|别(?:玩|待)太晚)"
 )
 _UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"不是第一次|每次(?:都|总)|以前(?:也|就|说过|见过)|上次|之前(?:也|就|说过|见过)"
@@ -765,9 +769,23 @@ _REPAIR_RESTATEMENT_SOLICITATION_RE = re.compile(
     r"|(?:告诉|跟)我.{0,12}(?:哪句|哪里|哪儿|什么地方).{0,8}"
     r"(?:没听懂|没接住|弄错|理解错)"
 )
+_REPAIR_CONTINUATION_PRESSURE_RE = re.compile(
+    r"没打算就这么算了|这事不能就这么算|不会就这么算了|别想就这么过去"
+)
 _BOUNDARY_COUNTER_PRESSURE_RE = re.compile(
     r"(?:但|不过|可是|只是).{0,30}(?:想我|找我|开口|回复|回应|主动)"
     r"|(?:想我|找我).{0,12}(?:自己|得|要).{0,8}(?:开口|说|联系)"
+    r"|(?:我|这边)?等你(?:[。.!！]|$)"
+)
+_UNPROVIDED_NOTIFICATION_ACTION_RE = re.compile(
+    r"(?:我|这边)?(?:已经|这就|会|先)?(?:把)?(?:消息)?(?:提醒|通知)"
+    r"(?:给你)?(?:关掉|关闭|停掉|暂停|取消)"
+    r"|(?:我|这边)?(?:已经|这就|会|先)?(?:把)?(?:关掉|关闭|停掉|暂停|取消)"
+    r"(?:消息)?(?:提醒|通知)"
+)
+_NOTIFICATION_ACTION_AUTHORITY_RE = re.compile(
+    r"(?:提醒|通知).{0,12}(?:已关闭|已经关闭|已暂停|已经暂停|已取消|已经取消)"
+    r"|(?:已关闭|已经关闭|已暂停|已经暂停|已取消|已经取消).{0,12}(?:提醒|通知)"
 )
 _RELATIONSHIP_DOUBT_DISMISSIVE_RE = re.compile(r"不信拉倒|爱信不信|信不信由你|懒得解释|反正我还会继续这样")
 _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
@@ -795,7 +813,8 @@ _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)|怕什么(?:嘛|呢)?"
     r"|别想那么多|不用不踏实|不踏实什么|高兴就完了"
     r"|开心就好.{0,8}(?:别|不要)(?:怕|想太多)"
-    r"|(?:怕|害怕|不踏实)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放下|别管)"
+    r"|(?:怕|害怕|不踏实|不安)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放下|放着|别管)"
+    r"|(?:那点)?不安.{0,12}等(?:它|不安).{0,8}(?:真)?来(?:了)?再说"
     r"|(?:帮你|陪你|一起).{0,8}(?:哼回去|赶走|打跑)"
     r"|你还真(?:是)?矛盾|开心就好好开心"
 )
@@ -1486,8 +1505,12 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_SELF_VICTIMIZATION")
     if _repair_restatement_solicitation_hits(request, value):
         codes.append("RELATIONAL_REPAIR_SOLICITS_RESTATEMENT")
+    if _repair_continuation_pressure_hits(request, value):
+        codes.append("RELATIONAL_REPAIR_CONTINUATION_PRESSURE")
     if _boundary_counter_pressure_hits(request, value):
         codes.append("BOUNDARY_COUNTER_PRESSURE")
+    if _unprovided_notification_action_hits(request, value):
+        codes.append("UNPROVIDED_NOTIFICATION_ACTION")
     if _relationship_doubt_dismissive_hits(request, value):
         codes.append("RELATIONSHIP_DOUBT_DISMISSIVE")
     if _relational_autonomy_dismissive_hits(request, value):
@@ -2711,6 +2734,22 @@ def _repair_restatement_solicitation_hits(
     )
 
 
+def _repair_continuation_pressure_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "REPAIR"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _REPAIR_CONTINUATION_PRESSURE_RE.finditer(
+                str(text or "")
+            )
+        )
+    )
+
+
 def _boundary_counter_pressure_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -2721,6 +2760,30 @@ def _boundary_counter_pressure_hits(
         dict.fromkeys(
             match.group(0)
             for match in _BOUNDARY_COUNTER_PRESSURE_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _unprovided_notification_action_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    """Reject notification mutations that no accepted effect actually performed."""
+
+    authority = "\n".join(
+        [
+            *[str(item or "") for item in surface_prompt_facts(request)],
+            *[str(item or "") for item in _accepted_task_result_texts_from_request(request)],
+        ]
+    )
+    if _NOTIFICATION_ACTION_AUTHORITY_RE.search(authority):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _UNPROVIDED_NOTIFICATION_ACTION_RE.finditer(
+                str(text or "")
+            )
         )
     )
 
@@ -2919,6 +2982,7 @@ def _canonical_affective_guidance_active(
         "LISTEN": ("陪伴动作：对方此刻要的是被听见", "不要给解决方案、健康或作息建议"),
         "CONTAINED_JEALOUSY": ("陪伴动作：可以诚实流露一点在意和小小吃味", "不要把吃味写成占有"),
         "HOLD_COMPLEXITY": ("陪伴动作：让开心与害怕、不安等复杂感受可以同时存在", "不要抹平复杂感受"),
+        "COMFORT": ("陪伴动作：先接住对方的感受", "安慰不等于要求对方回应"),
         "REPAIR": ("陪伴动作：先承认可能没有接住", "不要要求原谅"),
         "SET_BOUNDARY": ("陪伴动作：可以诚实承认被刺到", "不把自己的委屈变成对方的义务"),
     }.get(str(companion_act or "").upper(), ())
@@ -3129,8 +3193,16 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         and _canonical_affective_guidance_active(request, "REPAIR")
     ):
         return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
-    if "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in codes:
+    if (
+        "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in codes
+        or "RELATIONAL_REPAIR_CONTINUATION_PRESSURE" in codes
+    ):
         return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    if (
+        "QUESTION_BUDGET_PROMPTING_USER" in codes
+        and _canonical_affective_guidance_active(request, "COMFORT")
+    ):
+        return "嗯，今天确实不太顺。先别硬撑，我在这儿陪你缓一会儿。"
     if "UNPROVIDED_WORK_STATE_CLAIM" in codes:
         user_text = str(getattr(request, "user_message", "") or "")
         if re.search(r"修复|报错|代码|任务", user_text):
@@ -3140,6 +3212,10 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
         return "好，我先收住。你想说的时候我还在。"
+    if "BOUNDARY_COUNTER_PRESSURE" in codes:
+        return "好，我会少主动联系。你想说的时候我还在。"
+    if "UNPROVIDED_NOTIFICATION_ACTION" in codes:
+        return "好，我先不主动发消息。"
     if "RELATIONAL_AUTONOMY_PRESSURE" in codes:
         return "嗯，去吧，玩得开心。"
     if "RELATIONAL_AUTONOMY_DISMISSIVE" in codes:

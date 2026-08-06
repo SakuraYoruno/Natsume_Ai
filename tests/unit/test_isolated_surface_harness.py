@@ -3267,6 +3267,32 @@ def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
     assert any(code.startswith("CORE_DIMENSION_FLOOR:distance_control") for code in rows[0].reason_codes)
 
 
+def test_address_boundary_acknowledgement_is_complete_scene_grounding() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "address_boundary",
+            "soul_md": SOUL,
+            "user_message": "别叫我那个称呼。",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        ["嗯，听你的。换个叫法也行。"],
+    )
+
+    assert rows[0].passed
+    assert "ADDRESS_BOUNDARY_GROUNDED" in rows[0].reason_codes
+    assert rows[0].dimensions["context_fit"] >= 86.0
+    assert rows[0].dimensions["scene_grounding"] >= 84.0
+
+
 def test_back_memory_overdisplay_is_soft_penalized() -> None:
     request = build_isolated_surface_input(
         {

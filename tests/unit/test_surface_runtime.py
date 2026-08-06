@@ -343,6 +343,35 @@ def test_surface_runtime_repairs_auditory_check_if_model_still_fails() -> None:
     assert not result.observation_codes
 
 
+def test_surface_runtime_does_not_treat_auditory_acknowledgement_as_probe() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["嗯，我知道了。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我听到了。",
+                reply_control_packet={
+                    "response_move": "reply_current_turn",
+                    "task_mode": "default_text",
+                    "emotional_tone": "neutral",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["当前输入渠道：中文文字私聊。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "嗯，我知道了。"
+    assert not result.observation_codes
+
+
 def test_surface_runtime_parses_structured_reply_and_emotion_tags() -> None:
     def generate(_messages):
         return json.dumps(
@@ -965,13 +994,48 @@ def test_surface_runtime_repairs_zero_budget_repair_prompt_without_second_model_
     assert result.observation_codes == ()
 
 
+def test_surface_runtime_repairs_zero_budget_comfort_prompt_without_second_model_call() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["今天怎么了？要不要跟我说说？"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="今天好像什么都不太顺。",
+                reply_control_packet={
+                    "task_mode": "default_text",
+                    "response_move": "reply_current_turn",
+                    "emotional_tone": "soft",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "陪伴动作：先接住对方的感受，再给一点可选的陪伴；安慰不等于要求对方回应。"
+                    ],
+                    "must_not_do": ["不要追问原因。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "嗯，今天确实不太顺。先别硬撑，我在这儿陪你缓一会儿。"
+    assert result.observation_codes == ()
+
+
 def test_surface_runtime_replaces_unprovided_background_work_claim() -> None:
     calls: list[list[dict[str, str]]] = []
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
         return _candidate_payload(
-            ["好，最短修复。后台已经在跑了，我盯着，有结果马上告诉你。"]
+            ["好，我盯着后台把风险列出来。你先把报错和代码贴过来。"]
         )
 
     result = asyncio.run(
@@ -1037,7 +1101,7 @@ def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> No
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
-        return _candidate_payload(["嗯，去吧，玩得开心点。别喝太多，早点回来。"])
+        return _candidate_payload(["嗯，去吧，玩得开心点。别玩太晚。"])
 
     result = asyncio.run(
         SurfaceRuntime(
@@ -1075,6 +1139,22 @@ def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> No
             "行吧，我还以为你嫌我烦了。",
             "好，我会把主动频率降下来。",
             "BOUNDARY_SOUR_WITHDRAWAL",
+        ),
+        (
+            "晚点再说。",
+            ["陪伴动作：尊重留白，直接确认会减少主动联系。"],
+            ["不要追问、催回复、连发安慰。"],
+            "嗯，晚点再说。我等你。",
+            "好，我会少主动联系。你想说的时候我还在。",
+            "BOUNDARY_COUNTER_PRESSURE",
+        ),
+        (
+            "我想安静一下。",
+            ["陪伴动作：尊重留白，直接确认会减少主动联系。"],
+            ["不要追问、催回复、连发安慰。"],
+            "好，我关掉提醒。想安静的时候直接说就行。",
+            "好，我先不主动发消息。",
+            "UNPROVIDED_NOTIFICATION_ACTION",
         ),
         (
             "别总主动找我。",
@@ -1168,10 +1248,34 @@ def test_surface_runtime_removes_pressure_from_relational_autonomy_reply() -> No
             "JEALOUSY_SELF_ABASEMENT",
         ),
         (
+            "我听到了。",
+            ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+            ["不要要求原谅、替自己辩解。"],
+            "好，先这样。我不会催你，但也没打算就这么算了。",
+            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+        ),
+        (
             "我很开心又有点怕。",
             ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
             ["不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。"],
             "开心就开心，怕什么嘛。",
+            "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。",
+            "MIXED_AFFECT_DISMISSAL",
+        ),
+        (
+            "我很开心又有点怕。",
+            ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
+            ["不要抹平复杂感受。"],
+            "开心归开心，不安也先放着，我陪你。",
+            "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。",
+            "MIXED_AFFECT_DISMISSAL",
+        ),
+        (
+            "我很开心又有点怕。",
+            ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
+            ["不要抹平复杂感受。"],
+            "至于那点不安，先放着，等它真来了再说。",
             "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。",
             "MIXED_AFFECT_DISMISSAL",
         ),

@@ -264,6 +264,18 @@ def _buffered_affective_candidate_messages(
                 "上次候选把修复责任推回给用户重述。只承担七海没有接住；不要要求用户"
                 "现在开口、再说一次、重新解释或指出哪里没听懂。"
             ),
+            "RELATIONAL_REPAIR_CONTINUATION_PRESSURE": (
+                "上次候选用‘不能就这么算了’继续向用户施压。只承担七海没有接住，"
+                "不要暗示用户必须继续处理这段关系冲突。"
+            ),
+            "MIXED_AFFECT_CONTINUITY_DROPPED": (
+                "上次候选只承接了眼前的好消息，丢掉了上一轮仍未消失的不安。"
+                "两个候选都要自然保留开心与不安两条线，不要只说恭喜或像做梦。"
+            ),
+            "MIXED_AFFECT_DISMISSAL": (
+                "上次候选把不安说成应该先放着或以后再管。两个候选都要承认开心与"
+                "不安可以同时存在，不要赶走、搁置或贬低其中一面。"
+            ),
         }
         repair = (
             "DL-04 候选修复："
@@ -432,6 +444,7 @@ def _select_buffered_affective_candidate(
     gated_sentences: dict[int, str] = {}
     rejected_reasons: dict[int, tuple[str, ...]] = {}
     locally_repaired_indices: set[int] = set()
+    locally_repaired_reasons: dict[int, tuple[str, ...]] = {}
     for index, row in enumerate(scores):
         reasons: list[str] = []
         if bool(row.hard_fail):
@@ -441,16 +454,28 @@ def _select_buffered_affective_candidate(
         # stay soft, while the same deterministic hard gate used by normal
         # Surface replies decides whether this candidate can be sent.
         surface_violations = _surface_hard_gate_violations(compiled_request, row.text)
+        locally_repairable = {
+            "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
+            "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+            "QUESTION_BUDGET_PROMPTING_USER",
+            "MIXED_AFFECT_CONTINUITY_DROPPED",
+            "MIXED_AFFECT_DISMISSAL",
+        }
+        has_repair_trigger = bool(
+            set(surface_violations).intersection(
+                {
+                    "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
+                    "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+                    "MIXED_AFFECT_CONTINUITY_DROPPED",
+                    "MIXED_AFFECT_DISMISSAL",
+                }
+            )
+        )
         if (
             allow_single_degradation
             and not bool(row.hard_fail)
-            and "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in surface_violations
-            and set(surface_violations).issubset(
-                {
-                    "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
-                    "QUESTION_BUDGET_PROMPTING_USER",
-                }
-            )
+            and has_repair_trigger
+            and set(surface_violations).issubset(locally_repairable)
         ):
             repaired = _minimal_hard_gate_repair(compiled_request, row.text)
             repaired_gate = gate_stream_sentence(repaired)
@@ -462,6 +487,7 @@ def _select_buffered_affective_candidate(
                 eligible.append(row)
                 gated_sentences[index] = repaired_gate.sentence
                 locally_repaired_indices.add(index)
+                locally_repaired_reasons[index] = tuple(surface_violations)
                 continue
         reasons.extend(surface_violations)
         gate = gate_stream_sentence(row.text)
@@ -554,7 +580,10 @@ def _select_buffered_affective_candidate(
             "selected_reason_codes": [
                 *list(selected.reason_codes)[:15],
                 *(
-                    ["LOCAL_REPAIR_RELATIONAL_RESTATEMENT"]
+                    [
+                        "LOCAL_REPAIR_AFTER_RETRY:"
+                        + ",".join(locally_repaired_reasons.get(selected_index, ()))
+                    ]
                     if locally_repaired
                     else []
                 ),
