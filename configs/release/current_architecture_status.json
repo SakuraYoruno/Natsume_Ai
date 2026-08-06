@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_SURFACE_RECALL_APP_LOCAL_SINGLETON_REAL_RETEST_PASS_SCOPE_BOUND",
+  "commit_scope": "A15_REALTIME_CONTEXT_STAGE_TIMING_CODE_COMPLETE_REAL_RETEST_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -28,7 +28,8 @@
       "no_recall_plan_short_circuit": "CODE_COMPLETE_LIVE_CAUSAL_BENEFIT_UNPROVEN",
       "irrelevant_lightnovel_context_read": "PASS_REAL_FULL_STACK_SCOPE_BOUND",
       "surface_recall_service_lifetime": "PASS_REAL_FULL_STACK_SCOPE_BOUND",
-      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, but live evidence did not prove that change alone caused the previously observed 0.5-second wait. On 7c454b6fb, unrelated companion turns also skip the durable light-novel recommendation context read; three real NO_RECALL samples measured 100-124 ms retrieval wait. On f0aa50a58, RecallFusionService has app-local lifespan and reuses the canonical EpisodicStore Chroma client; MAY_RECALL median retrieval fell from 541 ms to 351 ms, but a 508 ms tail remains and the realtime gate is still open."
+      "context_stage_timing": "CODE_COMPLETE_REAL_RETEST_PENDING",
+      "note": "Direct no-effect chat keeps the realtime path. NO_RECALL now exits the explicit-memory compatibility helper at the plan boundary, but live evidence did not prove that change alone caused the previously observed 0.5-second wait. On 7c454b6fb, unrelated companion turns also skip the durable light-novel recommendation context read; three real NO_RECALL samples measured 100-124 ms retrieval wait. On f0aa50a58, RecallFusionService has app-local lifespan and reuses the canonical EpisodicStore Chroma client; MAY_RECALL median retrieval fell from 541 ms to 351 ms, but a 508 ms tail remains. Existing response trace now separates plan, embedding, service, route, domain review, general preference pack and context total without additional database writes; real retest is pending."
     },
     "user_self_affect_separation": {
       "status": "WIRED",

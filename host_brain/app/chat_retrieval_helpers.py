@@ -250,7 +250,20 @@ async def _run_retrieval(
     main chain only needs a compressed surface_memory_recall_packet; raw recall
     rows and evidence packs must not be returned to the final text layer.
     """
+    runtime_started = time.perf_counter()
+    runtime_timings_ms: dict[str, int] = {
+        "plan": 0,
+        "explicit_memory": 0,
+        "collection_fastpath": 0,
+        "embedding": 0,
+        "service_resolve": 0,
+        "recall": 0,
+        "lightnovel_review": 0,
+        "generic_evidence_review": 0,
+        "total": 0,
+    }
     try:
+        plan_started = time.perf_counter()
         from dataclasses import replace  # noqa: PLC0415
 
         from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext  # noqa: PLC0415
@@ -275,12 +288,14 @@ async def _run_retrieval(
             ),
         )
         plan = plan_surface_memory_recall(context)
+        runtime_timings_ms["plan"] = _elapsed_perf_ms(plan_started)
         embedding_model_id = ""
         # ``NO_RECALL`` is the common low-latency companion path.  Make the
         # plan-level short circuit explicit instead of entering the separate
         # explicit-memory compatibility helper.  That helper already rejects
         # unrelated messages before querying history; this is therefore a
         # contract simplification, not by itself a measured latency win.
+        explicit_memory_started = time.perf_counter()
         short_term_memory_facts = (
             _recent_explicit_memory_facts(
                 message=message,
@@ -290,6 +305,9 @@ async def _run_retrieval(
             )
             if plan.should_recall
             else []
+        )
+        runtime_timings_ms["explicit_memory"] = _elapsed_perf_ms(
+            explicit_memory_started
         )
         if plan.should_recall and short_term_memory_facts:
             packet = SurfaceMemoryRecallPacket(
@@ -318,6 +336,7 @@ async def _run_retrieval(
                 },
             )
         elif not short_term_memory_facts:
+            collection_fastpath_started = time.perf_counter()
             packet = _maybe_recall_collection_fastpath(
                 plan=plan,
                 request_id=request_id,
@@ -327,6 +346,9 @@ async def _run_retrieval(
                 build_packet_fn=build_surface_memory_recall_packet,
                 life_memory_store=life_memory_store,
             )
+            runtime_timings_ms["collection_fastpath"] = _elapsed_perf_ms(
+                collection_fastpath_started
+            )
             recall_invoked = packet is not None
             if packet is None:
                 # Semantic model import/load can take tens of seconds on the
@@ -334,6 +356,7 @@ async def _run_retrieval(
                 # bounded relational-retrieval timeout can actually fire and
                 # the conversation can continue with canonical short-term and
                 # relationship context while the local model warms in a worker.
+                embedding_started = time.perf_counter()
                 embed_task = asyncio.to_thread(
                     _embed_surface_memory_query,
                     plan.query,
@@ -377,11 +400,19 @@ async def _run_retrieval(
                         )
                 else:
                     query_embedding, embedding_model_id = await embed_task
+                runtime_timings_ms["embedding"] = _elapsed_perf_ms(
+                    embedding_started
+                )
                 if packet is None:
                     recall_invoked = True
+                    service_resolve_started = time.perf_counter()
                     recall_service = (
                         recall_service_factory or _build_surface_memory_recall_service
                     )()
+                    runtime_timings_ms["service_resolve"] = _elapsed_perf_ms(
+                        service_resolve_started
+                    )
+                    recall_started = time.perf_counter()
                     packet = recall_surface_memory_packet(
                         recall_service=recall_service,
                         request_id=request_id,
@@ -433,6 +464,9 @@ async def _run_retrieval(
                         render_target_lang=render_target_lang,
                         coverage_failed_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
                     )
+                    runtime_timings_ms["recall"] = _elapsed_perf_ms(
+                        recall_started
+                    )
             packet = replace(
                 packet,
                 trace={
@@ -445,6 +479,7 @@ async def _run_retrieval(
                     ),
                 },
             )
+        lightnovel_review_started = time.perf_counter()
         packet = await _maybe_apply_lightnovel_deep_review(
             packet=packet,
             message=message,
@@ -455,6 +490,10 @@ async def _run_retrieval(
             life_memory_store=life_memory_store,
             build_user_preference_pack=build_user_preference_pack,
         )
+        runtime_timings_ms["lightnovel_review"] = _elapsed_perf_ms(
+            lightnovel_review_started
+        )
+        generic_review_started = time.perf_counter()
         packet = await _maybe_apply_generic_evidence_review(
             packet=packet,
             message=message,
@@ -464,12 +503,18 @@ async def _run_retrieval(
             ts_ms=ts_ms,
             life_memory_store=life_memory_store,
         )
-        return _surface_memory_retrieval_summary(
+        runtime_timings_ms["generic_evidence_review"] = _elapsed_perf_ms(
+            generic_review_started
+        )
+        runtime_timings_ms["total"] = _elapsed_perf_ms(runtime_started)
+        summary = _surface_memory_retrieval_summary(
             request_id=request_id,
             ts_ms=ts_ms,
             packet=packet,
             embedding_model_id=embedding_model_id,
-        ), []
+        )
+        summary["runtime_timings_ms"] = dict(runtime_timings_ms)
+        return summary, []
     except Exception as exc:
         return (
             {
@@ -488,6 +533,10 @@ async def _run_retrieval(
             },
             [],
         )
+
+
+def _elapsed_perf_ms(started: float) -> int:
+    return max(0, int(round((time.perf_counter() - float(started)) * 1000)))
 
 
 def _maybe_recall_collection_fastpath(
@@ -1165,19 +1214,24 @@ async def _maybe_apply_generic_evidence_review(
     life_memory_store: Any,
 ) -> Any:
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
         from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
-            review_generic_evidence_from_memory_packet,
             should_review_generic_evidence,
-        )
-        from host_brain.app.observability_persist import (  # noqa: PLC0415
-            persist_life_action_event_memory,
         )
     except Exception:
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
     if not should_review_generic_evidence(user_message=message, packet=packet_payload):
+        return packet
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
+            review_generic_evidence_from_memory_packet,
+        )
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
+    except Exception:
         return packet
     started_ms = int(time.time() * 1000)
     try:

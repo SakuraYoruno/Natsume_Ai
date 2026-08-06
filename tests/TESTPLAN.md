@@ -384,3 +384,5 @@ python -m pytest -q `
 Surface recall service 的生命周期回归必须在同一 Agent Runtime application scope 内连续取得 factory 两次：两次对象 identity 相同，builder 只执行一次，并且注入对象必须是 canonical EpisodicStore 的 Chroma client。不得以模块全局 singleton 实现，也不得由 RecallFusionService 关闭借用的 client。真实复测要在重启 Host 后运行至少两条 `MAY_RECALL`，同时查询 `retrieval_event_log` 的 route latency；只允许把 service/client 构造差值归入本子项，不得用 provider 波动冒充检索收益。
 
 `f0aa50a58` 的 104 项回归与真实复测满足该子项：三条 `MAY_RECALL` 检索为 316／351／508 ms，route ledger 为 74／91／79 ms；修复前中位 541 ms、修复后中位 351 ms。收据 SHA-256 为 `e1c8a0f9110be096dbb8c2f29fec1a945dd52482b009a805f30f6c85f2fcafd8`。本 PASS 只关闭服务和 client 重建；508 ms 尾部、2,964～4,712 ms 首句及 provider 1,443～1,797 ms 均继续失败。
+
+下一轮真实探针必须从 COMMIT `audit_refs.trace_stage_meta` 读取 `context_pipeline_ms`、`user_preference_pack_ms` 与 `retrieval_runtime_timings_ms`；后者包含 plan、embedding、service resolve、recall 和 review 字段。各字段必须是非负整数，retrieval total 不小于其顺序关键段；这些字段不得通过新增数据库 audit event 获得。只有数据确认的主段才能进入下一性能修复。

@@ -98,6 +98,8 @@ Gateway Chat 因跨进程投递仍会生成紧凑 TaskGraph 和 durable Acceptan
 
 Surface 的 `RecallFusionService` 同样由一个 Host application scope 拥有。它复用 Host authority owner 已创建的 `EpisodicStore.chroma`，而不是每个情绪回合重新解析 Chroma 配置、创建 HTTP client 和构造另一份服务。服务本身只在调用栈内保存 route rows／candidate，允许并发只读调用；底层 client 的关闭权仍只属于 EpisodicStore owner。
 
+实时性能计时属于既有响应 trace，不是新的审计子系统。Retrieval 只添加有界整数阶段耗时，Cortex 记录 persona prefetch、retrieval wait、prompt filter、general preference pack、LLM route resolve 和 context total；这些字段随本轮内存 packet 进入原 COMMIT，不触发额外 SQLite 写。
+
 OBS 与 Host 当前共享 canonical SQLite 文件，但只有 Host 业务仓储拥有 canonical 状态写 authority；OBS 只写可重建的 Operator projection。Task 详情采用“缺失优先、最旧优先”的 16 项轮转批次，并在每次派生写后留下 5 ms 的 cooperative writer window，防止 Sidecar 连续 `BEGIN IMMEDIATE` 饿死交互式 Task 写入。Chat worker projection 使用独立连接在线程执行；Task Runtime 仍等待其确定终局后再结算 Budget、Verification 和 Acceptance，因此这里只解除事件循环阻塞，不放宽持久边界。
 
 真实五端加 Docker 复验中，Task 详情每波最多刷新 16 个，index 加详情最多 17 个；三轮 worker projection 到后预算落盘为 187／94／49 ms，修复前峰值为 2,880 ms。该结果证明派生 writer 公平性已进入实际 composition，但不代表普通聊天端到端实时门槛已经通过。

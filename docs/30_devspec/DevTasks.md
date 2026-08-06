@@ -84,6 +84,7 @@
 - [x] 关闭 OBS Task 派生投影对普通聊天 canonical SQLite writer 的饥饿。`ead903f66` 已在 Host／OBS／Monitor／Gateway／远端 Edge 与 Docker 同时运行时复验：三轮 worker projection 到后预算落盘为 187／94／49 ms，详情波次上限实测为 16，index 加详情上限为 17；报告 SHA-256 为 `7415951164753cd00c68d55b40b35167e30feefe93d02503f259dee34f2f06ce`。
 - [ ] 继续压缩普通聊天模型前固定开销与语义修复比例。上述复验的 TaskGraph 为 4,899／4,903／4,736 ms，Host 终态为 7,040／7,159／6,509 ms；第二轮仍有一次语义修复，首轮 worker projection 到 artifact 仍有 1,054 ms 冷态尾部。`0165e95f9` 的真实复测没有支持“`NO_RECALL` 重复 history IO 独占约 0.5 秒”的原判断：同句检索从 561 ms 降至 194 ms，但 provider 抖动令首句由 2.64 秒变为 2.76 秒，而且旧 helper 本就会先按内容短路。`7c454b6fb` 随后关闭了可证明的无关工作：普通陪伴消息不再读取轻小说最近推荐偏好，也不加载其深读持久化模块；真正的“第几本／详情”追问仍读取一次并完成深读。60 项代码与文档 Gate 通过，真实三条 `NO_RECALL` 检索为 100／104／124 ms、首句为 2.61～3.15 秒，子项关闭，收据 SHA-256 为 `25f23ac04b9a117a8ceb63b3bb19499dcea67420259f87f052f873be1cba5aff`。下一断点是情绪 `MAY_RECALL` 的 514／568 ms 尾部、provider 首 token 波动和语义修复；端到端实时门槛及人工人感仍未通过。
   - [x] `MAY_RECALL` 服务生命周期切片：route ledger 实测 63～125 ms、暖态 embedding 基准约 91 ms，但旧 composition 每轮新建 RecallFusionService／Chroma client，暖态构造仍需约 64～74 ms。`f0aa50a58` 改为 app-local 单例并复用 canonical EpisodicStore client，104 项回归通过；真实三条检索为 316／351／508 ms，中位数从 541 ms 降至 351 ms，route ledger 为 74～91 ms。收据 SHA-256 为 `e1c8a0f9110be096dbb8c2f29fec1a945dd52482b009a805f30f6c85f2fcafd8`。本子项关闭，但 508 ms 调度尾部仍留在父项继续处理。
+  - [ ] 重新加载轻量阶段计时，分别读取 embedding、service resolve、route recall、两个领域 reviewer、通用偏好包和 context total；先用数据决定下一处删除或并行化，不以 `retrieval_wait_ms` 总数猜测。计时进入现有 trace，不新增 durable 审计写入；78 项非重复代码、集成与文档 Gate 已通过。
 
 ## P1：情感生命清零项
 

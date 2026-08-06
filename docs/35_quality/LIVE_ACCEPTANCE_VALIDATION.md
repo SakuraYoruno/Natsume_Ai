@@ -358,3 +358,5 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 `f0aa50a58` 在 `AgentRuntimeApplicationScope` 内以锁保护一个 lifespan-bound RecallFusionService，并注入现有 EpisodicStore Chroma client；并发请求共享无状态服务，而连接仍由 Host authority owner 统一关闭。定向测试重复调用 factory 两次，断言 builder 只执行一次且拿到同一 client；生命周期、召回和文档回归共 104 项通过。
 
 重启后的 Host PID 3500、OBS PID 12432、Monitor PID 52800 与三个 Docker 依赖同时在线。相同情绪文本三次 `MAY_RECALL` 的 `retrieval_wait_ms` 为 316／351／508，route ledger 为 74／91／79 ms；修复前两条检索为 514／568 ms，中位数从 541 ms 降到 351 ms，下降约 35%。一条 `NO_RECALL` 对照为 118 ms。服务／client 重建子项因此提升为 `PASS_REAL_APP_LOCAL_RECALL_SERVICE_REUSE`，收据 SHA-256 为 `e1c8a0f9110be096dbb8c2f29fec1a945dd52482b009a805f30f6c85f2fcafd8`。首句为 2,964～4,712 ms且仍有 508 ms 检索尾部，所以整体实时结论保持 `INCOMPLETE`。
+
+原 trace 只记录 Cortex 等待 retrieval task 的总时长，无法区分 embedding 调度、app-local service resolve、route 执行和两个 domain reviewer；通用 preference pack 又发生在该计时之后。新切片在原 COMMIT trace 内补齐这些整数耗时，并记录整个 context pipeline；没有新增表、journal 或普通回合写事务。通用 evidence reviewer 的 `observability_persist` import 同时后移到 packet-aware predicate 命中之后。78 项非重复 retrieval／composition／HTTP 集成与文档 Gate 通过，真实进程加载前只标 `CODE_COMPLETE_REAL_RETEST_PENDING`。

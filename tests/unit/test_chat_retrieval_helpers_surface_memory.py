@@ -69,6 +69,11 @@ async def test_semantic_embedding_load_does_not_block_conversation_event_loop(
 
     assert evidence_items == []
     assert summary["embedding_model_id"] == "slow-test-embedding"
+    timings = summary["runtime_timings_ms"]
+    assert timings["embedding"] >= 0
+    assert timings["service_resolve"] >= 0
+    assert timings["recall"] >= 0
+    assert timings["total"] >= timings["embedding"]
     assert embedding_thread_ids
     assert all(thread_id != event_loop_thread_id for thread_id in embedding_thread_ids)
 
