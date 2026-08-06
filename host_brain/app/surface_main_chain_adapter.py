@@ -175,6 +175,28 @@ async def run_surface_main_chain_for_surface_reply_input(
                     selection.get("selection_status")
                     == "DEGRADED_SINGLE_AFTER_RETRY"
                 )
+                if (
+                    not bool(selection.get("selected_passed"))
+                    and int(getattr(attempt, "attempt_index", 1) or 1) < 2
+                ):
+                    retry_reason = "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+                    repaired_messages = _buffered_affective_candidate_messages(
+                        attempt.prompt.messages,
+                        candidate_count=affective_candidate_count,
+                        retry_reason=retry_reason,
+                    )
+                    return RetryDirective(
+                        retry=True,
+                        reason=retry_reason,
+                        rendered_prompt=attempt.prompt.with_messages(repaired_messages),
+                        reuse_target=True,
+                        metadata={
+                            "expected_candidate_count": affective_candidate_count,
+                            "selected_reason_codes": list(
+                                selection.get("selected_reason_codes") or []
+                            )[:16],
+                        },
+                    )
                 return RetryDirective.accept()
             evaluation = evaluate_surface_model_response_for_retry(
                 compiled_request,

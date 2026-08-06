@@ -492,3 +492,13 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 第一次三轮复测的第三轮在 Host 终态瞬间把尚为 `PENDING` 的 `surface.reply_delivery` 误报为失败；同一 durable effect 约 6.3 秒后已经 `COMMITTED` 并生成 `gateway-outbox://` receipt，因此这是 runner 单次快照缺陷，不是回复丢失。runner 现对最小 reply delivery prefix 做最长 30 秒有界轮询，durable `FAILED` 仍立即失败，并把等待单列为非用户延迟；26 项 runner 回归通过。
 
 修正后报告 SHA-256 为 `005728c7b412a2ada46c6a72780d1e9534eaed1e519c424ecd8c10fa33c2d5c9`，三轮均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，Gateway durable outbox 3/3，canonical affect／relationship 增量分别为 8／5，legacy writer 为 0。Gateway→Host terminal 为 7,548／5,864／6,273 ms，surface commit 为 911／1,230／1,326 ms；锁争用已消除，但整体仍未达到实时数字生命目标，48 条队列与人工盲评继续待跑。
+
+## 2026-08-06 A15 48 条真实文本队列失败与首轮修复
+
+48 条真实 Gateway 文本场景已经完成，不再记为“待跑”。报告位于 acceptance 忽略目录，SHA-256 为 `279926456b066c03ee5c0eac40458380c1e33baa21d013b65beeec179b7df2ab`。自动规则得到 17 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、31 条 `FAIL`；整轮耗时中位数 6,993 ms、p95 10,383 ms。该自动结果不是“像人”评分，17 条通过仍需人工盲评，31 条失败则已经足以阻断数字生命完成声明。
+
+八类结果依次为：隐晦低落 5/6、含混情绪 6/6、用户对七海生气 0/6、低落中的技术任务 0/6、空间与边界 3/6、裂痕与修复 1/6、共同喜悦与混合情绪 1/6、亲密与吃醋边界 1/6。主要失败信号为 `DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED=24`、未证明双候选与收益各 14、最终回复为空 7。`ASR_CHUNK` 未回归，因此本轮失败集中在路由、候选质量和回复交付，不再归因于旧写压力。
+
+本切片只修复这批证据直接指向的非安全问题：没有日志、文件或明确执行指令的“今晚必须修这个报错”继续作为陪伴对话并索取最小上下文；失败的双候选在同一冻结 target 上最多追加一次语义修复；Chat 路由中的“项目发布成功”不再被关键词提升为维护场景；普通已验收文字回复使用 claim-fenced `AcceptanceEffectExecutionProof` 进入 Gateway outbox，不再因无关 Guardian／Scene heartbeat 产生第二次 Preview 漂移。Skill、Operator、设备和其他高风险 effect 的 Preview 门禁未改变。
+
+当前代码回归为 Surface／路由 162 项、Intent authority 35 项、回复交付与恢复 47 项、Scene 九类定向 9 项通过；真实 Host 仍运行旧提交，因此状态只能是 `CODE_REMEDIATED_REAL_RETEST_PENDING`。下一步先用全新 SQLite 重跑失败最集中的四类，再决定是否重跑完整 48 条；不能用定向单测把真实失败覆盖成 PASS。Pentest、渗透与网络安全专项继续为 `NOT_RUN_USER_SKIPPED`，不参与本轮非安全修复的通过率，也不阻断其继续执行。

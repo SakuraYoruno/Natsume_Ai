@@ -352,6 +352,7 @@ async def submit_gateway_reply(
     action_preview_service: Any | None = None,
     action_preview_event_id: str | None = None,
     action_preview_boundary: Mapping[str, Any] | None = None,
+    accepted_effect_proof: Any | None = None,
 ) -> EdgeTransportResult:
     """Submit one idempotency-bound reply to the durable Gateway outbox."""
 
@@ -368,20 +369,28 @@ async def submit_gateway_reply(
     if extra:
         preview_payload["raw_extra"] = extra
     stable_scope = str(delivery_id or req_id).strip()
-    denied = _require_terminal_action_preview(
-        service=action_preview_service,
-        event_id=action_preview_event_id,
-        boundary=action_preview_boundary,
-        allowed_action_kinds=frozenset(
-            {
-                "life-delivery.proactive.gateway",
-                "life-delivery.edge.gateway_reply",
-            }
-        ),
-        expected_scope=stable_scope,
-        expected_destination=None,
-        expected_payload=preview_payload,
-    )
+    if accepted_effect_proof is not None:
+        denied = _require_accepted_surface_effect(
+            proof=accepted_effect_proof,
+            effect_id=str(effect_id or ""),
+            request_id=req_id,
+            terminal_payload=preview_payload,
+        )
+    else:
+        denied = _require_terminal_action_preview(
+            service=action_preview_service,
+            event_id=action_preview_event_id,
+            boundary=action_preview_boundary,
+            allowed_action_kinds=frozenset(
+                {
+                    "life-delivery.proactive.gateway",
+                    "life-delivery.edge.gateway_reply",
+                }
+            ),
+            expected_scope=stable_scope,
+            expected_destination=None,
+            expected_payload=preview_payload,
+        )
     if denied is not None:
         return denied
     material = json.dumps(
@@ -456,6 +465,46 @@ async def query_gateway_reply_delivery(
         timeout_ms=max(500, int(timeout_ms)),
         accepted_statuses=frozenset({"committed", "unknown"}),
     )
+
+
+def _require_accepted_surface_effect(
+    *,
+    proof: Any,
+    effect_id: str,
+    request_id: str,
+    terminal_payload: Mapping[str, Any],
+) -> EdgeTransportResult | None:
+    """Validate the narrow Acceptance Effect -> text outbox projection.
+
+    The Task dispatcher has already claimed the immutable effect under a live
+    fence.  Ordinary chat delivery therefore needs exact effect/payload
+    identity, not a second Guardian/Scene policy decision that can drift while
+    an unrelated runtime heartbeat is being recorded.
+    """
+
+    from host_brain.runtime.acceptance_effect_execution import (  # noqa: PLC0415
+        AcceptanceEffectExecutionProof,
+    )
+
+    if not isinstance(proof, AcceptanceEffectExecutionProof):
+        return _rejected(
+            "ACCEPTANCE_EFFECT_AUTHORITY_REQUIRED",
+            "accepted Gateway reply lacks a typed Acceptance Effect proof",
+        )
+    if (
+        proof.effect_type != "surface.reply_delivery"
+        or str(proof.effect_id) != str(effect_id or "")
+        or not _acceptance_surface_matches(
+            action_args=proof.action_args_dict(),
+            request_id=str(request_id or ""),
+            terminal_payload=terminal_payload,
+        )
+    ):
+        return _rejected(
+            "ACCEPTANCE_EFFECT_DRIFT",
+            "accepted Gateway reply differs from its durable effect",
+        )
+    return None
 
 
 def _require_terminal_action_preview(

@@ -742,6 +742,14 @@ def test_surface_proactive_and_task_admission_reopen_one_durable_scene_identity(
             None,
         ),
         (
+            "release-result-chat",
+            "scene.casual-chat",
+            14,
+            {"route": "chat", "task": "项目发布成功。"},
+            "WORKING",
+            None,
+        ),
+        (
             "late-night",
             "scene.late-night",
             1,
@@ -824,6 +832,15 @@ def test_context_application_resolves_eight_required_scene_inputs(
     assert frozen.payload["scene_resolution_input_v1"]["activity_state"] == (
         "GAMING" if production_mode == "gaming" else "FOCUS"
     )
+    constraint_kinds = {
+        str(item.get("code") or "")
+        for item in frozen.payload["scene_decision_v2"].get("constraints") or []
+        if isinstance(item, dict)
+    }
+    if case_id == "release-result-chat":
+        assert "MAINTENANCE_EFFECT_REVIEW" not in constraint_kinds
+    if case_id == "release-maintenance":
+        assert "MAINTENANCE_EFFECT_REVIEW" in constraint_kinds
 
 
 @pytest.mark.parametrize(

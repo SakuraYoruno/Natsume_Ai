@@ -117,3 +117,7 @@ flowchart LR
 ```
 
 `worker_dispatch` 只把 `gateway_delivery_authority=acceptance_effect_outbox` 与 `gateway_delivery_state=OUTBOX_COMMITTED` 两个无正文枚举写入完成事件。OBS 用它们判断当前请求是否已完成 Host→Gateway 的可恢复提交；平台物理送达仍由独立 terminal/ACK 证据负责。Life Body 则直接从 canonical runtime snapshot 的 `hard_state` 派生当前情绪，旧 `emotion_context` 仅作历史兼容读取。
+
+普通陪伴文字回复属于已经通过 Task Verification／Acceptance 的低风险终态投影。dispatcher 从持久 effect row 与当前 claim fence 构造进程内 typed `AcceptanceEffectExecutionProof`，Gateway transport 只允许 proof 中的 effect id、请求、目标和正文做固定的 text-outbox 转换。它不再对同一回复追加第二次 Scene／Guardian 策略判断，从而避免心跳或场景 revision 更新把合法回复误判为 `ACTION_PREVIEW_DRIFT`。该简化只适用于 `surface.reply_delivery`；Skill、Delegate 的实际工具动作、Operator、Scheduler、Edge embodiment 与系统状态变更仍保留原 ActionPreview／Review 边界。
+
+Scene 解析同样以已分类 route 为先：显式 `route=chat` 始终是 Chat task kind，文本中出现“发布成功”或“部署结束”不会反向制造维护权限与 Review；只有可执行 route 才使用 research、debug、refactor、release 等关键词补全 task kind。这保证日常聊天不会因为谈论工作而进入工程控制流。

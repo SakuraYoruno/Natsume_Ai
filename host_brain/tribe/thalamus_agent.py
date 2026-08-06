@@ -432,7 +432,8 @@ _TASK_MEMORY_FACT_RE = re.compile(
 _TASK_CODE_RE = re.compile(
     r"(报错|错误|异常|修复|修一个|改代码|写代码|单测|测试|diff|patch|traceback|stack trace|compile|build|修.*bug|bug.*修"
     r"|代码|编程|写.*函数|函数|脚本|调试|实现|开发|\bcode\b|coding|programming|function|script|program"
-    r"|python|javascript|typescript|java|golang|rust|c\+\+|debug|bug|class|algorithm|implement|develop)",
+    r"|python|javascript|typescript|java|golang|rust|c\+\+|debug|bug|class|algorithm|implement|develop"
+    r"|\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b|[\w.-]+\.(?:py|js|jsx|ts|tsx|java|go|rs|cpp|c|h)\b)",
     re.IGNORECASE,
 )
 _TASK_PLUGIN_BUILD_RE = re.compile(
@@ -864,6 +865,24 @@ _SIMPLE_TECH_ACTION_BLOCKERS: tuple[str, ...] = (
     "迁移",
     "写代码",
 )
+_UNDERSPECIFIED_CODE_SUPPORT_RE = re.compile(
+    r"(报错|错误|异常|bug|崩溃|失败|修不动|修不了)",
+    re.IGNORECASE,
+)
+_CODE_SUPPORT_EVIDENCE_RE = re.compile(
+    r"(```|traceback|stack\s+trace|\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b"
+    r"|(?:line|第)\s*\d+\s*(?:行)?|[A-Za-z]:\\|https?://|(?:^|[\s(])\.?\.?[/\\][\w.-]+"
+    r"|[\w.-]+\.(?:py|js|jsx|ts|tsx|java|go|rs|cpp|c|h|json|ya?ml|toml|md)\b"
+    r"|错误信息|报错信息|日志如下|完整日志|附件|截图|npm\s|pnpm\s|pytest\s|python\s)",
+    re.IGNORECASE,
+)
+_CODE_SUPPORT_DIRECT_ACTION_RE = re.compile(
+    r"((?:帮我|请你|麻烦(?:你)?|直接|开始|继续|立刻|马上|现在就).{0,12}"
+    r"(?:修|改|查|排查|处理|解决|跑|执行|定位)"
+    r"|^(?:修复|修改|排查|处理|解决|定位|检查|查看|跑|执行)"
+    r"|(?:修复|修改|排查|处理|解决|定位|检查)(?:一下|这个|该|上述|下面|代码|文件|项目|仓库|bug|报错|错误))",
+    re.IGNORECASE,
+)
 _STATUS_REPLY_REQUEST_RE = re.compile(
     r"("
     r"用.{0,10}(?:一句|一句话|短句).{0,10}(?:回复|回答|告诉|说)"
@@ -921,7 +940,29 @@ def _looks_like_simple_technical_advice(text: str) -> bool:
     compact_lower = normalized.lower().replace(" ", "")
     if any(marker in compact_lower for marker in _SIMPLE_TECH_ACTION_BLOCKERS):
         return False
+    if _CODE_SUPPORT_DIRECT_ACTION_RE.search(normalized):
+        return False
     return bool(_SIMPLE_TECH_ADVICE_RE.search(normalized) and _SIMPLE_TECH_QUESTION_RE.search(normalized))
+
+
+def _looks_like_underspecified_code_support_chat(text: str) -> bool:
+    """Keep a vague problem statement conversational until evidence exists.
+
+    Saying that an error *must* be fixed is not yet permission or enough input
+    to open a Workspace worker.  The companion should acknowledge the current
+    situation and ask for the smallest useful error/log/code context.  Concrete
+    evidence or an explicit execution request continues to the governed code
+    route.
+    """
+
+    normalized = _normalize_text(text)
+    if not normalized or not _UNDERSPECIFIED_CODE_SUPPORT_RE.search(normalized):
+        return False
+    if _CODE_SUPPORT_EVIDENCE_RE.search(normalized):
+        return False
+    if _CODE_SUPPORT_DIRECT_ACTION_RE.search(normalized):
+        return False
+    return True
 
 
 def _looks_like_status_reply_chat(text: str) -> bool:
@@ -1065,6 +1106,24 @@ def _build_simple_technical_chat_seed(text: str, *, route_source: str) -> dict[s
             "text": normalized,
         },
     }
+
+
+def _build_code_context_required_chat_seed(
+    text: str,
+    *,
+    route_source: str,
+) -> dict[str, Any]:
+    return _build_semantic_chat_seed(
+        text,
+        route_source=route_source,
+        reason_code="THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT",
+        semantic_type="underspecified_technical_support",
+        dialogue_act="state_technical_problem_without_evidence",
+        context_binding="conversation_and_current_affect",
+        answer_strategy="acknowledge_then_request_minimal_error_context",
+        confidence=0.98,
+        domain="technical_chat",
+    )
 
 
 def _build_planning_advice_chat_seed(
@@ -2498,6 +2557,12 @@ def _build_direct_route_seed(text: str) -> dict[str, Any] | None:
     if _looks_like_simple_technical_advice(cleaned):
         return _build_simple_technical_chat_seed(cleaned, route_source="thalamus.rule")
 
+    if _looks_like_underspecified_code_support_chat(cleaned):
+        return _build_code_context_required_chat_seed(
+            cleaned,
+            route_source="thalamus.rule",
+        )
+
     if _looks_like_lightweight_codex_request(cleaned):
         return _build_inline_code_chat_seed(cleaned, route_source="thalamus.rule")
 
@@ -2962,6 +3027,12 @@ def classify_task_intent_fastpath(text: str) -> dict[str, Any] | None:
 
     if _looks_like_simple_technical_advice(normalized):
         return _build_simple_technical_chat_seed(normalized, route_source="rule.fastpath")
+
+    if _looks_like_underspecified_code_support_chat(normalized):
+        return _build_code_context_required_chat_seed(
+            normalized,
+            route_source="rule.fastpath",
+        )
 
     if _TASK_RECENT_TURN_STRICT_RE.search(normalized):
         return {

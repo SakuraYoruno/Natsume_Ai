@@ -436,3 +436,30 @@ Code filesystem-facing runtime/run component 必须为固定长度摘要，不�
 数字生命真实文本队列还必须检查 Edge 重放的写压力边界：`ASR_CHUNK` 请求可被 Host 接受，并在满足 final／confidence 条件时进入当前回合 ASR bridge，但不得写入 `voice_event_log`、Life episode 或 Life evidence；`ASR_FINAL` 与 TTS／Avatar 终态仍应写入运维日志。任何 `voice_event_log` 事件都不得直接派生 Life Memory，长期情感事实只能由 canonical 对话、Affective Life、Relationship 和 Expression receipt 生成。代码回归通过后必须换用全新 Host SQLite 重启远端连接，确认 `ASR_CHUNK=0`、voice→Life anchor 增量为 0，并重测三轮 Gateway→Host 延迟；未完成真实重启前只标记 `CODE_REMEDIATED_REAL_RESTART_RETEST_PENDING`。
 
 `INPUT_COMPLETED` 与 TaskGraph 终态早于后台 Acceptance Effect 收敛，不得在该瞬间单次读取 `surface.reply_delivery` 后判失败。文本 runner 必须对 user turn + surface receipt 做最长 30 秒的有界轮询，遇到 durable `FAILED` 立即停止；等待时长单列为 `delivery_convergence_wait_ms`，不得计入 Gateway→Host、TaskGraph 或首回复延迟。当前全新 SQLite 三轮预检的 surface commit 为 911／1,230／1,326 ms，runner 观察等待仅 16／15／15 ms，三轮均取得 `gateway-outbox://` receipt。
+
+48 条真实文本队列的首轮报告 SHA-256 为 `279926456b066c03ee5c0eac40458380c1e33baa21d013b65beeec179b7df2ab`，结果为 17 条自动待人工、31 条失败。回归不得只断言安全输出存在，还必须覆盖以下四个失败边界：
+
+- 模糊技术陈述保持 Chat，只有显式执行指令、文件／行号、异常类型、日志或仓库动作才进入 governed worker；
+- 双候选均低于质量下限时，在同一冻结 target、同一图和既有预算内恰好重试一次，第二次仍失败则 fail-soft，不循环重试；
+- `route=chat` 的发布结果陈述不携带 `MAINTENANCE_EFFECT_REVIEW`，真正的 Skill 发布维护仍保留该约束；
+- 普通 `surface.reply_delivery` 只消费 dispatcher 生成的 typed、claim-fenced Acceptance Effect proof；正文、目标或 effect id 漂移必须拒绝，而 Skill／Operator／设备 effect 仍走 ActionPreview。
+
+本切片的非安全定向命令为：
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_thalamus_agent.py `
+  tests/unit/test_dl04_affective_turn_planner.py `
+  tests/unit/test_surface_main_chain_app_adapter.py
+
+python -m pytest -q `
+  tests/unit/test_ne03_intent_admission_structure.py `
+  tests/unit/test_ne03_production_intent_authority.py
+
+python -m pytest -q `
+  tests/integration/test_gr06_acceptance_effect_dispatcher.py `
+  tests/integration/test_ne01_gateway_reply_query.py `
+  tests/integration/test_ne01_generic_acceptance_effect_reconciliation.py
+```
+
+真实复验先只跑用户对七海生气、低落中的技术任务、共同喜悦／混合情绪和一个隐晦低落对照。四类均无空回复、无维护 Review、无 `ACTION_PREVIEW_DRIFT` 且低质量首候选确实触发一次修复后，才重跑完整 48 条。人感结论仍要求三名评审盲测；自动 48/48 也只能进入人工评审，不能直接标记“像人”。本计划明确排除 Pentest、渗透和网络安全专项，统一记录 `NOT_RUN_USER_SKIPPED`。

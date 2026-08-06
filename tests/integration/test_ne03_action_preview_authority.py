@@ -13,6 +13,9 @@ from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
     DurableActionPreviewAuthority,
 )
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 from host_brain.runtime.action_preview_resolver import (
     ACCEPTANCE_EFFECT_AUTHORITY_SCHEMA,
     DERIVED_EFFECT_AUTHORITY_SCHEMA,
@@ -540,7 +543,7 @@ def test_action_preview_service_rejects_missing_app_local_guardian(tmp_path: Pat
 
 
 @pytest.mark.asyncio
-async def test_acceptance_effect_dispatcher_reopens_preview_before_handler(
+async def test_accepted_surface_dispatcher_uses_live_effect_proof_without_preview(
     tmp_path: Path,
 ) -> None:
     _preview, guardian, event_store = _harness(tmp_path)
@@ -613,13 +616,10 @@ async def test_acceptance_effect_dispatcher_reopens_preview_before_handler(
     def handler(payload):
         seen.append(dict(payload))
         assert "_action_preview_context" not in payload
-        proof = payload["_action_preview_terminal_proof"]
-        boundary = dict(proof["boundary"])
-        assert "_action_preview_terminal_proof" not in boundary["action_args"]
-        # Exercise the same third reopen performed by the terminal
-        # Gateway/Edge transport.  The boundary must remain independent from
-        # the proof injected into the handler payload.
-        service.require_execution(event_id=proof["event_id"], **boundary)
+        proof = payload.pop("_acceptance_effect_execution_proof")
+        assert isinstance(proof, AcceptanceEffectExecutionProof)
+        assert proof.effect_id == effect["effect_id"]
+        assert proof.action_args_dict() == payload
         return {"receipt_ref": "gateway-receipt://delivery-alpha"}
 
     dispatcher = AcceptanceEffectDispatcher(
@@ -632,8 +632,7 @@ async def test_acceptance_effect_dispatcher_reopens_preview_before_handler(
     assert committed is not None and committed["status"] == "COMMITTED"
     assert len(seen) == 1
     rows = event_store.list_events(event_type="ActionPreviewReceiptIssued")
-    assert len(rows) == 1
-    assert rows[0]["payload"]["action_kind"] == "acceptance-effect.surface.reply_delivery"
+    assert len(rows) == 0
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,9 @@ from host_brain.contracts.agent_runtime.task_graph import (
     TaskNodeStatus,
 )
 from host_brain.governor.action_preview import ActionPreviewService
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 from host_brain.persistence.task_repository import (
     AcceptanceEffectStatus,
     DurableTaskStore,
@@ -647,6 +650,66 @@ async def test_local_acceptance_projection_reuses_node_lineage_without_terminal_
 
     assert settled is not None
     assert settled["status"] == AcceptanceEffectStatus.COMMITTED.value
+
+
+@pytest.mark.asyncio
+async def test_surface_reply_uses_claim_fenced_effect_proof_without_second_preview(
+    tmp_path: Path,
+) -> None:
+    clock = MutableClock()
+    store = _store(tmp_path, clock)
+    graph_id = "graph-accepted-surface"
+    node_id, attempt_id = _seed_completed_graph(store, graph_id)
+    business_payload = {
+        "request_id": "request-accepted-surface",
+        "session_id": "session-accepted-surface",
+        "person_id": "person-accepted-surface",
+        "reply_channel": "wechat",
+        "reply_target": "conversation-accepted-surface",
+        "decision": "APPROVE",
+        "narrative": "我在这儿。",
+        "authority": {"request_id": "request-accepted-surface"},
+    }
+    effect = _stage_effect(
+        store,
+        graph_id=graph_id,
+        node_id=node_id,
+        attempt_id=attempt_id,
+        effect_type="surface.reply_delivery",
+        opaque_order="surface",
+        business_payload=business_payload,
+    )
+
+    class ForbiddenPreview:
+        def issue_receipt(self, **_kwargs: Any) -> dict[str, Any]:
+            raise AssertionError("ordinary accepted text must not issue a second Preview")
+
+        def require_execution(self, **_kwargs: Any) -> None:
+            raise AssertionError("ordinary accepted text must not reopen a second Preview")
+
+    captured: list[AcceptanceEffectExecutionProof] = []
+
+    def handle(payload: dict[str, Any]) -> str:
+        proof = payload.pop("_acceptance_effect_execution_proof")
+        assert isinstance(proof, AcceptanceEffectExecutionProof)
+        assert proof.effect_id == effect["effect_id"]
+        assert proof.effect_type == "surface.reply_delivery"
+        assert proof.action_args_dict() == payload
+        captured.append(proof)
+        return "gateway-outbox://dispatcher/accepted-surface"
+
+    dispatcher = AcceptanceEffectDispatcher(
+        task_store=store,
+        handlers={"surface.reply_delivery": handle},
+        owner_id="dispatcher-accepted-surface",
+        action_preview_service=ForbiddenPreview(),
+    )
+
+    settled = await dispatcher.dispatch_effect(str(effect["effect_id"]))
+
+    assert settled is not None
+    assert settled["status"] == AcceptanceEffectStatus.COMMITTED.value
+    assert len(captured) == 1
 
 
 @pytest.mark.asyncio

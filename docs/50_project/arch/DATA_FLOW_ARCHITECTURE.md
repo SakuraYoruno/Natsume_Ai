@@ -385,3 +385,24 @@ production route catalog 还按 `code.benefit.execution.json` 注入冻结的 no
 两臂共享的 objective 不包含目标语义；差异只在 `PlanningSearch selected evidence`。隐藏 cases 位于模型数据流之外，因此 baseline 若通过只能来自其自身生成能力，而不能来自题名泄漏；v2 的泄漏收据被排除，v3 才重新进入收益测量。
 
 v3 的 20 条 member evidence 经 authority resolver 重开 Code terminal receipt 后写入 cohort ledger；seal 得到 pass-rate gain 1.0、静态与 diff-risk 不退化。report 的 proposal 位为 true、production influence 位为 false，后续 promotion 仍需独立 Review／策略切流。
+
+## 13. 普通陪伴文字交付数据流
+
+```mermaid
+flowchart LR
+    U["Gateway 用户消息"] --> R["Thalamus route"]
+    R -->|"模糊技术陈述"| C["Chat：承接情绪并索取最小上下文"]
+    R -->|"明确文件、日志或执行请求"| W["Governed Worker"]
+    C --> P["冻结 AffectiveTurnPlan"]
+    P --> M["模型双候选或单候选"]
+    M --> Q{"本地质量下限"}
+    Q -->|"失败且首次"| X["同一 target 一次语义修复"]
+    X --> Q
+    Q -->|"通过或二次 fail-soft"| A["Task Verification + Acceptance"]
+    A --> E["surface.reply_delivery intent"]
+    E --> F["claim fence + typed AcceptanceEffectExecutionProof"]
+    F --> G["Gateway durable outbox"]
+    G --> H["eventual platform delivery"]
+```
+
+`A → E` 已冻结正文、目标与 effect id；`F` 只证明当前 dispatcher 正在执行同一持久 effect，不再次计算情感、Scene 或策略。正文、目标、请求或 effect id 任一漂移都会在进入 Gateway 前拒绝。该轻量路径没有新增普通对话审计表，也不会把每个 token、候选正文或内部思考写入数据库；Affective Life、Relationship 和必要 terminal receipt 继续按原有有界写入工作。高风险与设备数据流不经过这条豁免路径。

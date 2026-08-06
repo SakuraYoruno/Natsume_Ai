@@ -246,6 +246,11 @@ def _buffered_affective_candidate_messages(
             "AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED": (
                 "上次候选违反当前关系或表达边界；重写两个更自然、克制且可直接发送的候选。"
             ),
+            "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR": (
+                "上次虽然安全，但没有达到当前关系和场景的质量下限。两个候选都要具体承接"
+                "用户刚说的事，避免套话式拉开距离、反向施压和连续追问；让语境贴合度与"
+                "分寸感足以直接发送。"
+            ),
         }
         repair = (
             "DL-04 候选修复："

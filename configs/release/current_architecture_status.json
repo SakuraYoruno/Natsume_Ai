@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_DIGITAL_LIFE_DELIVERY_CONVERGENCE_PENTEST_SKIPPED",
+  "commit_scope": "A15_DIGITAL_LIFE_48_TEXT_REMEDIATION_PENTEST_SKIPPED",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -50,7 +50,8 @@
       "status": "WIRED_PARTIAL",
       "real_provider_latency": "INCOMPLETE",
       "high_ambiguity_primary_path": "EXACT_TWO_PAIRED_TEXT_VOICE_CANDIDATES",
-      "second_attempt_safe_single_fallback": "WIRED_NOT_BENEFIT_ELIGIBLE_REAL_RETEST_PENDING"
+      "second_attempt_safe_single_fallback": "WIRED_NOT_BENEFIT_ELIGIBLE_REAL_RETEST_PENDING",
+      "failed_quality_floor_semantic_retry": "CODE_REMEDIATED_ONE_RETRY_SAME_FROZEN_TARGET_REAL_RETEST_PENDING"
     },
     "voice": {
       "status": "REMOTE_EDGE_REAL_PASS_PARTIAL",
@@ -228,7 +229,13 @@
     "planning_search_code_real_cohort_ledger_counts": "WORKLOAD_20_RUN_SPEC_21_ARM_42_TERMINAL_21_CLEANUP_21_COHORT_REGISTRATION_1_MEMBER_20_REPORT_1_MODEL_REQUEST_40",
     "planning_search_code_promotion_proposal_eligible": true,
     "planning_search_code_production_influence_enabled": false,
-    "digital_life_human_likeness": "PARTIAL_REAL_THREE_FAMILY_SINGLE_REVIEWER_3_OF_3_TEXT_PASS_BLIND_COHORT_PENDING",
+    "digital_life_human_likeness": "FAIL_REAL_48_TEXT_AUTOMATED_17_PENDING_HUMAN_31_FAIL",
+    "digital_life_real_48_text_cohort": "FAIL_17_AUTOMATED_PENDING_HUMAN_31_FAIL",
+    "digital_life_real_48_text_cohort_report_sha256": "279926456b066c03ee5c0eac40458380c1e33baa21d013b65beeec179b7df2ab",
+    "digital_life_real_48_text_cohort_timing_ms": "P50_6993_P95_10383",
+    "digital_life_real_48_text_cohort_family_results": "IMPLICIT_LOW_MOOD_5_OF_6_AMBIGUOUS_AFFECT_6_OF_6_USER_ANGRY_0_OF_6_TASK_WITH_LOW_MOOD_0_OF_6_SPACE_BOUNDARY_3_OF_6_RUPTURE_REPAIR_1_OF_6_SHARED_JOY_MIXED_1_OF_6_INTIMACY_JEALOUSY_1_OF_6",
+    "digital_life_real_48_text_cohort_top_failures": "CANDIDATE_NOT_PASSED_24_TWO_CANDIDATES_NOT_PROVEN_14_SELECTION_NOT_BENEFIT_ELIGIBLE_14_FINAL_REPLY_EMPTY_7",
+    "digital_life_real_48_text_remediation": "CODE_REMEDIATED_ROUTING_CANDIDATE_RETRY_CHAT_SCENE_AND_LOW_RISK_DELIVERY_REAL_RETEST_PENDING",
     "whole_system_python_line_coverage": "72.22_PERCENT_OFFLINE_STABLE_BELOW_75_GATE",
     "whole_system_python_branch_coverage": "55.08_PERCENT_OFFLINE_STABLE_BELOW_65_GATE",
     "whole_system_python_coverage_scope": "FULL_PRODUCTION_SOURCE_DENOMINATOR_WITH_UNIT_CONTRACT_INTEGRATION_SECURITY_AND_LOCAL_E2E; REAL_DOCKER_PROVIDER_HARDWARE_RUNTIME_PROBES_PENDING",
@@ -529,7 +536,7 @@
     "ordinary_chat_writer_fairness_real_retest_projection_to_artifact_ms": [1054, 269, 246],
     "ordinary_chat_writer_fairness_real_retest_automated_status": "AUTOMATED_PASS_HUMAN_REVIEW_PENDING",
     "ordinary_chat_writer_fairness_real_retest_affect_writer_probe": "PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS",
-    "digital_life_text_cohort_timing_boundary": "PASS_REAL_PREFLIGHT_48_COHORT_PENDING",
+    "digital_life_text_cohort_timing_boundary": "REAL_48_COHORT_MEASURED_P50_6993_P95_10383_NOT_FIRST_TOKEN_GATE",
     "digital_life_text_cohort_edge_precondition": "NOT_REQUIRED_UNLESS_REQUIRE_VOICE",
     "digital_life_text_cohort_expression_wait_s": 0,
     "digital_life_voice_cohort_default_expression_wait_s": 90,
@@ -598,7 +605,7 @@
     "companion_profile_model_and_physical_edge_behavior": "NOT_TESTED_HOST_PROTOCOL_ONLY",
     "docker_host_obs_monitor_gateway_full_stack": "RUNNING_CURRENT_SHA_DOCKER_RESTORED_PERSISTENCE_PASS_MONITOR_TEXT_VOICE_PASS_VTS_PENDING_EXTERNAL",
     "real_provider_performance": "INCOMPLETE",
-    "fixed_72_scenarios": "EXECUTION_SPEC_READY_STABLE_SUBJECT_ASSERTED_48_GATEWAY_TEXT_24_REAL_DRIVER_REQUIRED_MEASUREMENT_PENDING",
+    "fixed_72_scenarios": "FAIL_REAL_48_TEXT_17_AUTOMATED_PENDING_HUMAN_31_FAIL_24_REAL_DRIVER_PENDING",
     "three_reviewer_blind_test": "NOT_RUN",
     "final_release": "INCOMPLETE"
   },
@@ -629,7 +636,7 @@
     "CHANGED_CODE_COVERAGE_BELOW_GATE_LINE_82_30_BRANCH_66_39",
     "ARCHITECTURE_V2_A15_CURRENT_SHA_FULL_STACK_RUNNING",
     "ORDINARY_CHAT_END_TO_END_LATENCY_ABOVE_GATE_FIXED_OVERHEAD_AND_PROVIDER_REPAIR",
-    "PLANNING_SEARCH_CODE_AND_PENTEST_BENEFIT_PENDING",
+    "PENTEST_AND_NETWORK_SECURITY_NOT_RUN_USER_SKIPPED_NONBLOCKING",
     "EDGE_ASR_CUDA_RUNTIME_MISSING_CPU_FALLBACK_PERFORMANCE_UNMEASURED",
     "EDGE_VTS_AUTH_DIALOG_MODEL_NOT_LOADED_AND_HOTKEY_MAPPING_UNPROVEN",
     "EDGE_ACOUSTIC_BARGE_IN_TRIGGER_NOT_TESTED",
@@ -637,6 +644,7 @@
     "MULTI_TURN_HUMAN_BLIND_TEST_NOT_RUN",
     "FULL_DIGITAL_LIFE_FAILURE_MATRIX_PENDING",
     "DIGITAL_LIFE_BROADER_MULTI_FAMILY_COHORT_AND_THREE_REVIEWER_BLIND_TEST_PENDING",
-    "DIGITAL_LIFE_LANGUAGE_QUALITY_REQUIRES_BROADER_COHORT_AND_HUMAN_BLIND_REVIEW"
+    "DIGITAL_LIFE_LANGUAGE_QUALITY_REQUIRES_BROADER_COHORT_AND_HUMAN_BLIND_REVIEW",
+    "DIGITAL_LIFE_REAL_48_TEXT_31_OF_48_AUTOMATED_FAILURES_RETEST_PENDING"
   ]
 }

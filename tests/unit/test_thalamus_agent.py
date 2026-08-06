@@ -1325,6 +1325,37 @@ def test_classify_task_intent_keeps_real_test_work_on_codex() -> None:
     assert decision["target_id"] == "agent_worker"
 
 
+def test_underspecified_error_statement_stays_in_affective_chat_until_context_exists() -> None:
+    text = "但这个报错今晚必须修，别把任务全变成安慰。"
+
+    rules = classify_task_intent_by_rules(text)
+    fastpath = classify_task_intent_fastpath(text)
+
+    assert rules is not None
+    assert rules["route"] == "chat"
+    assert rules["target_id"] == ""
+    assert rules["reason_code"] == "THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT"
+    assert fastpath is not None
+    assert fastpath["route"] == "chat"
+    assert fastpath["reason_code"] == "THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "帮我修复这个报错",
+        "src/app.py 第 42 行 ValueError，帮我修",
+        "检查仓库里的测试失败",
+    ],
+)
+def test_concrete_or_explicit_code_work_still_routes_to_governed_worker(text: str) -> None:
+    decision = classify_task_intent_by_rules(text)
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] in {"agent_worker", "agent_inspect"}
+
+
 def test_classify_task_intent_fastpath_routes_english_greeting_to_chat() -> None:
     decision = classify_task_intent_fastpath("hello")
 

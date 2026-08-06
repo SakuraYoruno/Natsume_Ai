@@ -441,6 +441,13 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert len(repaired_messages) == 2
     assert "上次输出不是恰好两个合法候选" in repaired_messages[-1]["content"]
+    quality_repaired_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+    )
+    assert "没有达到当前关系和场景的质量下限" in quality_repaired_messages[-1]["content"]
+    assert "反向施压" in quality_repaired_messages[-1]["content"]
 
     paired_by_reply = {
         "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",

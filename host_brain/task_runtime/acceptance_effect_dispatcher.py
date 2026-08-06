@@ -12,6 +12,9 @@ import secrets
 from typing import Any
 
 from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 from host_brain.agent_runtime.workspace_artifact_effect import (
     AGENT_WORKSPACE_ACTION_PREVIEW_CONTEXT_SCHEMA,
     AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
@@ -364,6 +367,32 @@ class AcceptanceEffectDispatcher:
                 "Acceptance Effect preview context schema drifted",
             )
         effect_type = str(effect.get("effect_type") or "").strip()
+        if effect_type == "surface.reply_delivery":
+            # A visible text reply is the terminal projection of an already
+            # verified and accepted node.  Re-running Guardian/Scene policy at
+            # delivery time made ordinary chat depend on unrelated heartbeat
+            # revisions and could turn a valid reply into ACTION_PREVIEW_DRIFT.
+            # Keep exact durable lineage and the live claim fence, but do not
+            # create a second policy decision for this low-risk text effect.
+            self._require_local_acceptance_projection_lineage(
+                effect=effect,
+                context=context,
+            )
+            payload["_acceptance_effect_execution_proof"] = (
+                AcceptanceEffectExecutionProof(
+                    effect_id=str(effect.get("effect_id") or ""),
+                    effect_type=effect_type,
+                    graph_id=str(effect.get("graph_id") or ""),
+                    graph_revision=int(effect.get("graph_revision") or 0),
+                    node_id=str(effect.get("node_id") or ""),
+                    attempt_id=str(effect.get("attempt_id") or ""),
+                    lease_owner_id=str(effect.get("lease_owner") or ""),
+                    fencing_token=int(effect.get("fencing_token") or 0),
+                    payload_sha256=str(effect.get("payload_sha256") or ""),
+                    action_args=payload,
+                )
+            )
+            return payload, None
         if effect_type in _LOCAL_ACCEPTANCE_PROJECTION_TYPES:
             # These effects append Host-local state only after the owning node
             # has passed Verification and Acceptance.  Reissuing a terminal
