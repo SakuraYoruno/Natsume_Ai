@@ -454,3 +454,7 @@ paired terminal ledger 不能保存回答正文，但真实收益又必须评估
 v2 第一次新 SHA 预检在任何外部模型调用前 fail-closed：Code ledger 发现同一 `workload_id` 正被绑定到新的 cohort/config evidence，返回 `CODE_BENCHMARK_REPLAY_DRIFT`。根因是只升级了 cohort version，却没有升级 durable workload registration identity。修复后 ledger identity 使用 `<固定题号>@<cohort_version>`，workload ref 与 baseline ref 也包含 cohort version；公共题号仍由配置保留，但 v1/v2 不再争用同一写身份。该失败没有模型成本，不删除也不改写原 ledger 行。
 
 version-bound identity 修复后的第二次 v2 预检完成了两只真实 DeepSeek 请求，latency 分别为 922 ms 与 625 ms，说明 non-thinking profile 已实际消除此前的长推理；但进入 sandbox 时 Windows bare clone 因长 acceptance 根目录、run namespace 与 run ID 叠加超过路径限制而失败。失败收据 SHA-256 为 `376e1a62822cbaabbfe8213d1823bae7147119e91601d5633f9897aade8ee2ae`，两条 succeeded model audit 不复用。修复将 runtime directory 和 filesystem-facing run ID 改为固定长度 SHA-256 前缀；完整 namespace、commit、config、workload 仍保留在外层 receipt 与 ledger digest 中，不用可读长路径承担语义身份。32 项定向回归与 20/20 dry-run 已通过，仍需深目录真实预检关闭该问题。
+
+短路径修复后的 v2 第三次预检成功完成了两只模型请求、两个 fresh worktree、隐藏测试、静态测试与清理，证明 Windows 路径缺陷关闭；但 baseline 和 selected 隐藏测试均为 true。报告 SHA-256 为 `41a6584882ad883c064555b9cc71982bc52df930bb863336c656dfc53424e71c`。原因是 objective 自己写出“整数绝对值语义”，模型无需 selected evidence 也能猜出正确实现；这是 benchmark 判别力失败，不能用 `PASS_PREFLIGHT_ONLY` 标签冒充搜索收益。
+
+固定队列因此升级为 `2026-08-06-v3`，配置摘要为 `b1c1e97eba049c57c70e54f64528d143896df7ae204d7b4328c003a3f65f75b7`。20 个 objective 统一为中性合同，只要求依据本轮选中证据实现，并明确禁止根据题号或常识猜测；正确业务语义只存在于 selected evidence 和模型不可见的隐藏 cases。loader 会对任何 descriptive objective 漂移 fail-closed，33 项定向回归与 20/20 dry-run 通过；v2 两臂都通过的收据永久保留但不计收益。

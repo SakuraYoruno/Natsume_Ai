@@ -12,6 +12,7 @@ from host_brain.model_runtime.live_prompts import (
 )
 from host_brain.planning_search.code_benefit_experiment import (
     CodeBenefitExperimentError,
+    FIXED_CODE_OBJECTIVE,
     _execution_messages,
     _parse_model_source,
     code_execution_profile_digest,
@@ -34,6 +35,17 @@ def test_fixed_code_queue_has_twenty_sorted_distinct_tasks() -> None:
     )
     assert len({item.module_name for item in cohort.workloads}) == 20
     assert all(len(item.cases) >= 3 for item in cohort.workloads)
+    assert {item.objective for item in cohort.workloads} == {FIXED_CODE_OBJECTIVE}
+
+
+def test_fixed_code_queue_rejects_a_descriptive_objective(tmp_path: Path) -> None:
+    payload = json.loads(CONFIG.read_text(encoding="utf-8"))
+    payload["workloads"][0]["objective"] = "实现整数绝对值。"
+    drifted = tmp_path / "cohort.json"
+    drifted.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(CodeBenefitExperimentError, match="objective"):
+        load_fixed_code_cohort(drifted)
 
 
 def test_generated_source_commit_and_search_paths_are_deterministic(tmp_path: Path) -> None:

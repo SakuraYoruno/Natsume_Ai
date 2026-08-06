@@ -70,6 +70,9 @@ from host_brain.planning_search.contracts import MCTSMode, PlanningGoal, SearchB
 
 
 FIXED_CODE_COHORT_SCHEMA = "natsume.code-benefit-fixed-cohort.v1"
+FIXED_CODE_OBJECTIVE = (
+    "仅依据本轮选中的需求证据实现 solve(value)；不得根据题号或常识猜测未提供的语义。"
+)
 CODE_EXECUTION_PROFILE_ID = "a15-code-full-file-json-v2"
 CODE_BENCHMARK_SCENE_TYPE = "CODE_BENCHMARK"
 DEFAULT_CODE_BENCHMARK_MODEL_TIMEOUT_MS = 30_000
@@ -823,10 +826,13 @@ def _workload_from_dict(value: Any) -> FixedCodeWorkloadV1:
     module = _text(value.get("module_name"), "module_name", 80).lower()
     if not module.startswith("task_") or not module.replace("_", "").isalnum():
         raise CodeBenefitExperimentError("Code module_name is invalid")
+    objective = _text(value.get("objective"), "objective", 2_000)
+    if objective != FIXED_CODE_OBJECTIVE:
+        raise CodeBenefitExperimentError("Code objective leaks or drifts from the neutral contract")
     return FixedCodeWorkloadV1(
         workload_id=_text(value.get("workload_id"), "workload_id", 160),
         module_name=module,
-        objective=_text(value.get("objective"), "objective", 2_000),
+        objective=objective,
         baseline_evidence=_text(
             value.get("baseline_evidence"), "baseline_evidence", 2_000
         ),
@@ -889,6 +895,7 @@ __all__ = [
     "CODE_HIDDEN_VERIFIER_PROFILE_DIGEST",
     "CODE_STATIC_VERIFIER_PROFILE_DIGEST",
     "FIXED_CODE_COHORT_SCHEMA",
+    "FIXED_CODE_OBJECTIVE",
     "CodeBenchmarkRuntimeRootsV1",
     "CodeBenefitExperimentError",
     "FixedCodeCohortV1",

@@ -379,3 +379,5 @@ Code 模型请求通过共享 attestation boundary 进入 canonical ModelAttempt
 production route catalog 还按 `code.benefit.execution.json` 注入冻结的 non-thinking generation profile。prompt identity、scene、generation、route timeout 与 request deadline 共同构成 Code execution profile digest；任一项变化都要求新 cohort 版本和新运行身份。
 
 进入 Git sandbox 前，语义 run identity 会导出一个固定长度 filesystem digest。bare repo 与 detached worktree 只使用该短组件；ledger 仍保存完整 workload/run/receipt 绑定，从而同时满足 Windows 路径边界和可追踪性。
+
+两臂共享的 objective 不包含目标语义；差异只在 `PlanningSearch selected evidence`。隐藏 cases 位于模型数据流之外，因此 baseline 若通过只能来自其自身生成能力，而不能来自题名泄漏；v2 的泄漏收据被排除，v3 才重新进入收益测量。

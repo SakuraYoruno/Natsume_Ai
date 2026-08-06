@@ -422,3 +422,5 @@ production route catalog 必须为 `code.benefit.execution.json` 返回 temperat
 Code 的 durable workload ID 必须绑定 cohort version；同一固定题号升级 cohort 后应产生新 registration，不得触发旧 identity 的 evidence drift，也不得覆盖旧行。测试必须断言 20 个 prepared workload 均使用 `<题号>@<cohort_version>`，而模型 prompt 仍只接收任务内容、不接收 ledger 历史。
 
 Code filesystem-facing runtime/run component 必须为固定长度摘要，不得直接拼接最长 60 字符 namespace。测试需断言 20 个 run ID 唯一且不超过 40 字符；真实预检必须在深 acceptance 数据根下完成 bare clone、双 worktree、清理和 receipt，才算关闭 Windows 路径问题。
+
+固定 Code objective 必须严格等于中性合同，不能包含任一任务的正确操作名称。loader 对 descriptive objective fail-closed；测试断言 20 题 objective 完全一致。预检若 baseline 与 selected 同时通过，只能说明 cohort 无判别力，不能计作 PlanningSearch 收益，必须修订版本后完整重跑。
