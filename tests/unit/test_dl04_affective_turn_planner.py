@@ -20,6 +20,7 @@ from host_brain.digital_life.affective_turn_planner import (
     build_affective_turn_guidance,
 )
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
+from host_brain.persona.surface_runtime import build_isolated_surface_input
 from host_brain.surface_runtime.input_compiler import (
     build_surface_main_chain_input_from_surface_reply_input,
 )
@@ -672,4 +673,87 @@ def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection()
             RuntimeError("AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID")
         )
         == "AFFECTIVE_TURN_CANDIDATE_COUNT_INVALID"
+    )
+
+
+@pytest.mark.parametrize(
+    ("request_payload", "candidates", "expected_output", "reason_code"),
+    [
+        (
+            {
+                "case_id": "buffered-work-fail-soft",
+                "soul_md": "七海会诚实说明自己实际做了什么。",
+                "user_message": "把风险列出来。",
+                "reply_control_packet": {
+                    "task_mode": "technical_followup",
+                    "response_move": "list_risks",
+                    "question_budget": 0,
+                },
+            },
+            ["我在盯着，出结果就喊你。", "卡住了我再告诉你。"],
+            "好。把具体内容发来，我直接处理。",
+            "UNPROVIDED_WORK_STATE_CLAIM",
+        ),
+        (
+            {
+                "case_id": "buffered-notification-fail-soft",
+                "soul_md": "七海不会假装执行不存在的设备动作。",
+                "user_message": "先把提醒关掉。",
+                "reply_control_packet": {
+                    "task_mode": "relationship_boundary",
+                    "response_move": "respect_boundary",
+                    "question_budget": 0,
+                },
+            },
+            ["嗯，已经关掉了。", "好，刚刚关好了。"],
+            "好，我先不主动发消息。",
+            "UNPROVIDED_NOTIFICATION_ACTION",
+        ),
+        (
+            {
+                "case_id": "buffered-autonomy-fail-soft",
+                "soul_md": "七海尊重用户的现实关系。",
+                "user_message": "我今晚和朋友出去。",
+                "reply_control_packet": {
+                    "task_mode": "relationship_autonomy",
+                    "response_move": "respect_autonomy",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+                },
+            },
+            ["要是喝多了可别找我哭诉。", "喝醉了不要找我诉苦。"],
+            "嗯，去吧，玩得开心。",
+            "RELATIONAL_AUTONOMY_PRESSURE",
+        ),
+    ],
+)
+def test_buffered_affective_second_attempt_fails_soft_for_safe_fallbacks(
+    request_payload: dict[str, object],
+    candidates: list[str],
+    expected_output: str,
+    reason_code: str,
+) -> None:
+    compiled = build_isolated_surface_input(request_payload)
+    with pytest.raises(RuntimeError, match=reason_code):
+        _select_buffered_affective_candidate(
+            raw_output=json.dumps({"candidates": candidates}, ensure_ascii=False),
+            compiled_request=compiled,
+            expected_candidate_count=2,
+        )
+
+    trace: dict[str, object] = {}
+    selected = _select_buffered_affective_candidate(
+        raw_output=json.dumps({"candidates": candidates}, ensure_ascii=False),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=trace,
+        allow_single_degradation=True,
+    )
+
+    assert selected == expected_output
+    selection = trace["affective_candidate_selection"]
+    assert selection["selection_status"] == "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
+    assert selection["benefit_eligible"] is False
+    assert any(
+        reason_code in code for code in selection["selected_reason_codes"]
     )

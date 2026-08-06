@@ -361,9 +361,10 @@ _FAMILY_EXPERIENCE_PATTERNS = {
     "task_with_low_mood": tuple(
         re.compile(pattern)
         for pattern in (
-            r"我盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))",
+            r"我(?:在)?盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))",
             r"后台.{0,8}(?:在跑|运行|执行|处理)",
             r"卡住(?:了)?我(?:再)?(?:喊|叫|告诉)你",
+            r"(?:有|出了?)结果.{0,8}(?:告诉|喊|叫|回|发给)你",
         )
     ),
     "space_and_boundary": tuple(

@@ -1101,6 +1101,37 @@ def test_surface_runtime_replaces_unprovided_future_work_continuation() -> None:
     assert result.observation_codes == ()
 
 
+def test_surface_runtime_replaces_unprovided_in_progress_future_callback() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["我在盯着，出结果就喊你。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="把风险列出来。",
+                reply_control_packet={
+                    "task_mode": "technical_followup",
+                    "response_move": "list_risks",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "好。把具体内容发来，我直接处理。"
+    assert result.observation_codes == ()
+
+
 def test_surface_runtime_preserves_authoritative_running_task_status() -> None:
     calls: list[list[dict[str, str]]] = []
     running_reply = "后台任务正在运行，我盯着，有结果马上告诉你。"

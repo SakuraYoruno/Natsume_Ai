@@ -572,3 +572,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `0d2dc6f3b` 加载后的 8 条第二次定向复验报告 SHA-256 为 `88f44b41ea73dca12c49a9f1a9e52afde16746980562495edd8c691249ec4a08`，结果为 7 条自动待人工、1 条失败；24 个 accepted Gateway turn 继续保持旧 writer 零增量和 canonical projection 前进。上一轮的直接修复索取、喜忧并存、称呼防御与关系暂停均已在真实正文中关闭，但人工检查仍发现三项漏网：`已经关掉了` 的多字后缀绕过通知 effect 规则，`卡住了我喊你` 暗示并不存在的持续执行，以及 `喝多了可别找我哭诉` 用惩罚性条件回应现实社交。
 
 第三轮修复仅扩展现有三个正则边界和独立 runner 体验断言；没有新表、同步 journal、额外模型调用或普通对话重审计。Surface、runner、DL-04 与主链相邻非安全测试合计 401 passed。三条真实新 SHA 复测、完整 48 条和三人盲评前继续保持失败／待验证；Pentest、渗透与网络安全仍为 `NOT_RUN_USER_SKIPPED`。
+
+`513f0757e` 加载后的三条根因复测报告 SHA-256 为 `a015e25305a700aa7664dcba1793beb0ef2288f9d08ebce7c3c5109f96f20cf1`，自动结果为 2 条待人工、1 条失败；8 个成功 accepted turn 的 writer probe 通过。现实自主回复已变为不索取回报的开放句；技术回复仍用“我在盯着／出结果就喊你”伪装持续执行。通知场景的两次模型候选则都被 `UNPROVIDED_NOTIFICATION_ACTION` 正确拒绝，但外层在第二次拒绝后返回 `MODEL_SEMANTIC_RETRY_EXHAUSTED`，导致 TaskGraph 失败，而没有使用已经存在的“我先不主动发消息”安全句。
+
+代码现把 `我在盯着` 与结果回喊纳入同一 Task authority 真实性边界，并仅将 `UNPROVIDED_NOTIFICATION_ACTION`、`UNPROVIDED_WORK_STATE_CLAIM`、`RELATIONAL_AUTONOMY_PRESSURE` 加入第二候选后的确定性本地 fail-soft 白名单；输出明确失去候选择优收益资格，不伪造 Voice，也不增加第三次模型调用。406 项非安全主链回归通过。真实复测、完整 48 条与三人盲评前状态不提升；Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。

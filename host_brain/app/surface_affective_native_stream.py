@@ -483,6 +483,9 @@ def _select_buffered_affective_candidate(
             "QUESTION_BUDGET_PROMPTING_USER",
             "MIXED_AFFECT_CONTINUITY_DROPPED",
             "MIXED_AFFECT_DISMISSAL",
+            "UNPROVIDED_NOTIFICATION_ACTION",
+            "UNPROVIDED_WORK_STATE_CLAIM",
+            "RELATIONAL_AUTONOMY_PRESSURE",
         }
         has_repair_trigger = bool(
             set(surface_violations).intersection(
@@ -491,6 +494,9 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
                     "MIXED_AFFECT_CONTINUITY_DROPPED",
                     "MIXED_AFFECT_DISMISSAL",
+                    "UNPROVIDED_NOTIFICATION_ACTION",
+                    "UNPROVIDED_WORK_STATE_CLAIM",
+                    "RELATIONAL_AUTONOMY_PRESSURE",
                 }
             )
         )
