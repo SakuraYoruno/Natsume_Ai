@@ -1106,7 +1106,7 @@ def test_surface_runtime_replaces_unprovided_in_progress_future_callback() -> No
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
-        return _candidate_payload(["我在盯着，出结果就喊你。"])
+        return _candidate_payload(["我在这盯着，出结果就喊你。"])
 
     result = asyncio.run(
         SurfaceRuntime(

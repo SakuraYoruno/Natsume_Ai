@@ -487,6 +487,26 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "没有真实 effect 回执" in give_space_quality_messages[-1]["content"]
     assert "不得声称已经关掉提醒／通知" in give_space_quality_messages[-1]["content"]
+    notification_retry_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="UNPROVIDED_NOTIFICATION_ACTION",
+    )
+    assert "没有真实提醒／通知 effect 回执" in notification_retry_messages[-1]["content"]
+    assert "只能确认七海接下来不会主动发消息" in notification_retry_messages[-1]["content"]
+    work_retry_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="UNPROVIDED_WORK_STATE_CLAIM",
+    )
+    assert "没有 server-authored Task 运行快照" in work_retry_messages[-1]["content"]
+    assert "不要声称七海正在处理、盯着后台" in work_retry_messages[-1]["content"]
+    autonomy_retry_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="RELATIONAL_AUTONOMY_PRESSURE",
+    )
+    assert "不要求早点回来、控制饮酒" in autonomy_retry_messages[-1]["content"]
 
     paired_by_reply = {
         "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",

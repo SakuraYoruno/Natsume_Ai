@@ -576,3 +576,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `513f0757e` 加载后的三条根因复测报告 SHA-256 为 `a015e25305a700aa7664dcba1793beb0ef2288f9d08ebce7c3c5109f96f20cf1`，自动结果为 2 条待人工、1 条失败；8 个成功 accepted turn 的 writer probe 通过。现实自主回复已变为不索取回报的开放句；技术回复仍用“我在盯着／出结果就喊你”伪装持续执行。通知场景的两次模型候选则都被 `UNPROVIDED_NOTIFICATION_ACTION` 正确拒绝，但外层在第二次拒绝后返回 `MODEL_SEMANTIC_RETRY_EXHAUSTED`，导致 TaskGraph 失败，而没有使用已经存在的“我先不主动发消息”安全句。
 
 代码现把 `我在盯着` 与结果回喊纳入同一 Task authority 真实性边界，并仅将 `UNPROVIDED_NOTIFICATION_ACTION`、`UNPROVIDED_WORK_STATE_CLAIM`、`RELATIONAL_AUTONOMY_PRESSURE` 加入第二候选后的确定性本地 fail-soft 白名单；输出明确失去候选择优收益资格，不伪造 Voice，也不增加第三次模型调用。406 项非安全主链回归通过。真实复测、完整 48 条与三人盲评前状态不提升；Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。
+
+`840f11223` 加载后的同三条复测报告 SHA-256 为 `dce907ce92088d50e8f31124ba6cf9fc1eb0a21f196a3e1c0ffa967ccc664d1c`，2 条自动待人工、1 条失败，9 个 accepted Gateway turn 的 writer probe 通过。通知场景不再导致 Graph 失败，确定性输出“好，我先不主动发消息”，但由于它是两次模型候选失败后的 local repair，仍被正确标记 `DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE`；这不能通过修改 runner 口径伪装成搜索收益。技术回复则生成“我在这盯着”，说明真实性规则仍缺一个自然方位词变体；现实自主回复“注意安全就好”经人工检查可接受。
+
+当前代码覆盖 `我在这／这里／这儿盯着`，并为现有唯一重试新增三类具体提示：无 effect 时只承诺不主动发消息；无 Task snapshot 时不声称处理、监看或未来回报；现实社交不限制时间、饮酒和回报。fail-soft 仍保留为安全底线，但完整质量验收要求重试本身产出合格候选。407 项非安全主链回归通过；真实新 SHA 复测前不提升状态。Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。

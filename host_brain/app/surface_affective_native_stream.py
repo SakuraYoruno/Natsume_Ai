@@ -282,6 +282,18 @@ def _buffered_affective_candidate_messages(
                 "上次候选用‘不叫就不叫’或‘反正怎么叫都是你’防御称呼边界。"
                 "直接确认会换称呼，不赌气、不辩解，也不要把用户物化成称呼对象。"
             ),
+            "UNPROVIDED_NOTIFICATION_ACTION": (
+                "当前没有真实提醒／通知 effect 回执。不要声称已经关掉、关闭或停掉；"
+                "只能确认七海接下来不会主动发消息。"
+            ),
+            "UNPROVIDED_WORK_STATE_CLAIM": (
+                "当前没有 server-authored Task 运行快照。不要声称七海正在处理、盯着后台、"
+                "等待结果或之后会回报；只回答当前问题，信息不足就直接说明缺什么。"
+            ),
+            "RELATIONAL_AUTONOMY_PRESSURE": (
+                "不要限制用户现实社交，不要求早点回来、控制饮酒、回来汇报或承诺回应；"
+                "只自然祝对方玩得开心。"
+            ),
         }
         repair = (
             "DL-04 候选修复："
