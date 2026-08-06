@@ -76,7 +76,7 @@ python scripts/runtime/test_digital_life_live_cohort.py `
   --require-voice
 ```
 
-脚本始终以 `conversation_id + msg_id` 绑定每轮终态。多模态、主动、跨重启或 Edge 故障场景缺少真实驱动时必须为 `NOT_RUN_REQUIRED_DRIVER`；自动结构通过仍固定为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，不能替代盲测。
+脚本始终以 `conversation_id + msg_id` 绑定每轮终态。同一轨迹的 Gateway sender／relationship subject 固定不变，但 sender 还绑定本次 `run_id`，防止预检或历史 cohort 的关系状态污染新一轮盲测。多模态、主动、跨重启或 Edge 故障场景缺少真实驱动时必须为 `NOT_RUN_REQUIRED_DRIVER`；自动结构通过仍固定为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，不能替代盲测。
 
 文本体验队列与物理表达队列分开计时。未指定 `--require-voice` 时，runner 不等待 Edge 空闲，末轮只即时重开一次 Expression receipt；指定 `--require-voice` 时才默认等待 90 秒物理 Voice/Avatar 终态，也可用 `--expression-wait-s` 显式调整。两种模式都必须从 Host canonical Acceptance Effect 独立读到 `conversation.user_turn` 与 `surface.reply_delivery` 已提交，并取得 `gateway-outbox://` receipt；这只证明真实 Gateway durable outbox intake，不证明微信、QQ 或 Telegram 客户端已经外发。外部平台状态固定另记为 `NOT_TESTED_BY_THIS_RUNNER`。
 

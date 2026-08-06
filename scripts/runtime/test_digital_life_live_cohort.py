@@ -970,10 +970,19 @@ def _select_cases(
     return tuple(unique.values())
 
 
-def _participant_case_id(case: ExecutableDialogueCase) -> str:
-    """Return one stable Gateway sender key for the whole trajectory."""
+def _participant_case_id(
+    case: ExecutableDialogueCase,
+    *,
+    run_scope: str | None = None,
+) -> str:
+    """Return a stable per-trajectory sender without cross-run contamination."""
 
-    return f"dl_{case.family_id}_{case.variant_index}"
+    base = f"dl_{case.family_id}_{case.variant_index}"
+    normalized_scope = str(run_scope or "").strip()
+    if not normalized_scope:
+        return base
+    scope_digest = hashlib.sha256(normalized_scope.encode("utf-8")).hexdigest()[:10]
+    return f"dl_{scope_digest}_{case.family_id}_{case.variant_index}"
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -1052,7 +1061,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Gateway derives relationship_subject_id from the sender identity.
         # Keep it stable across the entire trajectory; msg_id already carries
         # a fresh timestamp and remains the per-turn transport identity.
-        participant_case_id = _participant_case_id(case)
+        participant_case_id = _participant_case_id(case, run_scope=run_id)
         prompts = [*case.setup_turns, case.probe_turn]
         turns: list[dict[str, Any]] = []
         for index, prompt in enumerate(prompts, start=1):
@@ -1082,6 +1091,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "case": case.__dict__,
                 "conversation_id": conversation_id,
+                "participant_case_id": participant_case_id,
                 "turns": turns,
                 "verdict": automated_case_verdict(
                     case,
@@ -1115,6 +1125,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "expression_wait_s": expression_wait_s,
         "delivery_evidence_scope": "GATEWAY_DURABLE_OUTBOX_INTAKE",
         "external_platform_delivery_status": "NOT_TESTED_BY_THIS_RUNNER",
+        "relationship_subject_isolation": "FRESH_PER_RUN_CASE_TRAJECTORY",
         "human_review_status": "PENDING",
         "affect_writer_probe": affect_writer_probe,
         "outcomes": outcomes,

@@ -159,6 +159,13 @@ def test_live_execution_manifest_expands_to_72_without_sending_scenario_notes() 
     )
     sample = next(case for case in cases if case.case_id == "implicit_low_mood:1")
     assert _participant_case_id(sample) == "dl_implicit_low_mood_1"
+    assert _participant_case_id(
+        sample,
+        run_scope="dl-live-1",
+    ) == _participant_case_id(sample, run_scope="dl-live-1")
+    assert _participant_case_id(sample, run_scope="dl-live-1") != (
+        _participant_case_id(sample, run_scope="dl-live-2")
+    )
 
 
 def test_automated_verdict_keeps_naturalness_human_review_pending() -> None:

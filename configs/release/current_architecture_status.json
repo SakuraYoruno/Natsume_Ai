@@ -533,6 +533,7 @@
     "digital_life_text_cohort_edge_precondition": "NOT_REQUIRED_UNLESS_REQUIRE_VOICE",
     "digital_life_text_cohort_expression_wait_s": 0,
     "digital_life_voice_cohort_default_expression_wait_s": 90,
+    "digital_life_text_cohort_relationship_subject_isolation": "FRESH_PER_RUN_CASE_TRAJECTORY",
     "digital_life_text_delivery_evidence": "CANONICAL_USER_TURN_AND_SURFACE_COMMIT_WITH_GATEWAY_OUTBOX_RECEIPT_REQUIRED",
     "digital_life_external_platform_delivery_in_text_cohort": "NOT_TESTED_BY_THIS_RUNNER",
     "digital_life_text_cohort_runner_regression": "PASS_23",

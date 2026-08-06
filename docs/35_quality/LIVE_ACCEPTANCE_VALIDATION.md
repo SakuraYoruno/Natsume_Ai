@@ -473,6 +473,6 @@ SQLite reopen 得到 20 workload registration、21 run spec、42 arm execution�
 
 在 48 条文本体验队列前的三轮真实预检中，Gateway→Host→DeepSeek→TaskGraph 均完成，且 canonical affect writer 前进、legacy writer 增量为 0；但脚本总耗时 176.3 秒。其中末轮在未要求 Voice 的情况下仍轮询 physical Expression receipt 90 秒，并且每轮都会要求远端 Edge 处于 Voice idle。这个时间不属于文本响应，也会让一条纯文本体验用例因远端设备繁忙误判失败。
 
-runner 现将三个边界显式分离：文本模式不等待 Edge，只对 Expression storage 做一次即时快照；`--require-voice` 模式才等待物理 Voice/Avatar；外部微信客户端投递不由该 runner 推断。与此同时，自动通过条件被收紧为必须从 canonical Acceptance Effect 读到 user turn 和 `surface.reply_delivery` 均为 `COMMITTED`，并取得真实 `gateway-outbox://` receipt。报告新增 Gateway HTTP、Host terminal、TaskGraph、模型调用和最小 Acceptance prefix 的逐段耗时，因此 TaskGraph 完成不能再冒充消息已进入 Gateway durable outbox。
+runner 现将三个边界显式分离：文本模式不等待 Edge，只对 Expression storage 做一次即时快照；`--require-voice` 模式才等待物理 Voice/Avatar；外部微信客户端投递不由该 runner 推断。与此同时，自动通过条件被收紧为必须从 canonical Acceptance Effect 读到 user turn 和 `surface.reply_delivery` 均为 `COMMITTED`，并取得真实 `gateway-outbox://` receipt。报告新增 Gateway HTTP、Host terminal、TaskGraph、模型调用和最小 Acceptance prefix 的逐段耗时，因此 TaskGraph 完成不能再冒充消息已进入 Gateway durable outbox。每次 run 还为各轨迹生成新的 sender/relationship subject，轨迹内保持稳定，预检和旧 cohort 不再把历史关系状态带入新盲测。
 
 23 项 runner 定向单测已通过。该切片仅为 `CODE_REMEDIATED_REAL_RETEST_PENDING`；修正后的真实预检、48 条文本队列及三人盲评尚未完成。Pentest、渗透和网络安全专项按用户范围明确记为 `NOT_RUN_USER_SKIPPED`，不得写成 PASS，也不阻断其余非安全验收继续执行。
