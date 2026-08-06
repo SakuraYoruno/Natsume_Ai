@@ -386,3 +386,11 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 末轮正文分别为“那就不说那些了，我在这儿陪着你就好”、“你安静的时候，我不打扰你”和“开心归开心，那点不踏实我也记得”。三者都在首次真实 DeepSeek attempt 成功，没有依赖 semantic repair 才过线；窄范围单人复核为 3/3。自动结果为 2/3，混合场景仅因三轮 `EDGE_NOT_IDLE` 失败。测试结束后的远端 health 显示 TTS persistent worker `ERROR`（ready／synth_result timeout），VTS 仍等待认证；因此本证据只把 canonical 轮序、typed continuity 和文本输出提升为 scope-bound PASS，Voice/Avatar、48 条三人盲测和整体 A15 仍未通过。
 
 远端资源快照进一步定位到十多个 `GPT-SoVITS...runtime\python.exe` 子进程：单进程 Working Set 约 1.2～2.2GB，目标机只剩约 2.5GB 可用内存，RTX 3070 Ti 8GB 显存已使用约 7.9GB。代码审查确认 synthesis timeout 会关闭 worker，但初始 `ready` timeout 发生在 adapter 交给 `SoVITSModelManager` 之前，异常路径只丢弃局部变量而未调用 `close()`；每次重试因此留下一个模型进程。修复后 `_PersistentProcessSoVITSAdapter.start()` 对启动、READY 消息和失败响应使用同一所有权边界，任一异常都同步关闭子进程和 stderr handle；120 项 TTS、播放队列、Voice pipeline 与启动脚本回归通过。尚未部署远端和执行物理播放，状态只能是 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+## 2026-08-06 A15 远端 TTS worker 生命周期与物理播放复验
+
+远端精确清点为 17 个 GPT-SoVITS runtime；只终止该可执行路径后，worker 归零，系统可用内存约从 2.5GB 恢复到 24.7GB，显存占用约从 7.9GB 降到 675MB。修复后的 `tts_engine.py` 同步到实际运行副本 `D:\Natsume_Ai_acceptance_d7e0cfba8`，Edge PID 30196 启动约 18.6 秒后 TTS 进入 `READY`，只创建一个模型 worker PID 34580。第一次重启后 Voice 请求在 Host→Edge session 轮换期间以 `EMBODIMENT_COMMAND_EXPIRED` 安全拒绝；它没有进入合成，不能记作 TTS 失败或成功。Host 持久 lease 随后显示 Edge session fencing token 2、runtime fencing token 14，且持续续期。
+
+在新 session 上使用全新 effect 重跑 `implicit_low_mood:1` 三轮真实 Gateway→Host→DeepSeek→TaskGraph→Edge 链路，三轮 webhook、TaskGraph、Acceptance 均完成，legacy affect writer 增量为 0；最终 `voice.speak` 为 `APPLIED`，terminal receipt 为 `TTS_PLAYBACK_FINISHED`，`voice.release` 也为 `APPLIED`。Avatar transition 仍按真实外部状态以 `VTS_CONNECTION_FAILED` 拒绝，没有被 Voice 成功覆盖。报告 SHA-256 为 `3fbd674e9f828a67f434f2cfef5acb950dbf53643be03c0a86fcd35f206f5f3a`，自动状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，末句“嗯，那就先这样待着吧。”仍保留人工评审。
+
+随后在不停止主 Edge 的独立真实进程探针中将 READY timeout 强制为 5 秒。探针于 8.234 秒返回预期 `TimeoutError`，adapter 持有的子进程已释放；再次清点仍只有原 worker PID 34580，可用内存约 23.6GB，显存 2861/8192MB。脱敏生命周期收据 SHA-256 为 `3e8024afd135f69d6e6dac693e71539100481c9b584b040d9f59a2b37ce3f607`。本项由 `CODE_REMEDIATED_REAL_RETEST_PENDING` 提升为 `PASS_REAL_REMOTE_SINGLE_WORKER_PHYSICAL_PLAYBACK_AND_TIMEOUT_RECLAIM`；VTS、声学 barge-in、48 条三人盲测和整体 A15 继续为未完成。

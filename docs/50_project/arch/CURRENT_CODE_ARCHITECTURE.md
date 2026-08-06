@@ -79,6 +79,8 @@ Surface packet 继续保持最多 8 条事实，但不再机械保留前 8 条�
 
 Edge 的 persistent TTS adapter 在子进程发出 `ready` 前拥有该进程的唯一生命周期责任。启动、模型加载、READY 等待或 READY 拒绝任一步失败，都必须在返回 Manager 之前同步 `close()`；不能把超时 worker 留给 GC，也不能让下一次合成在旧 worker 仍占 RAM／VRAM 时继续创建新进程。合成阶段的超时沿用同一 fail-closed 回收规则，下一次请求才允许启动一个干净 worker。
 
+远端 A15 已验证该边界：清理 17 个历史残留后，干净启动、真实物理播放和受控 5 秒 READY timeout 全部结束于单一常驻 worker；Voice terminal receipt 为 `TTS_PLAYBACK_FINISHED/APPLIED`，超时探针返回后没有新增 PID、RAM 或 VRAM 常驻。Avatar 仍因 VTS 未连接独立拒绝，不能由 Voice PASS 推高。
+
 ## 5. Governed Task Runtime
 
 `host_brain/task_runtime/` 仍负责所有有副作用路线：

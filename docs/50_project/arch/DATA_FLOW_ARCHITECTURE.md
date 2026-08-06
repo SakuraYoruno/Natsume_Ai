@@ -202,6 +202,8 @@ flowchart LR
 
 GPT-SoVITS persistent worker 的所有权从 `Popen` 成功开始，到 Manager 接收 READY 后才转为长期驻留。READY 超时、加载拒绝或进程异常必须先终止并等待子进程退出，再返回 TTS 失败；不得让后续请求并行堆叠新的模型 runtime。合成超时同样先释放当前 worker，下一请求才重建。该生命周期不增加 Host 对话审计，也不改变同一 expression intent／receipt identity。
 
+真实远端复验中，Edge 重启后的旧 session 命令先以 `EMBODIMENT_COMMAND_EXPIRED` fail-closed；新 fencing session 上的全新 effect 才进入 TTS，并以 `TTS_PLAYBACK_FINISHED/APPLIED` 结算。随后强制 READY timeout 的独立 worker 被同步回收，主 Edge 始终只保留一个常驻模型进程。这证明 session 恢复、TTS 生命周期和物理播放是三条分别判定的边界。
+
 ## 5. 主动陪伴
 
 ```text
