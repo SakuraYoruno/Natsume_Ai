@@ -137,6 +137,8 @@ Gateway 入站聊天属于“实时生成 + 有副作用交付”的交界：消
 
 召回后的领域增强同样先做廉价必要条件。普通情绪陪伴直接跳过轻小说最近推荐上下文；“刚才第二本的详情”等可能指代推荐的消息才读取 durable preference pack，补齐 recommendation packet 后执行完整 light-novel predicate。深读与 evidence 回写复用同一 packet，避免一轮内重复读取。
 
+`MAY_RECALL／MUST_RECALL` 进入真正检索时，从 Agent Runtime app-local scope 取得同一个 RecallFusionService；该服务使用 canonical EpisodicStore 已持有的 Chroma client。请求只创建本轮 query embedding 与局部候选，不再创建第二个 HTTP client 或第二份服务 owner。
+
 OBS 的 Task 读模型不在交互事务中同步构造。Sidecar 每 15 秒读取 canonical Task 索引，优先补齐新图，再按最旧 freshness 每波刷新最多 16 个详情；每次派生写提交后让出 5 ms canonical writer window。这样 Monitor 最终一致地看到 TaskGraph／Budget／Verification／Acceptance，同时等待写入 worker projection 的 Host 不会被一整波派生事务连续饿死。worker projection 本身在线程持久化，但 Task Runtime 必须等待其完成，不能把未落库 COMMIT 交给 Verification。
 
 实际全栈复验观察到详情批次上限为 16、index 加详情上限为 17；三轮 worker projection 到后预算落库为 187／94／49 ms，而旧路径峰值为 2,880 ms。该证据关闭了 OBS 连续抢写这一段阻塞，后续仍需分别处理模型语义修复和 artifact 冷态尾部。

@@ -204,9 +204,12 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
 ) -> None:
     ledger = object()
     life_memory_store = object()
+    chroma_client = object()
+    episodic_store = type("EpisodicStore", (), {"chroma": chroma_client})()
     conversation_history = object()
     recall_service = object()
     captured: dict[str, object] = {}
+    recall_service_builds: list[dict[str, object]] = []
     legacy_bond_client_calls: list[str] = []
 
     async def fake_run_retrieval(**kwargs):  # noqa: ANN003, ANN202
@@ -215,6 +218,7 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
 
     def fake_build_recall_service(**kwargs):  # noqa: ANN003, ANN202
         captured["recall_service"] = kwargs
+        recall_service_builds.append(dict(kwargs))
         return recall_service
 
     def fake_build_user_preference_pack(**kwargs):  # noqa: ANN003, ANN202
@@ -236,6 +240,7 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
         host_services=_host_services(
             ledger=lambda: ledger,
             life_memory_store=lambda: life_memory_store,
+            episodic_store=lambda: episodic_store,
             conversation_history=lambda: conversation_history,
             bond_neo4j_client=lambda: legacy_bond_client_calls.append("resolved"),
         ),
@@ -265,10 +270,13 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
     ) == {"status": "OK"}
     assert dict(captured["preference_pack"])["ledger"] is ledger
     assert retrieval_kwargs["recall_service_factory"]() is recall_service
+    assert retrieval_kwargs["recall_service_factory"]() is recall_service
     assert dict(captured["recall_service"]) == {
         "ledger": ledger,
         "life_memory_store": life_memory_store,
+        "chroma_client": chroma_client,
     }
+    assert len(recall_service_builds) == 1
     assert legacy_bond_client_calls == []
 
 

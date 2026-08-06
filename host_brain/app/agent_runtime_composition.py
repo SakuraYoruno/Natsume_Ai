@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
+from threading import RLock
 from typing import Any
 
 from host_brain.agent_runtime.application_ports import AgentRuntimeApplicationPorts
@@ -90,6 +91,7 @@ def build_agent_runtime_application_ports(
 
     ledger = host_services.require_provider("ledger")
     life_memory_store = host_services.require_provider("life_memory_store")
+    episodic_store = host_services.require_provider("episodic_store")
     life_memory_service = host_services.require_provider("life_memory_service")
     conversation_history = host_services.require_provider("conversation_history")
     conversation_turn_store = host_services.require_provider(
@@ -105,6 +107,8 @@ def build_agent_runtime_application_ports(
         "session_tactic_ledger_store"
     )
     realtime_companion_ports: RealtimeCompanionExecutionPorts | None = None
+    surface_memory_recall_service: Any | None = None
+    surface_memory_recall_service_lock = RLock()
 
     def resolve_life_authority() -> tuple[Any, Any]:
         try:
@@ -123,10 +127,16 @@ def build_agent_runtime_application_ports(
         _, reader = resolve_life_authority()
 
         def build_surface_memory_recall_service() -> Any:
-            return _build_surface_memory_recall_service(
-                ledger=ledger(),
-                life_memory_store=life_memory_store(),
-            )
+            nonlocal surface_memory_recall_service
+            with surface_memory_recall_service_lock:
+                if surface_memory_recall_service is None:
+                    owned_episodic_store = episodic_store()
+                    surface_memory_recall_service = _build_surface_memory_recall_service(
+                        ledger=ledger(),
+                        life_memory_store=life_memory_store(),
+                        chroma_client=getattr(owned_episodic_store, "chroma", None),
+                    )
+                return surface_memory_recall_service
 
         return await _run_retrieval(
             life_snapshot_reader=reader,

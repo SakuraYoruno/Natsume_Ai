@@ -203,6 +203,7 @@ def _build_surface_memory_recall_service(
     ledger: Any | None = None,
     life_memory_store: Any | None = None,
     bond_neo4j_client: Any | None = None,
+    chroma_client: Any | None = None,
 ) -> Any:
     from host_brain.retrieval.recall_fusion import RecallFusionServiceContract  # noqa: PLC0415
     from host_brain.retrieval.recall_schemas import RecallRouteConfig, RecallRuntimeConfig  # noqa: PLC0415
@@ -269,6 +270,7 @@ def _build_surface_memory_recall_service(
     return RecallFusionServiceContract(
         ledger=ledger,
         life_memory_store=life_memory_store,
+        chroma_client=chroma_client,
         neo4j_client=bond_neo4j_client,
         runtime_config=RecallRuntimeConfig(
             enabled=True,

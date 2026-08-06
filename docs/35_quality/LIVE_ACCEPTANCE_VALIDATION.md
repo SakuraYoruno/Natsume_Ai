@@ -352,3 +352,7 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 新提交加载到原 A15 隔离根后，Host PID 4132、OBS PID 62536、Nginx Monitor PID 60772 与 Neo4j／Chroma／Redis 同时在线。三条相同 `NO_RECALL` 文本的 `retrieval_wait_ms` 为 124／100／104，首个 `RENDER` 为 3,046／2,612／3,147 ms；Surface 为 1,361／1,741／2,047 ms，真实 `deepseek-v4-flash` 首 token 为 1,185／1,569／1,775 ms。无关领域钩子子项因此提升为 `PASS_REAL_UNRELATED_DOMAIN_HOOK_SKIPPED`，脱敏收据 SHA-256 为 `25f23ac04b9a117a8ceb63b3bb19499dcea67420259f87f052f873be1cba5aff`。该范围 PASS 不把首句差值全部归因于本切片，也不代表整体实时通过。
 
 当前拆分还显示两类独立尾部：同轮两条情绪 `MAY_RECALL` 的本地 embedding 与多路召回为 514／568 ms，首句为 3,269／2,768 ms；DeepSeek 首 token 在本轮五条样本间为 1,185～1,775 ms，历史样本可到约 2.2 秒。二者均未关闭，首句实时 Gate 和人工人感继续为 `INCOMPLETE`。
+
+对两个 `MAY_RECALL` request 的 canonical `retrieval_event_log` 继续拆分，真实 route ledger 分别只记录 125／63 ms；同环境独立暖态基准中，Qwen3-Embedding-0.6B 的第二、三次单句编码为 91.1／91.7 ms。审查 composition 后确认每次 `_run_retrieval()` 都调用新 factory，`RecallFusionServiceContract` 又会新建 `PersistentChromaClient`；对同一 Docker Chroma 的暖态 client 构造五次为 63.9～73.5 ms，首个进程冷构造为 1,161 ms。Host 已拥有 canonical `EpisodicStore.chroma`，这次重复 ownership 没有语义价值。
+
+新切片在 `AgentRuntimeApplicationScope` 内以锁保护一个 lifespan-bound RecallFusionService，并注入现有 EpisodicStore Chroma client；并发请求共享无状态服务，而连接仍由 Host authority owner 统一关闭。定向测试重复调用 factory 两次，断言 builder 只执行一次且拿到同一 client；与召回回归合计 28 项通过。真实进程尚未加载，所以本项保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
