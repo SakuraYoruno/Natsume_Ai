@@ -366,6 +366,7 @@ def test_original_quote_query_follows_turn_contract_scene() -> None:
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
 
     assert query.style_moves == ("quick_reaction",)
+    assert query.question_budget == 1
     assert "celebrate_user" in rendered
     assert "保留用户刚说的进展词" in rendered
 

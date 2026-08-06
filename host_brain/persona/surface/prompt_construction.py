@@ -383,6 +383,7 @@ def build_surface_original_quote_query(request: IsolatedSurfaceInput, *, limit: 
         scene_id=scene,
         user_message=quote_user_message,
         limit=max(1, min(int(limit or 16), 24)),
+        question_budget=max(0, int(request.control.question_budget or 0)),
     )
 
 
