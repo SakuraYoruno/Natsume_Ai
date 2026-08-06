@@ -81,7 +81,7 @@
 
 ## P1：情感生命清零项
 
-- [ ] 在真实运行中观察兼容情感 writer 使用量，确认旧 writer 为 0。runner v2 已在每个 cohort 前后冻结八张旧表、旧 emotion JSON 的脱敏 size／mtime／SHA-256 和五张 canonical 表；21 项 runner 回归通过。必须在代码提交后用完整成功 cohort 得到旧表／旧文件全零增量且 `affective_life_event_v1`、`relationship_life_event_v1` 正向推进的正式 receipt，当前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+- [x] 在真实运行中观察兼容情感 writer 使用量，确认旧 writer 为 0。`4f4008060` 的 v2 收据包含 3 个 accepted Gateway turn；八张旧表前后均为 0，4 个旧 JSON 没有新增、删除或指纹变化；canonical Affect／Relationship／Life／Turn Delivery／Expression 分别 +8／+6／+22／+3／+12。报告 SHA-256 为 `b511144d4fad3a9574e703cd4e33a658d86a7bd4ec0b89dc0acb5daba4b36450`。
 - [ ] 验证 profile apply → canary → rollback 会改变并恢复下一轮文本、TTS 和 Avatar。绑定 `e50841192` 的生产 Relationship/Profile/Fusion/Planner/Expression Delivery canary 已证明候选把文本 style policy、Voice rate `1.0 → 1.15`、Avatar motion `0.5 → 0.8` 写入下一轮 Host 协议，五次 canary 后保持并自动激活，rollback 恢复精确 baseline；收据 SHA-256 为 `acdf52ff5cfd6c6e53ff71f268273e2dcbaeb59bd906a1c614afdc5d572f3bde`。真实模型措辞和远端物理效果尚未执行，所以本项暂不勾选。
 - [x] 验证长期运行状态有界，原始音视频和用户正文不会进入 affect journal。绑定 `0195d1968` 的隔离真实 SQLite／生产 AffectFusion 收据完成 1001 次时间推进、1026 条 affective event 和 Repository 重启重放；快照由 13,370 bytes 衰减至 9,281 bytes，raw sentinel 与禁止字段命中均为 0，SHA-256 为 `ddc09b5bce7a6974a58205634b0c7518d25e6cc113d7ebd7d53e06283f3ca584`。
 - [x] 验证跨用户、workspace、session 泄漏为 0。同一收据使用四组交叉 scope，得到四个不同 aggregate；主 scope 的 1001 次推进没有改变其余三个 digest，scope violation 为 0。

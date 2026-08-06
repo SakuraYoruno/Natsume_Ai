@@ -80,6 +80,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 报告 schema v2 还必须在 cohort 前后读取八张退役 affect writer 表、`~/.natsume/emotion/*.json` 的脱敏指纹，以及 `affective_life_event_v1`、`relationship_life_event_v1` 等五张 canonical 表。存在 accepted Gateway turn 时，任何旧表增量、旧文件新增／删除／变更、缺失 inventory 或 canonical Affective／Relationship 不前进都令 probe `FAIL`；没有 accepted turn 只能是 `NOT_ELIGIBLE`，不能用失败请求证明 writer 清零。
 
+当前正式样本绑定 `4f4008060`：3 个 accepted turn，八张退役表全为 `0→0`，4 个旧文件零变化；五张 canonical 表分别 +8／+6／+22／+3／+12。该收据关闭旧 writer 运行使用量，不替代 48 条盲测、profile 物理行为或长期 soak。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

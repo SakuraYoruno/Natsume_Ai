@@ -469,6 +469,8 @@ ingress/request
 
 每次真实文本 cohort 同时生成 writer cutover 收据：前后各读取八张退役表、旧 emotion JSON 脱敏指纹和五张 canonical journal。只有请求实际被 Gateway／TaskGraph／Acceptance 接受，Affective 与 Relationship journal 均前进，且所有旧表和旧文件零增量，才关闭旧 writer Gate；测试失败或没有 accepted turn 都不具备证明资格。
 
+`4f4008060` 的首份合格收据已满足该条件：三轮全部 accepted，八张旧表 `0→0`、4 个旧文件无变化，五张 canonical 表均正向推进。该项在本轮计划中关闭；后续当前 SHA 全量复验仍须保留同一 probe。
+
 ### 12.1 必测场景
 
 | ID | 场景 | 期望体验 | 禁止表现 |

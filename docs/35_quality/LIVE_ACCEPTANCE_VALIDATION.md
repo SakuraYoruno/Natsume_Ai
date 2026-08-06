@@ -286,3 +286,7 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_VOICE`，但实时体验仍未达标：Host 整轮 latency 为 11,145／12,715／7,739 ms，远高于普通文本首可见 token 的目标，且三轮没有独立首 token 时间戳。下一步应拆分 3～4 秒确定性／轮询开销和语义修复比例，而不是重新打开隐藏思考或继续扩大 Token cap。A15 总体继续为 `INCOMPLETE`。
 
 为把旧情感 writer 清零从人工观察变成正式收据，cohort report 升级为 v2：运行前后读取八张退役表的存在性与行数、扫描旧 emotion JSON 的脱敏 size／mtime／SHA-256，并记录五张 canonical journal 的行数变化。只有至少一个 Gateway turn 完整经过 TaskGraph／Acceptance、Affective 与 Relationship journal 都正向推进、旧表和旧文件全零增量时才可通过；缺表、旧文件变化、旧表增量或只有失败请求均不能通过。runner 与相邻 writer cutover 回归 41 项通过，真实新 SHA cohort 尚未运行，故状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+绑定 `4f4008060` 的真实 v2 报告为 `dl-live-1785981812481.json`，SHA-256 `b511144d4fad3a9574e703cd4e33a658d86a7bd4ec0b89dc0acb5daba4b36450`。三轮均为 `INPUT_COMPLETED/OK`、TaskGraph `COMPLETED` 和 Acceptance `APPROVE`；最后一轮远端 Voice 再次得到 `APPLIED`。八张退役表的 before／after 均为 0，四个旧 emotion JSON 的脱敏文件集合与 size／mtime／SHA-256 全部相同。与此同时，`affective_life_event_v1 +8`、`relationship_life_event_v1 +6`、`life_event_journal +22`、`affective_turn_delivery_event_v1 +3`、`affective_expression_delivery_event_v1 +12`。该项提升为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`。
+
+本收据只关闭该 acceptance 数据根、当前运行窗口中的旧 writer 使用量；它不证明语言已经自然，也不证明远端 VTS。当前三轮 Host latency 仍为 13,112／8,655／8,795 ms，第一轮发生一次语义修复；A15 总体保持 `INCOMPLETE`。

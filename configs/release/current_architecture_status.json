@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_LEGACY_AFFECT_WRITER_FORMAL_PROBE_CODE_REMEDIATED_RETEST_PENDING",
+  "commit_scope": "A15_LEGACY_AFFECT_WRITER_FORMAL_PROBE_PASS_OTHER_GATES_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -381,8 +381,13 @@
     "digital_life_gateway_companion_realtime_third_retest_report_sha256": "45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0",
     "digital_life_gateway_companion_realtime_provider_latency_ms": "1407_TO_2467",
     "digital_life_gateway_companion_realtime_host_latency_ms": "7739_TO_12715_ABOVE_GATE",
-    "legacy_affect_writer_live_probe": "CODE_REMEDIATED_V2_FORMAL_PROBE_REAL_SUCCESS_COHORT_RETEST_PENDING",
+    "legacy_affect_writer_live_probe": "PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS",
     "legacy_affect_writer_live_probe_regression": "PASS_41_RUNNER_AND_WRITER_CUTOVER_UNIT",
+    "legacy_affect_writer_live_probe_report_sha256": "b511144d4fad3a9574e703cd4e33a658d86a7bd4ec0b89dc0acb5daba4b36450",
+    "legacy_affect_writer_live_probe_accepted_turns": 3,
+    "legacy_affect_writer_live_probe_legacy_table_delta": 0,
+    "legacy_affect_writer_live_probe_legacy_file_changes": 0,
+    "legacy_affect_writer_live_probe_canonical_deltas": "AFFECT_8_RELATIONSHIP_6_LIFE_22_TURN_DELIVERY_3_EXPRESSION_12",
     "digital_life_real_multiturn_smoke": "REAL_STABLE_SUBJECT_SELECTIVE_3_CASE_2_AUTOMATED_PASS_1_FAIL_ALL_HUMAN_REVIEW_PENDING_LANGUAGE_QUALITY_UNPROVEN",
     "digital_life_real_multiturn_report_sha256": "e004cb49ef1e4d90028f49d8ca87c790e530a7b60200924b93fdd7e34c9b9f5f",
     "digital_life_real_multiturn_previous_full_report_sha256": "6c5c12f21e39f956af39d3466d5805a871a978864a25aa9864620653844b3871",
@@ -451,7 +456,6 @@
     "MULTI_TURN_HUMAN_BLIND_TEST_NOT_RUN",
     "FULL_DIGITAL_LIFE_FAILURE_MATRIX_PENDING",
     "DIGITAL_LIFE_LIVE_COHORT_LATEST_SELECTIVE_RESULT_2_OF_3_AUTOMATED_PASS_1_FAIL_ALL_HUMAN_REVIEW_PENDING",
-    "LEGACY_AFFECT_WRITER_SUCCESSFUL_COHORT_FORMAL_RECEIPT_PENDING",
     "DIGITAL_LIFE_LANGUAGE_QUALITY_REQUIRES_BROADER_COHORT_AND_HUMAN_BLIND_REVIEW"
   ]
 }
