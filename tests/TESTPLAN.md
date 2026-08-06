@@ -361,6 +361,6 @@ python -m pytest -q `
   tests/unit/test_ne01_acceptance_effect_runtime.py
 ```
 
-合同必须证明：可信 `route_type=chat` 只同步提交 `conversation.user_turn` 与 `surface.reply_delivery`；用户轮次失败时 delivery 不得越过；无标记图仍执行完整 Life／foreground 前缀；可见 delivery 后唯一 app-local recovery Runtime 能在长轮询超时前被唤醒。真实复验还必须检查文本终态提前、后台 Life／Expression／Memory／Preference 最终全部 `COMMITTED`、末轮 Voice receipt 存在、重复 effect 为 0，并保留 VTS 外部状态。即使 47 项定向合同与 1 项生产组合集成通过，真实 Host 未加载时状态也只能是 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+合同必须证明：可信 `route_type=chat` 只同步提交 `conversation.user_turn` 与 `surface.reply_delivery`；用户轮次失败时 delivery 不得越过；无标记图仍执行完整 Life／foreground 前缀；可见 delivery 后唯一 app-local recovery Runtime 能在长轮询超时前被唤醒。Life conversation 与 foreground 的同步存储主体必须在线程池执行；回归使用线程事件阻塞 writer，同时断言主事件循环仍能推进，避免依赖脆弱墙钟阈值。真实复验还必须检查文本终态提前、下一轮 effect creation 不被上一轮后台链阻塞、后台 Life／Expression／Memory／Preference 最终全部 `COMMITTED`、末轮 Voice receipt 存在、重复 effect 为 0，并保留 VTS 外部状态。当前受影响 compiler／dispatcher／Runtime／Life／关系／Expression／Universal Host Runtime 共 111 项通过；真实 Host 未加载线程下沉修复时状态只能是 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
 
 HTTP 集成断言还要区分“自包含的小代码片段”和“需要 Workspace 的代码任务”：前者应留在实时 Chat，以 inline-code semantic 直接回答，不应启动 `agent_inspect`；包含文件、仓库、调试、测试或修改语义的任务才进入 Governed Agent Runtime。不得用已经退役的可变 process-service 测试桥注册 Skill 后声称生产 app-local Container 已被覆盖。

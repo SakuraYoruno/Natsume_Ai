@@ -260,6 +260,8 @@ flowchart LR
     OBS --> MON["Monitor"]
 ```
 
+`WAKE → BG` 是持久恢复链，不是请求线程里的松散任务。同步的 Expression／Memory／Preference handler 由 Dispatcher 在线程池调用；Life conversation／foreground 虽保留异步 handler 合同，其 SQLite 主体同样显式下沉到 worker thread。这样上一轮后台状态仍按 durable effect 顺序收敛，但不会独占事件循环并阻止下一轮 Gateway admission。
+
 这条链到 `OUTBOX_COMMITTED` 只证明 Host 已经完成可恢复提交。Gateway 实际 dispatch、未知外部副作用对账、平台 ACK 和用户可见性是后续独立阶段，缺少后续回执时不得推断为已送达。
 
 上述短前缀只对编译器可信标记的普通 Chat 生效。用户轮次未提交时不得发送 Surface；后台 effect 仍在同一 SQLite 队列中按原语义顺序完成，进程退出后也由同一恢复 owner 接管。Plan、Skill、Delegate 控制动作和旧账本不会因为存在 Surface delivery 自动获得快速路径。

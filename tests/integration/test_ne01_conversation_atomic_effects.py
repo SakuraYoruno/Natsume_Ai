@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import threading
 from typing import Any
 
 import pytest
@@ -104,6 +106,52 @@ def _ack_life_projection(message) -> dict[str, Any]:  # noqa: ANN001
         "target": message.target,
         "intent_id": message.intent_id,
     }
+
+
+@pytest.mark.asyncio
+async def test_life_conversation_writer_does_not_block_event_loop(monkeypatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    payload = _life_payload(
+        request_id="request-life-conversation-thread-offload",
+        content="后台生命写入不能卡住下一次对话",
+    )
+
+    def blocking_submit(_request):  # noqa: ANN001, ANN202
+        entered.set()
+        if not release.wait(timeout=1.0):
+            raise AssertionError("Life conversation writer blocked the event loop")
+        return {"command_id": payload["command_id"]}
+
+    monkeypatch.setattr(
+        acceptance_effect_handlers,
+        "_submit_accepted_life_conversation",
+        blocking_submit,
+    )
+    monkeypatch.setattr(
+        acceptance_effect_handlers,
+        "require_life_projection_admission",
+        lambda **_kwargs: {
+            "status": "APPLIED",
+            "receipt_ref": "life-projection-admission://thread-offload",
+        },
+    )
+    handler = build_production_acceptance_effect_handlers(
+        life_receipt_reader_provider=object,
+    )["life.conversation_turn_recorded"]
+    task = asyncio.create_task(handler(payload))
+
+    try:
+        for _ in range(100):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.005)
+        assert entered.is_set()
+        assert not task.done()
+    finally:
+        release.set()
+
+    assert (await task)["status"] == "APPLIED"
 
 
 def test_0118_is_catalogued_and_receipt_tables_are_immutable(tmp_path) -> None:

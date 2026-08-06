@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -129,6 +131,49 @@ def _ack_surface_projection(message) -> dict[str, Any]:  # noqa: ANN001
         "intent_id": message.intent_id,
         "request_id": str(message.payload.get("request_id") or ""),
     }
+
+
+@pytest.mark.asyncio
+async def test_life_foreground_writer_does_not_block_event_loop(monkeypatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    payload = _life_payload()
+
+    def blocking_submit(_payload, **_kwargs):  # noqa: ANN001, ANN003, ANN202
+        entered.set()
+        if not release.wait(timeout=1.0):
+            raise AssertionError("Life foreground writer blocked the event loop")
+        return {"command_id": payload["command_id"]}
+
+    monkeypatch.setattr(
+        acceptance_effect_handlers,
+        "_submit_accepted_life_foreground",
+        blocking_submit,
+    )
+    monkeypatch.setattr(
+        acceptance_effect_handlers,
+        "require_life_projection_admission",
+        lambda **_kwargs: {
+            "status": "APPLIED",
+            "receipt_ref": "life-projection-admission://thread-offload",
+        },
+    )
+    handler = build_production_acceptance_effect_handlers(
+        life_receipt_reader_provider=object,
+    )["life.foreground_completed"]
+    task = asyncio.create_task(handler(payload))
+
+    try:
+        for _ in range(100):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.005)
+        assert entered.is_set()
+        assert not task.done()
+    finally:
+        release.set()
+
+    assert (await task)["status"] == "APPLIED"
 
 
 def _surface_payload() -> dict[str, Any]:

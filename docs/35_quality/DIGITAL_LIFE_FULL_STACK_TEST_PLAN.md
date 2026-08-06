@@ -641,7 +641,7 @@ PlanningSearch 集成夹具必须让不同节点返回可区分、足以验证�
 
 额外体验门槛：任何正常对话不得达到分钟级；若 provider 超时，应在配置的超时边界内给出自然、简短的降级反馈，而不是一直显示处理中。
 
-性能计时必须分开记录 provider、TaskGraph、用户轮次提交、Surface delivery 和后台 Life／Expression 完成时间。编译器标记的普通 Chat 以 `conversation.user_turn → surface.reply_delivery` 为唯一同步 Acceptance 前缀；其余持久 effect 必须在 delivery 后立即唤醒恢复 Runtime，不能等固定轮询，也不能丢失。真实报告只有在文本提前完成、后台 effect 最终收敛、Voice receipt 仍存在且重复发送为 0 时，才可关闭该性能断点。
+性能计时必须分开记录 provider、TaskGraph、用户轮次提交、Surface delivery 和后台 Life／Expression 完成时间。编译器标记的普通 Chat 以 `conversation.user_turn → surface.reply_delivery` 为唯一同步 Acceptance 前缀；其余持久 effect 必须在 delivery 后立即唤醒恢复 Runtime，不能等固定轮询，也不能丢失。后台 Life、Expression、Memory 与 Preference 的同步存储主体不得占用 ASGI 事件循环；连续输入必须证明下一轮 admission／effect creation 能与上一轮后台 drain 重叠推进。真实报告只有在文本提前完成、连续输入不被上一轮后台链阻塞、后台 effect 最终收敛、Voice receipt 仍存在且重复发送为 0 时，才可关闭该性能断点。
 
 2 小时运行期间观察：
 
