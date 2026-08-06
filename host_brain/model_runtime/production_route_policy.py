@@ -34,7 +34,11 @@ ProductionRuntimeResolver = Callable[
 
 _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
     "THALAMUS_INTENT": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 400},
-    "CHAT_SURFACE_REALTIME": {"temperature": 0.72, "top_p": 0.9, "max_tokens": 192},
+    # The realtime Surface returns paired Chinese text and Japanese TTS JSON.
+    # Reasoning-capable Flash models may spend ~200 completion tokens before
+    # emitting content; 192 therefore produced an empty answer in both real
+    # attempts.  The per-target 15 s timeout still bounds latency.
+    "CHAT_SURFACE_REALTIME": {"temperature": 0.72, "top_p": 0.9, "max_tokens": 640},
     "CHAT_SURFACE_MEMORY_REPAIR": {"temperature": 0.65, "max_tokens": 120},
     "RESOURCE_MANAGEMENT": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 900},
     "MEMORY_DISTILLATION": {"temperature": 0.35, "max_tokens": 400},

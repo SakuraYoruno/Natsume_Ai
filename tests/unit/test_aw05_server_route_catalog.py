@@ -151,6 +151,13 @@ def test_realtime_companion_uses_tier_b_without_surface_pro_override(monkeypatch
     assert governed["model_id"] == "deepseek-v4-pro"
     assert governed["timeout_ms"] == 45000
 
+    production_realtime = build_production_server_route_catalog().resolve(
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+        prompt_id="surface.main_chain.live.json",
+    )
+    assert production_realtime["generation_parameters"]["max_tokens"] == 640
+
 
 def test_realtime_companion_accepts_dedicated_provider_override(monkeypatch) -> None:  # noqa: ANN001
     monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")

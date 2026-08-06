@@ -57,6 +57,7 @@
 - [x] 修复真实多轮 runner 每回合改变发送者、把同一会话伪装成多个用户的问题；新增 subject/session 漂移 fail-closed。
 - [x] 修复 Gateway 401 等入口拒绝仍轮询 180 秒的问题；A15 双机回调 HMAC 摘要已重新对齐并只重启远端 Gateway，未重启 Edge。
 - [ ] 复验普通 Gateway 陪伴实时模型通道。提交 `7355c20fa` 的真实三轮报告前两轮完成，第三轮在 DeepSeek Pro 调用 45,280 ms 后以 `MODEL_PROVIDER_USAGE_UNPROVEN` 拒绝；代码已把无前序 Task artifact 的普通 Gateway Chat 切到 Tier B／`CHAT_SURFACE_REALTIME`，并在可见输出前允许一次受 Task budget 约束的同 target transport retry。新 SHA 尚未重启 Host 和重跑同一轨迹，不得勾选。
+- [ ] 复验实时配对 JSON 输出预算。`8cbdadb7d` 已真实命中 DeepSeek Flash，但两个 attempt 的 192 completion tokens 均被 reasoning 用尽，正文为空；场景上限已提高到 640，单 attempt 15 秒 timeout 不变。必须重启 Host 并用新请求验证正文、日语 Voice 和 Task Acceptance，不能用本地合同替代。
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。

@@ -270,3 +270,5 @@ Monitor 的当前 SHA 复验先完成 `npm ci`、generated client drift、lint�
 同一真实窗口内，八张已退役情感表的写入增量均为 0，四个旧 `~/.natsume/emotion/*.json` 的大小、mtime 与 SHA-256 均未变化；canonical affective／relationship／Life journal 则随两条成功和一条失败请求正常前进。该观察只能标为 `PARTIAL_SCOPE_BOUND_ZERO_DELTA`：修复提交加载后的完整成功 cohort 与正式脱敏 receipt 尚未生成，因此旧 writer 清零项仍不封板。当前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，不是 PASS。
 
 本地回归覆盖 ModelAttempt、server-owned route catalog、原生情感流、冻结 Chat executor、Surface main chain、Universal Host Runtime 与 HTTP Skill／Chat 路由，共 129 项通过；`compileall`、JSON 解析和 `git diff --check` 同时通过。这里的本地结果只证明接线与回归边界，不能替代下一次真实 DeepSeek／Gateway／Edge 运行。
+
+`8cbdadb7d` 加载后的首轮真实复验确认模型已经切换到 `deepseek-v4-flash`，webhook 63 ms、整轮 11,062 ms；但两个 provider attempt 都以约 3 秒返回真实 usage 后 `finish_reason=length`，192 个 completion tokens 全部落在 `reasoning_content`，可发布 content 为空，最终以 `OUTPUT_SCHEMA_INVALID`／`MODEL_BUDGET_GUARD_REJECTED` 停止。报告 `dl-live-1785979370271.json` 的 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。该证据说明路由和 fail-fast 已生效，失败来自纯短文本上限与“中文正文 + 日语 TTS 配对 JSON”不兼容。场景上限现提高到 640 tokens，仍由单 attempt 15 秒 timeout 和 Task 总预算双重约束；新修复再次真实复验前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
