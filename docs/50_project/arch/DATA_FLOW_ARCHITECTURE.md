@@ -135,6 +135,8 @@ Gateway 入站聊天属于“实时生成 + 有副作用交付”的交界：消
 
 Gateway INBOX 固定请求体与 Host 幂等键；即使第一次 HTTP 响应丢失，Secure Ingress 和 HostCommand repository 也只返回既有图的精确结果，因此可以有界重试。向 QQ 等平台发送的 OUTBOX 不具备同等可证明语义，dispatch 开始后的未知结果必须进入对账隔离，不能盲目重发。
 
+INBOX 与 OUTBOX 由同一 app-local Delivery Runtime 管理，但不共用执行线程。`gateway-durable-inbox` 只领取并向 Host 交付冻结入站；`gateway-durable-outbox` 只执行平台发送。两个方向各自使用 `worker_id:inbox/outbox`、Lease 与 fencing token。平台调用阻塞或进入 uncertain DLQ 不会阻塞下一条用户消息被 Host 接管，停止信号和 readiness 仍由同一 Runtime 统一收口。
+
 HostCommand 一旦与 Secure Ingress claim 原子绑定，Gateway 重试只验证 claim、command、principal 和 body digest 后确认 durable handoff，不重新运行情绪观察、反馈、路由或图编译。Task Runtime 独立负责把已接管图推进到 Verification／Acceptance／Outbox。
 
 ```mermaid

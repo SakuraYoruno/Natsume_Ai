@@ -71,6 +71,7 @@
 - [x] 验证 Monitor 展示真实 task、budget、verification、acceptance、effect 和 receipt 数据。
 - [x] 验证真实 Gateway 重复入站和 Gateway 重启：同一 webhook 只有 1 条 Inbox、1 个 HostCommand、1 张 TaskGraph，重启后未新增 replay。微信客户端不可用，平台物理外发仍为 `NOT_TESTED_CLIENT_UNAVAILABLE`。
 - [x] 验证 Outbox 对账／网络恢复不会重复外发：`1616168d2` 的隔离真实 SQLite 与 loopback OneBot HTTP 收据证明，发送前适配器缺失先 `RETRY_WAIT`，恢复后两次 Attempt 只产生 1 个 HTTP；响应丢失路线只产生 1 个 HTTP 后进入 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN`／DLQ，重复提交、进程重启和无 reconciliation 的 operator replay 均未再次发送。收据 SHA-256 为 `c878cda4f2b3d428f8bbad04b55a03f72be6f8ac4b43e8a923435af20c5c17b2`。真实 QQ／微信客户端不可用，物理送达继续为 `NOT_TESTED_PLATFORM_CLIENT_UNAVAILABLE`，本地 ACK／DLQ 未被冒充为平台证据。
+- [ ] 复验 Gateway Inbox／Outbox 独立推进。真实旧链路已证实一次 16.06 秒微信外发等待会阻塞下一条已持久化 Inbox；代码已拆为两个独立 fenced worker，合同测试覆盖 Outbox 阻塞、双 worker 启停与部分启动回滚。必须在远端 acceptance Gateway 上证明新 Inbox 的领取不再等待上一条物理外发后才能勾选。
 - [x] 注入真实 Host 崩溃与 Lease 过期：修复后旧 Lease 变为 `EXPIRED`，fencing token 2 在 2.446 秒后接管同一 Attempt，Node Grant 尚余 57.211 秒；最终图、节点、预算和 6 类 Acceptance Effect 全部正常结算且无重复命令／图／Attempt。
 - [x] 运行隔离真实 SQLite terminal reconciliation canary：精确可修复案例自动释放预算，模糊案例保持未修改并以 `TASK_STORE_RECONCILIATION_AUTHORITY_REQUIRED` 阻断；报告强制绑定真实 migration head `0153`。
 - [x] 注入真实进程 unknown effect：operation reservation 已 `RESERVED` 后强杀 Sidecar Host；重启后同一 Attempt 进入 `RECOVERABLE`，operation 进入 `RECOVERY_REQUIRED` 并生成 signed-reconciliation hold，持续观察无第二次 worker／模型／Acceptance／Effect／reply。

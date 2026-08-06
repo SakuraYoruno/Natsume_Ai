@@ -1141,26 +1141,88 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
             reporter=MagicMock(),
             outbound=MagicMock(),
         )
-        retry_thread = _RetryThread()
+        retry_inbox_thread = _RetryThread()
+        retry_outbox_thread = _RetryThread()
 
         with patch(
             "edge_client.gateway.delivery_runtime.threading.Thread",
-            side_effect=[_FailingThread(), retry_thread],
+            side_effect=[_FailingThread(), retry_inbox_thread, retry_outbox_thread],
         ):
             with self.assertRaisesRegex(RuntimeError, "thread resource unavailable"):
                 runtime.start()
 
-            self.assertIsNone(runtime._worker)
+            self.assertIsNone(runtime._inbox_worker)
+            self.assertIsNone(runtime._outbox_worker)
             self.assertFalse(runtime._ready)
             runtime.stop(timeout_s=0.1)
 
             runtime.start()
-            self.assertIs(runtime._worker, retry_thread)
-            self.assertTrue(retry_thread.is_alive())
+            self.assertIs(runtime._inbox_worker, retry_inbox_thread)
+            self.assertIs(runtime._outbox_worker, retry_outbox_thread)
+            self.assertTrue(retry_inbox_thread.is_alive())
+            self.assertTrue(retry_outbox_thread.is_alive())
             runtime.stop(timeout_s=0.1)
 
-        self.assertIsNone(runtime._worker)
+        self.assertIsNone(runtime._inbox_worker)
+        self.assertIsNone(runtime._outbox_worker)
         self.assertFalse(runtime._ready)
+
+    def test_outbox_worker_start_failure_stops_started_inbox_sibling(self) -> None:
+        class _StartedThread:
+            def __init__(self) -> None:
+                self.ident = None
+                self.alive = False
+
+            def start(self) -> None:
+                self.ident = 1
+                self.alive = True
+
+            def is_alive(self) -> bool:
+                return self.alive
+
+            def join(self, timeout=None) -> None:  # noqa: ANN001
+                self.alive = False
+
+        class _FailingThread:
+            ident = None
+
+            @staticmethod
+            def start() -> None:
+                raise RuntimeError("outbox thread resource unavailable")
+
+            @staticmethod
+            def is_alive() -> bool:
+                return False
+
+            @staticmethod
+            def join(timeout=None) -> None:  # noqa: ANN001
+                raise AssertionError("an unstarted worker must never be joined")
+
+        store = MagicMock()
+        store.assert_schema_ready = MagicMock()
+        runtime = GatewayDeliveryRuntime(
+            mode=GatewayTransportMode.DURABLE,
+            store=store,
+            reporter=MagicMock(),
+            outbound=MagicMock(),
+        )
+        inbox_thread = _StartedThread()
+
+        with patch(
+            "edge_client.gateway.delivery_runtime.threading.Thread",
+            side_effect=[inbox_thread, _FailingThread()],
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "outbox thread resource unavailable",
+            ):
+                runtime.start()
+
+        self.assertFalse(inbox_thread.is_alive())
+        self.assertIsNone(runtime._inbox_worker)
+        self.assertIsNone(runtime._outbox_worker)
+        self.assertFalse(runtime.stats()["worker_alive"])
+        self.assertFalse(runtime.stats()["ready"])
 
     def test_worker_checks_shutdown_before_every_new_claim(self) -> None:
         entered = threading.Event()
@@ -1220,7 +1282,6 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
 
         self.assertEqual([], errors)
         self.assertEqual(1, claim_count)
-        store.claim_outbox.assert_not_called()
         self.assertFalse(runtime.stats()["worker_alive"])
 
     def test_worker_stop_timeout_is_explicit_and_retryable(self) -> None:
@@ -1228,6 +1289,7 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
         release = threading.Event()
         store = MagicMock()
         store.assert_schema_ready = MagicMock()
+        store.claim_outbox.return_value = None
         store.claim_inbox.return_value = {
             "inbox_id": "inbox-blocked",
             "claim_token": "claim-blocked",
@@ -1260,10 +1322,72 @@ class TestGatewayDeliveryRuntime(unittest.TestCase):
             runtime.stop(timeout_s=0.1)
 
         self.assertFalse(runtime.intake_enabled)
-        self.assertTrue(runtime.stats()["worker_alive"])
+        self.assertTrue(runtime.stats()["inbox_worker_alive"])
+        self.assertFalse(runtime.stats()["outbox_worker_alive"])
+        self.assertFalse(runtime.stats()["worker_alive"])
         release.set()
         runtime.stop(timeout_s=1.0)
         self.assertFalse(runtime.stats()["worker_alive"])
+
+    def test_blocked_platform_outbox_never_delays_new_inbox_delivery(self) -> None:
+        outbox_entered = threading.Event()
+        release_outbox = threading.Event()
+        inbox_available = threading.Event()
+        inbox_delivered = threading.Event()
+        inbox_claimed = False
+        outbox_claimed = False
+        store = MagicMock()
+        store.assert_schema_ready = MagicMock()
+
+        def _claim_inbox(**_kwargs):  # noqa: ANN003
+            nonlocal inbox_claimed
+            if not inbox_available.is_set() or inbox_claimed:
+                return None
+            inbox_claimed = True
+            return {"inbox_id": "inbox-independent"}
+
+        def _claim_outbox(**_kwargs):  # noqa: ANN003
+            nonlocal outbox_claimed
+            if outbox_claimed:
+                return None
+            outbox_claimed = True
+            return {"outbox_id": "outbox-blocking"}
+
+        store.claim_inbox.side_effect = _claim_inbox
+        store.claim_outbox.side_effect = _claim_outbox
+        runtime = GatewayDeliveryRuntime(
+            mode=GatewayTransportMode.DURABLE,
+            store=store,
+            reporter=MagicMock(),
+            outbound=MagicMock(),
+            worker_interval_s=0.02,
+        )
+
+        def _block_outbox(_row) -> None:  # noqa: ANN001
+            outbox_entered.set()
+            release_outbox.wait(timeout=2.0)
+
+        def _record_inbox(_row) -> None:  # noqa: ANN001
+            inbox_delivered.set()
+
+        runtime._deliver_outbox = _block_outbox  # type: ignore[method-assign]
+        runtime._deliver_inbox = _record_inbox  # type: ignore[method-assign]
+        runtime.start()
+        try:
+            self.assertTrue(outbox_entered.wait(timeout=1.0))
+            inbox_available.set()
+            self.assertTrue(
+                inbox_delivered.wait(timeout=0.5),
+                "the inbox worker was blocked by an unrelated platform send",
+            )
+            self.assertFalse(release_outbox.is_set())
+            stats = runtime.stats()
+            self.assertTrue(stats["inbox_worker_alive"])
+            self.assertTrue(stats["outbox_worker_alive"])
+            self.assertTrue(stats["worker_alive"])
+        finally:
+            release_outbox.set()
+            runtime.stop(timeout_s=1.0)
 
     def test_accept_inbound_supplies_required_local_tenant(self) -> None:
         store = MagicMock()

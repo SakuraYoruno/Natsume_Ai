@@ -141,6 +141,8 @@ flowchart LR
 
 观测系统必须消费当前唯一 authority，而不是要求生产继续制造已退役的 ACK／progress 事件来让仪表盘变绿。历史失败也不得被覆盖；当前改进应通过新的有时间边界的真实样本表现出来。
 
+持久化不等于把两个方向串成一条阻塞队列。Gateway 入站承载用户下一句话，平台 Outbox 承载上一句话的外部发送；后者可能等待客户端或网络超时，不能占住前者的领取线程。两者应共享同一生命周期，但分别持有稳定的 lease identity、fencing token 和有界批次。这样既不牺牲 unknown-effect 隔离，也不会让不可用的消息平台冻结实时陪伴。
+
 ## 13. 模块边界服务于生命连续性
 
 拆模块不是为了追求目录数量，而是避免一种文件同时承担“理解、状态折叠、交付、设备协议和恢复”后形成隐形第二 authority。当前代码按因果阶段分开：观察与融合、self-affect reducer、relationship reducer、Surface 生成、分句可见性、Expression delivery、设备命令和 terminal receipt 各自只拥有一段职责。

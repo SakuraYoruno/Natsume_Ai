@@ -425,6 +425,7 @@ Playwright 禁止 route stub、fixture response 和网络拦截。浏览器进�
 | EDGE-06 | VTS | 8001 真实监听并认证；口型／身体参数可写 |
 | EDGE-07 | 表情热键 | 至少 8 个 companion act 有兼容映射；缺失则该项 `FAIL／NOT_TESTED`，不能以认证代替 |
 | EDGE-08 | Gateway stats | 无管理凭据时按合同拒绝；Monitor 使用受控 OBS projection |
+| EDGE-09 | Gateway 收发隔离 | 阻塞真实或受控 Outbox 物理发送时，新 Inbox 仍在一个 poll interval 内被独立 worker 领取；两个方向分别保留 Lease／fencing／DLQ |
 
 ## 11. F 阶段：全入口和智能体群
 
