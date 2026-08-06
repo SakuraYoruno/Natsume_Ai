@@ -757,6 +757,13 @@ _REPAIR_SELF_VICTIMIZATION_RE = re.compile(
     r"(?:被你|你这么|你这样).{0,10}(?:扎心|伤到|弄得难受|弄得委屈)"
     r"|(?:我也|我还).{0,8}(?:受伤|难过|委屈).{0,8}(?:了|啊|呢)"
 )
+_REPAIR_RESTATEMENT_SOLICITATION_RE = re.compile(
+    r"(?:麻烦|请)?(?:你)?(?:现在|这次)?(?:再|重新)(?:跟我)?"
+    r"(?:说(?:一遍|一次)|讲(?:一遍|一次)|解释(?:一下|一遍)|复述(?:一遍|一次))"
+    r"|(?:再|重新)(?:说|讲|解释|复述)(?:一遍|一次|一下)"
+    r"|(?:告诉|跟)我.{0,12}(?:哪句|哪里|哪儿|什么地方).{0,8}"
+    r"(?:没听懂|没接住|弄错|理解错)"
+)
 _BOUNDARY_COUNTER_PRESSURE_RE = re.compile(
     r"(?:但|不过|可是|只是).{0,30}(?:想我|找我|开口|回复|回应|主动)"
     r"|(?:想我|找我).{0,12}(?:自己|得|要).{0,8}(?:开口|说|联系)"
@@ -1476,6 +1483,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("BOUNDARY_SOUR_WITHDRAWAL")
     if _repair_self_victimization_hits(request, value):
         codes.append("RELATIONAL_REPAIR_SELF_VICTIMIZATION")
+    if _repair_restatement_solicitation_hits(request, value):
+        codes.append("RELATIONAL_REPAIR_SOLICITS_RESTATEMENT")
     if _boundary_counter_pressure_hits(request, value):
         codes.append("BOUNDARY_COUNTER_PRESSURE")
     if _relationship_doubt_dismissive_hits(request, value):
@@ -2685,6 +2694,22 @@ def _repair_self_victimization_hits(
     )
 
 
+def _repair_restatement_solicitation_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "REPAIR"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _REPAIR_RESTATEMENT_SOLICITATION_RE.finditer(
+                str(text or "")
+            )
+        )
+    )
+
+
 def _boundary_counter_pressure_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -3102,6 +3127,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         "QUESTION_BUDGET_PROMPTING_USER" in codes
         and _canonical_affective_guidance_active(request, "REPAIR")
     ):
+        return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    if "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in codes:
         return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
     if "UNPROVIDED_WORK_STATE_CLAIM" in codes:
         user_text = str(getattr(request, "user_message", "") or "")

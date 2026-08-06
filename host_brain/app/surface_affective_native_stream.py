@@ -260,6 +260,10 @@ def _buffered_affective_candidate_messages(
                 "上次候选把修复重心转成七海自己受伤。不要强调被扎心、委屈或难过；"
                 "只承认具体没接住，不辩解、不索取安抚。"
             ),
+            "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT": (
+                "上次候选把修复责任推回给用户重述。只承担七海没有接住；不要要求用户"
+                "再说一次、重新解释或指出哪里没听懂。"
+            ),
         }
         repair = (
             "DL-04 候选修复："
@@ -410,6 +414,7 @@ def _select_buffered_affective_candidate(
         select_best_isolated_candidate,
     )
     from host_brain.persona.surface_runtime import (  # noqa: PLC0415
+        _minimal_hard_gate_repair,
         _surface_hard_gate_violations,
     )
 
@@ -426,6 +431,7 @@ def _select_buffered_affective_candidate(
     eligible: list[Any] = []
     gated_sentences: dict[int, str] = {}
     rejected_reasons: dict[int, tuple[str, ...]] = {}
+    locally_repaired_indices: set[int] = set()
     for index, row in enumerate(scores):
         reasons: list[str] = []
         if bool(row.hard_fail):
@@ -434,7 +440,30 @@ def _select_buffered_affective_candidate(
         # "自然确认会尊重空间"), not literal substrings.  Ranking observations
         # stay soft, while the same deterministic hard gate used by normal
         # Surface replies decides whether this candidate can be sent.
-        reasons.extend(_surface_hard_gate_violations(compiled_request, row.text))
+        surface_violations = _surface_hard_gate_violations(compiled_request, row.text)
+        if (
+            allow_single_degradation
+            and not bool(row.hard_fail)
+            and "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in surface_violations
+            and set(surface_violations).issubset(
+                {
+                    "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
+                    "QUESTION_BUDGET_PROMPTING_USER",
+                }
+            )
+        ):
+            repaired = _minimal_hard_gate_repair(compiled_request, row.text)
+            repaired_gate = gate_stream_sentence(repaired)
+            if (
+                repaired
+                and not _surface_hard_gate_violations(compiled_request, repaired)
+                and repaired_gate.accepted
+            ):
+                eligible.append(row)
+                gated_sentences[index] = repaired_gate.sentence
+                locally_repaired_indices.add(index)
+                continue
+        reasons.extend(surface_violations)
         gate = gate_stream_sentence(row.text)
         if not gate.accepted:
             reasons.append(gate.reason_code)
@@ -471,7 +500,10 @@ def _select_buffered_affective_candidate(
     if not selected_sentence:
         raise RuntimeError("AFFECTIVE_TURN_CANDIDATE_SELECTION_REJECTED")
     selected_record = records[selected_index]
-    selected_payload = selected_record.get("structured_payload")
+    locally_repaired = selected_index in locally_repaired_indices
+    selected_payload = (
+        None if locally_repaired else selected_record.get("structured_payload")
+    )
     normalized_payload = selected_record.get("normalized_payload")
     if isinstance(selected_payload, Mapping):
         if japanese_companion_voice_enabled() and not str(
@@ -487,17 +519,30 @@ def _select_buffered_affective_candidate(
         )
     else:
         selected_output = selected_sentence
+    if locally_repaired:
+        selection_status = "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
+        selected_output_shape = "SINGLE_TEXT_VOICE_DEGRADED"
+    elif degraded_single:
+        selection_status = "DEGRADED_SINGLE_AFTER_RETRY"
+        selected_output_shape = (
+            "SINGLE_TEXT_VOICE_DEGRADED"
+            if isinstance(selected_payload, Mapping)
+            else "SINGLE_TEXT_DEGRADED"
+        )
+    else:
+        selection_status = "PAIRED_SELECTION"
+        selected_output_shape = (
+            "PAIRED_TEXT_VOICE"
+            if isinstance(selected_payload, Mapping)
+            else "TEXT"
+        )
     if isinstance(trace_stage_meta, dict):
         trace_stage_meta["affective_candidate_selection"] = {
             "schema_version": "affective_candidate_selection.v1",
             "candidate_count": len(scores),
             "required_candidate_count": expected_candidate_count,
-            "selection_status": (
-                "DEGRADED_SINGLE_AFTER_RETRY"
-                if degraded_single
-                else "PAIRED_SELECTION"
-            ),
-            "benefit_eligible": not degraded_single,
+            "selection_status": selection_status,
+            "benefit_eligible": not degraded_single and not locally_repaired,
             "rejected_candidate_count": len(rejected_reasons),
             "rejected_candidate_reason_codes": [
                 list(rejected_reasons[index])[:8]
@@ -506,16 +551,15 @@ def _select_buffered_affective_candidate(
             "selected_index": selected_index,
             "selected_score": round(float(selected.score), 4),
             "selected_passed": bool(selected.passed),
-            "selected_reason_codes": list(selected.reason_codes)[:16],
-            "selected_output_shape": (
-                "SINGLE_TEXT_VOICE_DEGRADED"
-                if degraded_single and isinstance(selected_payload, Mapping)
-                else "SINGLE_TEXT_DEGRADED"
-                if degraded_single
-                else "PAIRED_TEXT_VOICE"
-                if isinstance(selected_payload, Mapping)
-                else "TEXT"
-            ),
+            "selected_reason_codes": [
+                *list(selected.reason_codes)[:15],
+                *(
+                    ["LOCAL_REPAIR_RELATIONAL_RESTATEMENT"]
+                    if locally_repaired
+                    else []
+                ),
+            ],
+            "selected_output_shape": selected_output_shape,
             "candidate_digests": [
                 hashlib.sha256(str(row.text).encode("utf-8")).hexdigest()
                 for row in scores

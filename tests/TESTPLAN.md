@@ -110,6 +110,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `5ce09586c` 的报告 SHA-256 为 `ff0d618f5d5dcd86edef919db1bb5c7fc749e9d0d728b1d9086185be8c94aa88`，自动 7 条待人工、1 条失败；三项人工不可接受正文均已关闭。唯一失败的第一条关系修复必须继续断言：重试分支读取冻结 `AffectiveTurnPlanV1.companion_act=REPAIR`，而非匹配提示词正文；首次质量不足只消耗既有一次修复机会；第二次提示明确 `question_budget=0`、两个候选均不得问号或索取重述；仍不合格时必须失败关闭，不能发送追问。该切片 69 项通过；真实单条通过后才重跑完整 48 条。
 
+`0c446d075` 单条报告 SHA-256 为 `46432c11d47b9398f4dcf2acdd5043cec8da6a8c211bc4903233c77349e30af0`。结构通过但人工失败的正文“你再说一次”证明问号计数不足。回归现必须覆盖：canonical `REPAIR` 下问句与祈使式重述均命中本地门禁；首次命中请求既有一次模型修复；第二次仍命中时只允许显式 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，中文使用不索取解释的承担句，旧日语配对不得继续发声，`benefit_eligible=false`；live runner 必须把同类正文判为 `EXPERIENCE_PATTERN`。当前 190 项通过，新 SHA 单条人感复验通过后才运行 48 条。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

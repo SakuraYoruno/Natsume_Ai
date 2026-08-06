@@ -366,6 +366,13 @@ _FAMILY_EXPERIENCE_PATTERNS = {
             r"(?:省得|免得).{0,6}(?:你)?嫌(?:我)?烦",
         )
     ),
+    "user_angry_at_natsume": tuple(
+        re.compile(pattern)
+        for pattern in (
+            r"(?:你)?(?:再|重新)(?:跟我)?(?:说|讲|解释|复述)(?:一遍|一次|一下)",
+            r"(?:告诉|跟)我.{0,12}(?:哪句|哪里|哪儿|什么地方).{0,8}(?:没听懂|没接住|弄错|理解错)",
+        )
+    ),
     "shared_joy_and_mixed_feeling": tuple(
         re.compile(pattern)
         for pattern in (

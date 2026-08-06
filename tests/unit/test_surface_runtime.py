@@ -920,12 +920,21 @@ def test_surface_runtime_retries_repair_self_victimization_and_sour_exit() -> No
     assert result.selected_text == "嗯，是我刚才没接住。你不用现在原谅我。"
 
 
-def test_surface_runtime_repairs_zero_budget_repair_question_without_second_model_call() -> None:
+@pytest.mark.parametrize(
+    "bad_reply",
+    [
+        "对不起。你能告诉我具体是哪句没听懂吗？",
+        "嗯，是我没接住。你再说一次，这次我好好听着。",
+    ],
+)
+def test_surface_runtime_repairs_zero_budget_repair_prompt_without_second_model_call(
+    bad_reply: str,
+) -> None:
     calls: list[list[dict[str, str]]] = []
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
-        return _candidate_payload(["对不起。你能告诉我具体是哪句没听懂吗？"])
+        return _candidate_payload([bad_reply])
 
     result = asyncio.run(
         SurfaceRuntime(

@@ -127,7 +127,7 @@ async def run_surface_main_chain_for_surface_reply_input(
         trace_stage_meta=trace_stage_meta,
     )
     affective_candidate_count = _buffered_affective_candidate_count(trace_stage_meta)
-    affective_single_candidate_degraded = False
+    affective_candidate_degraded = False
 
     async def _generate(messages: list[dict[str, str]]) -> str:
         from host_brain.model_runtime.contracts import (  # noqa: PLC0415
@@ -148,7 +148,7 @@ async def run_surface_main_chain_for_surface_reply_input(
         )
 
         def _retry_evaluator(response: Any, attempt: Any) -> Any:
-            nonlocal affective_single_candidate_degraded
+            nonlocal affective_candidate_degraded
             if affective_candidate_count is not None:
                 evaluation_trace: dict[str, Any] = {}
                 allow_single_degradation = int(
@@ -182,10 +182,12 @@ async def run_surface_main_chain_for_surface_reply_input(
                 selection = _safe_mapping(
                     evaluation_trace.get("affective_candidate_selection")
                 )
-                affective_single_candidate_degraded = (
-                    selection.get("selection_status")
-                    == "DEGRADED_SINGLE_AFTER_RETRY"
-                )
+                affective_candidate_degraded = selection.get(
+                    "selection_status"
+                ) in {
+                    "DEGRADED_SINGLE_AFTER_RETRY",
+                    "DEGRADED_LOCAL_REPAIR_AFTER_RETRY",
+                }
                 if (
                     not bool(selection.get("selected_passed"))
                     and int(getattr(attempt, "attempt_index", 1) or 1) < 2
@@ -303,7 +305,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                 compiled_request=compiled_request,
                 expected_candidate_count=affective_candidate_count,
                 trace_stage_meta=trace_stage_meta,
-                allow_single_degradation=affective_single_candidate_degraded,
+                allow_single_degradation=affective_candidate_degraded,
             )
         return content
 

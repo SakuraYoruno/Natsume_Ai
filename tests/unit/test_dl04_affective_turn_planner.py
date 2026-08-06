@@ -534,6 +534,46 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert degraded_selection["benefit_eligible"] is False
     assert degraded_selection["selected_output_shape"] == "SINGLE_TEXT_VOICE_DEGRADED"
 
+    restatement_payload = {
+        "candidates": [
+            {
+                "reply_text": "嗯，是我没接住。你再说一次，这次我好好听着。",
+                "tts_text_ja": "うん、私が受け止められなかった。もう一度話して。",
+            },
+            {
+                "reply_text": "是我理解错了。重新解释一下，我会认真听。",
+                "tts_text_ja": "私が勘違いした。もう一度説明して。",
+            },
+        ]
+    }
+    with pytest.raises(RuntimeError, match="RELATIONAL_REPAIR_SOLICITS_RESTATEMENT"):
+        _select_buffered_affective_candidate(
+            raw_output=json.dumps(restatement_payload, ensure_ascii=False),
+            compiled_request=compiled,
+            expected_candidate_count=2,
+        )
+    locally_repaired_trace: dict[str, object] = {}
+    locally_repaired_output = _select_buffered_affective_candidate(
+        raw_output=json.dumps(restatement_payload, ensure_ascii=False),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=locally_repaired_trace,
+        allow_single_degradation=True,
+    )
+    assert locally_repaired_output == (
+        "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    )
+    locally_repaired_selection = locally_repaired_trace[
+        "affective_candidate_selection"
+    ]
+    assert locally_repaired_selection["selection_status"] == (
+        "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
+    )
+    assert locally_repaired_selection["benefit_eligible"] is False
+    assert locally_repaired_selection["selected_output_shape"] == (
+        "SINGLE_TEXT_VOICE_DEGRADED"
+    )
+
 
 def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection() -> None:
     assert (

@@ -546,3 +546,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `5ce09586c` 的全新隔离库复验报告 SHA-256 为 `ff0d618f5d5dcd86edef919db1bb5c7fc749e9d0d728b1d9086185be8c94aa88`，自动结果提升为 7 条待人工、1 条失败，writer probe 仍为 21 个 accepted turn、零 legacy delta。任务轨迹返回“把报错和相关代码贴过来”，关系自主轨迹移除了饮酒／回家要求，裂痕轨迹进入双候选并返回“先把你的意思听明白再说”；这三项代码根因已由真实正文关闭。
 
 剩余 `user_angry_at_natsume:3` 的 canonical Appraisal 和 CompanionAct 均为 `REPAIR`。第一次真实双候选被判 `AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR`；第二次仍全部违反发送门禁，所以没有坏文本外发，但 TaskGraph 以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 失败。现有质量重试提示只泛化要求“避免连续追问”，没有针对该零问句修复回合明确禁止问号和索取重述。当前补丁直接消费冻结 `AffectiveTurnPlanV1` 的类型化 `REPAIR`，不再搜索编译后提示词中的中文片段，并把既有第二次尝试限定为两个中日配对陈述句：具体承担、不得追问哪里没听懂、不得要求用户现在重新解释；模型次数仍最多两次。Surface app adapter、原生情感流与 DL-04 planner 共 69 项通过。新进程单条复验前保持 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`0c446d075` 已在全新隔离 Host SQLite、真实 Gateway 和真实 DeepSeek 上复验该三轮轨迹，报告 SHA-256 为 `46432c11d47b9398f4dcf2acdd5043cec8da6a8c211bc4903233c77349e30af0`，3 个 accepted turn 与 canonical writer probe 均通过。但最终正文是“嗯，是我没接住。你再说一次，这次我好好听着。”：它绕过了只统计问号的 `question_budget=0`，仍把修复劳动交给用户，因此自动结构通过、人工体验失败。
+
+后续代码不继续堆提示词：Surface hard gate 在类型化 `REPAIR` 下新增 `RELATIONAL_REPAIR_SOLICITS_RESTATEMENT`，覆盖“再说一次／重新解释／告诉我哪里没听懂”等无问号祈使式索取。首次命中沿用唯一一次模型修复；第二次仍只含重述索取时，本地 fail-soft 改为不要求当前解释的承担句，同时去掉不再同义的日语 Voice payload，标记 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY` 与 `benefit_eligible=false`。真实 cohort runner 也独立把这类正文判失败，避免再次以自动绿灯盖住人感问题。Surface、DL-04、app adapter 与 runner 共 190 项通过；新 SHA 真实复验前不提升状态。
