@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-06",
-  "commit_scope": "A15_RESEARCH_HIDDEN_VERIFIER_TRANSIENT_BOUNDARY_CODE_COMPLETE_REAL_24_PAIR_PENDING",
+  "commit_scope": "A15_RESEARCH_FIXED_24_QUEUE_CODE_COMPLETE_REAL_PREFLIGHT_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -183,6 +183,8 @@
     "planning_search_research_external_cost_fail_closed": "PASS_PROXY_UNKNOWN_MODEL_OR_INCOMPLETE_CACHE_USAGE_UNPRICED",
     "planning_search_research_hidden_quality_verifier": "CODE_COMPLETE_ATTESTED_EXTERNAL_RESPONSE_BOUND_REAL_24_PAIR_PENDING",
     "planning_search_research_private_output_persistence": "PASS_CODE_TRANSIENT_PROCESS_LOCAL_ONLY_TERMINAL_REPLAY_EMPTY",
+    "planning_search_research_fixed_queue": "PASS_DRY_RUN_24_WORKLOADS_3_TOPICS_LOCAL_AND_WEB_ALL_SEARCH_MCTS",
+    "planning_search_research_real_preflight": "NOT_RUN_CURRENT_COMMIT_PENDING",
     "digital_life_human_likeness": "PARTIAL_REAL_THREE_FAMILY_SINGLE_REVIEWER_3_OF_3_TEXT_PASS_BLIND_COHORT_PENDING",
     "whole_system_python_line_coverage": "72.22_PERCENT_OFFLINE_STABLE_BELOW_75_GATE",
     "whole_system_python_branch_coverage": "55.08_PERCENT_OFFLINE_STABLE_BELOW_65_GATE",

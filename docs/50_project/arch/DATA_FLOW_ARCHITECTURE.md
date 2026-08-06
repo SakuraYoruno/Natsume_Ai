@@ -346,3 +346,5 @@ flowchart LR
 成本数据流为 `provider usage → cache hit/miss 一致性检查 → endpoint/model 价目匹配 → micro-USD 向上取整 → ModelAttempt audit → Research attestation`。价目不匹配或 usage 不完整时流程停在“成本未知”，不会用 0 继续进入收益比较。工具计数同样来自请求能力边界：请求没有 tools 才能证明为 0。
 
 回答正文只沿上图的进程内质量分支存在，不能写入 paired ledger；重启后终态只能精确重放公开 receipt，不能补造隐藏评审。质量评审使用统一 rubric 且不接收 arm role，持久化的是被评响应摘要、分数、错误计数和评审模型 attestation。
+
+固定 24 题在进入图中 `baseline source set`／`PlanningSearch selected path` 前共用同一三来源 snapshot。baseline 仅关闭 L3，search 使用 AUTO；两者的差异由公共搜索结果产生。期望覆盖点位于图外的隐藏 verifier 输入，不参与 source ranking 或正文生成。

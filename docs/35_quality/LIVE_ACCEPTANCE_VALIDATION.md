@@ -416,3 +416,9 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 paired terminal ledger 不能保存回答正文，但真实收益又必须评估内容。当前 runner 因此只在新鲜双臂完成的同一进程里返回不可序列化的 `ResearchTransientArmOutputV1`；terminal replay 的 transient 列表固定为空，不能从摘要恢复正文或补签质量证据。独立隐藏评审不接收 arm 标签，使用统一 rubric 和另一条 canonical 外部 ModelAttempt，最终只把被评回答摘要、独立 execution／attempt、prompt digest、usage、cost、transport、分数和严重错误数写入 receipt。
 
 候选正文 JSON 形状漂移、评审输出额外字段、越界分数和非外部 attestation 都会在 cohort 写入前失败。paired 恢复、历史重放、质量 receipt 和隐藏输入的 22 项定向测试通过。该结果只关闭正文隐私与评审身份边界；24 题真实队列仍未运行，Research 收益继续为 `UNPROVEN`。
+
+## 2026-08-06 A15 Research 固定队列准备
+
+仓库现冻结 24 个 workload，运行时恢复、存储持久化与模型证据各 8 个；每个主题由本地 primary、官方 Web independent 和信息不完整的 secondary 三份短来源组成。expected points 只存在于隐藏评审输入，不进入公开 planning snapshot、候选 payload 或执行 arm。baseline 与 selected 并非手写两套执行器：前者通过同一 `GoalPlanningService` 的 `MCTSMode.NEVER` 选出 secondary quick answer，后者通过 AUTO 条件 L3 选出 primary＋independent 路径。
+
+完整 dry-run 结果为 24/24 search arm 使用 MCTS、24/24 两臂 prompt digest 不同、主题数 3、来源种类同时包含 `LOCAL_FILE`／`WEB`、外部请求 0。语料篡改会在 planning 前因 byte count／digest 漂移失败。相关 14 项 runner、隐藏评审和 paired recovery 回归通过。该结果只证明固定实验可启动，真实单题预检和 24 对外部请求尚未执行。

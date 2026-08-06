@@ -1,0 +1,9 @@
+冻结日期：2026-08-05。官方来源：https://api-docs.deepseek.com/quick_start/pricing 。以下为短释义快照，金额单位均为每百万 token 的美元。
+Q1 DeepSeek-V4-Flash 输入缓存命中价格为 0.0028 美元。
+Q2 DeepSeek-V4-Flash 输入缓存未命中价格为 0.14 美元。
+Q3 DeepSeek-V4-Flash 输出价格为 0.28 美元。
+Q4 DeepSeek-V4-Pro 输入缓存命中价格为 0.003625 美元。
+Q5 DeepSeek-V4-Pro 输入缓存未命中价格为 0.435 美元。
+Q6 DeepSeek-V4-Pro 输出价格为 0.87 美元。
+Q7 费用按对应 token 数乘以每百万 token 单价计算。
+Q8 官方 OpenAI 格式 API 基础地址为 https://api.deepseek.com 。

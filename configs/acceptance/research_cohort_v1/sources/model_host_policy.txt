@@ -1,0 +1,9 @@
+冻结日期：2026-08-05。来源类型：Natsume AI 本地 Research 证据政策。
+M1 每次 canonical 模型请求必须产生 started 与 terminal Attempt 记录。
+M2 收益证据只接受 fresh request，缓存结果不能计入。
+M3 baseline 与 search arm 使用相同 provider、model、profile 与预算。
+M4 两个 arm 必须使用不同 execution ID，不能共享响应或临时结果。
+M5 持久账本只保存响应 digest，不保存研究回答正文。
+M6 合格外部 attestation 必须记录 token、成本、provider latency、总耗时与 transport identity。
+M7 质量评审使用独立 execution 与隐藏统一 rubric，不能看到 arm 标签。
+M8 scripted replay 与未证明外部 transport 的 canonical attempt 永远不具收益资格。

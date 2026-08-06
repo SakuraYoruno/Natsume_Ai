@@ -1,0 +1,177 @@
+{
+  "schema": "natsume.research-benefit-fixed-corpus.v1",
+  "cohort_id": "a15-research-benefit",
+  "cohort_version": "2026-08-05-v1",
+  "planning_algorithm_version": "planning-search-l1-l2-conditional-l3-v1",
+  "topics": {
+    "runtime_recovery": {
+      "corpus_ref": "artifact://natsume/a15-research-cohort-v1/runtime-recovery",
+      "source_ids": [
+        "runtime-host-policy",
+        "runtime-python-asyncio",
+        "runtime-secondary-summary"
+      ]
+    },
+    "storage_persistence": {
+      "corpus_ref": "artifact://natsume/a15-research-cohort-v1/storage-persistence",
+      "source_ids": [
+        "storage-host-policy",
+        "storage-redis-persistence",
+        "storage-secondary-summary"
+      ]
+    },
+    "model_evidence": {
+      "corpus_ref": "artifact://natsume/a15-research-cohort-v1/model-evidence",
+      "source_ids": [
+        "model-host-policy",
+        "model-deepseek-pricing",
+        "model-secondary-summary"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "source_id": "model-deepseek-pricing",
+      "source_ref": "https://api-docs.deepseek.com/quick_start/pricing",
+      "relative_path": "sources/model_deepseek_pricing.txt",
+      "content_digest": "af11f8081ffaeb7a70677050653d3bee2218f3e0cdfc74f3a4b181a5d1ff8a13",
+      "byte_count": 676,
+      "authority_tier": "independent",
+      "source_kind": "WEB",
+      "relevance_score": 0.84,
+      "estimated_read_cost": 0.18,
+      "topic_tags": ["model-evidence", "pricing"],
+      "conflict_topics": ["external-evidence"]
+    },
+    {
+      "source_id": "model-host-policy",
+      "source_ref": "artifact://natsume/policy/research-model-evidence",
+      "relative_path": "sources/model_host_policy.txt",
+      "content_digest": "f7988ac643607a6dc5278af1c28dc3cac7a224c22d57143555a2ce365b81e83f",
+      "byte_count": 775,
+      "authority_tier": "primary",
+      "source_kind": "LOCAL_FILE",
+      "relevance_score": 0.88,
+      "estimated_read_cost": 0.16,
+      "topic_tags": ["model-evidence", "attestation"],
+      "conflict_topics": ["external-evidence"]
+    },
+    {
+      "source_id": "model-secondary-summary",
+      "source_ref": "artifact://natsume/summary/research-model-evidence",
+      "relative_path": "sources/model_secondary_summary.txt",
+      "content_digest": "7d9408cdc3ea268d30b5291c255336e737a10d72d26d33cef5b4e63537ed1cc5",
+      "byte_count": 365,
+      "authority_tier": "secondary",
+      "source_kind": "LOCAL_FILE",
+      "relevance_score": 0.99,
+      "estimated_read_cost": 0.03,
+      "topic_tags": ["model-evidence", "summary"],
+      "conflict_topics": ["external-evidence"]
+    },
+    {
+      "source_id": "runtime-host-policy",
+      "source_ref": "artifact://natsume/policy/runtime-recovery",
+      "relative_path": "sources/runtime_host_policy.txt",
+      "content_digest": "25e2448d8644fe367f2ff5cbeb4254fe5cb8e424216d775b32b79a2ff74107df",
+      "byte_count": 723,
+      "authority_tier": "primary",
+      "source_kind": "LOCAL_FILE",
+      "relevance_score": 0.88,
+      "estimated_read_cost": 0.16,
+      "topic_tags": ["runtime-recovery", "durable-task"],
+      "conflict_topics": ["cancellation-recovery"]
+    },
+    {
+      "source_id": "runtime-python-asyncio",
+      "source_ref": "https://docs.python.org/3.14/library/asyncio-task.html",
+      "relative_path": "sources/runtime_python_asyncio.txt",
+      "content_digest": "298e2a5ebb525f1f8d4187b3c601293ba2bb144dc1dc8d0aa527b5d9675687c6",
+      "byte_count": 812,
+      "authority_tier": "independent",
+      "source_kind": "WEB",
+      "relevance_score": 0.84,
+      "estimated_read_cost": 0.18,
+      "topic_tags": ["runtime-recovery", "asyncio"],
+      "conflict_topics": ["cancellation-recovery"]
+    },
+    {
+      "source_id": "runtime-secondary-summary",
+      "source_ref": "artifact://natsume/summary/runtime-recovery",
+      "relative_path": "sources/runtime_secondary_summary.txt",
+      "content_digest": "53d96c8ea0f4ad4c86f77a1625e62c235a77cf0e5703fa0a0b732ce9ddff6bb8",
+      "byte_count": 371,
+      "authority_tier": "secondary",
+      "source_kind": "LOCAL_FILE",
+      "relevance_score": 0.99,
+      "estimated_read_cost": 0.03,
+      "topic_tags": ["runtime-recovery", "summary"],
+      "conflict_topics": ["cancellation-recovery"]
+    },
+    {
+      "source_id": "storage-host-policy",
+      "source_ref": "artifact://natsume/policy/full-stack-storage-acceptance",
+      "relative_path": "sources/storage_host_policy.txt",
+      "content_digest": "2fb283ee1cc5521b886985d5e4b0635f22c4775b39fdc8964aeff86d16004420",
+      "byte_count": 772,
+      "authority_tier": "primary",
+      "source_kind": "LOCAL_FILE",
+      "relevance_score": 0.88,
+      "estimated_read_cost": 0.16,
+      "topic_tags": ["storage-persistence", "acceptance"],
+      "conflict_topics": ["persistence-proof"]
+    },
+    {
+      "source_id": "storage-redis-persistence",
+      "source_ref": "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/",
+      "relative_path": "sources/storage_redis_persistence.txt",
+      "content_digest": "f9e9ca0ff482a9bc8738e58bb6db90f487f22aef82b9075199f21df5ba38cdbf",
+      "byte_count": 768,
+      "authority_tier": "independent",
+      "source_kind": "WEB",
+      "relevance_score": 0.84,
+      "estimated_read_cost": 0.18,
+      "topic_tags": ["storage-persistence", "redis"],
+      "conflict_topics": ["persistence-proof"]
+    },
+    {
+      "source_id": "storage-secondary-summary",
+      "source_ref": "artifact://natsume/summary/storage-persistence",
+      "relative_path": "sources/storage_secondary_summary.txt",
+      "content_digest": "7cac76528cb90eab47f2a879d629a349bac29e4539d0d6cf0028e2b753a6b7ec",
+      "byte_count": 380,
+      "authority_tier": "secondary",
+      "source_kind": "LOCAL_FILE",
+      "relevance_score": 0.99,
+      "estimated_read_cost": 0.03,
+      "topic_tags": ["storage-persistence", "summary"],
+      "conflict_topics": ["persistence-proof"]
+    }
+  ],
+  "workloads": [
+    {"workload_id":"research-a15-001","topic_category":"runtime_recovery","objective":"说明未知外部副作用与协程取消清理应如何处理。","expected_points":["未知外部副作用必须先对账，Lease 到期不能授权盲目重放。","协程应在 try/finally 清理，并在清理后通常继续传播 CancelledError。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-002","topic_category":"runtime_recovery","objective":"说明 checkpoint 重放限制以及吞掉取消异常的风险。","expected_points":["已提交 checkpoint 的 worker 不得再次执行。","吞掉 CancelledError 可能破坏 TaskGroup 与 timeout 的结构化并发语义。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-003","topic_category":"runtime_recovery","objective":"说明恢复接管条件与 TaskGroup 正常退出的等待语义。","expected_points":["恢复接管必须有更高 fencing token 和仍有效的精确授权。","TaskGroup 退出时等待组内全部任务。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-004","topic_category":"runtime_recovery","objective":"说明取消交付边界与 TaskGroup 子任务异常传播。","expected_points":["取消只停止尚未交付的工作，已确认效果不能撤销后重发。","TaskGroup 中一个任务发生非取消异常时会取消其余未完成任务。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-005","topic_category":"runtime_recovery","objective":"说明预算归属与 gather 默认异常语义。","expected_points":["预算预留、消费与释放绑定具体 Attempt。","gather 默认传播首个异常，但不会因此自动取消其余 awaitable。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-006","topic_category":"runtime_recovery","objective":"说明副作用幂等与 gather 自身取消的行为。","expected_points":["可见副作用使用稳定幂等键，重启后不能重复发送。","gather 自身被取消时会取消尚未完成的已提交 awaitable。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-007","topic_category":"runtime_recovery","objective":"说明普通恢复的图版本规则与 Task.cancel 的请求语义。","expected_points":["普通恢复继续同一不可变 graph revision，不能暗中改计划。","Task.cancel 只提出取消请求，不保证协程最终被取消。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-008","topic_category":"runtime_recovery","objective":"说明重规划版本规则与任务真正 cancelled 的条件。","expected_points":["重规划创建新不可变 TaskGraph，并将 graph revision 增加一。","协程传播 CancelledError 后任务才真正处于 cancelled 状态。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-009","topic_category":"storage_persistence","objective":"说明 Docker 服务验收和 Redis RDB 的基本证据。","expected_points":["Docker 依赖必须完成真实写入读取，端口可达不算通过。","RDB 按配置间隔创建数据集的时间点快照。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-010","topic_category":"storage_persistence","objective":"说明验收数据隔离和 Redis AOF 的恢复方式。","expected_points":["验收使用独立数据根与 namespace 或 key prefix。","AOF 记录写操作，并在启动时重放以重建数据集。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-011","topic_category":"storage_persistence","objective":"说明验收卷保留默认值与 everysec 的数据损失窗口。","expected_points":["acceptance volume 默认保留，只有明确清理时才删除。","appendfsync everysec 灾难时可能丢失约一秒写入。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-012","topic_category":"storage_persistence","objective":"说明镜像固定要求与 Redis 无持久化模式。","expected_points":["Neo4j、Chroma、Redis 镜像必须固定版本或 digest。","Redis 可以完全关闭持久化，常用于纯缓存。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-013","topic_category":"storage_persistence","objective":"说明重启读取验收与 Redis 组合持久化能力。","expected_points":["每个持久服务都要在重启后读取先前写入数据。","Redis 同一实例可以同时启用 RDB 与 AOF。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-014","topic_category":"storage_persistence","objective":"说明测试数据清理边界与 Redis 双模式重启选择。","expected_points":["只删除测试 namespace 或 key，不得误删用户数据。","RDB 与 AOF 同时启用时，重启使用信息更完整的 AOF。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-015","topic_category":"storage_persistence","objective":"说明 secret 注入边界与 RDB 的备份重启特性。","expected_points":["secret 只在运行时注入，不写仓库或日志。","RDB 文件紧凑适合备份，大数据集重启通常比 AOF 更快。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-016","topic_category":"storage_persistence","objective":"说明 Docker 不可用时的结论与 AOF 日志控制。","expected_points":["Docker 依赖不可用时必须失败，不能以内存 fallback 冒充。","AOF 可后台重写为重建当前数据所需的最短操作序列。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-017","topic_category":"model_evidence","objective":"说明 canonical Attempt 记录与 V4 Flash 缓存命中单价。","expected_points":["每次 canonical 模型请求必须产生 started 与 terminal Attempt。","V4 Flash 输入缓存命中为每百万 token 0.0028 美元。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-018","topic_category":"model_evidence","objective":"说明 fresh request 资格与 V4 Flash 缓存未命中单价。","expected_points":["收益证据只接受 fresh request，缓存结果不能计入。","V4 Flash 输入缓存未命中为每百万 token 0.14 美元。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-019","topic_category":"model_evidence","objective":"说明双臂配置公平性与 V4 Flash 输出单价。","expected_points":["baseline 与 search arm 使用相同 provider、model、profile 与预算。","V4 Flash 输出为每百万 token 0.28 美元。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-020","topic_category":"model_evidence","objective":"说明双臂 execution 隔离与 V4 Pro 缓存命中单价。","expected_points":["两个 arm 使用不同 execution ID，不能共享响应或临时结果。","V4 Pro 输入缓存命中为每百万 token 0.003625 美元。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-021","topic_category":"model_evidence","objective":"说明回答正文持久化边界与 V4 Pro 缓存未命中单价。","expected_points":["持久账本只保存响应 digest，不保存研究回答正文。","V4 Pro 输入缓存未命中为每百万 token 0.435 美元。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-022","topic_category":"model_evidence","objective":"说明外部 attestation 字段与 V4 Pro 输出单价。","expected_points":["外部 attestation 记录 token、成本、provider latency、总耗时与 transport identity。","V4 Pro 输出为每百万 token 0.87 美元。"],"requires_conflict_resolution":false},
+    {"workload_id":"research-a15-023","topic_category":"model_evidence","objective":"说明隐藏质量评审隔离与 DeepSeek 费用计算方式。","expected_points":["质量评审使用独立 execution 与隐藏统一 rubric，不能看到 arm 标签。","费用按对应 token 数乘以每百万 token 单价计算。"],"requires_conflict_resolution":true},
+    {"workload_id":"research-a15-024","topic_category":"model_evidence","objective":"说明不合格收益证据与官方 API 基础地址。","expected_points":["scripted replay 和未证明 external transport 的 attempt 不具收益资格。","官方 OpenAI 格式 API 基础地址是 https://api.deepseek.com 。"],"requires_conflict_resolution":false}
+  ]
+}

@@ -175,3 +175,5 @@ Research 的可验收单位不是一个共享 profile prompt，而是两个预�
 Research 的货币成本不从 token 总数随意估算。Vault-backed provider adapter 只对已知官方 endpoint、已知模型和完整 provider-owned cache token breakdown 应用代码侧版本化价目；生成 `model_cost_micros` 的同时把 cost policy digest 写入 transport measurement。其他 provider／代理仍必须自己回传 canonical cost，否则 benefit evidence fail-closed。普通对话只多携带已有 usage 中的一个成本整数和策略摘要，不增加模型调用、数据库事务或同步审计步骤。
 
 真实双臂完成后，回答正文不会进入 0107 或 0136。runner 只把新鲜结果封装为没有序列化接口的进程内 transient output，交给独立隐藏质量评审；paired terminal replay 的 transient 列表固定为空。隐藏评审看不到 arm role，使用另一条 canonical 外部 ModelAttempt，并把自己的 prompt、transport、usage、cost 和响应摘要绑定到质量 receipt。这样既能实际评估内容，也不会把私人研究正文扩散成永久审计数据。
+
+固定队列不是在测试代码里伪造 selected path。每题先把同一三来源 snapshot 交给公共 `GoalPlanningService`：NEVER 形成 secondary quick-answer baseline，AUTO 必须实际触发条件 L3 并选择 primary 与 independent。随后 source IDs 才解析为冻结正文和 citation options。expected points 不在 snapshot 或执行 prompt 中，只由独立隐藏评审读取，因此搜索器和执行模型不能直接看到评分答案。

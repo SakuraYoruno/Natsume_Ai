@@ -408,3 +408,5 @@ Research paired execution 必须允许 baseline 与 selected 使用不同的 dur
 Provider 成本测试必须覆盖 DeepSeek V4 Flash／Pro 的 cache hit、cache miss 和 completion 价目、micro-USD 向上取整、官方 endpoint 限定、prompt token 和 cache breakdown 一致性、代理／未知模型／缺字段 fail-closed。没有 tools 字段的生产请求可证明 `tool_call_count=0`；不能从模型正文猜测。真实 D20c 预检还必须经过 canonical ModelAttempt audit，并同时出现 token、cost、provider latency、transport identity 和单次 started／succeeded 记录。
 
 Research hidden verifier 回归必须证明：新鲜 paired run 才提供进程内正文，数据库不出现正文；terminal replay 的 transient output 为空；评审输入没有 `BASELINE/SELECTED` 身份；评审 prompt digest 和 external attestation 精确进入 receipt；候选或评审 JSON 漂移、越界 score 均在写 cohort 前拒绝。
+
+固定 Research 队列的无外部调用 Gate 必须加载全部 24 题并断言：至少三个 topic；同时含本地与 Web source kind；每题 baseline 只选 secondary；每题 selected 由 AUTO L3 选择 primary＋independent；两臂 rendered prompt digest 不同；source byte count 或 digest 被改动时在 planning 前失败。dry-run 的 `external_calls` 必须为 0，不能计入收益。
