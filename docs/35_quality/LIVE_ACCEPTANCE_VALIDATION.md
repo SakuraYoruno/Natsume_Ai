@@ -552,3 +552,5 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 后续代码不继续堆提示词：Surface hard gate 在类型化 `REPAIR` 下新增 `RELATIONAL_REPAIR_SOLICITS_RESTATEMENT`，覆盖“再说一次／重新解释／告诉我哪里没听懂”等无问号祈使式索取。首次命中沿用唯一一次模型修复；第二次仍只含重述索取时，本地 fail-soft 改为不要求当前解释的承担句，同时去掉不再同义的日语 Voice payload，标记 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY` 与 `benefit_eligible=false`。真实 cohort runner 也独立把这类正文判失败，避免再次以自动绿灯盖住人感问题。Surface、DL-04、app adapter 与 runner 共 190 项通过；新 SHA 真实复验前不提升状态。
 
 `db322df18` 的全新隔离进程复验报告 SHA-256 为 `22a2f365610ee046dd537a6d7d593d67519fa37783c480e57789c7f4bc913c7b`，3 个 accepted turn 和 writer probe 通过，最终正文为“嗯，我知道这不是第一次。是我没接住你，对不起。现在你说，我听着。”。虽然它不再要求“再说一次”，但“现在你说”仍直接安排用户开口，人工体验继续失败。当前规则因此补充直接发言祈使句，允许“你愿意／想说的时候”这种自主时机；192 项非安全回归通过，新 SHA 复验前仍不算关闭。
+
+`9372ab1e3` 的第三次全新隔离复验报告 SHA-256 为 `b75df4864b63eefdde912be757c8a7a943b1b2388e87059328cb3db5d4424aec`，自动状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，writer probe 为 3 个 accepted turn、零 legacy delta、canonical progress。人工逐轮正文检查得到：“是我没听懂。对不起，先不解释；你愿意再说的时候，我认真听。”、“上次是我没接住，对不起。那件事让你不舒服，我记住了，你想说的时候我都在。”、“嗯，我知道。上次是我没接住，这次我会好好听。”。三轮均承担具体失误、不反击、不催用户重述，单条回归关闭；完整 48 条与独立多人盲评仍待完成。

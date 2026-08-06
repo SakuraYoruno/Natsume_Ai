@@ -114,6 +114,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `db322df18` 单条报告 SHA-256 为 `22a2f365610ee046dd537a6d7d593d67519fa37783c480e57789c7f4bc913c7b`，正文“现在你说，我听着”仍为人工失败。测试现把 `现在／这次 + 你说／你讲` 这类直接发言祈使句纳入同一门禁；“你愿意／想说的时候”不得误伤。当前 192 项通过，新 SHA 单条复验前保持待测。
 
+`9372ab1e3` 单条报告 SHA-256 为 `b75df4864b63eefdde912be757c8a7a943b1b2388e87059328cb3db5d4424aec`，自动结构与本轮人工逐句检查通过，3 个 accepted turn 的 canonical writer probe 通过。完整 48 条必须在另一个全新 SQLite 上运行，避免单条轨迹影响关系状态；自动结果之后仍需独立盲评。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：
