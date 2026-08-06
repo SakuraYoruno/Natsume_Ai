@@ -336,3 +336,7 @@ OBS 检查点生效后的真实 Gateway 三轮报告为 `dl-live-1785987851661.j
 同库关闭 OBS 后的对照报告为 `dl-live-1785994204620.json`，SHA-256 `0fb651bebb0e06db7c946f78588fffe77c4855b14cc79239b7ff137703f7a36f`；三轮 worker projection 到后续 artifact 仅 233／229／312 ms。重新启动 OBS 后直接查询 `task_execution` current 文档，单次波次从 index 到 36 个详情的更新时间跨 3,007 ms；旧批次上限 64 会在当前 36 个图规模下连续执行全部 SQLite 写事务，等待中的 Host writer 被重复抢占。无 OBS 对照只用于定位，不能计为正式服务栈性能 PASS；第二轮远端 TTS 另有约 96.5 秒物理执行尖峰，也不混入 Host 根因结论。
 
 修复将 Task 详情批次上限收窄为 16；缺失文档仍优先，所以新 Task 首波可见，既有 36 个详情约 45 秒轮转一次。每次派生 projection 提交后，OBS 线程显式留下 5 ms 无写锁窗口；Chat worker projection 则在线程中持久化并在 caller cancellation 时等待写入终局，避免 SQLite busy wait 冻结其他 ASGI 协程，同时不产生失联后台写。定向测试先证明 16／64 分批、17 次公平让锁以及阻塞 projection 时事件循环仍可推进。真实 Host／OBS 新 SHA 复验完成前，本项为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
+`ead903f66` 加载后的正式复验报告为 `dl-live-1785995815718.json`，SHA-256 `7415951164753cd00c68d55b40b35167e30feefe93d02503f259dee34f2f06ce`。Host、OBS、Nginx Monitor、Gateway、远端 Edge 与三个真实 Docker 容器同时在线；OBS daemon 连续成功且无失败波次。三轮 worker projection 到 `WORKER_USAGE` 落盘分别为 187／94／49 ms，远低于修复前 2,880 ms；到 artifact 为 1,054／269／246 ms。current 文档实际轮转的详情批次最大为 16，index 加详情最大为 17，证明配置没有只停留在单测。
+
+三轮 TaskGraph 分别为 4,899／4,903／4,736 ms，Host 终态为 7,040／7,159／6,509 ms；自动陪伴结构和旧 writer 清零通过，末轮远端 Voice 到达 `TTS_PLAYBACK_FINISHED/APPLIED`。本项因此提升为 `PASS_REAL_FULL_STACK_WRITER_FAIRNESS`。整体实时 Gate 仍失败：第二轮有一次模型语义修复，首轮 artifact 冷态尾部仍为 1,054 ms，VTS 为外部连接拒绝，人工自然度评审仍为 `PENDING`；A15 总体继续为 `INCOMPLETE`。
