@@ -328,3 +328,14 @@ python scripts/runtime/run_digital_life_scope_privacy_acceptance.py `
 ```
 
 正式收据必须使用完整 migration catalog、真实临时 SQLite、生产 `AffectFusionService`／`LifeCommandService`／`LifeCommandRepository`。四组 scope 需要同时改变 user、workspace 和 session，并确认主 scope 的 1001 条事件不会改变其他 scope digest；raw audio/image/video observation 应在 fusion 被省略，绕过 fusion 的 raw command 也必须被 reducer 拒绝。扫描范围包括 affective command、Life event、canonical snapshot 和 projection intent；不得出现原始正文 sentinel 或禁止字段。最终 snapshot 最多 4 个 active episode、8 个 component、每个 episode 16 个 evidence ref，并在新 Repository 重启重放后得到完全相同 digest。
+
+Companion Profile 的独立 Host 行为验收命令为：
+
+```powershell
+python -m pytest -q tests/integration/test_companion_profile_behavior_acceptance.py
+python scripts/runtime/run_companion_profile_behavior_acceptance.py `
+  --run-id <acceptance-run-id> `
+  --receipt <isolated-evidence-path>
+```
+
+Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Planner/Expression Delivery 组件：五条跨至少三天、helpfulness 下界不低于 0.85 且无边界违规的 aftereffect 才能开始；候选必须真实改变下一轮文本生成约束、Voice rate 和 Avatar motion，五次后效应后保持同一候选并自动激活；rollback 必须恢复精确前代的 profile identity、文本策略和两通道参数。该收据只证明 Host 生成与协议接线，不得冒充模型实际措辞或远端 Voice／Avatar 物理执行。
