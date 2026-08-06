@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 
 import pytest
@@ -7,8 +8,10 @@ import pytest
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.observability.projection_store import (
     PROJECTION_CURSOR_CONFLICT,
+    PROJECTION_DATA_INVALID,
     QueryProjectionError,
     QueryProjectionStore,
+    canonical_json,
     digest_json,
 )
 
@@ -48,6 +51,103 @@ def test_projection_rebuilds_from_immutable_journal_and_reconciles_source(tmp_pa
             assert "immutable" in str(exc)
         else:
             raise AssertionError("projection journal deletion was not fenced")
+
+
+def test_large_projection_journal_payload_is_compact_and_rebuilds_transparently(tmp_path):
+    db_path = tmp_path / "projection-compressed.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw07-compressed-journal"
+    )
+    assert migrated.success, migrated
+    store = QueryProjectionStore(db_path)
+    payload = {
+        "status": "READY",
+        "items": [
+            {"item_id": f"item-{index}", "summary": "自然陪伴投影" * 40}
+            for index in range(400)
+        ],
+    }
+
+    store.upsert("session", "index", payload, source_cursor=10)
+
+    with sqlite3.connect(db_path) as conn:
+        encoded = str(
+            conn.execute(
+                """
+                SELECT source_payload_json
+                FROM operator_query_projection_journal
+                WHERE projection_kind = 'session' AND document_key = 'index'
+                """
+            ).fetchone()[0]
+        )
+    envelope = json.loads(encoded)
+    assert isinstance(envelope, list)
+    assert envelope[0] == "Natsume.operator.query_projection.journal_payload.zlib.v1"
+    assert len(encoded.encode("utf-8")) < len(canonical_json(payload).encode("utf-8")) // 5
+    assert store.get("session", "index").payload == payload
+    assert store.journal_text_values("session", "index", "status") == frozenset({"READY"})
+
+    rebuilt = store.rebuild_from_journal("session")
+    assert rebuilt["rebuilt_count"] == 1
+    assert store.get("session", "index").payload == payload
+
+
+def test_small_legacy_journal_object_remains_readable(tmp_path):
+    db_path = tmp_path / "projection-legacy-object.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw07-legacy-journal"
+    )
+    assert migrated.success, migrated
+    store = QueryProjectionStore(db_path)
+    payload = {"status": "READY"}
+
+    store.upsert("trace", "small", payload, source_cursor=1)
+
+    with sqlite3.connect(db_path) as conn:
+        encoded = str(
+            conn.execute(
+                "SELECT source_payload_json FROM operator_query_projection_journal"
+            ).fetchone()[0]
+        )
+    assert json.loads(encoded) == payload
+    assert store.rebuild_from_journal("trace")["rebuilt_count"] == 1
+    assert store.get("trace", "small").payload == payload
+
+
+def test_compressed_projection_journal_fails_closed_on_digest_tamper(tmp_path):
+    db_path = tmp_path / "projection-compressed-tamper.sqlite3"
+    migrated = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="aw07-compressed-tamper"
+    )
+    assert migrated.success, migrated
+    store = QueryProjectionStore(db_path)
+    payload = {"status": "READY", "items": ["evidence" * 100 for _ in range(200)]}
+    store.upsert("source", "valid", payload, source_cursor=1)
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT schema_version, source_digest, source_payload_json
+            FROM operator_query_projection_journal
+            WHERE projection_kind = 'source'
+            """
+        ).fetchone()
+        envelope = json.loads(str(row[2]))
+        assert isinstance(envelope, list)
+        envelope[2] = digest_json({"status": "TAMPERED"})
+        conn.execute(
+            """
+            INSERT INTO operator_query_projection_journal(
+                schema_version, projection_kind, document_key, source_cursor,
+                source_digest, source_payload_json, source_ref, observed_ts_ms
+            ) VALUES (?, 'tampered', 'invalid', 1, ?, ?, 'test', 1)
+            """,
+            (str(row[0]), str(row[1]), canonical_json(envelope)),
+        )
+
+    with pytest.raises(QueryProjectionError) as invalid:
+        store.rebuild_from_journal("tampered")
+    assert invalid.value.reason_code == PROJECTION_DATA_INVALID
 
 
 def test_all_projection_writes_remove_task_session_trace_bodies_before_sqlite(tmp_path):

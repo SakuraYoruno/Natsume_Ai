@@ -79,6 +79,7 @@
 - [x] 验证 Sidecar 停止隔离：显式空 RuntimeRoot 不再按 18082／18180 全局兜底，主 Obs 与 Nginx PID 均保持不变且健康端点继续为 200。
 - [x] 验证分段 TTS 合成失败会结算父命令并取消兄弟分段，打断后队列归零。
 - [x] 验证 VTS 人工授权等待不会触发无界自动重连或句柄增长。
+- [ ] 关闭 OBS 派生 projection journal 写放大。代码已将超过 8 KiB 的历史公开载荷改为带大小／摘要验证的透明压缩，当前文档与 canonical ledgers 不变；旧 JSON 重放、压缩重放和篡改拒绝定向测试通过。真实 OBS 重启后必须比较新行的压缩率、单位时间写入量、重放和 Monitor 可用性，完成前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
 
 ## P1：情感生命清零项
 

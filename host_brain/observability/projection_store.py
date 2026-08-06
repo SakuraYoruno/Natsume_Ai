@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import sqlite3
 import time
+import zlib
 from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -41,6 +44,10 @@ _BOUND_LEADER_LEASE: ContextVar[ProjectionLeaderLease | None] = ContextVar(
     default=None,
 )
 _UNCONDITIONAL_CURRENT = object()
+_JOURNAL_PAYLOAD_SCHEMA = "Natsume.operator.query_projection.journal_payload.zlib.v1"
+_JOURNAL_COMPRESSION_MIN_BYTES = 8 * 1024
+_JOURNAL_MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024
+_JOURNAL_MAX_ENCODED_BYTES = ((_JOURNAL_MAX_UNCOMPRESSED_BYTES + 1024) * 4 // 3) + 4
 
 
 class QueryProjectionError(RuntimeError):
@@ -56,6 +63,118 @@ def canonical_json(value: Any) -> str:
 
 def digest_json(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _encode_journal_payload(
+    value: Mapping[str, Any],
+    *,
+    source_digest: str,
+) -> str:
+    """Compact large derived snapshots without changing their public digest.
+
+    The materialized document remains ordinary JSON for low-latency Monitor
+    reads.  Only the immutable replay journal uses this envelope, represented
+    as a JSON array so it cannot collide with a valid object payload.
+    """
+
+    raw = canonical_json(value)
+    raw_bytes = raw.encode("utf-8")
+    if (
+        len(raw_bytes) < _JOURNAL_COMPRESSION_MIN_BYTES
+        or len(raw_bytes) > _JOURNAL_MAX_UNCOMPRESSED_BYTES
+    ):
+        return raw
+    compressed = zlib.compress(raw_bytes, level=1)
+    encoded = canonical_json(
+        [
+            _JOURNAL_PAYLOAD_SCHEMA,
+            len(raw_bytes),
+            source_digest,
+            base64.b64encode(compressed).decode("ascii"),
+        ]
+    )
+    return encoded if len(encoded.encode("utf-8")) < len(raw_bytes) else raw
+
+
+def _decode_journal_payload(
+    encoded: str,
+    *,
+    expected_digest: str,
+) -> dict[str, Any]:
+    """Decode legacy object rows and bounded compressed journal envelopes."""
+
+    try:
+        stored = json.loads(encoded)
+    except json.JSONDecodeError as exc:
+        raise QueryProjectionError(
+            PROJECTION_DATA_INVALID,
+            "projection journal source_payload_json is invalid",
+        ) from exc
+
+    if isinstance(stored, dict):
+        payload = stored
+    elif (
+        isinstance(stored, list)
+        and len(stored) == 4
+        and stored[0] == _JOURNAL_PAYLOAD_SCHEMA
+    ):
+        declared_size, envelope_digest, payload_text = stored[1:]
+        if (
+            type(declared_size) is not int
+            or declared_size < 0
+            or declared_size > _JOURNAL_MAX_UNCOMPRESSED_BYTES
+            or not isinstance(envelope_digest, str)
+            or envelope_digest != expected_digest
+            or not isinstance(payload_text, str)
+            or len(payload_text) > _JOURNAL_MAX_ENCODED_BYTES
+        ):
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection journal compressed envelope is invalid",
+            )
+        try:
+            compressed = base64.b64decode(payload_text, validate=True)
+            inflater = zlib.decompressobj()
+            raw_bytes = inflater.decompress(compressed, declared_size + 1)
+            if (
+                len(raw_bytes) > declared_size
+                or inflater.unconsumed_tail
+                or not inflater.eof
+                or inflater.unused_data
+            ):
+                raise ValueError("compressed payload boundary mismatch")
+            raw_bytes += inflater.flush()
+            if len(raw_bytes) != declared_size:
+                raise ValueError("compressed payload size mismatch")
+            payload = json.loads(raw_bytes.decode("utf-8"))
+        except (
+            binascii.Error,
+            UnicodeDecodeError,
+            ValueError,
+            zlib.error,
+            json.JSONDecodeError,
+        ) as exc:
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection journal compressed payload is invalid",
+            ) from exc
+        if not isinstance(payload, dict):
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection journal payload must be an object",
+            )
+    else:
+        raise QueryProjectionError(
+            PROJECTION_DATA_INVALID,
+            "projection journal payload must be an object or supported envelope",
+        )
+
+    if digest_json(payload) != expected_digest:
+        raise QueryProjectionError(
+            PROJECTION_DATA_INVALID,
+            "projection journal payload digest mismatch",
+        )
+    return payload
 
 
 def public_projection_payload(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -406,21 +525,10 @@ class QueryProjectionStore:
             ).fetchall()
         values: set[str] = set()
         for row in rows:
-            try:
-                payload = json.loads(str(row["source_payload_json"]))
-            except json.JSONDecodeError as exc:
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal source_payload_json is invalid",
-                ) from exc
-            if (
-                not isinstance(payload, dict)
-                or digest_json(payload) != str(row["source_digest"])
-            ):
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal payload digest mismatch",
-                )
+            payload = _decode_journal_payload(
+                str(row["source_payload_json"]),
+                expected_digest=str(row["source_digest"]),
+            )
             value = payload.get(field_name)
             if isinstance(value, str) and value.strip():
                 values.add(value.strip())
@@ -560,7 +668,7 @@ class QueryProjectionStore:
                     document_key,
                     cursor,
                     source_hash,
-                    canonical_json(body),
+                    _encode_journal_payload(body, source_digest=source_hash),
                     source_reference,
                     operation_now,
                 ),
@@ -796,7 +904,7 @@ class QueryProjectionStore:
                         key,
                         source_cursor,
                         source_hash,
-                        canonical_json(body),
+                        _encode_journal_payload(body, source_digest=source_hash),
                         source_reference,
                         now,
                     ),
@@ -978,18 +1086,10 @@ class QueryProjectionStore:
         journal_head = int(rows[0]["rebuild_head"]) if rows else 0
         sources: list[tuple[str, Mapping[str, Any], int, str]] = []
         for row in rows:
-            try:
-                payload = json.loads(str(row["source_payload_json"]))
-            except json.JSONDecodeError as exc:
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal source_payload_json is invalid",
-                ) from exc
-            if not isinstance(payload, dict):
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal payload must be an object",
-                )
+            payload = _decode_journal_payload(
+                str(row["source_payload_json"]),
+                expected_digest=str(row["source_digest"]),
+            )
             sources.append(
                 (
                     str(row["document_key"]),

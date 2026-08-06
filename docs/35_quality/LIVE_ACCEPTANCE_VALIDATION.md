@@ -294,3 +294,11 @@ non-thinking 路由因此提升为 `PASS_REAL_GATEWAY_TEXT_TASKGRAPH_FINAL_TURN_
 继续对这三轮的远端 Gateway SQLite 做方向时间线核对后发现：第一轮 Reply Outbox 在 16.06 秒的平台调用后以 `GATEWAY_TRANSPORT_DELIVERY_UNCERTAIN` 进入 DLQ；第二轮 Inbox 已在此期间提交，却直到 Outbox 返回后才获得 claim。根因是 `GatewayDeliveryRuntime` 原先由一个 worker 先跑 Inbox batch、再同步跑 Outbox batch。当前代码已改为独立 `gateway-durable-inbox` 与 `gateway-durable-outbox` 线程，两个方向继续使用原稳定 worker ID 后缀、Lease、fencing token 和原 DLQ 语义；新增合同测试让 Outbox 故意阻塞并确认 Inbox 在释放前已完成。
 
 `4c66d61b8` 部署后的远端复验报告为 `dl-live-1785982868337.json`，SHA-256 `8709a206ce052a2eeb597f6ba549d3e5f98315efa3d62245a682555267208992`。同一 `:outbox` attempt 从 `1785982875004` 到 `1785982891062` 持续 16,075 ms 并进入 uncertain DLQ；其间两个 `:inbox` attempt 分别在持久化后 118／197 ms 开始，第一条在 Outbox 终态前 15,604 ms 已被领取。三轮均 `INPUT_COMPLETED/OK`、TaskGraph `COMPLETED`、Acceptance `APPROVE`，末轮 Voice 为 `APPLIED`。方向阻塞项提升为 `PASS_REAL_BLOCKING_OUTBOX_OVERLAPPED_INBOX_PROGRESS`；回复“嗯，那就好。我这边也正好闲着。”仍需人工评审，微信物理送达也没有因此变成 PASS。
+
+## 2026-08-06 A15 OBS 派生投影写放大
+
+对普通陪伴延迟做阶段拆分时，隔离 Host SQLite 的 `operator_query_projection_journal` 已占约 1.93 GB。OBS 正常运行的 5 秒窗口从 51,725 行增至 51,750 行，`source_payload_json` 总量增加 1,640,149 bytes；新增大行主要是约 853 KiB 的 Gateway source 和约 653 KiB 的 session projection。按该瞬时速率外推不具备长期性能结论，但足以证明派生读模型正在反复保存完整大快照，必须修复。
+
+代码现在保留 `operator_query_projection_document.payload_json` 为普通公开 JSON，只在 immutable journal 中把超过 8 KiB 且不超过 16 MiB 的载荷写成 zlib/base64 JSON envelope，并绑定原始 byte size 与既有 source digest。历史读取和 journal rebuild 同时支持旧对象行与新 envelope；解压有 16 MiB 上限，并拒绝非法 base64、非终止 zlib stream、尾随数据、大小或摘要漂移。7 项重放／隐私／原子切换定向集成、110 项相邻 QueryProjectionStore unit 与 1 项修正后的 composition 精确端口用例均通过；首次相邻运行暴露的唯一失败是测试 fixture 未纳入生产已经显式注入的 `episodic_store`，现已同步。
+
+当前只标记 `CODE_REMEDIATED_REAL_RETEST_PENDING`。必须重启真实 OBS，验证新大行确实采用 envelope、总压缩率、Monitor 查询、临时库重放和同链路延迟后，才能关闭该缺陷；既有 1.93 GB 历史不会被破坏性改写或冒充已经缩小。

@@ -218,6 +218,17 @@ Host lifespan 心跳分别读取 Host 自身和真实 Edge 子服务，只把明
 
 Gateway 页面同样区分服务进程、durable transport 与平台通道详情。Gateway 本身 `UP` 但平台详情尚未上报时，读模型保留 `UNKNOWN` 并显示未确认数量；只有具体平台 observation 才能改变对应状态。
 
+```text
+canonical ledgers
+→ OBS public projection
+├→ current document：普通 JSON，直接服务 Monitor 查询
+└→ immutable history：小对象保持旧 JSON；大对象使用有界 zlib/base64 envelope
+   → size + source digest 校验
+   → rebuild / history reader 透明解码
+```
+
+压缩只作用于派生 projection history。解压后的公开载荷必须与 journal `source_digest` 一致，声明大小超过上限、编码损坏、尾随数据或摘要漂移均以 `OPERATOR_PROJECTION_DATA_INVALID` 阻断；canonical 账本和当前 Monitor 读路径不经过该 envelope。
+
 ## 8. 数据保留
 
 | 数据 | 默认策略 |
