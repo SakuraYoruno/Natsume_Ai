@@ -200,6 +200,8 @@ flowchart LR
 
 当前方案显示中文文本、生成日语语音。各通道独立失败与降级，不反向修改七海情绪。
 
+Edge 回传事件按寿命分层处理。`ASR_CHUNK` 是实时传输碎片，只允许在当前进程内参与最终语句桥接，不写入 Host SQLite；`ASR_FINAL`、TTS 终态和 Avatar 终态等低频事件可进入 `voice_event_log` 供运行诊断。`voice_event_log` 不再派生 Life Memory episode，七海的长期情感与关系记忆只来自已接受的对话、Affective Life、Relationship 和 Expression receipt。这样既保留物理链路可诊断性，也避免 Edge 重放把数万条分块转写变成人生记忆并阻塞普通聊天。
+
 GPT-SoVITS persistent worker 的所有权从 `Popen` 成功开始，到 Manager 接收 READY 后才转为长期驻留。READY 超时、加载拒绝或进程异常必须先终止并等待子进程退出，再返回 TTS 失败；不得让后续请求并行堆叠新的模型 runtime。合成超时同样先释放当前 worker，下一请求才重建。该生命周期不增加 Host 对话审计，也不改变同一 expression intent／receipt identity。
 
 真实远端复验中，Edge 重启后的旧 session 命令先以 `EMBODIMENT_COMMAND_EXPIRED` fail-closed；新 fencing session 上的全新 effect 才进入 TTS，并以 `TTS_PLAYBACK_FINISHED/APPLIED` 结算。随后强制 READY timeout 的独立 worker 被同步回收，主 Edge 始终只保留一个常驻模型进程。这证明 session 恢复、TTS 生命周期和物理播放是三条分别判定的边界。

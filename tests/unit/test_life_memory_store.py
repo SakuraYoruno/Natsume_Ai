@@ -63,10 +63,11 @@ def test_same_chat_request_creates_one_life_episode_with_many_evidence() -> None
         ledger.close()
 
 
-def test_voice_gateway_anchor_binds_person_and_message_ref(monkeypatch) -> None:
-    monkeypatch.setenv("HOST_DEFAULT_USER_ID", "owner")
+def test_voice_event_stays_in_operational_log_without_life_memory_anchor() -> None:
+    anchors: list[dict] = []
+
     def _write_anchor(**anchor) -> None:
-        LifeMemoryStore(ledger=ledger).write_background_episode(**anchor)
+        anchors.append(dict(anchor))
 
     ledger = SQLiteLedger(
         db_path=":memory:",
@@ -97,12 +98,11 @@ def test_voice_gateway_anchor_binds_person_and_message_ref(monkeypatch) -> None:
             }
         )
 
-        episode = ledger.life_episode[0]
-        metadata = episode["metadata"] if isinstance(episode["metadata"], dict) else json.loads(episode["metadata"])
-        assert episode["person_id"] == "owner"
-        assert "gateway://message/msg-voice-1" in metadata["evidence_refs"]
-        assert "chat://person/owner" in metadata["evidence_refs"]
-        assert any(row["source_ref"] == "voice://event/req-voice-gateway" for row in ledger.life_evidence)
+        assert len(ledger.voice_event_log) == 1
+        assert ledger.voice_event_log[0]["request_id"] == "req-voice-gateway"
+        assert anchors == []
+        assert ledger.life_episode == []
+        assert ledger.life_evidence == []
     finally:
         ledger.close()
 

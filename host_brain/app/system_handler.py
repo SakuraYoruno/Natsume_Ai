@@ -77,6 +77,11 @@ ALLOWED_EDGE_EVENT_TYPES: frozenset[str] = frozenset(
 
 ALLOWED_EDGE_EVENT_SOURCES: frozenset[str] = frozenset({"edge", "edge_client", "host_edge_bridge"})
 
+# ASR_CHUNK is a short-lived transport fragment.  It may still feed the
+# in-memory ASR bridge when it represents a final utterance, but persisting
+# every fragment creates an unbounded privacy/IO hotspot after Edge replay.
+_NON_PERSISTED_EDGE_EVENT_TYPES: frozenset[str] = frozenset({"ASR_CHUNK"})
+
 _EDGE_ASR_BRIDGE_EVENT_TYPES: frozenset[str] = frozenset(
     {"ASR_CHUNK", "ASR_FINAL", "ASR_RESULT", "USER_INPUT_FINAL"}
 )
@@ -739,19 +744,20 @@ def receive_edge_events_response(
                 detail=f"Unknown edge event_type: {event_type}",
             )
         try:
-            ledger.log_voice_event({
-                "request_id": request_id,
-                "session_id": session_id,
-                "event_type": normalized_event_type,
-                "direction": str(raw.get("direction") or "EDGE_TO_HOST"),
-                "seq": raw.get("seq") if isinstance(raw.get("seq"), int) else None,
-                "status": str(raw.get("status") or "RECEIVED"),
-                "reason_code": str(raw.get("reason_code") or "").strip() or None,
-                "stage": str(raw.get("stage") or "").strip() or None,
-                "detail": str(raw.get("detail") or "").strip() or None,
-                "payload": raw.get("payload") or {},
-                "ts_ms": int(ts_val),
-            })
+            if normalized_event_type not in _NON_PERSISTED_EDGE_EVENT_TYPES:
+                ledger.log_voice_event({
+                    "request_id": request_id,
+                    "session_id": session_id,
+                    "event_type": normalized_event_type,
+                    "direction": str(raw.get("direction") or "EDGE_TO_HOST"),
+                    "seq": raw.get("seq") if isinstance(raw.get("seq"), int) else None,
+                    "status": str(raw.get("status") or "RECEIVED"),
+                    "reason_code": str(raw.get("reason_code") or "").strip() or None,
+                    "stage": str(raw.get("stage") or "").strip() or None,
+                    "detail": str(raw.get("detail") or "").strip() or None,
+                    "payload": raw.get("payload") or {},
+                    "ts_ms": int(ts_val),
+                })
             accepted_count += 1
 
             bridge_candidate = _extract_edge_asr_bridge_candidate(

@@ -478,3 +478,11 @@ runner 现将三个边界显式分离：文本模式不等待 Edge，只对 Expr
 第一次修正后真实预检在 54.8 秒内完成三轮，文本结构与 Gateway durable-outbox 3/3 通过；逐轮 Gateway→Host terminal 为 20,523／13,281／17,421 ms，TaskGraph 为 14,743／8,440／6,066 ms，Surface commit 为 3,323／2,372／7,266 ms。旧 runner 的 90 秒末轮 Expression 等待已被消除。报告最终只因快照时 `relationship_life_event_v1` 尚未前进而失败；稍后重开同一 SQLite 已从 181 增至 182，证明这是可见回复后的 background convergence，而非 relationship writer 缺失。
 
 runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer 收敛等待。它只允许等待 Affect／Relationship 尚未前进；旧 writer 变化、表缺失等失败立即终止，且该时长不进入 turn latency。24 项 runner 定向单测通过后状态仍为 `CODE_REMEDIATED_REAL_RETEST_PENDING`；需要在干净 Host/Gateway acceptance 数据根复验，当前复用多轮的 Host DB 仍有 48 条历史 PENDING effect，不能作为性能基线。48 条文本队列及三人盲评尚未完成。Pentest、渗透和网络安全专项按用户范围明确记为 `NOT_RUN_USER_SKIPPED`，不得写成 PASS，也不阻断其余非安全验收继续执行。
+
+## 2026-08-06 A15 Edge 事件写压力修复
+
+换用全新 Host SQLite 与 Gateway 数据根后的三轮真实文本预检已达到 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`：canonical affect 增加 8、relationship 增加 3、Life event 增加 16、Gateway durable outbox 为 3/3，legacy writer 增量为 0；报告 SHA-256 为 `e91cd984414c90aaef2277cf9cb0f13461dc3cb8e841bff15ac4a33947385170`。但 Gateway→Host terminal 仍分别耗时 14,917／10,046／23,699 ms，明显不是模型本身造成；单轮 profile 也显示 7,330 ms 总时延中 provider 仅 1,922 ms。
+
+运行期采样定位到远端 Edge 重连后向新 Host 重放了 11,868 条 `ASR_CHUNK`。旧路径把每条 chunk 写入 `voice_event_log`，再同步派生 Life Memory episode/evidence，多条 asyncio worker 因 SQLite 写事务互相等待，Host 与 OBS 日志出现 `database is locked`。这既是普通对话延迟热点，也违反“原始／分块语音不进入长期情感记忆”的边界。
+
+本次窄修复保留最终 ASR 的实时桥接语义，但不持久化 `ASR_CHUNK`；低频语音终态仍写 `voice_event_log`，所有 voice operational event 停止派生 Life Memory。Affective Life、Relationship、Surface delivery 和 Expression receipt 的 canonical writer 均未改变。直接受影响回归为 95 passed，SQLite／时间线／RPC 合同及 OBS 相邻回归再通过 116 项，合计 211 passed；状态暂为 `CODE_REMEDIATED_REAL_RESTART_RETEST_PENDING`，必须在另一份全新 Host SQLite 上重启并确认 chunk 落盘与 voice→Life anchor 均为 0，才能继续 48 条队列。Pentest 与网络安全保持 `NOT_RUN_USER_SKIPPED`。

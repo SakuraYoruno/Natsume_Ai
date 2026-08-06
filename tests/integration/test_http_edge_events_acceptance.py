@@ -83,7 +83,7 @@ def test_v1_edge_events_http_accepts_valid_batch(monkeypatch, tmp_path: Path) ->
     assert payload["success"] is True
     assert payload["accepted"] == 1
     assert payload["rejected"] == 0
-    assert ledger.rows[0]["event_type"] == "ASR_CHUNK"
+    assert ledger.rows == []
 
 
 def test_v1_edge_events_http_rejects_unknown_event_type(monkeypatch, tmp_path: Path) -> None:
@@ -286,7 +286,7 @@ def test_v1_edge_events_http_partial_batch_reports_partial_fail(monkeypatch, tmp
     assert payload["rejected"] == 1
     assert payload["reason_code"] == "RPC_EVENT_BATCH_PARTIAL_FAIL"
     assert payload["rejected_indices"] == [1]
-    assert len(ledger.rows) == 1
+    assert ledger.rows == []
 
 
 def test_v1_edge_events_http_low_confidence_asr_does_not_bridge(monkeypatch, tmp_path: Path) -> None:

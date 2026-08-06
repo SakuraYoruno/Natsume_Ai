@@ -432,3 +432,5 @@ Code filesystem-facing runtime/run component 必须为固定长度摘要，不�
 固定 Code objective 必须严格等于中性合同，不能包含任一任务的正确操作名称。loader 对 descriptive objective fail-closed；测试断言 20 题 objective 完全一致。预检若 baseline 与 selected 同时通过，只能说明 cohort 无判别力，不能计作 PlanningSearch 收益，必须修订版本后完整重跑。
 
 `3eaa5486b` 的 v3 真实证据已通过：20/20 baseline hidden fail、20/20 selected hidden pass，两臂 static 20/20，diff-risk 均值相同。回归必须继续校验文件 receipt digest、SQLite reopen 的 20 member／1 report、40 started＋40 succeeded model audit、空 private/worktree 目录、干净 protected source，以及 durable JSON 不含 selected evidence／hidden cases；任何一项失败都不得沿用本次 PASS。
+
+数字生命真实文本队列还必须检查 Edge 重放的写压力边界：`ASR_CHUNK` 请求可被 Host 接受，并在满足 final／confidence 条件时进入当前回合 ASR bridge，但不得写入 `voice_event_log`、Life episode 或 Life evidence；`ASR_FINAL` 与 TTS／Avatar 终态仍应写入运维日志。任何 `voice_event_log` 事件都不得直接派生 Life Memory，长期情感事实只能由 canonical 对话、Affective Life、Relationship 和 Expression receipt 生成。代码回归通过后必须换用全新 Host SQLite 重启远端连接，确认 `ASR_CHUNK=0`、voice→Life anchor 增量为 0，并重测三轮 Gateway→Host 延迟；未完成真实重启前只标记 `CODE_REMEDIATED_REAL_RESTART_RETEST_PENDING`。

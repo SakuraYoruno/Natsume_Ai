@@ -93,68 +93,6 @@ def _join_detail(*parts: Any, limit: int = 900) -> str:
     return _clean_anchor_text(" | ".join(cleaned), limit=limit)
 
 
-def _json_object(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return dict(value)
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    return {}
-
-
-def _voice_gateway_evidence_refs(payload: dict[str, Any], *, request_id: Any, session_id: Any) -> list[str]:
-    meta = _json_object(payload.get("payload"))
-    platform = str(meta.get("platform") or meta.get("reply_channel") or "").strip().lower()
-    source = str(meta.get("source") or meta.get("input_source") or "").strip().lower()
-    conversation_id = str(meta.get("conversation_id") or meta.get("reply_target") or session_id or "").strip()
-    msg_id = str(meta.get("msg_id") or meta.get("message_id") or meta.get("message_seq") or "").strip()
-    is_gateway = (
-        platform in {"qq", "wechat", "gateway", "onebot", "wecom", "feishu"}
-        or source == "gateway"
-        or conversation_id.startswith(("qq_", "wechat_", "wx_", "wecom_", "feishu_"))
-    )
-    if not is_gateway:
-        return []
-    refs: list[str] = []
-    if msg_id:
-        refs.append(f"gateway://message/{msg_id}")
-    elif request_id:
-        refs.append(f"gateway://message/{request_id}")
-    if conversation_id:
-        refs.append(f"gateway://conversation/{conversation_id}")
-    return refs
-
-
-def _voice_gateway_person_id(payload: dict[str, Any], *, session_id: Any) -> str | None:
-    meta = _json_object(payload.get("payload"))
-    platform = str(meta.get("platform") or meta.get("reply_channel") or "").strip().lower()
-    source = str(meta.get("source") or meta.get("input_source") or "").strip().lower()
-    conversation_id = str(meta.get("conversation_id") or meta.get("reply_target") or session_id or "").strip()
-    is_gateway = (
-        platform in {"qq", "wechat", "gateway", "onebot", "wecom", "feishu"}
-        or source == "gateway"
-        or conversation_id.startswith(("qq_", "wechat_", "wx_", "wecom_", "feishu_"))
-    )
-    if not is_gateway:
-        return None
-    try:
-        from host_brain.bond.user_identity import resolve_person_id  # noqa: PLC0415
-
-        return resolve_person_id(
-            None,
-            user_id=str(meta.get("person_id") or meta.get("user_id") or "").strip() or None,
-            session_id=str(session_id or "").strip() or None,
-            platform=platform or None,
-            from_id=str(meta.get("from_id") or "").strip() or None,
-            conversation_id=conversation_id or None,
-        )
-    except Exception:
-        return None
-
-
 class SQLiteLedger(
     LedgerFetchMixin,
     LedgerLogMixin,
@@ -743,38 +681,6 @@ class SQLiteLedger(
     def log_voice_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in VOICE_EVENT_COLUMNS}
         self._insert("voice_event_log", payload)
-        evidence_refs = _voice_gateway_evidence_refs(
-            payload,
-            request_id=payload.get("request_id"),
-            session_id=payload.get("session_id"),
-        )
-        person_id = _voice_gateway_person_id(payload, session_id=payload.get("session_id"))
-        self._log_life_audit_anchor(
-            event_source="voice",
-            event_id=str(payload.get("request_id") or f"{payload.get('event_type') or 'voice'}:{payload.get('seq') or 0}"),
-            request_id=payload.get("request_id"),
-            person_id=person_id,
-            session_id=payload.get("session_id"),
-            task_id=payload.get("event_type") or "voice_event",
-            status=payload.get("status"),
-            reason_code=payload.get("reason_code"),
-            detail=_join_detail(
-                "voice",
-                payload.get("event_type"),
-                payload.get("direction"),
-                payload.get("status"),
-                payload.get("detail"),
-            ),
-            ts_ms=payload.get("ts_ms"),
-            metadata={
-                "audit_table": "voice_event_log",
-                "direction": payload.get("direction"),
-                "seq": payload.get("seq"),
-                "payload": payload.get("payload"),
-                "evidence_refs": evidence_refs,
-                "resolved_person_id_source": "voice_gateway_payload" if person_id else None,
-            },
-        )
 
     def log_retrieval_event(self, row: dict[str, Any]) -> None:
         payload = {key: row.get(key) for key in RETRIEVAL_EVENT_COLUMNS}

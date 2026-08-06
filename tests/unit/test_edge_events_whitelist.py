@@ -35,7 +35,7 @@ async def _noop_input_dispatcher(**_kwargs) -> None:  # noqa: ANN003
     return None
 
 
-def test_edge_events_accepts_whitelisted_event_type() -> None:
+def test_edge_events_accepts_asr_chunk_without_persisting_transport_fragment() -> None:
     ledger = _LedgerStub()
     request_body = EdgeEventsRequest(
         events=[
@@ -56,8 +56,33 @@ def test_edge_events_accepts_whitelisted_event_type() -> None:
     )
 
     assert response.accepted == 1
+    assert ledger.rows == []
+
+
+def test_edge_events_persists_terminal_asr_event() -> None:
+    ledger = _LedgerStub()
+    request_body = EdgeEventsRequest(
+        events=[
+            {
+                "event_type": "ASR_FINAL",
+                "ts_ms": int(time.time() * 1000),
+                "request_id": "req-edge-final-1",
+                "session_id": "sess-edge-final-1",
+                "payload": {"text": "hello", "final": True},
+            }
+        ]
+    )
+
+    response = receive_edge_events_response(
+        request_body=request_body,
+        get_ledger=lambda: ledger,
+        logger=_LedgerStub(),
+        input_dispatcher=_noop_input_dispatcher,
+    )
+
+    assert response.accepted == 1
     assert len(ledger.rows) == 1
-    assert ledger.rows[0]["event_type"] == "ASR_CHUNK"
+    assert ledger.rows[0]["event_type"] == "ASR_FINAL"
 
 
 def test_edge_events_rejects_unknown_event_type_with_400() -> None:

@@ -92,7 +92,7 @@ HostCommand → immutable TaskGraph → node attempt
 
 ## 7. 安全与隐私
 
-原始音视频默认只在 Edge 内存中处理；Host 保存脱敏观察摘要。外部 effect 需要明确 grant 与 Preview。用户可关闭观察、主动陪伴与学习。密钥只运行时注入，Monitor 和日志不得暴露用户正文或模型内部推理。
+原始音视频与分块 ASR 默认只在 Edge／Host 短期内存中处理；Host 只保存脱敏观察摘要和必要终态。外部 effect 需要明确 grant 与 Preview。用户可关闭观察、主动陪伴与学习。密钥只运行时注入，Monitor 和日志不得暴露用户正文或模型内部推理。
 
 ## 8. 当前状态
 
