@@ -494,6 +494,8 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "没有真实提醒／通知 effect 回执" in notification_retry_messages[-1]["content"]
     assert "只能确认七海接下来不会主动发消息" in notification_retry_messages[-1]["content"]
+    assert "好，我先不主动发消息" in notification_retry_messages[-1]["content"]
+    assert "正文不得出现‘已经／关掉／关闭／提醒／通知’" in notification_retry_messages[-1]["content"]
     work_retry_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,

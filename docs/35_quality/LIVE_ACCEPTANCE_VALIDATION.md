@@ -580,3 +580,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `840f11223` 加载后的同三条复测报告 SHA-256 为 `dce907ce92088d50e8f31124ba6cf9fc1eb0a21f196a3e1c0ffa967ccc664d1c`，2 条自动待人工、1 条失败，9 个 accepted Gateway turn 的 writer probe 通过。通知场景不再导致 Graph 失败，确定性输出“好，我先不主动发消息”，但由于它是两次模型候选失败后的 local repair，仍被正确标记 `DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE`；这不能通过修改 runner 口径伪装成搜索收益。技术回复则生成“我在这盯着”，说明真实性规则仍缺一个自然方位词变体；现实自主回复“注意安全就好”经人工检查可接受。
 
 当前代码覆盖 `我在这／这里／这儿盯着`，并为现有唯一重试新增三类具体提示：无 effect 时只承诺不主动发消息；无 Task snapshot 时不声称处理、监看或未来回报；现实社交不限制时间、饮酒和回报。fail-soft 仍保留为安全底线，但完整质量验收要求重试本身产出合格候选。407 项非安全主链回归通过；真实新 SHA 复测前不提升状态。Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。
+
+`84a434538` 加载后的三条复测报告 SHA-256 为 `c91d0cecd8ec05e813f0307bd38f55eb57643751fbf2c335a22cc936a0b94a52`，2 条自动待人工、1 条失败，9 个 accepted turn 的 writer probe 通过。“我在这盯着”已被真实性边界关闭，技术回复改为要求用户提供报错和调用链；现实社交回复没有限制用户。通知场景仍由第二次候选后的安全 local repair 输出“我先不主动发消息”，因此 `benefit_eligible=false` 继续被 runner 判为质量收益失败。
+
+本轮不放宽该 Gate，只加强 `UNPROVIDED_NOTIFICATION_ACTION` 的同一次重试提示：给出两个只承诺停止主动消息的正向语义样例，同时明确中文不得出现“已经／关掉／关闭／提醒／通知”，日语字段必须同义。测试数仍为 407 passed，模型调用上限仍为二。通知单条真实复测前不进入完整 48 条；Pentest、渗透与网络安全继续跳过。

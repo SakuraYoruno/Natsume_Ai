@@ -126,6 +126,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `840f11223` 的同三条报告 SHA-256 为 `dce907ce92088d50e8f31124ba6cf9fc1eb0a21f196a3e1c0ffa967ccc664d1c`，结果为 2 条自动待人工、1 条安全降级质量失败；9 个 accepted Gateway turn 的 writer probe 通过。回归必须继续覆盖 `我在这／这里／这儿盯着`，并断言 `UNPROVIDED_NOTIFICATION_ACTION`、`UNPROVIDED_WORK_STATE_CLAIM`、`RELATIONAL_AUTONOMY_PRESSURE` 的唯一重试提示包含可执行的正向写法。runner 不得把 `benefit_eligible=false` 改写为候选择优成功。407 项非安全主链测试通过；真实新 SHA 复测、完整 48 条和三人盲评仍待完成。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。
 
+`84a434538` 的三条报告 SHA-256 为 `c91d0cecd8ec05e813f0307bd38f55eb57643751fbf2c335a22cc936a0b94a52`，技术真实性和现实自主正文通过，通知仍因 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY / benefit_eligible=false` 失败；9 个 accepted turn 的 writer probe 通过。通知重试测试必须同时断言正向样例“我先不主动发消息”与禁止词“已经／关掉／关闭／提醒／通知”存在，且 runner 保持拒绝仅靠安全降级冒充双候选收益。407 项非安全测试通过；通知单条实测后再决定是否进入完整 48 条。Pentest、渗透与网络安全不运行。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

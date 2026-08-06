@@ -284,7 +284,9 @@ def _buffered_affective_candidate_messages(
             ),
             "UNPROVIDED_NOTIFICATION_ACTION": (
                 "当前没有真实提醒／通知 effect 回执。不要声称已经关掉、关闭或停掉；"
-                "只能确认七海接下来不会主动发消息。"
+                "只能确认七海接下来不会主动发消息。两个中文 reply_text 分别参考"
+                "‘好，我先不主动发消息。’和‘知道了，我会把主动消息停下来。’的含义；"
+                "正文不得出现‘已经／关掉／关闭／提醒／通知’，日语字段保持同义。"
             ),
             "UNPROVIDED_WORK_STATE_CLAIM": (
                 "当前没有 server-authored Task 运行快照。不要声称七海正在处理、盯着后台、"
