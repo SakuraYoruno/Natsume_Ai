@@ -404,6 +404,10 @@ def _misplaced_emotional_containment(
 ) -> bool:
     if _emotional_containment_context(request):
         return False
+    if _relational_repair_grounded(request, text):
+        # "我没接住" owns a concrete failure in a repair turn; it is not the
+        # generic promise "我能接住你" that this detector was built to reject.
+        return False
     return bool(_MISPLACED_EMOTIONAL_CONTAINMENT_RE.search(text))
 
 

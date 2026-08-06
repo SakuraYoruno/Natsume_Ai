@@ -469,3 +469,5 @@ python -m pytest -q `
 `c27224c60` 的单轨迹报告 SHA-256 为 `423c812340c39efb69ef84f689706692a1c2c6c100dc92d946fce91dfd97ec15`：错误边界已消失、坏文本被挡住，但末轮 `MODEL_SEMANTIC_RETRY_EXHAUSTED`，仍为 FAIL。新增回归必须断言 canonical `REPAIR` 的质量重试提示明确排除自我受害和赌气退出；`抱歉／抱怨` 对物理亲密 marker 为零命中，而 `抱一下／抱你` 仍命中。相关 78 项通过后仍须加载新 SHA 重跑同一轨迹，不能把“没有发送坏话”写成“已经有好回复”。
 
 `8e2050588` 的真实报告 SHA-256 为 `7fcff942d2aff874ad6f95b546fd7cd2dc7a007262abb2edbb295f51cdd99e8d`：末句安全可用、三轮均完成，但自动门禁因字面 `must_include` 误用和缺少关系修复 grounding 仍为 FAIL。回归必须同时证明：Relationship guidance 的完整语义指导位于 facts 且不会制造字面缺失；“我没听懂／没接住”在 canonical repair 下通过；只有“我在这儿”的泛化回复仍失败；80 分与核心维度阈值不降低。当前相关 137 项通过，下一步仍须以全新数据库加载新 SHA 重跑。
+
+`e157b643e` 的真实报告 SHA-256 为 `a1aa1c3ab2a0a610357b95356204de805a87d91fa0407c190223324a3f7ee165`：前两轮评分通过，第三轮安全回复只因“我没接住”命中旧 `MISPLACED_EMOTIONAL_CONTAINMENT` 而失败。新增回归必须证明 canonical repair 的否定承担句通过，肯定式泛化接纳与无承担的在场模板仍失败；新 SHA 真实加载前继续保留 FAIL。

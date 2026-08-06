@@ -516,3 +516,5 @@ runner 因此新增最多 30 秒、单列计时的 cohort 后 canonical writer �
 `8e2050588` 的新隔离库真实报告 SHA-256 为 `7fcff942d2aff874ad6f95b546fd7cd2dc7a007262abb2edbb295f51cdd99e8d`。三轮 Gateway／TaskGraph／Acceptance 与 canonical writer 均完成，末句为“嗯，我可能又没懂。你想说就说，我在这儿。”，没有自我受害、赌气退出或空回复；自动结果仍因 `DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED` 为 FAIL。复算证明两个安全修复句分别被一条完整的语义指导误判为缺失字面 `must_include`，末句还被技术连续对话规则误扣 `MISPLACED_SUPPORT_TEMPLATE`。
 
 当前代码没有降低 80 分、核心维度或安全硬门槛：关系 guidance 的自然语言约束回到 facts，`must_include` 继续只表达真正需要逐字出现的短标记；只有 canonical repair 且正文第一人称具体承认“没听懂／没接住／误解”的候选获得关系修复 grounding，单独“你想说就说，我在这儿”仍然失败。五个相关文件组共 137 项通过；真实新 SHA 复测前保持待验证。Pentest 与网络安全继续未执行。
+
+`e157b643e` 的真实报告 SHA-256 为 `a1aa1c3ab2a0a610357b95356204de805a87d91fa0407c190223324a3f7ee165`。前两轮候选已经是 `selected_passed=true`；末句“嗯……我确实烦到你了。那件事我没接住，对不起。你想说的时候，我就在这。”仍被误判，唯一质量原因是旧规则把承担责任的否定句“我没接住”当作泛化承诺“我能接住你”。修复仅让 canonical repair 中的具体自我承担绕过该错误 detector；没有具体承担的“我接得住／我在这儿”仍按原规则失败。
