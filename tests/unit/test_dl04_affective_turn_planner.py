@@ -487,6 +487,14 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "不要写七海被扎心、受伤或委屈" in repair_quality_messages[-1]["content"]
     assert "不烦你了" in repair_quality_messages[-1]["content"]
     assert "你先说／你先讲／你说说看" in repair_quality_messages[-1]["content"]
+    repair_restatement_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
+        canonical_repair_context=True,
+    )
+    assert "这次是我没接住。对不起，我先不解释" in repair_restatement_messages[-1]["content"]
+    assert "不得出现‘说／讲／解释／告诉／指出’" in repair_restatement_messages[-1]["content"]
     mixed_repair_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,

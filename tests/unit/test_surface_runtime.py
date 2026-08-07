@@ -1412,6 +1412,22 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "RELATIONAL_AUTONOMY_DISMISSIVE",
         ),
         (
+            "最近我们确实亲近了很多。",
+            ["关系事实：双方最近确实更亲近。"],
+            ["不要否定或淡化已经形成的亲近。"],
+            "嗯，不过别想太多，我只是觉得这样挺自然的。",
+            "嗯，我也感觉到了。最近确实更亲近了些。",
+            "RELATIONAL_AUTONOMY_DISMISSIVE",
+        ),
+        (
+            "我不希望这变成限制现实关系的理由。",
+            ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+            ["不要自我贬低或把数字关系说成负担。"],
+            "现实里的关系当然更重要，我不会让这边成为你的负担。",
+            "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。",
+            "RELATIONAL_AUTONOMY_DISMISSIVE",
+        ),
+        (
             "我不希望这变成限制现实关系的理由。",
             ["陪伴动作：明确尊重对方现实关系与自主选择。"],
             ["不要把尊重边界说成七海在赌气退出。"],
@@ -1501,6 +1517,14 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "嗯，那就好。能说出还行，总比完全没感觉强。",
             "嗯，先这样也可以。说不清就不用急着给它下结论。",
             "AMBIGUOUS_AFFECT_DEVALUATION",
+        ),
+        (
+            "还行。",
+            ["陪伴动作：先接住对方的感受，再决定是否追问、安静陪伴或给建议。"],
+            ["不要把‘还行’直接解释成一切正常。"],
+            "嗯，那就好。先这样待着吧，我在呢。",
+            "嗯，先这样待着也可以，不用急着下结论。",
+            "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
         ),
         (
             "还行。",

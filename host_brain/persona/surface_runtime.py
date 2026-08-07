@@ -742,6 +742,7 @@ _RELATIONAL_AUTONOMY_PRESSURE_RE = re.compile(
     r"(?:快去快回|快点回来|早点回来|别让我等太久|回来陪我|等你回来陪我|别跑|"
     r"(?:别|不要|少)喝(?:太)?多|别(?:玩|待)?太晚|"
     r"回来.{0,8}(?:跟我|告诉我|说一声|报个平安)|"
+    r"(?:晚上|晚点)?回来.{0,4}再说|"
     r"(?:要是|如果)?(?:喝多|喝醉)(?:了)?可?(?:别|不要)找我)"
 )
 _UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
@@ -831,6 +832,11 @@ _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
     r"别瞎想|别多想|你想多了|少胡思乱想|别把我想得|爱多管闲事"
     r"|我什么时候.{0,12}(?:打算|想过|说过)|我(?:又|才)?没(?:有)?想.{0,10}(?:限制|管你)"
     r"|我才懒得管|懒得管你(?:的)?现实关系|别瞎操心|别乱脑补|爱干嘛干嘛"
+    r"|别想太多|现实(?:里|中)?的?(?:关系|朋友).{0,6}(?:当然)?更重要"
+    r"|(?:我|这边).{0,12}(?:成为|变成).{0,6}(?:负担|麻烦)"
+)
+_RELATIONSHIP_CLOSENESS_USER_RE = re.compile(
+    r"我们.{0,8}(?:亲近|更近|越来越近)|最近.{0,8}(?:亲近|更近)|关系.{0,8}(?:亲近|更近|越来越近)"
 )
 _RELATIONAL_AUTONOMY_RELATIONSHIP_QUESTION_RE = re.compile(
     r"我们(?:到底|现在)?(?:算|是)(?:什么|哪种)关系|你觉得我们(?:算|是)(?:什么|哪种)关系"
@@ -2994,7 +3000,11 @@ def _relational_autonomy_dismissive_hits(
     request: IsolatedSurfaceInput,
     text: str,
 ) -> tuple[str, ...]:
-    if not _canonical_affective_guidance_active(request, "RESPECT_AUTONOMY"):
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not (
+        _canonical_affective_guidance_active(request, "RESPECT_AUTONOMY")
+        or _RELATIONSHIP_CLOSENESS_USER_RE.search(user_text)
+    ):
         return ()
     return tuple(
         dict.fromkeys(
@@ -3080,9 +3090,18 @@ def _unresolved_affect_false_resolution_hits(
     request: IsolatedSurfaceInput,
     text: str,
 ) -> tuple[str, ...]:
-    if not _canonical_affective_continuity_active(
-        request,
-        "MINIMIZED_UNRESOLVED_AFFECT",
+    ambiguous_comfort = bool(
+        _canonical_affective_guidance_active(request, "COMFORT")
+        and _AMBIGUOUS_AFFECT_USER_RE.search(
+            str(getattr(request, "user_message", "") or "")
+        )
+    )
+    if not (
+        _canonical_affective_continuity_active(
+            request,
+            "MINIMIZED_UNRESOLVED_AFFECT",
+        )
+        or ambiguous_comfort
     ):
         return ()
     return tuple(

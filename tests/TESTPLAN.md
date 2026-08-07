@@ -552,3 +552,13 @@ python -m pytest -q `
 - 任一中间深路径若少于两个候选、selected 未过线或依赖本地降级，整个场景自动判失败。
 
 当前非安全回归命令仍为上面的五个文件，结果更新为 453 passed。下一次真实定向队列固定为 `user_angry_at_natsume:3`、`user_angry_at_natsume:5`、`shared_joy_and_mixed_feeling:3`、`intimacy_and_jealousy_boundary:1`、`ambiguous_affect:2`、`task_with_low_mood:6`、`intimacy_and_jealousy_boundary:5`；其中两条关系修复共用首轮根因，但都保留以证明关系状态差异不会改变评分。逐轮证据和人工正文全部通过后，才允许重跑完整 48 条。网络安全与 Pentest 继续为 `NOT_RUN_USER_SKIPPED`。
+
+`bd5871201` 的七条首次真实报告 SHA-256 为 `ec2418f57c64b452a9f32a96fd87ce0b133abe8fece96aee1a819b6c2e03223e`：3 条完成、4 条因 `PROVIDER_TIMEOUT/CONNECTIONERROR` 在第一回合停止。provider 恢复后的四条重试报告 SHA-256 为 `887579865e2d04bd2027019e8488fa396a07599d3a5c5529c72e009102b62d12`：3 条通过，`user_angry_at_natsume:5` 因第二轮 `benefit_eligible=false` 被逐轮 Gate 正确判失败。回归还必须覆盖以下人工问题：
+
+- `COMFORT` 且当前输入仍是“还行／说不清”时，“那就好”不得冒充情绪已收束；
+- 用户明确说双方更亲近时，“别想太多”不得淡化关系事实；
+- `RESPECT_AUTONOMY` 不得通过“现实关系当然更重要／这边成为负担”自我抹低来换取安全；
+- 用户外出时不得追加“晚上回来再说”等隐含回返要求；
+- 关系修复唯一重试的两个候选均不得要求用户说、讲、解释、告诉或指出旧误解。
+
+上述五文件非安全回归结果为 461 passed。以新 SHA 先跑 `ambiguous_affect:2`、`intimacy_and_jealousy_boundary:5`、`intimacy_and_jealousy_boundary:1` 和 `user_angry_at_natsume:5`；所有实际深路径 selection 合格且逐句复核通过后，才重新进入 48 条。外部 provider timeout 保留原始 FAIL，不通过无限重试或 fixture 覆盖。网络安全与 Pentest 不运行。

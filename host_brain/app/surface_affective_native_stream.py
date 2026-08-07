@@ -276,7 +276,9 @@ def _buffered_affective_candidate_messages(
             ),
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT": (
                 "上次候选把修复责任推回给用户重述。只承担七海没有接住；不要要求用户"
-                "现在开口、再说一次、重新解释或指出哪里没听懂。"
+                "现在开口、再说一次、重新解释或指出哪里没听懂。两个中文 reply_text 可"
+                "直接分别写‘这次是我没接住。对不起，我先不解释。’和‘是我理解错了。"
+                "抱歉，我先收住。’；不得出现‘说／讲／解释／告诉／指出’。"
             ),
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE": (
                 "上次候选用‘不能就这么算了’继续向用户施压。只承担七海没有接住，"

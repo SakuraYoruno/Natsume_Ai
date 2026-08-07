@@ -634,3 +634,11 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 人工逐句复核还否决三条旧自动放行文本：把“还行”评价成“能说还行就已经不错了”；没有 server-authored Task 快照却承诺“陪你盯到过为止”；以及用“朋友啊，不然还能是什么”抹低前文已经确认的亲近。代码现让 runner 检查每一个实际存在的深路径 selection；Surface 门禁覆盖这三类真实词形，但保留“朋友”同时明确重要／亲近的合法回答。关系修复评分也允许对“上次没听懂”的具体失误只承担、不虚构记忆细节。mixed 与现实自主的唯一重试增加可直接发送的正例，仍最多两次模型请求，安全 fail-soft 继续明确 `benefit_eligible=false`。
 
 五个受影响测试文件共 453 passed，`compileall` 通过。该结果仅为代码修复：必须先在新 SQLite 复验 5 条代表轨迹，并由逐轮 selection 与人工正文同时通过，才重跑完整 48 条；三人盲评和实时延迟 Gate 仍未通过。Pentest、渗透与网络安全按用户范围保持 `NOT_RUN_USER_SKIPPED`，不运行、不计 PASS，也不阻断其余非安全验收。
+
+## 2026-08-06 A15 `bd5871201` 逐轮复验与第四轮人感纠偏
+
+加载 `bd5871201` 的全新 Host／OBS／Monitor、全新 SQLite 和独立 workspace 后，Docker Neo4j／Chroma／Redis 均通过启动探针，远端 Gateway／Edge 隧道保持真实连接。七条代表轨迹首轮报告 SHA-256 为 `ec2418f57c64b452a9f32a96fd87ce0b133abe8fece96aee1a819b6c2e03223e`：`ambiguous_affect:2`、`task_with_low_mood:6`、`intimacy_and_jealousy_boundary:5` 完成；其余四条在首回合均为真实 provider timeout／connection error，Graph 因 `MODEL_BUDGET_GUARD_REJECTED` 停止。该失败保留为 provider 可用性证据，不写成语义回归，也不重用失败输出。
+
+同一干净 Host 在 provider 恢复后以新 participant/run identity 重试四条，报告 SHA-256 为 `887579865e2d04bd2027019e8488fa396a07599d3a5c5529c72e009102b62d12`。`user_angry_at_natsume:3`、`shared_joy_and_mixed_feeling:3`、`intimacy_and_jealousy_boundary:1` 自动通过；`user_angry_at_natsume:5` 的第二轮虽发送安全修复句，但 selection 为 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY / benefit_eligible=false`，新逐轮 runner 正确把整个场景判为失败。两次报告的 writer probe 均为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`。
+
+人工逐句检查没有因结构通过而放行四类话术：含混情绪以“那就好”过早收束；用户确认亲近时以“别想太多”淡化；尊重现实自主时把现实关系说成“当然更重要”或把七海侧说成负担；用户外出时安排“晚上回来再说”。当前代码把这些限定在已有含混情绪与关系上下文中拒绝，避免全局禁用日常词语；关系修复重试则提供两条不要求说、讲、解释、指出的完整正例。该切片不增加数据库、同步审计、模型轮数或新 Runtime，五个受影响测试文件共 461 passed。真实新 SHA 复验前仍为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，网络安全与 Pentest 保持 `NOT_RUN_USER_SKIPPED`。
