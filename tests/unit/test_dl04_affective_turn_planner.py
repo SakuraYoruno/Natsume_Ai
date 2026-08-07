@@ -22,6 +22,7 @@ from host_brain.digital_life.affective_turn_planner import (
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
 from host_brain.persona.surface_runtime import build_isolated_surface_input
 from host_brain.surface_runtime.input_compiler import (
+    _affective_task_mode_for_turn,
     build_surface_main_chain_input_from_surface_reply_input,
 )
 
@@ -91,6 +92,49 @@ def test_user_sadness_does_not_mirror_into_natsume_self_affect() -> None:
     assert guidance.plan.candidate_count == 1
     assert "opaque digest only" not in str(guidance.plan.as_dict())
     assert any("不要把用户观察到的情绪直接说成七海自己的情绪" in item for item in guidance.must_not_do)
+
+
+def test_explicit_ambiguous_affect_uses_bounded_two_candidate_path() -> None:
+    guidance = build_affective_turn_guidance(
+        emotion_context=_context(),
+        request_id="request-ambiguous-affect",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        task_mode="ambiguous_affect",
+        created_at_ms=1_900_000_000_000,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "COMFORT"
+    assert guidance.plan.generation_mode == "BUFFERED_CANDIDATE_SELECTION"
+    assert guidance.plan.candidate_count == 2
+    assert any("还不能给当前感受命名" in item for item in guidance.facts)
+
+
+def test_affective_task_mode_preserves_technical_and_ambiguous_continuity() -> None:
+    technical_facts = [
+        "真实最近对话窗口：用户说报错今晚必须修，Natsume 请对方贴代码。"
+    ]
+    ambiguous_facts = [
+        "真实最近对话窗口：用户说自己也说不清现在是什么感觉。"
+    ]
+
+    assert _affective_task_mode_for_turn(
+        task_mode="default_text",
+        user_message="陪我一步步做。",
+        facts=technical_facts,
+    ) == "technical_help"
+    assert _affective_task_mode_for_turn(
+        task_mode="default_text",
+        user_message="还行。",
+        facts=ambiguous_facts,
+    ) == "ambiguous_affect"
+    assert _affective_task_mode_for_turn(
+        task_mode="default_text",
+        user_message="今天随便聊聊。",
+        facts=technical_facts,
+    ) == "default_text"
 
 
 @pytest.mark.parametrize(

@@ -322,6 +322,7 @@ def build_affective_turn_guidance(
         or appraisal_kind in _APPRAISAL_CANDIDATE_SELECTION_KINDS
         or continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
         or _has_low_confidence_or_conflicting_observation(observations)
+        or mode == "ambiguous_affect"
     )
     generation_mode = "BUFFERED_CANDIDATE_SELECTION" if high_ambiguity else "STREAM_ONE"
     candidate_count = 2 if high_ambiguity else 1
@@ -444,9 +445,9 @@ def build_affective_turn_guidance(
     )
     return AffectiveTurnGuidance(
         plan=plan,
-        facts=(*_facts_for_plan(plan), *_continuity_facts(continuity_kind)),
+        facts=(*_facts_for_plan(plan, task_mode=mode), *_continuity_facts(continuity_kind)),
         must_not_do=(
-            *_must_not_for_plan(plan),
+            *_must_not_for_plan(plan, task_mode=mode),
             *_continuity_must_not_do(continuity_kind),
         ),
         style_anchor=(
@@ -888,7 +889,11 @@ def _profile_style_anchors(
     return tuple(anchors)
 
 
-def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
+def _facts_for_plan(
+    plan: AffectiveTurnPlanV1,
+    *,
+    task_mode: str = "",
+) -> tuple[str, ...]:
     act = plan.companion_act.kind
     facts = [
         "本轮已冻结七海自己的情感与关系边界；你只负责把它自然写成一句真实的私聊，不要替她重判情绪、关系或权限。",
@@ -915,10 +920,19 @@ def _facts_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         facts.append("陪伴动作：可以一起开心、轻轻打趣，但不借热闹升级亲密或索取回应。")
     else:
         facts.append("陪伴动作：先自然回应当前这句话，保持有主见的私聊感，不写成客服回执。")
+    if task_mode == "ambiguous_affect":
+        facts.append(
+            "对方明确表示还不能给当前感受命名；用可能、像是或听起来保留不确定，"
+            "也可以只陪在当下，不替对方宣布空落、难受或已经恢复。"
+        )
     return tuple(facts)
 
 
-def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
+def _must_not_for_plan(
+    plan: AffectiveTurnPlanV1,
+    *,
+    task_mode: str = "",
+) -> tuple[str, ...]:
     items = [
         "不要把情绪标签、关系分数、计划、同步编号、账本或内部推理说给用户听。",
         "不要使用威胁、排他、冷暴力、负罪施压、依赖诱导，或暗示用户有义务回应。",
@@ -929,7 +943,10 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
     if plan.companion_act.kind == "CONTAINED_JEALOUSY":
         items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚，也不要自贬为麻烦或负担。")
     if plan.companion_act.kind == "REPAIR":
-        items.append("不要要求原谅、替自己辩解，或把道歉写成修复已经完成。")
+        items.append(
+            "不要要求原谅、替自己辩解、用‘可能’弱化已知失误，或要求用户重新解释、"
+            "指出哪里不对；先由七海承担，没有用户后续反应就不能把修复写成已经完成。"
+        )
     if plan.companion_act.kind == "SET_BOUNDARY":
         items.append("不要威胁、羞辱、冷处理、索要道歉，或把自己的受伤变成对方必须负责的情感债。")
     if plan.companion_act.kind == "HOLD_COMPLEXITY":
@@ -938,6 +955,10 @@ def _must_not_for_plan(plan: AffectiveTurnPlanV1) -> tuple[str, ...]:
         items.append("不要给解决方案、健康或作息建议，不要追问原因，也不要用‘早点休息’结束对话。")
     if plan.companion_act.kind == "RESPECT_AUTONOMY":
         items.append("不要限制现实交往、贬低第三方、要求排他承诺，或把尊重边界说成七海在赌气退出。")
+    if task_mode == "ambiguous_affect":
+        items.append(
+            "不要把未命名感受武断写成空落、难受或今天不顺，也不要用‘那就好’提前收束。"
+        )
     return tuple(items)
 
 

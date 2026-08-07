@@ -566,3 +566,5 @@ python -m pytest -q `
 `1238efc25` 的四条报告 SHA-256 为 `bd1cd0c670e2de57b6680ec1f2d51c70c7b9ee9f7a41c8d3cbe0f10928de1942`：三条 provider timeout、一条完整含混轨迹。后者末句“还行就好”必须与“那就好”具有相同的未解决情绪判定；只在当前输入含“还行／还好／说不清”且 CompanionAct 为 `COMFORT` 时启用。Surface 与 runner 定向结果为 207 passed，真实新 SHA 复验前不提升状态。
 
 `16d4fe0b3` 的完整 48 条报告 SHA-256 为 `20dee3c9e57fe77bc4bbda919cdb2ac80e25db178a716e46b91d22317dee7395`：47 条自动待人工、1 条失败，144 个 accepted turn 的 canonical writer probe 通过。失败用例要求回答复用用户原句 `offer`，但通用中文评分器将该词视为无条件风格漂移。回归要求分两层：`score_sample_guided_text()` 仅在显式 allow-list 包含候选全部英文词时免除惩罚；Surface 只从当前 `user_message` 构造该 allow-list。当前用户未提及的 `profile` 等词必须继续产生 `ASCII_WORD_IN_ZH_TEXT`。评分器与 Surface 定向结果为 236 passed；真实单条和完整人工复核未完成，网络安全与 Pentest 为 `NOT_RUN_USER_SKIPPED`。
+
+`cf05c124a` 的单条真实报告 SHA-256 为 `f4393d7103ac2ecb43c59334c405860735dede9475f124fc0f34287443563c7e`，自动与本轮人工检查通过，3 个 accepted turn 的 writer probe 通过。后续人工复核要求新增四组非安全回归：一、当前明确“说不清”或其紧邻短跟进必须得到 `ambiguous_affect`，使用恰好两个候选且保留不确定；二、近期窗口含报错／代码／修复时，“上线”或“陪我一步步做”必须让 AffectiveTurnPlan 使用 `SOLVE`，普通闲聊不得误切；三、REPAIR 拒绝“再跟我说说哪里不对”和“一直放在心上直到你觉得过去”；四、CONTAINED_JEALOUSY 拒绝“那是我的事，你不用管我”。当前四文件 394 passed；真实定向场景尚未执行，Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。

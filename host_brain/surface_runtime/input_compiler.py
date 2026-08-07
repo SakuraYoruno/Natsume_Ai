@@ -79,6 +79,51 @@ _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
 
 _AUDIO_INPUT_SOURCES = {"asr", "audio", "voice", "speech", "mic", "microphone", "voice_chat"}
 
+_AFFECTIVE_TECHNICAL_TEXT_RE = re.compile(
+    r"报错|代码|堆栈|排错|修复|调试|部署|发布|风险|测试失败|上线"
+)
+_AFFECTIVE_TECHNICAL_CONTINUATION_RE = re.compile(
+    r"一步步|继续(?:做|弄|排|修)?|陪我.{0,6}(?:做|排|修)|先(?:看|做|排|修)|帮我"
+)
+_AFFECTIVE_AMBIGUOUS_TEXT_RE = re.compile(
+    r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉"
+)
+_AFFECTIVE_AMBIGUOUS_FOLLOWUP_RE = re.compile(
+    r"^(?:嗯|还行|还好|就那样|不知道|反正结束了)[。.!！]?$"
+)
+
+
+def _affective_task_mode_for_turn(
+    *,
+    task_mode: str,
+    user_message: str,
+    facts: Any,
+) -> str:
+    """Preserve the current conversational objective for the affect planner.
+
+    The general conversation interpreter intentionally treats short follow-ups
+    as chat.  For the affective plan, however, a short ``陪我一步步做`` after
+    an explicit error-fixing turn is still a task, while an explicit
+    ``说不清是什么感觉`` is the bounded ambiguous path promised by DL-02.
+    This is a prompt-time decision only; it adds no durable writer or ordinary
+    chat model call.
+    """
+
+    mode = str(task_mode or "").strip()
+    current = str(user_message or "").strip()
+    fact_text = "\n".join(str(item or "") for item in list(facts or []))
+    technical_context = bool(_AFFECTIVE_TECHNICAL_TEXT_RE.search(fact_text))
+    if _AFFECTIVE_TECHNICAL_TEXT_RE.search(current) or (
+        technical_context and _AFFECTIVE_TECHNICAL_CONTINUATION_RE.search(current)
+    ):
+        return "technical_help"
+    ambiguous_context = bool(_AFFECTIVE_AMBIGUOUS_TEXT_RE.search(fact_text))
+    if _AFFECTIVE_AMBIGUOUS_TEXT_RE.search(current) or (
+        ambiguous_context and _AFFECTIVE_AMBIGUOUS_FOLLOWUP_RE.fullmatch(current)
+    ):
+        return "ambiguous_affect"
+    return mode
+
 
 _DETERMINISTIC_RESULT_AGENT_IDS = {
     "system_info",
@@ -479,13 +524,18 @@ def _apply_affective_turn_guidance(
         ports=ports,
     )
     try:
+        effective_task_mode = _affective_task_mode_for_turn(
+            task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
+            user_message=str(getattr(agent_input, "user_message", "") or ""),
+            facts=control.get("facts"),
+        )
         guidance = build_affective_turn_guidance(
             emotion_context=emotion_context,
             request_id=str(getattr(agent_input, "request_id", "") or ""),
             workspace_id=str(getattr(agent_input, "workspace_id", "") or ""),
             relationship_subject_id=str(getattr(agent_input, "person_id", "") or ""),
             session_id=str(getattr(agent_input, "session_id", "") or ""),
-            task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
+            task_mode=effective_task_mode,
             created_at_ms=_coerce_int(getattr(agent_input, "ts_ms", 0), default=0),
             previous_avatar_expression=previous_expression,
             previous_expression_source=previous_expression_source,
