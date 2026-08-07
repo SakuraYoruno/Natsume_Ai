@@ -784,8 +784,11 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         canonical_contained_hurt_repair_context=True,
     )
     assert "修复中的克制受伤" in contained_hurt_initial_messages[-1]["content"]
-    assert "七海第一人称反应" in contained_hurt_initial_messages[-1]["content"]
-    assert "不得再次复用‘没接住／没听懂／理解错’" in (
+    assert "前面的责任还在，但我不想装作没感觉" in (
+        contained_hurt_initial_messages[-1]["content"]
+    )
+    assert "这句话还是刺到我了" in contained_hurt_initial_messages[-1]["content"]
+    assert "不得再次用‘没接住／没听懂／理解错’" in (
         contained_hurt_initial_messages[-1]["content"]
     )
     mixed_initial_messages = _buffered_affective_candidate_messages(
@@ -913,9 +916,10 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         canonical_contained_hurt_repair_context=True,
     )
     assert "本轮是修复中的克制受伤" in contained_hurt_quality_messages[-1]["content"]
-    assert "必须包含一处七海第一人称的短反应" in (
+    assert "前面的责任还在，但我不想装作没感觉" in (
         contained_hurt_quality_messages[-1]["content"]
     )
+    assert "这句话还是刺到我了" in contained_hurt_quality_messages[-1]["content"]
     assert "不要写七海被扎心、受伤或委屈" not in (
         contained_hurt_quality_messages[-1]["content"]
     )

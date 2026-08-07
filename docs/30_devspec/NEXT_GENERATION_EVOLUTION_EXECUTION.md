@@ -65,6 +65,8 @@ flowchart LR
 
 当前最小复验点已收窄到关系修复的可见文本边界。`92c49e7c6` 真实报告证明 canonical Appraisal／self affect／Voice／Avatar 已是克制受伤，但旧 Surface 重试仍把该感受抹回流程化道歉；现有工作树已修正首轮、唯一重试、候选评分与本地 fallback，566 项回归通过。下一步只重启本机 Host 并复验 `user_angry_at_natsume:1`；不得启动远端 Edge，也不得在该条逐句接受前扩大到 mixed 或完整 48 条。
 
+`0f0a0b67b` 的复验已让最终可见句保留七海的克制受伤，但真实 Flash 双候选仍依赖本地 fail-soft，候选收益状态继续失败。现有工作树只把 composite 微策略改成两个正向口语结构，80 项生成链回归通过；再跑同一单轨迹一次。若仍是 `benefit_eligible=false`，停止围绕这一句追加 Gate，保留可见文本改进，并把真实模型／少量正向语料作为下一决策点。
+
 ## 6. 最终验收
 
 最终验收必须使用：真实 Docker 服务、真实 Host／OBS／Monitor／Gateway 进程、至少一个真实模型 provider，以及在用户允许后启动的目标 Edge。TTS、Avatar、重启、打断、网络恢复和长期多轮必须走真实传输，不得用端口占位、fixture 或 scripted replay 冒充。
