@@ -920,3 +920,9 @@ Monitor UI 在 `npm ci` 后依次通过 operator client check、lint、typecheck
 在提交 `8afa13f856c588edcec6a8e1ac4d205efbea02d2` 的 clean detached worktree 中运行 `run_ne04_golden_experiments.py`。Research Planning、Proactive、Memory Write 各执行 baseline/candidate，共 6 个真实容器 arm；镜像 digest 固定，`network=none`、rootfs 只读、用户 `65534:65534`，effect audit 为 0。三类 report digest 分别为 `cfadab6df15d1e4f041a74d98555f4697e9682da46e3f26426fd530dccb7f826`、`22770a05600db830f70efd646b148a90db28cf6e72c1db93b46e7e3f0266c126`、`6f0212e85f5c94c34af80d888f25594d7a716c24c013985963ffa4095598d78b`。
 
 SQLite 中实际存在 6 个 trusted run receipt、3 个 report、3 个 proposal、1 个 golden suite receipt；`production_side_effects=false`、`production_influence_enabled=false`，runtime 临时目录为空。正式收据 SHA-256 为 `fddf247166c7cc1fad7a9950e9013c5c5424734ecfe0e19a8b4fa1bff511bc4d`。随后启用 opt-in 真实 Docker integration，Golden Suite 与 completion-response-loss exact receipt 重开共 2/2 通过。临时 worktree 完整移除，现有 A15 容器和服务未被重启。
+
+## 2026-08-08 NE-05／NE-06 本地 Authority 集成
+
+NE-05 运行 19 项非网络测试，19/19 通过；log/JUnit SHA-256 分别为 `ee294424670931d80f23fa309884498b8d674e3b5a7e6248fc9165bf2fc910dd` 和 `a3695f7ae5a5028a51e390a557be36fd1e2399e329dd4bb4d98a4362e1523cc1`。真实文件 bundle 没有被 import，签名后篡改在 store 前拒绝；V2 SQLite authority 完成 activate、幂等 replay、v2→v1 exact rollback、degrade，并让 Host registry 只解析 active version。测试中的 Lab/Review/Sandbox/Canary evidence 由 fixture 构造，因此不能写成真实外部 Skill 激活 PASS。
+
+NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d` 和 `b74dbc1e3d5d63784da0456cb2d707a98825fdfe6810faab41ad7775e87391fb`。Feedback、Knowledge、Identity 的真实 SQLite 状态迁移和旧 V1 query-only 边界成立，但未通过本机 Gateway/Host 触发真实 Operator Review、版本切换并观察下一轮七海文本／Voice／Avatar。因此 NE-05、NE-06 只关闭本地 authority 语义，不关闭 live behavior。

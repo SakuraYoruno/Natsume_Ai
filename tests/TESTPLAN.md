@@ -638,3 +638,9 @@ Canon route 单测还必须覆盖 privacy-redacted payload：`status=OK` 且 det
 正式 Golden Suite 必须在与收据提交完全一致的 clean worktree 中运行，并拒绝 tag-only 镜像、脏树或错误 commit。三类实验必须形成 6 个独立 arm，逐 arm 验证 digest-pinned image、Docker engine identity、`network=none`、只读 rootfs、非 root、数据集 digest 重算和 effect count 0；结束后必须只有 proposal，不得启用 production influence。当前提交 `8afa13f85` 全部通过，收据 SHA-256 为 `fddf247166c7cc1fad7a9950e9013c5c5424734ecfe0e19a8b4fa1bff511bc4d`。
 
 恢复测试必须在 completion receipt 已提交但调用方丢失响应后重入同一 spec／variant，断言第二次结果与第一次逐字段相同、trusted run receipt 仍只有 1 条，并且运行目录无残留。真实 Docker opt-in integration 当前 2/2 通过。该验收不覆盖 Skill activation、Feedback/Knowledge/Identity activation，也不覆盖用户跳过的网络安全和 Pentest。
+
+## 2026-08-08 NE-05／NE-06 本地生产 Authority Gate
+
+NE-05 本地 Gate 由 19 项 unit/contract/integration 构成，必须同时验证 Compiler 决定性、accepted trace 私密正文拒绝、真实文件签名与 quarantine、tamper fail-closed、V2 activation/rollback/degrade 同库原子性、未知 canary reconciliation、Host active-version 解析和旧 mutation authority 物理缺失。当前 19/19 通过，日志 SHA-256 为 `ee294424670931d80f23fa309884498b8d674e3b5a7e6248fc9165bf2fc910dd`。由于 Lab/Review/Canary 为测试 evidence，状态不得高于 `PARTIAL_LOCAL_PRODUCTION_SQLITE_AUTHORITY_PASS`。
+
+NE-06 本地 Gate 必须覆盖 Feedback subject-bound baseline、apply→rollback→新版本、签名 ingress scope；Knowledge expiry、shadow/enforce、冲突 cursor、winner 和 deprecation；Identity no-change、重大差异阻断与 exact rollback；V1 只读。当前 19/19 通过，日志 SHA-256 为 `38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d`。要提升为完整 PASS，必须由真实 Operator Review 和在线 Host 下一轮行为证明版本切换，不得用 Repository 断言替代。

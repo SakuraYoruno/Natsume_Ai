@@ -110,3 +110,9 @@ flowchart LR
 提交 `8afa13f856c588edcec6a8e1ac4d205efbea02d2` 的 clean detached worktree 已执行 Research Planning、Proactive、Memory Write 三类可信实验，各自包含 baseline/candidate，共 6 个真实 Docker arm。镜像为 `python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df`；所有 arm 均为 `network=none`、只读根文件系统、`65534:65534` 非 root，effect audit 为 0。SQLite migration head 为 `0140#evolution_lab_redacted_dataset`，最终持久化 6 个 run receipt、3 个 report、3 个 proposal 和 1 个 suite receipt；运行目录无残留，生产副作用和生产影响均为 false。
 
 正式收据 SHA-256 为 `fddf247166c7cc1fad7a9950e9013c5c5424734ecfe0e19a8b4fa1bff511bc4d`。同一提交还通过 2 项 opt-in 真实 Docker 集成，其中响应在 completion commit 后丢失时，第二次调用只重开 exact receipt，不重复 arm。临时 worktree 已移除，没有创建临时分支。NE-04 本项提升为 PASS；Skill lifecycle、Feedback/Knowledge/Identity 仍需分别取得生产 authority 级证据。
+
+### NE-05／NE-06 本地生产 Authority 验收边界
+
+NE-05 选定的 19 项非网络测试在提交 `2b9d42f4b` 上全部通过，覆盖确定性 Skill Compiler、accepted-trace 私密字段拒绝、真实签名 bundle 的 quarantine/stage、签名后篡改拒绝、V2 activation exact replay、两版本切换、exact predecessor rollback、degrade、未知 canary reconciliation、Host 只解析 active content-addressed version，以及旧 V1 mutation authority 和 Forge route override 的物理删除。日志 SHA-256 为 `ee294424670931d80f23fa309884498b8d674e3b5a7e6248fc9165bf2fc910dd`。这些用例使用真实 SQLite 和文件系统，但 Skill 专属 Lab attestation、Review 和 canary 仍由测试构造；状态只能是本地 authority PASS、完整生命周期 PARTIAL。
+
+NE-06 的 19 项生产 Repository/Composition 集成也全部通过：Feedback 按 subject baseline 应用、回滚后新版本再次应用，签名 ingress 跨 scope 拒绝；Knowledge 过期、shadow→enforce、DecisionRecord、active winner、冲突 cursor 和 deprecation；Identity release review preparation、no-change、重大差异阻断和 exact previous snapshot rollback；V1 mutation surface 与 direct SQL 只读。日志 SHA-256 为 `38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d`。尚缺真实 Operator Review 与在线 Host 下一轮行为，因此 NE-06 同样保持 PARTIAL。
