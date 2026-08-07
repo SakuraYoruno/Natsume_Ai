@@ -138,6 +138,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `0087fa698` 的技术单条报告 SHA-256 为 `804ca579b352de16ac3e178bf1895cf7c36200ae8e95efbd88a406c2566f1e35`，后台委派关闭、3 个 accepted turn writer probe 通过，但人工否决未获支持的“明早验收会直接卡住”。回归必须同时证明：无来源的未来验收／上线／交付确定后果被替换；用户文本或 accepted fact 同时给出时间与事件时仍可保留；普通未来建议不受影响。430 项非安全主链测试通过，真实新 SHA 复测前仍失败。Pentest、渗透与网络安全继续不运行。
 
+`5dd0accac` 的技术单条报告 SHA-256 为 `347a590a0ad8d03fb2ed709506af6c939668a5363d2fcbe0fdb15c415e60e8d9`，自动与本轮人工检查通过；全新库 4 条报告 SHA-256 为 `716a6f6be80390ee7b022653aeff571da0851b97ef4ec609a9c3d952ae4d59e3`，结果为 3 条自动待人工、1 条 mixed 失败，12 个 accepted turn writer probe 通过。回归必须拒绝在 canonical `REPAIR` 中无来源地把失误改成“太啰嗦／话多”以及“不多说了”的退出；mixed 质量重试必须引用最后一条用户原文，并保留“项目发布成功”等核心结果词。当前 432 项非安全主链测试通过；真实新 SHA 复测前保持失败。Pentest、渗透与网络安全不运行。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

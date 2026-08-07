@@ -496,7 +496,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "不要只说恭喜或像做梦" in mixed_repair_messages[-1]["content"]
     assert "开心是真的，那点不踏实也还在" in mixed_repair_messages[-1]["content"]
     mixed_quality_messages = _buffered_affective_candidate_messages(
-        paired_messages,
+        [*paired_messages, {"role": "user", "content": "项目发布成功。"}],
         candidate_count=2,
         retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
         canonical_mixed_context=True,
@@ -505,6 +505,8 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "仍未消失的不安／不踏实" in mixed_quality_messages[-1]["content"]
     assert "我替你高兴，也知道不安不会马上消失" in mixed_quality_messages[-1]["content"]
     assert "必须复用用户当前或上一句好消息里的一个具体词" in mixed_quality_messages[-1]["content"]
+    assert "当前用户最后一句原文是“项目发布成功。”" in mixed_quality_messages[-1]["content"]
+    assert "必须原样保留" in mixed_quality_messages[-1]["content"]
     give_space_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,

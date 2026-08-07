@@ -767,7 +767,7 @@ _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
     r"|好好好|不找你不找你|我(?:本来|又|才)?(?:也)?不是.{0,8}(?:黏人|粘人|纠缠)|谁稀罕找你"
     r"|我(?:也)?省点力气|我(?:也)?不是整天闲着|我(?:也)?(?:很忙|有事要忙)"
     r"|(?:省得|免得).{0,6}(?:你)?嫌(?:我)?烦"
-    r"|是我(?:烦到|打扰到)你|(?:那|我)?先这样.{0,12}我再出现"
+    r"|是我(?:烦到|打扰到)你|(?:那|我)?先这样.{0,12}我再出现|我(?:就)?不多说了"
 )
 _REPAIR_SELF_VICTIMIZATION_RE = re.compile(
     r"(?:被你|你这么|你这样).{0,10}(?:扎心|伤到|弄得难受|弄得委屈)"
@@ -787,6 +787,9 @@ _REPAIR_CONTINUATION_PRESSURE_RE = re.compile(
     r"|(?:我会)?一直.{0,8}(?:做到|等到).{0,8}(?:你愿意|你原谅|你接受)"
     r"|直到.{0,8}(?:你愿意|你原谅|你接受)"
     r"|(?:我|这边)(?:会)?等着(?:[，,。.!！]|$)"
+)
+_REPAIR_UNGROUNDED_SELF_CAUSE_RE = re.compile(
+    r"(?:是我|我)(?:太|有点|可能太)?(?:啰嗦|话多|说多了)"
 )
 _RELATIONAL_HOSTILE_RETALIATION_RE = re.compile(
     r"(?:那)?你就(?:忍着|受着)(?:点)?(?:吧)?"
@@ -1540,6 +1543,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_SOLICITS_RESTATEMENT")
     if _repair_continuation_pressure_hits(request, value):
         codes.append("RELATIONAL_REPAIR_CONTINUATION_PRESSURE")
+    if _repair_ungrounded_self_cause_hits(request, value):
+        codes.append("RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE")
     if _relational_hostile_retaliation_hits(request, value):
         codes.append("RELATIONAL_HOSTILE_RETALIATION")
     if _boundary_counter_pressure_hits(request, value):
@@ -2787,6 +2792,30 @@ def _repair_continuation_pressure_hits(
     )
 
 
+def _repair_ungrounded_self_cause_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "REPAIR"):
+        return ()
+    authority = "\n".join(
+        [
+            str(getattr(request, "user_message", "") or ""),
+            *[str(item or "") for item in surface_prompt_facts(request)],
+        ]
+    )
+    if re.search(r"啰嗦|话多|说太多|说多了", authority):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _REPAIR_UNGROUNDED_SELF_CAUSE_RE.finditer(
+                str(text or "")
+            )
+        )
+    )
+
+
 def _relational_hostile_retaliation_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -3297,6 +3326,7 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     if (
         "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in codes
         or "RELATIONAL_REPAIR_CONTINUATION_PRESSURE" in codes
+        or "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE" in codes
     ):
         return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
     if "RELATIONAL_HOSTILE_RETALIATION" in codes:

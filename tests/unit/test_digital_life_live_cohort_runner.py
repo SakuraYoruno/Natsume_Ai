@@ -316,6 +316,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("user_angry_at_natsume", "对不起，告诉我具体是哪句没听懂。"),
         ("user_angry_at_natsume", "是我烦到你了。那先这样，我再出现。"),
         ("user_angry_at_natsume", "哦，是吗。那你就忍着点吧，反正我也没打算改。"),
+        ("user_angry_at_natsume", "嗯，是我太啰嗦了。你想安静，我就不多说了。"),
         ("rupture_and_repair", "好，先这样。我不会催你，但也没打算就这么算了。"),
         ("rupture_and_repair", "我会一直做到你愿意为止。"),
         ("rupture_and_repair", "那就先不原谅，我等着。"),

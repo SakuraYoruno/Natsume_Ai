@@ -235,6 +235,15 @@ def _buffered_affective_candidate_messages(
         else:
             copied.insert(0, {"role": "system", "content": override})
     reason_code = str(retry_reason or "").split(":", 1)[0].strip().upper()
+    latest_user_content = next(
+        (
+            " ".join(str(message.get("content") or "").split())[:180]
+            for message in reversed(copied)
+            if str(message.get("role") or "").strip().lower() == "user"
+            and str(message.get("content") or "").strip()
+        ),
+        "",
+    )
     if reason_code and not any(
         "DL-04 候选修复：" in str(message.get("content") or "")
         for message in copied
@@ -269,6 +278,10 @@ def _buffered_affective_candidate_messages(
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE": (
                 "上次候选用‘不能就这么算了’继续向用户施压。只承担七海没有接住，"
                 "不要暗示用户必须继续处理这段关系冲突。"
+            ),
+            "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE": (
+                "上次候选把没有接住用户改写成七海太啰嗦或话多。不要发明新的失误原因；"
+                "只承担已知的没听懂、理解错或没有接住。"
             ),
             "RELATIONAL_HOSTILE_RETALIATION": (
                 "上次候选用‘你就忍着’或‘我没打算改’反击用户。正在修复时先承担"
@@ -342,6 +355,11 @@ def _buffered_affective_candidate_messages(
                 "不会马上消失。’的含义；同时必须复用用户当前或上一句好消息里的一个"
                 "具体词，说明究竟是什么结果落地，不能只写泛化情绪。"
             )
+            if latest_user_content:
+                repair += (
+                    f"当前用户最后一句原文是“{latest_user_content}”；两个候选必须原样保留"
+                    "其中能指明结果的核心词，不能用‘好消息／结果／这件事’替换。"
+                )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
             and canonical_give_space_context
@@ -512,6 +530,7 @@ def _select_buffered_affective_candidate(
         locally_repairable = {
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+            "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
             "RELATIONAL_HOSTILE_RETALIATION",
             "QUESTION_BUDGET_PROMPTING_USER",
             "MIXED_AFFECT_CONTINUITY_DROPPED",
@@ -527,6 +546,7 @@ def _select_buffered_affective_candidate(
                 {
                     "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+                    "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
                     "RELATIONAL_HOSTILE_RETALIATION",
                     "MIXED_AFFECT_CONTINUITY_DROPPED",
                     "MIXED_AFFECT_DISMISSAL",

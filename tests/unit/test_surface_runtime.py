@@ -1475,6 +1475,14 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "RELATIONAL_HOSTILE_RETALIATION",
         ),
         (
+            "你真烦。",
+            ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+            ["不要要求原谅、替自己辩解。"],
+            "嗯，是我太啰嗦了。你要是想安静，我就不多说了。",
+            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+        ),
+        (
             "我很开心又有点怕。",
             ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
             ["不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。"],
