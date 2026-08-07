@@ -790,3 +790,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 `70180a4b1` 加载后只重跑上述含混、技术任务和空间边界三类，报告 SHA-256 为 `5515f04c1ad1e0fe64637f62f3b88b988acbf05ebfd5bf92276352755486a3d1`。自动层 3/3、9 个 accepted turn、TaskGraph／Outbox、canonical writer 与旧 writer 零增量均通过；当前逐句复核仅接受空间轨迹的直接退开。含混轨迹仍无证据地解释为“办完反而更空”，并用“等你想说了再说”绑定未来回应；技术轨迹在没有报错、代码或 accepted Task 结果时编造字段、边界条件、部署回滚等具体故障域，还声称“我这边盯紧校验”。因此 8 类 frame 当前只能记为 6/8 经本轮单人逐句接受，不是整体 PASS。
 
 新的代码修正继续保持轻量：只对服务器下发的 `UNNAMED_USER_AFFECT/PRESERVE_UNCERTAINTY` 和 `TASK_RESULT/FROZEN_FACTS_ONLY` frame 做一次内存候选检查；缺少技术证据时允许直接说明不确定性，不把“当前没有报错和代码”误当作已有证据。普通聊天没有新增 SQLite 写入或同步审计，也不提高现有最多一次语义重试／两次模型请求的上限；只有候选越过上述硬边界时才消费既有重试。核心规划／Surface／runner 298 项与相邻 native stream／restart／packet／composition 219 项通过；加载新 SHA 后只复验 `ambiguous_affect:4` 与 `task_with_low_mood:5`，逐句均通过后才扩大 cohort。远端 Edge 与网络安全专项继续不启动。
+
+`45bb91b26` 的上述双轨迹报告 SHA-256 为 `3141f9feb5f694eee67a2c0ee6f1e8ea249fdbcb33bd1c1fe7bde30b901ec85e`。含混轨迹 3 个回合全部 accepted，但当前逐句继续拒绝“办完了就踏实点／放一放”和“等哪天能说清了再说”；这是替用户命名结果并安排未来解决，不因自动 PASS 改写结论。技术轨迹前两轮 accepted，第三轮两个真实 DeepSeek 候选先后触发 `UNSUPPORTED_TASK_RISK_DETAIL`，第二个还同时触发 `UNPROVIDED_WORK_STATE_CLAIM/SURFACE_INTERNAL_AUTHORSHIP_LEAK`，Host 正确没有发送伪造内容，但最终以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 令 TaskGraph 失败。整轮共 5 个 accepted turn，writer probe 通过。
+
+失败后的实现修正包含两个可复用语义：未命名感受下拒绝“完成便踏实／把感受放着／等以后说清”，零任务证据下优先返回“尚无法列具体风险，请提供实际改动”，而不是先落入与风险问题不匹配的低信息或后台工作 fallback。外部模型重试所有权保持不变，本地 fallback 经同一 Gate 再验后可直接完成当前节点。核心 302 项与相邻 219 项非安全回归通过；只有加载新 SHA 后两条真实 Provider 轨迹均完成且逐句可接受，8 类 frame 才能从 6/8 提升。

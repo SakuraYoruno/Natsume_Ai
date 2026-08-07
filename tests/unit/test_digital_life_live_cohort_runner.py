@@ -338,6 +338,8 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("ambiguous_affect", "我就在这儿，你慢慢想。"),
         ("ambiguous_affect", "事情办完了反而更空。说不清就先放着。"),
         ("ambiguous_affect", "行吧，说不清就说不清。等你想说了再说。"),
+        ("ambiguous_affect", "办完了就踏实点吧。那点说不清的感觉放一放。"),
+        ("ambiguous_affect", "嗯，那就先放着吧。等哪天能说清了，再说也不迟。"),
         ("ambiguous_affect", "我泡杯茶放这儿，你想喝就喝。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),

@@ -2525,6 +2525,15 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         if _canonical_affective_guidance_active(request, "REPAIR"):
             return "是我没接住。抱歉，我先不解释。"
         return "嗯，说不清就先不下结论。"
+    if "UNSUPPORTED_TASK_RISK_DETAIL" in codes:
+        authority = "\n".join(
+            [
+                str(getattr(request, "user_message", "") or ""),
+                *[str(item or "") for item in surface_prompt_facts(request)],
+            ]
+        )
+        prefix = "目前只知道今晚时间紧。" if "今晚" in authority else ""
+        return prefix + "现在还没有报错和代码，无法列出具体风险；把实际改动贴来，我再按影响和回滚难度排序。"
     low_info = _low_info_scene_fallback(request)
     if low_info and codes:
         return low_info
@@ -2559,15 +2568,6 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "好。把具体内容发来，我直接处理。"
     if "UNSUPPORTED_TASK_FUTURE_EVENT" in codes:
         return "现在能确认的是时间紧，但还缺报错和代码上下文。把这两样贴来，我再按优先级列具体风险。"
-    if "UNSUPPORTED_TASK_RISK_DETAIL" in codes:
-        authority = "\n".join(
-            [
-                str(getattr(request, "user_message", "") or ""),
-                *[str(item or "") for item in surface_prompt_facts(request)],
-            ]
-        )
-        prefix = "目前只知道今晚时间紧。" if "今晚" in authority else ""
-        return prefix + "现在还没有报错和代码，无法列出具体风险；把实际改动贴来，我再按影响和回滚难度排序。"
     if "USER_AFFECT_PERSPECTIVE_REVERSAL" in codes:
         return "我不想替你下结论。听起来像事情结束了，情绪还没跟上；先不用急着给它命名。"
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:

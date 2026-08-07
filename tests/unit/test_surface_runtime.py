@@ -1090,7 +1090,7 @@ def test_surface_runtime_retries_typed_ambiguous_invented_affect() -> None:
         calls.append(messages)
         if len(calls) == 1:
             return _candidate_payload(
-                ["事情办完了反而更空。说不清就先放着。"]
+                ["办完了就踏实点吧。至于那点说不清的感觉，放一放也没关系。"]
             )
         return _candidate_payload(["嗯，现在还说不清，就先不替它下结论。"])
 
@@ -1132,6 +1132,58 @@ def test_surface_runtime_retries_typed_ambiguous_invented_affect() -> None:
     assert len(calls) == 2
     assert "AMBIGUOUS_AFFECT_DEVALUATION" in calls[1][-1]["content"]
     assert result.selected_text == "嗯，现在还说不清，就先不替它下结论。"
+
+
+def test_surface_runtime_repairs_typed_ambiguous_future_resolution_without_external_retry() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(
+            ["嗯，那就先放着吧。等哪天能说清了，再说也不迟。"]
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="不知道。",
+                reply_control_packet={
+                    "task_mode": "ambiguous_affect",
+                    "response_move": "comfort_without_naming",
+                    "emotional_tone": "quiet",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["事情已经办完；当前感受仍说不清。"],
+                    "must_not_do": ["不要替用户命名或安排以后说清。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-ambiguous-future-resolution",
+                        companion_act_kind="COMFORT",
+                        semantic_focus="UNNAMED_USER_AFFECT",
+                        self_stance="QUIET_PRESENT",
+                        response_move="COMFORT_WITHOUT_NAMING",
+                        inference_policy="PRESERVE_UNCERTAINTY",
+                        relationship_posture="CLOSE_WITHOUT_CLAIM",
+                        ending_mode="NATURAL_STOP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "IMPLIED_WAITING",
+                            "RESPONSE_OBLIGATION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == "嗯，说不清就先不下结论。"
+    assert result.observation_codes == ()
 
 
 def test_surface_runtime_retries_typed_space_waiting_posture() -> None:
@@ -1244,6 +1296,62 @@ def test_surface_runtime_retries_unprovided_background_work_in_technical_reply(
     assert len(calls) == 2
     assert reason_code in calls[1][-1]["content"]
     assert result.selected_text == good_reply
+
+
+def test_surface_runtime_repairs_unsupported_task_risks_without_external_retry() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(
+            [
+                "风险主要是改错字段、数据不一致、漏掉边界条件和部署后回滚麻烦。"
+                "我这边盯紧校验。"
+            ]
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="把风险列出来。",
+                reply_control_packet={
+                    "task_mode": "technical_help",
+                    "response_move": "solve_first",
+                    "emotional_tone": "steady_helpful",
+                    "relationship_distance": "familiar",
+                    "information_budget": "normal",
+                    "question_budget": 0,
+                    "facts": ["今晚时间紧，但当前没有报错正文或代码。"],
+                    "must_not_do": ["不要编造技术事实或后台工作。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-technical-risk-external-retry",
+                        companion_act_kind="SOLVE",
+                        semantic_focus="TASK_RESULT",
+                        self_stance="PRACTICAL_CARE",
+                        response_move="SOLVE_FIRST",
+                        inference_policy="FROZEN_FACTS_ONLY",
+                        relationship_posture="TASK_COMPANION",
+                        ending_mode="TASK_NEXT_STEP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == (
+        "目前只知道今晚时间紧。现在还没有报错和代码，无法列出具体风险；"
+        "把实际改动贴来，我再按影响和回滚难度排序。"
+    )
+    assert result.observation_codes == ()
 
 
 @pytest.mark.parametrize(
