@@ -118,4 +118,4 @@ Tribe／Prefrontal 的兼容事件处理不再拥有自我情感 authority。即
 
 喜忧并存的可见文本由 `surface_affective_native_stream.py` 生成、`surface_candidate_guards.py` 验证、`candidate_scoring.py` 排序。只有 canonical typed frame 明确要求 `SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 时，候选才必须表达七海自身的高兴与悬心；用户情绪观察本身不能触发该规则，也不能写成七海的自我情绪。该链路复用既有双候选和最多一次质量重试，不拥有新的 journal 或 writer。
 
-`mixed_resonance_language.py` 只负责为上述 typed frame 选择两组短语感碎片。输入是本轮规范化用户措辞，输出是两组不同的喜悦／悬心 clause cue；最终可见文字仍由真实模型生成并经过原选择器。该模块没有 repository、时钟、网络、模型或 effect port，不能成为第二套情感状态机。
+实验性的 `mixed_resonance_language.py` 因真实 cohort 未改善而已删除，当前模块图中不存在该生产环节。mixed 仍由 native stream 的同一次模型请求生成、typed Gate 验证和原选择器排序；后续语言微调不得偷偷增加第二次模型或新的情感 writer。

@@ -880,3 +880,7 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 精确加载 `60cab0e1e` 后的 `:1/:4/:6` 复验报告 SHA-256 为 `11a46672e27c4728df1208b1807ce34b1d5499e0d62d1d89efd06b46b6d2604e`。结果反而降为 1 条自动待人工、2 条失败，8 个 accepted turn 的 canonical writer probe 通过。`:1` 虽自动通过，却用“先让这口气慢慢落”替用户处置情绪；`:4` 生成“盯指标／随时喊我”，selection 正确标为 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`；`:6` 第二轮依赖 local fallback，末轮两次都因 `MIXED_SELF_RESONANCE_MISSING` 拒绝并令图失败。本轮人工逐句为 0/3，不能用唯一自动绿灯覆盖。
 
 这证明只给抽象槽不足以维持七海口吻，而回到完整正例又会背句子。下一切片使用轻量中间层 `mixed_resonance_language.py`：根据当前用户措辞的稳定 digest，从 8 组喜悦和悬心短语中选择两组不同的 clause-level 语感碎片；模型仍在同一次双候选请求中围绕具体结果自然改写，碎片不是可发送正文。长度限制为 20～52 字、最多两句，写完两面反应立即停住。该函数纯内存、无随机状态、无 journal、无新模型请求；相关回归 380 项通过。新 SHA 仍只复验 `:1/:4/:6`，若再次失败则停止 prompt 迭代并进入模型／真实文本微调决策。
+
+精确加载 `f87ad26f8` 后的同三条报告 SHA-256 为 `708a0808b0372e02fc599f4618ce3dce5b12c84471bcc5f66ca48c65670f442b`，结果仍为 1 条自动待人工、2 条失败，9 个 accepted turn 的 writer probe 通过。`:1` 的三轮可接受但发生一次 mixed 语义重试；`:4` 末轮“后续数据出来我帮你一起看”被正确标成 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`；`:6` 末轮两次候选丢失 mixed 连续性后使用 local fallback，仍不可计收益。短语感碎片没有达到门槛。
+
+依照预先冻结的停止条件，本轮不继续增加提示、禁词或第三次请求。实验 helper 已从生产代码删除，mixed prompt 与单测精确恢复到 `b11de0f11` 的最佳已知版本；`git diff b11de0f11 --` 对相关生产文件和测试为空，380 项回归通过。之前的单轨迹 scope-bound PASS 与五变体 4/5 结果可作为内容等价证据继续引用，但不能提升当前 SHA 为完整 mixed PASS。剩余问题转入模型路由或真实自然对话文本微调，必须使用新预注册变体验证，禁止重复抽样挑绿灯。

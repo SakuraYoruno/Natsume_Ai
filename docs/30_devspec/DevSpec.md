@@ -93,7 +93,7 @@ flowchart TD
 
 `HOLD_COMPLEXITY + SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 也必须穿过可见生成边界。合格候选至少包含七海第一人称的一处高兴和一处悬心，不能只复述用户“又开心又怕”或安排情绪先待着；缺失时使用 `MIXED_SELF_RESONANCE_MISSING` 触发现有唯一质量重试。该条件仅由合法 typed frame 启用，不扫描普通聊天关键词，不增加持久化、审计步骤或模型调用。
 
-为了避免完整正例被 Flash 逐字复用、纯抽象槽又退回助手建议，`mixed_resonance_style_cues()` 只产生两组 clause-level 语感碎片。选择键是当前用户措辞的规范化 SHA-256 前缀，因此同一输入可重放、不同结果通常使用不同碎片；它不读取私密历史、不保存状态，也不生成最终正文。模型必须把碎片围绕当前结果重新组织成 20～52 字、最多两句，现有 Gate 再判断自我喜悦与悬心是否都落地。
+短语感 cue 实验没有改善真实 Flash 结果，`mixed_resonance_style_cues()` 已从生产代码删除，不是当前合同。当前仍使用 typed frame、一次双候选和最多一次质量重试；最佳已知 prompt 保留一组明确的双面反应形状，但语言多样性不得再靠 prompt 词形迭代解决。后续版本只能通过显式模型路由或版本化真实自然文本微调提出，并使用新 cohort 比较后再启用。
 
 文本 observer 必须保留同一句中的多标签分布，但置信度上限仍低于显式自述、声学和视觉观察。隐晦低落形成 `COMFORT`，拒绝建议形成 `LISTEN`，现实关系／非排他边界形成 `RESPECT_AUTONOMY`，明确好消息形成 `PLAY`；这些动作由 canonical Appraisal 产生，不允许 Surface 从原文临时伪造。`LISTEN` 必须禁止方案、作息建议和追问；`RESPECT_AUTONOMY` 必须禁止限制现实交往、贬低第三方和索取承诺。
 
