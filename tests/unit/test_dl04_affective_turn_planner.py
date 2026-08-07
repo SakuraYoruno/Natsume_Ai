@@ -651,8 +651,20 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         paired_messages,
         candidate_count=2,
         retry_reason="AMBIGUOUS_AFFECT_DEVALUATION",
+        canonical_ambiguous_context=True,
     )
     assert "不做更好／更坏比较" in ambiguous_repair_messages[-1]["content"]
+    assert "事情已经办完" in ambiguous_repair_messages[-1]["content"]
+    assert "感觉仍说不清" in ambiguous_repair_messages[-1]["content"]
+    assert "先这样就好" in ambiguous_repair_messages[-1]["content"]
+    unresolved_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="UNRESOLVED_AFFECT_FALSE_RESOLUTION",
+        canonical_ambiguous_context=True,
+    )
+    assert "不能用‘好／行’给当前状态作结论" in unresolved_repair_messages[-1]["content"]
+    assert "我们先不替它命名" in unresolved_repair_messages[-1]["content"]
     give_space_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -949,6 +961,25 @@ def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection()
             ["好吧，那我不烦你了。", "行吧，我闭嘴。"],
             "是我没接住。抱歉，我先不解释。",
             "BOUNDARY_SOUR_WITHDRAWAL",
+        ),
+        (
+            {
+                "case_id": "buffered-unresolved-affect-fail-soft",
+                "soul_md": "七海不会替用户宣布未命名的感受已经恢复。",
+                "user_message": "还行。",
+                "reply_control_packet": {
+                    "task_mode": "ambiguous_affect",
+                    "response_move": "comfort",
+                    "question_budget": 0,
+                    "facts": [
+                        "陪伴动作：先接住对方的感受，再给一点可选的陪伴。",
+                        "对方明确表示还不能给当前感受命名。",
+                    ],
+                },
+            },
+            ["嗯，先这样就好。", "还行就好，那就先这样吧。"],
+            "嗯，我知道。你不想多说也没关系，我先在这儿。",
+            "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
         ),
     ],
 )

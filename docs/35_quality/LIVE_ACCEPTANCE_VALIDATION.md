@@ -680,3 +680,11 @@ Surface、AffectiveTurnPlanner、native candidate、app adapter 与 runner 共 3
 逐轮人工检查继续否决两类自动层没有完全覆盖的体验问题：一是把“事情已经办完、但感受仍说不清”直接写成“事情办完了就轻松一点”，替用户宣布恢复；二是在纯在线文本陪伴中写“我泡杯茶放这儿”，编造实体共处和可操作物品。代码现要求含混候选同时保留“事情已办完”和“感觉仍说不清”两个真实锚点，并把无共处事实的泡茶、倒水、递物纳入既有现实一致性 Gate。第二次候选若仍触发该 Gate，只能安全降级且不得计入候选择优收益。
 
 Surface、planner、native candidate、app adapter、scorer、harness 与 live runner 共 510 项非安全回归通过。本切片没有新增数据库、普通对话同步审计或第三次模型请求。新 SHA 必须先在全新 SQLite 复验原四条；自动逐轮 selection 与当前人工正文均通过后才运行完整 48 条。三人盲评和实时延迟 Gate 仍未通过，网络安全、渗透与 Pentest 按用户要求保持 `NOT_RUN_USER_SKIPPED`。
+
+## 2026-08-07 A15 `642a29e3b` 四条复验与上下文保持纠偏
+
+加载 `642a29e3b` 的全新 Host／OBS／Monitor、SQLite 和 workspace 后，Docker Neo4j／Chroma／Redis 与远端 Gateway／Edge 均由真实入口探测为可用。四条真实文本轨迹得到 2 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、2 条 `FAIL`，10 个 accepted Gateway turn 的 canonical writer probe 通过。报告 SHA-256 为 `ff3992888888fbb1bfa67b356f78a507aff048b4cc73dc16e47772169f7a704d`。
+
+两个失败分别是：`ambiguous_affect:3` 第二轮连续触发 `AMBIGUOUS_AFFECT_DEVALUATION` 与 `UNRESOLVED_AFFECT_FALSE_RESOLUTION`，最终以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 停止 Chat 图；`ambiguous_affect:4` 第二轮把未命名感受写成“忙完那一刻反而空空的，挺正常的”，候选正确降为 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`。人工还否决自动放行的“嗯，先这样就好”和“不会因为这个就要求你什么”，前者假装感受已经收束，后者又把真实吃味写成免责声明。
+
+代码现让所有 canonical 含混重试——不只通用质量重试——都保留“事情已经办完、感觉仍说不清”两个事实，并给出两条可直接发送的自然正例；“先这样就好”、空空的武断命名和新的吃味免责声明进入 scoped Gate。第二次候选仍触发未收束假结论时，Runtime 使用现有安全 fallback 保持对话可用，但回执仍是 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY / benefit_eligible=false`，不会冒充候选择优收益。517 项非安全回归通过，没有新增持久写、同步审计、第三次模型调用或网络安全范围。新 SHA 仍需用全新 SQLite 复验原四条，之后才决定完整 48 条。

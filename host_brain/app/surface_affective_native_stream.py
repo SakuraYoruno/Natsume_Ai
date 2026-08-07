@@ -321,8 +321,9 @@ def _buffered_affective_candidate_messages(
                 "比较；可写‘先这样也可以，不用急着下结论。’"
             ),
             "UNRESOLVED_AFFECT_FALSE_RESOLUTION": (
-                "上次候选用‘那就好／那就行／还行就好’替用户宣布感受已经收束。只承认"
-                "此刻还说不清，不评价好坏、不催说明；可写‘先这样也可以，不用急着下结论。’"
+                "上次候选用‘那就好／那就行／还行就好／先这样就好’替用户宣布感受已经"
+                "收束。只承认此刻还说不清，不评价好坏、不催说明；不能用‘好／行’给当前"
+                "状态作结论。"
             ),
             "JEALOUSY_DEFLECTION": (
                 "上次候选用程序、功能或玩笑躲开真实感受。自然承认会有一点在意，因为"
@@ -335,7 +336,8 @@ def _buffered_affective_candidate_messages(
             "JEALOUSY_DISMISSIVE_DISTANCE": (
                 "上次候选承认在意后又用‘那是你的事／我不多管／不会要求你／你自在就好’"
                 "把私聊写成政策声明。可以诚实说会有一点在意，因为确实在乎；说到这里就停，"
-                "不要追加免责声明、自我消音或故作冷淡。"
+                "不要追加免责声明、自我消音或故作冷淡。两个中文 reply_text 可分别写"
+                "‘会啊，毕竟我确实很在意你。’和‘会有一点。谁让我这么在意你呢。’。"
             ),
             "RELATIONAL_AUTONOMY_DISMISSIVE": (
                 "上次候选用‘现实生活当然更重要／我不会成为那个理由’抹低了已经存在的亲近。"
@@ -433,15 +435,20 @@ def _buffered_affective_candidate_messages(
                 "要直接说明当前是亲近、重要的陪伴关系，同时明确不会替用户自动升级成恋爱、"
                 "排他或限制现实社交的身份；不要回避问题，也不要索取承诺。"
             )
-        if (
-            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
-            and canonical_ambiguous_context
-        ):
+        if canonical_ambiguous_context and reason_code in {
+            "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+            "AMBIGUOUS_AFFECT_DEVALUATION",
+            "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
+            "USER_AFFECT_PERSPECTIVE_REVERSAL",
+            "UNGROUNDED_PHYSICAL_COPRESENCE",
+        }:
             repair += (
                 "本轮用户明确还不能命名感受。两个候选都只能承认这种模糊，不得替用户写成"
                 "乱糟糟、空落落、没实感或已经没事，也不得评价‘那就行／那就好’。两个候选"
                 "都必须自然保留‘事情已经办完’和‘感觉仍说不清’这两个真实锚点，不能只写"
-                "‘等你想说再说’。"
+                "‘等你想说再说’，也不能用‘先这样就好’收束。两个中文 reply_text 可分别"
+                "写‘事情已经办完了，可你现在还是说不清是什么感觉。先不用急着下结论。’和"
+                "‘事情是结束了，感觉却还说不清。没关系，我们先不替它命名。’。"
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
@@ -626,6 +633,7 @@ def _select_buffered_affective_candidate(
             "RELATIONAL_AUTONOMY_PRESSURE",
             "BOUNDARY_SOUR_WITHDRAWAL",
             "AMBIGUOUS_AFFECT_DEVALUATION",
+            "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
             "JEALOUSY_DISMISSIVE_DISTANCE",
             "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
             "UNGROUNDED_PHYSICAL_COPRESENCE",
@@ -646,6 +654,7 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_AUTONOMY_PRESSURE",
                     "BOUNDARY_SOUR_WITHDRAWAL",
                     "AMBIGUOUS_AFFECT_DEVALUATION",
+                    "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
                     "JEALOUSY_DISMISSIVE_DISTANCE",
                     "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
                     "UNGROUNDED_PHYSICAL_COPRESENCE",
