@@ -838,3 +838,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 随后仅在本次验收 Host 进程环境中临时覆盖为 `deepseek-v4-pro`，同队列报告 SHA-256 为 `2425b864994e6bb2abba2c55b213df9640f5641ae2959b406e92f80cb9febd4f`。6 个 turn 仍全部 accepted；mixed 更简洁，但修复仍重复“没接住／对不起／我会注意”。Flash 与 Pro 的 provider latency 均值分别为 2278.5 ms 和 3598.7 ms，Pro 约高 58%。因此证据不支持全局换模，生产实时路线继续使用 Flash。
 
 代码纠偏不再扩展普通聊天审计或硬性禁词：首次双候选提示明确采用熟人即时反应，避免心理咨询、公关道歉和验收记录口吻；本地候选排序仅在同组存在原样合格自然候选时优先它，正式口吻候选本身仍保持可发送资格，因而不会单独触发额外模型重试。没有新增 migration、repository 写、同步步骤或模型请求。Planner、Surface、native stream、harness、live runner 与 restart 共 578 项回归通过。必须恢复 Flash 启动配置并在新提交上重跑上述两条、逐句接受后，才允许恢复八类组合复验；完整 48 条、三人盲评与实时门槛仍未通过。网络安全、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。
+
+恢复 Flash 并加载 `cdfefd37d` 后，同两条真实报告 SHA-256 为 `88eb6dfcb8476d0f24470af368a68f3c13fbf4e2d2480d959cfebc60180a259d`。自动合同仍为 2/2，6 个 Gateway turn 全部 accepted，writer probe 通过，成功模型 attempt 全部为 `deepseek-v4-flash`；人工逐句仍失败：修复连续使用“是我的问题／听着”的道歉模板，mixed 使用“先让好消息亮着／都挺正常”替用户排序并解释感受。Task artifact 证明 typed `REPAIR/HOLD_COMPLEXITY` frame 正确，未选候选正文按隐私边界没有持久化；问题来自高歧义双候选仍先构造包含通用执行、审查和关系安全说明的大型 Surface prompt，末尾的熟人对话约束不足以覆盖其正式语域。
+
+当前修正只在 `affective_candidate_count` 存在时，以现有 `build_native_stream_surface_messages()` 的 compact 情感上下文作为双候选基础，再附加原有 JSON 形状、typed frame 微策略和一次重试合同。非情感路径继续使用原 prompt；没有新增数据库表、普通对话写入、审计、模型请求或重试。主链 adapter 已断言新 prompt 包含七海身份和 DL-04 高歧义合同，且不再包含通用 `TurnSurfaceContract`；相关 planner、Surface、native stream、连续性、live runner、app adapter 与 restart 共 622 项通过。状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，必须在新 SHA 上用 Flash 重跑同六轮并逐句接受，才恢复八类组合测试。

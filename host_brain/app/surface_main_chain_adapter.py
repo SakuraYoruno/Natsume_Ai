@@ -286,7 +286,13 @@ async def run_surface_main_chain_for_surface_reply_input(
                     prompt_id,
                     {
                         "messages": _buffered_affective_candidate_messages(
-                            messages,
+                            (
+                                build_native_stream_surface_messages(
+                                    compiled_request
+                                )
+                                if affective_candidate_count is not None
+                                else messages
+                            ),
                             candidate_count=affective_candidate_count,
                             canonical_repair_context=canonical_repair_context,
                             canonical_mixed_context=canonical_mixed_context,

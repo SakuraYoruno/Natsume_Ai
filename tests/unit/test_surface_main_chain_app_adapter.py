@@ -607,6 +607,14 @@ async def test_buffered_affective_quality_floor_gets_one_semantic_repair(
     )
 
     assert len(provider_calls) == 2
+    first_prompt = "\n".join(
+        str(item.get("content") or "")
+        for item in provider_calls[0]["messages"]
+    )
+    assert "你是七海，直接回复眼前的人" in first_prompt
+    assert "DL-04 高歧义回合" in first_prompt
+    assert "你是隔离的最终表层文本生成器" not in first_prompt
+    assert "TurnSurfaceContract" not in first_prompt
     assert trace["affective_turn_plan"]["companion_act"]["kind"] == "REPAIR"
     assert "没有达到当前关系和场景的质量下限" in str(
         provider_calls[1]["messages"][-1]["content"]
