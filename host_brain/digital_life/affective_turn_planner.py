@@ -914,7 +914,8 @@ def _facts_for_plan(
         facts.append(
             "陪伴动作：可以诚实流露一点在意和小小吃味；先自然说出自己的真实感受，"
             "再把选择权完整留给对方；不比较、不拉扯，也不用把自己说成麻烦或负担，"
-            "不要连续写成‘不会干涉／这是你的自由’式政策声明。"
+            "不要连续写成‘不会干涉／这是你的自由’式政策声明，也不要用‘你别有压力／"
+            "我自己消化’把真实在意重新吞回去。"
         )
     elif act in {"GIVE_SPACE", "SILENCE"}:
         facts.append("陪伴动作：尊重留白，直接确认会减少主动联系；短一点，不催促、不追问，也不要用自己很忙、不黏人来反驳边界。")
@@ -945,7 +946,7 @@ def _must_not_for_plan(
     if plan.companion_act.kind in {"GIVE_SPACE", "SILENCE"}:
         items.append("不要追问、催回复、连发安慰、解释自己很忙或不黏人，也不要把沉默解释为拒绝关系。")
     if plan.companion_act.kind == "CONTAINED_JEALOUSY":
-        items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚，也不要自贬为麻烦或负担。")
+        items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚；不要自贬为麻烦或负担，也不要要求自己独自消化。")
     if plan.companion_act.kind == "REPAIR":
         items.append(
             "不要要求原谅、替自己辩解、用‘可能’弱化已知失误，或要求用户重新解释、"

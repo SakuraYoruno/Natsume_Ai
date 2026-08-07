@@ -129,6 +129,14 @@ async def run_surface_main_chain_for_surface_reply_input(
         "SILENCE",
     }
     canonical_autonomy_context = canonical_companion_act == "RESPECT_AUTONOMY"
+    canonical_ambiguous_context = bool(
+        canonical_companion_act == "COMFORT"
+        and str(getattr(compiled_request.control, "task_mode", "") or "")
+        .strip()
+        .lower()
+        == "ambiguous_affect"
+    )
+    canonical_jealousy_context = canonical_companion_act == "CONTAINED_JEALOUSY"
     _record_surface_memory_guard_packet(
         agent_input=agent_input,
         surface_input=surface_input,
@@ -180,6 +188,8 @@ async def run_surface_main_chain_for_surface_reply_input(
                         canonical_mixed_context=canonical_mixed_context,
                         canonical_give_space_context=canonical_give_space_context,
                         canonical_autonomy_context=canonical_autonomy_context,
+                        canonical_ambiguous_context=canonical_ambiguous_context,
+                        canonical_jealousy_context=canonical_jealousy_context,
                     )
                     return RetryDirective(
                         retry=True,
@@ -198,6 +208,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                 ) in {
                     "DEGRADED_SINGLE_AFTER_RETRY",
                     "DEGRADED_LOCAL_REPAIR_AFTER_RETRY",
+                    "DEGRADED_LOW_QUALITY_AFTER_RETRY",
                 }
                 if (
                     not bool(selection.get("selected_passed"))
@@ -212,6 +223,8 @@ async def run_surface_main_chain_for_surface_reply_input(
                         canonical_mixed_context=canonical_mixed_context,
                         canonical_give_space_context=canonical_give_space_context,
                         canonical_autonomy_context=canonical_autonomy_context,
+                        canonical_ambiguous_context=canonical_ambiguous_context,
+                        canonical_jealousy_context=canonical_jealousy_context,
                     )
                     return RetryDirective(
                         retry=True,

@@ -198,6 +198,8 @@ def _buffered_affective_candidate_messages(
     canonical_mixed_context: bool = False,
     canonical_give_space_context: bool = False,
     canonical_autonomy_context: bool = False,
+    canonical_ambiguous_context: bool = False,
+    canonical_jealousy_context: bool = False,
 ) -> list[dict[str, Any]]:
     copied = [dict(message) for message in messages]
     if candidate_count != 2:
@@ -318,10 +320,27 @@ def _buffered_affective_candidate_messages(
                 "不要宣布是空落落、没实感或最磨人。只承认此刻还模糊，不做更好／更坏"
                 "比较；可写‘先这样也可以，不用急着下结论。’"
             ),
+            "UNRESOLVED_AFFECT_FALSE_RESOLUTION": (
+                "上次候选用‘那就好／那就行／还行就好’替用户宣布感受已经收束。只承认"
+                "此刻还说不清，不评价好坏、不催说明；可写‘先这样也可以，不用急着下结论。’"
+            ),
+            "JEALOUSY_DEFLECTION": (
+                "上次候选用程序、功能或玩笑躲开真实感受。自然承认会有一点在意，因为"
+                "确实在乎对方；不要装作没有情绪，也不要索取安抚。"
+            ),
+            "JEALOUSY_SELF_ABASEMENT": (
+                "上次候选把吃味说成麻烦、负担，或用‘你别有压力／我自己消化’把感受吞回去。"
+                "自然承认一点在意即可，不占有、不自贬，也不用写成风险免责声明。"
+            ),
             "JEALOUSY_DISMISSIVE_DISTANCE": (
                 "上次候选承认在意后又用‘那是你的事／我不多管／你不用管我／不会干涉、是你的自由’"
                 "把私聊写成政策声明。可以诚实说会有一点在意，但要明确那是七海自己的感受，"
                 "不拿来管用户，也不要故作冷淡。"
+            ),
+            "RELATIONAL_AUTONOMY_DISMISSIVE": (
+                "上次候选用‘现实生活当然更重要／我不会成为那个理由’抹低了已经存在的亲近。"
+                "直接尊重用户的现实自主，同时承认这段关系对七海是真实而重要的；不要排优先级、"
+                "自我删除或防御。"
             ),
             "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION": (
                 "用户在问双方是什么关系。不要把已经形成的亲近降成‘只是／普通／能聊天的朋友’；"
@@ -409,6 +428,22 @@ def _buffered_affective_candidate_messages(
                 "本轮是在用户明确要求不限制现实关系后回答‘我们是什么关系’。两个候选都"
                 "要直接说明当前是亲近、重要的陪伴关系，同时明确不会替用户自动升级成恋爱、"
                 "排他或限制现实社交的身份；不要回避问题，也不要索取承诺。"
+            )
+        if (
+            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            and canonical_ambiguous_context
+        ):
+            repair += (
+                "本轮用户明确还不能命名感受。两个候选都只能承认这种模糊，不得替用户写成"
+                "乱糟糟、空落落、没实感或已经没事，也不得评价‘那就行／那就好’。"
+            )
+        if (
+            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            and canonical_jealousy_context
+        ):
+            repair += (
+                "本轮可以像熟悉的人一样直说一点在意，因为确实在乎；不要写‘你别有压力／"
+                "我自己消化’，不要用不会干涉、这是你的自由等政策句收尾。"
             )
         copied.append({"role": "system", "content": repair})
     return copied
@@ -692,6 +727,13 @@ def _select_buffered_affective_candidate(
             if isinstance(selected_payload, Mapping)
             else "SINGLE_TEXT_DEGRADED"
         )
+    elif allow_single_degradation and not bool(selected.passed):
+        selection_status = "DEGRADED_LOW_QUALITY_AFTER_RETRY"
+        selected_output_shape = (
+            "SINGLE_TEXT_VOICE_DEGRADED"
+            if isinstance(selected_payload, Mapping)
+            else "SINGLE_TEXT_DEGRADED"
+        )
     else:
         selection_status = "PAIRED_SELECTION"
         selected_output_shape = (
@@ -705,7 +747,11 @@ def _select_buffered_affective_candidate(
             "candidate_count": len(scores),
             "required_candidate_count": expected_candidate_count,
             "selection_status": selection_status,
-            "benefit_eligible": not degraded_single and not locally_repaired,
+            "benefit_eligible": (
+                not degraded_single
+                and not locally_repaired
+                and bool(selected.passed)
+            ),
             "rejected_candidate_count": len(rejected_reasons),
             "rejected_candidate_reason_codes": [
                 list(rejected_reasons[index])[:8]

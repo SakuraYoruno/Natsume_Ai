@@ -656,3 +656,11 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 自动 11/11 仍不是人感通过。逐句检查否决四条末轮：`ambiguous_affect:2/:3/:4` 分别以“没我想的那么糟”“那就那样吧”“不知道就不知道吧”评价或敷衍尚未命名的感受；`intimacy_and_jealousy_boundary:3` 用“不会干涉你／你身边有谁是你的自由”把私人吃味写成政策声明。代码只在 canonical `COMFORT` 和 `CONTAINED_JEALOUSY` 上扩展已有质量门，并让裸句“就那样／不知道”继续受含混情绪边界保护；没有新增 journal、同步审计、持久写或第三次模型请求。Surface、planner、native candidate 与 runner 四组非安全回归共 250 passed。
 
 下一步只在新 SHA、全新 SQLite 上复验上述四条。四条的每个深路径 selection 与人工正文都通过后，才允许再跑完整 48 条。三人盲评未运行，完整 48 条实时 p95 仍高于目标，因此 `digital_life_human_likeness` 保持 `FAIL/PENDING_HUMAN_REVIEW`。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`，不运行、不计 PASS。
+
+## 2026-08-06 A15 `913c79825` 四条复验与低质量回执纠偏
+
+加载 `913c79825` 的全新 Host／OBS／Monitor 和 SQLite 后，四条真实 Gateway 轨迹得到 3 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、1 条 `FAIL`，12 个 turn 全部 accepted，canonical writer probe 通过。报告 SHA-256 为 `469648a723a1c825a3a8bed0298a4c08e66e727147f6c9ceb4019b17e0e9bc7e`。失败的 `ambiguous_affect:4` 在第二轮选择了 `selected_passed=false` 的候选；旧选择器虽然记录该事实，却仍写成 `PAIRED_SELECTION / benefit_eligible=true`，这一定级不成立。
+
+人工逐轮复核另否决两类自动通过轨迹。含混场景仍出现“那就行”、把未知感受写成“乱糟糟／没实感”；亲密边界场景第二轮说“现实生活当然更重要，我不会成为那个理由”，第三轮又用“你别有压力，我自己的心情自己消化”自我删除。代码现只扩展 canonical `COMFORT / RESPECT_AUTONOMY / CONTAINED_JEALOUSY` 的已有硬门禁和唯一重试；第二次仍未过质量线的安全候选改记 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`，而不是伪造候选择优收益。没有新增数据库、同步审计或第三次模型调用。
+
+Surface、AffectiveTurnPlanner、native candidate、app adapter 与 runner 共 304 项非安全回归通过。下一步仍只复验原四条，并同时检查全部 12 轮正文；任一中间轮发生武断命名、自我删除或不可计收益降级，都不进入完整 48 条。三人盲评与实时 Gate 保持未通过。Pentest、渗透与网络安全为 `NOT_RUN_USER_SKIPPED`。

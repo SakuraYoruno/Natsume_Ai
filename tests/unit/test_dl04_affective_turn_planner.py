@@ -482,6 +482,45 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert safe_selected == safe.text
     assert safe_trace["affective_candidate_selection"]["selected_index"] == 1
     assert safe_trace["affective_candidate_selection"]["rejected_candidate_count"] == 1
+    low_a = SimpleNamespace(
+        text="这件事挺复杂的。",
+        score=76.0,
+        passed=False,
+        hard_fail=False,
+        reason_codes=("CORE_DIMENSION_FLOOR:scene_grounding<72",),
+        control_violations=(),
+        dimensions={},
+    )
+    low_b = SimpleNamespace(
+        text="我先陪你缓一下。",
+        score=74.0,
+        passed=False,
+        hard_fail=False,
+        reason_codes=("CORE_DIMENSION_FLOOR:implied_fact_risk<72",),
+        control_violations=(),
+        dimensions={},
+    )
+    monkeypatch.setattr(
+        candidate_scoring,
+        "score_isolated_surface_candidates",
+        lambda _request, _candidates: [low_a, low_b],
+    )
+    low_trace: dict[str, object] = {}
+    _select_buffered_affective_candidate(
+        raw_output=json.dumps(
+            {"candidates": [low_a.text, low_b.text]},
+            ensure_ascii=False,
+        ),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=low_trace,
+        allow_single_degradation=True,
+    )
+    assert (
+        low_trace["affective_candidate_selection"]["selection_status"]
+        == "DEGRADED_LOW_QUALITY_AFTER_RETRY"
+    )
+    assert low_trace["affective_candidate_selection"]["benefit_eligible"] is False
     monkeypatch.setattr(
         candidate_scoring,
         "score_isolated_surface_candidates",
@@ -582,6 +621,26 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         retry_reason="JEALOUSY_DISMISSIVE_DISTANCE",
     )
     assert "那是你的事／我不多管" in jealousy_repair_messages[-1]["content"]
+    jealousy_self_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="JEALOUSY_SELF_ABASEMENT",
+    )
+    assert "我自己消化" in jealousy_self_repair_messages[-1]["content"]
+    ambiguous_quality_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_ambiguous_context=True,
+    )
+    assert "不得替用户写成" in ambiguous_quality_messages[-1]["content"]
+    jealousy_quality_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_jealousy_context=True,
+    )
+    assert "我自己消化" in jealousy_quality_messages[-1]["content"]
     relationship_repair_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
