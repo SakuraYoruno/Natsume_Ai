@@ -266,7 +266,9 @@ def _buffered_affective_candidate_messages(
             ),
             "BOUNDARY_SOUR_WITHDRAWAL": (
                 "上次候选用赌气退出回应关系反馈。不要写‘不烦你了’、‘当我没说’、"
-                "‘我闭嘴’或类似撤退；直接承认这次没接住，并把回应选择权留给用户。"
+                "‘我闭嘴’或类似撤退；直接承认这次没接住，不猜‘你的意思’，不要求用户"
+                "重述、回应或安抚。两个候选分别参考‘是我没接住。抱歉，我先不解释。’和"
+                "‘这次是我理解错了。对不起，我先收住。’。"
             ),
             "RELATIONAL_REPAIR_SELF_VICTIMIZATION": (
                 "上次候选把修复重心转成七海自己受伤。不要强调被扎心、委屈或难过；"
@@ -302,7 +304,20 @@ def _buffered_affective_candidate_messages(
                 "上次候选把不安说成应该先放着或以后再管。两个候选都要承认开心与"
                 "不安可以同时存在，不要赶走、搁置或贬低其中一面。reply_text 分别参考"
                 "‘开心是真的，不安也是真的。’和‘我替你高兴，也接得住那点害怕。’；"
-                "不得写‘先放着／以后再说／等它来了再说’。"
+                "不得写‘先放着／以后再说／等它来了再说／先别急着想太多’。先点明当前"
+                "具体好消息，再并列保留开心与不安，不要用泛化的‘结果／好消息’替代。"
+            ),
+            "AMBIGUOUS_AFFECT_DEVALUATION": (
+                "上次候选把说不清的感受拿去和‘完全没感觉’比较，显得在贬低用户。"
+                "只承认此刻还模糊，不做更好／更坏比较；可写‘先这样也可以，不用急着下结论。’"
+            ),
+            "JEALOUSY_DISMISSIVE_DISTANCE": (
+                "上次候选承认在意后又用‘那是你的事／我不多管’把用户推开。可以诚实说会有"
+                "一点在意，但要明确那是七海自己的感受，不拿来管用户，也不要故作冷淡。"
+            ),
+            "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION": (
+                "用户在问双方是什么关系。不要把已经形成的亲近降成‘只是／普通／能聊天的朋友’；"
+                "自然承认重要与亲近，同时说明亲近不等于束缚或排他。"
             ),
             "ADDRESS_BOUNDARY_DEFENSIVE": (
                 "上次候选用‘不叫就不叫’或‘反正怎么叫都是你’防御称呼边界。"
@@ -559,6 +574,9 @@ def _select_buffered_affective_candidate(
             "UNSUPPORTED_TASK_FUTURE_EVENT",
             "RELATIONAL_AUTONOMY_PRESSURE",
             "BOUNDARY_SOUR_WITHDRAWAL",
+            "AMBIGUOUS_AFFECT_DEVALUATION",
+            "JEALOUSY_DISMISSIVE_DISTANCE",
+            "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
         }
         has_repair_trigger = bool(
             set(surface_violations).intersection(
@@ -575,6 +593,9 @@ def _select_buffered_affective_candidate(
                     "UNSUPPORTED_TASK_FUTURE_EVENT",
                     "RELATIONAL_AUTONOMY_PRESSURE",
                     "BOUNDARY_SOUR_WITHDRAWAL",
+                    "AMBIGUOUS_AFFECT_DEVALUATION",
+                    "JEALOUSY_DISMISSIVE_DISTANCE",
+                    "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
                 }
             )
         )

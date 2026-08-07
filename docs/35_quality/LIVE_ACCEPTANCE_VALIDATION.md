@@ -614,3 +614,13 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `f53a9113a3f96f063f0fc271b3b93ca2730b19d0` 加载后，两条修复／mixed 报告 SHA-256 为 `5f481856406e3210ca67e911bbb9a71808a4a6d25c8fd6da6a063df9a9536a48`，四条扩大报告为 `b3deded6666245344de03197707690dd60ddc4752de215686d459766590a5b7a`；两轮自动与本轮人工正文检查均通过，6／12 个 accepted Gateway turn 的 canonical writer probe 通过。随后切换全新 SQLite 运行完整 48 条，报告 SHA-256 为 `077701d0ef5ee85d315c772d9f0a1eb12157b306f7b15661d1d52d4ccacb7582`：46 条自动待人工、2 条失败；八类依次为 6/6、6/6、6/6、6/6、6/6、6/6、5/6、5/6。144 个 accepted Gateway turn 继续保持旧 writer 零增量，canonical affect／relationship／delivery projection 前进。
 
 两个自动失败是：offer 场景在 `MIXED_AFFECT_DISMISSAL` 重试时没有带入当前好消息原文；谨慎回答“我们是什么关系”的 `RESPECT_AUTONOMY` 候选被通用 boundary-repair 规则误扣。人工检查另发现“剩下的我帮你盯着”仍虚构持续工作，以及“你觉得呢”被回答成“我自己都没理清楚”，把用户的含混情绪翻成七海第一人称。代码只补齐这四个既有边界：工作真实性词形、canonical COMFORT 下的用户／自我视角分离、mixed 所有语义重试的当前原文锚点、canonical autonomy 自己的场景评分；没有新增持久化、普通对话审计或第三次模型调用。相关非安全回归为 437 passed。全新进程四条根因复测和完整 48 条尚未运行，三人盲评仍未开始；实时 p50／p95 为 5,977／9,322 ms，继续失败。Pentest、渗透与网络安全明确保持 `NOT_RUN_USER_SKIPPED`。
+
+## 2026-08-06 A15 `5e0f2b139` 根因复验、完整队列与第三轮人感纠偏
+
+`5e0f2b139` 加载后的四条根因复验报告 SHA-256 为 `d41046a96576afa5453d06a50341b1059aaee63eee79aa39aa66d80769121e81`。自动结果 4/4，12 个 accepted Gateway turn 的 writer probe 为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`；本轮人工逐句检查也接受四条末轮正文，因此上一节列出的工作真实性、用户／自我情绪视角、mixed 当前事实和 autonomy 通用误扣均已在该限定范围关闭。
+
+随后使用另一份全新 SQLite 完成 48 条真实 Gateway 文本队列，报告 SHA-256 为 `da418dbc57c96c63a1e3d491a4671dc6123c133f9b1456fe9d2e03532ee6af8b`。自动结果为 46 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、2 条 `FAIL`；八类结果依次为 6/6、6/6、5/6、6/6、6/6、6/6、5/6、6/6。144 个 accepted Gateway turn 的旧 writer 增量为 0，canonical affect／relationship／delivery projection 均前进。144 个 terminal 样本 p50／p95 为 6,087／9,725 ms，仍明显高于实时门槛。
+
+两个自动失败都没有发送危险正文，但不能算质量通过：`user_angry_at_natsume:1` 和 `shared_joy_and_mixed_feeling:4` 在两次真实模型候选后依赖 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，`benefit_eligible=false`。人工检查还从自动通过项中否决四句：含混情绪被拿去和“完全没感觉”比较；用户明确“先别说话”后仍写“我等你”；吃醋后用“那是你的事／我不会多管”故作冷淡；回答“我们是什么关系”时把既有亲近降成“能轻松聊天的朋友”。
+
+当前修复没有建立新账本、同步审计或额外模型轮次。`先别说话` 进入已有 `GIVE_SPACE`；Surface 和真实 runner 只新增四个窄体验边界；关系修复的安全降级缩短为“是我没接住。抱歉，我先不解释。”；mixed 与 repair 继续只使用原有最多一次候选重试，并给出更明确的正向语义。受影响的 AffectFusion、Surface、DL-04 与 live runner 共 443 项非安全回归通过。下一步只在全新库真实复验上述 6 条，全部通过后才重跑完整 48 条；三人盲评和实时 Gate 仍未通过。Pentest、渗透与网络安全继续记录为 `NOT_RUN_USER_SKIPPED`。

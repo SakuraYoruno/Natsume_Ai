@@ -81,6 +81,7 @@ _POSITIVE_RESULT_CONTINUATION_MARKERS = (
 )
 _SPACE_MARKERS = (
     "别说了",
+    "别说话",
     "给我一点空间",
     "想一个人待会",
     "一个人待着",

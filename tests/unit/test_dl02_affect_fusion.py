@@ -311,6 +311,7 @@ def test_natural_space_and_relationship_autonomy_phrases_take_distinct_paths(
     ("message", "expected_appraisal", "expected_act"),
     [
         ("今天别管我。", "user_boundary_or_space", "GIVE_SPACE"),
+        ("先别说话。", "user_boundary_or_space", "GIVE_SPACE"),
         ("我想一个人待着。", "user_boundary_or_space", "GIVE_SPACE"),
         ("我今晚和朋友出去。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
         ("我喜欢别人了怎么办。", "user_relational_autonomy", "RESPECT_AUTONOMY"),

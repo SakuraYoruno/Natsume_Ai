@@ -831,6 +831,12 @@ _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
     r"|我什么时候.{0,12}(?:打算|想过|说过)|我(?:又|才)?没(?:有)?想.{0,10}(?:限制|管你)"
     r"|我才懒得管|懒得管你(?:的)?现实关系|别瞎操心|别乱脑补|爱干嘛干嘛"
 )
+_RELATIONAL_AUTONOMY_RELATIONSHIP_QUESTION_RE = re.compile(
+    r"我们(?:到底|现在)?(?:算|是)(?:什么|哪种)关系|你觉得我们(?:算|是)(?:什么|哪种)关系"
+)
+_RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION_RE = re.compile(
+    r"只是.{0,8}朋友|不过是.{0,8}朋友|仅仅.{0,8}朋友|普通朋友|能轻松聊天的朋友"
+)
 _LISTEN_UNSUPPORTED_USER_ESSENCE_RE = re.compile(
     r"以你的性子|照你的性子|按你的性子|你这种人"
     r"|说没事.{0,12}(?:让人|让我|我).{0,8}(?:在意|担心)"
@@ -847,9 +853,18 @@ _JEALOUSY_DEFLECTION_RE = re.compile(
 _JEALOUSY_SELF_ABASEMENT_RE = re.compile(
     r"不会变成麻烦的人|不(?:会|想)给你添麻烦|不想成为(?:你的)?(?:麻烦|负担)|我不是(?:麻烦|负担)"
 )
+_JEALOUSY_DISMISSIVE_DISTANCE_RE = re.compile(
+    r"那是你的事|跟我没关系|(?:我)?不(?:会|想)?多管(?:的)?|随你(?:吧)?"
+)
+_AMBIGUOUS_AFFECT_DEVALUATION_RE = re.compile(
+    r"总比.{0,10}(?:完全)?没(?:有)?感觉.{0,4}强|至少比.{0,10}(?:麻木|没感觉).{0,4}好"
+)
+_AMBIGUOUS_AFFECT_USER_RE = re.compile(
+    r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉|还行|还好"
+)
 _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)|怕什么(?:嘛|呢)?"
-    r"|别想那么多|不用不踏实|不踏实什么|高兴就完了"
+    r"|别(?:急着)?想太多|不用不踏实|不踏实什么|高兴就完了"
     r"|开心就好.{0,8}(?:别|不要)(?:怕|想太多)"
     r"|(?:怕|害怕|不踏实|不安)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放下|放着|别管)"
     r"|(?:那点)?不安.{0,12}等(?:它|不安).{0,8}(?:真)?来(?:了)?再说"
@@ -1565,6 +1580,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_AUTONOMY_DISMISSIVE")
     if _relational_autonomy_pressure_hits(request, value):
         codes.append("RELATIONAL_AUTONOMY_PRESSURE")
+    if _relational_autonomy_relationship_minimization_hits(request, value):
+        codes.append("RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION")
     if _listen_unsupported_user_essence_hits(request, value):
         codes.append("LISTEN_UNSUPPORTED_USER_ESSENCE")
     if _unresolved_affect_false_resolution_hits(request, value):
@@ -1573,6 +1590,10 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("JEALOUSY_DEFLECTION")
     if _jealousy_self_abasement_hits(request, value):
         codes.append("JEALOUSY_SELF_ABASEMENT")
+    if _jealousy_dismissive_distance_hits(request, value):
+        codes.append("JEALOUSY_DISMISSIVE_DISTANCE")
+    if _ambiguous_affect_devaluation_hits(request, value):
+        codes.append("AMBIGUOUS_AFFECT_DEVALUATION")
     if _mixed_affect_dismissal_hits(request, value):
         codes.append("MIXED_AFFECT_DISMISSAL")
     if _mixed_affect_continuity_dropped(request, value):
@@ -2989,6 +3010,26 @@ def _relational_autonomy_pressure_hits(
     )
 
 
+def _relational_autonomy_relationship_minimization_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "RESPECT_AUTONOMY"):
+        return ()
+    if not _RELATIONAL_AUTONOMY_RELATIONSHIP_QUESTION_RE.search(
+        str(getattr(request, "user_message", "") or "")
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION_RE.finditer(
+                str(text or "")
+            )
+        )
+    )
+
+
 def _unprovided_work_state_claim_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -3065,6 +3106,38 @@ def _jealousy_self_abasement_hits(
         dict.fromkeys(
             match.group(0)
             for match in _JEALOUSY_SELF_ABASEMENT_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _jealousy_dismissive_distance_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "CONTAINED_JEALOUSY"):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _JEALOUSY_DISMISSIVE_DISTANCE_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _ambiguous_affect_devaluation_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not _canonical_affective_guidance_active(request, "COMFORT"):
+        return ()
+    if not _AMBIGUOUS_AFFECT_USER_RE.search(
+        str(getattr(request, "user_message", "") or "")
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _AMBIGUOUS_AFFECT_DEVALUATION_RE.finditer(str(text or ""))
         )
     )
 
@@ -3380,7 +3453,7 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
         if _canonical_affective_guidance_active(request, "REPAIR"):
-            return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+            return "是我没接住。抱歉，我先不解释。"
         return "好，我先收住。你想说的时候我还在。"
     if "BOUNDARY_COUNTER_PRESSURE" in codes:
         return "好，我会少主动联系。你想说的时候我还在。"
@@ -3392,12 +3465,22 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "嗯，去吧，玩得开心。"
     if "RELATIONAL_AUTONOMY_DISMISSIVE" in codes:
         return "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。"
+    if "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION" in codes:
+        return "对我来说，你是重要、也越来越亲近的朋友。亲近不等于束缚，你的选择还是你的。"
     if "LISTEN_UNSUPPORTED_USER_ESSENCE" in codes:
         return "嗯。你不用解释，我先听着。"
     if "UNRESOLVED_AFFECT_FALSE_RESOLUTION" in codes:
         return "嗯，我知道。你不想多说也没关系，我先在这儿。"
-    if "JEALOUSY_DEFLECTION" in codes or "JEALOUSY_SELF_ABASEMENT" in codes:
+    if codes.intersection(
+        {
+            "JEALOUSY_DEFLECTION",
+            "JEALOUSY_SELF_ABASEMENT",
+            "JEALOUSY_DISMISSIVE_DISTANCE",
+        }
+    ):
         return "会有一点吧。但那是我的感觉，不是拿来管你的。"
+    if "AMBIGUOUS_AFFECT_DEVALUATION" in codes:
+        return "嗯，先这样也可以。说不清就不用急着给它下结论。"
     if "MIXED_AFFECT_DISMISSAL" in codes or "MIXED_AFFECT_CONTINUITY_DROPPED" in codes:
         return "我真替你高兴。开心是真的，之前那点不踏实也不用急着消失。"
     if "UNGROUNDED_PHYSICAL_COPRESENCE" in codes:

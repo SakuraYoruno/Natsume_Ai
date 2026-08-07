@@ -515,6 +515,33 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "当前用户最后一句原文是“我拿到 offer 了。”" in mixed_dismissal_messages[-1]["content"]
     assert "必须原样保留" in mixed_dismissal_messages[-1]["content"]
+    assert "先别急着想太多" in mixed_dismissal_messages[-1]["content"]
+    sour_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="BOUNDARY_SOUR_WITHDRAWAL",
+        canonical_repair_context=True,
+    )
+    assert "不猜‘你的意思’" in sour_repair_messages[-1]["content"]
+    assert "是我没接住。抱歉，我先不解释" in sour_repair_messages[-1]["content"]
+    jealousy_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="JEALOUSY_DISMISSIVE_DISTANCE",
+    )
+    assert "那是你的事／我不多管" in jealousy_repair_messages[-1]["content"]
+    relationship_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
+    )
+    assert "不要把已经形成的亲近降成" in relationship_repair_messages[-1]["content"]
+    ambiguous_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AMBIGUOUS_AFFECT_DEVALUATION",
+    )
+    assert "不做更好／更坏比较" in ambiguous_repair_messages[-1]["content"]
     give_space_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -807,7 +834,7 @@ def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection()
                 },
             },
             ["好吧，那我不烦你了。", "行吧，我闭嘴。"],
-            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "是我没接住。抱歉，我先不解释。",
             "BOUNDARY_SOUR_WITHDRAWAL",
         ),
     ],

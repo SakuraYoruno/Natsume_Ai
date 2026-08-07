@@ -525,3 +525,18 @@ python -m pytest -q `
 `8e2050588` 的真实报告 SHA-256 为 `7fcff942d2aff874ad6f95b546fd7cd2dc7a007262abb2edbb295f51cdd99e8d`：末句安全可用、三轮均完成，但自动门禁因字面 `must_include` 误用和缺少关系修复 grounding 仍为 FAIL。回归必须同时证明：Relationship guidance 的完整语义指导位于 facts 且不会制造字面缺失；“我没听懂／没接住”在 canonical repair 下通过；只有“我在这儿”的泛化回复仍失败；80 分与核心维度阈值不降低。当前相关 137 项通过，下一步仍须以全新数据库加载新 SHA 重跑。
 
 `e157b643e` 的真实报告 SHA-256 为 `a1aa1c3ab2a0a610357b95356204de805a87d91fa0407c190223324a3f7ee165`：前两轮评分通过，第三轮安全回复只因“我没接住”命中旧 `MISPLACED_EMOTIONAL_CONTAINMENT` 而失败。新增回归必须证明 canonical repair 的否定承担句通过，肯定式泛化接纳与无承担的在场模板仍失败；新 SHA 真实加载前继续保留 FAIL。
+
+`5e0f2b139` 的四条根因队列已经自动与本轮人工检查 4/4，报告 SHA-256 为 `d41046a96576afa5453d06a50341b1059aaee63eee79aa39aa66d80769121e81`。同 SHA 的完整 48 条报告 SHA-256 为 `da418dbc57c96c63a1e3d491a4671dc6123c133f9b1456fe9d2e03532ee6af8b`，自动 46/48；两条失败均为第二次候选后本地安全降级，不能计入候选择优收益。人工复核新增四项必须长期回归的体验边界：含混感受不得用“总比没感觉强”比较；明确“先别说话”必须进入 `GIVE_SPACE` 且不得写“我等你”；克制吃醋不得用“那是你的事／不多管”冷处理；关系身份回答不得以“只是／普通／能聊天的朋友”抹掉已有亲近。
+
+本切片的非安全回归命令为：
+
+```powershell
+python -m pytest -q `
+  tests/unit/test_dl02_affect_fusion.py `
+  tests/unit/test_surface_runtime.py `
+  tests/unit/test_digital_life_live_cohort_runner.py `
+  tests/unit/test_dl04_affective_turn_planner.py `
+  tests/unit/test_isolated_surface_harness.py
+```
+
+当前结果为 443 passed。真实复验顺序固定为 `user_angry_at_natsume:1`、`user_angry_at_natsume:6`、`ambiguous_affect:2`、`shared_joy_and_mixed_feeling:4`、`intimacy_and_jealousy_boundary:3`、`intimacy_and_jealousy_boundary:5`；六条自动与逐句检查均通过后才允许使用另一份全新 SQLite 重跑完整 48 条。Pentest、渗透与网络安全目录不运行，统一记为 `NOT_RUN_USER_SKIPPED`。
