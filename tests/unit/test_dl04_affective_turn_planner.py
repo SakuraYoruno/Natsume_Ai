@@ -208,6 +208,7 @@ def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     assert guidance.plan.utterance_frame.response_move == "OWN_IMPACT"
     assert guidance.plan.utterance_frame.ending_mode == "OWNERSHIP_STOP"
     assert "PREMATURE_REPAIR" in guidance.plan.utterance_frame.forbidden_claims
+    assert "RELATIONSHIP_SELF_ERASURE" in guidance.plan.utterance_frame.forbidden_claims
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
 

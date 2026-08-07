@@ -949,6 +949,61 @@ def test_surface_runtime_retries_repair_self_victimization_and_sour_exit() -> No
     assert result.selected_text == "嗯，是我刚才没接住。你不用现在原谅我。"
 
 
+def test_surface_runtime_retries_typed_repair_self_erasure_without_affecting_space() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["抱歉，是我太烦了。我会安静点的。"])
+        return _candidate_payload(["是我没接住你的意思。抱歉，我先不替自己解释。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="你真烦。",
+                reply_control_packet={
+                    "task_mode": "relationship_repair",
+                    "response_move": "repair_open",
+                    "emotional_tone": "gentle_direct",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+                    "must_not_do": ["不要要求原谅、替自己辩解。"],
+                    "companion_utterance_frame": {
+                        "schema_version": "companion_utterance_frame.v1",
+                        "frame_id": "frame-repair-self-erasure",
+                        "companion_act_kind": "REPAIR",
+                        "semantic_focus": "RELATIONAL_IMPACT",
+                        "self_stance": "OWN_REPAIR",
+                        "response_move": "OWN_IMPACT",
+                        "inference_policy": "BOUNDED_BY_EVIDENCE",
+                        "relationship_posture": "REPAIR_UNRESOLVED",
+                        "question_policy": "NONE",
+                        "ending_mode": "OWNERSHIP_STOP",
+                        "forbidden_claims": [
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "IMPLIED_WAITING",
+                            "PREMATURE_REPAIR",
+                            "RELATIONSHIP_SELF_ERASURE",
+                            "RESPONSE_OBLIGATION",
+                        ],
+                        "created_at_ms": 1_900_000_000_000,
+                    },
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "RELATIONAL_REPAIR_SELF_ERASURE" in calls[1][-1]["content"]
+    assert "用沉默、消失和退出换取修复" in calls[0][-1]["content"]
+    assert result.selected_text == "是我没接住你的意思。抱歉，我先不替自己解释。"
+
+
 @pytest.mark.parametrize(
     "bad_reply",
     [

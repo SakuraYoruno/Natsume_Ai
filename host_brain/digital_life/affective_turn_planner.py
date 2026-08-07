@@ -573,7 +573,13 @@ def _companion_utterance_frame_spec(
             "question_policy": "NONE",
             "ending_mode": "OWNERSHIP_STOP",
             "forbidden_claims": tuple(
-                [*common_claims, "IMPLIED_WAITING", "PREMATURE_REPAIR", "RESPONSE_OBLIGATION"]
+                [
+                    *common_claims,
+                    "IMPLIED_WAITING",
+                    "PREMATURE_REPAIR",
+                    "RELATIONSHIP_SELF_ERASURE",
+                    "RESPONSE_OBLIGATION",
+                ]
             ),
         }
     if act == "SET_BOUNDARY":

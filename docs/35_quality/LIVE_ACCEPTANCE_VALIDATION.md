@@ -776,3 +776,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 这只把代码根因标为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。下一步必须在含有既存多用户数据的同一隔离库中，以新 participant/run identity 重跑代表场景并证明召回包跨 subject 命中为 0；之后再处理 frame 没有约束住的“稍后再说”、隐含等待、混合情绪偏置和技术事实编造。完整 48 条与三人盲评在这些窄队列通过前不重跑。网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。
 
 `03886f282` 随后在保留全部旧 subject 数据的同一 SQLite/Chroma 上重跑用户生气与裂痕修复，共 6 个真实 accepted turn，旧 writer 增量 0；报告 SHA-256 为 `19f52e0b8141ce44864ad3f13f6414a17a65088bcbd1fb999e28e0dba6503cfe`。两条仍都因首轮 `DEGRADED_LOW_QUALITY_AFTER_RETRY` 自动失败，但持久 Task artifact 已不再包含其他 subject 的历史，作用域修复有效。新的直接原因是 sqlite_ledger 把当前 request 刚写入的 Intent 作为唯一“记忆”召回，压缩后事实只剩 `_thalamus_meta`，评分器据此错误要求候选满足 memory alignment。当前代码在同一融合边界增加 causal self-exclusion：metadata request/intent 或 doc_id 与当前请求相同的候选在作用域和 FTS 融合前后均被排除，并记录 `self_excluded_candidate_count`；118 项相邻回归通过。该修复仍需新 SHA 真实复验，不能用最终两句较自然的 fallback 把本轮失败改写为 PASS。
+
+`f169cd4e3` 的同两条真实复验报告 SHA-256 为 `6fbe0a45d0db2f92782461af3bfec9cd95fb28c5b001f23144b54bc072bd6bb1`。两条均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，6 个 accepted turn、canonical writer 推进与旧 writer 零增量通过，首轮不再出现当前 request／Intent 假记忆，causal self-exclusion 的真实缺陷关闭。当前人工复核只接受裂痕修复；用户生气末句“抱歉，是我太烦了。我会安静点的。”仍被拒绝，因为它把具体失误改写成全局自我贬低，再用沉默退出代替承担。
+
+后续代码不增加普通对话写入、模型调用或审计步骤：`REPAIR` 的类型化 `CompanionUtteranceFrameV1` 新增 `RELATIONSHIP_SELF_ERASURE` 禁止项，Surface 仅在该服务器 frame 下拒绝“我是个很烦的人／我会沉默退出”一类候选；`GIVE_SPACE` 仍可独立确认留白。规划与 Surface 定向回归 184 项通过。必须加载新进程再跑用户生气轨迹并完成逐句复核；在此之前 frame 真实队列、人感和完整 48 条仍为 `FAIL/PENDING_HUMAN_REVIEW`。

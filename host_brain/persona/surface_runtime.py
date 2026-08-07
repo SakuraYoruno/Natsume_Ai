@@ -43,7 +43,8 @@ from host_brain.persona.surface_candidate_guards import (
     _relational_autonomy_relationship_minimization_hits,
     _relational_hostile_retaliation_hits, _relationship_doubt_dismissive_hits,
     _repair_continuation_pressure_hits, _repair_restatement_solicitation_hits,
-    _repair_self_victimization_hits, _repair_ungrounded_self_cause_hits,
+    _repair_self_erasure_hits, _repair_self_victimization_hits,
+    _repair_ungrounded_self_cause_hits,
     _surface_internal_authorship_hits, _text_input_boundary_active,
     _ungrounded_physical_copresence_hits, _unprovided_notification_action_hits,
     _unprovided_work_state_claim_hits, _unresolved_affect_false_resolution_hits,
@@ -1285,6 +1286,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_CONTINUATION_PRESSURE")
     if _repair_ungrounded_self_cause_hits(request, value):
         codes.append("RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE")
+    if _repair_self_erasure_hits(request, value):
+        codes.append("RELATIONAL_REPAIR_SELF_ERASURE")
     if _user_affect_perspective_reversal_hits(request, value):
         codes.append("USER_AFFECT_PERSPECTIVE_REVERSAL")
     if _relational_hostile_retaliation_hits(request, value):
@@ -2522,6 +2525,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         or "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE" in codes
     ):
         return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    if "RELATIONAL_REPAIR_SELF_ERASURE" in codes:
+        return "是我没接住。抱歉，我先不解释。"
     if "RELATIONAL_HOSTILE_RETALIATION" in codes:
         if _canonical_affective_guidance_active(request, "REPAIR"):
             return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"

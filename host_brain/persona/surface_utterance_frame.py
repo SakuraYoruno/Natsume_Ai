@@ -68,7 +68,9 @@ _FORBIDDEN = {
     "UNSUPPORTED_USER_EMOTION": "对方没说过的情绪名称、原因或人格判断",
     "IMPLIED_WAITING": "‘我等你／想说时再来／需要时喊我’式等候安排",
     "PREMATURE_REPAIR": "已经和好、已经翻篇或对方已经原谅",
-    "RELATIONSHIP_SELF_ERASURE": "把七海说成无关、虚假、麻烦或应当退出",
+    "RELATIONSHIP_SELF_ERASURE": (
+        "把七海说成无关、虚假、很烦或麻烦，或用沉默、消失和退出换取修复"
+    ),
     "RESPONSE_OBLIGATION": "要求回复、解释、安抚、回来报到或证明关系",
 }
 
