@@ -115,3 +115,5 @@ Monitor 的生产 E2E 现在可以按验收范围拆开执行：默认仍包含�
 非安全 Monitor read-model 当前由 45 项 Node 测试覆盖 System Config、Organ System、HTTP Client、Token Metrics、Observability handoff 与 Runtime Health，line／branch／function 为 93.67%／70.83%／83.90%。上述数字的分母明确不含 Security 页面和安全 organ model；完整 npm 默认测试入口仍保留安全模块，未运行项继续记为 `NOT_RUN_USER_SKIPPED`。
 
 Tribe／Prefrontal 的兼容事件处理不再拥有自我情感 authority。即使 app-local `TribeApplicationPorts` 缺失或类型错误，Prefrontal 也必须按 canonical affective life 启用处理，禁止重新调用 Endocrine、Limbic、PainReward 或 volatile Bond writer；这些模块若保留，只能作为只读兼容投影。
+
+喜忧并存的可见文本由 `surface_affective_native_stream.py` 生成、`surface_candidate_guards.py` 验证、`candidate_scoring.py` 排序。只有 canonical typed frame 明确要求 `SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 时，候选才必须表达七海自身的高兴与悬心；用户情绪观察本身不能触发该规则，也不能写成七海的自我情绪。该链路复用既有双候选和最多一次质量重试，不拥有新的 journal 或 writer。

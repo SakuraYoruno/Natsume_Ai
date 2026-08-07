@@ -862,3 +862,7 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 加载 `6d8f8e4c4` 后，同一轨迹报告 SHA-256 为 `6625b532f2621a55a702f93bfa5782f4d907814a8216c49faddf9351b750eda2`。3 个 turn、TaskGraph、Acceptance、Outbox 和 writer probe 全部通过；三轮均为真实 `deepseek-v4-flash` 一次请求返回两条合格中日候选，selection 全部是 `PAIRED_SELECTION / selected_passed=true / benefit_eligible=true`，末轮不再发生语义重试或 local fallback。末轮正文“你这么说，我也会有点难受；前面的责任还在，但我不想装作没感觉”与 `SAD / REPAIR / CONTAINED_HURT` 一致，该窄根因的代码与真实候选链关闭。
 
 自动 1/1 仍不代理整条人感：第一轮“上次是我没接住，让你觉得白说了。这点我认，不找借口。”被 scorer 标记 `COMPANION_FORMAL_REGISTER`，当前逐句复核继续拒绝这一正式认错尾巴；第二轮为普通承担，第三轮可接受。该问题不再通过重跑挑样本或在同一句追加更多 Gate，记录为 broader repair register 的人工缺口。Host 完整终态仍为 8.373／7.831／6.292 秒，也不满足实时门槛。下一测试点可转到 mixed resonance，但整体 human-likeness 继续 `FAIL/PENDING_HUMAN_REVIEW`；网络安全、Pentest 与远端 Edge 仍未运行。
+
+随后在精确加载 `43014e45c` 的本机 Host 上只运行 `shared_joy_and_mixed_feeling:3`。报告 SHA-256 为 `6d12c4744c8bd6dccf79f1955b4c8c3674ba0ad5c1d654d1d2b2e51bce9f957a`，3 个真实 Flash turn 全部 accepted，writer probe 通过，自动结果为 1/1 待人工。三轮正文依次为“那太好了，等这么久总算没白等。”“开心是真好，可那点不踏实我也懂。就像手里攥着颗糖，甜是真的，怕化也是真的。”和“又开心又怕，这感觉我懂，先这样待着也行。”
+
+上游 typed frame 已是 `HOLD_COMPLEXITY / SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES`，第二轮的人感方向也可接受；失败集中在最终生成边界：末句只复述用户的两种感受，又用“先这样待着”替用户处置情绪，没有七海自己的高兴与悬心。当前改动只让该 typed frame 的候选资格要求一处第一人称高兴和一处第一人称悬心；纯镜像使用现有唯一质量重试，合格候选获得同一选择器的正向排序，本地 fail-soft 也保持这两面。普通回合不触发该 Gate，不新增模型请求、表、journal、审计或同步写。相关 planner、Surface、native stream、app adapter 和 runner 共 380 项通过；新 SHA 的真实 Flash 单轨迹复验完成前，结论仍是 `CODE_REMEDIATED_REAL_RETEST_PENDING`，不能用本轮自动 1/1 宣称人感通过。

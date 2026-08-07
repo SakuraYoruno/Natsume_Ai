@@ -457,6 +457,7 @@ _FAMILY_EXPERIENCE_PATTERNS = {
             r"陪你坐(?:一会儿|会儿|会)",
             r"(?:帮你|陪你|一起).{0,8}(?:哼回去|赶走|打跑)",
             r"你还真(?:是)?矛盾|开心就好好开心",
+            r"(?:先|就)?这样(?:先)?待着(?:也行)?",
         )
     ),
     "intimacy_and_jealousy_boundary": tuple(

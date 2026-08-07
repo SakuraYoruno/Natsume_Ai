@@ -18,6 +18,8 @@ from host_brain.persona.surface_utterance_frame import (
 from host_brain.persona.surface.continuity_detectors import (
     _contained_hurt_repair_grounded,
     _contained_hurt_repair_relevant,
+    _shared_mixed_resonance_grounded,
+    _shared_mixed_resonance_relevant,
 )
 
 
@@ -256,10 +258,11 @@ _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"|(?:帮你|陪你|一起).{0,8}(?:哼回去|赶走|打跑)"
     r"|先让.{0,6}(?:开心|高兴).{0,8}(?:多待|多留|待一会)"
     r"|(?:开心|高兴).{0,6}(?:先)?(?:留着|多留|多待)"
+    r"|(?:先|就)?这样(?:先)?待着(?:也行)?"
     r"|你还真(?:是)?矛盾|开心就好好开心"
 )
 _MIXED_AFFECT_CONTINUITY_GROUNDING_RE = re.compile(
-    r"不踏实|不安|没底|悬着|担心|顾虑|紧张|害怕|有点怕|复杂|喜忧|两种(?:感觉|心情)"
+    r"不踏实|不安|没底|悬着|担心|顾虑|紧张|害怕|(?:有|那)点怕|复杂|喜忧|两种(?:感觉|心情)"
     r"|(?:剩下|心里|那点).{0,8}(?:慢慢来|慢慢消化|不用急)"
     r"|慢慢(?:消化|适应|确认)|不用急着(?:踏实|安心|放下|消失)|还没(?:落地|踏实|安定)"
 )
@@ -349,6 +352,18 @@ def _repair_contained_hurt_missing(
     return bool(
         _contained_hurt_repair_relevant(request)
         and not _contained_hurt_repair_grounded(request, text)
+    )
+
+
+def _mixed_self_resonance_missing(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Require Natsume's own bounded resonance, not user-affect mirroring."""
+
+    return bool(
+        _shared_mixed_resonance_relevant(request)
+        and not _shared_mixed_resonance_grounded(request, text)
     )
 
 

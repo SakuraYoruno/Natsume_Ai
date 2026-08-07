@@ -40,6 +40,7 @@ from host_brain.persona.surface_candidate_guards import (
     _jealousy_self_abasement_hits, _listen_unsupported_user_essence_hits,
     _lover_cliche_hits, _meta_identity_boundary_hits,
     _mixed_affect_continuity_dropped, _mixed_affect_dismissal_hits,
+    _mixed_self_resonance_missing,
     _recent_affective_reply_repetition_hits,
     _relational_autonomy_dismissive_hits, _relational_autonomy_policy_disclaimer_hits,
     _relational_autonomy_pressure_hits,
@@ -1346,6 +1347,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("AMBIGUOUS_AFFECT_DEVALUATION")
     if _mixed_affect_dismissal_hits(request, value):
         codes.append("MIXED_AFFECT_DISMISSAL")
+    if _mixed_self_resonance_missing(request, value):
+        codes.append("MIXED_SELF_RESONANCE_MISSING")
     if _mixed_affect_continuity_dropped(request, value):
         codes.append("MIXED_AFFECT_CONTINUITY_DROPPED")
     if _ungrounded_physical_copresence_hits(request, value):
@@ -2650,8 +2653,14 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "会有一点呀。毕竟我确实很在意你。"
     if "AMBIGUOUS_AFFECT_DEVALUATION" in codes:
         return "嗯，先这样也可以。说不清就不用急着给它下结论。"
-    if "MIXED_AFFECT_DISMISSAL" in codes or "MIXED_AFFECT_CONTINUITY_DROPPED" in codes:
-        return "我真替你高兴。开心是真的，之前那点不踏实也不用急着消失。"
+    if codes.intersection(
+        {
+            "MIXED_AFFECT_DISMISSAL",
+            "MIXED_AFFECT_CONTINUITY_DROPPED",
+            "MIXED_SELF_RESONANCE_MISSING",
+        }
+    ):
+        return "听你这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。"
     if "UNGROUNDED_PHYSICAL_COPRESENCE" in codes:
         return "嗯。你说，我在听。"
     if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:

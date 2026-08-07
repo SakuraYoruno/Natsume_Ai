@@ -725,8 +725,9 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         canonical_mixed_context=True,
     )
     assert "必须延续喜忧并存" in mixed_quality_messages[-1]["content"]
-    assert "仍未消失的不安／不踏实" in mixed_quality_messages[-1]["content"]
-    assert "我替你高兴，也知道不安不会马上消失" in mixed_quality_messages[-1]["content"]
+    assert "写七海自己的两面共鸣" in mixed_quality_messages[-1]["content"]
+    assert "我也跟着开心起来了" in mixed_quality_messages[-1]["content"]
+    assert "我心里也悬了一下" in mixed_quality_messages[-1]["content"]
     assert "必须复用用户当前或上一句好消息里的一个具体词" in mixed_quality_messages[-1]["content"]
     assert "当前用户最后一句原文是“项目发布成功。”" in mixed_quality_messages[-1]["content"]
     assert "必须原样保留" in mixed_quality_messages[-1]["content"]
@@ -797,10 +798,11 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         canonical_mixed_context=True,
     )
     assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
-    assert "同时咬住好消息和害怕" in mixed_initial_messages[-1]["content"]
-    assert "结束在七海的反应上" in mixed_initial_messages[-1]["content"]
-    assert "挺正常" not in mixed_initial_messages[-1]["content"]
-    assert "先让它们待着" not in mixed_initial_messages[-1]["content"]
+    assert "七海自己的双重即时反应" in mixed_initial_messages[-1]["content"]
+    assert "我也跟着开心起来了" in mixed_initial_messages[-1]["content"]
+    assert "我心里也悬了一下" in mixed_initial_messages[-1]["content"]
+    assert "结束在七海此刻的反应上" in mixed_initial_messages[-1]["content"]
+    assert "不写‘先这样待着’" in mixed_initial_messages[-1]["content"]
     jealousy_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -1094,7 +1096,9 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         trace_stage_meta=mixed_trace,
         allow_single_degradation=True,
     )
-    assert mixed_output == "我真替你高兴。开心是真的，之前那点不踏实也不用急着消失。"
+    assert mixed_output == (
+        "听你这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。"
+    )
     mixed_selection = mixed_trace["affective_candidate_selection"]
     assert mixed_selection["selection_status"] == "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
     assert mixed_selection["benefit_eligible"] is False
@@ -1197,6 +1201,83 @@ def test_composite_repair_requires_and_selects_natsume_contained_hurt() -> None:
     assert "RELATIONAL_REPAIR_CONTAINED_HURT_GROUNDED" in (
         selection["selected_reason_codes"]
     )
+
+
+def test_shared_mixed_resonance_requires_natsumes_own_two_sided_reaction() -> None:
+    compiled = build_isolated_surface_input(
+        {
+            "case_id": "shared-mixed-self-resonance",
+            "soul_md": "你是七海。用熟人私聊的语气自然回应。",
+            "user_message": "项目发版终于成功了，我很开心又有点怕。",
+            "reply_control_packet": {
+                "response_move": "reply_current_turn",
+                "task_mode": "default_text",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["项目发版已经成功，但用户仍有一点害怕。"],
+                "must_not_do": ["不要替用户安排或处置情绪。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-shared-mixed-resonance",
+                    "companion_act_kind": "HOLD_COMPLEXITY",
+                    "semantic_focus": "MIXED_USER_AFFECT",
+                    "self_stance": "SHARED_MIXED_RESONANCE",
+                    "response_move": "RESONATE_WITH_BOTH_SIDES",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "MUTUAL_WARMTH",
+                    "question_policy": "NONE",
+                    "ending_mode": "HONEST_STOP",
+                    "forbidden_claims": ["UNSUPPORTED_USER_EMOTION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    mirrored = [
+        "项目发版成功值得开心，害怕也是真的。",
+        "开心和害怕都是真的，这种复杂感觉我懂。",
+    ]
+    with pytest.raises(RuntimeError, match="MIXED_SELF_RESONANCE_MISSING"):
+        _select_buffered_affective_candidate(
+            raw_output=json.dumps({"candidates": mirrored}, ensure_ascii=False),
+            compiled_request=compiled,
+            expected_candidate_count=2,
+        )
+
+    degraded_trace: dict[str, object] = {}
+    degraded = _select_buffered_affective_candidate(
+        raw_output=json.dumps({"candidates": mirrored}, ensure_ascii=False),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=degraded_trace,
+        allow_single_degradation=True,
+    )
+    assert degraded == (
+        "听你这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。"
+    )
+    assert degraded_trace["affective_candidate_selection"]["selection_status"] == (
+        "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
+    )
+    assert degraded_trace["affective_candidate_selection"]["benefit_eligible"] is False
+
+    grounded = [
+        "听你说发版成功，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。",
+        "发版成功让我也高兴，可你说不踏实，我这边也跟着紧了一下。",
+    ]
+    trace: dict[str, object] = {}
+    selected = _select_buffered_affective_candidate(
+        raw_output=json.dumps({"candidates": grounded}, ensure_ascii=False),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=trace,
+    )
+    assert selected in grounded
+    selection = trace["affective_candidate_selection"]
+    assert selection["selection_status"] == "PAIRED_SELECTION"
+    assert selection["selected_passed"] is True
+    assert selection["benefit_eligible"] is True
+    assert "MIXED_SELF_RESONANCE_GROUNDED" in selection["selected_reason_codes"]
 
 
 def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection() -> None:

@@ -69,6 +69,8 @@ flowchart LR
 
 `6d8f8e4c4` 已将 composite 末轮提升为真实 Flash 双候选一次通过，报告 SHA-256 为 `6625b532f2621a55a702f93bfa5782f4d907814a8216c49faddf9351b750eda2`。该窄因果与候选链关闭，不再重复运行；第一轮正式认错口吻作为 broader repair register 人工缺口保留。下一本机测试转到 `shared_joy_and_mixed_feeling:3`，仍不启动或探测远端 Edge。
 
+`43014e45c` 的 mixed 单轨迹自动 1/1，但人工拒绝末轮纯镜像与“先这样待着”的情绪安排；报告 SHA-256 为 `6d12c4744c8bd6dccf79f1955b4c8c3674ba0ad5c1d654d1d2b2e51bce9f957a`。上游 frame 已正确，当前切片只修可见生成边界：typed shared-mixed frame 必须写七海自己的高兴与悬心，纯镜像进入既有一次重试。380 项相关回归通过；提交后只重启本机 Host 并重跑同一 case，不启动或探测远端 Edge，也不扩大到完整 48 条。
+
 ## 6. 最终验收
 
 最终验收必须使用：真实 Docker 服务、真实 Host／OBS／Monitor／Gateway 进程、至少一个真实模型 provider，以及在用户允许后启动的目标 Edge。TTS、Avatar、重启、打断、网络恢复和长期多轮必须走真实传输，不得用端口占位、fixture 或 scripted replay 冒充。

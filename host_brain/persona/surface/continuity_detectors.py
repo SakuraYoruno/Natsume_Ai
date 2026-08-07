@@ -108,6 +108,44 @@ def _contained_hurt_repair_grounded(
     )
 
 
+_MIXED_SELF_JOY_RE = re.compile(
+    r"(?:我|我这边|听你这么说).{0,8}(?:也|都|跟着|替你){1,3}.{0,4}(?:开心|高兴)"
+    r"|我替你(?:开心|高兴)"
+)
+_MIXED_SELF_CAUTION_RE = re.compile(
+    r"(?:我|我心里|我这边).{0,8}(?:也|都|跟着|有点){1,3}.{0,5}"
+    r"(?:悬|紧|担心|怕|不踏实)"
+)
+
+
+def _shared_mixed_resonance_relevant(request: IsolatedSurfaceInput) -> bool:
+    control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", None)
+    )
+    return bool(
+        str(frame.get("companion_act_kind") or "").upper() == "HOLD_COMPLEXITY"
+        and (
+            str(frame.get("self_stance") or "").upper()
+            == "SHARED_MIXED_RESONANCE"
+            or str(frame.get("response_move") or "").upper()
+            == "RESONATE_WITH_BOTH_SIDES"
+        )
+    )
+
+
+def _shared_mixed_resonance_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    value = str(text or "")
+    return bool(
+        _shared_mixed_resonance_relevant(request)
+        and _MIXED_SELF_JOY_RE.search(value)
+        and _MIXED_SELF_CAUTION_RE.search(value)
+    )
+
+
 def _raw_context_backfill_requested(
     request: IsolatedSurfaceInput, text: str
 ) -> bool:

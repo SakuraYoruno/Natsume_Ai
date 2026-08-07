@@ -78,6 +78,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _self_doubt_scene_relevant,
     _signature_texture_relevant,
     _surface_process_meta_hits,
+    _shared_mixed_resonance_grounded,
     _thin_continuity_generic_reply,
     _thin_daily_followup_reply,
     _thin_wait_scene_hold,
@@ -1557,6 +1558,33 @@ def score_isolated_surface_candidates(request, candidates):
                 float(dimensions.get("emotional_containment", 86.0)),
             )
             reason_codes.append("RELATIONAL_REPAIR_CONTAINED_HURT_GROUNDED")
+        if _shared_mixed_resonance_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 12.0
+            dimensions["context_fit"] = max(
+                84.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                82.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                84.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("MIXED_SELF_RESONANCE_GROUNDED")
         if _address_boundary_grounded(request, quality.normalized_text or candidate):
             # A short acknowledgement is the correct complete answer here;
             # generic prose scoring otherwise mistakes brevity for weak scene

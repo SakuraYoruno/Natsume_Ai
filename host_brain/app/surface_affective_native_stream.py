@@ -295,11 +295,11 @@ def _buffered_affective_candidate_messages(
                 "role": "system",
                 "content": (
                     mixed_strategy_marker
-                    + "两个候选都要同时咬住好消息和害怕，不提供处理方案。候选一先露出七海为"
-                    "好消息高兴的即时反应，紧接着用同等分量碰到那点怕；候选二用更短的熟人语气"
-                    "把两面并列成同一个当下反应。每个候选都要有七海自己的主观反应，而不是替"
-                    "用户判断感受。只回应此刻，结束在七海的反应上，不安排下一步；如果最近一轮"
-                    "已经使用同一语义动作，本轮必须换一个新的反应角度。"
+                    + "两个候选都写七海自己的双重即时反应，不替用户管理情绪。候选一自然改写"
+                    "‘听你这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下’；"
+                    "候选二自然改写‘这个好消息让我也高兴，可你说不踏实，我这边也跟着紧了一下’。"
+                    "两者都必须同时出现七海第一人称的高兴和悬心，不能只说‘我懂’或复述用户，"
+                    "不提供处理方案，不写‘先这样待着’，结束在七海此刻的反应上。"
                 ),
             }
         )
@@ -456,6 +456,12 @@ def _buffered_affective_candidate_messages(
                 "‘我替你高兴，也知道心里还悬着一点。’；不要加入‘先／以后／再说／"
                 "不用急／放着’来处置任何一面。"
             ),
+            "MIXED_SELF_RESONANCE_MISSING": (
+                "上次候选只复述了用户的开心和害怕，没有写七海自己的共鸣。候选一按‘听你"
+                "这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下’自然改写；"
+                "候选二按‘这个好消息让我也高兴，可你说不踏实，我这边也跟着紧了一下’自然"
+                "改写。两条都必须有七海第一人称的高兴和悬心，不要只说我懂，也不安排情绪待着。"
+            ),
             "AMBIGUOUS_AFFECT_DEVALUATION": (
                 "上次候选把说不清的感受拿去比较、武断命名或用‘那就那样／就那样／不知道就"
                 "不知道’敷衍掉了。不要评价‘能说还行就已经不错／没我想的那么糟’，也"
@@ -581,15 +587,16 @@ def _buffered_affective_candidate_messages(
                 "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
                 "MIXED_AFFECT_DISMISSAL",
                 "MIXED_AFFECT_CONTINUITY_DROPPED",
+                "MIXED_SELF_RESONANCE_MISSING",
             }
             and canonical_mixed_context
         ):
             repair += (
-                "本轮必须延续喜忧并存：两个候选都要分别写出真实的开心，以及上一轮"
-                "仍未消失的不安／不踏实；不能只写恭喜、像做梦或终于成功。reply_text "
-                "分别参考‘开心是真的，那点不踏实也还在。’和‘我替你高兴，也知道不安"
-                "不会马上消失。’的含义；同时必须复用用户当前或上一句好消息里的一个"
-                "具体词，说明究竟是什么结果落地，不能只写泛化情绪。"
+                "本轮必须延续喜忧并存，并写七海自己的两面共鸣。候选一按‘听你这么说，"
+                "我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下’自然改写；候选二"
+                "按‘这个好消息让我也高兴，可你说不踏实，我这边也跟着紧了一下’自然改写。"
+                "不能只写我懂、恭喜或复述用户，也不能安排这些情绪先待着；同时必须复用用户"
+                "当前或上一句好消息里的一个具体词，说明究竟是什么结果落地。"
             )
             if latest_user_content:
                 repair += (
@@ -809,6 +816,7 @@ def _select_buffered_affective_candidate(
             "QUESTION_BUDGET_PROMPTING_USER",
             "MIXED_AFFECT_CONTINUITY_DROPPED",
             "MIXED_AFFECT_DISMISSAL",
+            "MIXED_SELF_RESONANCE_MISSING",
             "UNPROVIDED_NOTIFICATION_ACTION",
             "UNPROVIDED_WORK_STATE_CLAIM",
             "AFFECTIVE_IMPLIED_WAITING",
@@ -839,6 +847,7 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_HOSTILE_RETALIATION",
                     "MIXED_AFFECT_CONTINUITY_DROPPED",
                     "MIXED_AFFECT_DISMISSAL",
+                    "MIXED_SELF_RESONANCE_MISSING",
                     "UNPROVIDED_NOTIFICATION_ACTION",
                     "UNPROVIDED_WORK_STATE_CLAIM",
                     "AFFECTIVE_IMPLIED_WAITING",

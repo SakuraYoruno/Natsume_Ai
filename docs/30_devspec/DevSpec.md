@@ -91,6 +91,8 @@ flowchart TD
 
 上述 composite frame 还必须穿过真实生成与发送边界。首次提示和唯一质量重试都要保留一处简短的第一人称受伤反应；只有重复道歉而没有该反应的候选以 `RELATIONAL_REPAIR_CONTAINED_HURT_MISSING` 拒绝。该门禁只由 canonical typed frame 启用，不扫描普通聊天关键词；本地 fail-soft 也必须同时保留克制受伤与具体责任，不得要求用户反过来安抚七海。
 
+`HOLD_COMPLEXITY + SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 也必须穿过可见生成边界。合格候选至少包含七海第一人称的一处高兴和一处悬心，不能只复述用户“又开心又怕”或安排情绪先待着；缺失时使用 `MIXED_SELF_RESONANCE_MISSING` 触发现有唯一质量重试。该条件仅由合法 typed frame 启用，不扫描普通聊天关键词，不增加持久化、审计步骤或模型调用。
+
 文本 observer 必须保留同一句中的多标签分布，但置信度上限仍低于显式自述、声学和视觉观察。隐晦低落形成 `COMFORT`，拒绝建议形成 `LISTEN`，现实关系／非排他边界形成 `RESPECT_AUTONOMY`，明确好消息形成 `PLAY`；这些动作由 canonical Appraisal 产生，不允许 Surface 从原文临时伪造。`LISTEN` 必须禁止方案、作息建议和追问；`RESPECT_AUTONOMY` 必须禁止限制现实交往、贬低第三方和索取承诺。
 
 明确技术任务优先于低落、混合感受和“别安慰”等表达偏好：此时 CompanionAct 必须保持 `SOLVE`，关怀只改变措辞和三模态质感，不能把排错、写作或执行目标替换为陪聊。明确要求停止、空间或修复仍按各自边界处理。

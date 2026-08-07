@@ -2557,7 +2557,7 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ],
             ["不要只说恭喜。"],
             "恭喜你！这下可以松口气了吧。",
-            "我真替你高兴。开心是真的，之前那点不踏实也不用急着消失。",
+            "听到你拿到 offer，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。",
             "MIXED_AFFECT_CONTINUITY_DROPPED",
         ),
         (

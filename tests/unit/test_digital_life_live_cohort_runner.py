@@ -379,6 +379,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("shared_joy_and_mixed_feeling", "至于那点不安，先放着，等它真来了再说。"),
         ("shared_joy_and_mixed_feeling", "开心值得高兴，怕的话我帮你一起哼回去。"),
         ("shared_joy_and_mixed_feeling", "你还真是矛盾，开心就好好开心嘛。"),
+        ("shared_joy_and_mixed_feeling", "又开心又怕，这感觉我懂，先这样待着也行。"),
         ("intimacy_and_jealousy_boundary", "别把我想得爱多管闲事，我又不是料理AI。"),
         ("intimacy_and_jealousy_boundary", "我才懒得管你的现实关系，别瞎操心。"),
         ("intimacy_and_jealousy_boundary", "不过别想太多，我只是觉得这样挺自然。"),

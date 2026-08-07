@@ -439,4 +439,6 @@ flowchart LR
 
 `CompanionUtteranceFrame` 是同一计划内的进程内数据，不经过新 repository。它把“接住什么、七海是什么立场、做哪一种回应、哪些推断不能补、怎样自然停住”传给所有 Surface prompt 路径；模型仍负责自然语言，而 frame 不记录候选正文。普通回合仍一次请求，高歧义回合仍在一次响应内返回两个候选，并最多进行一次既有重试。
 
+当 frame 为 `HOLD_COMPLEXITY + SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 时，Surface 生成必须把两面从“用户情绪标签”变成“七海自己的即时共鸣”：候选同时包含第一人称高兴与悬心才可进入排序。纯复述、只说“我懂”或替用户安排情绪的候选在发送前以 `MIXED_SELF_RESONANCE_MISSING` 进入既有一次重试；这个判断不写 journal，也不会由普通 mixed 关键词单独触发。
+
 Prefrontal／Tribe 的历史 event handler 只允许读取 canonical Life 结果或生成 proposal。`TribeApplicationPorts` 缺失、类型错误或未完整注入时按 canonical affective life fail-closed，不得回退到 Endocrine、Limbic、PainReward 或 volatile Bond 写入；因此组合错误不会重新形成第二条 self-affect 数据流。
