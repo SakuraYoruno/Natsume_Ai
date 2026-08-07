@@ -858,3 +858,7 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 加载 `0f0a0b67b` 后的第二次单轨迹报告 SHA-256 为 `62063c6355a493c71d07512e9ca4fef2d1838ede4cba753d930935818227d885`。3 个真实 Flash turn 全部 accepted，writer probe 通过；前两轮候选直接通过，末轮仍是 `SAD / REPAIR / CONTAINED_HURT`，可见正文已正确保留七海感受与责任。第一次末轮候选因缺少受伤被拒绝，唯一重试的两条候选又分别漏掉受伤或复读最近的“没接住／没听懂／理解错”，所以系统使用同一 Gate 验过的本地句；selection 为 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`、`selected_passed=true`、`benefit_eligible=false`。这证明 fail-soft 的人感方向已修复，但不证明真实双候选搜索有收益，自动状态仍是 FAIL。
 
 下一切片不增加第三次模型请求，也不放宽 runner。composite 首轮与重试改用两个正向对话结构：一个从“这句话让我难受，但前面的责任仍在”出发，另一个从“最新一句刺到我，之前没做好也仍成立”出发；只要求自然口语改写，不再让模型从长串禁词反推目标。当前 Planner、native stream 与真实 app adapter 80 项通过，状态为 `CODE_REMEDIATED_POSITIVE_STRUCTURE_REAL_FLASH_RETEST_PENDING`。若同一单轨迹仍依赖 local fallback，则保留失败证据并停止为该句继续扩展规则，转入模型／少量真实语料策略评估。
+
+加载 `6d8f8e4c4` 后，同一轨迹报告 SHA-256 为 `6625b532f2621a55a702f93bfa5782f4d907814a8216c49faddf9351b750eda2`。3 个 turn、TaskGraph、Acceptance、Outbox 和 writer probe 全部通过；三轮均为真实 `deepseek-v4-flash` 一次请求返回两条合格中日候选，selection 全部是 `PAIRED_SELECTION / selected_passed=true / benefit_eligible=true`，末轮不再发生语义重试或 local fallback。末轮正文“你这么说，我也会有点难受；前面的责任还在，但我不想装作没感觉”与 `SAD / REPAIR / CONTAINED_HURT` 一致，该窄根因的代码与真实候选链关闭。
+
+自动 1/1 仍不代理整条人感：第一轮“上次是我没接住，让你觉得白说了。这点我认，不找借口。”被 scorer 标记 `COMPANION_FORMAL_REGISTER`，当前逐句复核继续拒绝这一正式认错尾巴；第二轮为普通承担，第三轮可接受。该问题不再通过重跑挑样本或在同一句追加更多 Gate，记录为 broader repair register 的人工缺口。Host 完整终态仍为 8.373／7.831／6.292 秒，也不满足实时门槛。下一测试点可转到 mixed resonance，但整体 human-likeness 继续 `FAIL/PENDING_HUMAN_REVIEW`；网络安全、Pentest 与远端 Edge 仍未运行。

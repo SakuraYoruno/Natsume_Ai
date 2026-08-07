@@ -67,6 +67,8 @@ flowchart LR
 
 `0f0a0b67b` 的复验已让最终可见句保留七海的克制受伤，但真实 Flash 双候选仍依赖本地 fail-soft，候选收益状态继续失败。现有工作树只把 composite 微策略改成两个正向口语结构，80 项生成链回归通过；再跑同一单轨迹一次。若仍是 `benefit_eligible=false`，停止围绕这一句追加 Gate，保留可见文本改进，并把真实模型／少量正向语料作为下一决策点。
 
+`6d8f8e4c4` 已将 composite 末轮提升为真实 Flash 双候选一次通过，报告 SHA-256 为 `6625b532f2621a55a702f93bfa5782f4d907814a8216c49faddf9351b750eda2`。该窄因果与候选链关闭，不再重复运行；第一轮正式认错口吻作为 broader repair register 人工缺口保留。下一本机测试转到 `shared_joy_and_mixed_feeling:3`，仍不启动或探测远端 Edge。
+
 ## 6. 最终验收
 
 最终验收必须使用：真实 Docker 服务、真实 Host／OBS／Monitor／Gateway 进程、至少一个真实模型 provider，以及在用户允许后启动的目标 Edge。TTS、Avatar、重启、打断、网络恢复和长期多轮必须走真实传输，不得用端口占位、fixture 或 scripted replay 冒充。
