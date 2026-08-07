@@ -182,6 +182,25 @@ def test_identity_profile_card_loses_to_private_chat_texture() -> None:
     assert textured.score > call_me.score
 
 
+def test_user_grounded_ascii_term_is_not_treated_as_style_drift() -> None:
+    contract = build_galgame_text_contract(user_message="我拿到 offer 了。", scene_id="daily_chat")
+
+    grounded = score_sample_guided_text(
+        text="offer 拿到了，真好。",
+        contract=contract,
+        allowed_ascii_terms=("offer",),
+    )
+    ungrounded = score_sample_guided_text(
+        text="profile 更新好了。",
+        contract=contract,
+        allowed_ascii_terms=("offer",),
+    )
+
+    assert "ASCII_WORD_IN_ZH_TEXT" not in grounded.reason_codes
+    assert "grounded_ascii_term:offer" in grounded.bonuses
+    assert "ASCII_WORD_IN_ZH_TEXT" in ungrounded.reason_codes
+
+
 def test_identity_brief_phrase_beats_bare_name() -> None:
     contract = build_galgame_text_contract(user_message="你是谁？", scene_id="daily_chat")
 

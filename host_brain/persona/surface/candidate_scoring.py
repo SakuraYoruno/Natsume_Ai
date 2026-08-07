@@ -1301,6 +1301,7 @@ def score_isolated_surface_candidates(request, candidates):
             contract=contract,
             quality=quality,
             relationship_axes=relationship_axes.as_dict(),
+            allowed_ascii_terms=re.findall(r"[A-Za-z]{2,}", str(request.user_message or "")),
         )
         violations = _control_violations(request, quality.normalized_text or candidate_surface)
         score = float(sample_score.score)

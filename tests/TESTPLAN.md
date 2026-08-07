@@ -564,3 +564,5 @@ python -m pytest -q `
 上述五文件非安全回归结果为 461 passed。以新 SHA 先跑 `ambiguous_affect:2`、`intimacy_and_jealousy_boundary:5`、`intimacy_and_jealousy_boundary:1` 和 `user_angry_at_natsume:5`；所有实际深路径 selection 合格且逐句复核通过后，才重新进入 48 条。外部 provider timeout 保留原始 FAIL，不通过无限重试或 fixture 覆盖。网络安全与 Pentest 不运行。
 
 `1238efc25` 的四条报告 SHA-256 为 `bd1cd0c670e2de57b6680ec1f2d51c70c7b9ee9f7a41c8d3cbe0f10928de1942`：三条 provider timeout、一条完整含混轨迹。后者末句“还行就好”必须与“那就好”具有相同的未解决情绪判定；只在当前输入含“还行／还好／说不清”且 CompanionAct 为 `COMFORT` 时启用。Surface 与 runner 定向结果为 207 passed，真实新 SHA 复验前不提升状态。
+
+`16d4fe0b3` 的完整 48 条报告 SHA-256 为 `20dee3c9e57fe77bc4bbda919cdb2ac80e25db178a716e46b91d22317dee7395`：47 条自动待人工、1 条失败，144 个 accepted turn 的 canonical writer probe 通过。失败用例要求回答复用用户原句 `offer`，但通用中文评分器将该词视为无条件风格漂移。回归要求分两层：`score_sample_guided_text()` 仅在显式 allow-list 包含候选全部英文词时免除惩罚；Surface 只从当前 `user_message` 构造该 allow-list。当前用户未提及的 `profile` 等词必须继续产生 `ASCII_WORD_IN_ZH_TEXT`。评分器与 Surface 定向结果为 236 passed；真实单条和完整人工复核未完成，网络安全与 Pentest 为 `NOT_RUN_USER_SKIPPED`。

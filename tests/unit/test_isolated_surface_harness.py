@@ -5242,6 +5242,35 @@ def test_rerank_prefers_present_over_presence_attention_debt() -> None:
     assert any("PRESENCE_ATTENTION_DEBT" in row.reason_codes for row in rows if "等你半天" in row.text)
 
 
+def test_rerank_allows_ascii_term_copied_from_current_user_turn() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "shared_joy_grounded_ascii",
+            "soul_md": SOUL,
+            "user_message": "我拿到 offer 了。",
+            "reply_control_packet": {
+                "response_move": "hold_complexity",
+                "task_mode": "daily_chat",
+                "emotional_tone": "shared_joy",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    grounded = score_isolated_surface_candidates(
+        request,
+        ["offer 拿到了，真好。开心是真的，不安也可以慢慢消化。"],
+    )[0]
+    ungrounded = score_isolated_surface_candidates(
+        request,
+        ["profile 更新好了，真好。开心是真的，不安也可以慢慢消化。"],
+    )[0]
+
+    assert "ASCII_WORD_IN_ZH_TEXT" not in grounded.reason_codes
+    assert "ASCII_WORD_IN_ZH_TEXT" in ungrounded.reason_codes
+
+
 def test_run_isolated_surface_generation_with_injected_generator() -> None:
     request = _request()
 

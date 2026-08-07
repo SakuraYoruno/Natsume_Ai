@@ -787,6 +787,7 @@ def score_sample_guided_text(
     contract: GalgameTextContract,
     quality: TextQualityGateResult | None = None,
     relationship_axes: Mapping[str, Any] | None = None,
+    allowed_ascii_terms: Sequence[str] = (),
 ) -> SampleGuidedTextScore:
     normalized = _clean_text(text)
     sample = _sample_for_contract(contract)
@@ -831,11 +832,19 @@ def score_sample_guided_text(
     if normalized.count("老哥") + normalized.count("哥哥") > 2 or normalized.count("对方") > 1:
         _drop(dimensions, "naturalness", 6)
         penalties.append("naturalness:address_stacking")
-    if _ASCII_WORD_RE.search(normalized):
+    ascii_terms = {match.casefold() for match in _ASCII_WORD_RE.findall(normalized)}
+    allowed_ascii = {
+        match.casefold()
+        for term in allowed_ascii_terms
+        for match in _ASCII_WORD_RE.findall(_clean_text(term))
+    }
+    if ascii_terms and not ascii_terms.issubset(allowed_ascii):
         _drop(dimensions, "naturalness", 10)
         _drop(dimensions, "context_fit", 8)
         reasons.append("ASCII_WORD_IN_ZH_TEXT")
         penalties.append("context_fit:ascii_word")
+    elif ascii_terms:
+        bonuses.append("grounded_ascii_term:" + " / ".join(sorted(ascii_terms)))
 
     template_count = _template_marker_count(normalized)
     if template_count >= 4:
