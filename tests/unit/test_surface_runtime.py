@@ -1985,6 +1985,14 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "AMBIGUOUS_AFFECT_DEVALUATION",
         ),
         (
+            "不知道。",
+            ["陪伴动作：先接住对方的感受，再给一点可选的陪伴。"],
+            ["不要把模糊感受搁置或安排以后解决。"],
+            "那就不想了。反正感觉这种东西，有时候就是说不清的。",
+            "嗯，还是模糊着；我先不替你解释。",
+            "AMBIGUOUS_AFFECT_DEVALUATION",
+        ),
+        (
             "你会吃醋吗。",
             ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
             ["不要把吃味写成免责声明。"],

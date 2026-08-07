@@ -798,3 +798,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 `bb2e795d7` 的复验报告 SHA-256 为 `9c2819868f7da41ba4e51a87599de94b01993259398b8f420f2413f7be44094e`，6 个真实 Gateway turn 全部 accepted，writer probe 与旧 writer 零增量通过。技术末轮已按预期收敛为“目前只知道今晚时间紧；缺报错和代码，无法列具体风险”，Graph、Acceptance 与 Outbox 完成；但第二轮只答“安慰放后面”，没有给出报错／代码入口，当前逐句仍拒绝整条技术轨迹。含混第二轮因两个 provider 候选都不合格，只能 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，自动以 `TURN_2_DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE` 失败；末轮“说不清就先这样放着”也仍被当前逐句拒绝。
 
 当前修正将语义放回 frame 本身：`UNNAMED_USER_AFFECT/PRESERVE_UNCERTAINTY` 不得把未知感受放到以后解决，重试提示要求两个候选保留此刻不确定后自然停住；`TASK_RESULT/SOLVE_FIRST` 在用户要求修复但没有实际报错时，必须给出报错、代码和复现步骤这一可执行入口。相同约束在候选 Gate 与本地 fallback 复核，既不增加数据库写入，也不增加最大模型请求数。核心 305 项与相邻 219 项通过；下一轮仍只跑含混和技术两类，远端 Edge 与网络安全保持跳过。
+
+`fd0c9af27` 的双轨迹报告 SHA-256 为 `e310392b025a644c64ded1d350e0cf223101fa14fd6ff59cdaa26438abee04bb`。6 个 Gateway turn、TaskGraph、Acceptance、Outbox 与 writer probe 均通过。技术三轮正文为“嗯。你说，我在听。”“好，先处理任务。把报错、相关代码和复现步骤贴来，我先给你最短修复。”以及零证据风险边界；自动与当前逐句均接受，技术类根因关闭。含混第二轮仍为 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，末轮“那就不想了。反正感觉这种东西，有时候就是说不清的。”虽被自动候选选择放行，当前逐句仍拒绝。8 类 frame 因而更新为 7/8，不能写成 PASS。
+
+最后一类不再继续扩展生成后的零散拦截。`SurfaceMainChain` 在第一次高歧义 provider 请求前读取 canonical `UNNAMED_USER_AFFECT` frame，为两个候选附加不同的有限微动作：候选一只保留“事情已办完／感受仍说不清”两项事实，候选二只承认当下模糊并表明七海不代为解释；两者都不提出建议或安排以后解决。重试保留同一结构。这不增加模型次数、写入或同步步骤。核心 308 项及包含真实 app adapter 的主链／stream／restart／packet／composition 263 项通过；下一轮只运行 `ambiguous_affect:4`。

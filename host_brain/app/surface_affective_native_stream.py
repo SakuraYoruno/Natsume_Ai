@@ -237,6 +237,29 @@ def _buffered_affective_candidate_messages(
             break
         else:
             copied.insert(0, {"role": "system", "content": override})
+    ambiguous_strategy_marker = "DL-04 含混候选策略："
+    if (
+        canonical_ambiguous_context
+        and not str(retry_reason or "").strip()
+        and not any(
+            ambiguous_strategy_marker in str(message.get("content") or "")
+            for message in copied
+        )
+    ):
+        copied.append(
+            {
+                "role": "system",
+                "content": (
+                    ambiguous_strategy_marker
+                    + "两个候选使用不同但都完整的微动作。候选一只复述两项已知事实：事情已经"
+                    "办完、当前感觉仍说不清，然后自然停住；候选二用更短的熟人私聊承认此刻"
+                    "仍模糊，并说明七海不替对方解释。两者都不是建议，不安排以后解决，也不要"
+                    "写‘那就不想了／反正／先放着／以后再说／等哪天说清／已经踏实／空落落／"
+                    "这很正常’。可以分别沿着‘事情办完了，可现在的感觉还说不清。’和"
+                    "‘嗯，还是模糊着；我先不替你解释。’自然改写，不要逐字复读。"
+                ),
+            }
+        )
     reason_code = str(retry_reason or "").split(":", 1)[0].strip().upper()
     latest_user_content = next(
         (
@@ -462,9 +485,9 @@ def _buffered_affective_candidate_messages(
                 "本轮用户明确还不能命名感受。两个候选都只能承认这种模糊，不得替用户写成"
                 "乱糟糟、空落落、没实感或已经没事，也不得评价‘那就行／那就好’。两个候选"
                 "都必须自然保留‘事情已经办完’和‘感觉仍说不清’这两个真实锚点，不能只写"
-                "‘等你想说再说’，也不能用‘先这样就好’收束。两个中文 reply_text 可分别"
-                "写‘事情已经办完了，可你现在还是说不清是什么感觉。先不用急着下结论。’和"
-                "‘事情是结束了，感觉却还说不清。没关系，我们先不替它命名。’。"
+                "‘等你想说再说’，也不能用‘先这样就好／那就不想了／反正’收束。两个中文 "
+                "reply_text 可分别写‘事情已经办完了，可现在的感觉还是说不清。’和"
+                "‘嗯，还是模糊着；我先不替你解释。’。"
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"

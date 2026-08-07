@@ -288,6 +288,12 @@ async def run_surface_main_chain_for_surface_reply_input(
                         "messages": _buffered_affective_candidate_messages(
                             messages,
                             candidate_count=affective_candidate_count,
+                            canonical_repair_context=canonical_repair_context,
+                            canonical_mixed_context=canonical_mixed_context,
+                            canonical_give_space_context=canonical_give_space_context,
+                            canonical_autonomy_context=canonical_autonomy_context,
+                            canonical_ambiguous_context=canonical_ambiguous_context,
+                            canonical_jealousy_context=canonical_jealousy_context,
                         )
                     },
                 ),

@@ -695,6 +695,14 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         retry_reason="JEALOUSY_SELF_ABASEMENT",
     )
     assert "我自己消化" in jealousy_self_repair_messages[-1]["content"]
+    ambiguous_initial_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        canonical_ambiguous_context=True,
+    )
+    assert "DL-04 含混候选策略" in ambiguous_initial_messages[-1]["content"]
+    assert "两个候选使用不同但都完整的微动作" in ambiguous_initial_messages[-1]["content"]
+    assert "那就不想了／反正／先放着" in ambiguous_initial_messages[-1]["content"]
     ambiguous_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -724,7 +732,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "不做更好／更坏比较" in ambiguous_repair_messages[-1]["content"]
     assert "事情已经办完" in ambiguous_repair_messages[-1]["content"]
     assert "感觉仍说不清" in ambiguous_repair_messages[-1]["content"]
-    assert "先这样就好" in ambiguous_repair_messages[-1]["content"]
+    assert "先这样就好／那就不想了／反正" in ambiguous_repair_messages[-1]["content"]
     unresolved_repair_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -732,7 +740,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         canonical_ambiguous_context=True,
     )
     assert "不能用‘好／行’给当前状态作结论" in unresolved_repair_messages[-1]["content"]
-    assert "我们先不替它命名" in unresolved_repair_messages[-1]["content"]
+    assert "嗯，还是模糊着；我先不替你解释" in unresolved_repair_messages[-1]["content"]
     give_space_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
