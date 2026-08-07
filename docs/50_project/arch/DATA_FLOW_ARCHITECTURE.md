@@ -441,4 +441,6 @@ flowchart LR
 
 当 frame 为 `HOLD_COMPLEXITY + SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 时，Surface 生成必须把两面从“用户情绪标签”变成“七海自己的即时共鸣”：候选同时包含第一人称高兴与悬心才可进入排序。纯复述、只说“我懂”或替用户安排情绪的候选在发送前以 `MIXED_SELF_RESONANCE_MISSING` 进入既有一次重试；这个判断不写 journal，也不会由普通 mixed 关键词单独触发。
 
+为避免所有 mixed 回合复用同一完整示例，frame 到 Surface prompt 之间增加一个纯函数 cue 步骤：`normalized latest user text → stable digest → two distinct joy/caution fragments`。碎片只提供句内语感，不是最终回复；模型围绕当前具体结果改写，随后仍走同一候选 Gate、评分和发送路径。该步骤不增加外部 I/O、持久事件或模型轮数。
+
 Prefrontal／Tribe 的历史 event handler 只允许读取 canonical Life 结果或生成 proposal。`TribeApplicationPorts` 缺失、类型错误或未完整注入时按 canonical affective life fail-closed，不得回退到 Endocrine、Limbic、PainReward 或 volatile Bond 写入；因此组合错误不会重新形成第二条 self-affect 数据流。

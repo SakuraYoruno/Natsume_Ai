@@ -876,3 +876,7 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 `:4` 在“项目发布成功”回合第一次真实 Flash attempt 因 `QUESTION_BUDGET_PROMPTING_USER` 拒绝，唯一重试又因 `UNPROVIDED_WORK_STATE_CLAIM` 拒绝，最终 `MODEL_SEMANTIC_RETRY_EXHAUSTED`，TaskGraph 没有伪提交 Outbox。该报告由 `9f5ddba3c` 工作树生成；运行 Host 的生产代码仍是此前加载的 `b11de0f11`，两者之间只有本轮证据文档差异，代码内容相同。下一份证据必须重启到新代码 SHA 后生成。
 
 根因是 mixed 首轮与重试提示包含两句完整正例，模型在不同上下文中直接复用。当前修正删除完整台词，改为三个语义槽：当前具体结果、七海第一人称喜悦、七海第一人称悬心；两个候选使用不同反应词、语序和停顿，只写当下，不追问、不承诺后续工作。现有 typed Gate、一次重试上限和本地 fail-soft 不变，相关回归 380 项通过。先在新进程复验 `:1/:4/:6`；只有失败项关闭且正文不再逐字同构，才扩大 mixed 全家族。
+
+精确加载 `60cab0e1e` 后的 `:1/:4/:6` 复验报告 SHA-256 为 `11a46672e27c4728df1208b1807ce34b1d5499e0d62d1d89efd06b46b6d2604e`。结果反而降为 1 条自动待人工、2 条失败，8 个 accepted turn 的 canonical writer probe 通过。`:1` 虽自动通过，却用“先让这口气慢慢落”替用户处置情绪；`:4` 生成“盯指标／随时喊我”，selection 正确标为 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`；`:6` 第二轮依赖 local fallback，末轮两次都因 `MIXED_SELF_RESONANCE_MISSING` 拒绝并令图失败。本轮人工逐句为 0/3，不能用唯一自动绿灯覆盖。
+
+这证明只给抽象槽不足以维持七海口吻，而回到完整正例又会背句子。下一切片使用轻量中间层 `mixed_resonance_language.py`：根据当前用户措辞的稳定 digest，从 8 组喜悦和悬心短语中选择两组不同的 clause-level 语感碎片；模型仍在同一次双候选请求中围绕具体结果自然改写，碎片不是可发送正文。长度限制为 20～52 字、最多两句，写完两面反应立即停住。该函数纯内存、无随机状态、无 journal、无新模型请求；相关回归 380 项通过。新 SHA 仍只复验 `:1/:4/:6`，若再次失败则停止 prompt 迭代并进入模型／真实文本微调决策。

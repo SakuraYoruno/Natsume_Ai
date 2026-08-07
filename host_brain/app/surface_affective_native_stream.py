@@ -24,6 +24,9 @@ from host_brain.app.surface_main_chain_support import (
 from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
 from host_brain.input_runtime.reply_envelope import ReplyEnvelope
 from host_brain.persona.isolated_surface_harness import build_native_stream_surface_messages
+from host_brain.persona.surface.mixed_resonance_language import (
+    mixed_resonance_style_cues,
+)
 from host_brain.persona.surface_main_chain import SurfaceMainChainInput, compile_surface_main_chain_input
 from host_brain.surface_runtime.affective_streaming import (
     affective_turn_plan_from_trace,
@@ -247,6 +250,7 @@ def _buffered_affective_candidate_messages(
         ),
         "",
     )
+    mixed_style_cues = mixed_resonance_style_cues(latest_user_content)
     repair_strategy_marker = "DL-04 修复候选策略："
     if (
         canonical_repair_context
@@ -295,11 +299,13 @@ def _buffered_affective_candidate_messages(
                 "role": "system",
                 "content": (
                     mixed_strategy_marker
-                    + "把本轮写成自然私聊，不要背固定台词。两个候选都填满三个语义槽："
+                    + "把本轮写成自然私聊。两个候选都填满三个语义槽："
                     "当前具体结果、七海第一人称的喜悦、七海第一人称的悬心。喜悦可用开心／"
-                    "高兴等自然反应，悬心可用心里一紧／悬着／担心等自然反应；两个候选必须"
-                    "使用不同反应词和句子节奏，不得只是换标点。只写七海此刻的反应，不替用户"
-                    "管理情绪，不承诺后续动作，不问下一步，意思完整后自然停住。"
+                    "高兴等自然反应，悬心可用心里一紧／悬着／担心等自然反应。以下只给两组"
+                    f"语感碎片，不是可直接复制的完整回复：候选一“{mixed_style_cues[0]}”，"
+                    f"候选二“{mixed_style_cues[1]}”。分别改写成一到两句、20～52 个汉字，"
+                    "用不同语序和停顿接住当前具体结果；全文只写七海此刻的反应，写完第二种"
+                    "反应就用句号停住，不替用户管理情绪，不承诺后续动作，不问下一步。"
                     + (
                         f"当前用户最后一句是“{latest_user_content}”；它只作为事实素材，候选要"
                         "自然复用其中能指明结果的词，不复述整句。"
@@ -465,7 +471,9 @@ def _buffered_affective_candidate_messages(
             "MIXED_SELF_RESONANCE_MISSING": (
                 "上次候选只复述了用户的开心和害怕，没有写七海自己的共鸣。重新生成时，"
                 "每条都要自然包含当前结果、七海第一人称的喜悦和七海第一人称的悬心三个"
-                "语义槽；两条使用不同反应词和节奏。不要复述槽名，不要安排用户怎样处理情绪。"
+                f"语义槽。分别借用语感碎片“{mixed_style_cues[0]}”和“{mixed_style_cues[1]}”"
+                "重新组织，不要原样复制碎片；每条最多两句，写完悬心反应立即停住，不要安排"
+                "用户怎样处理情绪。"
             ),
             "AMBIGUOUS_AFFECT_DEVALUATION": (
                 "上次候选把说不清的感受拿去比较、武断命名或用‘那就那样／就那样／不知道就"
@@ -598,8 +606,10 @@ def _buffered_affective_candidate_messages(
         ):
             repair += (
                 "本轮必须延续喜忧并存，并写七海自己的两面共鸣。两个候选都填满当前具体结果、"
-                "七海第一人称喜悦、七海第一人称悬心三个语义槽，但使用不同反应词、语序和停顿，"
-                "不要背同一句模板。不能只写我懂、恭喜或复述用户，也不能安排用户怎样处理情绪；"
+                "七海第一人称喜悦、七海第一人称悬心三个语义槽。候选一借用语感碎片"
+                f"“{mixed_style_cues[0]}”，候选二借用“{mixed_style_cues[1]}”，但都要围绕"
+                "本轮事实重新组织成最多两句，不能原样复制。不能只写我懂、恭喜或复述用户，"
+                "也不能安排用户怎样处理情绪；"
                 "必须复用用户当前或上一句好消息里的一个具体词，说明究竟是什么结果落地。"
             )
             if latest_user_content:

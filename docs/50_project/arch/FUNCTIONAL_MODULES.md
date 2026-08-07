@@ -117,3 +117,5 @@ Monitor 的生产 E2E 现在可以按验收范围拆开执行：默认仍包含�
 Tribe／Prefrontal 的兼容事件处理不再拥有自我情感 authority。即使 app-local `TribeApplicationPorts` 缺失或类型错误，Prefrontal 也必须按 canonical affective life 启用处理，禁止重新调用 Endocrine、Limbic、PainReward 或 volatile Bond writer；这些模块若保留，只能作为只读兼容投影。
 
 喜忧并存的可见文本由 `surface_affective_native_stream.py` 生成、`surface_candidate_guards.py` 验证、`candidate_scoring.py` 排序。只有 canonical typed frame 明确要求 `SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 时，候选才必须表达七海自身的高兴与悬心；用户情绪观察本身不能触发该规则，也不能写成七海的自我情绪。该链路复用既有双候选和最多一次质量重试，不拥有新的 journal 或 writer。
+
+`mixed_resonance_language.py` 只负责为上述 typed frame 选择两组短语感碎片。输入是本轮规范化用户措辞，输出是两组不同的喜悦／悬心 clause cue；最终可见文字仍由真实模型生成并经过原选择器。该模块没有 repository、时钟、网络、模型或 effect port，不能成为第二套情感状态机。

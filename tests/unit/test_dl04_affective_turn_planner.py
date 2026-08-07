@@ -20,6 +20,9 @@ from host_brain.digital_life.affective_turn_planner import (
     build_affective_turn_guidance,
 )
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
+from host_brain.persona.surface.mixed_resonance_language import (
+    mixed_resonance_style_cues,
+)
 from host_brain.persona.surface_runtime import (
     _hard_gate_fallback,
     build_isolated_surface_input,
@@ -727,8 +730,9 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "必须延续喜忧并存" in mixed_quality_messages[-1]["content"]
     assert "写七海自己的两面共鸣" in mixed_quality_messages[-1]["content"]
     assert "三个语义槽" in mixed_quality_messages[-1]["content"]
-    assert "不同反应词、语序和停顿" in mixed_quality_messages[-1]["content"]
-    assert "不要背同一句模板" in mixed_quality_messages[-1]["content"]
+    assert "候选一借用语感碎片" in mixed_quality_messages[-1]["content"]
+    assert "最多两句" in mixed_quality_messages[-1]["content"]
+    assert "不能原样复制" in mixed_quality_messages[-1]["content"]
     assert "听你这么说，我也跟着开心起来了" not in mixed_quality_messages[-1]["content"]
     assert "必须复用用户当前或上一句好消息里的一个具体词" in mixed_quality_messages[-1]["content"]
     assert "当前用户最后一句原文是“项目发布成功。”" in mixed_quality_messages[-1]["content"]
@@ -802,8 +806,9 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
     assert "三个语义槽" in mixed_initial_messages[-1]["content"]
     assert "当前具体结果" in mixed_initial_messages[-1]["content"]
-    assert "不同反应词和句子节奏" in mixed_initial_messages[-1]["content"]
-    assert "不得只是换标点" in mixed_initial_messages[-1]["content"]
+    assert "语感碎片" in mixed_initial_messages[-1]["content"]
+    assert "不是可直接复制的完整回复" in mixed_initial_messages[-1]["content"]
+    assert "20～52 个汉字" in mixed_initial_messages[-1]["content"]
     assert "不承诺后续动作" in mixed_initial_messages[-1]["content"]
     assert "听你这么说，我也跟着开心起来了" not in mixed_initial_messages[-1]["content"]
     mixed_initial_with_result = _buffered_affective_candidate_messages(
@@ -816,6 +821,12 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "自然复用其中能指明结果的词" in (
         mixed_initial_with_result[-1]["content"]
+    )
+    assert mixed_resonance_style_cues("我拿到 offer 了。") != (
+        mixed_resonance_style_cues("项目发布成功。")
+    )
+    assert mixed_resonance_style_cues("项目发布成功。") == (
+        mixed_resonance_style_cues("  项目发布成功。  ")
     )
     jealousy_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
