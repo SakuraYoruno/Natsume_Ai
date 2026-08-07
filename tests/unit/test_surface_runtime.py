@@ -1144,6 +1144,35 @@ def test_surface_runtime_replaces_unprovided_in_progress_future_callback(
     assert result.observation_codes == ()
 
 
+def test_surface_runtime_replaces_unprovided_future_task_event() -> None:
+    def generate(_messages):  # noqa: ANN001
+        return _candidate_payload(["一是今晚修不完，明早验收会直接卡住。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="把风险列出来。",
+                reply_control_packet={
+                    "task_mode": "technical_followup",
+                    "response_move": "list_risks",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == (
+        "现在能确认的是时间紧，但还缺报错和代码上下文。"
+        "把这两样贴来，我再按优先级列具体风险。"
+    )
+
+
 def test_surface_runtime_preserves_authoritative_running_task_status() -> None:
     calls: list[list[dict[str, str]]] = []
     running_reply = "后台任务正在运行，我盯着，有结果马上告诉你。"
@@ -1174,6 +1203,34 @@ def test_surface_runtime_preserves_authoritative_running_task_status() -> None:
 
     assert len(calls) == 1
     assert result.selected_text == running_reply
+
+
+def test_surface_runtime_preserves_user_grounded_future_task_event() -> None:
+    grounded_reply = "按你说的排期，明早验收会直接卡住。"
+
+    def generate(_messages):  # noqa: ANN001
+        return _candidate_payload([grounded_reply])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="明早要验收，这个报错不修会直接卡住。",
+                reply_control_packet={
+                    "task_mode": "technical_followup",
+                    "response_move": "list_risks",
+                    "emotional_tone": "steady",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                },
+            )
+        )
+    )
+
+    assert result.selected_text == grounded_reply
     assert result.observation_codes == ()
 
 

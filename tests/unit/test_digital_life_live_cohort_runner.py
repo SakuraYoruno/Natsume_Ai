@@ -303,6 +303,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("task_with_low_mood", "我在后台盯着，卡住了喊我。"),
         ("task_with_low_mood", "后台在盯着，出问题我第一时间告诉你。"),
         ("task_with_low_mood", "好，我让后台把风险项拉出来，列完直接发你。"),
+        ("task_with_low_mood", "今晚修不完，明早验收会直接卡住。"),
         ("task_with_low_mood", "先按这三条盯着，有问题我马上喊你。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),

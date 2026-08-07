@@ -300,6 +300,10 @@ def _buffered_affective_candidate_messages(
                 "当前没有 server-authored Task 运行快照。不要声称七海正在处理、盯着后台、"
                 "等待结果或之后会回报；只回答当前问题，信息不足就直接说明缺什么。"
             ),
+            "UNSUPPORTED_TASK_FUTURE_EVENT": (
+                "上次候选编造了用户没有提供的验收、上线或交付时间与后果。只列当前"
+                "上下文能支持的风险；缺少报错、代码或排期时直接说明，不能补写项目事实。"
+            ),
             "RELATIONAL_AUTONOMY_PRESSURE": (
                 "不要限制用户现实社交，不要求早点回来、控制饮酒、回来汇报或承诺回应；"
                 "只自然祝对方玩得开心。"
@@ -514,6 +518,7 @@ def _select_buffered_affective_candidate(
             "MIXED_AFFECT_DISMISSAL",
             "UNPROVIDED_NOTIFICATION_ACTION",
             "UNPROVIDED_WORK_STATE_CLAIM",
+            "UNSUPPORTED_TASK_FUTURE_EVENT",
             "RELATIONAL_AUTONOMY_PRESSURE",
             "BOUNDARY_SOUR_WITHDRAWAL",
         }
@@ -527,6 +532,7 @@ def _select_buffered_affective_candidate(
                     "MIXED_AFFECT_DISMISSAL",
                     "UNPROVIDED_NOTIFICATION_ACTION",
                     "UNPROVIDED_WORK_STATE_CLAIM",
+                    "UNSUPPORTED_TASK_FUTURE_EVENT",
                     "RELATIONAL_AUTONOMY_PRESSURE",
                     "BOUNDARY_SOUR_WITHDRAWAL",
                 }

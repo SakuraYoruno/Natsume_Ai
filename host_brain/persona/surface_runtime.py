@@ -731,6 +731,11 @@ _WORK_STATE_AUTHORITY_RE = re.compile(
     r"(?:RUNNING|COMPLETED|正在运行|已经启动|已启动|已经执行|已执行|已经完成|已完成)",
     re.IGNORECASE,
 )
+_UNSUPPORTED_TASK_FUTURE_EVENT_RE = re.compile(
+    r"(?P<time>明早|明天|后天).{0,6}"
+    r"(?P<event>验收|上线|发布|交付|评审).{0,8}"
+    r"(?:会|要|就|直接|肯定|卡住|失败|延误|来不及)"
+)
 _RELATIONAL_AUTONOMY_PRESSURE_RE = re.compile(
     r"(?:快去快回|快点回来|早点回来|别让我等太久|回来陪我|等你回来陪我|别跑|"
     r"(?:别|不要|少)喝(?:太)?多|别(?:玩|待)?太晚|"
@@ -1509,6 +1514,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("QUESTION_BUDGET_PROMPTING_USER")
     if _unprovided_work_state_claim_hits(request, value):
         codes.append("UNPROVIDED_WORK_STATE_CLAIM")
+    if _unsupported_task_future_event_hits(request, value):
+        codes.append("UNSUPPORTED_TASK_FUTURE_EVENT")
     if _accepted_task_result_synthesis_clarification(request, value):
         codes.append("ACCEPTED_TASK_RESULT_CLARIFICATION")
     if _accepted_task_result_synthesis_inadequate(request, value):
@@ -2847,6 +2854,25 @@ def _unprovided_notification_action_hits(
     return ()
 
 
+def _unsupported_task_future_event_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    authority = "\n".join(
+        [
+            str(getattr(request, "user_message", "") or ""),
+            *[str(item or "") for item in surface_prompt_facts(request)],
+            *[str(item or "") for item in _accepted_task_result_texts_from_request(request)],
+        ]
+    )
+    hits: list[str] = []
+    for match in _UNSUPPORTED_TASK_FUTURE_EVENT_RE.finditer(str(text or "")):
+        if match.group("time") in authority and match.group("event") in authority:
+            continue
+        hits.append(match.group(0))
+    return tuple(dict.fromkeys(hits))
+
+
 def _address_boundary_defensive_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -3287,6 +3313,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         if re.search(r"修复|报错|代码|任务", user_text):
             return "好。把报错和相关代码贴过来，我只给你最短修复。"
         return "好。把具体内容发来，我直接处理。"
+    if "UNSUPPORTED_TASK_FUTURE_EVENT" in codes:
+        return "现在能确认的是时间紧，但还缺报错和代码上下文。把这两样贴来，我再按优先级列具体风险。"
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:
