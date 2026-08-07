@@ -780,3 +780,5 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 `f169cd4e3` 的同两条真实复验报告 SHA-256 为 `6fbe0a45d0db2f92782461af3bfec9cd95fb28c5b001f23144b54bc072bd6bb1`。两条均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，6 个 accepted turn、canonical writer 推进与旧 writer 零增量通过，首轮不再出现当前 request／Intent 假记忆，causal self-exclusion 的真实缺陷关闭。当前人工复核只接受裂痕修复；用户生气末句“抱歉，是我太烦了。我会安静点的。”仍被拒绝，因为它把具体失误改写成全局自我贬低，再用沉默退出代替承担。
 
 后续代码不增加普通对话写入、模型调用或审计步骤：`REPAIR` 的类型化 `CompanionUtteranceFrameV1` 新增 `RELATIONSHIP_SELF_ERASURE` 禁止项，Surface 仅在该服务器 frame 下拒绝“我是个很烦的人／我会沉默退出”一类候选；`GIVE_SPACE` 仍可独立确认留白。规划与 Surface 定向回归 184 项通过。必须加载新进程再跑用户生气轨迹并完成逐句复核；在此之前 frame 真实队列、人感和完整 48 条仍为 `FAIL/PENDING_HUMAN_REVIEW`。
+
+`7268ac768` 已加载到同一隔离 Host，Docker 容器 ID、acceptance 数据根和 29000 Gateway 均保持不变，远端 Edge 未启动。`user_angry_at_natsume:1` 三轮真实 DeepSeek 报告 SHA-256 为 `955f09555ada2b768f927e084b1cc7afea415abe635c8f4d35df3045c3c881ac`：自动 1/1，3 个 accepted turn、TaskGraph、Outbox、canonical writer 与旧 writer 零增量通过。三轮正文为“上次是我没听懂，抱歉。这次我会认真听的。”“让你不舒服了，是我的错。我会记住的。”“这次是我理解错了。我会把你的不舒服记住。”；当前逐句复核接受，没有自我贬低、反击、索取重述或沉默退出。Host 终态为 7,942／5,985／8,796 ms，仍不满足实时门槛。该根因提升为限定范围 PASS，不能外推为 8 类 frame、完整 48 条或整体“像人”通过。
