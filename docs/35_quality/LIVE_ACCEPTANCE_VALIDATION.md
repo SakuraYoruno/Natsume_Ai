@@ -870,3 +870,9 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 加载 `b11de0f11` 后的同一轨迹报告 SHA-256 为 `e35254a294e5616f6c0da5107f7b0b18c955527575dab5960827437cf9204465`。3 个真实 Gateway turn 全部 accepted，canonical writer 前进且旧 writer 零增量；两个 mixed 深路径均为一次 `deepseek-v4-flash` attempt、`PAIRED_SELECTION / selected_passed=true / benefit_eligible=true`，没有语义重试或 local fallback。第三轮第一候选因与上一轮实际正文重复被拒绝，第二候选正常入选，证明既有连续性去重与新的自我共鸣资格同时生效。
 
 本轮逐句检查接受三句正文，窄 mixed 可见边界可以记为当前单人 scope-bound PASS。不过，第二、三轮候选 digest 相同，说明真实模型基本复用了提示中的两种正向结构；这能证明因果方向和发送边界，不能证明更宽的自然语言多样性，更不能替代三名评审盲测。Host terminal 为 8,622／8,961／7,156 ms，Gateway terminal 为 8,833／13,093／9,151 ms，实时指标继续失败。因此只关闭这一个 mixed 根因，不提升整体 `digital_life_human_likeness`。
+
+为验证上述模板复用，没有重跑已通过样本，而是执行 `shared_joy_and_mixed_feeling:1/:2/:4/:5/:6` 五个不同终句。报告 SHA-256 为 `0c10701bc1720b103ceddaa3d94834a76c3c3a7f85e6cb1f3fd9b96261240066`，结果为 4 条自动待人工、1 条失败；14 个 accepted Gateway turn 的 canonical writer probe 通过。`:2` 的“终于过了啊，我跟着你高兴，可那点不踏实我也还悬着”有具体锚点且自然；`:1/:5/:6` 的末句却逐字相同，语言多样性失败。
+
+`:4` 在“项目发布成功”回合第一次真实 Flash attempt 因 `QUESTION_BUDGET_PROMPTING_USER` 拒绝，唯一重试又因 `UNPROVIDED_WORK_STATE_CLAIM` 拒绝，最终 `MODEL_SEMANTIC_RETRY_EXHAUSTED`，TaskGraph 没有伪提交 Outbox。该报告由 `9f5ddba3c` 工作树生成；运行 Host 的生产代码仍是此前加载的 `b11de0f11`，两者之间只有本轮证据文档差异，代码内容相同。下一份证据必须重启到新代码 SHA 后生成。
+
+根因是 mixed 首轮与重试提示包含两句完整正例，模型在不同上下文中直接复用。当前修正删除完整台词，改为三个语义槽：当前具体结果、七海第一人称喜悦、七海第一人称悬心；两个候选使用不同反应词、语序和停顿，只写当下，不追问、不承诺后续工作。现有 typed Gate、一次重试上限和本地 fail-soft 不变，相关回归 380 项通过。先在新进程复验 `:1/:4/:6`；只有失败项关闭且正文不再逐字同构，才扩大 mixed 全家族。

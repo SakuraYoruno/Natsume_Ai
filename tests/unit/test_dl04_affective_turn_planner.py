@@ -726,8 +726,10 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "必须延续喜忧并存" in mixed_quality_messages[-1]["content"]
     assert "写七海自己的两面共鸣" in mixed_quality_messages[-1]["content"]
-    assert "我也跟着开心起来了" in mixed_quality_messages[-1]["content"]
-    assert "我心里也悬了一下" in mixed_quality_messages[-1]["content"]
+    assert "三个语义槽" in mixed_quality_messages[-1]["content"]
+    assert "不同反应词、语序和停顿" in mixed_quality_messages[-1]["content"]
+    assert "不要背同一句模板" in mixed_quality_messages[-1]["content"]
+    assert "听你这么说，我也跟着开心起来了" not in mixed_quality_messages[-1]["content"]
     assert "必须复用用户当前或上一句好消息里的一个具体词" in mixed_quality_messages[-1]["content"]
     assert "当前用户最后一句原文是“项目发布成功。”" in mixed_quality_messages[-1]["content"]
     assert "必须原样保留" in mixed_quality_messages[-1]["content"]
@@ -798,11 +800,23 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         canonical_mixed_context=True,
     )
     assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
-    assert "七海自己的双重即时反应" in mixed_initial_messages[-1]["content"]
-    assert "我也跟着开心起来了" in mixed_initial_messages[-1]["content"]
-    assert "我心里也悬了一下" in mixed_initial_messages[-1]["content"]
-    assert "结束在七海此刻的反应上" in mixed_initial_messages[-1]["content"]
-    assert "不写‘先这样待着’" in mixed_initial_messages[-1]["content"]
+    assert "三个语义槽" in mixed_initial_messages[-1]["content"]
+    assert "当前具体结果" in mixed_initial_messages[-1]["content"]
+    assert "不同反应词和句子节奏" in mixed_initial_messages[-1]["content"]
+    assert "不得只是换标点" in mixed_initial_messages[-1]["content"]
+    assert "不承诺后续动作" in mixed_initial_messages[-1]["content"]
+    assert "听你这么说，我也跟着开心起来了" not in mixed_initial_messages[-1]["content"]
+    mixed_initial_with_result = _buffered_affective_candidate_messages(
+        [*paired_messages, {"role": "user", "content": "项目发布成功。"}],
+        candidate_count=2,
+        canonical_mixed_context=True,
+    )
+    assert "当前用户最后一句是“项目发布成功。”" in (
+        mixed_initial_with_result[-1]["content"]
+    )
+    assert "自然复用其中能指明结果的词" in (
+        mixed_initial_with_result[-1]["content"]
+    )
     jealousy_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,

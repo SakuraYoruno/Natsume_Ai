@@ -73,6 +73,8 @@ flowchart LR
 
 `b11de0f11` 的复验报告 SHA-256 为 `e35254a294e5616f6c0da5107f7b0b18c955527575dab5960827437cf9204465`。两个 mixed 深路径均一次真实 Flash 双候选通过，无重试或本地 fallback，三句经当前逐句复核接受；该窄根因关闭。候选结构复用和实时延迟仍是独立缺口，下一步转向更宽代表场景或 Architecture 2.0 非安全验收，不重复挑跑本 case；远端 Edge 继续不启动、不探测。
 
+更宽的 5 个 mixed 变体报告 SHA-256 为 `0c10701bc1720b103ceddaa3d94834a76c3c3a7f85e6cb1f3fd9b96261240066`，只有 4/5 自动完成，且 3 条正文逐字复用同一模板；`:4` 的唯一重试还产生无 authority 的工作状态而整图失败。当前切片将完整正例改为三个语义槽和两种不同节奏，380 项回归通过。提交并重启本机 Host 后只复验 `:1/:4/:6`；远端 Edge、网络安全和 Pentest 继续跳过。
+
 ## 6. 最终验收
 
 最终验收必须使用：真实 Docker 服务、真实 Host／OBS／Monitor／Gateway 进程、至少一个真实模型 provider，以及在用户允许后启动的目标 Edge。TTS、Avatar、重启、打断、网络恢复和长期多轮必须走真实传输，不得用端口占位、fixture 或 scripted replay 冒充。
