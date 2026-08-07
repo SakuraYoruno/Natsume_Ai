@@ -443,7 +443,7 @@ Secure Ingress
 | B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `RESEARCH_CODE_PASS_SCOPE_INHERITED_PENTEST_NOT_RUN_USER_SKIPPED` |
 | C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `FAIL_REAL_48_QUEUE_PENDING_THREE_REVIEWERS` |
 | D 真实全栈 | 本地强制服务、路线、故障、恢复、性能和回滚通过 | `PARTIAL_NON_SECURITY_DOCKER_HOST_OBS_MONITOR_GATEWAY_PASS` |
-| 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `FAIL_LAST_MEASURED_LINE_72_22_BRANCH_55_08_CURRENT_SHA_RETEST_PENDING` |
+| 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `FAIL_CURRENT_SHA_LINE_68_50_BRANCH_51_40` |
 | pytest 收集 | 0 error | `PASS_11881_ITEMS` |
 
 当前唯一诚实结论：
@@ -453,13 +453,14 @@ SYSTEM_V2 = INCOMPLETE
 ARCHITECTURE_V2_ACCEPTANCE = PARTIAL_NON_SECURITY_PASS_SECURITY_USER_SKIPPED
 PLANNING_SEARCH_BENEFIT = PARTIAL_RESEARCH_CODE_PASS_PENTEST_USER_SKIPPED
 DIGITAL_LIFE_HUMAN_LIKENESS = FAIL_PENDING_THREE_REVIEWERS
-WHOLE_SYSTEM_LINE_BRANCH_COVERAGE = FAIL_LAST_MEASURED_CURRENT_SHA_RETEST_PENDING
+WHOLE_SYSTEM_LINE_BRANCH_COVERAGE = FAIL_CURRENT_SHA_LINE_68_50_BRANCH_51_40
 ```
 
 ## 11. 2026-08-07 非安全覆盖执行增量
 
-- Unit run7：7956 个 JUnit case，0 failure/error，8 classified skips；Unit-only line 57.55%、branch 39.85%。
+- Unit run7：7954 个 JUnit testcase，另有 2 个成功 subtest；合计 7956 个 pytest outcome，0 failure/error、8 classified skips；Unit-only line 57.55%、branch 39.85%。
 - Contract：1898/1898 通过。
 - 本地 E2E：68/68 通过，明确排除含 Pentest 的旧 golden fault matrix。
-- Integration：首轮 848 passed、11 failed、2 Redis env skips；11 个失败已全部定向复跑通过。修复覆盖共享 clock、startup exact replay 和 fenced late heartbeat，不涉及网络安全。
-- 当前仍缺最终 combine 与三人数字生命盲评，因此全系统 coverage Gate 和 A15 均未通过。A09、A12、Pentest、网络安全维持 `NOT_RUN_USER_SKIPPED`。
+- Integration：当前 SHA 完整六片为 862 passed、2 Redis env skips、0 failed/error；首轮 11 个失败已全部在完整相邻集合中关闭。修复覆盖共享 clock、startup exact replay 和 fenced late heartbeat，不涉及网络安全。
+- Unit／Contract／Integration／E2E 去重后共 10786 个 outcome：10776 passed、10 classified skips、0 failed/error。完整生产源码分母 line 68.50%（191578/279662）、branch 51.40%（47284/92000）、综合 64.27%，低于 75%／65% Gate，结论为 `FAIL_BELOW_COVERAGE_GATE`。
+- 覆盖摘要 SHA-256 为 `0e012682d1a50db53c5b2cac8e2b9186fe7e993d0a2ed3d72c203f38291a6bd2`。三人数字生命盲评仍缺，因此 A15 继续未完成；A09、A12、Pentest、网络安全维持 `NOT_RUN_USER_SKIPPED`。

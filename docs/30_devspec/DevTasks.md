@@ -56,9 +56,10 @@
 - [x] 非安全 Monitor read-model 扩展到 45 项并全部通过；当前工作树 LCOV 为 line 93.67%、branch 70.83%、function 83.90%。该切片显式排除 Security 页面和安全 organ model，排除项保持 `NOT_RUN_USER_SKIPPED`，不能表述为完整前端覆盖率。
 - [x] Python Unit 覆盖预检定位并修复 5 个非安全回归：Scheduler 冻结时钟、Gateway 已退役线程断言、OBS 隔离测试的新鲜度耦合，以及缺失 canonical ports 时 Prefrontal 重新获得 Endocrine／Limbic／Pain writer 的历史测试语义。相邻回归 29 项通过，完整 Unit 分片仍需在提交 SHA 上重跑。
 - [x] `d696417c47` 的六片完整非安全 Unit 首轮实际执行为 7939 passed／7 failed／8 classified skips／224 deselected。7 个失败已收口为 canonical mode timestamp、三项轻量 Chat 路由旧断言和三项显式 legacy Prefrontal fixture，目标复跑 7/7；该失败运行不计覆盖率，下一提交重新跑六片。
-- [x] 当前候选树的非安全 Unit run7 为 7956 JUnit case、0 failure/error、8 classified skips；Contract 为 1898/1898 通过；本地 E2E 为 68/68 通过。Unit-only 全生产分母为 line 57.55%、branch 39.85%，不得冒充全套覆盖率。
-- [x] Integration 六片首轮 848 passed／11 failed／2 Redis env skips；11 个失败全部完成定向复跑。实际代码修复为 Scheduler/Internal 共享 clock、精确 startup replay 不重新要求父 Grant 存活，以及未发生 takeover 时 heartbeat 可用 token/version/fence CAS 晚续租；E2E 同步确认 `ASR_CHUNK` 不进入长期 voice ledger。
-- [ ] 完成剩余非安全故障／回滚、当前 SHA 覆盖率和三人盲评；A09、A12、Pentest 按用户要求不运行。全部强制结论满足前不宣称 Architecture 2.0 完成。
+- [x] 当前候选树的非安全 Unit run7 为 7954 个 JUnit testcase＋2 个成功 subtest，合计 7956 outcome、0 failure/error、8 classified skips；Contract 为 1898/1898，本地 E2E 为 68/68。Unit-only 全生产分母为 line 57.55%、branch 39.85%，不得冒充全套覆盖率。
+- [x] 当前 SHA 的完整 Integration 六片为 862 passed／2 Redis env skips／0 failed；首轮 11 个失败已在完整相邻集合中关闭。实际代码修复为 Scheduler/Internal 共享 clock、精确 startup replay 不重新要求父 Grant 存活，以及未发生 takeover 时 heartbeat 可用 token/version/fence CAS 晚续租；E2E 同步确认 `ASR_CHUNK` 不进入长期 voice ledger。
+- [x] 生成当前 SHA 的 Unit／Contract／Integration／E2E 合并覆盖：去重 10786 个 outcome，10776 passed、10 classified skips、0 failed/error；完整生产源码分母 line 68.50%、branch 51.40%、综合 64.27%，低于冻结 Gate，明确记为失败而非完成。
+- [ ] 提升覆盖率并完成剩余非安全故障／回滚与三人盲评；A09、A12、Pentest 按用户要求不运行。全部强制结论满足前不宣称 Architecture 2.0 完成。
 
 ## P0：真实对话体验
 

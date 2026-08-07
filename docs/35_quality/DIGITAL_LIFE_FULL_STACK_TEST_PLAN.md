@@ -828,4 +828,4 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 
 覆盖率预检还必须验证“兼容模块不会复活第二套 self-affect writer”。Prefrontal 即使缺失 app-local `TribeApplicationPorts` 也要 fail-closed；drift 事件不得调用 Endocrine、Limbic 或 PainReward 写路径。当前目标回归已覆盖 moderate／severe drift 和无 drift，29 项 Scheduler／Gateway／OBS／Prefrontal 相邻测试通过；完整 Unit 分片仍须在候选提交上重跑。该工程封口不能替代 48 条人感和三人盲评。
 
-2026-08-07 非安全覆盖收口已得到 Unit 7956 JUnit case（0 failure/error、8 classified skips）、Contract 1898 项全绿、本地 E2E 68 项全绿。Integration 首轮为 848 passed／11 failed／2 Redis env skips，11 个失败均完成定向修复复跑；完整 combine 尚未完成。该工程证据只验证数字生命所依赖的恢复、调度、Internal 与语音事件边界，不能把 `f378fa80d` 的 48 条人感失败或三人盲评提升为 PASS。网络安全与 Pentest 保持 `NOT_RUN_USER_SKIPPED`。
+2026-08-07 非安全覆盖收口已得到 Unit 7954 个 JUnit testcase＋2 个成功 subtest（合计 7956 outcome，0 failure/error、8 classified skips）、Contract 1898 项全绿、本地 E2E 68 项全绿。当前 SHA 的完整 Integration 六片为 862 passed／2 Redis env skips／0 failed，首轮 11 个失败已在完整相邻集合中关闭。最终完整生产源码分母为 line 68.50%、branch 51.40%、综合 64.27%，低于 75%／65% Gate，状态为 `FAIL_BELOW_COVERAGE_GATE`。该工程证据只验证数字生命所依赖的恢复、调度、Internal 与语音事件边界，不能把 `f378fa80d` 的 48 条人感失败或三人盲评提升为 PASS。网络安全与 Pentest 保持 `NOT_RUN_USER_SKIPPED`。

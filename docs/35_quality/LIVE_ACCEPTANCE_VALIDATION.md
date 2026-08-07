@@ -745,8 +745,16 @@ Python Unit 非安全覆盖首次分成六片运行，约 4800 项执行后有�
 
 ## 2026-08-07 A15 非安全 Unit／Contract／Integration／E2E 收口
 
-当前候选树从零运行的 Unit run7 生成 7956 个 JUnit case，0 failure、0 error、8 个分类 skip；pytest 明细为 7946 passed、2 subtests passed、8 skipped。Unit-only 对完整生产源码分母的 line coverage 为 57.55%（160941/279647），branch coverage 为 39.85%（36657/91990），只代表 Unit，不代表全系统。Contract 四片共 1898 项，0 failure/error/skip。本地非安全 E2E 共 68 项通过；旧 RPC 用例已按现行隐私合同改为“ASR_CHUNK 可被接收但不写长期 voice_event_log，TTS 终态持久化”。
+当前候选树从零运行的 Unit run7 生成 7954 个 JUnit testcase；pytest 另报告 2 个成功 subtest，因此总计 7956 个 outcome，明细为 7946 passed、2 subtests passed、8 skipped，0 failure/error。Unit-only 对完整生产源码分母的 line coverage 为 57.55%（160941/279647），branch coverage 为 39.85%（36657/91990），只代表 Unit，不代表全系统。Contract 四片共 1898 项，0 failure/error/skip。本地非安全 E2E 共 68 项通过；旧 RPC 用例已按现行隐私合同改为“ASR_CHUNK 可被接收但不写长期 voice_event_log，TTS 终态持久化”。
 
 Integration 六片首轮共 861 个 JUnit case：848 passed、11 failed、2 个因 `NASTUME_TEST_REDIS_URL` 未设置而分类 skip。真实 Redis 写入、竞争锁、重启重读已由同轮隔离 Docker 收据覆盖，两个 skip 没有冒充本次 pytest PASS。11 个失败聚类为三项根因：Scheduler/Internal 的 NodeBoundGrant 服务没有消费组合层共享 clock；已持久 admission 的 startup continuation 错误重新执行父 Grant preflight；Review heartbeat 在无人 takeover 时也会因事件循环晚调度立即自我失权。修复后 11/11 失败节点及相邻 Internal/E2E 共 13 项通过，Review store/worker 全文件另有 29 项通过。
 
-恢复语义没有放宽新 admission：startup continuation 必须是 repository 的 exact replay；缺少既有 child-grant batch 时仍不能从过期父 Grant 铸造新权限，child grant 自身过期仍在 worker mutation 前拒绝。晚 heartbeat 也只允许同一 token、status version 与 fencing token 在事务内 CAS 续租；若其他 worker 已先 takeover，旧 owner 必然失败。网络安全、A09、A12、Pentest 未运行且不计入上述数字。完整 Unit＋Contract＋Integration＋E2E coverage combine 仍待生成，因此 A15 继续为 `INCOMPLETE`。
+恢复语义没有放宽新 admission：startup continuation 必须是 repository 的 exact replay；缺少既有 child-grant batch 时仍不能从过期父 Grant 铸造新权限，child grant 自身过期仍在 worker mutation 前拒绝。晚 heartbeat 也只允许同一 token、status version 与 fencing token 在事务内 CAS 续租；若其他 worker 已先 takeover，旧 owner 必然失败。网络安全、A09、A12、Pentest 未运行且不计入上述数字。完整 combine 的终态见下一节。
+
+## 2026-08-07 A15 `86deb0b15` 非安全覆盖终态
+
+修复提交上的 Integration 六片按同一 155 个非安全模块重新并发运行，得到 862 passed、2 个因 `NASTUME_TEST_REDIS_URL` 未设置而分类 skip、0 failed/error；最慢分片为 31 分 18 秒。此前的 11 个失败全部消失，说明共享 clock、startup exact replay 和 fenced late heartbeat 修复在完整相邻集合中闭合。两个 Redis pytest skip 没有记为 PASS；真实 Redis 写入、竞争锁、容器重启和持久重读仍引用本次 A15 的独立 Docker 收据。
+
+最终 coverage 只继承 `8341d99a0` 上 byte-identical 生产文件的 Unit／Contract／E2E 数据；先从继承数据中清除本提交改动的 6 个生产文件，再叠加当前 SHA 的 42 项 remediation 和完整 Integration run2（包含子进程 coverage）。去重测试口径为 10786 个 pytest outcome：10776 passed、10 classified skips、0 failed/error。完整 `host_brain`、`edge_client`、`natsume_contracts` 生产源码均留在分母，未运行的安全源码没有被删掉。
+
+当前 line coverage 为 68.50%（191578/279662），branch coverage 为 51.40%（47284/92000），statements＋branches 综合为 64.27%。两项分别低于冻结的 75%／65% Gate，所以 coverage 结论是 `FAIL_BELOW_COVERAGE_GATE`，不是 PASS。证据摘要位于忽略目录 `artifacts/local-gates/86deb0b1539e4f1b81107e009cfcb80f3a7e79b0/python-coverage-nonsecurity/combined-current-final/acceptance-summary.json`，SHA-256 为 `0e012682d1a50db53c5b2cac8e2b9186fe7e993d0a2ed3d72c203f38291a6bd2`；coverage JSON SHA-256 为 `4d924ad118d90e5d7fe8529c4a8e333c7562086d48da7133b9ae03583943344f`。网络安全、A09、A12、Security Monitor 和 Pentest 均保持 `NOT_RUN_USER_SKIPPED`；远端 Edge 保持关闭，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
