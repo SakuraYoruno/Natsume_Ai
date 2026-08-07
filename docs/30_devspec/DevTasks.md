@@ -99,6 +99,7 @@
 - [x] 在 `2cf552c92` 上完成严格 Host-only 探针：Canon `OK`、真实 Chat COMMIT、required unavailable 为 0；远端 Edge 未探测，报告 SHA-256 为 `0164db7266eddf87ab45216651d1de350817670f91f6aaf706bee71c21bb44ec`。
 - [ ] 在最终 SHA 继续复验 Docker 三库、Monitor 真实浏览器和本地 Gateway，仍排除网络安全与远端 Edge。
 - [x] 对齐外部服务 runner 与当前 A15 隔离项目身份；两次无副作用配置拒绝均保留失败收据，正式运行必须使用完整 Git SHA。
+- [x] 在 `f2a7f176c` 完成 Neo4j／Chroma／Redis 真实写入、更新、容器重启、持久重读与清理；报告 SHA-256 为 `39d7d22a4ce6dee0441cf44ae492a6e1d4ec59575a380558cd6ad348fb6a9af6`。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。
 - [ ] 邀请至少 3 名评审，与稳定基线盲测并达到 PRD 门槛。
 - [ ] 重点检查情绪变化幅度、混合情绪、裂痕／修复和技术任务中的人格连续性。

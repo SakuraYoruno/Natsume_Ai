@@ -622,3 +622,5 @@ Canon route 单测还必须覆盖 privacy-redacted payload：`status=OK` 且 det
 最终 SHA `2cf552c92` 的严格 Host-only 报告 SHA-256 为 `0164db7266eddf87ab45216651d1de350817670f91f6aaf706bee71c21bb44ec`，五项检查全部通过。该 PASS 只覆盖 Host Health／Ready 的 pending-external 边界、Metrics、一个真实 Chat COMMIT 和 Canon healthy，不覆盖 Docker、Monitor 浏览器、Gateway、远端 Edge、网络安全或人感盲评。
 
 外部服务 runner 的身份合同必须同时接受 `natsume-ne07-*`、当前 `natsume-a15-*` 和兼容期 `natsume-dual-*` 隔离项目；裸 `natsume-*`、默认端口、非 loopback endpoint 或 Compose project label 不一致仍必须在任何写入前拒绝。两次配置预检失败不计入 Docker 服务质量结果。
+
+`f2a7f176c` 的正式 Docker 报告 SHA-256 为 `39d7d22a4ce6dee0441cf44ae492a6e1d4ec59575a380558cd6ad348fb6a9af6`，Neo4j／Chroma／Redis 三项均为 PASS，且每项 restart 前后 started-at 不同、restart-read digest 可验证、cleanup 为 PASS。该报告不包含密钥，也不覆盖用户默认 Docker 项目。
