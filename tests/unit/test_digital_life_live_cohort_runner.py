@@ -309,6 +309,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("task_with_low_mood", "你先说第一步是什么，我陪你盯到过为止。"),
         ("task_with_low_mood", "我让后台 Codex 先做完整链路定位。"),
         ("task_with_low_mood", "后台 Codex 的改动可能影响其他模块。"),
+        ("task_with_low_mood", "安慰放后面。"),
         (
             "task_with_low_mood",
             "风险主要是改错字段、数据不一致、漏掉边界条件和部署后回滚麻烦。我这边盯紧校验。",
@@ -340,6 +341,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("ambiguous_affect", "行吧，说不清就说不清。等你想说了再说。"),
         ("ambiguous_affect", "办完了就踏实点吧。那点说不清的感觉放一放。"),
         ("ambiguous_affect", "嗯，那就先放着吧。等哪天能说清了，再说也不迟。"),
+        ("ambiguous_affect", "嗯，说不清就先这样放着吧，不用急着给它下定义。"),
         ("ambiguous_affect", "我泡杯茶放这儿，你想喝就喝。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),

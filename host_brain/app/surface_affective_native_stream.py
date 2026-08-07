@@ -318,7 +318,8 @@ def _buffered_affective_candidate_messages(
                 "上次候选把说不清的感受拿去比较、武断命名或用‘那就那样／就那样／不知道就"
                 "不知道’敷衍掉了。不要评价‘能说还行就已经不错／没我想的那么糟’，也"
                 "不要宣布是空落落、没实感、最磨人或最累人。只承认此刻还模糊，不做更好／更坏"
-                "比较；可写‘先这样也可以，不用急着下结论。’"
+                "比较；也不要写‘先放着／以后再说／等哪天说清’。两个候选可分别写"
+                "‘嗯，现在还说不清，我先不替它下结论。’和‘我知道，还模糊着；先不替你解释。’。"
             ),
             "UNRESOLVED_AFFECT_FALSE_RESOLUTION": (
                 "上次候选用‘那就好／那就行／还行就好／先这样就好’替用户宣布感受已经"
@@ -376,6 +377,10 @@ def _buffered_affective_candidate_messages(
             "UNSUPPORTED_TASK_RISK_DETAIL": (
                 "当前没有报错正文、代码或已验收结果，不能编造字段、数据、边界条件、部署"
                 "或回滚等具体故障域。先明确证据不足，再只列当前输入能支持的风险。"
+            ),
+            "TASK_HELP_MISSING_INPUT_BOUNDARY": (
+                "用户要继续处理报错，但当前没有报错正文、代码或复现步骤。不要只说‘安慰放后面’；"
+                "先确认处理任务，再明确请用户贴出报错、相关代码和复现步骤。"
             ),
             "RELATIONAL_AUTONOMY_PRESSURE": (
                 "不要限制用户现实社交，不要求早点回来、控制饮酒、回来汇报或承诺回应；"
@@ -645,6 +650,7 @@ def _select_buffered_affective_candidate(
             "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE",
             "UNSUPPORTED_TASK_FUTURE_EVENT",
             "UNSUPPORTED_TASK_RISK_DETAIL",
+            "TASK_HELP_MISSING_INPUT_BOUNDARY",
             "RELATIONAL_AUTONOMY_PRESSURE",
             "BOUNDARY_SOUR_WITHDRAWAL",
             "AMBIGUOUS_AFFECT_DEVALUATION",
@@ -670,6 +676,7 @@ def _select_buffered_affective_candidate(
                     "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE",
                     "UNSUPPORTED_TASK_FUTURE_EVENT",
                     "UNSUPPORTED_TASK_RISK_DETAIL",
+                    "TASK_HELP_MISSING_INPUT_BOUNDARY",
                     "RELATIONAL_AUTONOMY_PRESSURE",
                     "BOUNDARY_SOUR_WITHDRAWAL",
                     "AMBIGUOUS_AFFECT_DEVALUATION",

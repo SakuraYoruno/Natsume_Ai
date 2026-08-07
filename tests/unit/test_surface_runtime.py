@@ -1140,7 +1140,7 @@ def test_surface_runtime_repairs_typed_ambiguous_future_resolution_without_exter
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
         return _candidate_payload(
-            ["嗯，那就先放着吧。等哪天能说清了，再说也不迟。"]
+            ["嗯，说不清就先这样放着吧，不用急着给它下定义。"]
         )
 
     result = asyncio.run(
@@ -1350,6 +1350,56 @@ def test_surface_runtime_repairs_unsupported_task_risks_without_external_retry()
     assert result.selected_text == (
         "目前只知道今晚时间紧。现在还没有报错和代码，无法列出具体风险；"
         "把实际改动贴来，我再按影响和回滚难度排序。"
+    )
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_repairs_thin_task_handoff_without_external_retry() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["安慰放后面。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="但这个报错今晚必须修，别把任务全变成安慰。",
+                reply_control_packet={
+                    "task_mode": "technical_help",
+                    "response_move": "solve_first",
+                    "emotional_tone": "steady_helpful",
+                    "relationship_distance": "familiar",
+                    "information_budget": "normal",
+                    "question_budget": 0,
+                    "facts": ["今晚必须处理报错，但当前没有报错正文、代码或复现步骤。"],
+                    "must_not_do": ["不能用安慰替代任务下一步。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-technical-missing-input",
+                        companion_act_kind="SOLVE",
+                        semantic_focus="TASK_RESULT",
+                        self_stance="PRACTICAL_CARE",
+                        response_move="SOLVE_FIRST",
+                        inference_policy="FROZEN_FACTS_ONLY",
+                        relationship_posture="TASK_COMPANION",
+                        ending_mode="TASK_NEXT_STEP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == (
+        "好，先处理任务。把报错、相关代码和复现步骤贴来，我先给你最短修复。"
     )
     assert result.observation_codes == ()
 

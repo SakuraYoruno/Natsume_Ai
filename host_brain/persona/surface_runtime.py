@@ -47,6 +47,7 @@ from host_brain.persona.surface_candidate_guards import (
     _repair_self_erasure_hits, _repair_self_victimization_hits,
     _repair_ungrounded_self_cause_hits,
     _surface_internal_authorship_hits, _text_input_boundary_active,
+    _task_help_missing_input_boundary_hits,
     _ungrounded_physical_copresence_hits, _unprovided_notification_action_hits,
     _unprovided_work_state_claim_hits, _unresolved_affect_false_resolution_hits,
     _unsupported_task_future_event_hits, _unsupported_task_risk_detail_hits,
@@ -1264,6 +1265,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("UNSUPPORTED_TASK_FUTURE_EVENT")
     if _unsupported_task_risk_detail_hits(request, value):
         codes.append("UNSUPPORTED_TASK_RISK_DETAIL")
+    if _task_help_missing_input_boundary_hits(request, value):
+        codes.append("TASK_HELP_MISSING_INPUT_BOUNDARY")
     if _accepted_task_result_synthesis_clarification(request, value):
         codes.append("ACCEPTED_TASK_RESULT_CLARIFICATION")
     if _accepted_task_result_synthesis_inadequate(request, value):
@@ -2519,6 +2522,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
             return temporal
     if "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE" in codes:
         return "嗯，说不清就先不下结论。"
+    if "AMBIGUOUS_AFFECT_DEVALUATION" in codes:
+        return "嗯，说不清就先不下结论。"
     if "AFFECTIVE_IMPLIED_WAITING" in codes:
         if _canonical_affective_guidance_active(request, "GIVE_SPACE"):
             return "好，我先不主动找你。"
@@ -2534,6 +2539,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         )
         prefix = "目前只知道今晚时间紧。" if "今晚" in authority else ""
         return prefix + "现在还没有报错和代码，无法列出具体风险；把实际改动贴来，我再按影响和回滚难度排序。"
+    if "TASK_HELP_MISSING_INPUT_BOUNDARY" in codes:
+        return "好，先处理任务。把报错、相关代码和复现步骤贴来，我先给你最短修复。"
     low_info = _low_info_scene_fallback(request)
     if low_info and codes:
         return low_info

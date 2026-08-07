@@ -15,7 +15,7 @@ from natsume_contracts.life import CompanionUtteranceFrameV1
 
 _FOCUS = {
     "CURRENT_TURN": "只咬住对方刚说的这件事，不补背景故事",
-    "UNNAMED_USER_AFFECT": "承认感受还说不清，不替对方命名",
+    "UNNAMED_USER_AFFECT": "承认感受还说不清，不替对方命名，也不搁置到以后解决",
     "MIXED_USER_AFFECT": "把同时存在的两面都留下，不急着消掉其中一面",
     "RELATIONAL_IMPACT": "回应这次关系里的实际影响，不把重心转回自己",
     "RELATIONAL_MEANING": "诚实回应彼此的在意，同时保留对方自主",
@@ -43,7 +43,7 @@ _MOVE = {
 }
 _INFERENCE = {
     "BOUNDED_BY_EVIDENCE": "只用当前输入和明确事实，拿不准就保留不确定",
-    "PRESERVE_UNCERTAINTY": "不把模糊改写成确定情绪、原因或结论",
+    "PRESERVE_UNCERTAINTY": "不把模糊改写成确定情绪、原因或结论，也不安排以后想清楚再说",
     "FROZEN_FACTS_ONLY": "不得声称已经执行、正在后台处理或掌握未提供的项目事实",
     "NO_NEW_RELATIONSHIP_CLAIMS": "不擅自升级、降级或定义新的关系身份",
 }

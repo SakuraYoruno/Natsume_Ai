@@ -794,3 +794,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 `45bb91b26` 的上述双轨迹报告 SHA-256 为 `3141f9feb5f694eee67a2c0ee6f1e8ea249fdbcb33bd1c1fe7bde30b901ec85e`。含混轨迹 3 个回合全部 accepted，但当前逐句继续拒绝“办完了就踏实点／放一放”和“等哪天能说清了再说”；这是替用户命名结果并安排未来解决，不因自动 PASS 改写结论。技术轨迹前两轮 accepted，第三轮两个真实 DeepSeek 候选先后触发 `UNSUPPORTED_TASK_RISK_DETAIL`，第二个还同时触发 `UNPROVIDED_WORK_STATE_CLAIM/SURFACE_INTERNAL_AUTHORSHIP_LEAK`，Host 正确没有发送伪造内容，但最终以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 令 TaskGraph 失败。整轮共 5 个 accepted turn，writer probe 通过。
 
 失败后的实现修正包含两个可复用语义：未命名感受下拒绝“完成便踏实／把感受放着／等以后说清”，零任务证据下优先返回“尚无法列具体风险，请提供实际改动”，而不是先落入与风险问题不匹配的低信息或后台工作 fallback。外部模型重试所有权保持不变，本地 fallback 经同一 Gate 再验后可直接完成当前节点。核心 302 项与相邻 219 项非安全回归通过；只有加载新 SHA 后两条真实 Provider 轨迹均完成且逐句可接受，8 类 frame 才能从 6/8 提升。
+
+`bb2e795d7` 的复验报告 SHA-256 为 `9c2819868f7da41ba4e51a87599de94b01993259398b8f420f2413f7be44094e`，6 个真实 Gateway turn 全部 accepted，writer probe 与旧 writer 零增量通过。技术末轮已按预期收敛为“目前只知道今晚时间紧；缺报错和代码，无法列具体风险”，Graph、Acceptance 与 Outbox 完成；但第二轮只答“安慰放后面”，没有给出报错／代码入口，当前逐句仍拒绝整条技术轨迹。含混第二轮因两个 provider 候选都不合格，只能 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，自动以 `TURN_2_DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE` 失败；末轮“说不清就先这样放着”也仍被当前逐句拒绝。
+
+当前修正将语义放回 frame 本身：`UNNAMED_USER_AFFECT/PRESERVE_UNCERTAINTY` 不得把未知感受放到以后解决，重试提示要求两个候选保留此刻不确定后自然停住；`TASK_RESULT/SOLVE_FIRST` 在用户要求修复但没有实际报错时，必须给出报错、代码和复现步骤这一可执行入口。相同约束在候选 Gate 与本地 fallback 复核，既不增加数据库写入，也不增加最大模型请求数。核心 305 项与相邻 219 项通过；下一轮仍只跑含混和技术两类，远端 Edge 与网络安全保持跳过。

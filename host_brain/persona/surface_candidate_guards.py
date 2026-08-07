@@ -207,7 +207,7 @@ _AMBIGUOUS_AFFECT_DEVALUATION_RE = re.compile(
     r"|办完.{0,8}就(?:轻松|踏实|没事)"
     r"|(?:感觉|听起来|看起来).{0,6}(?:没.{0,2}精神|低落|难受|疲惫)"
     r"|不想说就不说|等你(?:想|理|弄)(?:清楚|明白)"
-    r"|说不清.{0,12}(?:先放着|放一放)|(?:那就|就)?先放着"
+    r"|说不清.{0,12}(?:放着|放一放)|(?:那就|就)?先(?:这样)?放着"
 )
 _AMBIGUOUS_AFFECT_USER_RE = re.compile(
     r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉|还行|还好"
@@ -222,6 +222,16 @@ _TASK_EVIDENCE_RE = re.compile(
 _TASK_RISK_UNCERTAINTY_RE = re.compile(
     r"(?:当前|现在)?(?:还)?(?:没有|缺少|未提供).{0,12}(?:报错|代码|改动|上下文|信息)"
     r"|(?:只能|先)列(?:通用|一般)风险|(?:具体|实际)风险.{0,8}(?:不能|没法|无法|还不能)"
+)
+_TASK_CONTEXT_REQUIRED_USER_RE = re.compile(
+    r"(?:这个|那个|当前)?(?:报错|错误|异常|bug).{0,12}(?:修|解决|处理|排查)"
+    r"|(?:修|解决|处理|排查).{0,12}(?:报错|错误|异常|bug)",
+    re.IGNORECASE,
+)
+_TASK_INPUT_NEXT_STEP_RE = re.compile(
+    r"(?:把|请|先).{0,10}(?:报错|错误|日志|代码|堆栈|复现|改动).{0,10}(?:贴|发|给|提供)"
+    r"|(?:需要|缺少|还没有|尚无).{0,12}(?:报错|错误|日志|代码|堆栈|复现|改动)",
+    re.IGNORECASE,
 )
 _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)|怕什么(?:嘛|呢)?"
@@ -669,6 +679,37 @@ def _unsupported_task_risk_detail_hits(
     if _TASK_RISK_UNCERTAINTY_RE.search(candidate):
         return ()
     return (candidate,) if candidate.strip() else ()
+
+
+def _task_help_missing_input_boundary_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    """Keep a typed SOLVE turn actionable when the referenced error is absent."""
+
+    frame = _typed_affective_frame(request)
+    if (
+        str(frame.get("semantic_focus") or "").upper() != "TASK_RESULT"
+        or str(frame.get("inference_policy") or "").upper() != "FROZEN_FACTS_ONLY"
+        or not _TASK_CONTEXT_REQUIRED_USER_RE.search(
+            str(getattr(request, "user_message", "") or "")
+        )
+        or getattr(request, "accepted_task_results", None)
+    ):
+        return ()
+    authority = "\n".join(
+        [
+            str(getattr(request, "user_message", "") or ""),
+            *[str(item or "") for item in surface_prompt_facts(request)],
+        ]
+    )
+    evidence_authority = _TASK_RISK_UNCERTAINTY_RE.sub("", authority)
+    if _TASK_EVIDENCE_RE.search(evidence_authority):
+        return ()
+    candidate = str(text or "").strip()
+    if not candidate or _TASK_INPUT_NEXT_STEP_RE.search(candidate):
+        return ()
+    return (candidate,)
 
 
 def _listen_unsupported_user_essence_hits(
