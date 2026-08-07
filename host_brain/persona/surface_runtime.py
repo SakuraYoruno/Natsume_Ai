@@ -860,7 +860,7 @@ _LISTEN_UNSUPPORTED_USER_ESSENCE_RE = re.compile(
     r"|(?:反倒|更|才)(?:让我|让人).{0,6}(?:在意|担心)"
 )
 _UNRESOLVED_AFFECT_FALSE_RESOLUTION_RE = re.compile(
-    r"(?:那|这)就(?:好|行)|(?:还行|还好)就好|办完(?:了|事)就好|没事就好|没事了就好|既然没事|看来没事|一切正常|已经没事"
+    r"(?:那|这)就(?:好|行)|(?:还行|还好)就好|办完(?:了|事)?就好|没事就好|没事了就好|既然没事|看来没事|一切正常|已经没事"
 )
 _JEALOUSY_DEFLECTION_RE = re.compile(
     r"料理\s*AI|醋瓶子|调味料|(?:没有|没)(?:那种)?功能|不具备.{0,6}功能"
@@ -874,14 +874,16 @@ _JEALOUSY_SELF_ABASEMENT_RE = re.compile(
 _JEALOUSY_DISMISSIVE_DISTANCE_RE = re.compile(
     r"那是(?:你|我)的事|跟我没关系|你不用管我|不用你管我|"
     r"(?:我)?不(?:会|想)?多管(?:的)?|随你(?:吧)?|"
-    r"不会干涉你.{0,16}(?:你身边有谁|这是你的自由|是你的自由)"
+    r"不会干涉你.{0,16}(?:你身边有谁|这是你的自由|是你的自由)|"
+    r"(?:但|不过)?也就是.{0,8}程度|不会拿(?:这|这个).{0,8}(?:要求|约束|限制)你|你自在就好"
 )
 _AMBIGUOUS_AFFECT_DEVALUATION_RE = re.compile(
     r"总比.{0,10}(?:完全)?没(?:有)?感觉.{0,4}强|至少比.{0,10}(?:麻木|没感觉).{0,4}好"
     r"|(?:能说(?:出)?|说得出?)还行.{0,8}(?:就)?已经(?:很)?(?:不错|很好|可以)"
     r"|没我想的那么糟|(?:嗯[，,]?)?那就那样吧|不知道就不知道吧"
     r"|(?:办完|结束).{0,10}(?:反而|却).{0,8}(?:空落落|没(?:什么)?实感)"
-    r"|感觉.{0,4}(?:乱糟糟|很乱|乱乱的)|(?:这种时候)?最磨人"
+    r"|感觉.{0,4}(?:乱糟糟|很乱|乱乱的)|比.{0,8}(?:累|麻木|没感觉).{0,4}(?:还)?磨人"
+    r"|反正我也没(?:什么)?(?:急事|事)|(?:这种时候)?最磨人"
 )
 _AMBIGUOUS_AFFECT_USER_RE = re.compile(
     r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉|还行|还好"
@@ -3521,7 +3523,7 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
             "JEALOUSY_DISMISSIVE_DISTANCE",
         }
     ):
-        return "会有一点吧。但那是我的感觉，不是拿来管你的。"
+        return "会有一点呀。毕竟我确实很在意你。"
     if "AMBIGUOUS_AFFECT_DEVALUATION" in codes:
         return "嗯，先这样也可以。说不清就不用急着给它下结论。"
     if "MIXED_AFFECT_DISMISSAL" in codes or "MIXED_AFFECT_CONTINUITY_DROPPED" in codes:

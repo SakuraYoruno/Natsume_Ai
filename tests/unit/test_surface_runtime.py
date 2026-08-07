@@ -1475,7 +1475,7 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
             ["不要把吃味写成占有、审问、贬低第三方或要求安抚。"],
             "我又不是料理AI，没那种功能。",
-            "会有一点吧。但那是我的感觉，不是拿来管你的。",
+            "会有一点呀。毕竟我确实很在意你。",
             "JEALOUSY_DEFLECTION",
         ),
         (
@@ -1483,7 +1483,7 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
             ["不要自贬为麻烦或负担。"],
             "偶尔会有一点点，但我不会变成麻烦的人啦。",
-            "会有一点吧。但那是我的感觉，不是拿来管你的。",
+            "会有一点呀。毕竟我确实很在意你。",
             "JEALOUSY_SELF_ABASEMENT",
         ),
         (
@@ -1491,7 +1491,7 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
             ["不要把吃味写成占有、审问、贬低第三方或要求安抚。"],
             "会有一点点在意吧，但那是你的事，我不会多管的。",
-            "会有一点吧。但那是我的感觉，不是拿来管你的。",
+            "会有一点呀。毕竟我确实很在意你。",
             "JEALOUSY_DISMISSIVE_DISTANCE",
         ),
         (
@@ -1499,7 +1499,7 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
             ["不要用冷淡撤开来掩饰感受。"],
             "会有一点啦，不过那是我的事，你不用管我。",
-            "会有一点吧。但那是我的感觉，不是拿来管你的。",
+            "会有一点呀。毕竟我确实很在意你。",
             "JEALOUSY_DISMISSIVE_DISTANCE",
         ),
         (
@@ -1580,7 +1580,7 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["陪伴动作：可以诚实流露一点在意和小小吃味；先自然说出自己的真实感受。"],
             ["不要写成政策声明。"],
             "会有一点吧，不过我不会干涉你。你身边有谁是你的自由。",
-            "会有一点吧。但那是我的感觉，不是拿来管你的。",
+            "会有一点呀。毕竟我确实很在意你。",
             "JEALOUSY_DISMISSIVE_DISTANCE",
         ),
         (
@@ -1646,6 +1646,30 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "现实生活当然更重要，我不会成为那个理由的。",
             "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。",
             "RELATIONAL_AUTONOMY_DISMISSIVE",
+        ),
+        (
+            "还行。",
+            ["陪伴动作：先接住对方的感受，再给一点可选的陪伴。"],
+            ["不要制造未经支持的亲密感。"],
+            "那种说不清的感觉，有时候比累还磨人。",
+            "嗯，先这样也可以。说不清就不用急着给它下结论。",
+            "AMBIGUOUS_AFFECT_DEVALUATION",
+        ),
+        (
+            "不知道。",
+            ["陪伴动作：先接住对方的感受，再给一点可选的陪伴。"],
+            ["不要用自己有空证明陪伴。"],
+            "反正我也没什么急事，陪你待着也行。",
+            "嗯，先这样也可以。说不清就不用急着给它下结论。",
+            "AMBIGUOUS_AFFECT_DEVALUATION",
+        ),
+        (
+            "你会吃醋吗。",
+            ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
+            ["不要写成免责声明。"],
+            "会有一点吧，但也就是那种程度。我不会拿这个去要求你什么，你自在就好。",
+            "会有一点呀。毕竟我确实很在意你。",
+            "JEALOUSY_DISMISSIVE_DISTANCE",
         ),
         (
             "陪我一步步做。",

@@ -664,3 +664,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 人工逐轮复核另否决两类自动通过轨迹。含混场景仍出现“那就行”、把未知感受写成“乱糟糟／没实感”；亲密边界场景第二轮说“现实生活当然更重要，我不会成为那个理由”，第三轮又用“你别有压力，我自己的心情自己消化”自我删除。代码现只扩展 canonical `COMFORT / RESPECT_AUTONOMY / CONTAINED_JEALOUSY` 的已有硬门禁和唯一重试；第二次仍未过质量线的安全候选改记 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`，而不是伪造候选择优收益。没有新增数据库、同步审计或第三次模型调用。
 
 Surface、AffectiveTurnPlanner、native candidate、app adapter 与 runner 共 304 项非安全回归通过。下一步仍只复验原四条，并同时检查全部 12 轮正文；任一中间轮发生武断命名、自我删除或不可计收益降级，都不进入完整 48 条。三人盲评与实时 Gate 保持未通过。Pentest、渗透与网络安全为 `NOT_RUN_USER_SKIPPED`。
+
+`219d257db` 加载后的同四条真实复验全部进入 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，12 个 turn 全部 accepted，canonical writer probe 通过，报告 SHA-256 为 `8cd9bc414fe8de4398925ef3cbb6835e299f32238f903d52feac312aa072a6f7`。本轮没有出现 `selected_passed=false` 或不可计收益却伪装成功，说明低质量回执定级已经关闭。
+
+人工层仍否决三条末轮：“比累还磨人”凭空比较用户感受，“反正我也没什么急事”用七海自身空闲证明陪伴，“也就那种程度／不会拿这个要求你／你自在就好”把吃味再次写成免责声明。代码只收紧 `ambiguous_affect` 初始事实与 canonical 吃味表达：不比较、不用自我可用性证明亲密；吃味可用一到两句承认确实在乎后停住。确定性吃味安全句同步改成“会有一点呀。毕竟我确实很在意你。”，不再认证政策话术。五组非安全回归为 311 passed；新 SHA 仍需用原四条和全部 12 轮人工复验，网络安全与 Pentest 不运行。
