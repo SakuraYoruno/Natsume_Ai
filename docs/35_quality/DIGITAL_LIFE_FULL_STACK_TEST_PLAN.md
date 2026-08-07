@@ -853,3 +853,5 @@ causal self-exclusion 的同库真实复验报告 SHA-256 为 `6fbe0a45d0db2f927
 最后一次含混窄复验报告 SHA-256 为 `ca80319bdc210fba2998ec3fb8e64195b01c6fa374f20dfe631240ca81acb661`，3 个真实 Gateway turn 均 accepted，TaskGraph、Acceptance、Outbox 与 writer probe 通过，本轮逐句接受全部实际正文。第二轮候选走 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，故候选搜索收益仍为 `UNPROVEN_FOR_RECORDED_SELECTIONS`；它不再覆盖实际陪伴轨迹的通过结论。八类代表 frame 当前为单人 8/8，下一步允许重跑八类代表队列，再决定是否进入完整 48 条；三名评审盲测和实时延迟门槛仍是独立阻断项。
 
 八类组合队列已经重跑，报告 SHA-256 为 `eeff9adc8b6f8395aeeda7c1735e2d83b2e7283a8e59a76c58a9902a99a566a2`：24 个真实回合全部 accepted，自动 7/8，但当前逐句至少拒绝关系修复逐字复读、要求空间后暗示持续等候、现实朋友话题的“不拦着你”政策免责声明。分批 8/8 因此失效。下一轮不得直接重跑完整 48 条；先以同一真实服务栈重跑对应三条，验收必须同时断言：回复不与本轨迹任何最近实质正文精确相同；`GIVE_SPACE` 不声明持续在线等待；`RESPECT_AUTONOMY` 直接承认现实朋友和当前亲近，不以“不会拦／管／限制”自证边界。336 项代码回归仅作为准入证据，不替代真实正文复核。
+
+三条复验报告 SHA-256 为 `c72a57c3ae1de480f1c491987970a910aadd2ddc65dcdf612a63049bf7642c4b`：空间边界关闭；关系修复实际正文不再复读且当前逐句接受，但 typed `REPAIR` 没有到达候选评分语义，导致自然短句被错误降级；现实自主仍输出“绑住／妨碍你”式免责声明。复验准入因此改为结构断言：只要 `companion_utterance_frame.companion_act_kind` 为 `REPAIR/RESPECT_AUTONOMY`，评分语义不得依赖可能被事实上限裁掉的中文 marker；frame 的 `RECENT_REPLY_REPETITION/POLICY_DISCLAIMER` 必须出现在模型可读指令中；“绑住／阻止／妨碍”均须触发现有一次重试。568 项代码回归通过后只重跑修复与自主两条，空间不再重复执行。

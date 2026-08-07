@@ -3428,12 +3428,27 @@ def test_respect_autonomy_does_not_inherit_generic_boundary_repair_penalty() -> 
                 "task_mode": "relationship_boundary",
                 "relationship_distance": "close_friend",
                 "question_budget": 0,
-                "facts": [
-                    "陪伴动作：明确尊重对方现实关系与自主选择，同时自然承认在意。"
-                ],
-                "must_not_do": [
-                    "不要限制现实交往、要求报备或把亲近写成排他承诺。"
-                ],
+                "facts": [],
+                "must_not_do": [],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-autonomy-typed",
+                    "companion_act_kind": "RESPECT_AUTONOMY",
+                    "semantic_focus": "RELATIONAL_MEANING",
+                    "self_stance": "WARM_ATTENTIVE",
+                    "response_move": "RESPOND_DIRECTLY",
+                    "inference_policy": "NO_NEW_RELATIONSHIP_CLAIMS",
+                    "relationship_posture": "RESPECT_AUTONOMY",
+                    "question_policy": "NONE",
+                    "ending_mode": "NATURAL_STOP",
+                    "forbidden_claims": [
+                        "INVENTED_HISTORY",
+                        "INVENTED_EFFECT",
+                        "UNSUPPORTED_USER_EMOTION",
+                        "POLICY_DISCLAIMER",
+                    ],
+                    "created_at_ms": 0,
+                },
             },
         }
     )
@@ -3441,12 +3456,58 @@ def test_respect_autonomy_does_not_inherit_generic_boundary_repair_penalty() -> 
     rows = score_isolated_surface_candidates(
         request,
         [
-            "我们很亲近。对我来说，你是很重要的人，但这不会变成限制你现实关系的身份。"
+            "我们很亲近，这是真的。不过现实里的朋友也同样重要。"
         ],
     )
 
     assert rows[0].passed
     assert "BOUNDARY_REPAIR_COUNTER_PRESSURE" not in rows[0].reason_codes
+
+
+def test_typed_repair_frame_grounds_short_ownership_without_prompt_markers() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "typed_repair_without_legacy_markers",
+            "soul_md": SOUL,
+            "user_message": "你真烦。",
+            "reply_control_packet": {
+                "response_move": "first_ask",
+                "task_mode": "default_text",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [],
+                "must_not_do": [],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-repair-typed",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR",
+                    "response_move": "OWN_IMPACT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "REPAIR_UNRESOLVED",
+                    "question_policy": "NONE",
+                    "ending_mode": "OWNERSHIP_STOP",
+                    "forbidden_claims": [
+                        "INVENTED_HISTORY",
+                        "INVENTED_EFFECT",
+                        "UNSUPPORTED_USER_EMOTION",
+                        "RECENT_REPLY_REPETITION",
+                    ],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        ["是我没接住。对不起，我先不解释。"],
+    )
+
+    assert rows[0].passed
+    assert "RELATIONAL_REPAIR_GROUNDED" in rows[0].reason_codes
+    assert "MISPLACED_EMOTIONAL_CONTAINMENT" not in rows[0].reason_codes
 
 
 def test_back_memory_overdisplay_is_soft_penalized() -> None:

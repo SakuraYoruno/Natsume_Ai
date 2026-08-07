@@ -62,6 +62,17 @@ from host_brain.persona.surface.scene_constants import (
     _WAIT_SCENE_THIN_HOLD_RE,
 )
 from host_brain.persona.surface.util import _clean_list, _clean_text
+from host_brain.persona.surface_utterance_frame import (
+    normalize_companion_utterance_frame,
+)
+
+
+def _canonical_companion_act_kind(request: IsolatedSurfaceInput) -> str:
+    control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", None)
+    )
+    return str(frame.get("companion_act_kind") or "").strip().upper()
 
 
 def _raw_context_backfill_requested(
@@ -412,6 +423,8 @@ def _misplaced_emotional_containment(
 
 
 def _relational_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "REPAIR":
+        return True
     surface = "\n".join(
         _clean_list(
             [
@@ -861,6 +874,8 @@ def _short_continue_unprovided_tech_detail_hits(
 
 
 def _canonical_contained_jealousy_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "CONTAINED_JEALOUSY":
+        return True
     control = getattr(request, "control", None)
     canonical_context = "\n".join(
         str(item or "")
@@ -879,6 +894,8 @@ def _canonical_contained_jealousy_relevant(request: IsolatedSurfaceInput) -> boo
 
 
 def _canonical_hold_complexity_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "HOLD_COMPLEXITY":
+        return True
     control = getattr(request, "control", None)
     canonical_context = "\n".join(
         str(item or "")
@@ -897,6 +914,8 @@ def _canonical_hold_complexity_relevant(request: IsolatedSurfaceInput) -> bool:
 
 
 def _canonical_respect_autonomy_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "RESPECT_AUTONOMY":
+        return True
     control = getattr(request, "control", None)
     canonical_context = "\n".join(
         str(item or "")

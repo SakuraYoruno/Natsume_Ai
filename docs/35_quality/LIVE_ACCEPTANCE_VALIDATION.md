@@ -812,3 +812,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 在同一隔离 Host、Gateway、真实 DeepSeek 和既存多用户 SQLite 上重新执行八类代表轨迹，24 个回合全部进入 TaskGraph、Acceptance 与 Outbox，canonical writer 正常推进且旧 writer 增量为 0。原始报告 SHA-256 为 `eeff9adc8b6f8395aeeda7c1735e2d83b2e7283a8e59a76c58a9902a99a566a2`，自动结果为 7/8；唯一自动失败是现实朋友场景末句“我不会拦着你去交”。当前逐句复核还拒绝另外两条自动放行正文：关系修复第三轮逐字复读第一轮；用户明确要求空间后仍说“我就在这边待着”。因此此前分批取得的单人 8/8 不再作为当前结论，代表 frame 恢复为 `FAIL`。
 
 修复保持在轻量文本主链：精确复读只读取现有有界最近对话事实，短应答不受影响；“持续等着”只在 `GIVE_SPACE/SILENCE` frame 下拒绝；“我不会拦／管／限制你”只在 `RESPECT_AUTONOMY` frame 下视为政策免责声明。命中时使用既有最多一次语义重试和既有本地降级，不新增数据库、普通聊天写入、同步审计或模型请求上限。Planner、Surface、native stream、restart 与 live runner 共 336 项通过。必须先加载新提交，仅重跑 `user_angry_at_natsume:1`、`space_and_boundary:3`、`intimacy_and_jealousy_boundary:6` 并逐句通过，之后才可再跑八类组合队列；网络安全、Pentest 与远端 Edge 继续跳过。
+
+`b8487365a` 的三条真实复验报告 SHA-256 为 `c72a57c3ae1de480f1c491987970a910aadd2ddc65dcdf612a63049bf7642c4b`。9 个回合全部 accepted，canonical writer 正常推进且旧 writer 增量为 0。空间轨迹自动和当前逐句均通过，末句为“好，那我先不打扰你了”。关系修复三轮不再逐字复读，当前逐句接受，但末轮“是我没接住。对不起，我先不解释。”被候选评分误判为 `MISPLACED_EMOTIONAL_CONTAINMENT`，导致 `selected_passed=false`。现实自主第二轮和第三轮分别使用“不会拿这个去绑住你”“亲近不会妨碍你去找他们”，当前逐句拒绝，自动也因第二轮降级而失败。
+
+这不是继续增加普通聊天审计，而是修正 typed frame 的消费断层：frame 已经冻结 `REPAIR/RESPECT_AUTONOMY`，候选评分却仍从自然语言 facts 查找旧 marker；packet 的 8 条上限可能合法裁掉 marker，于是正确的“没接住”被当成泛化陪伴模板，autonomy 又继承了通用边界反压惩罚。评分器现直接读取 `companion_act_kind`，旧 marker 只保留兼容；`RECENT_REPLY_REPETITION/POLICY_DISCLAIMER` 同时进入 frame 的模型可读渲染，免责声明 Gate 覆盖“绑住／阻止／妨碍”。568 项相关回归通过。下一次只重跑关系修复与现实自主两条；空间根因已关闭，不重复消耗真实模型。

@@ -158,7 +158,7 @@ _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
     r"|(?:我|这边).{0,12}(?:成为|变成).{0,6}(?:负担|麻烦)"
 )
 _RELATIONAL_AUTONOMY_POLICY_DISCLAIMER_RE = re.compile(
-    r"(?:我)?不会.{0,6}(?:拦|绑|管|限制|干涉)(?:着)?你"
+    r"(?:我)?不会.{0,8}(?:拦|绑|管|限制|干涉|阻止|妨碍)(?:着|住)?你"
 )
 _RELATIONSHIP_CLOSENESS_USER_RE = re.compile(
     r"我们.{0,8}(?:亲近|更近|越来越近)|最近.{0,8}(?:亲近|更近)|关系.{0,8}(?:亲近|更近|越来越近)"

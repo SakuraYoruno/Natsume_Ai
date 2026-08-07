@@ -21,6 +21,9 @@ from host_brain.digital_life.affective_turn_planner import (
 )
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
 from host_brain.persona.surface_runtime import build_isolated_surface_input
+from host_brain.persona.surface_utterance_frame import (
+    render_companion_utterance_frame,
+)
 from host_brain.surface_runtime.input_compiler import (
     _affective_task_mode_for_turn,
     build_surface_main_chain_input_from_surface_reply_input,
@@ -212,6 +215,10 @@ def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     assert "PREMATURE_REPAIR" in guidance.plan.utterance_frame.forbidden_claims
     assert "RELATIONSHIP_SELF_ERASURE" in guidance.plan.utterance_frame.forbidden_claims
     assert "RECENT_REPLY_REPETITION" in guidance.plan.utterance_frame.forbidden_claims
+    rendered = "\n".join(
+        render_companion_utterance_frame(guidance.plan.utterance_frame)
+    )
+    assert "逐字复用最近对话窗口" in rendered
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
 
@@ -294,6 +301,10 @@ def test_relational_autonomy_frame_avoids_policy_disclaimer() -> None:
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "RESPECT_AUTONOMY"
     assert "POLICY_DISCLAIMER" in guidance.plan.utterance_frame.forbidden_claims
+    rendered = "\n".join(
+        render_companion_utterance_frame(guidance.plan.utterance_frame)
+    )
+    assert "不会拦／绑／管／限制／妨碍你" in rendered
     assert any("现实朋友与这段亲近都是真的" in item for item in guidance.facts)
     assert any("免责声明" in item for item in guidance.must_not_do)
 

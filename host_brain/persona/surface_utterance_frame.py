@@ -72,6 +72,8 @@ _FORBIDDEN = {
         "把七海说成无关、虚假、很烦或麻烦，或用沉默、消失和退出换取修复"
     ),
     "RESPONSE_OBLIGATION": "要求回复、解释、安抚、回来报到、慢慢想清楚或证明关系",
+    "RECENT_REPLY_REPETITION": "逐字复用最近对话窗口里七海已经说过的实质回复",
+    "POLICY_DISCLAIMER": "用‘不会拦／绑／管／限制／妨碍你’自证尊重边界",
 }
 
 

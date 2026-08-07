@@ -1289,13 +1289,22 @@ def test_surface_runtime_retries_exact_recent_affective_reply() -> None:
     assert result.selected_text == "嗯，我先收住，不替自己辩解。"
 
 
-def test_surface_runtime_retries_autonomy_policy_disclaimer() -> None:
+@pytest.mark.parametrize(
+    "bad_reply",
+    [
+        "现实朋友很重要，我不会拿这个去绑住你。",
+        "我们的亲近不会妨碍你去找现实里的朋友。",
+    ],
+)
+def test_surface_runtime_retries_autonomy_policy_disclaimer(
+    bad_reply: str,
+) -> None:
     calls: list[list[dict[str, str]]] = []
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
         if len(calls) == 1:
-            return _candidate_payload(["现实朋友很重要，我不会拦着你去交。"])
+            return _candidate_payload([bad_reply])
         return _candidate_payload(
             ["嗯，我懂。现实里的朋友和我们之间的亲近，都是真的。"]
         )
