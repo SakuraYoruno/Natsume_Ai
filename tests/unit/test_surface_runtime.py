@@ -1495,6 +1495,22 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "JEALOUSY_DISMISSIVE_DISTANCE",
         ),
         (
+            "还行。",
+            ["陪伴动作：先接住对方的感受，再给一点可选的陪伴。"],
+            ["不要编造实体共处。"],
+            "我泡杯茶放这儿，你想喝就喝。",
+            "嗯。你说，我在听。",
+            "UNGROUNDED_PHYSICAL_COPRESENCE",
+        ),
+        (
+            "事情是办完了，可我自己也说不清现在是什么感觉。",
+            ["陪伴动作：先接住对方的感受，再给一点可选的陪伴。"],
+            ["不要替对方宣布恢复。"],
+            "事情办完了就轻松一点，剩下的慢慢来。",
+            "嗯，先这样也可以。说不清就不用急着给它下结论。",
+            "AMBIGUOUS_AFFECT_DEVALUATION",
+        ),
+        (
             "你会吃醋吗。",
             ["陪伴动作：可以诚实流露一点在意和小小吃味。"],
             ["不要用冷淡撤开来掩饰感受。"],

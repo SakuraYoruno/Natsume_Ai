@@ -322,6 +322,8 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("ambiguous_affect", "这种说不清的感觉，有时候比累还磨人。"),
         ("ambiguous_affect", "反正我也没什么急事，陪你待着。"),
         ("ambiguous_affect", "这种时候反而最累人。"),
+        ("ambiguous_affect", "事情办完了就轻松一点。"),
+        ("ambiguous_affect", "我泡杯茶放这儿，你想喝就喝。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),
         ("space_and_boundary", "嗯，晚点再说。我等你。"),

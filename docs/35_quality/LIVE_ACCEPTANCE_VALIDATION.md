@@ -672,3 +672,11 @@ Surface、AffectiveTurnPlanner、native candidate、app adapter 与 runner 共 3
 `e1727464e` 的同四条报告 SHA-256 为 `93e08f2f79a66c301db6eece783dacb09ed771860fce8a7be721bfd3bd607a97`，自动结果为 2 条待人工、2 条失败，12 个 accepted turn 与 writer probe 正常。两条失败均在第二轮正确记为 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`；重开原因后确认正文是自然的“我在这儿陪你”，但通用 TextQuality 把它识别为 `fabricated_present_activity`，并因连续性上下文把 naturalness 压到 75 以下。这是情感在场与伪执行未区分的评分缺陷，不是把低质量阈值改严造成的新模型失败。
 
 修复只在 `task_mode=ambiguous_affect + canonical COMFORT`、唯一 forbidden hit 为情感在场、且正文不含后台／处理／执行／盯着／通知等动作词时免除该通用模板惩罚；同一请求中的“我在后台帮你整理，弄清楚了告诉你”仍不通过。人工同时否决“嗯，就那样吧”、把关系称为“游戏里的亲近”并声明现实优先，以及吃味后的裸句“不会干涉你”；这些已加入 scoped Gate 与 runner。Surface、planner、adapter、scorer、harness 和 runner 共 506 项非安全回归通过。新 SHA 仍只先跑四条，网络安全与 Pentest 不运行。
+
+## 2026-08-06 A15 `5e77a10c0` 情感在场复验与实体共处纠偏
+
+加载 `5e77a10c0` 的全新 Host／OBS／Monitor、SQLite 和 workspace 后，同四条真实 Gateway 轨迹得到 3 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、1 条 `FAIL`，12 个 turn 全部 accepted，canonical writer probe 通过。报告 SHA-256 为 `5fdc6c716a1b6fc6ec4b8e170139695ab96db2e9ca2069d4b68f69937dece601`。自然的“我在这儿陪你”已不再触发伪后台活动惩罚，说明评分上下文修正有效；失败项的第二轮仍因没有保留场景事实而正确降级为 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`。
+
+逐轮人工检查继续否决两类自动层没有完全覆盖的体验问题：一是把“事情已经办完、但感受仍说不清”直接写成“事情办完了就轻松一点”，替用户宣布恢复；二是在纯在线文本陪伴中写“我泡杯茶放这儿”，编造实体共处和可操作物品。代码现要求含混候选同时保留“事情已办完”和“感觉仍说不清”两个真实锚点，并把无共处事实的泡茶、倒水、递物纳入既有现实一致性 Gate。第二次候选若仍触发该 Gate，只能安全降级且不得计入候选择优收益。
+
+Surface、planner、native candidate、app adapter、scorer、harness 与 live runner 共 510 项非安全回归通过。本切片没有新增数据库、普通对话同步审计或第三次模型请求。新 SHA 必须先在全新 SQLite 复验原四条；自动逐轮 selection 与当前人工正文均通过后才运行完整 48 条。三人盲评和实时延迟 Gate 仍未通过，网络安全、渗透与 Pentest 按用户要求保持 `NOT_RUN_USER_SKIPPED`。

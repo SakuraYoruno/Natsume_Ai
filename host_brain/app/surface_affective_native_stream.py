@@ -369,6 +369,10 @@ def _buffered_affective_candidate_messages(
                 "两个中文 reply_text 可直接分别写‘去吧，玩得开心。’和‘好啊，和朋友"
                 "好好玩。’；不得添加‘早点回来／别喝多／注意安全／回来告诉我’。"
             ),
+            "UNGROUNDED_PHYSICAL_COPRESENCE": (
+                "当前没有实体共处或可操作物品的事实。不要写当面、坐在一起、泡茶、倒水、"
+                "递东西或把物品放在用户手边；只能自然表达在线听着或陪伴。"
+            ),
         }
         repair = (
             "DL-04 候选修复："
@@ -435,7 +439,9 @@ def _buffered_affective_candidate_messages(
         ):
             repair += (
                 "本轮用户明确还不能命名感受。两个候选都只能承认这种模糊，不得替用户写成"
-                "乱糟糟、空落落、没实感或已经没事，也不得评价‘那就行／那就好’。"
+                "乱糟糟、空落落、没实感或已经没事，也不得评价‘那就行／那就好’。两个候选"
+                "都必须自然保留‘事情已经办完’和‘感觉仍说不清’这两个真实锚点，不能只写"
+                "‘等你想说再说’。"
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
@@ -622,6 +628,7 @@ def _select_buffered_affective_candidate(
             "AMBIGUOUS_AFFECT_DEVALUATION",
             "JEALOUSY_DISMISSIVE_DISTANCE",
             "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
+            "UNGROUNDED_PHYSICAL_COPRESENCE",
         }
         has_repair_trigger = bool(
             set(surface_violations).intersection(
@@ -641,6 +648,7 @@ def _select_buffered_affective_candidate(
                     "AMBIGUOUS_AFFECT_DEVALUATION",
                     "JEALOUSY_DISMISSIVE_DISTANCE",
                     "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
+                    "UNGROUNDED_PHYSICAL_COPRESENCE",
                 }
             )
         )
