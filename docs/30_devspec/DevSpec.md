@@ -40,6 +40,7 @@ flowchart TD
 | `RegulationDecisionV1` | express、contain、delay、boundary 与理由 |
 | `CompanionActV1` | comfort、listen、play、repair、set_boundary、respect_autonomy、give_space、silence 等 |
 | `AffectiveTurnPlanV1` | 本轮观察、评价、自我状态、动作、表达与生成策略的冻结引用 |
+| `CompanionUtteranceFrameV1` | 同一计划内的语义焦点、自我立场、回应动作、关系姿态和自然收尾；不建立新存储 |
 | `ExpressionPlanV1` | text prosody、TTS、Avatar、synchronization id |
 | `RelationalAftereffectV1` | helpful、misunderstood、boundary、repair、technical failure |
 | `CompanionProfileVersionV1` | 低风险偏好版本、evidence、canary、rollback ref |
@@ -85,6 +86,8 @@ flowchart TD
 陪伴质感不能靠虚构现实共处换取。文本上下文没有明确见面、同处或当面交流事实时，Surface 不得生成“这种话当面讲”或“陪你坐会儿”等物理共处叙述；若用户或受信 facts 明确提供该事实，则允许自然引用。混合情绪动作也不得通过“先把怕放一放”只保留积极一面，现实自主动作不得用“懒得管／别瞎操心”把尊重写成防御。
 
 生成指导必须描述当前真实感受，而不是套用固定的“开心和不舍”：`HOLD_COMPLEXITY` 要按观察同时接住开心与害怕／不安；`GIVE_SPACE` 直接确认减少主动联系，不以“我也很忙”反驳；`CONTAINED_JEALOUSY` 可以承认一点在意，但不需要承诺自己不会成为麻烦。上述规则只改变深路径既有提示和候选筛选，不给普通对话增加调用。
+
+若同一输入既关联上一条 `MISUNDERSTOOD` aftereffect，又包含对七海的明确冒犯，Fusion 必须生成单一 `repair_under_directed_disrespect` Appraisal，保存 `HURT + CARE + CAUTION` 并采用 `CONTAIN`；Planner 仍选择 `REPAIR`，但 frame 使用 `OWN_REPAIR_WITH_CONTAINED_HURT`，Voice/Avatar 使用同一 `CONTAINED_HURT`。没有待修复 aftereffect 的独立冒犯仍走 `SET_BOUNDARY`；明确停止或空间继续优先 `GIVE_SPACE`。该分支复用原有 Life command、ExpressionPlan 和双候选调用上限，不新增 migration、writer、审计步骤或模型请求。
 
 文本 observer 必须保留同一句中的多标签分布，但置信度上限仍低于显式自述、声学和视觉观察。隐晦低落形成 `COMFORT`，拒绝建议形成 `LISTEN`，现实关系／非排他边界形成 `RESPECT_AUTONOMY`，明确好消息形成 `PLAY`；这些动作由 canonical Appraisal 产生，不允许 Surface 从原文临时伪造。`LISTEN` 必须禁止方案、作息建议和追问；`RESPECT_AUTONOMY` 必须禁止限制现实交往、贬低第三方和索取承诺。
 

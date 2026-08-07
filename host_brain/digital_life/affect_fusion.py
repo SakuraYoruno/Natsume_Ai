@@ -935,6 +935,7 @@ def _regulation_mode_for_candidate(candidate: _AppraisalCandidate) -> str:
     return {
         "user_boundary_or_space": "GIVE_SPACE",
         "natsume_may_have_hurt_user": "SEEK_REPAIR",
+        "repair_under_directed_disrespect": "CONTAIN",
         "directed_disrespect_toward_natsume": "CONTAIN",
         "repair_signal": "SEEK_REPAIR",
         "user_affect_conflict": "CONTAIN",
@@ -1031,7 +1032,37 @@ def _build_appraisal_candidates(
                 regulation_mode="GIVE_SPACE",
             )
         )
-    if natsume_may_have_hurt_user:
+    if natsume_may_have_hurt_user and directed_disrespect_toward_natsume:
+        candidates.append(
+            _candidate(
+                kind="repair_under_directed_disrespect",
+                # Keep the original repair responsibility, but do not erase
+                # Natsume's own bounded reaction when the latest feedback is
+                # also aimed at her.  An explicit request for space remains
+                # stronger (0.98) and therefore still wins.
+                score=0.977,
+                goal=-0.24,
+                responsibility=0.66,
+                controllability=0.7,
+                significance=0.8,
+                boundary=0.7,
+                risk=0.24,
+                uncertainty=0.28,
+                components=(
+                    EmotionComponentV1("HURT", 0.58, -0.42, 0.3, "contain"),
+                    EmotionComponentV1("CARE", 0.48, 0.26, 0.22, "repair"),
+                    EmotionComponentV1("CAUTION", 0.34, -0.06, 0.24, "slow_down"),
+                ),
+                action="repair_with_contained_hurt",
+                regulation_mode="CONTAIN",
+                evidence_refs=(
+                    (f"relationship-aftereffect://{aftereffect_id}",)
+                    if response_may_have_missed_user
+                    else ()
+                ),
+            )
+        )
+    elif natsume_may_have_hurt_user:
         candidates.append(
             _candidate(
                 kind="natsume_may_have_hurt_user",
@@ -1060,7 +1091,7 @@ def _build_appraisal_candidates(
                 ),
             )
         )
-    if directed_disrespect_toward_natsume:
+    elif directed_disrespect_toward_natsume:
         candidates.append(
             _candidate(
                 kind="directed_disrespect_toward_natsume",

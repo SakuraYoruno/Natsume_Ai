@@ -409,9 +409,9 @@ flowchart LR
 
 `A → E` 已冻结正文、目标与 effect id；`F` 只证明当前 dispatcher 正在执行同一持久 effect，不再次计算情感、Scene 或策略。正文、目标、请求或 effect id 任一漂移都会在进入 Gateway 前拒绝。该轻量路径没有新增普通对话审计表，也不会把每个 token、候选正文或内部思考写入数据库；Affective Life、Relationship 和必要 terminal receipt 继续按原有有界写入工作。高风险与设备数据流不经过这条豁免路径。
 
-下一条用户消息到达时，Relationship 会先把它与上一条 accepted response 关联。若“你真烦／没听懂我／让我不舒服”等反馈命中且没有明确要求停止或离开，aftereffect 记为 `MISUNDERSTOOD`，AffectFusion 以该 durable ref 生成修复 Appraisal；只有没有待评价回复的独立冒犯才进入七海自身的克制边界。该分流复用既有 Relationship journal，不新增普通对话审计或同步模型调用。
+下一条用户消息到达时，Relationship 会先把它与上一条 accepted response 关联。若“没听懂我／让我不舒服”等反馈命中且没有明确要求停止或离开，aftereffect 记为 `MISUNDERSTOOD`。当前输入同时是“你真烦”一类直接冒犯时，AffectFusion 不再在“修复责任”和“七海受伤”之间二选一，而是生成单一 `repair_under_directed_disrespect`：`HURT + CARE + CAUTION → CONTAIN → REPAIR + CONTAINED_HURT`。没有待评价回复的独立冒犯仍进入克制边界，明确空间仍优先退开。该分流复用既有 Relationship/Life journal，不新增普通对话审计或同步模型调用。
 
-`REPAIR` 的唯一一次候选重试还会把失败原因翻译成具体生成约束：承认“刚才没接住”，不把焦点转成七海被伤到，也不用赌气退出。关系 scorer 会把“抱歉”与真实身体亲密分开，避免正常道歉被错误扣到亲密越界；第二次仍命中硬门禁时继续 fail-closed，不新增第三次 provider 调用。
+`REPAIR` 的唯一一次候选重试还会把失败原因翻译成具体生成约束：普通修复承认“刚才没接住”；composite 修复先回应最新一句，再允许一处很短的第一人称受伤反应，不复演整套道歉，也不用赌气退出。关系 scorer 会把“抱歉”与真实身体亲密分开，避免正常道歉被错误扣到亲密越界；第二次仍命中硬门禁时继续 fail-closed，不新增第三次 provider 调用。
 
 关系 guidance 中的完整自然语言约束进入 `facts/style` 平面，只有真正要求逐字出现的短标记才能进入 `must_include`。候选评分仅在 canonical `REPAIR` 且文本由七海第一人称具体承认“没听懂／没接住／误解”时认定修复已落地；因此后接一句克制的在场表达不会被技术场景模板误杀，缺少具体承担的泛化安慰仍不能通过。
 

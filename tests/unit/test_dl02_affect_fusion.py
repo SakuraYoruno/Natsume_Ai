@@ -202,6 +202,8 @@ def test_natural_mixed_affect_preserves_both_signals_and_selects_two_candidates(
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
     assert guidance.plan.candidate_count == 2
+    assert guidance.plan.utterance_frame.self_stance == "SHARED_MIXED_RESONANCE"
+    assert guidance.plan.utterance_frame.response_move == "RESONATE_WITH_BOTH_SIDES"
 
 
 def test_mixed_affect_result_followup_keeps_both_sides_without_new_appraisal(
@@ -725,6 +727,41 @@ def test_fresh_directed_harm_outranks_a_preceding_repair_acceptance() -> None:
     )
 
     assert candidates[0].kind == "natsume_may_have_hurt_user"
+
+
+def test_missed_reply_plus_directed_annoyance_preserves_repair_and_natsume_hurt() -> None:
+    observation = UserAffectObservationV1(
+        observation_id="observation-repair-under-disrespect",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        modality="TEXT",
+        emotion_distribution={"ANGRY": 0.62},
+        valence=-0.48,
+        arousal=0.42,
+        confidence=0.38,
+        observed_at_ms=NOW,
+        expires_at_ms=NOW + 30_000,
+    )
+
+    candidates = _build_appraisal_candidates(
+        observations=(observation,),
+        conflict=False,
+        message="你真烦。",
+        relationship_aftereffect={
+            "outcome": "MISUNDERSTOOD",
+            "aftereffect_id": "aftereffect-missed",
+        },
+    )
+
+    assert candidates[0].kind == "repair_under_directed_disrespect"
+    assert {item.emotion for item in candidates[0].components} == {
+        "HURT",
+        "CARE",
+        "CAUTION",
+    }
+    assert candidates[0].regulation_mode == "CONTAIN"
+    assert candidates[0].action == "repair_with_contained_hurt"
 
 
 def test_direct_relational_hurt_becomes_self_owned_and_atomically_regulated(

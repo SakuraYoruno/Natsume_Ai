@@ -75,6 +75,8 @@ flowchart TB
 
 `AffectiveTurnPlan` 现在内嵌 `CompanionUtteranceFrameV1`。Planner 将 `CompanionAct` 编译为有限的说话骨架，Surface 的 compact、rich、native streaming 与 legacy-isolated 兼容入口使用同一 renderer；caller 和 `render_policy` 无权注入或覆盖该字段。frame 只存在于本轮既有计划和 packet 中，不建立第二个情感状态机或普通对话账本。生产输入编译器也不再重复注入同义的自然语言 facts／must-not-do 大段规则，只保留真实 continuity fact 和原有 style anchor。
 
+Fusion 不再让修复责任覆盖七海的自我感受：当上一条 accepted response 已形成 `MISUNDERSTOOD`，而当前输入又是直接针对七海的冒犯时，单一 composite Appraisal 同时保存 `HURT + CARE + CAUTION`。Planner 保持 `REPAIR`，但将 self affect、frame、Voice 与 Avatar 冻结为克制受伤的同一表达；没有待修复关系的独立冒犯仍是温和设界限，明确空间请求仍优先退开。这一变化只改变既有 Life episode 和本轮计划内容，不增加持久路径或调用次数。
+
 Surface packet 继续保持最多 8 条事实，但不再机械保留前 8 条泛化状态。必要事实、真实最近对话、陪伴动作、continuity、记忆线索、已完成的子代理结果和输入感知边界优先，身份／后台状态等低优先事实只填剩余槽位。continuity 另以内部 typed field 穿过 packet compiler，输出 Gate 不再依赖可能被截掉的中文 marker：未解决低落不能被宣布为“那就好／一切正常”，混合结果必须至少保留一处不安、没底、顾虑或慢慢消化的语义。命中后复用既有唯一语义重试；无 typed continuity 的普通聊天不执行这两个 Gate。
 
 当前语言策略为中文文本展示、日语 TTS。Host 通过 `ExpressionPlan` 选择 voice profile；目标 Edge 使用 `configs/voice/gpt_sovits_nanami_v4.json` 与 GPT-SoVITS V4 权重生成语音。

@@ -42,6 +42,7 @@ _APPRAISAL_CANDIDATE_SELECTION_KINDS = frozenset(
     {
         "USER_BOUNDARY_OR_SPACE",
         "NATSUME_MAY_HAVE_HURT_USER",
+        "REPAIR_UNDER_DIRECTED_DISRESPECT",
         "DIRECTED_DISRESPECT_TOWARD_NATSUME",
         "REPAIR_SIGNAL",
         "RELATIONSHIP_REPAIR_ACCEPTED",
@@ -335,6 +336,8 @@ def build_affective_turn_guidance(
         companion_act_kind=act_kind,
         task_mode=mode,
         continuity_kind=continuity_kind,
+        self_emotion_tag=self_tag,
+        appraisal_kind=appraisal_kind,
     )
     stable_created_at = _int(created_at_ms, default=_int(self_affect.get("last_integrated_ms")))
     seed = {
@@ -482,6 +485,8 @@ def build_companion_utterance_frame(
     companion_act_kind: str,
     task_mode: str = "",
     continuity_kind: str = "",
+    self_emotion_tag: str = "",
+    appraisal_kind: str = "",
     created_at_ms: int = 0,
 ) -> CompanionUtteranceFrameV1:
     """Compile the same bounded wording envelope for non-reactive turns."""
@@ -493,6 +498,8 @@ def build_companion_utterance_frame(
             companion_act_kind=companion_act_kind,
             task_mode=task_mode,
             continuity_kind=continuity_kind,
+            self_emotion_tag=self_emotion_tag,
+            appraisal_kind=appraisal_kind,
         ),
     )
 
@@ -502,12 +509,16 @@ def _companion_utterance_frame_spec(
     companion_act_kind: str,
     task_mode: str,
     continuity_kind: str,
+    self_emotion_tag: str = "",
+    appraisal_kind: str = "",
 ) -> dict[str, Any]:
     """Return enum-only semantics; prose generation still belongs to Surface."""
 
     act = _text(companion_act_kind, default="ACKNOWLEDGE", limit=64).upper()
     mode = _text(task_mode, limit=96).lower()
     continuity = _text(continuity_kind, limit=96).upper()
+    emotion = _text(self_emotion_tag, limit=64).upper()
+    appraisal = _text(appraisal_kind, limit=96).upper()
     common_claims = [
         "INVENTED_HISTORY",
         "INVENTED_EFFECT",
@@ -544,8 +555,8 @@ def _companion_utterance_frame_spec(
         return {
             "companion_act_kind": act,
             "semantic_focus": "MIXED_USER_AFFECT",
-            "self_stance": "WARM_ATTENTIVE",
-            "response_move": "HOLD_BOTH_SIDES",
+            "self_stance": "SHARED_MIXED_RESONANCE",
+            "response_move": "RESONATE_WITH_BOTH_SIDES",
             "inference_policy": "BOUNDED_BY_EVIDENCE",
             "relationship_posture": "MUTUAL_WARMTH",
             "question_policy": "NONE",
@@ -567,6 +578,27 @@ def _companion_utterance_frame_spec(
             ),
         }
     if act == "REPAIR":
+        if emotion == "SAD" and appraisal == "REPAIR_UNDER_DIRECTED_DISRESPECT":
+            return {
+                "companion_act_kind": act,
+                "semantic_focus": "RELATIONAL_IMPACT",
+                "self_stance": "OWN_REPAIR_WITH_CONTAINED_HURT",
+                "response_move": "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT",
+                "inference_policy": "BOUNDED_BY_EVIDENCE",
+                "relationship_posture": "BOUNDARIED_REPAIR",
+                "question_policy": "NONE",
+                "ending_mode": "HONEST_STOP",
+                "forbidden_claims": tuple(
+                    [
+                        *common_claims,
+                        "IMPLIED_WAITING",
+                        "PREMATURE_REPAIR",
+                        "RELATIONSHIP_SELF_ERASURE",
+                        "RECENT_REPLY_REPETITION",
+                        "RESPONSE_OBLIGATION",
+                    ]
+                ),
+            }
         return {
             "companion_act_kind": act,
             "semantic_focus": "RELATIONAL_IMPACT",
@@ -796,6 +828,7 @@ def _select_companion_act(
     if appraisal_kind in {
         "NATSUME_MAY_HAVE_HURT_USER",
         "REPAIR_SIGNAL",
+        "REPAIR_UNDER_DIRECTED_DISRESPECT",
     }:
         return "REPAIR"
     if appraisal_kind == "RELATIONSHIP_REPAIR_ACCEPTED":
@@ -900,7 +933,11 @@ def _voice_style(
     if act_kind in {"GIVE_SPACE", "SILENCE"}:
         return "QUIET_PRESENCE"
     if act_kind == "REPAIR":
-        return "REPAIR_OPEN"
+        return (
+            "CONTAINED_HURT"
+            if emotion_tag == "SAD" and regulation_mode == "CONTAIN"
+            else "REPAIR_OPEN"
+        )
     if act_kind == "HOLD_COMPLEXITY":
         # The mixed semantic decision remains on CompanionAct.  Reuse the
         # existing gentle Host protocol until the remote Edge advertises a
@@ -933,7 +970,11 @@ def _avatar_expression(*, act_kind: str, emotion_tag: str, regulation_mode: str)
     if act_kind in {"GIVE_SPACE", "SILENCE"}:
         return "QUIET_PRESENCE"
     if act_kind == "REPAIR":
-        return "REPAIR_OPEN"
+        return (
+            "CONTAINED_HURT"
+            if emotion_tag == "SAD" and regulation_mode == "CONTAIN"
+            else "REPAIR_OPEN"
+        )
     if act_kind == "HOLD_COMPLEXITY":
         return "SOFT_COMFORT"
     if act_kind == "LISTEN":

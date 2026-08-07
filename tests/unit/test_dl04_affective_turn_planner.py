@@ -222,13 +222,23 @@ def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
 
-def test_unresolved_repair_precedes_new_directed_disrespect() -> None:
+def test_unresolved_repair_keeps_natsume_contained_hurt_in_the_same_plan() -> None:
     context = _context(repair_required=True)
     appraisal_id = "appraisal-directed-disrespect-during-repair"
     context["affective_life"]["appraisal_id"] = appraisal_id
-    context["affective_life"]["self_affect"]["last_appraisal"] = {
+    self_affect = context["affective_life"]["self_affect"]
+    self_affect["components"] = [
+        {"emotion": "HURT", "intensity": 0.58},
+        {"emotion": "CARE", "intensity": 0.48},
+    ]
+    self_affect["last_appraisal"] = {
         "appraisal_id": appraisal_id,
-        "event_kind": "DIRECTED_DISRESPECT_TOWARD_NATSUME",
+        "event_kind": "REPAIR_UNDER_DIRECTED_DISRESPECT",
+    }
+    self_affect["last_regulation"] = {
+        "regulation_id": "regulation-repair-under-disrespect",
+        "mode": "CONTAIN",
+        "reason_refs": [f"appraisal://{appraisal_id}"],
     }
 
     guidance = build_affective_turn_guidance(
@@ -243,6 +253,21 @@ def test_unresolved_repair_precedes_new_directed_disrespect() -> None:
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "REPAIR"
     assert guidance.plan.generation_mode == "BUFFERED_CANDIDATE_SELECTION"
+    assert guidance.plan.self_emotion_tag == "SAD"
+    assert guidance.plan.expression_plan.regulation_mode == "CONTAIN"
+    assert guidance.plan.expression_plan.voice_style == "CONTAINED_HURT"
+    assert guidance.plan.expression_plan.avatar_expression == "CONTAINED_HURT"
+    assert guidance.plan.utterance_frame.self_stance == (
+        "OWN_REPAIR_WITH_CONTAINED_HURT"
+    )
+    assert guidance.plan.utterance_frame.response_move == (
+        "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+    )
+    rendered = "\n".join(
+        render_companion_utterance_frame(guidance.plan.utterance_frame)
+    )
+    assert "最新这句确实刺到了" in rendered
+    assert "不重复整套道歉" in rendered
 
 
 def test_contained_jealousy_keeps_choice_with_the_user_across_expression_plan() -> None:

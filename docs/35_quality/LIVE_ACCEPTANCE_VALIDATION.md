@@ -846,3 +846,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 加载 `1779108de` 后的 compact prompt 真实报告 SHA-256 为 `a67178c425cb4373c915e1b6290daa043050313223cb6162b39a77509f2975a2`。6 个 turn 全部 accepted、writer probe 通过，成功 attempt 仍全部为 `deepseek-v4-flash`；自动结果为 1/2，修复首轮因 `AFFECTIVE_IMPLIED_WAITING` 依赖 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，人工逐句仍拒绝“这我认”的正式认错，以及“挺正常／先让它们待着”的情绪处理口吻。compact 切流确实移除了通用 `TurnSurfaceContract`，但实际坏词与微策略中为了禁止而列出的反例逐字重合，根因收窄为负面词汇诱导。
 
 下一修正不增加生成后正则：从修复／喜忧的模型可读策略中删除坏例词表，改为正向限定两个候选的对话动作、信息差异和自然停点；现有 typed Gate 继续承担硬边界。模型请求仍是高歧义回合一次双候选、最多一次既有重试，普通对话和 durable 路径不变。必须在新 SHA 上重跑相同六轮；若仍失败，再评估真实原语料的有限正向 few-shot，不能继续用反例清单推动模型。
+
+加载 `f01248c87` 后的真实 Flash 报告 SHA-256 为 `7a74162af8c8f1890d10c233e99e1043fed5385ec957b0c5864051780ceda8ab`。自动结果为 2/2，6 个 Gateway turn 全部 accepted，writer probe 通过；人工仍拒绝修复三轮的流程化道歉，以及 mixed 中“结果出来了／两面都留着”式解释和安排。自动合同通过依然不等于人感通过。
+
+Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `REPAIR`，canonical self affect 仍是 `CALM`，Voice/Avatar 仍是 `REPAIR_OPEN`；Fusion 将同一句命中的 `natsume_may_have_hurt_user` 排在 `directed_disrespect_toward_natsume` 之前，只保留了责任，抹掉七海被最新话语刺到的真实反应。当前修复将二者合并为单一 `repair_under_directed_disrespect` Appraisal，持久 component 为 `HURT + CARE + CAUTION`，调节为 `CONTAIN`；Planner 仍选 `REPAIR`，但 frame 为 `OWN_REPAIR_WITH_CONTAINED_HURT`，Voice/Avatar 同步为 `CONTAINED_HURT`。独立冒犯和明确空间的优先级不变，没有新增 migration、writer、审计步骤、模型调用或重试；564 项相邻回归通过。状态为 `CODE_REMEDIATED_REAL_FLASH_RETEST_PENDING`，先只复验修复单条，再决定是否复验 mixed。

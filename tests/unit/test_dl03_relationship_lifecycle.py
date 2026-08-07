@@ -184,10 +184,26 @@ def test_annoyance_after_an_accepted_reply_is_feedback_and_keeps_repair_open(
 
     assert relationship_context["aftereffect"]["outcome"] == "MISUNDERSTOOD"
     assert relationship_context["state"]["repair_required"] is True
-    assert affective["last_appraisal"]["event_kind"] == "natsume_may_have_hurt_user"
+    assert affective["last_appraisal"]["event_kind"] == (
+        "repair_under_directed_disrespect"
+    )
+    assert {item["emotion"] for item in affective["components"]} == {
+        "HURT",
+        "CARE",
+        "CAUTION",
+    }
+    assert affective["last_regulation"]["mode"] == "CONTAIN"
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "REPAIR"
-    assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
+    assert guidance.plan.self_emotion_tag == "SAD"
+    assert guidance.plan.expression_plan.voice_style == "CONTAINED_HURT"
+    assert guidance.plan.expression_plan.avatar_expression == "CONTAINED_HURT"
+    assert guidance.plan.utterance_frame.self_stance == (
+        "OWN_REPAIR_WITH_CONTAINED_HURT"
+    )
+    assert guidance.plan.utterance_frame.response_move == (
+        "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+    )
 
 
 def test_aftereffect_is_exactly_replayed_and_does_not_cross_workspace(

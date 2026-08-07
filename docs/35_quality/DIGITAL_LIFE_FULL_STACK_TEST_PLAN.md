@@ -869,3 +869,5 @@ Flash 双轨迹报告 SHA-256 为 `1618a895a5062f6d23e6564f320aba53f2e8d21668207
 恢复 Flash 后的 `cdfefd37d` 双轨迹报告 SHA-256 为 `88eb6dfcb8476d0f24470af368a68f3c13fbf4e2d2480d959cfebc60180a259d`。自动 2/2、6 个 accepted turn 和 writer probe 仍通过，但人工拒绝重复道歉模板、喜忧偏序及“都挺正常”的解释口吻。下一次同队列不改模型、不新增调用，只验证双候选从通用大型 Surface prompt 切到现有 compact native 情感 prompt 后的实际语言；typed frame、最近对话、候选 JSON、日语字段、一次重试和本地 Gate 必须全部保留。622 项代码回归只提供准入；六轮正文人工通过前不得扩大到八类或完整 48 条。
 
 `1779108de` compact prompt 报告 SHA-256 为 `a67178c425cb4373c915e1b6290daa043050313223cb6162b39a77509f2975a2`：自动 1/2、6 个 accepted turn、writer probe 通过，人工仍拒绝“这我认”和“挺正常／待着”。这些词来自模型提示中的禁止示例，下一轮因此只验证删除反例词表、改用正向候选动作后是否消除负面词汇诱导。若同六轮仍未逐句通过，停止继续堆叠禁词，转为从已清洗七海原语料提供少量 scene-bound 正向节奏样本；不得直接扩大队列。
+
+删除反例词表后的真实 Flash 报告 SHA-256 为 `7a74162af8c8f1890d10c233e99e1043fed5385ec957b0c5864051780ceda8ab`：自动 2/2、6 个 accepted turn 和 writer probe 通过，但人工仍拒绝修复三轮的流程化道歉，以及 mixed 三轮的情绪解释／安排。持久 artifact 表明修复末轮 canonical self affect 仍为 `CALM + REPAIR_OPEN`，因此下一步不是继续堆提示词，而是验收复合情感因果：有 `MISUNDERSTOOD` aftereffect 的“你真烦”必须得到 `repair_under_directed_disrespect`、`SAD`、`REPAIR`、`CONTAINED_HURT` 和对应 frame；单独冒犯仍是 `SET_BOUNDARY`，明确空间仍是 `GIVE_SPACE`。564 项相邻回归通过只准入修复单条真实复验，不能恢复八类或完整 48 条。

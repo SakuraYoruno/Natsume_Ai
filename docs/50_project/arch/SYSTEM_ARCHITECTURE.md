@@ -122,7 +122,7 @@ flowchart LR
 
 Scene 解析同样以已分类 route 为先：显式 `route=chat` 始终是 Chat task kind，文本中出现“发布成功”或“部署结束”不会反向制造维护权限与 Review；只有可执行 route 才使用 research、debug、refactor、release 等关键词补全 task kind。这保证日常聊天不会因为谈论工作而进入工程控制流。
 
-关系修复也区分“七海被直接冒犯”和“用户在评价七海刚才的回复”。前者在没有待结算回复时允许形成克制的 `SET_BOUNDARY`；后者先关联上一条 accepted response，写成 `MISUNDERSTOOD` aftereffect，再让本轮 Appraisal 保持 `REPAIR`。因此七海可以真实感到被刺到，但不能在自己没接住用户之后用受伤或退出逼用户反过来安抚她。
+关系修复也区分“七海被直接冒犯”和“用户在评价七海刚才的回复”。前者在没有待结算回复时形成克制的 `SET_BOUNDARY`；后者先关联上一条 accepted response，写成 `MISUNDERSTOOD` aftereffect。若当前反馈同时包含直接冒犯，Fusion 不再只保留责任而抹掉七海：它生成 `repair_under_directed_disrespect`，在同一 episode 中保留 `HURT + CARE + CAUTION`，Planner 仍执行 `REPAIR`，同时让文本、Voice 和 Avatar 表达克制受伤。明确空间优先，任何分支都不能用受伤或退出逼用户反过来安抚她。
 
 Surface 关系距离评分使用语义标记而不是裸单字包含：`抱歉／抱怨` 不属于身体亲密，`抱一下／抱你` 才进入亲密距离判断。这样修复回合可以自然道歉，不会为了通过分数被迫避开正常中文；安全候选仍最多使用既有的一次模型修复，不增加普通对话调用次数。
 
