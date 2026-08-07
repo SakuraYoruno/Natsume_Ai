@@ -27,7 +27,8 @@ def _ledger(
         ts_ms=2_100_000_010_000,
     )
     assert result.success, result.as_dict()
-    assert result.summary["latest_version"] == 152
+    assert result.summary["current_version"] == result.summary["latest_version"]
+    assert result.summary["latest_version"] >= 152
     return SQLiteEvolutionGovernanceLedger(db), db
 
 

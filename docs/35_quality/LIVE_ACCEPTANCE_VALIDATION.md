@@ -712,3 +712,9 @@ Surface、planner、native candidate、app adapter、scorer、harness 与 live r
 在 `5bebb8053` 后的当前工作树重跑非安全静态 Gate，A01～A08、A10～A11、A13～A14 中只有 A03 首轮失败：`affect_fusion.py` 为 1627 行且未分类，`surface_runtime.py` 为 4066 行，超过既定 3100 行上限。旧机器状态中的 `A01_A14_PASS` 因而不再沿用。
 
 代码没有提高上限或新增白名单，而是将用户情绪观察、时间指向和候选约束分别抽到 `affect_observation.py`、`surface_deictic.py`、`surface_candidate_guards.py`。完成后主文件为 1376/3092 行，A03 重新通过；融合与真实 SQLite 重启 52 项、Surface 与端口合同 162 项通过，`compileall` 与 `git diff --check` 通过。A09 Secure Ingress、A12 Edge network authority、Pentest 和其他网络安全检查均按用户要求未运行，状态固定为 `NOT_RUN_USER_SKIPPED`，本节不能提升完整 Architecture 2.0 结论。
+
+## 2026-08-07 非安全 Runtime 与 PlanningSearch 当前工作树验收
+
+Runtime/恢复批次 50 项通过，覆盖 durable 多节点 fan-out、Host/Worker 与并行终态重启、Budget 争用、Review continuation、取消和 effect reconciliation；迁移/备份 57 项、Workspace promotion/cleanup 59 项、七路线/对话/Outbox 19 项通过。Evolution Lab、Skill 生命周期、Feedback/Knowledge/Identity 批次首轮在 37 项后发现 NE-05/NE-06 fixture 把 migration head 写死为 152；当前 catalog 已到 153。断言改为“current 等于 latest 且至少包含 0152 合同”，完整批次随后 64 项通过。该修复没有改生产 schema 或历史 migration。
+
+Research/Code PlanningSearch 的当前工作树非 Pentest 机械回归为 128 passed、1 项因 Windows 无 symlink 权限分类跳过。Code 真实 cohort 提交 `3eaa5486b` 到当前工作树之间，`host_brain/planning_search` tree、planning contracts、冻结 `cohort.json` 和 code ledger blob 均逐项相同。Research 提交 `1c9c2b2bd` 的冻结 corpus 与 contracts 也相同；唯一相关变更是外部 adapter 新增默认值仍为 `RESEARCH` 的 `scene_type` 参数，以供 Code 复用，当前单测继续精确断言 Research request 和 metadata 不变。因此两份昂贵外部 cohort 分别按 byte-identical 与 scope-equivalent 继承，不伪称当前 SHA 重新调用。Pentest、A09、A12 和网络安全未运行，PlanningSearch 总结论仍是部分通过而非三域完成。

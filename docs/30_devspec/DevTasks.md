@@ -47,6 +47,9 @@
 - [x] 对 A03 报出的 15 个生产热点执行真实职责拆分，未扩大 cohesive 白名单。
 - [x] 当前工作树非安全静态门禁 A01～A08、A10～A11、A13～A14 通过；A09、A12 依用户要求保持 `NOT_RUN_USER_SKIPPED`。
 - [x] 修正旧状态对 A03 的误报：不扩大白名单，拆分 Surface 候选约束、时间指向与 Affect observation，Gate 3 重新通过。
+- [x] 当前工作树通过 249 项 Runtime/恢复、迁移/备份、Workspace、通用路线及 Evolution/Skill/Identity 非安全回归。
+- [x] Research/Code PlanningSearch 当前工作树机械回归 128 passed、1 项 Windows symlink 权限分类跳过；Code 执行范围与真实 cohort 提交逐 blob 相同，Research 仅有保持默认行为的通用 scene 参数扩展。
+- [x] Pentest、A09、A12 与网络安全保持 `NOT_RUN_USER_SKIPPED`，未计入通过项。
 - [x] 拆分后的受影响波次回归 306 项通过，pytest 全量收集通过。
 - [ ] 提交并绑定新 SHA 后执行 A15 完整服务栈与故障矩阵；通过前不宣称 Architecture 2.0 完成。
 

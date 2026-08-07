@@ -434,8 +434,8 @@ Secure Ingress
 
 | 轴 | PASS 条件 | 当前基线 |
 |---|---|---|
-| A Architecture 2.0 | A01～A15 全部绑定最终 SHA 通过 | `NOT_RUN_CURRENT_SHA` |
-| B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `RESEARCH_PASS_CODE_PENTEST_PENDING` |
+| A Architecture 2.0 | A01～A15 全部绑定最终 SHA 通过 | `NON_SECURITY_STATIC_AND_249_RUNTIME_PASS_A09_A12_SKIPPED_A15_PENDING` |
+| B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `RESEARCH_CODE_PASS_SCOPE_INHERITED_PENTEST_NOT_RUN_USER_SKIPPED` |
 | C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `MEASUREMENT_PENDING` |
 | D 真实全栈 | 本地强制服务、路线、故障、恢复、性能和回滚通过 | `RETEST_REQUIRED_FINAL_SHA` |
 | 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `UNKNOWN` |
