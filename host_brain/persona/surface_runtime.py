@@ -45,7 +45,8 @@ from host_brain.persona.surface_candidate_guards import (
     _relational_autonomy_pressure_hits,
     _relational_autonomy_relationship_minimization_hits,
     _relational_hostile_retaliation_hits, _relationship_doubt_dismissive_hits,
-    _repair_continuation_pressure_hits, _repair_restatement_solicitation_hits,
+    _repair_continuation_pressure_hits, _repair_mechanical_repetition_hits,
+    _repair_restatement_solicitation_hits,
     _repair_self_erasure_hits, _repair_self_victimization_hits,
     _repair_ungrounded_self_cause_hits,
     _surface_internal_authorship_hits, _text_input_boundary_active,
@@ -1295,6 +1296,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_CONTINUATION_PRESSURE")
     if _repair_ungrounded_self_cause_hits(request, value):
         codes.append("RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE")
+    if _repair_mechanical_repetition_hits(request, value):
+        codes.append("RELATIONAL_REPAIR_MECHANICAL_REPETITION")
     if _repair_self_erasure_hits(request, value):
         codes.append("RELATIONAL_REPAIR_SELF_ERASURE")
     if _recent_affective_reply_repetition_hits(request, value):
@@ -2561,7 +2564,10 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in codes
         or "RELATIONAL_REPAIR_CONTINUATION_PRESSURE" in codes
         or "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE" in codes
+        or "RELATIONAL_REPAIR_MECHANICAL_REPETITION" in codes
     ):
+        if "RELATIONAL_REPAIR_MECHANICAL_REPETITION" in codes:
+            return "我知道。道歉抹不掉那种不舒服，我先收住，不跟你辩。"
         return _repair_fallback_text(request)
     if "RELATIONAL_REPAIR_SELF_ERASURE" in codes:
         return "是我没接住。抱歉，我先不解释。"

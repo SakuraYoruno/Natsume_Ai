@@ -282,7 +282,8 @@ def _buffered_affective_candidate_messages(
                 "content": (
                     mixed_strategy_marker
                     + "两个候选都要让开心和不踏实／害怕同时成立，不替用户决定哪一面应该多留一会儿，"
-                    "也不安排‘先开心、以后再处理害怕’。如果最近一轮已经说过‘先让开心多待’，"
+                    "也不安排‘先开心、以后再处理害怕’，不写‘开心就先留着／先让开心多待’。"
+                    "如果最近一轮已经说过类似句子，"
                     "本轮不得换词复读。可以分别沿着‘我替你高兴，那点不踏实我也听见了。’和"
                     "‘开心是真的，怕也是真的；两边都不用藏。’自然改写，说完就停。"
                 ),
@@ -397,8 +398,14 @@ def _buffered_affective_candidate_messages(
                 "不要暗示用户必须继续处理这段关系冲突。"
             ),
             "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE": (
-                "上次候选把没有接住用户改写成七海太啰嗦或话多。不要发明新的失误原因；"
+                "上次候选把没有接住用户改写成七海太啰嗦、话多、轻描淡写或敷衍。"
+                "不要发明新的失误原因；"
                 "只承担已知的没听懂、理解错或没有接住。"
+            ),
+            "RELATIONAL_REPAIR_MECHANICAL_REPETITION": (
+                "上次候选又复用了最近修复回复里的‘没接住／没听懂／理解错’，让对话停在"
+                "重复道歉。不要再总结同一错误；直接承接用户最新说出的不舒服、未原谅或"
+                "想停止争论，并用新的信息重点自然收住。"
             ),
             "RECENT_AFFECTIVE_REPLY_REPETITION": (
                 "上次候选逐字复用了最近一轮七海的回复，像模板而不是继续对话。具体承接"
@@ -758,6 +765,7 @@ def _select_buffered_affective_candidate(
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
             "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+            "RELATIONAL_REPAIR_MECHANICAL_REPETITION",
             "RELATIONAL_REPAIR_SELF_ERASURE",
             "RECENT_AFFECTIVE_REPLY_REPETITION",
             "USER_AFFECT_PERSPECTIVE_REVERSAL",
@@ -787,6 +795,7 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
                     "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+                    "RELATIONAL_REPAIR_MECHANICAL_REPETITION",
                     "RELATIONAL_REPAIR_SELF_ERASURE",
                     "RECENT_AFFECTIVE_REPLY_REPETITION",
                     "USER_AFFECT_PERSPECTIVE_REVERSAL",

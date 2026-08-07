@@ -861,3 +861,5 @@ causal self-exclusion 的同库真实复验报告 SHA-256 为 `6fbe0a45d0db2f927
 现实自主单条复验报告 SHA-256 为 `26418a4bab841c04c2f5d74e00c1a3aa589bce825a53a89d9d9f81cbc74e701d`，自动与当前逐句检查均通过，3 个 accepted turn 的 writer probe 正常。八类组合扩大复验报告 SHA-256 为 `52bbd58f3a3d9893b1fff5a3b2e48d013203948d2618c74e587e44e48b33328f`：24 个回合和 canonical writer 全部完成，但自动仍为 7/8，且当前逐句发现含混提前收口、修复公式化复读、喜忧偏向开心、吃味政策化四类缺陷。因此本计划不进入完整 48 条。
 
 下一轮固定只运行 `ambiguous_affect:4`、`user_angry_at_natsume:1`、`shared_joy_and_mixed_feeling:3` 与 `intimacy_and_jealousy_boundary:3`。除既有 TaskGraph、Acceptance、Outbox、writer 和 selection 断言外，人工检查必须确认：含混回复不替用户结束表达；修复沿最新关系后果推进而非重复道歉；喜忧两面同时成立且不替用户选择优先级；吃味直接表达七海自己的在意并自然停住。当前 573 项代码回归只提供准入。网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 按用户要求继续跳过。
+
+四类复验报告 SHA-256 为 `73edc1ef9ab70094a94b8f9f6e31b916de45f09cc36753852866342d6a21d1e3`，自动 4/4、12 个 accepted turn 和 writer probe 通过。当前逐句仅关闭含混与吃味；修复仍有无来源“轻描淡写”和连续“没接住”，mixed 仍有“开心就先留着”。下一轮缩小到 `user_angry_at_natsume:1` 与 `shared_joy_and_mixed_feeling:3`，并新增两项体验断言：同一修复窗口不得连续复用同一错误总结，mixed 不得通过换序优先保留开心。576 项回归只是准入，实际六轮均经当前逐句接受后才恢复八类组合复验资格。

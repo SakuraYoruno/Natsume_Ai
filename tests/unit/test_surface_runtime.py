@@ -1289,6 +1289,57 @@ def test_surface_runtime_retries_exact_recent_affective_reply() -> None:
     assert result.selected_text == "嗯，我先收住，不替自己辩解。"
 
 
+def test_surface_runtime_retries_mechanical_repair_repetition() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["我知道，道歉不能抹掉那种不舒服，是我没接住。"])
+        return _candidate_payload(["我知道。道歉抹不掉那种不舒服，我先收住，不跟你辩。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="那件事让我很不舒服。",
+                reply_control_packet={
+                    "task_mode": "relationship_repair",
+                    "response_move": "own_impact",
+                    "emotional_tone": "repair_open",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "真实最近对话窗口：用户: 你上次完全没听懂我。 / "
+                        "Natsume: 嗯，是我没接住。对不起。 / 用户: 那件事让我很不舒服。"
+                    ],
+                    "must_not_do": ["不要复读最近修复回复。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-repair-progress",
+                        companion_act_kind="REPAIR",
+                        semantic_focus="RELATIONAL_IMPACT",
+                        self_stance="OWN_REPAIR",
+                        response_move="OWN_IMPACT",
+                        inference_policy="BOUNDED_BY_EVIDENCE",
+                        relationship_posture="REPAIR_UNRESOLVED",
+                        ending_mode="OWNERSHIP_STOP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "RECENT_REPLY_REPETITION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "RELATIONAL_REPAIR_MECHANICAL_REPETITION" in calls[1][-1]["content"]
+    assert result.selected_text == "我知道。道歉抹不掉那种不舒服，我先收住，不跟你辩。"
+
+
 @pytest.mark.parametrize(
     "bad_reply",
     [
@@ -2427,6 +2478,14 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
         ),
         (
+            "你上次完全没听懂我。",
+            ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+            ["不要发明新的失误原因。"],
+            "那件事让你不舒服了，我不该这么轻描淡写。",
+            "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。",
+            "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+        ),
+        (
             "我很开心又有点怕。",
             ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
             ["不要抹平复杂感受、强行乐观，或把其中一面说成不该存在。"],
@@ -2471,6 +2530,14 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
             ["不要优先处置其中一面。"],
             "先让开心的部分多待一会儿吧。",
+            "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。",
+            "MIXED_AFFECT_DISMISSAL",
+        ),
+        (
+            "我很开心又有点怕。",
+            ["陪伴动作：让开心与害怕、不安等复杂感受可以同时存在。"],
+            ["不要优先处置其中一面。"],
+            "替你高兴是真的，那点不踏实我也听见了。开心就先留着吧。",
             "开心是真的，害怕也是真的。两种感觉一起在，不用急着选一边。",
             "MIXED_AFFECT_DISMISSAL",
         ),

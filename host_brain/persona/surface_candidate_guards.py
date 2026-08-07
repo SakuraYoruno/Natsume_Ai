@@ -99,7 +99,9 @@ _REPAIR_CONTINUATION_PRESSURE_RE = re.compile(
 )
 _REPAIR_UNGROUNDED_SELF_CAUSE_RE = re.compile(
     r"(?:是我|我)(?:太|有点|可能太)?(?:啰嗦|话多|说多了)"
+    r"|(?:我|刚才|之前).{0,6}(?:轻描淡写|敷衍|没当回事)"
 )
+_REPAIR_MECHANICAL_REPETITION_RE = re.compile(r"没接住|没听懂|理解错")
 _REPAIR_SELF_ERASURE_RE = re.compile(
     r"(?:是我|我(?:就是|真的|确实)?)(?:太|很|有点)?(?:烦人|烦)(?:了|的)?(?=[，,。.!！]|$)"
     r"|我(?:会|以后|就|还是|先){0,2}(?:安静(?:一)?点|少说(?:一)?点|不说了|闭嘴)(?:的)?"
@@ -249,6 +251,7 @@ _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"|(?:那点)?不安.{0,12}等(?:它|不安).{0,8}(?:真)?来(?:了)?再说"
     r"|(?:帮你|陪你|一起).{0,8}(?:哼回去|赶走|打跑)"
     r"|先让.{0,6}(?:开心|高兴).{0,8}(?:多待|多留|待一会)"
+    r"|(?:开心|高兴).{0,6}(?:先)?(?:留着|多留|多待)"
     r"|你还真(?:是)?矛盾|开心就好好开心"
 )
 _MIXED_AFFECT_CONTINUITY_GROUNDING_RE = re.compile(
@@ -443,6 +446,46 @@ def _recent_affective_reply_repetition_hits(
     candidate = _compact_dialogue_text(text)
     if len(candidate) < 8:
         return ()
+    recent = _recent_assistant_replies(request)
+    return tuple(
+        dict.fromkeys(
+            previous
+            for previous in recent
+            if _compact_dialogue_text(previous) == candidate
+        )
+    )
+
+
+def _repair_mechanical_repetition_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    """Keep a repair exchange moving instead of repeating apology keywords."""
+
+    frame = _typed_affective_frame(request)
+    if (
+        str(frame.get("companion_act_kind") or "").upper() != "REPAIR"
+        or "RECENT_REPLY_REPETITION"
+        not in set(frame.get("forbidden_claims") or ())
+    ):
+        return ()
+    current = tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _REPAIR_MECHANICAL_REPETITION_RE.finditer(str(text or ""))
+        )
+    )
+    if not current:
+        return ()
+    if not any(
+        _REPAIR_MECHANICAL_REPETITION_RE.search(previous)
+        for previous in _recent_assistant_replies(request)
+    ):
+        return ()
+    return current
+
+
+def _recent_assistant_replies(request: IsolatedSurfaceInput) -> tuple[str, ...]:
     recent: list[str] = []
     for fact in surface_prompt_facts(request):
         value = str(fact or "")
@@ -455,13 +498,7 @@ def _recent_affective_reply_repetition_hits(
             previous = str(match.group(1) or "").strip()
             if len(_compact_dialogue_text(previous)) >= 8:
                 recent.append(previous)
-    return tuple(
-        dict.fromkeys(
-            previous
-            for previous in recent
-            if _compact_dialogue_text(previous) == candidate
-        )
-    )
+    return tuple(dict.fromkeys(recent))
 
 
 def _compact_dialogue_text(value: str) -> str:

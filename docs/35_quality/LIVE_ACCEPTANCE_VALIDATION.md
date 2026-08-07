@@ -826,3 +826,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 同一新进程随后重跑八类代表队列，报告 SHA-256 为 `52bbd58f3a3d9893b1fff5a3b2e48d013203948d2618c74e587e44e48b33328f`。24 个真实 Gateway turn 全部完成 TaskGraph、Acceptance 与 Outbox，canonical writer 前进且旧 writer 增量为 0；自动结果为 7 条待人工、1 条失败。当前逐句检查没有把 7 条自动通过直接算做人感通过：含混第二轮“说不清就不说吧”提前结束表达；关系修复连续复用“没接住／对不起”；喜忧并存连续两轮要求先让开心多待；吃味以“那是你的选择，我尊重”退回政策口吻。
 
 当前代码只在原有双候选首次请求中加入修复推进、喜忧并存和直接吃味三类有限微动作，并让“说不清就不说”“先让开心多待”“那是你的选择，我尊重”进入既有类型化语义 Gate；最多仍为一次质量重试。没有新增表、普通聊天同步审计、模型请求或持久 writer。相关 planner、Surface、native stream、harness、live runner 与 restart 回归为 573 passed。新 SHA 只复验含混、关系修复、喜忧并存和克制吃味四类；四类自动 selection 与逐句正文均通过后才允许完整 48 条。三名评审盲测和实时延迟仍为独立阻断项；网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。
+
+加载 `7ad9c1cf1` 后运行上述四类，报告 SHA-256 为 `73edc1ef9ab70094a94b8f9f6e31b916de45f09cc36753852866342d6a21d1e3`。自动结果为 4/4，12 个真实 turn 全部 accepted，writer probe 保持旧 writer 零增量和 canonical projection 前进。当前逐句检查接受含混三轮和吃味三轮；关系修复第一轮却无来源补写“轻描淡写”，第二轮又复用“没接住”，mixed 第二轮则把已禁止的“先让开心多待”改序为“开心就先留着”。因此仍不能进入完整 48 条。
+
+最后一轮窄修复复用既有 bounded 最近对话事实，不增加 repository 查询：仅当 typed frame 为 `REPAIR` 且最近七海回复已经出现“没接住／没听懂／理解错”时，下一候选不得继续复用同一修复核心，必须承接用户最新后果；`轻描淡写／敷衍／没当回事` 作为无来源失误原因进入现有修复 Gate；mixed Gate 同时覆盖“开心就先留着”。命中后仍只使用既有一次语义重试。相关回归为 576 passed。下一轮只运行 `user_angry_at_natsume:1` 与 `shared_joy_and_mixed_feeling:3`；网络安全、Pentest 和远端 Edge 继续跳过。

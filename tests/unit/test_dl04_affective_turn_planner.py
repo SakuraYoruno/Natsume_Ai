@@ -754,6 +754,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
     assert "不替用户决定哪一面应该多留一会儿" in mixed_initial_messages[-1]["content"]
+    assert "开心就先留着／先让开心多待" in mixed_initial_messages[-1]["content"]
     assert "两边都不用藏" in mixed_initial_messages[-1]["content"]
     jealousy_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
@@ -854,6 +855,14 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "逐字复用了最近一轮" in repeated_repair_messages[-1]["content"]
     assert "不要复读" in repeated_repair_messages[-1]["content"]
+    mechanical_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="RELATIONAL_REPAIR_MECHANICAL_REPETITION",
+        canonical_repair_context=True,
+    )
+    assert "重复道歉" in mechanical_repair_messages[-1]["content"]
+    assert "承接用户最新说出的不舒服" in mechanical_repair_messages[-1]["content"]
     autonomy_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
