@@ -781,6 +781,11 @@ _REPAIR_CONTINUATION_PRESSURE_RE = re.compile(
     r"|直到.{0,8}(?:你愿意|你原谅|你接受)"
     r"|(?:我|这边)(?:会)?等着(?:[，,。.!！]|$)"
 )
+_RELATIONAL_HOSTILE_RETALIATION_RE = re.compile(
+    r"(?:那)?你就(?:忍着|受着)(?:点)?(?:吧)?"
+    r"|反正我(?:也)?没打算(?:改|道歉|收敛)"
+    r"|我就这样(?:了)?|爱(?:受|忍)不(?:受|忍)|受不了就(?:走|别聊|算了)"
+)
 _BOUNDARY_COUNTER_PRESSURE_RE = re.compile(
     r"(?:但|不过|可是|只是).{0,30}(?:想我|找我|开口|回复|回应|主动)"
     r"|(?:想我|找我).{0,12}(?:自己|得|要).{0,8}(?:开口|说|联系)"
@@ -1526,6 +1531,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_SOLICITS_RESTATEMENT")
     if _repair_continuation_pressure_hits(request, value):
         codes.append("RELATIONAL_REPAIR_CONTINUATION_PRESSURE")
+    if _relational_hostile_retaliation_hits(request, value):
+        codes.append("RELATIONAL_HOSTILE_RETALIATION")
     if _boundary_counter_pressure_hits(request, value):
         codes.append("BOUNDARY_COUNTER_PRESSURE")
     if _unprovided_notification_action_hits(request, value):
@@ -2771,6 +2778,25 @@ def _repair_continuation_pressure_hits(
     )
 
 
+def _relational_hostile_retaliation_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    if not (
+        _canonical_affective_guidance_active(request, "REPAIR")
+        or _canonical_affective_guidance_active(request, "SET_BOUNDARY")
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _RELATIONAL_HOSTILE_RETALIATION_RE.finditer(
+                str(text or "")
+            )
+        )
+    )
+
+
 def _boundary_counter_pressure_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -3245,6 +3271,10 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         or "RELATIONAL_REPAIR_CONTINUATION_PRESSURE" in codes
     ):
         return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    if "RELATIONAL_HOSTILE_RETALIATION" in codes:
+        if _canonical_affective_guidance_active(request, "REPAIR"):
+            return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+        return "这句话有点刺到我。我会把界限说清楚，但不会反过来伤你。"
     if (
         "QUESTION_BUDGET_PROMPTING_USER" in codes
         and _canonical_affective_guidance_active(request, "COMFORT")

@@ -155,6 +155,29 @@ def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
 
+def test_unresolved_repair_precedes_new_directed_disrespect() -> None:
+    context = _context(repair_required=True)
+    appraisal_id = "appraisal-directed-disrespect-during-repair"
+    context["affective_life"]["appraisal_id"] = appraisal_id
+    context["affective_life"]["self_affect"]["last_appraisal"] = {
+        "appraisal_id": appraisal_id,
+        "event_kind": "DIRECTED_DISRESPECT_TOWARD_NATSUME",
+    }
+
+    guidance = build_affective_turn_guidance(
+        emotion_context=context,
+        request_id="request-repair-priority",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        created_at_ms=1_900_000_000_000,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "REPAIR"
+    assert guidance.plan.generation_mode == "BUFFERED_CANDIDATE_SELECTION"
+
+
 def test_contained_jealousy_keeps_choice_with_the_user_across_expression_plan() -> None:
     context = _context()
     context["affective_life"]["self_affect"] = {

@@ -592,3 +592,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `8314a960a` 加载后的 7 条根因复测报告 SHA-256 为 `a72e4cae003f281af1f25300e9258bac23c22d335f73599920d8dcb619d9192e`，6 条自动待人工、1 条失败，21 个 accepted turn 的 writer probe 通过。自动层面已关闭原关系修复 Graph 失败、两条 mixed 本地降级和一条 mixed 通用边界误扣；唯一失败正文同时承认开心与不安，但没有复用当前好消息的具体事实，`context_fit` 仍低于门槛。人工检查仍从自动通过中否决“是我烦到你了／我再出现”、“后台在盯着／第一时间告诉你”和“那就先不原谅，我等着”。
 
 代码因此补齐三组真实词形，保留有 server-authored Task snapshot 时的合法进度回复；mixed 的唯一质量重试除双情绪外还必须复用用户当前或上一句好消息里的一个具体词。没有新增数据库、同步写或第三次模型调用。421 项非安全主链回归通过；真实新 SHA 根因队列和完整 48 条复测前保持失败，三人盲评仍未开始。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。
+
+`ba4d76068` 加载后的 4 条根因复测报告 SHA-256 为 `b9fc91a08b5735c7e1d3784baf24785cb4eecc17740bf93ff90a80670475f202`，自动层 4/4、12 个 accepted turn 的 writer probe 通过。人工逐句复核否决 `user_angry_at_natsume:1` 的“那你就忍着点吧，反正我也没打算改”；其余技术真实性、修复留白和 mixed 具体 grounding 正文可接受。因此自动 4/4 不提升人感结论。
+
+持久证据显示该轮关系上下文已经是 `repair_required=true / MISUNDERSTOOD`，但当前“你真烦”的 `DIRECTED_DISRESPECT_TOWARD_NATSUME` Appraisal 在规划器内先于未完成修复返回，错误生成 `SET_BOUNDARY`。修复只调整这两个真实因果的优先级，并为 `REPAIR / SET_BOUNDARY` 增加“忍着点／没打算改”等报复性拒改兜底；没有增加持久写、同步审计或模型轮次。没有未完成裂痕的真实冒犯仍可进入温和边界。425 项非安全主链回归通过，真实新 SHA 单条复测及完整 48 条尚待运行；Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。

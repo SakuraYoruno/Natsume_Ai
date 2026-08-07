@@ -132,6 +132,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `8314a960a` 的 7 条根因报告 SHA-256 为 `a72e4cae003f281af1f25300e9258bac23c22d335f73599920d8dcb619d9192e`，结果为 6 条自动待人工、1 条失败，21 个 accepted turn 的 writer probe 通过。回归必须继续覆盖 `是我烦到／打扰到你`、`后台在盯着`、`出问题我第一时间告诉你` 和关系修复中的 `我等着`；mixed 质量重试必须同时包含双情绪和至少一个来自当前／上一句好消息的具体词，不能只输出泛化“替你高兴”。当前 421 项非安全主链测试通过；真实新 SHA 根因复测和完整队列前仍为待测。Pentest、渗透与网络安全不运行。
 
+`ba4d76068` 的 4 条根因报告 SHA-256 为 `b9fc91a08b5735c7e1d3784baf24785cb4eecc17740bf93ff90a80670475f202`，自动层 4/4、12 个 accepted turn 的 writer probe 通过，但人工否决“那你就忍着点吧，反正我也没打算改”。回归必须断言 `repair_required=true` 时即使当前 Appraisal 为 `DIRECTED_DISRESPECT_TOWARD_NATSUME` 也保持 canonical `REPAIR`，并拒绝 `忍着／受着／没打算改` 等报复性候选；没有未完成裂痕时仍允许 `SET_BOUNDARY`。当前 425 项非安全主链测试通过，真实新 SHA 复测前仍失败。Pentest、渗透与网络安全继续跳过。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：

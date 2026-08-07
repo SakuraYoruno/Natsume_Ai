@@ -270,6 +270,10 @@ def _buffered_affective_candidate_messages(
                 "上次候选用‘不能就这么算了’继续向用户施压。只承担七海没有接住，"
                 "不要暗示用户必须继续处理这段关系冲突。"
             ),
+            "RELATIONAL_HOSTILE_RETALIATION": (
+                "上次候选用‘你就忍着’或‘我没打算改’反击用户。正在修复时先承担"
+                "没有接住；确需设界限时可以直说被刺到，但不得报复、挑衅或拒绝改正。"
+            ),
             "MIXED_AFFECT_CONTINUITY_DROPPED": (
                 "上次候选只承接了眼前的好消息，丢掉了上一轮仍未消失的不安。"
                 "两个候选都要自然保留开心与不安两条线，不要只说恭喜或像做梦。"
@@ -504,6 +508,7 @@ def _select_buffered_affective_candidate(
         locally_repairable = {
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+            "RELATIONAL_HOSTILE_RETALIATION",
             "QUESTION_BUDGET_PROMPTING_USER",
             "MIXED_AFFECT_CONTINUITY_DROPPED",
             "MIXED_AFFECT_DISMISSAL",
@@ -517,6 +522,7 @@ def _select_buffered_affective_candidate(
                 {
                     "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+                    "RELATIONAL_HOSTILE_RETALIATION",
                     "MIXED_AFFECT_CONTINUITY_DROPPED",
                     "MIXED_AFFECT_DISMISSAL",
                     "UNPROVIDED_NOTIFICATION_ACTION",

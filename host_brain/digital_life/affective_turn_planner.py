@@ -581,6 +581,16 @@ def _select_companion_act(
         # ``REPAIR`` remains reserved for an unresolved rupture or a fresh
         # signal that Natsume may have missed the user again.
         return "ACKNOWLEDGE"
+    if (
+        repair_required
+        or relationship_outcome in _REPAIR_OUTCOMES
+        or regulation_mode == "SEEK_REPAIR"
+    ):
+        # An unresolved rupture keeps repair authority even when the user's
+        # latest sentence is sharp.  Otherwise a complaint made *inside* an
+        # open repair thread is misread as a fresh boundary dispute and
+        # Natsume can retaliate instead of owning the original miss.
+        return "REPAIR"
     if appraisal_kind == "DIRECTED_DISRESPECT_TOWARD_NATSUME":
         return "SET_BOUNDARY"
     # A concrete user task remains primary.  Affect changes the delivery
@@ -604,8 +614,6 @@ def _select_companion_act(
         return "COMFORT"
     if appraisal_kind == "SHARED_POSITIVE_MOMENT":
         return "PLAY"
-    if repair_required or relationship_outcome in _REPAIR_OUTCOMES or regulation_mode == "SEEK_REPAIR":
-        return "REPAIR"
     if top_action_tendency in {"listen", "withhold_advice"}:
         return "LISTEN"
     if top_component == "ANGER":
