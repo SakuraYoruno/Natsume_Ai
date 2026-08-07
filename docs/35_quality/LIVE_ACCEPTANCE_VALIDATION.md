@@ -914,3 +914,9 @@ Monitor UI 在 `npm ci` 后依次通过 operator client check、lint、typecheck
 人工层结论比自动数字更差：48 条末轮为 45 个唯一文本，同一句“这个好消息让我也高兴，可你说不踏实，我这边也跟着紧了一下。”出现 4 次；21 条以“嗯”开头，16 条包含“先”。含混低落有敷衍收束，空间边界有惩罚感，关系修复有自我消化或前后矛盾，现实自主和吃味大量退回政策说明。`user_to_surface_commit_ms` 只是稳定分句／effect commit 代理，不是首可见 Token；其 p50 为 1099.5 ms、p95 为 2375 ms，仍高于 900／1800 ms 门槛。Gateway→Host terminal p50/p95 为 9252/12868 ms，provider attempt terminal p50/p95 为 2335/4468 ms。
 
 结论：本机强制服务栈通过，但数字生命人感为 `FAIL`，三名评审盲测为 `NOT_RUN`，24 条真实多模态／主动／故障 driver 待执行。继续调整 prompt 或 Gate 已触发停止条件；下一轮必须改变模型层或使用版本化真实自然文本调优。`npm ci` 报告的 7 high／3 moderate 依赖问题未做审计或修复，按用户要求记为 `NOT_RUN_USER_SKIPPED`，不冒充 PASS。网络安全与 Pentest 同样跳过。
+
+## 2026-08-08 NE-04 真实 Docker Golden Suite
+
+在提交 `8afa13f856c588edcec6a8e1ac4d205efbea02d2` 的 clean detached worktree 中运行 `run_ne04_golden_experiments.py`。Research Planning、Proactive、Memory Write 各执行 baseline/candidate，共 6 个真实容器 arm；镜像 digest 固定，`network=none`、rootfs 只读、用户 `65534:65534`，effect audit 为 0。三类 report digest 分别为 `cfadab6df15d1e4f041a74d98555f4697e9682da46e3f26426fd530dccb7f826`、`22770a05600db830f70efd646b148a90db28cf6e72c1db93b46e7e3f0266c126`、`6f0212e85f5c94c34af80d888f25594d7a716c24c013985963ffa4095598d78b`。
+
+SQLite 中实际存在 6 个 trusted run receipt、3 个 report、3 个 proposal、1 个 golden suite receipt；`production_side_effects=false`、`production_influence_enabled=false`，runtime 临时目录为空。正式收据 SHA-256 为 `fddf247166c7cc1fad7a9950e9013c5c5424734ecfe0e19a8b4fa1bff511bc4d`。随后启用 opt-in 真实 Docker integration，Golden Suite 与 completion-response-loss exact receipt 重开共 2/2 通过。临时 worktree 完整移除，现有 A15 容器和服务未被重启。

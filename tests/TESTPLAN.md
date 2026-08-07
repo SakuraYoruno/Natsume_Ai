@@ -632,3 +632,9 @@ Canon route 单测还必须覆盖 privacy-redacted payload：`status=OK` 且 det
 48 条文本队列必须使用单一 run ID 和真实 provider，不得把同小时其他运行混入计数。当前 `dl-live-1786140473510` 含 48 条场景、144 个 accepted Gateway turn，自动 46 条待人工、2 条失败，报告 SHA-256 为 `1efd6886792d2df8ea2ae5198bbf4127eaf273d17eeda04fd596a196fbda1cc8`。回归验收不能只看自动 Gate；必须额外统计末轮 exact reuse、开头词分布、关系政策口吻、空间边界、修复一致性和 mixed self resonance。当前 exact reuse 与单人逐句复核均失败，所以人感状态保持 `FAIL`。
 
 后续数字生命语言实验不得再添加 prompt 完整正例、禁词或第三次模型请求。候选方案必须版本化，至少比较：同一语义不同上下文的逐字复用率、建议／安排用户比例、关系立场自然度、自动 selection 收益和三名评审盲测偏好。首可见 Token 必须由流式客户端时间戳直接测量；`user_to_surface_commit_ms` 只能作为稳定分句提交代理，不能冒充首 Token 指标。远端 Edge、网络安全、A09、A12、Security Monitor 和 Pentest 不在本轮执行范围。
+
+## 2026-08-08 NE-04 真实 Docker 验收
+
+正式 Golden Suite 必须在与收据提交完全一致的 clean worktree 中运行，并拒绝 tag-only 镜像、脏树或错误 commit。三类实验必须形成 6 个独立 arm，逐 arm 验证 digest-pinned image、Docker engine identity、`network=none`、只读 rootfs、非 root、数据集 digest 重算和 effect count 0；结束后必须只有 proposal，不得启用 production influence。当前提交 `8afa13f85` 全部通过，收据 SHA-256 为 `fddf247166c7cc1fad7a9950e9013c5c5424734ecfe0e19a8b4fa1bff511bc4d`。
+
+恢复测试必须在 completion receipt 已提交但调用方丢失响应后重入同一 spec／variant，断言第二次结果与第一次逐字段相同、trusted run receipt 仍只有 1 条，并且运行目录无残留。真实 Docker opt-in integration 当前 2/2 通过。该验收不覆盖 Skill activation、Feedback/Knowledge/Identity activation，也不覆盖用户跳过的网络安全和 Pentest。

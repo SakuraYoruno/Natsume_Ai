@@ -104,3 +104,9 @@ flowchart LR
 随后执行完整 48 条文本多轮队列，共 144 个真实 Gateway→DeepSeek→TaskGraph 回合。144/144 终态完成，canonical writer 正常推进且旧 writer 增量为 0；自动结果为 46 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、2 条 `FAIL`。原始报告 SHA-256 为 `1efd6886792d2df8ea2ae5198bbf4127eaf273d17eeda04fd596a196fbda1cc8`。单人逐句复核不能接受整体体验：48 条末轮只有 45 个不同文本，同一句 mixed 回复出现 4 次，21 条以“嗯”开头，关系、自主、空间和修复场景仍出现模板化、政策化、敷衍或前后矛盾。
 
 因此执行策略冻结为：不再增加 prompt 正例、禁词、评分规则或普通聊天审计；不再重复抽样同一随机轨迹挑选绿灯。下一阶段只能使用版本化真实自然文本调优或模型层方案，并以新的预注册变体队列比较 exact reuse、自然度、关系立场和三名评审偏好。远端 Edge 未启动或探测；网络安全、A09、A12、Security Monitor 与 Pentest 继续为 `NOT_RUN_USER_SKIPPED`。当前结论为“本机强制服务栈 PASS，数字生命人感 FAIL，整体 INCOMPLETE”。
+
+### NE-04 真实 Docker Golden Suite
+
+提交 `8afa13f856c588edcec6a8e1ac4d205efbea02d2` 的 clean detached worktree 已执行 Research Planning、Proactive、Memory Write 三类可信实验，各自包含 baseline/candidate，共 6 个真实 Docker arm。镜像为 `python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df`；所有 arm 均为 `network=none`、只读根文件系统、`65534:65534` 非 root，effect audit 为 0。SQLite migration head 为 `0140#evolution_lab_redacted_dataset`，最终持久化 6 个 run receipt、3 个 report、3 个 proposal 和 1 个 suite receipt；运行目录无残留，生产副作用和生产影响均为 false。
+
+正式收据 SHA-256 为 `fddf247166c7cc1fad7a9950e9013c5c5424734ecfe0e19a8b4fa1bff511bc4d`。同一提交还通过 2 项 opt-in 真实 Docker 集成，其中响应在 completion commit 后丢失时，第二次调用只重开 exact receipt，不重复 arm。临时 worktree 已移除，没有创建临时分支。NE-04 本项提升为 PASS；Skill lifecycle、Feedback/Knowledge/Identity 仍需分别取得生产 authority 级证据。

@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-08",
-  "commit_scope": "A15_LOCAL_MANDATORY_STACK_PASS_DIGITAL_LIFE_HUMAN_LIKENESS_FAIL",
+  "commit_scope": "A15_LOCAL_MANDATORY_STACK_AND_NE04_GOLDEN_PASS_DIGITAL_LIFE_HUMAN_LIKENESS_FAIL",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -546,6 +546,26 @@
       "coverage_evidence_commit_sha": "d0a0adb65",
       "coverage_python_line_percent": 36.15,
       "coverage_python_branch_percent": 16.38
+    },
+    "evolution_lab_real_docker_golden_suite": {
+      "status": "PASS",
+      "commit_sha": "8afa13f856c588edcec6a8e1ac4d205efbea02d2",
+      "receipt_sha256": "fddf247166c7cc1fad7a9950e9013c5c5424734ecfe0e19a8b4fa1bff511bc4d",
+      "migration_head": "0140#evolution_lab_redacted_dataset",
+      "experiment_kinds": [
+        "research_planning",
+        "proactive",
+        "memory_write"
+      ],
+      "real_docker_arm_count": 6,
+      "network_mode": "none",
+      "readonly_rootfs": true,
+      "non_root_user": "65534:65534",
+      "production_side_effects": false,
+      "production_influence_enabled": false,
+      "durable_counts": "RUN_RECEIPT_6_REPORT_3_PROPOSAL_3_SUITE_RECEIPT_1",
+      "response_loss_exact_reopen": "PASS_REAL_DOCKER_2_OF_2_INTEGRATION",
+      "runtime_residue": false
     },
     "integration_shard_preflight": {
       "status": "PASS_CURRENT_SHA_WITH_2_CLASSIFIED_REDIS_SKIPS",
