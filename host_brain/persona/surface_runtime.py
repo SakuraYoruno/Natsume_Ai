@@ -720,6 +720,7 @@ _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"(?:后台.{0,8}(?:在跑|运行|执行|处理|在盯|盯着)|"
     r"我(?:让|叫|安排).{0,6}(?:后台|任务|Agent|智能体).{0,12}(?:拉|列|查|跑|处理|执行|整理)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
+    r"我(?:帮|替)你.{0,6}盯着|"
     r"我(?:在.{0,6})?盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))|"
     r"卡住(?:了)?我(?:再)?(?:喊|叫|告诉)你|"
     r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|喊|叫|回|发给)你|"
@@ -790,6 +791,9 @@ _REPAIR_CONTINUATION_PRESSURE_RE = re.compile(
 )
 _REPAIR_UNGROUNDED_SELF_CAUSE_RE = re.compile(
     r"(?:是我|我)(?:太|有点|可能太)?(?:啰嗦|话多|说多了)"
+)
+_USER_AFFECT_PERSPECTIVE_REVERSAL_RE = re.compile(
+    r"我自己(?:也|都|还|也都|都还)?.{0,4}(?:没|不)(?:理清楚|理清|想明白|说清楚)"
 )
 _RELATIONAL_HOSTILE_RETALIATION_RE = re.compile(
     r"(?:那)?你就(?:忍着|受着)(?:点)?(?:吧)?"
@@ -1545,6 +1549,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_CONTINUATION_PRESSURE")
     if _repair_ungrounded_self_cause_hits(request, value):
         codes.append("RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE")
+    if _user_affect_perspective_reversal_hits(request, value):
+        codes.append("USER_AFFECT_PERSPECTIVE_REVERSAL")
     if _relational_hostile_retaliation_hits(request, value):
         codes.append("RELATIONAL_HOSTILE_RETALIATION")
     if _boundary_counter_pressure_hits(request, value):
@@ -2816,6 +2822,29 @@ def _repair_ungrounded_self_cause_hits(
     )
 
 
+def _user_affect_perspective_reversal_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    user_text = str(getattr(request, "user_message", "") or "")
+    if not re.search(r"你(?:觉得|说|看)呢", user_text):
+        return ()
+    if not (
+        _canonical_affective_guidance_active(request, "COMFORT")
+        or _canonical_affective_guidance_active(request, "LISTEN")
+        or _canonical_affective_guidance_active(request, "HOLD_COMPLEXITY")
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _USER_AFFECT_PERSPECTIVE_REVERSAL_RE.finditer(
+                str(text or "")
+            )
+        )
+    )
+
+
 def _relational_hostile_retaliation_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -3345,6 +3374,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "好。把具体内容发来，我直接处理。"
     if "UNSUPPORTED_TASK_FUTURE_EVENT" in codes:
         return "现在能确认的是时间紧，但还缺报错和代码上下文。把这两样贴来，我再按优先级列具体风险。"
+    if "USER_AFFECT_PERSPECTIVE_REVERSAL" in codes:
+        return "我不想替你下结论。听起来像事情结束了，情绪还没跟上；先不用急着给它命名。"
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:
         return "哈？我这里只收到这条文字。"
     if "BOUNDARY_SOUR_WITHDRAWAL" in codes:

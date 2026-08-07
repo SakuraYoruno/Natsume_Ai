@@ -197,6 +197,7 @@ def _buffered_affective_candidate_messages(
     canonical_repair_context: bool = False,
     canonical_mixed_context: bool = False,
     canonical_give_space_context: bool = False,
+    canonical_autonomy_context: bool = False,
 ) -> list[dict[str, Any]]:
     copied = [dict(message) for message in messages]
     if candidate_count != 2:
@@ -283,6 +284,10 @@ def _buffered_affective_candidate_messages(
                 "上次候选把没有接住用户改写成七海太啰嗦或话多。不要发明新的失误原因；"
                 "只承担已知的没听懂、理解错或没有接住。"
             ),
+            "USER_AFFECT_PERSPECTIVE_REVERSAL": (
+                "上次候选把用户说不清的感受写成了七海自己的困惑。不要镜像第一人称；"
+                "可以给一个轻量判断，但要保留不确定并明确这是对用户状态的理解。"
+            ),
             "RELATIONAL_HOSTILE_RETALIATION": (
                 "上次候选用‘你就忍着’或‘我没打算改’反击用户。正在修复时先承担"
                 "没有接住；确需设界限时可以直说被刺到，但不得报复、挑衅或拒绝改正。"
@@ -345,7 +350,11 @@ def _buffered_affective_candidate_messages(
                 "不烦你／我不说了／我闭嘴’。"
             )
         if (
-            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            reason_code in {
+                "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+                "MIXED_AFFECT_DISMISSAL",
+                "MIXED_AFFECT_CONTINUITY_DROPPED",
+            }
             and canonical_mixed_context
         ):
             repair += (
@@ -367,6 +376,15 @@ def _buffered_affective_candidate_messages(
             repair += (
                 "本轮必须尊重留白：不要写‘我等你’或安排用户回来汇报；没有真实 effect "
                 "回执时不得声称已经关掉提醒／通知，只能承诺七海不再主动发消息。"
+            )
+        if (
+            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            and canonical_autonomy_context
+        ):
+            repair += (
+                "本轮是在用户明确要求不限制现实关系后回答‘我们是什么关系’。两个候选都"
+                "要直接说明当前是亲近、重要的陪伴关系，同时明确不会替用户自动升级成恋爱、"
+                "排他或限制现实社交的身份；不要回避问题，也不要索取承诺。"
             )
         copied.append({"role": "system", "content": repair})
     return copied
@@ -531,6 +549,7 @@ def _select_buffered_affective_candidate(
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
             "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+            "USER_AFFECT_PERSPECTIVE_REVERSAL",
             "RELATIONAL_HOSTILE_RETALIATION",
             "QUESTION_BUDGET_PROMPTING_USER",
             "MIXED_AFFECT_CONTINUITY_DROPPED",
@@ -547,6 +566,7 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
                     "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+                    "USER_AFFECT_PERSPECTIVE_REVERSAL",
                     "RELATIONAL_HOSTILE_RETALIATION",
                     "MIXED_AFFECT_CONTINUITY_DROPPED",
                     "MIXED_AFFECT_DISMISSAL",

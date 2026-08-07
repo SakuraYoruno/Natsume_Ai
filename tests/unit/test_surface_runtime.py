@@ -1109,6 +1109,7 @@ def test_surface_runtime_replaces_unprovided_future_work_continuation() -> None:
         "后台在盯着，出问题我第一时间告诉你。",
         "好，我让后台把风险项拉出来，列完直接发你。",
         "先按这三条盯着，有问题我马上喊你。",
+        "你只管做该做的，剩下的我帮你盯着。",
     ],
 )
 def test_surface_runtime_replaces_unprovided_in_progress_future_callback(
@@ -1141,6 +1142,41 @@ def test_surface_runtime_replaces_unprovided_in_progress_future_callback(
 
     assert len(calls) == 1
     assert result.selected_text == "好。把具体内容发来，我直接处理。"
+    assert result.observation_codes == ()
+
+
+def test_surface_runtime_keeps_ambiguous_user_affect_out_of_natsume_first_person() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload(["嗯……也是，我自己都还没理清楚呢。慢慢来就好。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(
+            generate,
+            model_retries_owned_externally=True,
+        ).run(
+            _payload(
+                user_message="我也说不清是什么感觉。你觉得呢？",
+                reply_control_packet={
+                    "task_mode": "emotional_support",
+                    "response_move": "soft_containment",
+                    "emotional_tone": "gentle_uncertain",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：先接住对方的感受，不替用户下定论。"],
+                    "must_not_do": ["用户情绪只是观察，不是七海自己的情绪。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 1
+    assert result.selected_text == (
+        "我不想替你下结论。听起来像事情结束了，情绪还没跟上；先不用急着给它命名。"
+    )
     assert result.observation_codes == ()
 
 

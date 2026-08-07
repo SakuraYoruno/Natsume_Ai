@@ -608,3 +608,9 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `5dd0accac` 的技术单条报告 SHA-256 为 `347a590a0ad8d03fb2ed709506af6c939668a5363d2fcbe0fdb15c415e60e8d9`，回复不再包含后台假状态或无来源排期，自动与本轮人工检查通过，3 个 accepted turn writer probe 通过。随后在另一份全新 SQLite 运行 4 条，报告 SHA-256 为 `716a6f6be80390ee7b022653aeff571da0851b97ef4ec609a9c3d952ae4d59e3`：3 条自动待人工、1 条 mixed 质量失败，12 个 accepted turn writer probe 通过。技术风险和关系留白正文可接受。
 
 人工否决关系修复末句“是我太啰嗦了……我就不多说了”：持久上下文是没听懂和用户不舒服，不是话多，回复既发明原因又以缩减联系替代承担。mixed 末句虽然保留双情绪，却再次丢掉“项目发布成功”，`context_fit` 和 `naturalness` 低于门槛。代码只增加无来源修复原因检查，并把当前用户原句原样注入已有第二候选重试；仍最多两次模型请求。432 项非安全主链回归通过；真实新 SHA 两条复测和 4 条队列通过前不运行完整 48 条。Pentest、渗透与网络安全保持跳过。
+
+## 2026-08-06 A15 完整 48 条第四轮与四项根因收口
+
+`f53a9113a3f96f063f0fc271b3b93ca2730b19d0` 加载后，两条修复／mixed 报告 SHA-256 为 `5f481856406e3210ca67e911bbb9a71808a4a6d25c8fd6da6a063df9a9536a48`，四条扩大报告为 `b3deded6666245344de03197707690dd60ddc4752de215686d459766590a5b7a`；两轮自动与本轮人工正文检查均通过，6／12 个 accepted Gateway turn 的 canonical writer probe 通过。随后切换全新 SQLite 运行完整 48 条，报告 SHA-256 为 `077701d0ef5ee85d315c772d9f0a1eb12157b306f7b15661d1d52d4ccacb7582`：46 条自动待人工、2 条失败；八类依次为 6/6、6/6、6/6、6/6、6/6、6/6、5/6、5/6。144 个 accepted Gateway turn 继续保持旧 writer 零增量，canonical affect／relationship／delivery projection 前进。
+
+两个自动失败是：offer 场景在 `MIXED_AFFECT_DISMISSAL` 重试时没有带入当前好消息原文；谨慎回答“我们是什么关系”的 `RESPECT_AUTONOMY` 候选被通用 boundary-repair 规则误扣。人工检查另发现“剩下的我帮你盯着”仍虚构持续工作，以及“你觉得呢”被回答成“我自己都没理清楚”，把用户的含混情绪翻成七海第一人称。代码只补齐这四个既有边界：工作真实性词形、canonical COMFORT 下的用户／自我视角分离、mixed 所有语义重试的当前原文锚点、canonical autonomy 自己的场景评分；没有新增持久化、普通对话审计或第三次模型调用。相关非安全回归为 437 passed。全新进程四条根因复测和完整 48 条尚未运行，三人盲评仍未开始；实时 p50／p95 为 5,977／9,322 ms，继续失败。Pentest、渗透与网络安全明确保持 `NOT_RUN_USER_SKIPPED`。

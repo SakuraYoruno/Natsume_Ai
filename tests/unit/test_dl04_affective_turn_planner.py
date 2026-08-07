@@ -507,6 +507,14 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "必须复用用户当前或上一句好消息里的一个具体词" in mixed_quality_messages[-1]["content"]
     assert "当前用户最后一句原文是“项目发布成功。”" in mixed_quality_messages[-1]["content"]
     assert "必须原样保留" in mixed_quality_messages[-1]["content"]
+    mixed_dismissal_messages = _buffered_affective_candidate_messages(
+        [*paired_messages, {"role": "user", "content": "我拿到 offer 了。"}],
+        candidate_count=2,
+        retry_reason="MIXED_AFFECT_DISMISSAL",
+        canonical_mixed_context=True,
+    )
+    assert "当前用户最后一句原文是“我拿到 offer 了。”" in mixed_dismissal_messages[-1]["content"]
+    assert "必须原样保留" in mixed_dismissal_messages[-1]["content"]
     give_space_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -537,6 +545,15 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         retry_reason="RELATIONAL_AUTONOMY_PRESSURE",
     )
     assert "不要求早点回来、控制饮酒" in autonomy_retry_messages[-1]["content"]
+    autonomy_quality_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_autonomy_context=True,
+    )
+    assert "回答‘我们是什么关系’" in autonomy_quality_messages[-1]["content"]
+    assert "亲近、重要的陪伴关系" in autonomy_quality_messages[-1]["content"]
+    assert "不会替用户自动升级成恋爱、排他" in autonomy_quality_messages[-1]["content"]
 
     paired_by_reply = {
         "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",

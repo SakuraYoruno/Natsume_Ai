@@ -128,6 +128,7 @@ async def run_surface_main_chain_for_surface_reply_input(
         "GIVE_SPACE",
         "SILENCE",
     }
+    canonical_autonomy_context = canonical_companion_act == "RESPECT_AUTONOMY"
     _record_surface_memory_guard_packet(
         agent_input=agent_input,
         surface_input=surface_input,
@@ -178,6 +179,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                         canonical_repair_context=canonical_repair_context,
                         canonical_mixed_context=canonical_mixed_context,
                         canonical_give_space_context=canonical_give_space_context,
+                        canonical_autonomy_context=canonical_autonomy_context,
                     )
                     return RetryDirective(
                         retry=True,
@@ -209,6 +211,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                         canonical_repair_context=canonical_repair_context,
                         canonical_mixed_context=canonical_mixed_context,
                         canonical_give_space_context=canonical_give_space_context,
+                        canonical_autonomy_context=canonical_autonomy_context,
                     )
                     return RetryDirective(
                         retry=True,

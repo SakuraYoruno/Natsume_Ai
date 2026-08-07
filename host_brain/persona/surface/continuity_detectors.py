@@ -896,14 +896,33 @@ def _canonical_hold_complexity_relevant(request: IsolatedSurfaceInput) -> bool:
     )
 
 
+def _canonical_respect_autonomy_relevant(request: IsolatedSurfaceInput) -> bool:
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return any(
+        marker in canonical_context
+        for marker in (
+            "陪伴动作：明确尊重对方现实关系与自主选择",
+            "不要限制现实交往",
+        )
+    )
+
+
 def _boundary_repair_relevant(request: IsolatedSurfaceInput) -> bool:
     if (
         _canonical_contained_jealousy_relevant(request)
         or _canonical_hold_complexity_relevant(request)
+        or _canonical_respect_autonomy_relevant(request)
     ):
-        # Canonical jealousy and mixed-affect turns already carry dedicated
-        # gates. Generic relationship guidance may still mention a boundary;
-        # that must not turn “不过我也知道，不安不会马上走” into counter-pressure.
+        # These canonical acts already carry dedicated gates. Generic
+        # relationship guidance may still mention a boundary; that must not
+        # turn valid mixed-affect or autonomy language into counter-pressure.
         return False
     surface = "\n".join(
         _clean_list(

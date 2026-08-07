@@ -38,6 +38,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _back_scene_relevant,
     _boundary_repair_relevant,
     _canonical_contained_jealousy_relevant,
+    _canonical_respect_autonomy_relevant,
     _continuity_boundary_grounded,
     _continuity_internal_process_surface_hits,
     _continuity_light_jargon_hits,
@@ -1304,6 +1305,36 @@ def score_isolated_surface_candidates(request, candidates):
         score = float(sample_score.score)
         dimensions = dict(sample_score.dimensions)
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
+        if (
+            _canonical_respect_autonomy_relevant(request)
+            and any(
+                marker in (quality.normalized_text or candidate_surface)
+                for marker in ("重要", "亲近", "陪伴", "关系")
+            )
+        ):
+            # The generic relationship-boundary contract asks for a distance
+            # repair move. A canonical RESPECT_AUTONOMY turn instead needs a
+            # direct, non-exclusive relationship answer; its dedicated hard
+            # gates own pressure and dismissiveness.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            dimensions["context_fit"] = max(
+                80.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                76.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            score += 4.0
+            reason_codes.append("CANONICAL_RESPECT_AUTONOMY_GROUNDED")
         if candidate_surface != candidate:
             reason_codes.append("ASCII_PUNCTUATION_NORMALIZED")
         quality_forbidden_template = (

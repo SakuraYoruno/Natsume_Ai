@@ -3354,6 +3354,38 @@ def test_hold_complexity_does_not_inherit_generic_boundary_repair_penalty() -> N
     assert "BOUNDARY_REPAIR_COUNTER_PRESSURE" not in rows[0].reason_codes
 
 
+def test_respect_autonomy_does_not_inherit_generic_boundary_repair_penalty() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "respect_autonomy_boundary_false_positive",
+            "soul_md": SOUL,
+            "user_message": "我们是什么关系。",
+            "reply_control_packet": {
+                "response_move": "respect_autonomy",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：明确尊重对方现实关系与自主选择，同时自然承认在意。"
+                ],
+                "must_not_do": [
+                    "不要限制现实交往、要求报备或把亲近写成排他承诺。"
+                ],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "我们很亲近。对我来说，你是很重要的人，但这不会变成限制你现实关系的身份。"
+        ],
+    )
+
+    assert rows[0].passed
+    assert "BOUNDARY_REPAIR_COUNTER_PRESSURE" not in rows[0].reason_codes
+
+
 def test_back_memory_overdisplay_is_soft_penalized() -> None:
     request = build_isolated_surface_input(
         {

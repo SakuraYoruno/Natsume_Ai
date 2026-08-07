@@ -140,6 +140,8 @@ python scripts/runtime/test_digital_life_live_cohort.py `
 
 `5dd0accac` 的技术单条报告 SHA-256 为 `347a590a0ad8d03fb2ed709506af6c939668a5363d2fcbe0fdb15c415e60e8d9`，自动与本轮人工检查通过；全新库 4 条报告 SHA-256 为 `716a6f6be80390ee7b022653aeff571da0851b97ef4ec609a9c3d952ae4d59e3`，结果为 3 条自动待人工、1 条 mixed 失败，12 个 accepted turn writer probe 通过。回归必须拒绝在 canonical `REPAIR` 中无来源地把失误改成“太啰嗦／话多”以及“不多说了”的退出；mixed 质量重试必须引用最后一条用户原文，并保留“项目发布成功”等核心结果词。当前 432 项非安全主链测试通过；真实新 SHA 复测前保持失败。Pentest、渗透与网络安全不运行。
 
+`f53a9113a` 的两条与四条根因队列已通过自动和本轮人工检查，报告 SHA-256 分别为 `5f481856406e3210ca67e911bbb9a71808a4a6d25c8fd6da6a063df9a9536a48`、`b3deded6666245344de03197707690dd60ddc4752de215686d459766590a5b7a`；随后完整 48 条报告 SHA-256 为 `077701d0ef5ee85d315c772d9f0a1eb12157b306f7b15661d1d52d4ccacb7582`，自动 46 条待人工、2 条失败，144 个 accepted turn writer probe 通过。下一轮必须只先复测 `ambiguous_affect:5`、`task_with_low_mood:3`、`shared_joy_and_mixed_feeling:1`、`intimacy_and_jealousy_boundary:5`：分别禁止用户情绪第一人称反转、无 Task authority 的“帮你盯着”、mixed 重试丢当前 offer、canonical autonomy 被通用边界规则误杀。437 项非安全主链测试通过；四条真实复测通过后才可用另一份全新 SQLite 重跑 48 条。p50／p95 5,977／9,322 ms 与三人盲评仍阻断人感完成；Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。
+
 Gateway Webhook 必须先得到 durable inbox 的 `accepted/duplicate` 回执，才允许轮询 Host 终态。签名漂移、401/403、未注册 adapter 或网络错误属于入口终态失败，runner 必须立即报告实际 HTTP 原因，禁止继续消耗整轮 180 秒等待窗口。双机启动后还要以不暴露原文的长度与 SHA-256 摘要核对 Host/Edge 回调 HMAC，并在变更密钥后重启 Gateway 使新进程接线生效。
 
 工程断言：
