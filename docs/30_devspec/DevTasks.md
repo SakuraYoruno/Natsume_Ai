@@ -96,7 +96,8 @@
 - [x] 修复最终 SHA Host 探针只按 HTTP 200 产生假绿的问题：Health／Ready／Canon 必须校验业务语义，Host-only pending external 只能通过显式参数接受。
 - [x] 修复 `wc-004` 空 hash 与 Canon 漂移被误分类为 source unavailable；全部 `wc-*` 生产资产必须通过真实 loader 合同。
 - [x] 修复 Canon 健康 detail 经隐私投影隐藏后仍显示 unavailable 的矛盾文案；只有已验证 `OK` 可使用固定健康文案。
-- [ ] 在修复提交上重启 Host／OBS，保持 Gateway、隧道、Docker 与远端 Edge 不动，重新采集 Canon `OK`、真实 Chat COMMIT 和 Host-only pending external 报告。
+- [x] 在 `2cf552c92` 上完成严格 Host-only 探针：Canon `OK`、真实 Chat COMMIT、required unavailable 为 0；远端 Edge 未探测，报告 SHA-256 为 `0164db7266eddf87ab45216651d1de350817670f91f6aaf706bee71c21bb44ec`。
+- [ ] 在最终 SHA 继续复验 Docker 三库、Monitor 真实浏览器和本地 Gateway，仍排除网络安全与远端 Edge。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。
 - [ ] 邀请至少 3 名评审，与稳定基线盲测并达到 PRD 门槛。
 - [ ] 重点检查情绪变化幅度、混合情绪、裂痕／修复和技术任务中的人格连续性。
