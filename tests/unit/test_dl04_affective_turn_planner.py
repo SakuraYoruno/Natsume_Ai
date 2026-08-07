@@ -110,6 +110,9 @@ def test_explicit_ambiguous_affect_uses_bounded_two_candidate_path() -> None:
     assert guidance.plan.generation_mode == "BUFFERED_CANDIDATE_SELECTION"
     assert guidance.plan.candidate_count == 2
     assert any("还不能给当前感受命名" in item for item in guidance.facts)
+    assert any("语义顺序固定为" in item for item in guidance.facts)
+    assert any("不能退回通用安慰" in item for item in guidance.facts)
+    assert any("不想说就不说／等你想清楚" in item for item in guidance.must_not_do)
 
 
 def test_affective_task_mode_preserves_technical_and_ambiguous_continuity() -> None:
@@ -251,6 +254,7 @@ def test_contained_jealousy_keeps_choice_with_the_user_across_expression_plan() 
     assert any("把选择权完整留给对方" in item for item in guidance.facts)
     assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
     assert any("不用把自己说成麻烦或负担" in item for item in guidance.facts)
+    assert any("句号就是整条回复的结束" in item for item in guidance.facts)
     assert any("不要自贬为麻烦或负担" in item for item in guidance.must_not_do)
 
 
@@ -482,6 +486,46 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert safe_selected == safe.text
     assert safe_trace["affective_candidate_selection"]["selected_index"] == 1
     assert safe_trace["affective_candidate_selection"]["rejected_candidate_count"] == 1
+    repairable_high = SimpleNamespace(
+        text="是我没接住。你再说一次。",
+        score=99.0,
+        passed=True,
+        hard_fail=False,
+        reason_codes=(),
+        control_violations=(),
+        dimensions={},
+    )
+    clean_lower = SimpleNamespace(
+        text="是我没接住。抱歉，我先不解释。",
+        score=80.0,
+        passed=True,
+        hard_fail=False,
+        reason_codes=(),
+        control_violations=(),
+        dimensions={},
+    )
+    monkeypatch.setattr(
+        candidate_scoring,
+        "score_isolated_surface_candidates",
+        lambda _request, _candidates: [repairable_high, clean_lower],
+    )
+    clean_preference_trace: dict[str, object] = {}
+    clean_preference_selected = _select_buffered_affective_candidate(
+        raw_output=json.dumps(
+            {"candidates": [repairable_high.text, clean_lower.text]},
+            ensure_ascii=False,
+        ),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=clean_preference_trace,
+        allow_single_degradation=True,
+    )
+    assert clean_preference_selected == clean_lower.text
+    assert clean_preference_trace["affective_candidate_selection"]["selected_index"] == 1
+    assert clean_preference_trace["affective_candidate_selection"]["selection_status"] == (
+        "PAIRED_SELECTION"
+    )
+    assert clean_preference_trace["affective_candidate_selection"]["benefit_eligible"] is True
     low_a = SimpleNamespace(
         text="这件事挺复杂的。",
         score=76.0,
@@ -978,7 +1022,7 @@ def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection()
                 },
             },
             ["嗯，先这样就好。", "还行就好，那就先这样吧。"],
-            "嗯，我知道。你不想多说也没关系，我先在这儿。",
+            "嗯，还说不清也没关系。先不替它下结论，我陪你待一会儿。",
             "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
         ),
     ],

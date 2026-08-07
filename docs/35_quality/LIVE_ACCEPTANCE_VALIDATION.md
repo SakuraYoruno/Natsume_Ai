@@ -688,3 +688,11 @@ Surface、planner、native candidate、app adapter、scorer、harness 与 live r
 两个失败分别是：`ambiguous_affect:3` 第二轮连续触发 `AMBIGUOUS_AFFECT_DEVALUATION` 与 `UNRESOLVED_AFFECT_FALSE_RESOLUTION`，最终以 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 停止 Chat 图；`ambiguous_affect:4` 第二轮把未命名感受写成“忙完那一刻反而空空的，挺正常的”，候选正确降为 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`。人工还否决自动放行的“嗯，先这样就好”和“不会因为这个就要求你什么”，前者假装感受已经收束，后者又把真实吃味写成免责声明。
 
 代码现让所有 canonical 含混重试——不只通用质量重试——都保留“事情已经办完、感觉仍说不清”两个事实，并给出两条可直接发送的自然正例；“先这样就好”、空空的武断命名和新的吃味免责声明进入 scoped Gate。第二次候选仍触发未收束假结论时，Runtime 使用现有安全 fallback 保持对话可用，但回执仍是 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY / benefit_eligible=false`，不会冒充候选择优收益。517 项非安全回归通过，没有新增持久写、同步审计、第三次模型调用或网络安全范围。新 SHA 仍需用全新 SQLite 复验原四条，之后才决定完整 48 条。
+
+## 2026-08-07 A15 `5c45edb67` 安全降级复验与候选优先级纠偏
+
+加载 `5c45edb67` 的全新 Host／OBS／Monitor、SQLite 和 workspace 后，同四条真实 Gateway 轨迹得到 2 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、2 条 `FAIL`。本轮 12 个 turn 全部 accepted，上一轮的 `MODEL_SEMANTIC_RETRY_EXHAUSTED` 已关闭；两个失败都是第二轮 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY / benefit_eligible=false`，报告 SHA-256 为 `8b0d24fad132e3b219c2e3af1ac5f377782e3c077e187a758305bc5bc304c7b4`。这证明 fail-soft 可用性恢复，但不证明模型候选质量通过。
+
+重开 selection 发现结构性缺陷：第二次响应同时包含原样合格候选和需要本地修复的候选时，旧选择器把两者放在同一排名池，后者可凭修复前的较高语言分获胜，导致明明存在干净答案却把整轮记为不可计收益。代码现先只在原样合格候选中选优，仅当一个都没有时才使用修复候选。该优先级由专门回归覆盖，不再依赖某个具体词形。
+
+人工层另否决“感觉你也没啥精神”“行，那就这样”“等你想清楚”和“不过我不会拦着你的”。因此 AffectiveTurnPlan 的含混动作不再要求模型继续猜情绪，而采用稳定语义框架：只写用户明说的已发生事实、当前仍无法命名、无需现在下结论；短句必须延续上一轮，不得退回通用安慰。克制吃味则把“承认真实在意后的句号”定义为整条回复结束，禁止再以“但／不过”转入自主权保证。525 项非安全回归通过；不增加普通对话写入、审计或模型轮数，新 SHA 仍须真实复验。

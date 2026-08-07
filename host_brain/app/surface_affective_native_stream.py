@@ -695,7 +695,20 @@ def _select_buffered_affective_candidate(
         eligible.append(row)
         gated_sentences[index] = gate.sentence
 
-    selected = select_best_isolated_candidate(eligible)
+    # A repaired candidate must never outrank an untouched candidate merely
+    # because its pre-repair language score was higher.  The previous ordering
+    # could choose a locally normalized reply even when the provider returned
+    # another fully valid alternative, then incorrectly downgrade the whole
+    # turn to ``benefit_eligible=false``.  Prefer the best clean candidate and
+    # use a repaired one only when no clean alternative survived.
+    clean_eligible = [
+        row
+        for index, row in enumerate(scores)
+        if row in eligible and index not in locally_repaired_indices
+    ]
+    selected = select_best_isolated_candidate(clean_eligible)
+    if selected is None:
+        selected = select_best_isolated_candidate(eligible)
     if selected is None:
         unfiltered = select_best_isolated_candidate(scores)
         unfiltered_index = next(
