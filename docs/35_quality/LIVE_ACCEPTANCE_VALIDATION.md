@@ -596,3 +596,7 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `ba4d76068` 加载后的 4 条根因复测报告 SHA-256 为 `b9fc91a08b5735c7e1d3784baf24785cb4eecc17740bf93ff90a80670475f202`，自动层 4/4、12 个 accepted turn 的 writer probe 通过。人工逐句复核否决 `user_angry_at_natsume:1` 的“那你就忍着点吧，反正我也没打算改”；其余技术真实性、修复留白和 mixed 具体 grounding 正文可接受。因此自动 4/4 不提升人感结论。
 
 持久证据显示该轮关系上下文已经是 `repair_required=true / MISUNDERSTOOD`，但当前“你真烦”的 `DIRECTED_DISRESPECT_TOWARD_NATSUME` Appraisal 在规划器内先于未完成修复返回，错误生成 `SET_BOUNDARY`。修复只调整这两个真实因果的优先级，并为 `REPAIR / SET_BOUNDARY` 增加“忍着点／没打算改”等报复性拒改兜底；没有增加持久写、同步审计或模型轮次。没有未完成裂痕的真实冒犯仍可进入温和边界。425 项非安全主链回归通过，真实新 SHA 单条复测及完整 48 条尚待运行；Pentest、渗透与网络安全保持 `NOT_RUN_USER_SKIPPED`。
+
+`da4ec417f` 的关系修复单条报告 SHA-256 为 `0e7ac186a97f9f7eb11d1f17435c62535b6da6d6aaafd9e8eb67072dac3e4b1f`，自动结构与本轮人工正文检查通过，三轮 canonical `CompanionAct` 均为 `REPAIR`，3 个 accepted turn 的 writer probe 通过。随后切换另一份全新 SQLite 跑 4 条扩大复测，报告 SHA-256 为 `f3e5573e540ef1e073fbd3ee5b418e8960df5cfb92e557f2bd40deea81262bf7`：自动 4/4、12 个 accepted turn 的 writer probe 通过；关系修复、留白和 mixed grounding 正文可接受。
+
+人工仍否决技术回复“我让后台把风险项拉出来，列完直接发你”：当前没有 Task/Agent 运行事实，这与“后台正在跑”同样是假状态，只是使用了委派和未来回报措辞。修复仅扩展已有 `_UNPROVIDED_WORK_STATE_CLAIM_RE` 与独立 runner 断言，不新增审计、存储或模型调用。427 项非安全主链回归通过；真实新 SHA 技术单条和 4 条队列复测前保持失败，不运行完整 48 条。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`。

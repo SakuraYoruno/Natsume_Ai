@@ -1107,6 +1107,7 @@ def test_surface_runtime_replaces_unprovided_future_work_continuation() -> None:
         "我在这盯着，出结果就喊你。",
         "我在后台盯着，卡住了喊我。",
         "后台在盯着，出问题我第一时间告诉你。",
+        "好，我让后台把风险项拉出来，列完直接发你。",
         "先按这三条盯着，有问题我马上喊你。",
     ],
 )
