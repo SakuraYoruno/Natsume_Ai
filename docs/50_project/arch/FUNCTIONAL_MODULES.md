@@ -106,3 +106,5 @@ Monitor 的 Closed Loop、Reply Outbox、Terminal 三组指标分别展示上述
 | TTS 情绪韵律 | `edge_client/actuators/tts_prosody.py` | 模型生命周期与播放设备 |
 
 兼容入口仍从原模块重导出必要符号，以保持调用合同；新实现边界本身才是职责 owner。后续修改应直接进入对应模块，禁止把逻辑重新堆回 facade。
+
+Monitor 的生产 E2E 现在可以按验收范围拆开执行：默认仍包含全部页面；显式设置 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0` 时，只验证 Host／OBS 健康、Task Runtime、Trace、Observability、Gateway 与真实 read model，不请求 Security Immune 投影。该模式用于本次用户要求的非安全验收，不能把未执行的安全页面写成 PASS。

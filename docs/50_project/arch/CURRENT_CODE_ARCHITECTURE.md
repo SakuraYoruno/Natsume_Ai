@@ -166,6 +166,8 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 
 当前工作树上的 A01～A14 静态架构门禁为 `PASS`，migration catalog head 为 `0153`。这只关闭静态职责和目录合同漂移；A15 必须绑定提交 SHA 重新启动真实 Docker、Host、OBS、Monitor、Gateway 和可用 Edge 后才能形成最终结论。
 
+当前非安全 A15 已把真实 Docker、Host、OBS、Nginx Monitor 与 Gateway 绑定到同一隔离数据根。Neo4j／Chroma／Redis 的写入、容器重启、重读与清理通过；Monitor 从真实 OBS 投影读取 TaskGraph、预算、验证、Gateway 和 Life Body，并允许用 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0` 单独执行非安全生产 E2E。这个开关只裁剪测试范围，不改变生产路由或安全默认值；A09、A12 和 Pentest 仍明确为 `NOT_RUN_USER_SKIPPED`。
+
 ## 12. PlanningSearch Research 的双臂身份
 
 Research 的可验收单位不是一个共享 profile prompt，而是两个预注册 arm。baseline 和 selected 可以共享 provider、model、budget 与冻结 corpus，却必须分别绑定自己的 candidate path、source set、graph/path digest 和渲染后的 prompt digest。外部模型 receipt 只有与对应 arm 的 durable prompt identity 精确一致时才可进入配对终态；调用者临时提交的摘要不具 authority。

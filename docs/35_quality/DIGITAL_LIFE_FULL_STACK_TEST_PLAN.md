@@ -822,4 +822,6 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 
 `f378fa80d` 的完整 48 条实测证明结构正确和服务稳定不能代理人感：144 个 turn 与 graph 全部完成、旧 writer 为 0，但自动仍只有 38/48，端到端 p95 为 10,044 ms，且当前 agent 逐句复核发现跨场景的客服式重复、无依据情绪解释、修复/边界等待压力、技术事实编造和关系自我删除。后续不得再以局部正则消除单句为主；应先实现结构化 `CompanionUtteranceFrame`，把可用事实、允许情感、自身立场、不可推断项和自然结束方式作为模型输入/输出合同，再重跑完整队列。三名评审盲测未运行前仍为 `HUMAN_REVIEW_PENDING/FAIL`。
 
+本轮若用户明确跳过网络安全，真实 Monitor Core Release 用例必须设置 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0`。测试仍须覆盖生产 Nginx、普通 operator session、Host／OBS health、Task Runtime、Trace SSE、Observability 与 Gateway；`/obs/security/*`、Security Immune 页面、A09、A12 与 Pentest 必须逐项记录 `NOT_RUN_USER_SKIPPED`，不得从分母中静默删除或写成 PASS。默认不设置该变量时，完整用例仍包含安全投影。
+
 结构拆分后的最小回归固定为两组：`test_dl02_affect_fusion.py + test_dl02_affect_fusion_restart.py` 验证观察抽取没有改变 TTL、冲突、CAS 与重启语义；`test_surface_runtime.py + test_aw08_surface_runtime_ports.py` 验证候选规则抽取没有改变生成和端口合同。当前工作树分别为 52/52、162/162。该证据只证明等价拆分与 Gate 3，不改变完整 48 条人感失败结论。

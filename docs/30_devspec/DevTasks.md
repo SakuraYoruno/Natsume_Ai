@@ -51,7 +51,9 @@
 - [x] Research/Code PlanningSearch 当前工作树机械回归 128 passed、1 项 Windows symlink 权限分类跳过；Code 执行范围与真实 cohort 提交逐 blob 相同，Research 仅有保持默认行为的通用 scene 参数扩展。
 - [x] Pentest、A09、A12 与网络安全保持 `NOT_RUN_USER_SKIPPED`，未计入通过项。
 - [x] 拆分后的受影响波次回归 306 项通过，pytest 全量收集通过。
-- [ ] 提交并绑定新 SHA 后执行 A15 完整服务栈与故障矩阵；通过前不宣称 Architecture 2.0 完成。
+- [x] 在当前运行时代码 SHA 上启动真实 Docker、Host、OBS、Nginx Monitor 与 Gateway；Neo4j／Chroma／Redis 完成隔离写入、容器重启、重读和清理，Monitor 的普通会话与非安全核心页面 E2E 通过。
+- [x] 当前运行时代码 SHA 的 4 类 12 回合真实 Gateway／DeepSeek 数字生命冒烟为 4/4 自动待人工，12 个 turn 全部 accepted，旧情感 writer 增量为 0。
+- [ ] 完成剩余非安全故障／回滚、当前 SHA 覆盖率和三人盲评；A09、A12、Pentest 按用户要求不运行。全部强制结论满足前不宣称 Architecture 2.0 完成。
 
 ## P0：真实对话体验
 

@@ -718,3 +718,15 @@ Surface、planner、native candidate、app adapter、scorer、harness 与 live r
 Runtime/恢复批次 50 项通过，覆盖 durable 多节点 fan-out、Host/Worker 与并行终态重启、Budget 争用、Review continuation、取消和 effect reconciliation；迁移/备份 57 项、Workspace promotion/cleanup 59 项、七路线/对话/Outbox 19 项通过。Evolution Lab、Skill 生命周期、Feedback/Knowledge/Identity 批次首轮在 37 项后发现 NE-05/NE-06 fixture 把 migration head 写死为 152；当前 catalog 已到 153。断言改为“current 等于 latest 且至少包含 0152 合同”，完整批次随后 64 项通过。该修复没有改生产 schema 或历史 migration。
 
 Research/Code PlanningSearch 的当前工作树非 Pentest 机械回归为 128 passed、1 项因 Windows 无 symlink 权限分类跳过。Code 真实 cohort 提交 `3eaa5486b` 到当前工作树之间，`host_brain/planning_search` tree、planning contracts、冻结 `cohort.json` 和 code ledger blob 均逐项相同。Research 提交 `1c9c2b2bd` 的冻结 corpus 与 contracts 也相同；唯一相关变更是外部 adapter 新增默认值仍为 `RESEARCH` 的 `scene_type` 参数，以供 Code 复用，当前单测继续精确断言 Research request 和 metadata 不变。因此两份昂贵外部 cohort 分别按 byte-identical 与 scope-equivalent 继承，不伪称当前 SHA 重新调用。Pentest、A09、A12 和网络安全未运行，PlanningSearch 总结论仍是部分通过而非三域完成。
+
+## 2026-08-07 A15 当前 SHA 非安全真实服务栈
+
+运行时代码提交 `df464e61a` 使用隔离 `host-final-df464e61a` 数据根启动 Host `:18080`、OBS `:18082`、Nginx Monitor `:18180`，并继续连接真实 Gateway `:19000` 与固定镜像摘要的 acceptance Docker project `natsume-ne07-d7e0cfba8`。Monitor UI 重新执行 `npm ci`、operator client drift、lint、typecheck、27 项 read-model test 和 production build；真实浏览器自动建立普通本机会话，Cockpit 不再出现“待连接”“Runtime 待恢复”或 raw Capability Forge 错误，HTTP 与 WebSocket 均读取真实 OBS 数据。
+
+为遵守用户跳过网络安全的范围，Core Release 浏览器用例新增显式 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0`。该模式不请求 `/obs/security/*`、不进入 Security Immune 页面，其余真实 Host／OBS health、TaskGraph detail、Trace SSE、Observability、Gateway 和 Task Runtime 页面仍全部执行并通过。默认值继续包含 Security，不改变产品或完整验收合同；本轮安全分支状态只能写为 `NOT_RUN_USER_SKIPPED`。
+
+外部服务收据 `sha256:72ef48733dcedc51a9b75123c264ba9189e6ba3d42f683324776f98ee9f31e52` 为 `PASS`：Neo4j、Chroma、Redis 分别完成隔离写入、容器重启、持久重读、更新／向量查询／竞争锁和 namespace 清理。三库重启后 Host、OBS、Monitor、Gateway 继续返回 200，Monitor 普通会话 E2E 再次通过。
+
+同一运行时代码 SHA 又执行低落、生气后的修复、喜忧并存和亲密边界四类真实 Gateway cohort，共 12 个 accepted turn。四类均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；DeepSeek `deepseek-v4-flash` 形成 12 条 succeeded 和 3 条 rejected attempt 记录，最终 12 个 turn 均完成，rejected 记录未被计作成功。Gateway→Host terminal 中位数 6,718 ms，TaskGraph 中位数 4,498 ms，provider terminal 中位数 2,304.5 ms；仍显著高于实时目标。canonical affect／relationship／Life／turn delivery writer 分别前进 33／18／75／12 行，所有 legacy emotion table 与旧文件变化为 0。报告 SHA-256 为 `c466a0b385dc535071c27963eac5bcbe6e652f397abb44fd2ed3fb5ea466cd42`。
+
+这四类冒烟证明结构拆分没有破坏真实主链，不覆盖 `f378fa80d` 完整 48 条的 38/48 自动结果、人感人工失败和 p95 10,044 ms，也不能替代三人盲评。当前总体仍为 `INCOMPLETE`；网络安全、Pentest、A09、A12 均未运行，覆盖率门槛和剩余非安全回滚／性能项继续待收口。
