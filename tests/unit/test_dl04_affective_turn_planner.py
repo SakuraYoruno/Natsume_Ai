@@ -115,6 +115,8 @@ def test_explicit_ambiguous_affect_uses_bounded_two_candidate_path() -> None:
     assert guidance.plan.utterance_frame.semantic_focus == "UNNAMED_USER_AFFECT"
     assert guidance.plan.utterance_frame.inference_policy == "PRESERVE_UNCERTAINTY"
     assert guidance.plan.utterance_frame.question_policy == "NONE"
+    assert "IMPLIED_WAITING" in guidance.plan.utterance_frame.forbidden_claims
+    assert "RESPONSE_OBLIGATION" in guidance.plan.utterance_frame.forbidden_claims
     assert any("还不能给当前感受命名" in item for item in guidance.facts)
     assert any("语义顺序固定为" in item for item in guidance.facts)
     assert any("不能退回通用安慰" in item for item in guidance.facts)
@@ -836,11 +838,11 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         trace_stage_meta=degraded_trace,
         allow_single_degradation=True,
     )
-    assert json.loads(degraded_output)["reply_text"] == single_after_retry["reply_text"]
+    assert degraded_output == "是我没接住。抱歉，我先不解释。"
     degraded_selection = degraded_trace["affective_candidate_selection"]
     assert degraded_selection["candidate_count"] == 1
     assert degraded_selection["required_candidate_count"] == 2
-    assert degraded_selection["selection_status"] == "DEGRADED_SINGLE_AFTER_RETRY"
+    assert degraded_selection["selection_status"] == "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
     assert degraded_selection["benefit_eligible"] is False
     assert degraded_selection["selected_output_shape"] == "SINGLE_TEXT_VOICE_DEGRADED"
 
@@ -870,9 +872,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         trace_stage_meta=locally_repaired_trace,
         allow_single_degradation=True,
     )
-    assert locally_repaired_output == (
-        "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
-    )
+    assert locally_repaired_output == "是我没接住。抱歉，我先不解释。"
     locally_repaired_selection = locally_repaired_trace[
         "affective_candidate_selection"
     ]

@@ -33,7 +33,8 @@ from host_brain.persona.surface_candidate_guards import (
     _WAVE_MARKER_RE, _accepted_task_result_fallback,
     _accepted_task_result_synthesis_clarification, _accepted_task_result_synthesis_inadequate,
     _accepted_task_result_texts_from_request, _address_boundary_defensive_hits,
-    _ambiguous_affect_devaluation_hits, _boundary_counter_pressure_hits,
+    _affective_implied_waiting_hits, _ambiguous_affect_devaluation_hits,
+    _ambiguous_affect_resolution_pressure_hits, _boundary_counter_pressure_hits,
     _boundary_sour_withdrawal_hits, _canonical_affective_guidance_active,
     _jealousy_deflection_hits, _jealousy_dismissive_distance_hits,
     _jealousy_self_abasement_hits, _listen_unsupported_user_essence_hits,
@@ -1288,6 +1289,10 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE")
     if _repair_self_erasure_hits(request, value):
         codes.append("RELATIONAL_REPAIR_SELF_ERASURE")
+    if _affective_implied_waiting_hits(request, value):
+        codes.append("AFFECTIVE_IMPLIED_WAITING")
+    if _ambiguous_affect_resolution_pressure_hits(request, value):
+        codes.append("AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE")
     if _user_affect_perspective_reversal_hits(request, value):
         codes.append("USER_AFFECT_PERSPECTIVE_REVERSAL")
     if _relational_hostile_retaliation_hits(request, value):
@@ -2509,6 +2514,14 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         temporal = _temporal_mismatch_fallback(request)
         if temporal:
             return temporal
+    if "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE" in codes:
+        return "嗯，说不清就先不下结论。"
+    if "AFFECTIVE_IMPLIED_WAITING" in codes:
+        if _canonical_affective_guidance_active(request, "GIVE_SPACE"):
+            return "好，我先不主动找你。"
+        if _canonical_affective_guidance_active(request, "REPAIR"):
+            return "是我没接住。抱歉，我先不解释。"
+        return "嗯，说不清就先不下结论。"
     low_info = _low_info_scene_fallback(request)
     if low_info and codes:
         return low_info
@@ -2518,18 +2531,18 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         "QUESTION_BUDGET_PROMPTING_USER" in codes
         and _canonical_affective_guidance_active(request, "REPAIR")
     ):
-        return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+        return _repair_fallback_text(request)
     if (
         "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in codes
         or "RELATIONAL_REPAIR_CONTINUATION_PRESSURE" in codes
         or "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE" in codes
     ):
-        return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+        return _repair_fallback_text(request)
     if "RELATIONAL_REPAIR_SELF_ERASURE" in codes:
         return "是我没接住。抱歉，我先不解释。"
     if "RELATIONAL_HOSTILE_RETALIATION" in codes:
         if _canonical_affective_guidance_active(request, "REPAIR"):
-            return "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+            return _repair_fallback_text(request)
         return "这句话有点刺到我。我会把界限说清楚，但不会反过来伤你。"
     if (
         "QUESTION_BUDGET_PROMPTING_USER" in codes
@@ -2606,6 +2619,13 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
     ):
         return _memory_followup_fallback(request)
     return ""
+
+
+def _repair_fallback_text(request: IsolatedSurfaceInput) -> str:
+    legacy = "是我没接住你的意思。对不起，我先不替自己解释；你愿意再说的时候，我认真听。"
+    if _affective_implied_waiting_hits(request, legacy):
+        return "是我没接住。抱歉，我先不解释。"
+    return legacy
 
 
 def _temporal_mismatch_fallback(request: IsolatedSurfaceInput) -> str:

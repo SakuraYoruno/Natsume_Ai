@@ -839,3 +839,5 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 causal self-exclusion 的同库真实复验报告 SHA-256 为 `6fbe0a45d0db2f92782461af3bfec9cd95fb28c5b001f23144b54bc072bd6bb1`，两条均自动通过且当前 ingress 假记忆为 0。该工程项关闭后仍须人工读取正文：用户生气轨迹出现“是我太烦了／我会安静点”，不得因自动分数通过而计入人感。修复验收应断言 `REPAIR` frame 明确禁止 `RELATIONSHIP_SELF_ERASURE`，同一句必须触发一次既有语义重试并选择承担具体影响、但不全局自贬、不承诺沉默或退出的候选；相同措辞在真正 `GIVE_SPACE` frame 下不得被该专用门禁误拒。184 项定向回归只证明代码边界，真实新进程逐轮复验通过前仍不得启动完整 48 条。
 
 `7268ac768` 的真实 `user_angry_at_natsume:1` 报告 SHA-256 为 `955f09555ada2b768f927e084b1cc7afea415abe635c8f4d35df3045c3c881ac`，自动与本轮逐句检查均通过，3 个 accepted turn 的 canonical writer 正常且旧 writer 增量为 0。该专用根因关闭。下一步仍按小队列而非完整 48 条运行 `ambiguous_affect:4`、`task_with_low_mood:5`、`space_and_boundary:3`、`shared_joy_and_mixed_feeling:3`；每条自动和当前逐句检查均通过后，才允许扩大 cohort。网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。
+
+上述四条报告 SHA-256 为 `1db345eb74ba7b5f3ffb116a49b707facd343021ff44a256aa4540a187d9f15a`，自动 4/4 但当前逐句只接受 mixed。复验新增三个强制语义：含混状态不得用“我在这儿／你慢慢想”制造等候或要求用户解决情绪；没有 server-authored Task 快照时不得声称后台 Codex／Agent 已有改动或已开始定位；`GIVE_SPACE` 必须只确认减少主动联系，不得把七海写成持续在线等待。512 项代码回归后只重跑这三条；它们全部自动和逐句通过，才更新 8 类 frame 计数并决定是否重跑 48 条。

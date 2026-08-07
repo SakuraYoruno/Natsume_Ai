@@ -19,7 +19,7 @@ from host_brain.persona.surface_utterance_frame import (
 
 _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"(?:后台.{0,8}(?:在跑|运行|执行|处理|在盯|盯着)|"
-    r"我(?:让|叫|安排).{0,6}(?:后台|任务|Agent|智能体).{0,12}(?:拉|列|查|跑|处理|执行|整理)|"
+    r"我(?:让|叫|安排).{0,6}(?:后台|任务|Agent|智能体).{0,12}(?:拉|列|查|跑|处理|执行|整理|做|定位|分析|检查|排查)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
     r"我(?:帮|替)你.{0,6}盯着|"
     r"(?:我)?陪你.{0,6}盯到.{0,10}(?:为止|完成|结束|过)|"
@@ -56,7 +56,8 @@ _JAPANESE_UNSUPPORTED_SHARED_HISTORY_RE = re.compile(
     r"ずっと(?:ここ|一緒|そば)|いつも(?:こう|同じ))"
 )
 _SURFACE_INTERNAL_AUTHORSHIP_RE = re.compile(
-    r"(?:(?:交给|让|叫).{0,6})?(?:Codex|ChatGPT|DeepSeek|Qwen|GPT[-\w]*)"
+    r"(?:后台|内部).{0,4}(?:Codex|ChatGPT|DeepSeek|Qwen|GPT[-\w]*)"
+    r"|(?:(?:交给|让|叫).{0,6})?(?:Codex|ChatGPT|DeepSeek|Qwen|GPT[-\w]*)"
     r".{0,12}(?:说|写|生成|给|做|处理|完成|搞定|完事|一眨眼)",
     re.IGNORECASE,
 )
@@ -101,6 +102,14 @@ _REPAIR_UNGROUNDED_SELF_CAUSE_RE = re.compile(
 _REPAIR_SELF_ERASURE_RE = re.compile(
     r"(?:是我|我(?:就是|真的|确实)?)(?:太|很|有点)?(?:烦人|烦)(?:了|的)?(?=[，,。.!！]|$)"
     r"|我(?:会|以后|就|还是|先){0,2}(?:安静(?:一)?点|少说(?:一)?点|不说了|闭嘴)(?:的)?"
+)
+_AFFECTIVE_IMPLIED_WAITING_RE = re.compile(
+    r"我(?:就|会|都|一直)?(?:在这(?:儿|里)|等(?:着)?|安静(?:地)?待着)"
+    r"|(?:想找我|想说|愿意再说)(?:的)?时候.{0,12}(?:我|再)"
+)
+_AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE_RE = re.compile(
+    r"你(?:就|先|可以)?慢慢(?:想|理|弄)(?:清楚|明白)?"
+    r"|等你(?:想|理|弄)(?:清楚|明白)"
 )
 _USER_AFFECT_PERSPECTIVE_REVERSAL_RE = re.compile(
     r"我自己(?:也|都|还|也都|都还)?.{0,4}(?:没|不)(?:理清楚|理清|想明白|说清楚)"
@@ -353,10 +362,7 @@ def _repair_self_erasure_hits(
 ) -> tuple[str, ...]:
     """Reject self-devaluation or self-removal only when the typed repair frame forbids it."""
 
-    control = getattr(request, "control", None)
-    frame = normalize_companion_utterance_frame(
-        getattr(control, "companion_utterance_frame", {})
-    )
+    frame = _typed_affective_frame(request)
     if (
         not frame
         or str(frame.get("companion_act_kind") or "").upper() != "REPAIR"
@@ -368,6 +374,41 @@ def _repair_self_erasure_hits(
         dict.fromkeys(
             match.group(0)
             for match in _REPAIR_SELF_ERASURE_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _affective_implied_waiting_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    frame = _typed_affective_frame(request)
+    if "IMPLIED_WAITING" not in set(frame.get("forbidden_claims") or ()):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _AFFECTIVE_IMPLIED_WAITING_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _ambiguous_affect_resolution_pressure_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    frame = _typed_affective_frame(request)
+    if (
+        str(frame.get("semantic_focus") or "").upper() != "UNNAMED_USER_AFFECT"
+        or "RESPONSE_OBLIGATION" not in set(frame.get("forbidden_claims") or ())
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE_RE.finditer(
+                str(text or "")
+            )
         )
     )
 
@@ -773,6 +814,13 @@ def _canonical_affective_guidance_active(
         "SET_BOUNDARY": ("陪伴动作：可以诚实承认被刺到", "不把自己的委屈变成对方的义务"),
     }.get(str(companion_act or "").upper(), ())
     return bool(markers) and any(marker in context for marker in markers)
+
+
+def _typed_affective_frame(request: IsolatedSurfaceInput) -> dict[str, object]:
+    control = getattr(request, "control", None)
+    return normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {})
+    )
 
 
 def _canonical_affective_continuity_active(

@@ -536,7 +536,9 @@ def _companion_utterance_frame_spec(
             "relationship_posture": "CLOSE_WITHOUT_CLAIM",
             "question_policy": "NONE",
             "ending_mode": "NATURAL_STOP",
-            "forbidden_claims": tuple(common_claims),
+            "forbidden_claims": tuple(
+                [*common_claims, "IMPLIED_WAITING", "RESPONSE_OBLIGATION"]
+            ),
         }
     if act == "HOLD_COMPLEXITY" or continuity == "MIXED_AFFECT_RESULT_CONTINUATION":
         return {
@@ -560,7 +562,9 @@ def _companion_utterance_frame_spec(
             "relationship_posture": "CLOSE_WITHOUT_CLAIM",
             "question_policy": "NONE",
             "ending_mode": "NATURAL_STOP",
-            "forbidden_claims": tuple(common_claims),
+            "forbidden_claims": tuple(
+                [*common_claims, "IMPLIED_WAITING", "RESPONSE_OBLIGATION"]
+            ),
         }
     if act == "REPAIR":
         return {

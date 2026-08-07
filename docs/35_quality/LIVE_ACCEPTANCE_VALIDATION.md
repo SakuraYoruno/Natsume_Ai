@@ -782,3 +782,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 后续代码不增加普通对话写入、模型调用或审计步骤：`REPAIR` 的类型化 `CompanionUtteranceFrameV1` 新增 `RELATIONSHIP_SELF_ERASURE` 禁止项，Surface 仅在该服务器 frame 下拒绝“我是个很烦的人／我会沉默退出”一类候选；`GIVE_SPACE` 仍可独立确认留白。规划与 Surface 定向回归 184 项通过。必须加载新进程再跑用户生气轨迹并完成逐句复核；在此之前 frame 真实队列、人感和完整 48 条仍为 `FAIL/PENDING_HUMAN_REVIEW`。
 
 `7268ac768` 已加载到同一隔离 Host，Docker 容器 ID、acceptance 数据根和 29000 Gateway 均保持不变，远端 Edge 未启动。`user_angry_at_natsume:1` 三轮真实 DeepSeek 报告 SHA-256 为 `955f09555ada2b768f927e084b1cc7afea415abe635c8f4d35df3045c3c881ac`：自动 1/1，3 个 accepted turn、TaskGraph、Outbox、canonical writer 与旧 writer 零增量通过。三轮正文为“上次是我没听懂，抱歉。这次我会认真听的。”“让你不舒服了，是我的错。我会记住的。”“这次是我理解错了。我会把你的不舒服记住。”；当前逐句复核接受，没有自我贬低、反击、索取重述或沉默退出。Host 终态为 7,942／5,985／8,796 ms，仍不满足实时门槛。该根因提升为限定范围 PASS，不能外推为 8 类 frame、完整 48 条或整体“像人”通过。
+
+继续运行 `ambiguous_affect:4`、`task_with_low_mood:5`、`space_and_boundary:3` 与 `shared_joy_and_mixed_feeling:3`，报告 SHA-256 为 `1db345eb74ba7b5f3ffb116a49b707facd343021ff44a256aa4540a187d9f15a`。自动层 4/4、12 个 accepted turn、TaskGraph／Outbox 和旧 writer 零增量通过；当前逐句复核仅接受同时保留开心与害怕的 mixed 轨迹。含混末句“我就在这儿，你慢慢想”仍将陪伴模板化为等候和认知任务；技术轨迹在没有 Task 快照时声称“后台 Codex”已有改动并会执行定位；空间轨迹用“我安静待着／想找我时我都在”替代真正退出当前互动。
+
+当前补丁仍只操作已有内存输出边界：`UNNAMED_USER_AFFECT` 增加 `IMPLIED_WAITING/RESPONSE_OBLIGATION`，`GIVE_SPACE` 直接消费既有 `IMPLIED_WAITING`，技术输出补齐未授权后台动作和内部模型署名词形；安全 fallback 在服务器 frame 下分别收敛为“不下结论”“不主动找你”或陈述当前可确认事实。没有新增 migration、repository、普通对话写入或第三次模型调用。规划、Surface、native stream、packet compiler、app composition 与 live runner 共 512 项非安全回归通过；加载新 SHA 重跑三条前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

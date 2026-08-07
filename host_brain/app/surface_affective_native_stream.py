@@ -362,6 +362,13 @@ def _buffered_affective_candidate_messages(
                 "当前没有 server-authored Task 运行快照。不要声称七海正在处理、盯着后台、"
                 "等待结果或之后会回报；只回答当前问题，信息不足就直接说明缺什么。"
             ),
+            "AFFECTIVE_IMPLIED_WAITING": (
+                "不要用‘我在这儿／我等你／想找我时我都在’安排持续等候。若用户要空间，"
+                "只确认减少主动联系；若感受说不清，只承认暂不下结论。"
+            ),
+            "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE": (
+                "对方已经说不清，不要再要求‘慢慢想／想清楚’。只保留不确定性后自然停住。"
+            ),
             "UNSUPPORTED_TASK_FUTURE_EVENT": (
                 "上次候选编造了用户没有提供的验收、上线或交付时间与后果。只列当前"
                 "上下文能支持的风险；缺少报错、代码或排期时直接说明，不能补写项目事实。"
@@ -622,6 +629,7 @@ def _select_buffered_affective_candidate(
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
             "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+            "RELATIONAL_REPAIR_SELF_ERASURE",
             "USER_AFFECT_PERSPECTIVE_REVERSAL",
             "RELATIONAL_HOSTILE_RETALIATION",
             "QUESTION_BUDGET_PROMPTING_USER",
@@ -629,6 +637,8 @@ def _select_buffered_affective_candidate(
             "MIXED_AFFECT_DISMISSAL",
             "UNPROVIDED_NOTIFICATION_ACTION",
             "UNPROVIDED_WORK_STATE_CLAIM",
+            "AFFECTIVE_IMPLIED_WAITING",
+            "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE",
             "UNSUPPORTED_TASK_FUTURE_EVENT",
             "RELATIONAL_AUTONOMY_PRESSURE",
             "BOUNDARY_SOUR_WITHDRAWAL",
@@ -644,12 +654,15 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
                     "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+                    "RELATIONAL_REPAIR_SELF_ERASURE",
                     "USER_AFFECT_PERSPECTIVE_REVERSAL",
                     "RELATIONAL_HOSTILE_RETALIATION",
                     "MIXED_AFFECT_CONTINUITY_DROPPED",
                     "MIXED_AFFECT_DISMISSAL",
                     "UNPROVIDED_NOTIFICATION_ACTION",
                     "UNPROVIDED_WORK_STATE_CLAIM",
+                    "AFFECTIVE_IMPLIED_WAITING",
+                    "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE",
                     "UNSUPPORTED_TASK_FUTURE_EVENT",
                     "RELATIONAL_AUTONOMY_PRESSURE",
                     "BOUNDARY_SOUR_WITHDRAWAL",

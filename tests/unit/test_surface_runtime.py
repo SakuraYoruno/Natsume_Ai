@@ -62,6 +62,34 @@ def _candidate_payload(candidates: list[str]) -> str:
     )
 
 
+def _frame_payload(
+    *,
+    frame_id: str,
+    companion_act_kind: str,
+    semantic_focus: str,
+    self_stance: str,
+    response_move: str,
+    inference_policy: str,
+    relationship_posture: str,
+    ending_mode: str,
+    forbidden_claims: list[str],
+) -> dict[str, object]:
+    return {
+        "schema_version": "companion_utterance_frame.v1",
+        "frame_id": frame_id,
+        "companion_act_kind": companion_act_kind,
+        "semantic_focus": semantic_focus,
+        "self_stance": self_stance,
+        "response_move": response_move,
+        "inference_policy": inference_policy,
+        "relationship_posture": relationship_posture,
+        "question_policy": "NONE",
+        "ending_mode": ending_mode,
+        "forbidden_claims": forbidden_claims,
+        "created_at_ms": 1_900_000_000_000,
+    }
+
+
 def test_surface_runtime_uses_first_reply_without_code_scoring() -> None:
     calls: list[list[dict[str, str]]] = []
 
@@ -1002,6 +1030,147 @@ def test_surface_runtime_retries_typed_repair_self_erasure_without_affecting_spa
     assert "RELATIONAL_REPAIR_SELF_ERASURE" in calls[1][-1]["content"]
     assert "用沉默、消失和退出换取修复" in calls[0][-1]["content"]
     assert result.selected_text == "是我没接住你的意思。抱歉，我先不替自己解释。"
+
+
+def test_surface_runtime_retries_typed_ambiguous_waiting_and_resolution_pressure() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["嗯，我就在这儿，你慢慢想。"])
+        return _candidate_payload(["嗯，说不清就先不下结论。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="不知道。",
+                reply_control_packet={
+                    "task_mode": "ambiguous_affect",
+                    "response_move": "comfort_without_naming",
+                    "emotional_tone": "quiet",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["当前感受仍说不清。"],
+                    "must_not_do": ["不要替用户命名感受。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-ambiguous-waiting",
+                        companion_act_kind="COMFORT",
+                        semantic_focus="UNNAMED_USER_AFFECT",
+                        self_stance="QUIET_PRESENT",
+                        response_move="COMFORT_WITHOUT_NAMING",
+                        inference_policy="PRESERVE_UNCERTAINTY",
+                        relationship_posture="CLOSE_WITHOUT_CLAIM",
+                        ending_mode="NATURAL_STOP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "IMPLIED_WAITING",
+                            "RESPONSE_OBLIGATION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    retry_prompt = calls[1][-1]["content"]
+    assert "AFFECTIVE_IMPLIED_WAITING" in retry_prompt
+    assert "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE" in retry_prompt
+    assert result.selected_text == "嗯，说不清就先不下结论。"
+
+
+def test_surface_runtime_retries_typed_space_waiting_posture() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["嗯，我安静待着。想找我的时候，我都在。"])
+        return _candidate_payload(["好，我先不主动找你。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我想一个人待着。",
+                reply_control_packet={
+                    "task_mode": "boundary_repair",
+                    "response_move": "respect_space",
+                    "emotional_tone": "quiet",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["陪伴动作：尊重留白，直接确认会减少主动联系。"],
+                    "must_not_do": ["不要追问、催回复或安排用户回来。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-space-waiting",
+                        companion_act_kind="GIVE_SPACE",
+                        semantic_focus="CURRENT_TURN",
+                        self_stance="QUIET_PRESENT",
+                        response_move="RESPECT_SPACE",
+                        inference_policy="BOUNDED_BY_EVIDENCE",
+                        relationship_posture="RESPECT_AUTONOMY",
+                        ending_mode="QUIET_STOP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "IMPLIED_WAITING",
+                            "RESPONSE_OBLIGATION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "AFFECTIVE_IMPLIED_WAITING" in calls[1][-1]["content"]
+    assert result.selected_text == "好，我先不主动找你。"
+
+
+@pytest.mark.parametrize(
+    ("bad_reply", "reason_code"),
+    [
+        ("报错信息发我，我让后台 Codex 先做完整链路定位。", "SURFACE_INTERNAL_AUTHORSHIP_LEAK"),
+        ("风险列完我让后台先做完整链路定位。", "UNPROVIDED_WORK_STATE_CLAIM"),
+    ],
+)
+def test_surface_runtime_retries_unprovided_background_work_in_technical_reply(
+    bad_reply: str,
+    reason_code: str,
+) -> None:
+    calls: list[list[dict[str, str]]] = []
+    good_reply = "目前能确认的风险是：定位信息不足、修复后的回归不足，以及今晚的时间窗口太短。"
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        return _candidate_payload([bad_reply if len(calls) == 1 else good_reply])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="把风险列出来。",
+                reply_control_packet={
+                    "task_mode": "technical_help",
+                    "response_move": "solve_first",
+                    "emotional_tone": "steady_helpful",
+                    "relationship_distance": "familiar",
+                    "information_budget": "normal",
+                    "question_budget": 0,
+                    "facts": ["今晚时间紧，但当前没有报错正文或代码。"],
+                    "must_not_do": ["不要声称后台已开始定位。"],
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert reason_code in calls[1][-1]["content"]
+    assert result.selected_text == good_reply
 
 
 @pytest.mark.parametrize(
