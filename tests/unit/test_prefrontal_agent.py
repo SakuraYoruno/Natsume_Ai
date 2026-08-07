@@ -294,7 +294,11 @@ def test_prefrontal_run_evolution_cycle_degraded_on_error(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.persona.evolution_orchestrator.EvolutionOrchestrator", _boom)
     logger = _FakeLogger()
 
-    result = _build_prefrontal_agent().run_evolution_cycle(
+    result = _build_prefrontal_agent(
+        # Explicitly exercise the retained non-canonical compatibility
+        # branch. Missing ports are fail-closed and must never select it.
+        application_ports=TribeApplicationPorts(),
+    ).run_evolution_cycle(
         system_intent={"args": {"user_id": "user_y"}},
         logger=logger,
     )
@@ -788,7 +792,9 @@ def test_prefrontal_run_emergent_growth_weekly_and_status(monkeypatch) -> None:
 
 
 def test_prefrontal_run_emergent_growth_weekly_skips_without_llm() -> None:
-    result = _build_prefrontal_agent().run_emergent_growth_weekly(
+    result = _build_prefrontal_agent(
+        application_ports=TribeApplicationPorts(),
+    ).run_emergent_growth_weekly(
         user_id="user-eg",
         lookback_days=7,
         episodic_store=object(),
@@ -1066,7 +1072,10 @@ def test_prefrontal_autobiographical_gate_and_commit(monkeypatch) -> None:
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_social_brain_agent", lambda: _FakeSocial())
     monkeypatch.setattr("host_brain.tribe.prefrontal_agent.get_hippocampus_agent", lambda: _FakeHippocampus())
 
-    agent = PrefrontalAgent(state_registry=registry)
+    agent = PrefrontalAgent(
+        state_registry=registry,
+        application_ports=TribeApplicationPorts(),
+    )
     gate = agent.evaluate_autobiographical_memory_gate(
         persona_user_id="u-autobio",
         narrative="这是我们一起推进系统的一次重要记忆。",

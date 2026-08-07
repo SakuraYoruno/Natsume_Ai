@@ -58,6 +58,8 @@ flowchart LR
 
 2026-08-07 的当前非安全 Unit 覆盖预检在约 4800 个已执行测试后暴露 5 个过时或非确定性断言：Scheduler 子授权时钟早于冻结父授权、Gateway 仍期待已拆分的旧 delivery thread、OBS app-local 隔离受 30 秒 Life freshness 干扰，以及两组 Prefrontal 测试仍要求恢复已退役的 Endocrine／Limbic／Pain writer。修复后的 29 项相邻回归通过；失败预检 coverage 数据不得合并为发布收据，完整 Unit／Contract／Integration／本地 E2E 必须从新提交重新采集。
 
+随后 `d696417c47` 的六片完整非安全 Unit 首轮运行到终态：7939 passed、7 failed、8 classified skips、224 deselected。7 个失败并非生产异常：Mode fixture 二次读取墙钟导致 canonical timestamp 相差 1 ms；Thalamus 三项仍期待已退役的 IntentAgent／Workspace 路由；Prefrontal 三项没有显式选择 legacy compatibility ports。测试现与生产合同对齐，目标复跑 7/7。Pentest 静态路由被拆为名称含 `pentest` 的独立测试，使 `-k not pentest` 明确 deselect，而不是藏在通用矩阵中运行。完整六片仍须重新绿灯后才能合并 coverage。
+
 ### 1.2 功能和验收覆盖
 
 | 领域 | 当前事实 | 当前有效结论 |

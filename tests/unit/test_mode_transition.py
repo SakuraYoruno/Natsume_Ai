@@ -62,7 +62,10 @@ def _make_service(
             "from_mode": old.sys_mode,
             "to_mode": target_mode,
             "event_id": metadata["event_id"],
-            "ts_ms": int(time.time() * 1000),
+            # The canonical owner commits the caller-bound transition
+            # timestamp. Reading the wall clock again makes this identity
+            # assertion race across a millisecond boundary under coverage.
+            "ts_ms": metadata["ts_ms"],
         }
 
     mock_get = MagicMock(side_effect=get_hard_state)

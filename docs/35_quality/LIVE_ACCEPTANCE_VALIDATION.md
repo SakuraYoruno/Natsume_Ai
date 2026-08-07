@@ -738,3 +738,7 @@ Monitor read-model 新增 System Config、Organ System、HTTP Client、Token Met
 Python Unit 非安全覆盖首次分成六片运行，约 4800 项执行后有五片分别在一个问题处停止，另一片 1420 passed、1 项 Windows symlink 权限分类跳过。五个问题分别为：测试冻结父授权却让 Scheduler 子授权读取真实墙钟；Gateway 断言已拆为 inbox／outbox 的旧 delivery thread；OBS 两实例隔离测试在 coverage 插桩下超过 30 秒 freshness；两组历史 Prefrontal 测试仍期望 drift 恢复已由 canonical Digital Life 取代的 Endocrine／Limbic／Pain writer。
 
 修复保持生产默认不变：Scheduler factory 只增加可注入 clock；OBS 只在隔离测试内冻结 freshness；Gateway 测试改验真实 inbox／outbox；Prefrontal 在组合端口缺失或类型错误时 fail-closed，禁止裸实例重新拥有旧情感 writer。29 项相邻回归全部通过。首次失败运行的数据不作为覆盖率证据；完整非安全 Unit 分片将在提交 SHA 上从零重跑。A09、A12、Pentest 与网络安全继续为 `NOT_RUN_USER_SKIPPED`，A15 总体仍为 `INCOMPLETE`。
+
+`d696417c47` 随后的六片完整 Unit 运行实际得到 7939 passed、7 failed、8 classified skips、224 deselected。7 个失败已逐项隔离复现：1 个测试用 store 在提交后重新读取墙钟，造成 transition receipt 相差 1 ms；3 个 Thalamus 断言仍把独立代码片段、纯建议和无上下文“开始吧”视为执行授权；3 个 Prefrontal 测试未显式构造 non-canonical compatibility ports，却期待旧 evolution／autobiographical 路径运行。
+
+修复只改测试合同：fake store 回显 caller-bound `ts_ms`；轻量回答保持 Chat；Pentest 静态路由移入名称明确的独立测试，本轮被 `-k not pentest` deselect；legacy Prefrontal 行为必须显式传入 `TribeApplicationPorts()`，缺失或畸形 ports 继续 fail-closed。目标复跑 7/7。原六片因存在失败仍不可作为 coverage 收据，必须在下一提交重新跑到终态。
