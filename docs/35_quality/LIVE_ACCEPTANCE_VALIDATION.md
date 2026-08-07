@@ -830,3 +830,11 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 加载 `7ad9c1cf1` 后运行上述四类，报告 SHA-256 为 `73edc1ef9ab70094a94b8f9f6e31b916de45f09cc36753852866342d6a21d1e3`。自动结果为 4/4，12 个真实 turn 全部 accepted，writer probe 保持旧 writer 零增量和 canonical projection 前进。当前逐句检查接受含混三轮和吃味三轮；关系修复第一轮却无来源补写“轻描淡写”，第二轮又复用“没接住”，mixed 第二轮则把已禁止的“先让开心多待”改序为“开心就先留着”。因此仍不能进入完整 48 条。
 
 最后一轮窄修复复用既有 bounded 最近对话事实，不增加 repository 查询：仅当 typed frame 为 `REPAIR` 且最近七海回复已经出现“没接住／没听懂／理解错”时，下一候选不得继续复用同一修复核心，必须承接用户最新后果；`轻描淡写／敷衍／没当回事` 作为无来源失误原因进入现有修复 Gate；mixed Gate 同时覆盖“开心就先留着”。命中后仍只使用既有一次语义重试。相关回归为 576 passed。下一轮只运行 `user_angry_at_natsume:1` 与 `shared_joy_and_mixed_feeling:3`；网络安全、Pentest 和远端 Edge 继续跳过。
+
+## 2026-08-08 修复／喜忧模型 A/B 与自然口吻纠偏
+
+加载 `8a5bc8c36` 后，以真实 `deepseek-v4-flash` 运行修复和喜忧两条、共 6 个 accepted turn，自动 2/2 且 writer probe 通过；报告 SHA-256 为 `1618a895a5062f6d23e6564f320aba53f2e8d2166820711fa714f38fcbff62aa`。人工逐句仍拒绝“这是合理的／我记着／我认”和“两种感觉不丢人／先留着”一类心理咨询或验收结案语气。自动合同通过不等于人感通过。
+
+随后仅在本次验收 Host 进程环境中临时覆盖为 `deepseek-v4-pro`，同队列报告 SHA-256 为 `2425b864994e6bb2abba2c55b213df9640f5641ae2959b406e92f80cb9febd4f`。6 个 turn 仍全部 accepted；mixed 更简洁，但修复仍重复“没接住／对不起／我会注意”。Flash 与 Pro 的 provider latency 均值分别为 2278.5 ms 和 3598.7 ms，Pro 约高 58%。因此证据不支持全局换模，生产实时路线继续使用 Flash。
+
+代码纠偏不再扩展普通聊天审计或硬性禁词：首次双候选提示明确采用熟人即时反应，避免心理咨询、公关道歉和验收记录口吻；本地候选排序仅在同组存在原样合格自然候选时优先它，正式口吻候选本身仍保持可发送资格，因而不会单独触发额外模型重试。没有新增 migration、repository 写、同步步骤或模型请求。Planner、Surface、native stream、harness、live runner 与 restart 共 578 项回归通过。必须恢复 Flash 启动配置并在新提交上重跑上述两条、逐句接受后，才允许恢复八类组合复验；完整 48 条、三人盲评与实时门槛仍未通过。网络安全、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。

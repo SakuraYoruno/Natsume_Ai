@@ -747,6 +747,8 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "DL-04 修复候选策略" in repair_initial_messages[-1]["content"]
     assert "不要每一轮都复读‘没接住／对不起’" in repair_initial_messages[-1]["content"]
     assert "不同的信息重点" in repair_initial_messages[-1]["content"]
+    assert "不是心理咨询、公关道歉或验收记录" in repair_initial_messages[-1]["content"]
+    assert "这是合理的／不丢人／这点我认" in repair_initial_messages[-1]["content"]
     mixed_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -755,7 +757,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
     assert "不替用户决定哪一面应该多留一会儿" in mixed_initial_messages[-1]["content"]
     assert "开心就先留着／先让开心多待" in mixed_initial_messages[-1]["content"]
-    assert "两边都不用藏" in mixed_initial_messages[-1]["content"]
+    assert "不提供完整示例供照抄" in mixed_initial_messages[-1]["content"]
     jealousy_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,

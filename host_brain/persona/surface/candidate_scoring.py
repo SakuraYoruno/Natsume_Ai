@@ -38,6 +38,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _back_scene_relevant,
     _boundary_repair_relevant,
     _canonical_contained_jealousy_relevant,
+    _canonical_hold_complexity_relevant,
     _canonical_respect_autonomy_relevant,
     _continuity_boundary_grounded,
     _continuity_internal_process_surface_hits,
@@ -1266,6 +1267,30 @@ _JEALOUSY_LOW_PRESSURE_MARKERS = (
 _RELATION_AXIS_PHYSICAL_MARKERS = ("抱一下", "抱抱", "抱", "过来", "靠我", "靠过来", "靠一下")
 _RELATION_AXIS_ROMANCE_MARKERS = ("爱你", "想你", "想我", "心里有我", "亲爱的", "宝贝", "只属于")
 
+_REPAIR_FORMAL_REGISTER_PATTERNS = (
+    re.compile(r"(?:这是|是)?合理的|不丢人"),
+    re.compile(r"(?:这点|这部分|不舒服的部分)[，,]?(?:我)?(?:认|记着)"),
+    re.compile(r"我会注意(?:的)?(?=[，,。.!！]|$)"),
+)
+_MIXED_FORMAL_REGISTER_PATTERNS = (
+    re.compile(r"不丢人|两种感觉"),
+    re.compile(r"(?:先让|都先|一起).{0,10}(?:留着|待着|多待)"),
+    re.compile(r"(?:开心|高兴).{0,6}(?:先)?(?:留着|多留|多待)"),
+)
+
+
+def _companion_formal_register_hits(request, text):
+    patterns = []
+    if _relational_repair_relevant(request):
+        patterns.extend(_REPAIR_FORMAL_REGISTER_PATTERNS)
+    if _canonical_hold_complexity_relevant(request):
+        patterns.extend(_MIXED_FORMAL_REGISTER_PATTERNS)
+    return [
+        match.group(0)
+        for pattern in patterns
+        for match in pattern.finditer(str(text or ""))
+    ]
+
 
 # ---------------------------------------------------------------------------
 # Core scoring function
@@ -1307,6 +1332,26 @@ def score_isolated_surface_candidates(request, candidates):
         score = float(sample_score.score)
         dimensions = dict(sample_score.dimensions)
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
+        formal_register_hits = _companion_formal_register_hits(
+            request,
+            quality.normalized_text or candidate_surface,
+        )
+        if formal_register_hits:
+            dimensions["naturalness"] = min(
+                82.0,
+                float(dimensions.get("naturalness", 86.0)),
+            )
+            dimensions["spoken_chat_texture"] = min(
+                80.0,
+                float(dimensions.get("spoken_chat_texture", 86.0)),
+            )
+            dimensions["character_freshness"] = min(
+                82.0,
+                float(dimensions.get("character_freshness", 86.0)),
+            )
+            reason_codes.append(
+                "COMPANION_FORMAL_REGISTER:" + ",".join(formal_register_hits[:4])
+            )
         if (
             _canonical_respect_autonomy_relevant(request)
             and any(
@@ -1973,6 +2018,12 @@ def select_best_isolated_candidate(scores):
             1 if row.passed else 0,
             0 if row.hard_fail else 1,
             -len(row.control_violations),
+            0
+            if any(
+                code.startswith("COMPANION_FORMAL_REGISTER:")
+                for code in row.reason_codes
+            )
+            else 1,
             float(row.score),
             float(dict(row.dimensions).get("spoken_chat_texture", 86.0)),
             float(dict(row.dimensions).get("naturalness", 86.0)),

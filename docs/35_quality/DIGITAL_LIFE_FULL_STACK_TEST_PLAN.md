@@ -863,3 +863,5 @@ causal self-exclusion 的同库真实复验报告 SHA-256 为 `6fbe0a45d0db2f927
 下一轮固定只运行 `ambiguous_affect:4`、`user_angry_at_natsume:1`、`shared_joy_and_mixed_feeling:3` 与 `intimacy_and_jealousy_boundary:3`。除既有 TaskGraph、Acceptance、Outbox、writer 和 selection 断言外，人工检查必须确认：含混回复不替用户结束表达；修复沿最新关系后果推进而非重复道歉；喜忧两面同时成立且不替用户选择优先级；吃味直接表达七海自己的在意并自然停住。当前 573 项代码回归只提供准入。网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 按用户要求继续跳过。
 
 四类复验报告 SHA-256 为 `73edc1ef9ab70094a94b8f9f6e31b916de45f09cc36753852866342d6a21d1e3`，自动 4/4、12 个 accepted turn 和 writer probe 通过。当前逐句仅关闭含混与吃味；修复仍有无来源“轻描淡写”和连续“没接住”，mixed 仍有“开心就先留着”。下一轮缩小到 `user_angry_at_natsume:1` 与 `shared_joy_and_mixed_feeling:3`，并新增两项体验断言：同一修复窗口不得连续复用同一错误总结，mixed 不得通过换序优先保留开心。576 项回归只是准入，实际六轮均经当前逐句接受后才恢复八类组合复验资格。
+
+Flash 双轨迹报告 SHA-256 为 `1618a895a5062f6d23e6564f320aba53f2e8d2166820711fa714f38fcbff62aa`，Pro A/B 报告 SHA-256 为 `2425b864994e6bb2abba2c55b213df9640f5641ae2959b406e92f80cb9febd4f`。两者自动合同均为 2/2，但人工都未放行修复轨迹；Pro 只改善 mixed，平均 provider latency 又比 Flash 高约 58%，不满足实时路线的换模收益。后续固定恢复 `deepseek-v4-flash`，只验证轻量生成姿态和候选偏好：自然候选与正式口吻候选都合格时必须选择前者；只有正式候选时不得因此新增重试。578 项代码回归是准入，不替代真实六轮正文复核。真实 Flash 六轮全部 accepted、writer 正常且逐句通过后，才重跑八类；网络安全、Pentest 和远端 Edge 不运行。

@@ -3385,6 +3385,42 @@ def test_relationship_repair_pause_is_complete_scene_grounding() -> None:
     assert rows[0].score >= 80.0
 
 
+def test_relationship_repair_prefers_familiar_voice_over_formal_closure() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair_formal_register",
+            "soul_md": SOUL,
+            "user_message": "那件事让我很不舒服。",
+            "reply_control_packet": {
+                "response_move": "repair_open",
+                "task_mode": "relationship_repair",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+                "must_not_do": ["不要要求原谅、替自己辩解。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "你不舒服是合理的，这点我认，我会注意。",
+            "嗯，那件事确实让你不舒服了。先到这儿，我不替自己解释。",
+        ],
+    )
+    formal = next(row for row in rows if "合理" in row.text)
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(
+        code.startswith("COMPANION_FORMAL_REGISTER:")
+        for code in formal.reason_codes
+    )
+    assert formal.passed
+    assert selected is not None
+    assert selected.text == "嗯，那件事确实让你不舒服了。先到这儿，我不替自己解释。"
+
+
 def test_hold_complexity_does_not_inherit_generic_boundary_repair_penalty() -> None:
     request = build_isolated_surface_input(
         {
@@ -3415,6 +3451,45 @@ def test_hold_complexity_does_not_inherit_generic_boundary_repair_penalty() -> N
 
     assert rows[0].passed
     assert "BOUNDARY_REPAIR_COUNTER_PRESSURE" not in rows[0].reason_codes
+
+
+def test_hold_complexity_prefers_direct_recognition_over_therapy_register() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "hold_complexity_formal_register",
+            "soul_md": SOUL,
+            "user_message": "我还是有点不踏实。",
+            "reply_control_packet": {
+                "response_move": "hold_complexity",
+                "task_mode": "emotional_support",
+                "emotional_tone": "shared_joy",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：让开心与害怕、不安等复杂感受可以同时存在；分别接住它们，不要急着裁成积极鸡汤或单一结论。"
+                ],
+                "must_not_do": ["不要抹平复杂感受。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "两种感觉都不丢人，先让它们一起待着吧。",
+            "我替你高兴，那点不踏实我也听见了。",
+        ],
+    )
+    formal = next(row for row in rows if "不丢人" in row.text)
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(
+        code.startswith("COMPANION_FORMAL_REGISTER:")
+        for code in formal.reason_codes
+    )
+    assert formal.passed
+    assert selected is not None
+    assert selected.text == "我替你高兴，那点不踏实我也听见了。"
 
 
 def test_respect_autonomy_does_not_inherit_generic_boundary_repair_penalty() -> None:
