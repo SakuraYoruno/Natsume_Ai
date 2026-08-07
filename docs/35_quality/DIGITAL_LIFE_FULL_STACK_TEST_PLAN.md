@@ -827,3 +827,5 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 结构拆分后的最小回归固定为两组：`test_dl02_affect_fusion.py + test_dl02_affect_fusion_restart.py` 验证观察抽取没有改变 TTL、冲突、CAS 与重启语义；`test_surface_runtime.py + test_aw08_surface_runtime_ports.py` 验证候选规则抽取没有改变生成和端口合同。当前工作树分别为 52/52、162/162。该证据只证明等价拆分与 Gate 3，不改变完整 48 条人感失败结论。
 
 覆盖率预检还必须验证“兼容模块不会复活第二套 self-affect writer”。Prefrontal 即使缺失 app-local `TribeApplicationPorts` 也要 fail-closed；drift 事件不得调用 Endocrine、Limbic 或 PainReward 写路径。当前目标回归已覆盖 moderate／severe drift 和无 drift，29 项 Scheduler／Gateway／OBS／Prefrontal 相邻测试通过；完整 Unit 分片仍须在候选提交上重跑。该工程封口不能替代 48 条人感和三人盲评。
+
+2026-08-07 非安全覆盖收口已得到 Unit 7956 JUnit case（0 failure/error、8 classified skips）、Contract 1898 项全绿、本地 E2E 68 项全绿。Integration 首轮为 848 passed／11 failed／2 Redis env skips，11 个失败均完成定向修复复跑；完整 combine 尚未完成。该工程证据只验证数字生命所依赖的恢复、调度、Internal 与语音事件边界，不能把 `f378fa80d` 的 48 条人感失败或三人盲评提升为 PASS。网络安全与 Pentest 保持 `NOT_RUN_USER_SKIPPED`。

@@ -742,3 +742,11 @@ Python Unit 非安全覆盖首次分成六片运行，约 4800 项执行后有�
 `d696417c47` 随后的六片完整 Unit 运行实际得到 7939 passed、7 failed、8 classified skips、224 deselected。7 个失败已逐项隔离复现：1 个测试用 store 在提交后重新读取墙钟，造成 transition receipt 相差 1 ms；3 个 Thalamus 断言仍把独立代码片段、纯建议和无上下文“开始吧”视为执行授权；3 个 Prefrontal 测试未显式构造 non-canonical compatibility ports，却期待旧 evolution／autobiographical 路径运行。
 
 修复只改测试合同：fake store 回显 caller-bound `ts_ms`；轻量回答保持 Chat；Pentest 静态路由移入名称明确的独立测试，本轮被 `-k not pentest` deselect；legacy Prefrontal 行为必须显式传入 `TribeApplicationPorts()`，缺失或畸形 ports 继续 fail-closed。目标复跑 7/7。原六片因存在失败仍不可作为 coverage 收据，必须在下一提交重新跑到终态。
+
+## 2026-08-07 A15 非安全 Unit／Contract／Integration／E2E 收口
+
+当前候选树从零运行的 Unit run7 生成 7956 个 JUnit case，0 failure、0 error、8 个分类 skip；pytest 明细为 7946 passed、2 subtests passed、8 skipped。Unit-only 对完整生产源码分母的 line coverage 为 57.55%（160941/279647），branch coverage 为 39.85%（36657/91990），只代表 Unit，不代表全系统。Contract 四片共 1898 项，0 failure/error/skip。本地非安全 E2E 共 68 项通过；旧 RPC 用例已按现行隐私合同改为“ASR_CHUNK 可被接收但不写长期 voice_event_log，TTS 终态持久化”。
+
+Integration 六片首轮共 861 个 JUnit case：848 passed、11 failed、2 个因 `NASTUME_TEST_REDIS_URL` 未设置而分类 skip。真实 Redis 写入、竞争锁、重启重读已由同轮隔离 Docker 收据覆盖，两个 skip 没有冒充本次 pytest PASS。11 个失败聚类为三项根因：Scheduler/Internal 的 NodeBoundGrant 服务没有消费组合层共享 clock；已持久 admission 的 startup continuation 错误重新执行父 Grant preflight；Review heartbeat 在无人 takeover 时也会因事件循环晚调度立即自我失权。修复后 11/11 失败节点及相邻 Internal/E2E 共 13 项通过，Review store/worker 全文件另有 29 项通过。
+
+恢复语义没有放宽新 admission：startup continuation 必须是 repository 的 exact replay；缺少既有 child-grant batch 时仍不能从过期父 Grant 铸造新权限，child grant 自身过期仍在 worker mutation 前拒绝。晚 heartbeat 也只允许同一 token、status version 与 fencing token 在事务内 CAS 续租；若其他 worker 已先 takeover，旧 owner 必然失败。网络安全、A09、A12、Pentest 未运行且不计入上述数字。完整 Unit＋Contract＋Integration＋E2E coverage combine 仍待生成，因此 A15 继续为 `INCOMPLETE`。

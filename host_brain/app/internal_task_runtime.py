@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 import hashlib
 import re
 from typing import Any, Protocol
@@ -1178,6 +1178,7 @@ def build_governed_internal_runtime(
     artifact_store: Any | None = None,
     workspace_runtime: DurableWorkspaceRuntime | None = None,
     claim_result_store: Any | None = None,
+    clock: Callable[[], int] | None = None,
 ) -> GovernedInternalRuntime:
     review_store = getattr(task_runtime_container, "review_store", None)
     continuation_store = getattr(
@@ -1193,10 +1194,12 @@ def build_governed_internal_runtime(
         ledger=ledger,
         token_service=token_service,
         review_store=continuation_store,
+        clock=clock,
     )
     node_grant_verifier = DurableNodeGrantVerifier(
         ledger=ledger,
         review_store=continuation_store,
+        clock=clock,
     )
     projection_store = getattr(task_runtime_container, "worker_projection_store", None)
     if projection_store is None:

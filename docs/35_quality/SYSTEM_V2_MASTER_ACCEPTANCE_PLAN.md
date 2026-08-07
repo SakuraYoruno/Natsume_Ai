@@ -455,3 +455,11 @@ PLANNING_SEARCH_BENEFIT = PARTIAL_RESEARCH_CODE_PASS_PENTEST_USER_SKIPPED
 DIGITAL_LIFE_HUMAN_LIKENESS = FAIL_PENDING_THREE_REVIEWERS
 WHOLE_SYSTEM_LINE_BRANCH_COVERAGE = FAIL_LAST_MEASURED_CURRENT_SHA_RETEST_PENDING
 ```
+
+## 11. 2026-08-07 非安全覆盖执行增量
+
+- Unit run7：7956 个 JUnit case，0 failure/error，8 classified skips；Unit-only line 57.55%、branch 39.85%。
+- Contract：1898/1898 通过。
+- 本地 E2E：68/68 通过，明确排除含 Pentest 的旧 golden fault matrix。
+- Integration：首轮 848 passed、11 failed、2 Redis env skips；11 个失败已全部定向复跑通过。修复覆盖共享 clock、startup exact replay 和 fenced late heartbeat，不涉及网络安全。
+- 当前仍缺最终 combine 与三人数字生命盲评，因此全系统 coverage Gate 和 A15 均未通过。A09、A12、Pentest、网络安全维持 `NOT_RUN_USER_SKIPPED`。

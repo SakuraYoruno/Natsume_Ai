@@ -265,6 +265,43 @@ def test_claim_authority_is_secret_free_fenced_and_completion_rechecks_node(
     }
 
 
+def test_exact_owner_can_renew_just_after_expiry_until_takeover_wins(
+    tmp_path: Path,
+) -> None:
+    path = _db(tmp_path)
+    _insert_checkpoint(path, node_status="WAITING_APPROVAL", node_version=1)
+    clock = _Clock()
+    reviews = ReviewStore(path, clock=clock)
+    review = _review(
+        "review-late-heartbeat",
+        phase=ReviewResumePhase.PRE_EXECUTION,
+        subject_version=1,
+    )
+    _create(reviews, review)
+    _consume(reviews, review)
+    store = ReviewContinuationStore(path, clock=clock)
+    claim = store.claim_pending_review_continuations(
+        worker_id="review-worker",
+        lease_ms=25,
+        limit=1,
+    )[0]
+
+    clock.value = int(claim["claim_expires_ts_ms"]) + 1
+    renewed = store.heartbeat_review_continuation(
+        review.review_id,
+        worker_id="review-worker",
+        claim_token=claim["claim_token"],
+        fencing_token=claim["claim_fencing_token"],
+        lease_ms=100,
+        expected_version=claim["status_version"],
+    )
+
+    assert renewed["claim_owner"] == "review-worker"
+    assert renewed["claim_fencing_token"] == claim["claim_fencing_token"]
+    assert renewed["status_version"] == claim["status_version"] + 1
+    assert renewed["claim_expires_ts_ms"] == clock.value + 100
+
+
 @pytest.mark.parametrize("attempt_status", ("RUNNING", "RECOVERABLE"))
 def test_expired_pre_claim_can_be_taken_over_after_execution_crosses_checkpoint(
     tmp_path: Path,
