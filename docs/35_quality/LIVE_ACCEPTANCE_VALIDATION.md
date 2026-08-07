@@ -706,3 +706,9 @@ Surface、planner、native candidate、app adapter、scorer、harness 与 live r
 端到端 144 个样本 p50／p95／最大值为 6,846／10,044／13,305 ms，继续远高于实时陪伴门槛。自动失败集中在含混情绪 5 条、亲密边界 3 条，以及用户生气和混合喜悦各 1 条；但 38 条自动待人工也不能放行。当前 agent 对全部 144 轮逐句复核发现系统性体验缺陷：安慰高频重复“我在这儿／我都在／想说就说”；含混分支猜测没精神、微妙或空；关系修复反复要求再说或安排等待；空间边界仍以“等你回来／需要我都在”保持压力；技术上下文不足时编出依赖版本、异常兜底、超时设置三项风险；亲密场景把现实关系说成更重要，并以不添麻烦、不占位置、自主自由来自我删除。
 
 因此 `digital_life_human_likeness` 保持 `FAIL`。单元 Gate、原样候选优先与 canonical writer 已被验证，但自由生成仍没有稳定地服从 CompanionAct；下一轮应将已冻结事实、允许表达、禁止推断、关系姿态和结束方式编译成结构化 `CompanionUtteranceFrame`，再由模型只做有限措辞，并以三名评审盲测校准。当前单人复核不能替代三人盲评。网络安全、渗透与 Pentest 继续为 `NOT_RUN_USER_SKIPPED`，未运行、未计入分母。
+
+## 2026-08-07 非安全 Architecture 2.0 静态门禁纠偏
+
+在 `5bebb8053` 后的当前工作树重跑非安全静态 Gate，A01～A08、A10～A11、A13～A14 中只有 A03 首轮失败：`affect_fusion.py` 为 1627 行且未分类，`surface_runtime.py` 为 4066 行，超过既定 3100 行上限。旧机器状态中的 `A01_A14_PASS` 因而不再沿用。
+
+代码没有提高上限或新增白名单，而是将用户情绪观察、时间指向和候选约束分别抽到 `affect_observation.py`、`surface_deictic.py`、`surface_candidate_guards.py`。完成后主文件为 1376/3092 行，A03 重新通过；融合与真实 SQLite 重启 52 项、Surface 与端口合同 162 项通过，`compileall` 与 `git diff --check` 通过。A09 Secure Ingress、A12 Edge network authority、Pentest 和其他网络安全检查均按用户要求未运行，状态固定为 `NOT_RUN_USER_SKIPPED`，本节不能提升完整 Architecture 2.0 结论。

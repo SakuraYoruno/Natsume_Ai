@@ -164,16 +164,21 @@
     }
   },
   "acceptance": {
-    "architecture_v2_current_sha": "A01_A14_PASS_LOCAL_WORKTREE_A15_PENDING_COMMIT_SHA",
+    "architecture_v2_current_sha": "NON_SECURITY_STATIC_GATES_PASS_CURRENT_WORKTREE_A15_PENDING_FINAL_SHA",
     "architecture_static_gates": {
-      "status": "PASS_LOCAL_WORKTREE",
-      "range": "A01_A14",
+      "status": "PARTIAL_NON_SECURITY_PASS_CURRENT_WORKTREE",
+      "range": "A01_A08_A10_A11_A13_A14",
       "migration_catalog_head": "0153_terminal_prebudget_cancellation_classifier_correction.sql",
       "a03_policy_whitelist_expanded": false,
       "a03_reported_hotspots_remaining": 0,
-      "affected_wave_regression": "PASS_306",
-      "current_voice_and_expression_regression": "PASS_177",
+      "a03_surface_runtime_lines": 3092,
+      "a03_affect_fusion_lines": 1376,
+      "a03_extracted_modules": "SURFACE_CANDIDATE_GUARDS_880_SURFACE_DEICTIC_180_AFFECT_OBSERVATION_278",
+      "affected_wave_regression": "PASS_214_CURRENT_SLICE_52_AFFECT_FUSION_RESTART_PLUS_162_SURFACE_CONTRACT",
+      "current_voice_and_expression_regression": "PASS_177_PREVIOUS_SLICE_NOT_RERUN_BY_THIS_COMMIT",
       "pytest_collection": "PASS",
+      "network_security_gate_09": "NOT_RUN_USER_SKIPPED",
+      "edge_network_authority_gate_12": "NOT_RUN_USER_SKIPPED",
       "final_sha_full_stack_gate": "NOT_RUN"
     },
     "planning_search_three_domain_benefit": "PARTIAL_RESEARCH_CODE_PASS_PENTEST_NOT_RUN_USER_SKIPPED",

@@ -9,7 +9,7 @@
 
 > 这里的“数字生命”指一套具有连续状态、因果记忆、自主节律和具身表达的软件系统，不声称生物意识或人类心智已经被复刻。当前版本已接通 canonical Life 主链和文本交互；长期关系自然度、专属声线和远端 Avatar 联合体验仍在验证，整体状态为 `INCOMPLETE`。
 
-2026-08-05 的当前工程切片已把此前残留的大文件按真实职责拆开：Surface 的原生情感流、确定性交付和共享预算辅助不再挤在一个 adapter；Digital Life 的 self-affect 与 relationship reducer 分离；Task Acceptance、Operator effect、Embodiment command、TTS prosody、Tribe 事件订阅和 Life delivery 也各有独立边界。A01～A14 本地静态架构门禁已通过，但当前提交的 A15 全服务栈、PlanningSearch 收益与“更像人”的盲测仍未完成，因此没有升级总体完成状态。
+2026-08-07 的当前工程切片已把此前残留的大文件按真实职责拆开：Surface 的候选约束、时间指向与生成编排分离，Digital Life 的观察采集与 Appraisal 分离；Task Acceptance、Operator effect、Embodiment command、TTS prosody、Tribe 事件订阅和 Life delivery 也各有独立边界。当前工作树的非安全静态门禁 A01～A08、A10～A11、A13～A14 已通过；A09、A12 依用户要求保持 `NOT_RUN_USER_SKIPPED`。A15 全服务栈、PlanningSearch 最终 SHA 继承判定与“更像人”的盲测仍未完成，因此没有升级总体完成状态。
 
 ## 她不会在你沉默时消失
 
@@ -401,5 +401,6 @@ python tools/doc_lint/doc_link_gate.py --root .
 - `642a29e3b` 的同四条真实复验报告 SHA-256 为 `ff3992888888fbb1bfa67b356f78a507aff048b4cc73dc16e47772169f7a704d`：2 条自动待人工、2 条失败，10 个 accepted turn 的 canonical writer probe 通过。实体泡茶已经消失，但短句“还行”仍被写成“先这样就好”；另一轨迹的第二轮在两次语义拒绝后令 Chat 图失败；自动通过的吃味又追加“不会因为这个就要求你什么”。当前修复让所有含混重试保留“事情已办完、感受仍说不清”两个事实，第二次仍假收束时只允许安全降级且不计收益，并将上述吃味免责声明纳入 scoped Gate。517 项非安全回归通过；新 SHA 四条真实复验前，完整 48 条与三人盲评仍不启动，网络安全与 Pentest 不运行。
 - `5c45edb67` 的四条复验报告 SHA-256 为 `8b0d24fad132e3b219c2e3af1ac5f377782e3c077e187a758305bc5bc304c7b4`：2 条自动待人工、2 条因第二轮安全 fallback 不可计收益而失败，12 个 Gateway turn 均完成且 canonical writer probe 通过。逐轮复核发现，旧选择器会让“高分但需本地修复”的候选压过同组原样合格候选；正文仍有“没啥精神”“行，那就这样”“等你想清楚”和吃味后的“不会拦着你”。当前修复改为原样合格候选永远优先，并把含混动作的生成合同收成“已发生事实→仍说不清→无需现在下结论”的语义框架；吃味承认在意后停止，不再转入保证。525 项非安全回归通过，新 SHA 定向复验前总体仍为失败；网络安全与 Pentest 保持跳过。
 - `f378fa80d` 的定向复验仍只有 1/4 自动待人工、3/4 失败，报告 SHA-256 为 `107741df96f37f39544039fee609dbb2f5ab9c0056b8f860920f6051901c6d61`；因此停止围绕四条继续加规则，并在另一份全新 SQLite 完成完整 48 条真实文本队列。完整报告 SHA-256 为 `c169ed890d2f213b6a48c132f8e63b6c7ee3382fbf3d8d712aa57eb466d41145`：38 条自动待人工、10 条失败，144/144 TaskGraph 完成，144 个 accepted turn 的 canonical writer 前进且旧 writer 零增量；端到端 p50/p95 为 6,846/10,044 ms，模型 144 次成功、36 次语义拒绝。当前人工逐句复核确认“像人”仍失败：高频重复“我在这儿/我都在”，含混感受被猜测，技术风险会被无依据编造，边界与修复不断安排等待，亲密场景又自我删除。下一步需要结构化陪伴话语框架和盲评校准，而不是继续扩禁词；网络安全与 Pentest 仍为 `NOT_RUN_USER_SKIPPED`。
+- 当前非安全 Architecture 2.0 静态复核发现旧状态把超限文件误报为通过；本切片未扩大白名单，而是把 Surface 候选约束、时间指向和用户情绪观察分别拆入独立纯模块。`surface_runtime.py` 从 4066 行降到 3092 行，`affect_fusion.py` 降到 1376 行；Gate 3 真实通过，52 项融合/重启与 162 项 Surface/合同回归通过。A09、A12、Pentest 和网络安全未运行，也不计为 PASS。
 
 因此当前结论仍是 `INCOMPLETE`，不是 Full Architecture `PASS`。

@@ -122,3 +122,18 @@ Host、OBS 和 Edge 使用类型化 app-local composition。业务模块不得�
 - 旧表可在回滚窗口内只读保留，不再拥有写 authority。
 - V1 资产若未绑定真实生产调用点，不自动获得 activation／promotion eligibility。
 - 删除兼容路径前必须有运行使用量为 0 的证据和明确回滚点。
+
+## 10. Surface 与情感观察的当前模块边界
+
+```mermaid
+flowchart LR
+    O["affect_observation：采集、TTL、冲突"] --> F["affect_fusion：Appraisal 与 Life command"]
+    D["surface_deictic：时间指向"] --> R["surface_runtime：生成编排"]
+    G["surface_candidate_guards：纯候选约束"] --> R
+    F --> R
+```
+
+- `affect_observation.py` 只把文本、自述、声学和视觉派生摘要物化为 `UserAffectObservationV1`，不写七海自我情绪。
+- `affect_fusion.py` 负责 Appraisal 候选和 canonical Life command，不再包含观察解析实现。
+- `surface_candidate_guards.py` 与 `surface_deictic.py` 都是无持久化、无模型、无交付 authority 的纯规则模块。
+- `surface_runtime.py` 保留生成、候选择优和降级编排；既定 3100 行上限没有放宽。
