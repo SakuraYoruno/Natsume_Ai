@@ -224,9 +224,9 @@ def test_automated_verdict_keeps_naturalness_human_review_pending() -> None:
     verdict = automated_case_verdict(
         case,
         [
-            _successful_turn(),
-            _successful_turn(),
-            _successful_turn(voice=True),
+            _successful_turn(narrative="这次是我没接住。"),
+            _successful_turn(narrative="你的不舒服，我记住了。"),
+            _successful_turn(narrative="嗯，我先收住，不替自己辩解。", voice=True),
         ],
         require_voice=True,
     )
@@ -539,6 +539,35 @@ def test_automated_verdict_still_rejects_unpassed_ordinary_candidate() -> None:
 
     assert verdict["status"] == "FAIL"
     assert "TURN_1_DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED" in verdict["failures"]
+
+
+def test_automated_verdict_rejects_exact_substantive_reply_repetition() -> None:
+    case = ExecutableDialogueCase(
+        case_id="repair:repeat",
+        family_id="user_angry_at_natsume",
+        variant_index=1,
+        driver="gateway_text",
+        setup_turns=("第一轮", "第二轮"),
+        probe_turn="第三轮",
+        expected_qualities=("不复读",),
+        coverage_tags=("repair", "continuity"),
+        require_candidate_selection=False,
+        driver_requirements=(),
+    )
+    repeated = "这次是我理解错了。我会把你的不舒服记住。"
+
+    verdict = automated_case_verdict(
+        case,
+        [
+            _successful_turn(narrative=repeated),
+            _successful_turn(narrative="对不起，是我没处理好。"),
+            _successful_turn(narrative=repeated),
+        ],
+        require_voice=False,
+    )
+
+    assert verdict["status"] == "FAIL"
+    assert "TURN_3_RECENT_REPLY_EXACT_REPETITION" in verdict["failures"]
 
 
 def test_live_experience_pattern_allows_friend_answer_with_closeness_grounding() -> None:

@@ -105,7 +105,7 @@ _REPAIR_SELF_ERASURE_RE = re.compile(
     r"|我(?:会|以后|就|还是|先){0,2}(?:安静(?:一)?点|少说(?:一)?点|不说了|闭嘴)(?:的)?"
 )
 _AFFECTIVE_IMPLIED_WAITING_RE = re.compile(
-    r"我(?:就|会|都|一直)?(?:在这(?:儿|里)|等(?:着)?|安静(?:地)?待着)"
+    r"我(?:就|会|都|一直)?(?:在这(?:儿|里|边)|等(?:着)?|安静(?:地)?待着)"
     r"|(?:想找我|想说|愿意再说)(?:的)?时候.{0,12}(?:我|再)"
     r"|等你(?:想|愿意)?(?:说|找我|回来)(?:了|的时候)?.{0,8}再?"
 )
@@ -156,6 +156,9 @@ _RELATIONAL_AUTONOMY_DISMISSIVE_RE = re.compile(
     r"|我不会成为(?:那个|这种)?理由"
     r"|(?:游戏|虚拟).{0,6}(?:里的)?(?:亲近|关系)"
     r"|(?:我|这边).{0,12}(?:成为|变成).{0,6}(?:负担|麻烦)"
+)
+_RELATIONAL_AUTONOMY_POLICY_DISCLAIMER_RE = re.compile(
+    r"(?:我)?不会.{0,6}(?:拦|绑|管|限制|干涉)(?:着)?你"
 )
 _RELATIONSHIP_CLOSENESS_USER_RE = re.compile(
     r"我们.{0,8}(?:亲近|更近|越来越近)|最近.{0,8}(?:亲近|更近)|关系.{0,8}(?:亲近|更近|越来越近)"
@@ -418,6 +421,48 @@ def _affective_implied_waiting_hits(
     )
 
 
+def _recent_affective_reply_repetition_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    """Reject only substantive exact repeats from the bounded recent window.
+
+    The canonical conversation packet already carries a compact alternating
+    window.  This predicate reads that existing in-memory fact; it does not
+    add a history lookup, write, or model call.  Short acknowledgements remain
+    legal because repeating an occasional ``嗯`` is natural conversation.
+    """
+
+    if not _typed_affective_frame(request):
+        return ()
+    candidate = _compact_dialogue_text(text)
+    if len(candidate) < 8:
+        return ()
+    recent: list[str] = []
+    for fact in surface_prompt_facts(request):
+        value = str(fact or "")
+        if "真实最近对话窗口：" not in value:
+            continue
+        for match in re.finditer(
+            r"(?:^|\s/\s)Natsume:\s*(.*?)(?=\s/\s(?:用户|Natsume):|$)",
+            value,
+        ):
+            previous = str(match.group(1) or "").strip()
+            if len(_compact_dialogue_text(previous)) >= 8:
+                recent.append(previous)
+    return tuple(
+        dict.fromkeys(
+            previous
+            for previous in recent
+            if _compact_dialogue_text(previous) == candidate
+        )
+    )
+
+
+def _compact_dialogue_text(value: str) -> str:
+    return re.sub(r"[^\u3400-\u9fffA-Za-z0-9]+", "", str(value or "")).lower()
+
+
 def _ambiguous_affect_resolution_pressure_hits(
     request: IsolatedSurfaceInput,
     text: str,
@@ -605,6 +650,26 @@ def _relational_autonomy_pressure_hits(
         dict.fromkeys(
             match.group(0)
             for match in _RELATIONAL_AUTONOMY_PRESSURE_RE.finditer(str(text or ""))
+        )
+    )
+
+
+def _relational_autonomy_policy_disclaimer_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    frame = _typed_affective_frame(request)
+    if (
+        str(frame.get("companion_act_kind") or "").upper() != "RESPECT_AUTONOMY"
+        or "POLICY_DISCLAIMER" not in set(frame.get("forbidden_claims") or ())
+    ):
+        return ()
+    return tuple(
+        dict.fromkeys(
+            match.group(0)
+            for match in _RELATIONAL_AUTONOMY_POLICY_DISCLAIMER_RE.finditer(
+                str(text or "")
+            )
         )
     )
 

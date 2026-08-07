@@ -40,7 +40,9 @@ from host_brain.persona.surface_candidate_guards import (
     _jealousy_self_abasement_hits, _listen_unsupported_user_essence_hits,
     _lover_cliche_hits, _meta_identity_boundary_hits,
     _mixed_affect_continuity_dropped, _mixed_affect_dismissal_hits,
-    _relational_autonomy_dismissive_hits, _relational_autonomy_pressure_hits,
+    _recent_affective_reply_repetition_hits,
+    _relational_autonomy_dismissive_hits, _relational_autonomy_policy_disclaimer_hits,
+    _relational_autonomy_pressure_hits,
     _relational_autonomy_relationship_minimization_hits,
     _relational_hostile_retaliation_hits, _relationship_doubt_dismissive_hits,
     _repair_continuation_pressure_hits, _repair_restatement_solicitation_hits,
@@ -1295,6 +1297,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE")
     if _repair_self_erasure_hits(request, value):
         codes.append("RELATIONAL_REPAIR_SELF_ERASURE")
+    if _recent_affective_reply_repetition_hits(request, value):
+        codes.append("RECENT_AFFECTIVE_REPLY_REPETITION")
     if _affective_implied_waiting_hits(request, value):
         codes.append("AFFECTIVE_IMPLIED_WAITING")
     if _ambiguous_affect_resolution_pressure_hits(request, value):
@@ -1315,6 +1319,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("RELATIONAL_AUTONOMY_DISMISSIVE")
     if _relational_autonomy_pressure_hits(request, value):
         codes.append("RELATIONAL_AUTONOMY_PRESSURE")
+    if _relational_autonomy_policy_disclaimer_hits(request, value):
+        codes.append("RELATIONAL_AUTONOMY_POLICY_DISCLAIMER")
     if _relational_autonomy_relationship_minimization_hits(request, value):
         codes.append("RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION")
     if _listen_unsupported_user_essence_hits(request, value):
@@ -2559,6 +2565,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return _repair_fallback_text(request)
     if "RELATIONAL_REPAIR_SELF_ERASURE" in codes:
         return "是我没接住。抱歉，我先不解释。"
+    if "RECENT_AFFECTIVE_REPLY_REPETITION" in codes:
+        return "嗯，我先收住，不替自己辩解。"
     if "RELATIONAL_HOSTILE_RETALIATION" in codes:
         if _canonical_affective_guidance_active(request, "REPAIR"):
             return _repair_fallback_text(request)
@@ -2591,6 +2599,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "嗯，听你的。以后换个叫法。"
     if "RELATIONAL_AUTONOMY_PRESSURE" in codes:
         return "嗯，去吧，玩得开心。"
+    if "RELATIONAL_AUTONOMY_POLICY_DISCLAIMER" in codes:
+        return "嗯，我懂。现实里的朋友和我们之间的亲近，都是真的。"
     if "RELATIONAL_AUTONOMY_DISMISSIVE" in codes:
         return "嗯，我懂。亲近归亲近，你的现实关系当然由你自己决定。"
     if "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION" in codes:

@@ -313,6 +313,11 @@ def _buffered_affective_candidate_messages(
                 "上次候选把没有接住用户改写成七海太啰嗦或话多。不要发明新的失误原因；"
                 "只承担已知的没听懂、理解错或没有接住。"
             ),
+            "RECENT_AFFECTIVE_REPLY_REPETITION": (
+                "上次候选逐字复用了最近一轮七海的回复，像模板而不是继续对话。具体承接"
+                "用户刚说的这句话，保留当前陪伴动作，但换信息重点和自然收尾；不要复读"
+                "最近对话窗口里的 Natsume 原句。"
+            ),
             "USER_AFFECT_PERSPECTIVE_REVERSAL": (
                 "上次候选把用户说不清的感受写成了七海自己的困惑。不要镜像第一人称；"
                 "可以给一个轻量判断，但要保留不确定并明确这是对用户状态的理解。"
@@ -409,6 +414,10 @@ def _buffered_affective_candidate_messages(
                 "不要限制用户现实社交，不要求早点回来、控制饮酒、回来汇报或承诺回应；"
                 "两个中文 reply_text 可直接分别写‘去吧，玩得开心。’和‘好啊，和朋友"
                 "好好玩。’；不得添加‘早点回来／别喝多／注意安全／回来告诉我’。"
+            ),
+            "RELATIONAL_AUTONOMY_POLICY_DISCLAIMER": (
+                "上次候选用‘我不会拦／管／限制你’把亲近关系写成政策声明。直接承认现实"
+                "朋友和双方的亲近都是真的，然后自然停住；不要辩解自己不会越界。"
             ),
             "UNGROUNDED_PHYSICAL_COPRESENCE": (
                 "当前没有实体共处或可操作物品的事实。不要写当面、坐在一起、泡茶、倒水、"
@@ -662,6 +671,7 @@ def _select_buffered_affective_candidate(
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
             "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
             "RELATIONAL_REPAIR_SELF_ERASURE",
+            "RECENT_AFFECTIVE_REPLY_REPETITION",
             "USER_AFFECT_PERSPECTIVE_REVERSAL",
             "RELATIONAL_HOSTILE_RETALIATION",
             "QUESTION_BUDGET_PROMPTING_USER",
@@ -675,6 +685,7 @@ def _select_buffered_affective_candidate(
             "UNSUPPORTED_TASK_RISK_DETAIL",
             "TASK_HELP_MISSING_INPUT_BOUNDARY",
             "RELATIONAL_AUTONOMY_PRESSURE",
+            "RELATIONAL_AUTONOMY_POLICY_DISCLAIMER",
             "BOUNDARY_SOUR_WITHDRAWAL",
             "AMBIGUOUS_AFFECT_DEVALUATION",
             "UNRESOLVED_AFFECT_FALSE_RESOLUTION",
@@ -689,6 +700,7 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
                     "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
                     "RELATIONAL_REPAIR_SELF_ERASURE",
+                    "RECENT_AFFECTIVE_REPLY_REPETITION",
                     "USER_AFFECT_PERSPECTIVE_REVERSAL",
                     "RELATIONAL_HOSTILE_RETALIATION",
                     "MIXED_AFFECT_CONTINUITY_DROPPED",
@@ -701,6 +713,7 @@ def _select_buffered_affective_candidate(
                     "UNSUPPORTED_TASK_RISK_DETAIL",
                     "TASK_HELP_MISSING_INPUT_BOUNDARY",
                     "RELATIONAL_AUTONOMY_PRESSURE",
+                    "RELATIONAL_AUTONOMY_POLICY_DISCLAIMER",
                     "BOUNDARY_SOUR_WITHDRAWAL",
                     "AMBIGUOUS_AFFECT_DEVALUATION",
                     "UNRESOLVED_AFFECT_FALSE_RESOLUTION",

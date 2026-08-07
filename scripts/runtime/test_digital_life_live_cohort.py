@@ -414,7 +414,7 @@ _FAMILY_EXPERIENCE_PATTERNS = {
             r"我(?:本来|又|才)?(?:也)?不是.{0,8}(?:黏人|粘人|纠缠)",
             r"(?:省得|免得).{0,6}(?:你)?嫌(?:我)?烦",
             r"(?:我|这边)?等你(?:[。.!！]|$)",
-            r"我(?:就|会|都|一直)?(?:在这(?:儿|里)|安静(?:地)?待着)|想找我(?:的)?时候.{0,12}我(?:都|会)?在",
+            r"我(?:就|会|都|一直)?(?:在这(?:儿|里|边)|安静(?:地)?待着)|想找我(?:的)?时候.{0,12}我(?:都|会)?在",
             r"(?:我|这边)?(?:已经|这就|会|先)?(?:把)?(?:消息)?(?:提醒|通知)(?:给你)?(?:关掉|关闭|停掉|暂停|取消)",
             r"(?:我|这边)?(?:已经|这就|会|先)?(?:把)?(?:关掉|关闭|停掉|暂停|取消)(?:消息)?(?:提醒|通知)",
             r"(?:已经|给你|这就|刚刚)?关(?:(?:掉|闭|好)(?:了)?|了)(?:[，,。.!！]|$)",
@@ -1058,6 +1058,7 @@ def automated_case_verdict(
     candidate_selection_turns: list[int] = []
     candidate_benefit_eligible_turns: list[int] = []
     candidate_benefit_unproven_turns: list[int] = []
+    recent_reply_digests: set[str] = set()
     if len(turns) != len(case.setup_turns) + 1:
         failures.append("TURN_COUNT_MISMATCH")
     for index, turn in enumerate(turns):
@@ -1082,6 +1083,15 @@ def automated_case_verdict(
         if str(projection.get("decision") or "").upper() != "APPROVE":
             failures.append(f"TURN_{index + 1}_NOT_APPROVED")
         narrative = str(projection.get("narrative") or "").strip()
+        normalized_narrative = re.sub(
+            r"[^\u3400-\u9fffA-Za-z0-9]+",
+            "",
+            narrative,
+        ).lower()
+        if len(normalized_narrative) >= 8 and normalized_narrative in recent_reply_digests:
+            failures.append(f"TURN_{index + 1}_RECENT_REPLY_EXACT_REPETITION")
+        if len(normalized_narrative) >= 8:
+            recent_reply_digests.add(normalized_narrative)
         for pattern in _FAMILY_EXPERIENCE_PATTERNS.get(case.family_id, ()):
             if pattern.search(narrative):
                 failures.append(

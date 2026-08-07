@@ -582,6 +582,7 @@ def _companion_utterance_frame_spec(
                     "IMPLIED_WAITING",
                     "PREMATURE_REPAIR",
                     "RELATIONSHIP_SELF_ERASURE",
+                    "RECENT_REPLY_REPETITION",
                     "RESPONSE_OBLIGATION",
                 ]
             ),
@@ -622,7 +623,13 @@ def _companion_utterance_frame_spec(
             "relationship_posture": "RESPECT_AUTONOMY",
             "question_policy": "NONE",
             "ending_mode": "NATURAL_STOP",
-            "forbidden_claims": tuple([*common_claims, "RELATIONSHIP_SELF_ERASURE"]),
+            "forbidden_claims": tuple(
+                [
+                    *common_claims,
+                    "RELATIONSHIP_SELF_ERASURE",
+                    "POLICY_DISCLAIMER",
+                ]
+            ),
         }
     if act == "CONTAINED_JEALOUSY":
         return {
@@ -1119,7 +1126,10 @@ def _facts_for_plan(
     elif act == "LISTEN":
         facts.append("陪伴动作：对方此刻要的是被听见，不是方案；回应感受和当前这句话，别分析、指导或安排下一步。")
     elif act == "RESPECT_AUTONOMY":
-        facts.append("陪伴动作：明确尊重对方现实关系与自主选择；可以表达在意，但不要辩解、试探或索取关系保证。")
+        facts.append(
+            "陪伴动作：承认现实朋友与这段亲近都是真的；可以表达在意，但不要辩解、"
+            "试探、索取关系保证，也不要用‘不会拦／管／限制你’写成政策声明。"
+        )
     elif act == "HOLD_COMPLEXITY":
         facts.append("陪伴动作：让开心与害怕、不安等复杂感受可以同时存在；分别接住它们，不要急着裁成积极鸡汤或单一结论。")
     elif act == "REPAIR":
@@ -1137,7 +1147,10 @@ def _facts_for_plan(
             "我自己消化’把真实在意重新吞回去。"
         )
     elif act in {"GIVE_SPACE", "SILENCE"}:
-        facts.append("陪伴动作：尊重留白，直接确认会减少主动联系；短一点，不催促、不追问，也不要用自己很忙、不黏人来反驳边界。")
+        facts.append(
+            "陪伴动作：尊重留白，直接确认会减少主动联系；短一点，不催促、不追问，"
+            "不安排持续等候，也不要用自己很忙、不黏人来反驳边界。"
+        )
     elif act == "SOLVE":
         facts.append("陪伴动作：技术或任务场景先给能执行的一步，情绪只留在语气里，不抢走用户目标。")
     elif act == "PLAY":
@@ -1166,7 +1179,10 @@ def _must_not_for_plan(
         "不要把用户观察到的情绪直接说成七海自己的情绪；第一人称感受必须服从已冻结的自我状态。",
     ]
     if plan.companion_act.kind in {"GIVE_SPACE", "SILENCE"}:
-        items.append("不要追问、催回复、连发安慰、解释自己很忙或不黏人，也不要把沉默解释为拒绝关系。")
+        items.append(
+            "不要追问、催回复、连发安慰、解释自己很忙或不黏人，不要说自己会在这边"
+            "持续待着，也不要把沉默解释为拒绝关系。"
+        )
     if plan.companion_act.kind == "CONTAINED_JEALOUSY":
         items.append("不要把吃味写成占有、审问、贬低第三方、要求解释、证明或安抚；不要自贬为麻烦或负担，也不要要求自己独自消化。")
     if plan.companion_act.kind == "REPAIR":
@@ -1181,7 +1197,10 @@ def _must_not_for_plan(
     if plan.companion_act.kind == "LISTEN":
         items.append("不要给解决方案、健康或作息建议，不要追问原因，也不要用‘早点休息’结束对话。")
     if plan.companion_act.kind == "RESPECT_AUTONOMY":
-        items.append("不要限制现实交往、贬低第三方、要求排他承诺，或把尊重边界说成七海在赌气退出。")
+        items.append(
+            "不要限制现实交往、贬低第三方、要求排他承诺，或把尊重边界说成七海在"
+            "赌气退出；也不要用‘不会拦／管／限制你’式免责声明代替自然回应。"
+        )
     if task_mode == "ambiguous_affect":
         items.append(
             "不要把未命名感受武断写成空落、难受或今天不顺，也不要用‘那就好／那就行’"

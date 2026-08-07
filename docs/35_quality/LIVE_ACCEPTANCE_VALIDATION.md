@@ -806,3 +806,9 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 加载 `cd678c742` 后只运行 `ambiguous_affect:4`，原始报告 SHA-256 为 `ca80319bdc210fba2998ec3fb8e64195b01c6fa374f20dfe631240ca81acb661`。3 个真实 Gateway turn、TaskGraph、Acceptance、Outbox 与 writer probe 均通过；正文为“辛苦了，这么晚才结束会议。”“嗯，还说不清也没关系。先不替它下结论，我陪你待一会儿。”和“嗯，现在还说不清，我先不替它下结论。”。当前逐句检查接受三轮，没有替用户命名、催促想清楚或安排未来回应。旧自动 verdict 唯一失败项是第二轮 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY / benefit_eligible=false`，而不是可见回复、执行或副作用失败。
 
 验收口径因此拆成两层：普通陪伴轨迹继续硬性检查实际正文、`selected_passed`、操控／事实边界、TaskGraph、Acceptance、Outbox 和 writer；候选搜索收益只在 `require_candidate_selection=true` 的专用实验中阻断场景。新版 verifier 对上述原始 turns 重算为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，并单列 `candidate_search_evidence=UNPROVEN_FOR_RECORDED_SELECTIONS`、`benefit_unproven_turns=[2]`。这使八类代表 frame 达到当前单人 8/8 接受，但不改变完整 48 条旧失败、三人盲评未跑和实时门槛未达的总体结论。该变更没有新增普通对话写入、同步审计、模型请求或生产延迟。
+
+## 2026-08-08 八类组合复验与人感回归
+
+在同一隔离 Host、Gateway、真实 DeepSeek 和既存多用户 SQLite 上重新执行八类代表轨迹，24 个回合全部进入 TaskGraph、Acceptance 与 Outbox，canonical writer 正常推进且旧 writer 增量为 0。原始报告 SHA-256 为 `eeff9adc8b6f8395aeeda7c1735e2d83b2e7283a8e59a76c58a9902a99a566a2`，自动结果为 7/8；唯一自动失败是现实朋友场景末句“我不会拦着你去交”。当前逐句复核还拒绝另外两条自动放行正文：关系修复第三轮逐字复读第一轮；用户明确要求空间后仍说“我就在这边待着”。因此此前分批取得的单人 8/8 不再作为当前结论，代表 frame 恢复为 `FAIL`。
+
+修复保持在轻量文本主链：精确复读只读取现有有界最近对话事实，短应答不受影响；“持续等着”只在 `GIVE_SPACE/SILENCE` frame 下拒绝；“我不会拦／管／限制你”只在 `RESPECT_AUTONOMY` frame 下视为政策免责声明。命中时使用既有最多一次语义重试和既有本地降级，不新增数据库、普通聊天写入、同步审计或模型请求上限。Planner、Surface、native stream、restart 与 live runner 共 336 项通过。必须先加载新提交，仅重跑 `user_angry_at_natsume:1`、`space_and_boundary:3`、`intimacy_and_jealousy_boundary:6` 并逐句通过，之后才可再跑八类组合队列；网络安全、Pentest 与远端 Edge 继续跳过。

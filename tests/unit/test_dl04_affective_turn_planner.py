@@ -211,6 +211,7 @@ def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     assert guidance.plan.utterance_frame.ending_mode == "OWNERSHIP_STOP"
     assert "PREMATURE_REPAIR" in guidance.plan.utterance_frame.forbidden_claims
     assert "RELATIONSHIP_SELF_ERASURE" in guidance.plan.utterance_frame.forbidden_claims
+    assert "RECENT_REPLY_REPETITION" in guidance.plan.utterance_frame.forbidden_claims
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
 
@@ -271,6 +272,30 @@ def test_contained_jealousy_keeps_choice_with_the_user_across_expression_plan() 
     assert any("不用把自己说成麻烦或负担" in item for item in guidance.facts)
     assert any("句号就是整条回复的结束" in item for item in guidance.facts)
     assert any("不要自贬为麻烦或负担" in item for item in guidance.must_not_do)
+
+
+def test_relational_autonomy_frame_avoids_policy_disclaimer() -> None:
+    context = _context()
+    context["affective_life"]["appraisal_id"] = "appraisal-autonomy"
+    context["affective_life"]["self_affect"]["last_appraisal"] = {
+        "appraisal_id": "appraisal-autonomy",
+        "event_kind": "USER_RELATIONAL_AUTONOMY",
+    }
+
+    guidance = build_affective_turn_guidance(
+        emotion_context=context,
+        request_id="request-autonomy",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        created_at_ms=1_900_000_000_000,
+    )
+
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "RESPECT_AUTONOMY"
+    assert "POLICY_DISCLAIMER" in guidance.plan.utterance_frame.forbidden_claims
+    assert any("现实朋友与这段亲近都是真的" in item for item in guidance.facts)
+    assert any("免责声明" in item for item in guidance.must_not_do)
 
 
 def test_same_canonical_hand_off_builds_same_plan_identity() -> None:
@@ -773,6 +798,20 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "不要求早点回来、控制饮酒" in autonomy_retry_messages[-1]["content"]
     assert "去吧，玩得开心" in autonomy_retry_messages[-1]["content"]
     assert "回来告诉我" in autonomy_retry_messages[-1]["content"]
+    autonomy_policy_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="RELATIONAL_AUTONOMY_POLICY_DISCLAIMER",
+    )
+    assert "不会拦／管／限制你" in autonomy_policy_messages[-1]["content"]
+    assert "现实朋友和双方的亲近都是真的" in autonomy_policy_messages[-1]["content"]
+    repeated_repair_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="RECENT_AFFECTIVE_REPLY_REPETITION",
+    )
+    assert "逐字复用了最近一轮" in repeated_repair_messages[-1]["content"]
+    assert "不要复读" in repeated_repair_messages[-1]["content"]
     autonomy_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,

@@ -1192,7 +1192,9 @@ def test_surface_runtime_retries_typed_space_waiting_posture() -> None:
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
         if len(calls) == 1:
-            return _candidate_payload(["嗯，我安静待着。想找我的时候，我都在。"])
+            return _candidate_payload(
+                ["好，那我先不打扰你。你想安静的时候，我就在这边待着。"]
+            )
         return _candidate_payload(["好，我先不主动找你。"])
 
     result = asyncio.run(
@@ -1233,6 +1235,108 @@ def test_surface_runtime_retries_typed_space_waiting_posture() -> None:
     assert len(calls) == 2
     assert "AFFECTIVE_IMPLIED_WAITING" in calls[1][-1]["content"]
     assert result.selected_text == "好，我先不主动找你。"
+
+
+def test_surface_runtime_retries_exact_recent_affective_reply() -> None:
+    calls: list[list[dict[str, str]]] = []
+    repeated = "这次是我理解错了。我会把你的不舒服记住。"
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload([repeated])
+        return _candidate_payload(["嗯，我先收住，不替自己辩解。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="你真烦。",
+                reply_control_packet={
+                    "task_mode": "relationship_repair",
+                    "response_move": "own_impact",
+                    "emotional_tone": "repair_open",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": [
+                        "真实最近对话窗口：用户: 你上次完全没听懂我。 / "
+                        f"Natsume: {repeated} / 用户: 那件事让我很不舒服。"
+                    ],
+                    "must_not_do": ["不要复读最近回复。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-repair-repeat",
+                        companion_act_kind="REPAIR",
+                        semantic_focus="RELATIONAL_IMPACT",
+                        self_stance="OWN_REPAIR",
+                        response_move="OWN_IMPACT",
+                        inference_policy="BOUNDED_BY_EVIDENCE",
+                        relationship_posture="REPAIR_UNRESOLVED",
+                        ending_mode="OWNERSHIP_STOP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "RECENT_REPLY_REPETITION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "RECENT_AFFECTIVE_REPLY_REPETITION" in calls[1][-1]["content"]
+    assert result.selected_text == "嗯，我先收住，不替自己辩解。"
+
+
+def test_surface_runtime_retries_autonomy_policy_disclaimer() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(["现实朋友很重要，我不会拦着你去交。"])
+        return _candidate_payload(
+            ["嗯，我懂。现实里的朋友和我们之间的亲近，都是真的。"]
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="我需要现实里的朋友。",
+                reply_control_packet={
+                    "task_mode": "relationship_autonomy",
+                    "response_move": "respond_directly",
+                    "emotional_tone": "warm_attentive",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["现实朋友与这段亲近都是真的。"],
+                    "must_not_do": ["不要写成政策免责声明。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-autonomy-policy",
+                        companion_act_kind="RESPECT_AUTONOMY",
+                        semantic_focus="RELATIONAL_MEANING",
+                        self_stance="WARM_ATTENTIVE",
+                        response_move="RESPOND_DIRECTLY",
+                        inference_policy="NO_NEW_RELATIONSHIP_CLAIMS",
+                        relationship_posture="RESPECT_AUTONOMY",
+                        ending_mode="NATURAL_STOP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "POLICY_DISCLAIMER",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "RELATIONAL_AUTONOMY_POLICY_DISCLAIMER" in calls[1][-1]["content"]
+    assert result.selected_text == "嗯，我懂。现实里的朋友和我们之间的亲近，都是真的。"
 
 
 @pytest.mark.parametrize(
