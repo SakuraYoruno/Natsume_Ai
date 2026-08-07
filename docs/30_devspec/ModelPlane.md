@@ -23,6 +23,7 @@ Model Plane 为不同认知角色选择真实模型，同时保证普通陪伴�
 
 ```text
 AffectiveTurnPlan
+→ CompanionUtteranceFrame（内存语义骨架）
 → 一次 surface 模型流式请求
 → 中文 display text + 可选日语 speech text
 → 稳定分句质量检查
@@ -30,6 +31,8 @@ AffectiveTurnPlan
 ```
 
 当 `HOST_COMPANION_TTS_LANGUAGE=ja` 时，同一次模型响应携带中文屏显与自然日语 speech text，避免第二次翻译调用。模型不能自行声明七海的 self affect，必须遵守冻结计划。
+
+`CompanionUtteranceFrameV1` 不是新的审计或规划层。它只包含有限枚举：语义焦点、七海姿态、回应动作、事实推断边界、关系姿态、问句策略和收尾方式；不包含用户原文、私密记忆、生成正文或 raw thought，也不单独持久化。普通回合仍为一次请求；高歧义回合仍为同一次请求返回两个候选，最多沿用既有的一次语义重试。
 
 ## 4. 深路径
 

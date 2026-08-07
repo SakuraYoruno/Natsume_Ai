@@ -90,6 +90,9 @@ def test_user_sadness_does_not_mirror_into_natsume_self_affect() -> None:
     assert guidance.plan.companion_act.kind == "COMFORT"
     assert guidance.plan.generation_mode == "STREAM_ONE"
     assert guidance.plan.candidate_count == 1
+    assert guidance.plan.utterance_frame.companion_act_kind == "COMFORT"
+    assert guidance.plan.utterance_frame.response_move == "COMFORT_WITHOUT_NAMING"
+    assert guidance.plan.utterance_frame.inference_policy == "BOUNDED_BY_EVIDENCE"
     assert "opaque digest only" not in str(guidance.plan.as_dict())
     assert any("不要把用户观察到的情绪直接说成七海自己的情绪" in item for item in guidance.must_not_do)
 
@@ -109,6 +112,9 @@ def test_explicit_ambiguous_affect_uses_bounded_two_candidate_path() -> None:
     assert guidance.plan.companion_act.kind == "COMFORT"
     assert guidance.plan.generation_mode == "BUFFERED_CANDIDATE_SELECTION"
     assert guidance.plan.candidate_count == 2
+    assert guidance.plan.utterance_frame.semantic_focus == "UNNAMED_USER_AFFECT"
+    assert guidance.plan.utterance_frame.inference_policy == "PRESERVE_UNCERTAINTY"
+    assert guidance.plan.utterance_frame.question_policy == "NONE"
     assert any("还不能给当前感受命名" in item for item in guidance.facts)
     assert any("语义顺序固定为" in item for item in guidance.facts)
     assert any("不能退回通用安慰" in item for item in guidance.facts)
@@ -199,6 +205,9 @@ def test_conflict_or_repair_uses_two_candidate_safe_path() -> None:
     assert guidance.plan.generation_mode == "BUFFERED_CANDIDATE_SELECTION"
     assert guidance.plan.candidate_count == 2
     assert guidance.plan.companion_act.kind == "REPAIR"
+    assert guidance.plan.utterance_frame.response_move == "OWN_IMPACT"
+    assert guidance.plan.utterance_frame.ending_mode == "OWNERSHIP_STOP"
+    assert "PREMATURE_REPAIR" in guidance.plan.utterance_frame.forbidden_claims
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
 
 
@@ -251,6 +260,9 @@ def test_contained_jealousy_keeps_choice_with_the_user_across_expression_plan() 
     assert guidance.plan.companion_act.kind == "CONTAINED_JEALOUSY"
     assert guidance.plan.expression_plan.voice_style == "CONTAINED_JEALOUSY"
     assert guidance.plan.expression_plan.avatar_expression == "CONTAINED_JEALOUSY"
+    assert guidance.plan.utterance_frame.self_stance == "CONTAINED_JEALOUSY"
+    assert guidance.plan.utterance_frame.ending_mode == "HONEST_STOP"
+    assert "RELATIONSHIP_SELF_ERASURE" in guidance.plan.utterance_frame.forbidden_claims
     assert any("把选择权完整留给对方" in item for item in guidance.facts)
     assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
     assert any("不用把自己说成麻烦或负担" in item for item in guidance.facts)
@@ -265,6 +277,7 @@ def test_same_canonical_hand_off_builds_same_plan_identity() -> None:
     assert first is not None and second is not None
     assert first.plan.plan_id == second.plan.plan_id
     assert first.plan.expression_plan.synchronization_id == second.plan.expression_plan.synchronization_id
+    assert first.plan.utterance_frame.frame_id == second.plan.utterance_frame.frame_id
     assert first.plan.self_affect_digest == second.plan.self_affect_digest
 
 
@@ -361,6 +374,14 @@ def test_space_candidate_counter_pressure_is_rejected_before_selection(
         trace_stage_meta=trace,
     )
     compiled = compile_surface_main_chain_input(surface_input).request
+    frame = compiled.control.companion_utterance_frame
+
+    assert frame["schema_version"] == "companion_utterance_frame.v1"
+    assert frame["response_move"] == "RESPECT_SPACE"
+    assert frame["ending_mode"] == "QUIET_STOP"
+    assert not any(
+        str(item).startswith("陪伴动作：") for item in compiled.control.facts
+    )
 
     selected = _select_buffered_affective_candidate(
         raw_output=json.dumps(

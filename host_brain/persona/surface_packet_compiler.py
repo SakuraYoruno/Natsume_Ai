@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
+
+from natsume_contracts.life import CompanionUtteranceFrameV1
 
 from host_brain.persona.isolated_surface_harness import (
     IsolatedSurfaceInput,
@@ -89,6 +91,7 @@ class SurfaceTaskControl:
     facts: tuple[str, ...] = ()
     style_anchor: tuple[str, ...] = ()
     affective_continuity_kind: str = ""
+    companion_utterance_frame: Mapping[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -101,6 +104,7 @@ class SurfaceTaskControl:
             "facts": list(self.facts),
             "style_anchor": list(self.style_anchor),
             "affective_continuity_kind": self.affective_continuity_kind,
+            "companion_utterance_frame": dict(self.companion_utterance_frame),
         }
 
 
@@ -253,6 +257,7 @@ def compile_reply_control_packet(
         facts=_string_list(facts),
         style_anchor=_string_list(packet_style_anchor),
         affective_continuity_kind=task.affective_continuity_kind,
+        companion_utterance_frame=dict(task.companion_utterance_frame),
         # Inner-state leakage fields (生命感改造 A5)
         inner_weather=inner_weather or "",
         body_state_hint=body_state_hint or "",
@@ -277,6 +282,9 @@ def compile_reply_control_packet(
         "must_not_do_count": len(packet.must_not_do),
         "must_include_count": len(packet.must_include),
         "affective_continuity_kind": packet.affective_continuity_kind,
+        "companion_utterance_frame_id": str(
+            dict(packet.companion_utterance_frame or {}).get("frame_id") or ""
+        ),
         "dropped_memory_relationship_clues": bool(memory.relationship_clues),
         "low_info_scene_guidance_applied": low_info_guidance.applied,
         "low_info_scene_kind": low_info_guidance.scene_kind,
@@ -467,6 +475,9 @@ def _coerce_task_control(raw: SurfaceTaskControl | Mapping[str, Any] | None) -> 
         affective_continuity_kind=_affective_continuity_kind(
             raw.get("affective_continuity_kind")
         ),
+        companion_utterance_frame=_coerce_companion_utterance_frame(
+            raw.get("companion_utterance_frame")
+        ),
     )
 
 
@@ -478,6 +489,16 @@ def _affective_continuity_kind(value: Any) -> str:
     }:
         return normalized
     return ""
+
+
+def _coerce_companion_utterance_frame(value: Any) -> dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    if isinstance(value, CompanionUtteranceFrameV1):
+        return value.as_dict()
+    if not isinstance(value, Mapping):
+        raise ValueError("companion utterance frame must be a mapping")
+    return CompanionUtteranceFrameV1.from_mapping(value).as_dict()
 
 
 def _surface_fact_priority(value: Any) -> int:

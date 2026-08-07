@@ -517,6 +517,9 @@ def _apply_affective_turn_guidance(
     control = _safe_mapping(
         task_control.as_dict() if callable(getattr(task_control, "as_dict", None)) else task_control
     )
+    # This field is never accepted from render_policy or another caller.  It
+    # is rebuilt below only from the canonical Life hand-off.
+    control.pop("companion_utterance_frame", None)
     emotion_context = _safe_mapping(getattr(agent_input, "emotion_context", None))
     is_internal = bool(emotion_context.get("_affective_life_internal"))
     previous_expression, previous_expression_source = _previous_avatar_expression(
@@ -562,10 +565,17 @@ def _apply_affective_turn_guidance(
         ]
         return list(dict.fromkeys([*existing, *values]))
 
-    control["facts"] = merge("facts", guidance.facts)
-    control["must_not_do"] = merge("must_not_do", guidance.must_not_do)
+    # The typed frame now owns action, inference, relationship and ending
+    # semantics.  Do not duplicate its policy as a page of natural-language
+    # facts/prohibitions in every ordinary chat prompt.  Only actual continuity
+    # facts remain on the fact plane during the compatibility window.
+    continuity_facts = tuple(
+        item for item in guidance.facts if item.startswith("上下文连续性：")
+    )
+    control["facts"] = merge("facts", continuity_facts)
     control["style_anchor"] = merge("style_anchor", guidance.style_anchor)
     control["affective_continuity_kind"] = guidance.continuity_kind
+    control["companion_utterance_frame"] = guidance.plan.utterance_frame.as_dict()
     if isinstance(trace_stage_meta, dict):
         trace_stage_meta["affective_turn_plan"] = guidance.plan.as_dict()
         trace_stage_meta["affective_turn_guidance"] = guidance.trace()

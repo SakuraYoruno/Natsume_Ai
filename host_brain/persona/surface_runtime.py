@@ -58,6 +58,7 @@ from host_brain.persona.surface_deictic import (
     _surface_runtime_prompt_facts,
 )
 from host_brain.persona.surface_original_quote_bank import render_surface_original_quote_guidance
+from host_brain.persona.surface_utterance_frame import render_companion_utterance_frame
 
 
 def _surface_direct_quote_limit() -> int:
@@ -715,6 +716,10 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
     control_payload = _model_dump(request.control)
     prompt_facts = _surface_runtime_prompt_facts(request)
     prompt_must_not_do = _surface_runtime_must_not_do(request)
+    utterance_frame_lines = render_companion_utterance_frame(
+        getattr(request.control, "companion_utterance_frame", {}),
+        question_budget=int(request.control.question_budget or 0),
+    )
     control_payload["facts"] = list(prompt_facts)
     control_payload["must_not_do"] = list(prompt_must_not_do)
     relationship_axes_payload = relationship_control_axes_for_distance(
@@ -785,13 +790,14 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
             "",
             "当前用户消息：",
             str(request.user_message or "").strip(),
-            "",
-            "必须遵守的事实：",
-            fact_lines,
-            "",
-            "禁止项：",
-            must_lines,
         ]
+        if utterance_frame_lines:
+            user_lines.extend(
+                ["", "本轮说话骨架：", *(f"- {item}" for item in utterance_frame_lines)]
+            )
+        user_lines.extend(
+            ["", "必须遵守的事实：", fact_lines, "", "禁止项：", must_lines]
+        )
         if quote_guidance:
             user_lines.extend(["", quote_guidance])
         if accepted_task_results_block:
@@ -836,6 +842,10 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
             "当前用户消息：",
             str(request.user_message or "").strip(),
         ]
+        if utterance_frame_lines:
+            user_lines.extend(
+                ["", "本轮说话骨架：", *(f"- {item}" for item in utterance_frame_lines)]
+            )
         # --- Inner-state leakage for compact mode ---
         _compact_inner_parts: list[str] = []
         if request.inner_weather:
@@ -955,6 +965,9 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
         "",
         "## ReplyControlPacket",
         _json_block(control_payload),
+        "",
+        "## 本轮说话骨架",
+        "\n".join(f"- {item}" for item in utterance_frame_lines) or "- 无",
         "",
         "## DerivedRelationshipControlAxes",
         _json_block(relationship_axes_payload),

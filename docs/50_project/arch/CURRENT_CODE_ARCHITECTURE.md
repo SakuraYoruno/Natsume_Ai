@@ -73,6 +73,8 @@ flowchart TB
 
 多轮连续性以 `conversation_turn.turn_index` 为 canonical 顺序；`ContextRepository` 和 Surface 专用 `RuntimeReadRepository` 都必须使用该顺序，`ts_ms` 只描述各进程观察到的墙钟时间。Fusion 在本轮没有新 appraisal 时，只能从仍活跃且未解决的 canonical episode 派生受控 continuity enum；它不会复制历史原文、创建第二份 self-affect 或增加 journal 写入。Planner 将该 enum 冻结进同一 `AffectiveTurnPlan`，让“没事”仍保留未解决低落、让新好消息同时承接此前不安。`GIVE_SPACE` 的候选还会在本地硬拒绝要求用户主动想念／联系的反向施压，不能只靠软分数带过。
 
+`AffectiveTurnPlan` 现在内嵌 `CompanionUtteranceFrameV1`。Planner 将 `CompanionAct` 编译为有限的说话骨架，Surface 的 compact、rich、native streaming 与 legacy-isolated 兼容入口使用同一 renderer；caller 和 `render_policy` 无权注入或覆盖该字段。frame 只存在于本轮既有计划和 packet 中，不建立第二个情感状态机或普通对话账本。生产输入编译器也不再重复注入同义的自然语言 facts／must-not-do 大段规则，只保留真实 continuity fact 和原有 style anchor。
+
 Surface packet 继续保持最多 8 条事实，但不再机械保留前 8 条泛化状态。必要事实、真实最近对话、陪伴动作、continuity、记忆线索、已完成的子代理结果和输入感知边界优先，身份／后台状态等低优先事实只填剩余槽位。continuity 另以内部 typed field 穿过 packet compiler，输出 Gate 不再依赖可能被截掉的中文 marker：未解决低落不能被宣布为“那就好／一切正常”，混合结果必须至少保留一处不安、没底、顾虑或慢慢消化的语义。命中后复用既有唯一语义重试；无 typed continuity 的普通聊天不执行这两个 Gate。
 
 当前语言策略为中文文本展示、日语 TTS。Host 通过 `ExpressionPlan` 选择 voice profile；目标 Edge 使用 `configs/voice/gpt_sovits_nanami_v4.json` 与 GPT-SoVITS V4 权重生成语音。

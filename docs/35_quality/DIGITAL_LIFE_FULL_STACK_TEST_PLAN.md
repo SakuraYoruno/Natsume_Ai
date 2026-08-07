@@ -829,3 +829,5 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 覆盖率预检还必须验证“兼容模块不会复活第二套 self-affect writer”。Prefrontal 即使缺失 app-local `TribeApplicationPorts` 也要 fail-closed；drift 事件不得调用 Endocrine、Limbic 或 PainReward 写路径。当前目标回归已覆盖 moderate／severe drift 和无 drift，29 项 Scheduler／Gateway／OBS／Prefrontal 相邻测试通过；完整 Unit 分片仍须在候选提交上重跑。该工程封口不能替代 48 条人感和三人盲评。
 
 2026-08-07 非安全覆盖收口已得到 Unit 7954 个 JUnit testcase＋2 个成功 subtest（合计 7956 outcome，0 failure/error、8 classified skips）、Contract 1898 项全绿、本地 E2E 68 项全绿。当前 SHA 的完整 Integration 六片为 862 passed／2 Redis env skips／0 failed，首轮 11 个失败已在完整相邻集合中关闭。最终完整生产源码分母为 line 68.50%、branch 51.40%、综合 64.27%，低于 75%／65% Gate，状态为 `FAIL_BELOW_COVERAGE_GATE`。该工程证据只验证数字生命所依赖的恢复、调度、Internal 与语音事件边界，不能把 `f378fa80d` 的 48 条人感失败或三人盲评提升为 PASS。网络安全与 Pentest 保持 `NOT_RUN_USER_SKIPPED`。
+
+`CompanionUtteranceFrameV1` 接线后，下一轮先使用全新 SQLite 运行含混、修复、要求空间、喜忧并存、克制吃味／现实自主和低落中的技术任务小队列。每一轮同时检查 frame、实际正文、候选选择、模型 usage、TaskGraph／Acceptance／Outbox 和延迟；全部通过才允许重新执行完整 48 条。543 项回归不能替代这次真实 Provider 检查，更不能替代三名评审盲测。frame 本身不得增加 repository 写入或模型轮数，若普通回合出现额外请求即判回归。

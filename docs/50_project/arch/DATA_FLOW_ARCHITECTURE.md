@@ -429,9 +429,12 @@ flowchart LR
     A --> P["冻结 AffectiveTurnPlan"]
     M --> P
     N --> P
-    P --> S["Surface 生成与既有本地 Gate"]
+    P --> F["编译 CompanionUtteranceFrame"]
+    F --> S["Surface 生成与既有本地 Gate"]
 ```
 
 这条路径只读已有有界 head，并复用原来的 Life／Relationship 写入；不会为每轮建立新审计记录。只有明确接受才关闭裂痕，新的正向结果也不能覆盖仍活跃的 mixed episode。指代澄清属于 facts，关系修复优先时会被抑制；canonical 克制吃味由非占有门禁评分，不借“亲近”自动升级关系。
+
+`CompanionUtteranceFrame` 是同一计划内的进程内数据，不经过新 repository。它把“接住什么、七海是什么立场、做哪一种回应、哪些推断不能补、怎样自然停住”传给所有 Surface prompt 路径；模型仍负责自然语言，而 frame 不记录候选正文。普通回合仍一次请求，高歧义回合仍在一次响应内返回两个候选，并最多进行一次既有重试。
 
 Prefrontal／Tribe 的历史 event handler 只允许读取 canonical Life 结果或生成 proposal。`TribeApplicationPorts` 缺失、类型错误或未完整注入时按 canonical affective life fail-closed，不得回退到 Endocrine、Limbic、PainReward 或 volatile Bond 写入；因此组合错误不会重新形成第二条 self-affect 数据流。

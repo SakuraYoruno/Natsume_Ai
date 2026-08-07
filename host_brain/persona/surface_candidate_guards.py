@@ -12,6 +12,9 @@ from host_brain.persona.isolated_surface_harness import (
     IsolatedSurfaceInput,
     surface_prompt_facts,
 )
+from host_brain.persona.surface_utterance_frame import (
+    normalize_companion_utterance_frame,
+)
 
 
 _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
@@ -716,6 +719,13 @@ def _canonical_affective_guidance_active(
     """
 
     control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {})
+    )
+    if frame:
+        return str(frame.get("companion_act_kind") or "").upper() == str(
+            companion_act or ""
+        ).upper()
     context = "\n".join(
         str(item or "")
         for item in [

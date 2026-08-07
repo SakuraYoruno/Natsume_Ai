@@ -24,6 +24,7 @@ from .relationship import (
 from .affective_turn import (
     AffectiveTurnPlanV1,
     CompanionActV1,
+    CompanionUtteranceFrameV1,
     ExpressionPlanV1,
 )
 from .affective_delivery import (
@@ -60,6 +61,7 @@ __all__ = [
     "RelationalAftereffectV1",
     "AffectiveTurnPlanV1",
     "CompanionActV1",
+    "CompanionUtteranceFrameV1",
     "ExpressionPlanV1",
     "ExpressionDeliveryIntentV1",
     "ExpressionDeliveryReceiptV1",

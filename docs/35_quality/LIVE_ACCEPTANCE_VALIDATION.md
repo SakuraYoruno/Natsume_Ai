@@ -758,3 +758,9 @@ Integration 六片首轮共 861 个 JUnit case：848 passed、11 failed、2 个�
 最终 coverage 只继承 `8341d99a0` 上 byte-identical 生产文件的 Unit／Contract／E2E 数据；先从继承数据中清除本提交改动的 6 个生产文件，再叠加当前 SHA 的 42 项 remediation 和完整 Integration run2（包含子进程 coverage）。去重测试口径为 10786 个 pytest outcome：10776 passed、10 classified skips、0 failed/error。完整 `host_brain`、`edge_client`、`natsume_contracts` 生产源码均留在分母，未运行的安全源码没有被删掉。
 
 当前 line coverage 为 68.50%（191578/279662），branch coverage 为 51.40%（47284/92000），statements＋branches 综合为 64.27%。两项分别低于冻结的 75%／65% Gate，所以 coverage 结论是 `FAIL_BELOW_COVERAGE_GATE`，不是 PASS。证据摘要位于忽略目录 `artifacts/local-gates/86deb0b1539e4f1b81107e009cfcb80f3a7e79b0/python-coverage-nonsecurity/combined-current-final/acceptance-summary.json`，SHA-256 为 `0e012682d1a50db53c5b2cac8e2b9186fe7e993d0a2ed3d72c203f38291a6bd2`；coverage JSON SHA-256 为 `4d924ad118d90e5d7fe8529c4a8e333c7562086d48da7133b9ae03583943344f`。网络安全、A09、A12、Security Monitor 和 Pentest 均保持 `NOT_RUN_USER_SKIPPED`；远端 Edge 保持关闭，远程 CI 为 `NOT_RUN_ACCOUNT_QUOTA`。
+
+## 2026-08-07 A15 语义说话骨架代码收口
+
+完整 48 条逐句检查表明，客服式重复、无依据解释、关系自我删除和不自然收尾不是继续追加正则能够解决的问题。本切片在既有 `AffectiveTurnPlanV1` 中加入 `CompanionUtteranceFrameV1`，并让 compact、rich、native streaming、legacy-isolated 与 proactive 生成使用同一有限语义 frame。caller 提供的同名字段会在输入编译边界被丢弃，只能由 canonical Life plan 生成。
+
+frame 不包含用户原文、私密记忆、候选正文或 raw thought；不新增 migration、repository、普通对话同步写、审计步骤或模型请求。生产 prompt 同时停止复制与 frame 同义的整页 planner facts／must-not-do，只保留真实 continuity fact 与既有 style anchor。相关 Digital Life、Surface、App adapter、restart integration 共 543 项非安全回归通过，`compileall` 与 `git diff --check` 通过。该证据只证明代码接线与兼容性；新提交尚未使用真实 Provider 复测，所以当前状态是 `CODE_REMEDIATED_REAL_RETEST_PENDING`，完整 48 条、人感盲评和实时 Gate 继续失败／待验。网络安全、A09、A12、Security Monitor 与 Pentest 均未运行。

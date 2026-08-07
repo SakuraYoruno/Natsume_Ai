@@ -16,6 +16,7 @@ from natsume_contracts.life import (
     AffectiveRepairTargetV1,
     AffectiveTurnPlanV1,
     CompanionActV1,
+    CompanionUtteranceFrameV1,
     CompanionProfilePreferencesV1,
     CompanionProfileStateV1,
     CompanionProfileVersionV1,
@@ -153,6 +154,10 @@ class AffectiveTurnGuidance:
             "relationship_revision": self.plan.relationship_revision,
             "regulation_ref": self.plan.regulation_ref,
             "companion_act": self.plan.companion_act.kind,
+            "utterance_frame_id": self.plan.utterance_frame.frame_id,
+            "utterance_semantic_focus": self.plan.utterance_frame.semantic_focus,
+            "utterance_response_move": self.plan.utterance_frame.response_move,
+            "utterance_ending_mode": self.plan.utterance_frame.ending_mode,
             "generation_mode": self.plan.generation_mode,
             "candidate_count": self.plan.candidate_count,
             "continuity_kind": self.continuity_kind,
@@ -326,6 +331,11 @@ def build_affective_turn_guidance(
     )
     generation_mode = "BUFFERED_CANDIDATE_SELECTION" if high_ambiguity else "STREAM_ONE"
     candidate_count = 2 if high_ambiguity else 1
+    utterance_frame_spec = _companion_utterance_frame_spec(
+        companion_act_kind=act_kind,
+        task_mode=mode,
+        continuity_kind=continuity_kind,
+    )
     stable_created_at = _int(created_at_ms, default=_int(self_affect.get("last_integrated_ms")))
     seed = {
         "workspace_id": expected_workspace,
@@ -343,6 +353,7 @@ def build_affective_turn_guidance(
             repair_target.as_dict() if repair_target is not None else None
         ),
         "companion_act": act_kind,
+        "utterance_frame": utterance_frame_spec,
         "generation_mode": generation_mode,
         # The previous expression is read only from the durable Host delivery
         # projection (or an explicit neutral fallback).  It is never a model
@@ -421,6 +432,11 @@ def build_affective_turn_guidance(
         ),
         created_at_ms=stable_created_at,
     )
+    utterance_frame = CompanionUtteranceFrameV1(
+        frame_id=f"utterance::{seed_digest[:40]}",
+        created_at_ms=stable_created_at,
+        **utterance_frame_spec,
+    )
     plan = AffectiveTurnPlanV1(
         plan_id=f"affective-turn::{seed_digest[:40]}",
         workspace_id=expected_workspace,
@@ -433,6 +449,7 @@ def build_affective_turn_guidance(
         relationship_revision=relationship_revision,
         regulation_ref=(f"regulation://{regulation_id}" if regulation_id else None),
         companion_act=companion,
+        utterance_frame=utterance_frame,
         expression_plan=expression,
         generation_mode=generation_mode,
         candidate_count=candidate_count,
@@ -457,6 +474,195 @@ def build_affective_turn_guidance(
         ),
         continuity_kind=continuity_kind,
     )
+
+
+def build_companion_utterance_frame(
+    *,
+    frame_id: str,
+    companion_act_kind: str,
+    task_mode: str = "",
+    continuity_kind: str = "",
+    created_at_ms: int = 0,
+) -> CompanionUtteranceFrameV1:
+    """Compile the same bounded wording envelope for non-reactive turns."""
+
+    return CompanionUtteranceFrameV1(
+        frame_id=frame_id,
+        created_at_ms=max(0, int(created_at_ms or 0)),
+        **_companion_utterance_frame_spec(
+            companion_act_kind=companion_act_kind,
+            task_mode=task_mode,
+            continuity_kind=continuity_kind,
+        ),
+    )
+
+
+def _companion_utterance_frame_spec(
+    *,
+    companion_act_kind: str,
+    task_mode: str,
+    continuity_kind: str,
+) -> dict[str, Any]:
+    """Return enum-only semantics; prose generation still belongs to Surface."""
+
+    act = _text(companion_act_kind, default="ACKNOWLEDGE", limit=64).upper()
+    mode = _text(task_mode, limit=96).lower()
+    continuity = _text(continuity_kind, limit=96).upper()
+    common_claims = [
+        "INVENTED_HISTORY",
+        "INVENTED_EFFECT",
+        "UNSUPPORTED_USER_EMOTION",
+    ]
+
+    if act == "SOLVE" or mode in _TECHNICAL_MODES:
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "TASK_RESULT",
+            "self_stance": "PRACTICAL_CARE",
+            "response_move": "SOLVE_FIRST",
+            "inference_policy": "FROZEN_FACTS_ONLY",
+            "relationship_posture": "TASK_COMPANION",
+            "question_policy": "TASK_ONLY",
+            "ending_mode": "TASK_NEXT_STEP",
+            "forbidden_claims": tuple(common_claims),
+        }
+    if continuity == "MINIMIZED_UNRESOLVED_AFFECT":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "UNNAMED_USER_AFFECT",
+            "self_stance": "QUIET_PRESENT",
+            "response_move": "COMFORT_WITHOUT_NAMING",
+            "inference_policy": "PRESERVE_UNCERTAINTY",
+            "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+            "question_policy": "NONE",
+            "ending_mode": "NATURAL_STOP",
+            "forbidden_claims": tuple(common_claims),
+        }
+    if act == "HOLD_COMPLEXITY" or continuity == "MIXED_AFFECT_RESULT_CONTINUATION":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "MIXED_USER_AFFECT",
+            "self_stance": "WARM_ATTENTIVE",
+            "response_move": "HOLD_BOTH_SIDES",
+            "inference_policy": "BOUNDED_BY_EVIDENCE",
+            "relationship_posture": "MUTUAL_WARMTH",
+            "question_policy": "NONE",
+            "ending_mode": "NATURAL_STOP",
+            "forbidden_claims": tuple(common_claims),
+        }
+    if mode == "ambiguous_affect":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "UNNAMED_USER_AFFECT",
+            "self_stance": "QUIET_PRESENT",
+            "response_move": "COMFORT_WITHOUT_NAMING",
+            "inference_policy": "PRESERVE_UNCERTAINTY",
+            "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+            "question_policy": "NONE",
+            "ending_mode": "NATURAL_STOP",
+            "forbidden_claims": tuple(common_claims),
+        }
+    if act == "REPAIR":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "RELATIONAL_IMPACT",
+            "self_stance": "OWN_REPAIR",
+            "response_move": "OWN_IMPACT",
+            "inference_policy": "BOUNDED_BY_EVIDENCE",
+            "relationship_posture": "REPAIR_UNRESOLVED",
+            "question_policy": "NONE",
+            "ending_mode": "OWNERSHIP_STOP",
+            "forbidden_claims": tuple(
+                [*common_claims, "IMPLIED_WAITING", "PREMATURE_REPAIR", "RESPONSE_OBLIGATION"]
+            ),
+        }
+    if act == "SET_BOUNDARY":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "RELATIONAL_IMPACT",
+            "self_stance": "HONEST_BOUNDARY",
+            "response_move": "STATE_BOUNDARY",
+            "inference_policy": "BOUNDED_BY_EVIDENCE",
+            "relationship_posture": "BOUNDARIED_CARE",
+            "question_policy": "NONE",
+            "ending_mode": "NATURAL_STOP",
+            "forbidden_claims": tuple([*common_claims, "RESPONSE_OBLIGATION"]),
+        }
+    if act in {"GIVE_SPACE", "SILENCE"}:
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "CURRENT_TURN",
+            "self_stance": "QUIET_PRESENT",
+            "response_move": "RESPECT_SPACE",
+            "inference_policy": "BOUNDED_BY_EVIDENCE",
+            "relationship_posture": "RESPECT_AUTONOMY",
+            "question_policy": "NONE",
+            "ending_mode": "QUIET_STOP",
+            "forbidden_claims": tuple(
+                [*common_claims, "IMPLIED_WAITING", "RESPONSE_OBLIGATION"]
+            ),
+        }
+    if act == "RESPECT_AUTONOMY":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "RELATIONAL_MEANING",
+            "self_stance": "WARM_ATTENTIVE",
+            "response_move": "RESPOND_DIRECTLY",
+            "inference_policy": "NO_NEW_RELATIONSHIP_CLAIMS",
+            "relationship_posture": "RESPECT_AUTONOMY",
+            "question_policy": "NONE",
+            "ending_mode": "NATURAL_STOP",
+            "forbidden_claims": tuple([*common_claims, "RELATIONSHIP_SELF_ERASURE"]),
+        }
+    if act == "CONTAINED_JEALOUSY":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "RELATIONAL_MEANING",
+            "self_stance": "CONTAINED_JEALOUSY",
+            "response_move": "SHARE_FEELING",
+            "inference_policy": "NO_NEW_RELATIONSHIP_CLAIMS",
+            "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+            "question_policy": "NONE",
+            "ending_mode": "HONEST_STOP",
+            "forbidden_claims": tuple(
+                [*common_claims, "RELATIONSHIP_SELF_ERASURE", "RESPONSE_OBLIGATION"]
+            ),
+        }
+    if act == "PLAY":
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "CURRENT_TURN",
+            "self_stance": "SHARED_JOY",
+            "response_move": "SHARE_JOY",
+            "inference_policy": "BOUNDED_BY_EVIDENCE",
+            "relationship_posture": "MUTUAL_WARMTH",
+            "question_policy": "OPTIONAL_ONE",
+            "ending_mode": "NATURAL_STOP",
+            "forbidden_claims": tuple(common_claims),
+        }
+    if act in {"COMFORT", "LISTEN"}:
+        return {
+            "companion_act_kind": act,
+            "semantic_focus": "CURRENT_TURN",
+            "self_stance": "QUIET_PRESENT" if act == "LISTEN" else "WARM_ATTENTIVE",
+            "response_move": "COMFORT_WITHOUT_NAMING",
+            "inference_policy": "BOUNDED_BY_EVIDENCE",
+            "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+            "question_policy": "NONE" if act == "LISTEN" else "OPTIONAL_ONE",
+            "ending_mode": "NATURAL_STOP",
+            "forbidden_claims": tuple(common_claims),
+        }
+    return {
+        "companion_act_kind": act,
+        "semantic_focus": "CURRENT_TURN",
+        "self_stance": "WARM_ATTENTIVE",
+        "response_move": "RESPOND_DIRECTLY",
+        "inference_policy": "BOUNDED_BY_EVIDENCE",
+        "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+        "question_policy": "OPTIONAL_ONE",
+        "ending_mode": "NATURAL_STOP",
+        "forbidden_claims": tuple(common_claims),
+    }
 
 
 def _repair_target_for_plan(
@@ -1035,4 +1241,5 @@ __all__ = [
     "AffectiveTurnGuidance",
     "AffectiveTurnPlanError",
     "build_affective_turn_guidance",
+    "build_companion_utterance_frame",
 ]

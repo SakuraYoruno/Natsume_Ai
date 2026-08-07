@@ -30,6 +30,9 @@ from host_brain.persona.emotional_proactive import (
     EmotionalProactiveEpisode,
     build_emotional_proactive_episode,
 )
+from host_brain.digital_life.affective_turn_planner import (
+    build_companion_utterance_frame,
+)
 
 
 _SAFE_NO_REPLY_MARKERS = ("不用回", "不必回", "不方便回", "不急着要回应")
@@ -669,6 +672,7 @@ def _build_proactive_turn_plan(
         "episode_id": episode.episode_id,
         "motive": episode.motive,
         "act": act_kind,
+        "utterance_frame_version": 1,
         "emotion": emotion,
         "profile_id": profile_id,
         "profile_revision": _integer(profile_revision),
@@ -715,6 +719,12 @@ def _build_proactive_turn_plan(
         ),
         created_at_ms=max(0, int(now_ms)),
     )
+    utterance_frame = build_companion_utterance_frame(
+        frame_id=f"utterance::{seed_digest[:40]}",
+        companion_act_kind=act_kind,
+        task_mode="proactive",
+        created_at_ms=max(0, int(now_ms)),
+    )
     plan = AffectiveTurnPlanV1(
         plan_id=f"affective-turn::{seed_digest[:40]}",
         workspace_id=str(relationship.get("workspace_id") or ""),
@@ -731,6 +741,7 @@ def _build_proactive_turn_plan(
             else None
         ),
         companion_act=companion_act,
+        utterance_frame=utterance_frame,
         expression_plan=expression_plan,
         generation_mode="STREAM_ONE",
         candidate_count=1,

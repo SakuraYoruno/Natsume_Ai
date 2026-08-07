@@ -31,6 +31,7 @@
 | 主动陪伴 | `companion_proactive.py`、permission ingress | `WIRED / PARTIAL` |
 | 偏好成长 | `companion_profile_lifecycle.py`、feedback ingress | `WIRED / PARTIAL` |
 | 表达计划 | `affective_turn_planner.py`、`companion_voice.py` | `WIRED` |
+| 语义说话骨架 | `CompanionUtteranceFrameV1`、`surface_utterance_frame.py` | `CODE_COMPLETE / REAL_PROVIDER_RETEST_PENDING` |
 | 表达交付 | `affective_expression_delivery.py`、Surface streaming | `WIRED / PARTIAL` |
 
 ## 3. 对话与记忆
@@ -42,6 +43,8 @@
 | Life context | `surface_runtime/life_context.py` | 只读 canonical Life projection |
 | Memory grounding | `surface_runtime/memory_context.py`、`memory_grounding.py` | 只取必要摘要，不写 self affect |
 | 长期记忆 | `host_brain/memory/` | person 与 workspace namespace 分离 |
+
+语义说话骨架是纯内存编译／渲染模块，不是审计服务。它不访问 repository、不调用模型、不保存用户原文，也不增加普通聊天的同步写；其目的只是让 compact、rich、native stream 和兼容 prompt 不再各自拼接不同的陪伴规则。
 
 ## 4. 受管执行
 

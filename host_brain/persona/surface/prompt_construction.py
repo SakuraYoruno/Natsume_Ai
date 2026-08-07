@@ -15,6 +15,7 @@ from host_brain.persona.surface_original_quote_bank import (
     render_surface_original_quote_guidance,
     select_surface_original_quotes,
 )
+from host_brain.persona.surface_utterance_frame import render_companion_utterance_frame
 from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
     IsolatedCandidateScore,
@@ -450,6 +451,10 @@ def build_native_stream_surface_messages(
     ).as_dict()
     facts = surface_prompt_facts(request)
     must_not_do = merged_must_not_do(request)
+    utterance_frame_lines = render_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {}),
+        question_budget=int(control.question_budget or 0),
+    )
     # This is the realtime prompt, not the archived Soul or the buffered
     # candidate/judge contract.  Keep the compiled, relationship-safe Soul
     # projection intact while avoiding repeated policy prose and verbose JSON
@@ -504,6 +509,10 @@ def build_native_stream_surface_messages(
         ),
         f"关系尺度：{relationship_scale}",
     ]
+    if utterance_frame_lines:
+        user_parts.extend(
+            ("【本轮说话骨架】", *(f"- {item}" for item in utterance_frame_lines))
+        )
     if inner_state_lines:
         user_parts.extend(("【你的当前感受】", *inner_state_lines))
     if facts:
@@ -540,6 +549,10 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     control_payload = _model_dump(control)
     control_payload["facts"] = surface_prompt_facts(request)
     control_payload["must_not_do"] = merged_must_not_do(request)
+    utterance_frame_lines = render_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {}),
+        question_budget=int(control.question_budget or 0),
+    )
     relationship_axes_payload = relationship_control_axes_for_distance(control.relationship_distance).as_dict()
     no_question_line = (
         "本轮 question_budget=0：不要写真正问句或追问；“哈？/嗯？”以及“累了？那...”这类短促反应反问可以少量使用，但后面必须直接落地。"
@@ -606,6 +619,14 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
         "## TurnSurfaceContract",
         json.dumps(turn_contract_payload, ensure_ascii=False, indent=2, sort_keys=True),
     ]
+    if utterance_frame_lines:
+        user_parts.extend(
+            [
+                "",
+                "## 本轮说话骨架",
+                "\n".join(f"- {item}" for item in utterance_frame_lines),
+            ]
+        )
 
     # --- Inner-state leakage section ---
     # Inject a natural-language inner-weather block so the LLM can feel

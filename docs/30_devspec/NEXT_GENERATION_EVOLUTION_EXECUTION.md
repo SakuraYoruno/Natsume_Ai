@@ -17,7 +17,7 @@
 - 普通聊天采用轻量实时路径；工具和外部副作用仍采用 Governed Runtime。
 - GPT-SoVITS V4 方案 B 已在本机 CUDA 环境完成参考条件生成和人工试听；当前使用预训练权重，不是七海专属微调 checkpoint。
 - #194 与文档收口 PR #209 已合入 `dev`，本地和远端临时分支已清理。
-- 用户已授权并启动目标 Edge；ASR、GPT-SoVITS TTS、音频播放、Edge RPC、Unified Gateway 与真实消息平台核心往返已验证。
+- 历史验收已取得目标 Edge 的 ASR、GPT-SoVITS TTS、音频播放、Edge RPC、Unified Gateway 与真实消息平台核心往返证据；当前 Edge 保持关闭，本轮不得自行启动或重启。
 - Gateway Chat 已贯通 canonical HostCommand／TaskGraph／Acceptance／Outbox；重复入站不会重复建图或外发。
 - OBS/Monitor 已如实投影双端状态；VTS 缺兼容情绪热键而 `DEGRADED`，barge-in 关闭并为 `NOT_TESTED`。
 - Monitor 的普通本机浏览器会话已接通：启动器生成 ACL 保护的 owner token，浏览器经 loopback/same-origin bootstrap 获得 HttpOnly Cookie，HTTP 与 WebSocket 不再显示伪“待连接”。
@@ -25,6 +25,7 @@
 - Cockpit 深层诊断默认折叠；依赖审计已消除 `brace-expansion` high，React Router 仍有 2 项仅适用于当前依赖边界的 moderate 待上游安全版本。
 - GitHub Actions 因账户额度不可用，远程状态为 `NOT_RUN_ACCOUNT_QUOTA`。
 - 整体状态保持 `INCOMPLETE`。
+- 完整 48 条真实文本的人工作品检查仍失败；当前先以 `CompanionUtteranceFrameV1` 替代反复追加的自然语言规则，让模型围绕本轮语义和七海自身立场自然表达。代码与 543 项相关回归已完成，真实 Provider 定向复测尚未完成，不能提升人感状态。
 
 ## 3. 执行顺序
 
@@ -34,8 +35,10 @@ flowchart LR
     B --> C["Host / OBS / Monitor 真实 UI与本机会话：已完成"]
     C --> D["固定版本 Docker 重启持久性：已完成"]
     D --> E["VTS 热键与 barge-in：待外部配置"]
-    E --> F["真实多轮盲测与性能"]
-    F --> G["发布判定"]
+    D --> F["新语义骨架真实定向复测"]
+    F --> E
+    E --> G["完整 48 条与三人盲测、性能"]
+    G --> H["发布判定"]
 ```
 
 ## 4. 交付规则
@@ -58,7 +61,7 @@ flowchart LR
 4. #194 与 #209 均以中文 squash 提交进入 `dev`。
 5. 本地和远端只保留长期分支 `dev`、`main`。
 
-本轮 P0 代码已绑定提交 `cdaa4ea54`，固定版本 Neo4j、Chroma 与 Redis 的真实写读、容器重启和持久读取已经通过。当前执行点转为外部能力补齐与完整体验门槛：VTS 情绪热键、barge-in、多轮盲测和实时性能。目标 Edge 的运行已经获得本轮授权；后续再次启动、停止或变更模型资产仍需新的明确指令。
+本轮 P0 代码已绑定提交 `cdaa4ea54`，固定版本 Neo4j、Chroma 与 Redis 的真实写读、容器重启和持久读取已经通过。当前执行点转为本机代码与体验门槛：真实 Provider 定向复测、完整多轮盲测和实时性能。目标 Edge 的历史证据继续保留，但当前运行未获重新授权；VTS、barge-in 和物理三模态不在本轮自行执行。
 
 ## 6. 最终验收
 

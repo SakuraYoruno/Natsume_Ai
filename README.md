@@ -13,6 +13,8 @@
 
 非安全全仓覆盖已在 `86deb0b15` 收口：Unit 为 7954 个 JUnit testcase，另有 2 个成功 subtest，合计 7956 个 pytest outcome（7948 passed、8 个分类 skip）；Contract 1898/1898、Integration 862 passed／2 个 Redis 环境 skip、本地 E2E 68/68。去重后共 10786 个 outcome，10776 passed、10 skipped、0 failed/error。完整 Host／Edge／Contracts 生产源码仍全部进入分母，未运行的 Pentest／网络安全源码没有被静默排除；最终 line coverage 68.50%（191578/279662）、branch coverage 51.40%（47284/92000）、综合 64.27%，低于 75%／65% Gate，因此覆盖结论为 `FAIL_BELOW_GATE`，A15 与 Architecture 2.0 仍不能写成完成。证据摘要 SHA-256 为 `0e012682d1a50db53c5b2cac8e2b9186fe7e993d0a2ed3d72c203f38291a6bd2`；A09、A12、Pentest 与网络安全继续是 `NOT_RUN_USER_SKIPPED`。
 
+完整 48 条真实文本已经证明，继续叠加零散禁词并不能让七海更像人。本轮因此在既有 `AffectiveTurnPlan` 内加入轻量 `CompanionUtteranceFrameV1`：它只冻结本轮语义焦点、七海立场、回应动作、关系分寸和自然收尾，再交给模型自由措辞。该 frame 仅在内存中传递，不新增表、普通聊天写入、同步审计或模型调用；同时移除了生产 prompt 中与它重复的整页自然语言规则。543 项相关非安全回归已通过，但新提交尚未完成真实 Provider 定向复测，完整 48 条和三人盲评仍为 `FAIL/PENDING_HUMAN_REVIEW`。
+
 ## 她不会在你沉默时消失
 
 即使没有新消息，唯一的 Life Runtime 仍会按真实时间推进。默认每 60 秒一次的 `life_tick` 不调用大模型，也不会机械地给用户发消息；它负责让时间真正作用于七海：
