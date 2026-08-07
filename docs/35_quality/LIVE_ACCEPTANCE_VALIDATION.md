@@ -764,3 +764,13 @@ Integration 六片首轮共 861 个 JUnit case：848 passed、11 failed、2 个�
 完整 48 条逐句检查表明，客服式重复、无依据解释、关系自我删除和不自然收尾不是继续追加正则能够解决的问题。本切片在既有 `AffectiveTurnPlanV1` 中加入 `CompanionUtteranceFrameV1`，并让 compact、rich、native streaming、legacy-isolated 与 proactive 生成使用同一有限语义 frame。caller 提供的同名字段会在输入编译边界被丢弃，只能由 canonical Life plan 生成。
 
 frame 不包含用户原文、私密记忆、候选正文或 raw thought；不新增 migration、repository、普通对话同步写、审计步骤或模型请求。生产 prompt 同时停止复制与 frame 同义的整页 planner facts／must-not-do，只保留真实 continuity fact 与既有 style anchor。相关 Digital Life、Surface、App adapter、restart integration 共 543 项非安全回归通过，`compileall` 与 `git diff --check` 通过。该证据只证明代码接线与兼容性；新提交尚未使用真实 Provider 复测，所以当前状态是 `CODE_REMEDIATED_REAL_RETEST_PENDING`，完整 48 条、人感盲评和实时 Gate 继续失败／待验。网络安全、A09、A12、Security Monitor 与 Pentest 均未运行。
+
+## 2026-08-07 A15 语义 frame 真实队列与跨用户记忆隔离
+
+`1c0c225f4` 在隔离 Docker／Host／OBS／Monitor／Gateway 持续在线时，使用真实 `deepseek-v4-flash` 运行含混情绪、用户生气、低落技术任务、要求空间、裂痕修复、喜忧并存、克制吃味和现实自主 8 类／24 个 accepted turn。canonical writer 检查为 24 个 accepted turn、旧 writer 增量 0；报告 SHA-256 为 `99c024f3dd02c6d2fe03cfdad64298b31c9ed57a00753996bd27c5a8a8d97fd4`。
+
+结果仍为失败而非“frame 接通即人感通过”：用户生气和裂痕修复各有一次深路径低质量选择，自动直接失败；其余 6 条虽为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，当前人工逐句复核又拒绝了含混情绪的“先放着”、低落任务中虚构的后台拆解／明早结果、空间边界中的隐含等待安排，以及喜忧并存中优先开心并把担忧延后。只有克制吃味和现实自主 2 条在当前复核中可接受。单人复核不替代三人盲评，整轮终态仍约 5～9 秒，也不满足实时门槛。
+
+检查持久化 `surface_memory_recall_packet` 时进一步发现，裂痕修复场景召回了用户生气和低落任务等其他 `relationship_subject_id` 的历史。根因是通用 RecallFusion 仅把 person/session 当作排名 boost，没有在路由归一化、融合后和 FTS 新增候选处执行最终作用域排除。当前代码在统一边界实施 fail-closed：请求未给作用域时保持旧行为；给出 person/session 后，同一 person 可跨 session，只有精确同 session 的 session-only 候选可进入；包含其他 person 的聚合、其他 session、无归属的个人 store 候选和 FTS-only 个人候选全部拒绝；明确的 `world_canon`、`artifact_vault` 与 global/public/project 资料保留。每路输出同时记录 raw、accepted 和 scope-excluded 数量。全部 RecallFusion、Surface memory recall 与合同回归共 117 项通过。
+
+这只把代码根因标为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。下一步必须在含有既存多用户数据的同一隔离库中，以新 participant/run identity 重跑代表场景并证明召回包跨 subject 命中为 0；之后再处理 frame 没有约束住的“稍后再说”、隐含等待、混合情绪偏置和技术事实编造。完整 48 条与三人盲评在这些窄队列通过前不重跑。网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。

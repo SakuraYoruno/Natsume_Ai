@@ -13,7 +13,9 @@
 
 非安全全仓覆盖已在 `86deb0b15` 收口：Unit 为 7954 个 JUnit testcase，另有 2 个成功 subtest，合计 7956 个 pytest outcome（7948 passed、8 个分类 skip）；Contract 1898/1898、Integration 862 passed／2 个 Redis 环境 skip、本地 E2E 68/68。去重后共 10786 个 outcome，10776 passed、10 skipped、0 failed/error。完整 Host／Edge／Contracts 生产源码仍全部进入分母，未运行的 Pentest／网络安全源码没有被静默排除；最终 line coverage 68.50%（191578/279662）、branch coverage 51.40%（47284/92000）、综合 64.27%，低于 75%／65% Gate，因此覆盖结论为 `FAIL_BELOW_GATE`，A15 与 Architecture 2.0 仍不能写成完成。证据摘要 SHA-256 为 `0e012682d1a50db53c5b2cac8e2b9186fe7e993d0a2ed3d72c203f38291a6bd2`；A09、A12、Pentest 与网络安全继续是 `NOT_RUN_USER_SKIPPED`。
 
-完整 48 条真实文本已经证明，继续叠加零散禁词并不能让七海更像人。本轮因此在既有 `AffectiveTurnPlan` 内加入轻量 `CompanionUtteranceFrameV1`：它只冻结本轮语义焦点、七海立场、回应动作、关系分寸和自然收尾，再交给模型自由措辞。该 frame 仅在内存中传递，不新增表、普通聊天写入、同步审计或模型调用；同时移除了生产 prompt 中与它重复的整页自然语言规则。543 项相关非安全回归已通过，但新提交尚未完成真实 Provider 定向复测，完整 48 条和三人盲评仍为 `FAIL/PENDING_HUMAN_REVIEW`。
+完整 48 条真实文本已经证明，继续叠加零散禁词并不能让七海更像人。本轮因此在既有 `AffectiveTurnPlan` 内加入轻量 `CompanionUtteranceFrameV1`：它只冻结本轮语义焦点、七海立场、回应动作、关系分寸和自然收尾，再交给模型自由措辞。该 frame 仅在内存中传递，不新增表、普通聊天写入、同步审计或模型调用；同时移除了生产 prompt 中与它重复的整页自然语言规则。543 项相关非安全回归通过后，`1c0c225f4` 上的真实 DeepSeek 定向队列运行 8 类／24 个 accepted turn，结果不是 PASS：2 条自动失败，自动放行的 6 条中另有 4 条被当前人工复核拒绝，只有克制吃味和现实自主 2 条可接受。报告 SHA-256 为 `99c024f3dd02c6d2fe03cfdad64298b31c9ed57a00753996bd27c5a8a8d97fd4`。
+
+该轮还暴露了更基础的连续性错误：canonical `relationship_subject_id` 虽然彼此不同，通用 RecallFusion 却只给同用户／同会话加分，没有排除其他用户、其他会话和无归属的个人记忆，混合 FTS 也可能重新引入无作用域结果。当前切片已在统一融合边界改为 fail-closed：同一用户可跨会话，只有同会话的 session-only 候选可进入；多用户聚合、其他用户／会话和无归属个人候选被排除，`world_canon`、`artifact_vault` 及显式 global/public/project 资料保留。117 项召回与 Surface 回归通过，但修复后的真实 Provider 重测尚未运行，所以完整 48 条和三人盲评仍为 `FAIL/PENDING_HUMAN_REVIEW`。
 
 ## 她不会在你沉默时消失
 
