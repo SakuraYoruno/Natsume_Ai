@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 
+from host_brain.audit.sqlite_ledger import SQLiteLedger
 from host_brain.retrieval.recall_fusion import (
     STORE_EPISODIC_VECTOR,
+    STORE_SQLITE_LEDGER,
     RecallFusionServiceContract,
     _candidate_matches_recall_scope,
     load_recall_runtime_config,
@@ -151,3 +153,67 @@ def test_explicit_non_personal_stores_remain_recallable_in_person_scope() -> Non
         person_id="subject-a",
         session_id="session-a",
     )
+
+
+def test_current_ingress_intent_is_not_recalled_as_its_own_memory() -> None:
+    ledger = SQLiteLedger(db_path=":memory:")
+    try:
+        for request_id, intent_id, raw_text in (
+            ("req-previous", "intent::req-previous", "共同关键词 之前发生的事"),
+            ("req-current", "intent::req-current", "共同关键词 当前用户输入"),
+        ):
+            ledger.log_intent(
+                {
+                    "request_id": request_id,
+                    "intent_id": intent_id,
+                    "session_id": "session-a",
+                    "raw_text": raw_text,
+                    "normalized_json": {"person_id": "subject-a"},
+                    "ts_ms": 1_800_500_000_000,
+                }
+            )
+
+        config_result = load_recall_runtime_config(
+            env={
+                "RETR_RECALL_ENABLED": "true",
+                "RETR_RECALL_DEFAULT_ROUTE": "sqlite_route",
+                "RETR_RECALL_ROUTES_JSON": json.dumps(
+                    {
+                        "sqlite_route": {
+                            "store_id": STORE_SQLITE_LEDGER,
+                            "top_k": 8,
+                            "score_weight": 1.0,
+                            "node_selector": "*",
+                        }
+                    }
+                ),
+            }
+        )
+        assert config_result.success
+        assert config_result.config is not None
+        service = RecallFusionServiceContract(
+            ledger=ledger,
+            chroma_client=FakeChromaClient(),
+            runtime_config=config_result.config,
+            node_id="host-01",
+            use_hybrid=False,
+        )
+
+        result = service.recall(
+            request_id="req-current",
+            intent_id="intent::req-current",
+            query="共同关键词",
+            query_embedding=[0.2] * 16,
+            person_id="subject-a",
+            session_id="session-a",
+            ts_ms=1_800_500_000_100,
+        )
+
+        assert result.success
+        assert [row["doc_id"] for row in result.output["candidates"]] == [
+            "intent::req-previous"
+        ]
+        assert result.output["self_excluded_candidate_count"] == 1
+        assert result.output["route_rows"][0]["self_excluded_candidate_count"] == 1
+    finally:
+        ledger.close()

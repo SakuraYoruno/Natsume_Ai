@@ -833,3 +833,5 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 `CompanionUtteranceFrameV1` 接线后，下一轮先使用全新 SQLite 运行含混、修复、要求空间、喜忧并存、克制吃味／现实自主和低落中的技术任务小队列。每一轮同时检查 frame、实际正文、候选选择、模型 usage、TaskGraph／Acceptance／Outbox 和延迟；全部通过才允许重新执行完整 48 条。543 项回归不能替代这次真实 Provider 检查，更不能替代三名评审盲测。frame 本身不得增加 repository 写入或模型轮数，若普通回合出现额外请求即判回归。
 
 首轮 frame 真实 Provider 小队列已经执行：8 类／24 个 accepted turn 中只有 2 条经当前人工复核可接受，2 条自动失败，另 4 条自动放行但人工拒绝，报告 SHA-256 为 `99c024f3dd02c6d2fe03cfdad64298b31c9ed57a00753996bd27c5a8a8d97fd4`。因此后续重测不能只检查 candidate score 和 frame 字段存在，还必须逐条检查 `surface_memory_recall_packet` 的 person/session 归属。统一 RecallFusion 已新增 fail-closed 终态过滤及 117 项回归；真实重测须在包含多个既存 subject 的库中证明跨 subject 候选为 0，并保留每路 raw/accepted/excluded 计数。该项通过后才继续人感约束和完整 48 条，不能用清空数据库掩盖污染。
+
+第一次同库隔离复验报告 SHA-256 为 `19f52e0b8141ce44864ad3f13f6414a17a65088bcbd1fb999e28e0dba6503cfe`：跨 subject 候选已归零，但两条首轮仍把当前 request 的 Intent 自己召回，形成 `_thalamus_meta` 假记忆并触发 `MEMORY_ALIGNMENT_REQUIRED_MISS`。验收因此增加 causal self-exclusion：同一 request/intent 不得出现在自己的 recall packet，路由收据必须给出 `self_excluded_candidate_count`。代码回归现为 118 项通过；必须在不清理既存数据的情况下再跑同两条并确认首轮假记忆为 0，之后才能评价模型语言质量。

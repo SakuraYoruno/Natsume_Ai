@@ -426,6 +426,7 @@ class RecallFusionServiceContract:
 
         fused_candidates: dict[str, dict[str, Any]] = {}
         scope_excluded_candidate_count = 0
+        self_excluded_candidate_count = 0
         for route in routes:
             _route_start_ms = now_ms()
             try:
@@ -465,9 +466,18 @@ class RecallFusionServiceContract:
 
             route_candidate_count = 0
             route_scope_excluded_count = 0
+            route_self_excluded_count = 0
             for rank, raw in enumerate(rows):
                 candidate = _normalize_candidate(raw=raw, route=route, rank=rank)
                 if not candidate:
+                    continue
+                if _candidate_is_current_request(
+                    candidate,
+                    request_id=request_id,
+                    intent_id=intent_id,
+                ):
+                    route_self_excluded_count += 1
+                    self_excluded_candidate_count += 1
                     continue
                 if not _candidate_matches_recall_scope(
                     candidate,
@@ -516,6 +526,7 @@ class RecallFusionServiceContract:
                 "raw_candidate_count": len(rows),
                 "candidate_count": route_candidate_count,
                 "scope_excluded_candidate_count": route_scope_excluded_count,
+                "self_excluded_candidate_count": route_self_excluded_count,
                 "latency_ms": _route_latency_ms,
             })
 
@@ -527,6 +538,17 @@ class RecallFusionServiceContract:
                 vector_candidates=candidates,
                 query=normalized_query,
             )
+            hybrid_candidate_count = len(candidates)
+            candidates = [
+                candidate
+                for candidate in candidates
+                if not _candidate_is_current_request(
+                    candidate,
+                    request_id=request_id,
+                    intent_id=intent_id,
+                )
+            ]
+            self_excluded_candidate_count += hybrid_candidate_count - len(candidates)
             hybrid_candidate_count = len(candidates)
             candidates = [
                 candidate
@@ -592,6 +614,7 @@ class RecallFusionServiceContract:
                 "route_rows": route_rows,
                 "route_errors": [],
                 "scope_excluded_candidate_count": scope_excluded_candidate_count,
+                "self_excluded_candidate_count": self_excluded_candidate_count,
                 "candidate_count": 0,
                 "candidates": [],
                 "ts_ms": now_value,
@@ -641,6 +664,7 @@ class RecallFusionServiceContract:
             "route_rows": route_rows,
             "route_errors": route_errors,
             "scope_excluded_candidate_count": scope_excluded_candidate_count,
+            "self_excluded_candidate_count": self_excluded_candidate_count,
             "candidate_count": len(candidates),
             "candidates": candidates,
             "ts_ms": now_value,
@@ -861,6 +885,38 @@ def _candidate_matches_recall_scope(
     if store_id in _NON_PERSONAL_RECALL_STORE_IDS:
         return True
     return _has_explicit_non_personal_scope(metadata)
+
+
+def _candidate_is_current_request(
+    candidate: Mapping[str, Any],
+    *,
+    request_id: str,
+    intent_id: str | None,
+) -> bool:
+    """Keep the current ingress record out of its own historical context."""
+
+    target_request = str(request_id or "").strip()
+    target_intent = str(intent_id or "").strip()
+    metadata = (
+        dict(candidate.get("metadata") or {})
+        if isinstance(candidate.get("metadata"), Mapping)
+        else {}
+    )
+    candidate_request = str(metadata.get("request_id") or "").strip()
+    candidate_intent = str(metadata.get("intent_id") or "").strip()
+    if target_request and candidate_request == target_request:
+        return True
+    if target_intent and candidate_intent == target_intent:
+        return True
+
+    doc_id = str(candidate.get("doc_id") or candidate.get("memory_id") or "").strip()
+    return bool(
+        doc_id
+        and (
+            (target_request and doc_id == target_request)
+            or (target_intent and doc_id == target_intent)
+        )
+    )
 
 
 def _candidate_scope_values(
