@@ -867,3 +867,5 @@ causal self-exclusion 的同库真实复验报告 SHA-256 为 `6fbe0a45d0db2f927
 Flash 双轨迹报告 SHA-256 为 `1618a895a5062f6d23e6564f320aba53f2e8d2166820711fa714f38fcbff62aa`，Pro A/B 报告 SHA-256 为 `2425b864994e6bb2abba2c55b213df9640f5641ae2959b406e92f80cb9febd4f`。两者自动合同均为 2/2，但人工都未放行修复轨迹；Pro 只改善 mixed，平均 provider latency 又比 Flash 高约 58%，不满足实时路线的换模收益。后续固定恢复 `deepseek-v4-flash`，只验证轻量生成姿态和候选偏好：自然候选与正式口吻候选都合格时必须选择前者；只有正式候选时不得因此新增重试。578 项代码回归是准入，不替代真实六轮正文复核。真实 Flash 六轮全部 accepted、writer 正常且逐句通过后，才重跑八类；网络安全、Pentest 和远端 Edge 不运行。
 
 恢复 Flash 后的 `cdfefd37d` 双轨迹报告 SHA-256 为 `88eb6dfcb8476d0f24470af368a68f3c13fbf4e2d2480d959cfebc60180a259d`。自动 2/2、6 个 accepted turn 和 writer probe 仍通过，但人工拒绝重复道歉模板、喜忧偏序及“都挺正常”的解释口吻。下一次同队列不改模型、不新增调用，只验证双候选从通用大型 Surface prompt 切到现有 compact native 情感 prompt 后的实际语言；typed frame、最近对话、候选 JSON、日语字段、一次重试和本地 Gate 必须全部保留。622 项代码回归只提供准入；六轮正文人工通过前不得扩大到八类或完整 48 条。
+
+`1779108de` compact prompt 报告 SHA-256 为 `a67178c425cb4373c915e1b6290daa043050313223cb6162b39a77509f2975a2`：自动 1/2、6 个 accepted turn、writer probe 通过，人工仍拒绝“这我认”和“挺正常／待着”。这些词来自模型提示中的禁止示例，下一轮因此只验证删除反例词表、改用正向候选动作后是否消除负面词汇诱导。若同六轮仍未逐句通过，停止继续堆叠禁词，转为从已清洗七海原语料提供少量 scene-bound 正向节奏样本；不得直接扩大队列。

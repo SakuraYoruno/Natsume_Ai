@@ -842,3 +842,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 恢复 Flash 并加载 `cdfefd37d` 后，同两条真实报告 SHA-256 为 `88eb6dfcb8476d0f24470af368a68f3c13fbf4e2d2480d959cfebc60180a259d`。自动合同仍为 2/2，6 个 Gateway turn 全部 accepted，writer probe 通过，成功模型 attempt 全部为 `deepseek-v4-flash`；人工逐句仍失败：修复连续使用“是我的问题／听着”的道歉模板，mixed 使用“先让好消息亮着／都挺正常”替用户排序并解释感受。Task artifact 证明 typed `REPAIR/HOLD_COMPLEXITY` frame 正确，未选候选正文按隐私边界没有持久化；问题来自高歧义双候选仍先构造包含通用执行、审查和关系安全说明的大型 Surface prompt，末尾的熟人对话约束不足以覆盖其正式语域。
 
 当前修正只在 `affective_candidate_count` 存在时，以现有 `build_native_stream_surface_messages()` 的 compact 情感上下文作为双候选基础，再附加原有 JSON 形状、typed frame 微策略和一次重试合同。非情感路径继续使用原 prompt；没有新增数据库表、普通对话写入、审计、模型请求或重试。主链 adapter 已断言新 prompt 包含七海身份和 DL-04 高歧义合同，且不再包含通用 `TurnSurfaceContract`；相关 planner、Surface、native stream、连续性、live runner、app adapter 与 restart 共 622 项通过。状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，必须在新 SHA 上用 Flash 重跑同六轮并逐句接受，才恢复八类组合测试。
+
+加载 `1779108de` 后的 compact prompt 真实报告 SHA-256 为 `a67178c425cb4373c915e1b6290daa043050313223cb6162b39a77509f2975a2`。6 个 turn 全部 accepted、writer probe 通过，成功 attempt 仍全部为 `deepseek-v4-flash`；自动结果为 1/2，修复首轮因 `AFFECTIVE_IMPLIED_WAITING` 依赖 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，人工逐句仍拒绝“这我认”的正式认错，以及“挺正常／先让它们待着”的情绪处理口吻。compact 切流确实移除了通用 `TurnSurfaceContract`，但实际坏词与微策略中为了禁止而列出的反例逐字重合，根因收窄为负面词汇诱导。
+
+下一修正不增加生成后正则：从修复／喜忧的模型可读策略中删除坏例词表，改为正向限定两个候选的对话动作、信息差异和自然停点；现有 typed Gate 继续承担硬边界。模型请求仍是高歧义回合一次双候选、最多一次既有重试，普通对话和 durable 路径不变。必须在新 SHA 上重跑相同六轮；若仍失败，再评估真实原语料的有限正向 few-shot，不能继续用反例清单推动模型。
