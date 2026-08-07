@@ -91,18 +91,20 @@
 - [ ] 运行 Pentest 30 次授权实验；Pentest 没有真实最终 cohort 前，PlanningSearch 三域总状态保持 `PARTIAL_RESEARCH_CODE_PASS_PENTEST_PENDING`。
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。
-- [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
+- [x] 使用真实 `deepseek-v4-flash` 完成冻结的 48 条文本多轮场景：144/144 个 Gateway→TaskGraph 回合完成，自动 46 条待人工、2 条失败，单人复核确认模板坍缩，人感结论为 `FAIL`。
+- [ ] 完成剩余 24 条真实多模态／主动／重启／故障 driver；不得用 scripted replay 或文本 fixture 代替。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [x] 修复最终 SHA Host 探针只按 HTTP 200 产生假绿的问题：Health／Ready／Canon 必须校验业务语义，Host-only pending external 只能通过显式参数接受。
 - [x] 修复 `wc-004` 空 hash 与 Canon 漂移被误分类为 source unavailable；全部 `wc-*` 生产资产必须通过真实 loader 合同。
 - [x] 修复 Canon 健康 detail 经隐私投影隐藏后仍显示 unavailable 的矛盾文案；只有已验证 `OK` 可使用固定健康文案。
 - [x] 在 `2cf552c92` 上完成严格 Host-only 探针：Canon `OK`、真实 Chat COMMIT、required unavailable 为 0；远端 Edge 未探测，报告 SHA-256 为 `0164db7266eddf87ab45216651d1de350817670f91f6aaf706bee71c21bb44ec`。
-- [ ] 在最终 SHA 继续复验 Docker 三库、Monitor 真实浏览器和本地 Gateway，仍排除网络安全与远端 Edge。
+- [x] 在最终本机代码树复验 Docker 三库、Monitor 真实浏览器和本地 Gateway，仍排除网络安全与远端 Edge。Monitor 真实 Chrome 3/3；翻译、Memory Store、多 Skill Plan 与重复 webhook 全部通过。
 - [x] 对齐外部服务 runner 与当前 A15 隔离项目身份；两次无副作用配置拒绝均保留失败收据，正式运行必须使用完整 Git SHA。
 - [x] 在 `f2a7f176c` 完成 Neo4j／Chroma／Redis 真实写入、更新、容器重启、持久重读与清理；报告 SHA-256 为 `39d7d22a4ce6dee0441cf44ae492a6e1d4ec59575a380558cd6ad348fb6a9af6`。
-- [ ] 从 72 条场景中冻结 48 条多轮盲测集。
+- [x] 从 72 条场景中冻结并执行 48 条文本多轮集；原始报告 SHA-256 为 `1efd6886792d2df8ea2ae5198bbf4127eaf273d17eeda04fd596a196fbda1cc8`。
 - [ ] 邀请至少 3 名评审，与稳定基线盲测并达到 PRD 门槛。
 - [ ] 重点检查情绪变化幅度、混合情绪、裂痕／修复和技术任务中的人格连续性。
+- [ ] 停止继续堆 prompt／禁词／Gate；改用版本化真实自然文本调优或模型层方案，先消除 exact template reuse、政策化关系口吻和修复／空间场景矛盾，再提交新预注册 cohort。
 
 ## P1：完整本地服务栈
 

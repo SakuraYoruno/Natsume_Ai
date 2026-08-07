@@ -95,3 +95,12 @@ flowchart LR
 - Profile activation 必须指向 exact previous version。
 - TTS 声线配置可回退到前一已验证配置，不复制新版本证据。
 - Acceptance 数据根与用户真实数据隔离，默认保留证据但不提交仓库。
+## 2026-08-08 本机全栈收口与数字生命决策
+
+本轮在隔离 acceptance 数据根中完成了本机强制服务复验。Neo4j、Chroma、Redis 均完成真实写入、更新、容器重启、持久重读和测试 namespace 清理；Host、OBS、Nginx Monitor 与本地 Unified Gateway 保持在线。真实 Chrome 对运行中的 Monitor 串行执行核心交互、外周状态和 Operator Session 三个用例，结果 3/3；最终日志 SHA-256 为 `c468d253e81d717bf1dcac68e1dddbc23ad9d845db7c03e9f0d4f770c93b394e`。外周状态合同明确区分 7 个未启动的远端 Edge 服务与已在线的本地 Gateway，不再使用固定数量产生过期断言；执行索引先于 detail 投影出现时，测试等待同一 graph revision 收敛到完整只读合同，90 秒内未收敛仍失败。
+
+本地 Gateway 的翻译、Memory Store 和多 Skill Plan 三条真实路线均完成 TaskGraph、Acceptance 与 Outbox；报告 SHA-256 依次为 `540f3e76286b6d332a8e50a0c4bc13752d4dd72f913b2b3cfc5e706f0ad6f3e9`、`544ff73f9ac2e550b3d9f7ce1c571d3595c7c7bd25743c3f3eddfe8860c38b4f` 和 `3254cb880049cdf09ad4f39a3c791771a659049493f9623c5dccec6f7e7e6d3b`。同一 webhook 首次返回 accepted、第二次返回 duplicate，数据库只有一条 Inbox 和一条 Host request；报告 SHA-256 为 `ccc9aa9e7ccac3745e59f6428403b43404738078226444c941c39305c4dff9bc`。
+
+随后执行完整 48 条文本多轮队列，共 144 个真实 Gateway→DeepSeek→TaskGraph 回合。144/144 终态完成，canonical writer 正常推进且旧 writer 增量为 0；自动结果为 46 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、2 条 `FAIL`。原始报告 SHA-256 为 `1efd6886792d2df8ea2ae5198bbf4127eaf273d17eeda04fd596a196fbda1cc8`。单人逐句复核不能接受整体体验：48 条末轮只有 45 个不同文本，同一句 mixed 回复出现 4 次，21 条以“嗯”开头，关系、自主、空间和修复场景仍出现模板化、政策化、敷衍或前后矛盾。
+
+因此执行策略冻结为：不再增加 prompt 正例、禁词、评分规则或普通聊天审计；不再重复抽样同一随机轨迹挑选绿灯。下一阶段只能使用版本化真实自然文本调优或模型层方案，并以新的预注册变体队列比较 exact reuse、自然度、关系立场和三名评审偏好。远端 Edge 未启动或探测；网络安全、A09、A12、Security Monitor 与 Pentest 继续为 `NOT_RUN_USER_SKIPPED`。当前结论为“本机强制服务栈 PASS，数字生命人感 FAIL，整体 INCOMPLETE”。

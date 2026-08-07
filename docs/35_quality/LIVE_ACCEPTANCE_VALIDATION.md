@@ -902,3 +902,15 @@ Host 与 OBS 重启到 `28c77d2e2` 后，真实 Chat 已形成 `APPROVE / COMMIT
 Docker 三库 runner 的首个新 run ID 因 9 位短 SHA 被配置合同拒绝，第二个使用完整 SHA 后又因当前 Compose 项目 `natsume-a15-1c0c225f4` 不属于历史 `ne07/dual` 正则而拒绝；两次都在任何数据库写入或容器重启前结束。失败收据 SHA-256 分别为 `63b2767ef1e651234abcd421f677635ce151c75ac51bcd854b9e1183e7fc8797` 和 `ce6900cf6c4b15e6e4a3d781749c9e1170a648b98a5c91e1363ca7726e1b2b4d`，状态不得计为服务 FAIL。当前 runner 允许由现有 A15 启动器创建的 `natsume-a15-*` 身份，同时继续要求 loopback、非默认端口、Compose project label 和四个一致的隔离身份；默认项目与默认端口仍 fail-closed。
 
 修正后的正式运行绑定完整提交 `f2a7f176ccb8ae3232c61e7f17f1def32b787273`，37.4 秒完成并 PASS。Neo4j、Chroma、Redis 分别在 47687、48000、46379 完成真实初写、查询／更新、容器重启、持久重读和测试 namespace 清理；镜像引用均使用 SHA-256 digest，三个 container id 与 Compose project 均记录在脱敏收据中。收据 digest 为 `3ea946256434142d0f29c6a12895ed1e0be40835de4e2157e69ba6ac6d1d1143`，文件 SHA-256 为 `39d7d22a4ce6dee0441cf44ae492a6e1d4ec59575a380558cd6ad348fb6a9af6`，`secret_material=ABSENT`、`user_default_stack=EXCLUDED_UNTOUCHED`。本项关闭最终 SHA Docker 持久性，不提升 Monitor、Gateway、Edge 或整体 A15 状态。
+
+## 2026-08-08 本机 Monitor、Gateway 与 48 条数字生命终验
+
+Monitor UI 在 `npm ci` 后依次通过 operator client check、lint、typecheck、47 项 read-model 测试和生产构建。真实 Chrome 直接访问运行中的 Nginx Monitor／OBS，没有网络拦截或 fixture；核心交互、外周状态和 Operator Session 串行 3/3 通过，最终日志 SHA-256 为 `c468d253e81d717bf1dcac68e1dddbc23ad9d845db7c03e9f0d4f770c93b394e`。首次并行复核捕获到 execution index 已出现新 Scheduler 图、detail 投影尚未带上 mutation contract 的短暂窗口；最终测试改为等待同一 graph revision 收敛到完整只读合同，90 秒不收敛仍失败，而不是把 `undefined` 放行。外周状态测试从旧的固定 5 项改为精确验证 `asr/tts/vts/audio_playback/barge_in/resource_gate/edge_rpc` 七个远端服务均为 `NOT_TESTED / ACCEPTANCE_PENDING_EXTERNAL`，并同时验证本地 `unified_gateway=UP`。远端 Edge 没有被探测。
+
+本地 Gateway 使用当前进程内密钥完成只读签名对齐，未输出或持久化原始 secret，也没有重启或修改现有 Gateway、SSH tunnel 或 portproxy。翻译、Memory Store、多 Skill Plan 三条真实路线全部通过，报告 SHA-256 分别为 `540f3e76286b6d332a8e50a0c4bc13752d4dd72f913b2b3cfc5e706f0ad6f3e9`、`544ff73f9ac2e550b3d9f7ce1c571d3595c7c7bd25743c3f3eddfe8860c38b4f`、`3254cb880049cdf09ad4f39a3c791771a659049493f9623c5dccec6f7e7e6d3b`。重复 webhook 第一次 accepted、第二次 duplicate，最终只有 1 条 Gateway Inbox、1 条 Host request，报告 SHA-256 为 `ccc9aa9e7ccac3745e59f6428403b43404738078226444c941c39305c4dff9bc`。
+
+数字生命运行 ID `dl-live-1786140473510` 使用真实 `deepseek-v4-flash` 执行 48 条多轮文本／144 个回合。144/144 完成，自动为 46 条待人工、2 条失败；失败分别是 `rupture_and_repair:3` 的非收益深路径选择，以及 `shared_joy_and_mixed_feeling:4` 的“先把不踏实放着”体验模式。writer probe 为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`，accepted Gateway turn 为 144；原始报告 SHA-256 为 `1efd6886792d2df8ea2ae5198bbf4127eaf273d17eeda04fd596a196fbda1cc8`。
+
+人工层结论比自动数字更差：48 条末轮为 45 个唯一文本，同一句“这个好消息让我也高兴，可你说不踏实，我这边也跟着紧了一下。”出现 4 次；21 条以“嗯”开头，16 条包含“先”。含混低落有敷衍收束，空间边界有惩罚感，关系修复有自我消化或前后矛盾，现实自主和吃味大量退回政策说明。`user_to_surface_commit_ms` 只是稳定分句／effect commit 代理，不是首可见 Token；其 p50 为 1099.5 ms、p95 为 2375 ms，仍高于 900／1800 ms 门槛。Gateway→Host terminal p50/p95 为 9252/12868 ms，provider attempt terminal p50/p95 为 2335/4468 ms。
+
+结论：本机强制服务栈通过，但数字生命人感为 `FAIL`，三名评审盲测为 `NOT_RUN`，24 条真实多模态／主动／故障 driver 待执行。继续调整 prompt 或 Gate 已触发停止条件；下一轮必须改变模型层或使用版本化真实自然文本调优。`npm ci` 报告的 7 high／3 moderate 依赖问题未做审计或修复，按用户要求记为 `NOT_RUN_USER_SKIPPED`，不冒充 PASS。网络安全与 Pentest 同样跳过。

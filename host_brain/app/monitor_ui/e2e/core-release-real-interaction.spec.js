@@ -139,18 +139,35 @@ test('Core Release validates live health contracts and canonical production navi
   expect(executionIndex.read_only).toBe(true)
   expect(executionIndex.executions.length).toBeGreaterThan(0)
   const selectedExecution = executionIndex.executions[0]
-  const executionDetailResponse = await page.request.get(new URL(
+  const executionDetailUrl = new URL(
     `/obs/task-runtime/executions/${encodeURIComponent(selectedExecution.graph_id)}`
       + `?revision=${Number(selectedExecution.revision || 1)}&after_cursor=0&event_limit=200`,
     baseURL,
-  ).toString())
-  expect(executionDetailResponse.status()).toBe(200)
-  expect(executionDetailResponse.headers()['x-natsume-query-auth']).toBe('AUTHENTICATED')
-  const executionDetail = await executionDetailResponse.json()
-  expect(executionDetail.read_only).toBe(true)
-  expect(executionDetail.mutation_contract?.direct_database_write).toBe(false)
-  expect(executionDetail.mutation_contract?.automatic_resume).toBe(false)
-  expect(executionDetail.mutation_contract?.resume_requires_bound_token).toBe(true)
+  ).toString()
+  await expect.poll(async () => {
+    const response = await page.request.get(executionDetailUrl)
+    const payload = response.status() === 200 ? await response.json() : {}
+    const snapshot = {
+      status: response.status(),
+      auth: response.headers()['x-natsume-query-auth'] || '',
+      readOnly: payload.read_only,
+      directDatabaseWrite: payload.mutation_contract?.direct_database_write,
+      automaticResume: payload.mutation_contract?.automatic_resume,
+      resumeRequiresBoundToken: payload.mutation_contract?.resume_requires_bound_token,
+    }
+    await response.dispose()
+    return snapshot
+  }, {
+    message: 'the selected execution revision must converge to the canonical read-only contract',
+    timeout: 90_000,
+  }).toEqual({
+    status: 200,
+    auth: 'AUTHENTICATED',
+    readOnly: true,
+    directDatabaseWrite: false,
+    automaticResume: false,
+    resumeRequiresBoundToken: true,
+  })
 
   const runtimeSnapshotResponse = await page.request.get(
     new URL('/obs/runtime-snapshot', baseURL).toString(),

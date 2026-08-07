@@ -624,3 +624,11 @@ Canon route 单测还必须覆盖 privacy-redacted payload：`status=OK` 且 det
 外部服务 runner 的身份合同必须同时接受 `natsume-ne07-*`、当前 `natsume-a15-*` 和兼容期 `natsume-dual-*` 隔离项目；裸 `natsume-*`、默认端口、非 loopback endpoint 或 Compose project label 不一致仍必须在任何写入前拒绝。两次配置预检失败不计入 Docker 服务质量结果。
 
 `f2a7f176c` 的正式 Docker 报告 SHA-256 为 `39d7d22a4ce6dee0441cf44ae492a6e1d4ec59575a380558cd6ad348fb6a9af6`，Neo4j／Chroma／Redis 三项均为 PASS，且每项 restart 前后 started-at 不同、restart-read digest 可验证、cleanup 为 PASS。该报告不包含密钥，也不覆盖用户默认 Docker 项目。
+
+## 2026-08-08 A15 本机终验与数字生命 48 条文本队列
+
+本机强制服务测试必须同时满足：Docker 三库真实写入／重启／重读；Host／OBS／Nginx Monitor／Gateway 在线；真实 Chrome 不使用 route mock、network interception 或 fixture；翻译、Memory Store、多 Skill Plan 真实进入 TaskGraph／Acceptance／Outbox；相同 webhook 重放只形成一条 Inbox 和一条 Host request。当前结果均通过。Monitor 最终串行日志 SHA-256 为 `c468d253e81d717bf1dcac68e1dddbc23ad9d845db7c03e9f0d4f770c93b394e`，Gateway duplicate 报告 SHA-256 为 `ccc9aa9e7ccac3745e59f6428403b43404738078226444c941c39305c4dff9bc`。Execution index 与 detail 可以短暂不同步，真实测试必须等待同一 graph revision 的完整 mutation contract；超时必须失败，禁止把缺字段当成只读。
+
+48 条文本队列必须使用单一 run ID 和真实 provider，不得把同小时其他运行混入计数。当前 `dl-live-1786140473510` 含 48 条场景、144 个 accepted Gateway turn，自动 46 条待人工、2 条失败，报告 SHA-256 为 `1efd6886792d2df8ea2ae5198bbf4127eaf273d17eeda04fd596a196fbda1cc8`。回归验收不能只看自动 Gate；必须额外统计末轮 exact reuse、开头词分布、关系政策口吻、空间边界、修复一致性和 mixed self resonance。当前 exact reuse 与单人逐句复核均失败，所以人感状态保持 `FAIL`。
+
+后续数字生命语言实验不得再添加 prompt 完整正例、禁词或第三次模型请求。候选方案必须版本化，至少比较：同一语义不同上下文的逐字复用率、建议／安排用户比例、关系立场自然度、自动 selection 收益和三名评审盲测偏好。首可见 Token 必须由流式客户端时间戳直接测量；`user_to_surface_commit_ms` 只能作为稳定分句提交代理，不能冒充首 Token 指标。远端 Edge、网络安全、A09、A12、Security Monitor 和 Pentest 不在本轮执行范围。
