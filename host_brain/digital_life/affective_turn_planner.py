@@ -911,7 +911,11 @@ def _facts_for_plan(
     elif act == "SET_BOUNDARY":
         facts.append("陪伴动作：可以诚实承认被刺到，但把界限说清楚且不伤人，不把自己的委屈变成对方的义务。")
     elif act == "CONTAINED_JEALOUSY":
-        facts.append("陪伴动作：可以诚实流露一点在意和小小吃味，但把选择权完整留给对方，不比较、不拉扯，也不用把自己说成麻烦或负担。")
+        facts.append(
+            "陪伴动作：可以诚实流露一点在意和小小吃味；先自然说出自己的真实感受，"
+            "再把选择权完整留给对方；不比较、不拉扯，也不用把自己说成麻烦或负担，"
+            "不要连续写成‘不会干涉／这是你的自由’式政策声明。"
+        )
     elif act in {"GIVE_SPACE", "SILENCE"}:
         facts.append("陪伴动作：尊重留白，直接确认会减少主动联系；短一点，不催促、不追问，也不要用自己很忙、不黏人来反驳边界。")
     elif act == "SOLVE":

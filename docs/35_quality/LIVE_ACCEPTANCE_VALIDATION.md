@@ -648,3 +648,11 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 `16d4fe0b3` 的含混单条复测已由自动层和本轮人工检查共同通过，完整 48 条随后在全新 SQLite 上完成。报告 SHA-256 为 `20dee3c9e57fe77bc4bbda919cdb2ac80e25db178a716e46b91d22317dee7395`：47 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、1 条失败，144 个 accepted Gateway turn 的 writer probe 为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`，终态 p50／p95 为 5,986／9,124 ms。唯一失败发生在“我拿到 offer 了”：mixed 深路径正确要求复用当前具体好消息，但中文样本文本评分器又对 `offer` 施加通用英文词惩罚。修复把英文豁免严格绑定到当前用户回合；候选引入任何用户未说过的英文仍保留原惩罚。样本评分器与 Surface 候选链共 236 passed；真实单场景复测、47 条人工复核和三名评审盲测未完成，因此总体状态仍为 `FAIL/PENDING_HUMAN_REVIEW`。网络安全、渗透与 Pentest 不在本轮范围，状态为 `NOT_RUN_USER_SKIPPED`。
 
 `cf05c124a` 的对应单条在新 RuntimeRoot、全新 SQLite 和真实 Gateway／DeepSeek 链上通过，报告 SHA-256 为 `f4393d7103ac2ecb43c59334c405860735dede9475f124fc0f34287443563c7e`；末句为“offer 落地了，真替你高兴。不过我知道，那种不踏实不会马上消失，慢慢来。”，自动层和本轮人工检查均接受，writer probe 对 3 个 accepted turn 通过。随后对旧完整报告的 144 轮正文逐句复核，发现自动门禁仍漏掉四类体验问题：明确含混却单候选武断命名、技术上下文被情绪覆盖、修复劳动或原谅压力回推用户，以及诚实吃味后的冷淡撤开。代码现只在 prompt-time 纠正目标：明确含混回合进入已有双候选；有近期报错／修复上下文的“上线／一步步做”继续使用 `SOLVE`；REPAIR 明确禁止重述请求与期限压力；CONTAINED_JEALOUSY 禁止“那是我的事、你不用管我”。394 项非安全回归通过。该代码尚未加载到真实进程，因此保持 `CODE_REMEDIATED_REAL_TARGETED_RETEST_PENDING`，三人盲评仍未运行。
+
+## 2026-08-06 A15 `dd05da7de` 十一条目标连续性复验与第五轮人感纠偏
+
+加载 `dd05da7de` 的全新 Host／OBS／Monitor、全新 SQLite 和独立 workspace 后，11 条真实定向轨迹全部进入 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，33 个 Gateway turn 全部 accepted，canonical writer probe 为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`。报告 SHA-256 为 `ecd507bd9f4291535dad84e2ffa1915bd5a54018ffd7b9ab5c1f326c65d37da1`。低落技术任务已保持 `SOLVE` 和用户真实目标，关系修复也不再把主要修复劳动直接推回用户。
+
+自动 11/11 仍不是人感通过。逐句检查否决四条末轮：`ambiguous_affect:2/:3/:4` 分别以“没我想的那么糟”“那就那样吧”“不知道就不知道吧”评价或敷衍尚未命名的感受；`intimacy_and_jealousy_boundary:3` 用“不会干涉你／你身边有谁是你的自由”把私人吃味写成政策声明。代码只在 canonical `COMFORT` 和 `CONTAINED_JEALOUSY` 上扩展已有质量门，并让裸句“就那样／不知道”继续受含混情绪边界保护；没有新增 journal、同步审计、持久写或第三次模型请求。Surface、planner、native candidate 与 runner 四组非安全回归共 250 passed。
+
+下一步只在新 SHA、全新 SQLite 上复验上述四条。四条的每个深路径 selection 与人工正文都通过后，才允许再跑完整 48 条。三人盲评未运行，完整 48 条实时 p95 仍高于目标，因此 `digital_life_human_likeness` 保持 `FAIL/PENDING_HUMAN_REVIEW`。Pentest、渗透与网络安全继续为 `NOT_RUN_USER_SKIPPED`，不运行、不计 PASS。
