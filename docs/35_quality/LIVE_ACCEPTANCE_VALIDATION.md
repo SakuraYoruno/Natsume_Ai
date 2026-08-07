@@ -802,3 +802,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 `fd0c9af27` 的双轨迹报告 SHA-256 为 `e310392b025a644c64ded1d350e0cf223101fa14fd6ff59cdaa26438abee04bb`。6 个 Gateway turn、TaskGraph、Acceptance、Outbox 与 writer probe 均通过。技术三轮正文为“嗯。你说，我在听。”“好，先处理任务。把报错、相关代码和复现步骤贴来，我先给你最短修复。”以及零证据风险边界；自动与当前逐句均接受，技术类根因关闭。含混第二轮仍为 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，末轮“那就不想了。反正感觉这种东西，有时候就是说不清的。”虽被自动候选选择放行，当前逐句仍拒绝。8 类 frame 因而更新为 7/8，不能写成 PASS。
 
 最后一类不再继续扩展生成后的零散拦截。`SurfaceMainChain` 在第一次高歧义 provider 请求前读取 canonical `UNNAMED_USER_AFFECT` frame，为两个候选附加不同的有限微动作：候选一只保留“事情已办完／感受仍说不清”两项事实，候选二只承认当下模糊并表明七海不代为解释；两者都不提出建议或安排以后解决。重试保留同一结构。这不增加模型次数、写入或同步步骤。核心 308 项及包含真实 app adapter 的主链／stream／restart／packet／composition 263 项通过；下一轮只运行 `ambiguous_affect:4`。
+
+加载 `cd678c742` 后只运行 `ambiguous_affect:4`，原始报告 SHA-256 为 `ca80319bdc210fba2998ec3fb8e64195b01c6fa374f20dfe631240ca81acb661`。3 个真实 Gateway turn、TaskGraph、Acceptance、Outbox 与 writer probe 均通过；正文为“辛苦了，这么晚才结束会议。”“嗯，还说不清也没关系。先不替它下结论，我陪你待一会儿。”和“嗯，现在还说不清，我先不替它下结论。”。当前逐句检查接受三轮，没有替用户命名、催促想清楚或安排未来回应。旧自动 verdict 唯一失败项是第二轮 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY / benefit_eligible=false`，而不是可见回复、执行或副作用失败。
+
+验收口径因此拆成两层：普通陪伴轨迹继续硬性检查实际正文、`selected_passed`、操控／事实边界、TaskGraph、Acceptance、Outbox 和 writer；候选搜索收益只在 `require_candidate_selection=true` 的专用实验中阻断场景。新版 verifier 对上述原始 turns 重算为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，并单列 `candidate_search_evidence=UNPROVEN_FOR_RECORDED_SELECTIONS`、`benefit_unproven_turns=[2]`。这使八类代表 frame 达到当前单人 8/8 接受，但不改变完整 48 条旧失败、三人盲评未跑和实时门槛未达的总体结论。该变更没有新增普通对话写入、同步审计、模型请求或生产延迟。

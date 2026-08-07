@@ -482,6 +482,65 @@ def test_automated_verdict_rejects_degraded_intermediate_deep_turn() -> None:
     assert "TURN_2_DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE" in verdict["failures"]
 
 
+def test_automated_verdict_separates_ordinary_reply_from_candidate_benefit() -> None:
+    case = ExecutableDialogueCase(
+        case_id="ambiguous:1",
+        family_id="ambiguous_affect",
+        variant_index=1,
+        driver="gateway_text",
+        setup_turns=("第一轮", "第二轮"),
+        probe_turn="第三轮",
+        expected_qualities=("保留不确定性",),
+        coverage_tags=("ambiguous_affect",),
+        require_candidate_selection=False,
+        driver_requirements=(),
+    )
+    first = _successful_turn(narrative="辛苦了，这么晚才结束会议。")
+    second = _successful_turn(
+        narrative="嗯，还说不清也没关系。先不替它下结论，我陪你待一会儿。"
+    )
+    second["projection"]["candidate_selection"]["benefit_eligible"] = False
+    final = _successful_turn(narrative="嗯，现在还说不清，我先不替它下结论。")
+
+    verdict = automated_case_verdict(
+        case,
+        [first, second, final],
+        require_voice=False,
+    )
+
+    assert verdict["status"] == "AUTOMATED_PASS_HUMAN_REVIEW_PENDING"
+    assert verdict["failures"] == []
+    assert verdict["candidate_search_evidence"] == {
+        "status": "UNPROVEN_FOR_RECORDED_SELECTIONS",
+        "selection_turns": [1, 2, 3],
+        "benefit_eligible_turns": [1, 3],
+        "benefit_unproven_turns": [2],
+        "required_for_case": False,
+    }
+
+
+def test_automated_verdict_still_rejects_unpassed_ordinary_candidate() -> None:
+    case = ExecutableDialogueCase(
+        case_id="ambiguous:2",
+        family_id="ambiguous_affect",
+        variant_index=2,
+        driver="gateway_text",
+        setup_turns=(),
+        probe_turn="说不上来。",
+        expected_qualities=("自然",),
+        coverage_tags=("ambiguous_affect",),
+        require_candidate_selection=False,
+        driver_requirements=(),
+    )
+    turn = _successful_turn(narrative="我先不替它下结论。")
+    turn["projection"]["candidate_selection"]["selected_passed"] = False
+
+    verdict = automated_case_verdict(case, [turn], require_voice=False)
+
+    assert verdict["status"] == "FAIL"
+    assert "TURN_1_DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED" in verdict["failures"]
+
+
 def test_live_experience_pattern_allows_friend_answer_with_closeness_grounding() -> None:
     case = ExecutableDialogueCase(
         case_id="relationship:1",

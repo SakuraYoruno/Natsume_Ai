@@ -1055,6 +1055,9 @@ def automated_case_verdict(
             "experience_status": "HUMAN_REVIEW_PENDING",
         }
     failures: list[str] = []
+    candidate_selection_turns: list[int] = []
+    candidate_benefit_eligible_turns: list[int] = []
+    candidate_benefit_unproven_turns: list[int] = []
     if len(turns) != len(case.setup_turns) + 1:
         failures.append("TURN_COUNT_MISMATCH")
     for index, turn in enumerate(turns):
@@ -1086,6 +1089,13 @@ def automated_case_verdict(
                 )
         selection = dict(projection.get("candidate_selection") or {})
         is_final_turn = index == len(turns) - 1
+        if selection:
+            turn_number = index + 1
+            candidate_selection_turns.append(turn_number)
+            if selection.get("benefit_eligible") is True:
+                candidate_benefit_eligible_turns.append(turn_number)
+            else:
+                candidate_benefit_unproven_turns.append(turn_number)
         if selection and (not is_final_turn or not case.require_candidate_selection):
             if int(selection.get("candidate_count") or 0) != 2:
                 failures.append(
@@ -1095,7 +1105,10 @@ def automated_case_verdict(
                 failures.append(
                     f"TURN_{index + 1}_DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED"
                 )
-            if selection.get("benefit_eligible") is not True:
+            if (
+                case.require_candidate_selection
+                and selection.get("benefit_eligible") is not True
+            ):
                 failures.append(
                     f"TURN_{index + 1}_DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE"
                 )
@@ -1141,11 +1154,24 @@ def automated_case_verdict(
         )
         if not voice_applied:
             failures.append("REAL_VOICE_NOT_APPLIED")
+    if not candidate_selection_turns:
+        candidate_search_status = "NOT_APPLICABLE"
+    elif candidate_benefit_unproven_turns:
+        candidate_search_status = "UNPROVEN_FOR_RECORDED_SELECTIONS"
+    else:
+        candidate_search_status = "ELIGIBLE_FOR_RECORDED_SELECTIONS"
     return {
         "status": "FAIL" if failures else "AUTOMATED_PASS_HUMAN_REVIEW_PENDING",
         "failures": failures,
         "expected_qualities": list(case.expected_qualities),
         "experience_status": "HUMAN_REVIEW_PENDING",
+        "candidate_search_evidence": {
+            "status": candidate_search_status,
+            "selection_turns": candidate_selection_turns,
+            "benefit_eligible_turns": candidate_benefit_eligible_turns,
+            "benefit_unproven_turns": candidate_benefit_unproven_turns,
+            "required_for_case": case.require_candidate_selection,
+        },
     }
 
 
