@@ -50,6 +50,14 @@ def test_runner_accepts_only_isolated_loopback_resources(tmp_path: Path) -> None
         redis_container="natsume-dual-test-redis",
     ).validate()
 
+    _config(
+        tmp_path,
+        project_name="natsume-a15-test",
+        neo4j_container="natsume-a15-test-neo4j",
+        chroma_container="natsume-a15-test-chroma",
+        redis_container="natsume-a15-test-redis",
+    ).validate()
+
     with pytest.raises(ValueError, match="natsume-ne07"):
         _config(tmp_path, neo4j_container="natsume-neo4j").validate()
     with pytest.raises(ValueError, match="default service ports"):
