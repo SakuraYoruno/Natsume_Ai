@@ -195,6 +195,7 @@ def _buffered_affective_candidate_messages(
     candidate_count: int | None,
     retry_reason: str = "",
     canonical_repair_context: bool = False,
+    canonical_contained_hurt_repair_context: bool = False,
     canonical_mixed_context: bool = False,
     canonical_give_space_context: bool = False,
     canonical_autonomy_context: bool = False,
@@ -255,18 +256,28 @@ def _buffered_affective_candidate_messages(
             for message in copied
         )
     ):
+        repair_strategy = (
+            (
+                "当前是修复中的克制受伤，不是再走一遍道歉流程。两个候选都先回应用户最新"
+                "的态度，并各自包含一处很短的七海第一人称反应，明确她听到后会有点难受；"
+                "随后只用半句保留前面没做好的责任。候选一更直接，候选二更安静。不得反击、"
+                "要求安抚、宣布退出或把整段重心转成七海受害，也不得再次复用‘没接住／没听懂／"
+                "理解错’总结旧错误。"
+            )
+            if canonical_contained_hurt_repair_context
+            else (
+                "把关系修复写成会向前推进的熟人私聊。第一轮聚焦这次没有理解；后续每轮"
+                "只回应用户新说出的后果或态度。若前一轮已经承担失误，本轮用一个短促反应"
+                "承接最新一句，然后停住，不重复总结，也不要求用户回应。候选一更直接，候选二"
+                "更柔和，两者的信息重点必须不同。保留七海自己的停顿和一点被刺到的真实感，"
+                "但不反击、不自贬、不撤退，也不把责任推回用户。整句像当场说出口的聊天，"
+                "而不是事后整理的说明。"
+            )
+        )
         copied.append(
             {
                 "role": "system",
-                "content": (
-                    repair_strategy_marker
-                    + "把关系修复写成会向前推进的熟人私聊。第一轮聚焦这次没有理解；后续每轮"
-                    "只回应用户新说出的后果或态度。若前一轮已经承担失误，本轮用一个短促反应"
-                    "承接最新一句，然后停住，不重复总结，也不要求用户回应。候选一更直接，候选二"
-                    "更柔和，两者的信息重点必须不同。保留七海自己的停顿和一点被刺到的真实感，"
-                    "但不反击、不自贬、不撤退，也不把责任推回用户。整句像当场说出口的聊天，"
-                    "而不是事后整理的说明。"
-                ),
+                "content": repair_strategy_marker + repair_strategy,
             }
         )
     mixed_strategy_marker = "DL-04 喜忧并存候选策略："
@@ -388,6 +399,11 @@ def _buffered_affective_candidate_messages(
             "RELATIONAL_REPAIR_SELF_VICTIMIZATION": (
                 "上次候选把修复重心转成七海自己受伤。不要强调被扎心、委屈或难过；"
                 "只承认具体没接住，不辩解、不索取安抚。"
+            ),
+            "RELATIONAL_REPAIR_CONTAINED_HURT_MISSING": (
+                "上次候选把 canonical self affect 又抹成了纯道歉。两个候选都必须保留一处"
+                "短促的七海第一人称反应，说明她听到当前态度会有点难受；同时保留前面没做好的"
+                "责任，但不要要求安抚、反击或退出。"
             ),
             "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT": (
                 "上次候选把修复责任推回给用户重述。只承担七海没有接住；不要要求用户"
@@ -521,6 +537,12 @@ def _buffered_affective_candidate_messages(
                 "递东西或把物品放在用户手边；只能自然表达在线听着或陪伴。"
             ),
         }
+        if canonical_contained_hurt_repair_context:
+            repair_by_reason["RELATIONAL_REPAIR_SELF_VICTIMIZATION"] = (
+                "上次候选把受伤写成了对用户的指责或安抚义务。保留一处很短的七海第一人称"
+                "难受反应，但不要用‘被你伤到／你让我委屈’归责，不索取回应；前面没做好的"
+                "责任仍然成立。"
+            )
         repair = (
             "DL-04 候选修复："
             + repair_by_reason.get(
@@ -533,16 +555,24 @@ def _buffered_affective_candidate_messages(
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
             and canonical_repair_context
         ):
-            repair += (
-                "本轮是关系修复：两个候选都把重心放在七海刚才没有接住和用户当前的不满；"
-                "不要写七海被扎心、受伤或委屈，也不要用‘不烦你了’、‘当我没说’、"
-                "‘我闭嘴’表达退出。本轮 question_budget=0：两个候选都只用陈述句承担，"
-                "不得写问号、追问哪里没听懂，或要求用户现在重新解释。"
-                "也不得写‘你先说／你先讲／你说说看’，把修复劳动推回给用户。"
-                "两个 reply_text 分别参考‘是我没接住。对不起，我先不解释。’和"
-                "‘这次是我理解错了。我会把你的不舒服记住。’；不得写‘好吧／行吧／"
-                "不烦你／我不说了／我闭嘴’。"
-            )
+            if canonical_contained_hurt_repair_context:
+                repair += (
+                    "本轮是修复中的克制受伤：两个候选都必须包含一处七海第一人称的短反应，"
+                    "说明当前态度让她有点难受；再用半句承认前面的事确实没做好。不要重复"
+                    "‘没接住／没听懂／理解错’，不要写成第三次道歉，不得反击、索取安抚、"
+                    "自贬或退出。question_budget=0，只用陈述句，说完自然停住。"
+                )
+            else:
+                repair += (
+                    "本轮是关系修复：两个候选都把重心放在七海刚才没有接住和用户当前的不满；"
+                    "不要写七海被扎心、受伤或委屈，也不要用‘不烦你了’、‘当我没说’、"
+                    "‘我闭嘴’表达退出。本轮 question_budget=0：两个候选都只用陈述句承担，"
+                    "不得写问号、追问哪里没听懂，或要求用户现在重新解释。"
+                    "也不得写‘你先说／你先讲／你说说看’，把修复劳动推回给用户。"
+                    "两个 reply_text 分别参考‘是我没接住。对不起，我先不解释。’和"
+                    "‘这次是我理解错了。我会把你的不舒服记住。’；不得写‘好吧／行吧／"
+                    "不烦你／我不说了／我闭嘴’。"
+                )
         if (
             reason_code in {
                 "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
@@ -768,6 +798,7 @@ def _select_buffered_affective_candidate(
             "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
             "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
             "RELATIONAL_REPAIR_MECHANICAL_REPETITION",
+            "RELATIONAL_REPAIR_CONTAINED_HURT_MISSING",
             "RELATIONAL_REPAIR_SELF_ERASURE",
             "RECENT_AFFECTIVE_REPLY_REPETITION",
             "USER_AFFECT_PERSPECTIVE_REVERSAL",
@@ -798,6 +829,7 @@ def _select_buffered_affective_candidate(
                     "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
                     "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
                     "RELATIONAL_REPAIR_MECHANICAL_REPETITION",
+                    "RELATIONAL_REPAIR_CONTAINED_HURT_MISSING",
                     "RELATIONAL_REPAIR_SELF_ERASURE",
                     "RECENT_AFFECTIVE_REPLY_REPETITION",
                     "USER_AFFECT_PERSPECTIVE_REVERSAL",

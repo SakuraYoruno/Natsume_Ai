@@ -75,6 +75,39 @@ def _canonical_companion_act_kind(request: IsolatedSurfaceInput) -> str:
     return str(frame.get("companion_act_kind") or "").strip().upper()
 
 
+_CONTAINED_HURT_REPAIR_GROUNDING_RE = re.compile(
+    r"(?:这|那|刚才)?(?:一)?(?:句|句话|话).{0,8}(?:刺到我|扎到我|让我有点难受)"
+    r"|我(?:听着|心里)?(?:也|确实|还是|会|有点){0,3}(?:难受|不好受|受伤)"
+    r"|听到(?:这|那)?(?:句|句话|话).{0,8}(?:有点难受|心里有点疼)"
+)
+
+
+def _contained_hurt_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", None)
+    )
+    return bool(
+        str(frame.get("companion_act_kind") or "").upper() == "REPAIR"
+        and (
+            str(frame.get("self_stance") or "").upper()
+            == "OWN_REPAIR_WITH_CONTAINED_HURT"
+            or str(frame.get("response_move") or "").upper()
+            == "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+        )
+    )
+
+
+def _contained_hurt_repair_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    return bool(
+        _contained_hurt_repair_relevant(request)
+        and _CONTAINED_HURT_REPAIR_GROUNDING_RE.search(str(text or ""))
+    )
+
+
 def _raw_context_backfill_requested(
     request: IsolatedSurfaceInput, text: str
 ) -> bool:
@@ -735,6 +768,10 @@ def _surface_process_meta_hits(
             for term in _SURFACE_PROCESS_META_CHAT
             if term and term in text
         )
+    if _contained_hurt_repair_grounded(request, text):
+        # "这句话有点刺到我" is ordinary relational speech in this exact
+        # typed frame, not commentary about a generated candidate.
+        hits = [item for item in hits if item not in {"这句", "这一句", "这条"}]
     if _continuity_boundary_relevant(request):
         surface = "\n".join(
             _clean_list(

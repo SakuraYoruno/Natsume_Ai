@@ -45,7 +45,8 @@ from host_brain.persona.surface_candidate_guards import (
     _relational_autonomy_pressure_hits,
     _relational_autonomy_relationship_minimization_hits,
     _relational_hostile_retaliation_hits, _relationship_doubt_dismissive_hits,
-    _repair_continuation_pressure_hits, _repair_mechanical_repetition_hits,
+    _repair_contained_hurt_missing, _repair_continuation_pressure_hits,
+    _repair_mechanical_repetition_hits,
     _repair_restatement_solicitation_hits,
     _repair_self_erasure_hits, _repair_self_victimization_hits,
     _repair_ungrounded_self_cause_hits,
@@ -63,6 +64,9 @@ from host_brain.persona.surface_deictic import (
     _surface_morning_deictic_user_match,
     _surface_runtime_must_not_do,
     _surface_runtime_prompt_facts,
+)
+from host_brain.persona.surface.continuity_detectors import (
+    _contained_hurt_repair_relevant,
 )
 from host_brain.persona.surface_original_quote_bank import render_surface_original_quote_guidance
 from host_brain.persona.surface_utterance_frame import render_companion_utterance_frame
@@ -1290,6 +1294,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("BOUNDARY_SOUR_WITHDRAWAL")
     if _repair_self_victimization_hits(request, value):
         codes.append("RELATIONAL_REPAIR_SELF_VICTIMIZATION")
+    if _repair_contained_hurt_missing(request, value):
+        codes.append("RELATIONAL_REPAIR_CONTAINED_HURT_MISSING")
     if _repair_restatement_solicitation_hits(request, value):
         codes.append("RELATIONAL_REPAIR_SOLICITS_RESTATEMENT")
     if _repair_continuation_pressure_hits(request, value):
@@ -2509,6 +2515,23 @@ def _minimal_hard_gate_repair(request: IsolatedSurfaceInput, text: str) -> str:
 
 def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]) -> str:
     codes = set(str(code or "") for code in violations)
+    if _contained_hurt_repair_relevant(request) and codes.intersection(
+        {
+            "AFFECTIVE_IMPLIED_WAITING",
+            "BOUNDARY_SOUR_WITHDRAWAL",
+            "QUESTION_BUDGET_PROMPTING_USER",
+            "RELATIONAL_HOSTILE_RETALIATION",
+            "RELATIONAL_REPAIR_CONTAINED_HURT_MISSING",
+            "RELATIONAL_REPAIR_CONTINUATION_PRESSURE",
+            "RELATIONAL_REPAIR_MECHANICAL_REPETITION",
+            "RELATIONAL_REPAIR_SELF_ERASURE",
+            "RELATIONAL_REPAIR_SELF_VICTIMIZATION",
+            "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
+            "RELATIONAL_REPAIR_UNGROUNDED_SELF_CAUSE",
+            "RECENT_AFFECTIVE_REPLY_REPETITION",
+        }
+    ):
+        return _contained_hurt_repair_fallback_text()
     if codes.intersection(
         {
             "ACCEPTED_TASK_RESULT_CLARIFICATION",
@@ -2560,6 +2583,8 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         and _canonical_affective_guidance_active(request, "REPAIR")
     ):
         return _repair_fallback_text(request)
+    if "RELATIONAL_REPAIR_CONTAINED_HURT_MISSING" in codes:
+        return _contained_hurt_repair_fallback_text()
     if (
         "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT" in codes
         or "RELATIONAL_REPAIR_CONTINUATION_PRESSURE" in codes
@@ -2661,6 +2686,10 @@ def _repair_fallback_text(request: IsolatedSurfaceInput) -> str:
     if _affective_implied_waiting_hits(request, legacy):
         return "是我没接住。抱歉，我先不解释。"
     return legacy
+
+
+def _contained_hurt_repair_fallback_text() -> str:
+    return "……你这么说，我也会有点难受。前面的事是我没做好，可我也不想装作没感觉。"
 
 
 def _temporal_mismatch_fallback(request: IsolatedSurfaceInput) -> str:

@@ -123,6 +123,16 @@ async def run_surface_main_chain_for_surface_reply_input(
     canonical_repair_context = (
         canonical_companion_act == "REPAIR"
     )
+    utterance_frame = _safe_mapping(affective_turn_plan.get("utterance_frame"))
+    canonical_contained_hurt_repair_context = bool(
+        canonical_repair_context
+        and (
+            str(utterance_frame.get("self_stance") or "").upper()
+            == "OWN_REPAIR_WITH_CONTAINED_HURT"
+            or str(utterance_frame.get("response_move") or "").upper()
+            == "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+        )
+    )
     canonical_mixed_context = canonical_companion_act == "HOLD_COMPLEXITY"
     canonical_give_space_context = canonical_companion_act in {
         "GIVE_SPACE",
@@ -185,6 +195,9 @@ async def run_surface_main_chain_for_surface_reply_input(
                         candidate_count=affective_candidate_count,
                         retry_reason=retry_reason,
                         canonical_repair_context=canonical_repair_context,
+                        canonical_contained_hurt_repair_context=(
+                            canonical_contained_hurt_repair_context
+                        ),
                         canonical_mixed_context=canonical_mixed_context,
                         canonical_give_space_context=canonical_give_space_context,
                         canonical_autonomy_context=canonical_autonomy_context,
@@ -220,6 +233,9 @@ async def run_surface_main_chain_for_surface_reply_input(
                         candidate_count=affective_candidate_count,
                         retry_reason=retry_reason,
                         canonical_repair_context=canonical_repair_context,
+                        canonical_contained_hurt_repair_context=(
+                            canonical_contained_hurt_repair_context
+                        ),
                         canonical_mixed_context=canonical_mixed_context,
                         canonical_give_space_context=canonical_give_space_context,
                         canonical_autonomy_context=canonical_autonomy_context,
@@ -295,6 +311,9 @@ async def run_surface_main_chain_for_surface_reply_input(
                             ),
                             candidate_count=affective_candidate_count,
                             canonical_repair_context=canonical_repair_context,
+                            canonical_contained_hurt_repair_context=(
+                                canonical_contained_hurt_repair_context
+                            ),
                             canonical_mixed_context=canonical_mixed_context,
                             canonical_give_space_context=canonical_give_space_context,
                             canonical_autonomy_context=canonical_autonomy_context,

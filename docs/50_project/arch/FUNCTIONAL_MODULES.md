@@ -31,7 +31,7 @@
 | 主动陪伴 | `companion_proactive.py`、permission ingress | `WIRED / PARTIAL` |
 | 偏好成长 | `companion_profile_lifecycle.py`、feedback ingress | `WIRED / PARTIAL` |
 | 表达计划 | `affective_turn_planner.py`、`companion_voice.py` | `WIRED` |
-| 语义说话骨架 | `CompanionUtteranceFrameV1`、`surface_utterance_frame.py` | `CODE_REMEDIATED / COMPOSITE_AFFECT_REAL_PROVIDER_RETEST_PENDING` |
+| 语义说话骨架 | `CompanionUtteranceFrameV1`、`surface_utterance_frame.py`、Surface candidate gate | `CODE_REMEDIATED / VISIBLE_COMPOSITE_REPAIR_REAL_PROVIDER_RETEST_PENDING` |
 | 表达交付 | `affective_expression_delivery.py`、Surface streaming | `WIRED / PARTIAL` |
 
 ## 3. 对话与记忆

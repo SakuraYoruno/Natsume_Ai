@@ -63,6 +63,8 @@ flowchart LR
 
 本轮 P0 代码已绑定提交 `cdaa4ea54`，固定版本 Neo4j、Chroma 与 Redis 的真实写读、容器重启和持久读取已经通过。当前执行点转为本机代码与体验门槛：真实 Provider 定向复测、完整多轮盲测和实时性能。目标 Edge 的历史证据继续保留，但当前运行未获重新授权；VTS、barge-in 和物理三模态不在本轮自行执行。
 
+当前最小复验点已收窄到关系修复的可见文本边界。`92c49e7c6` 真实报告证明 canonical Appraisal／self affect／Voice／Avatar 已是克制受伤，但旧 Surface 重试仍把该感受抹回流程化道歉；现有工作树已修正首轮、唯一重试、候选评分与本地 fallback，566 项回归通过。下一步只重启本机 Host 并复验 `user_angry_at_natsume:1`；不得启动远端 Edge，也不得在该条逐句接受前扩大到 mixed 或完整 48 条。
+
 ## 6. 最终验收
 
 最终验收必须使用：真实 Docker 服务、真实 Host／OBS／Monitor／Gateway 进程、至少一个真实模型 provider，以及在用户允许后启动的目标 Edge。TTS、Avatar、重启、打断、网络恢复和长期多轮必须走真实传输，不得用端口占位、fixture 或 scripted replay 冒充。

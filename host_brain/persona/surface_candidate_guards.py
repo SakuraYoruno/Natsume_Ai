@@ -15,6 +15,10 @@ from host_brain.persona.isolated_surface_harness import (
 from host_brain.persona.surface_utterance_frame import (
     normalize_companion_utterance_frame,
 )
+from host_brain.persona.surface.continuity_detectors import (
+    _contained_hurt_repair_grounded,
+    _contained_hurt_repair_relevant,
+)
 
 
 _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
@@ -333,6 +337,18 @@ def _repair_self_victimization_hits(
             match.group(0)
             for match in _REPAIR_SELF_VICTIMIZATION_RE.finditer(str(text or ""))
         )
+    )
+
+
+def _repair_contained_hurt_missing(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Prevent prose from erasing a self reaction already frozen by Life."""
+
+    return bool(
+        _contained_hurt_repair_relevant(request)
+        and not _contained_hurt_repair_grounded(request, text)
     )
 
 

@@ -576,3 +576,5 @@ python -m pytest -q `
 `219d257db` 的同四条报告 SHA-256 为 `8cd9bc414fe8de4398925ef3cbb6835e299f32238f903d52feac312aa072a6f7`，自动 4/4、12 个 accepted turn、writer probe 通过，且没有低质量候选伪收益。人工回归继续要求：含混感受不得写“比累还磨人”或用“反正我也没什么急事”证明陪伴；吃味不得用“也就那种程度／不会要求你／你自在就好”免责声明收尾；合格短句应自然承认真实在意后停住。五组非安全回归更新为 311 passed。新 SHA 仍先跑原四条，逐轮人工接受后再跑 48 条；网络安全与 Pentest 不运行。
 
 `e1727464e` 的四条报告 SHA-256 为 `93e08f2f79a66c301db6eece783dacb09ed771860fce8a7be721bfd3bd607a97`，结果为 2 条自动待人工、2 条失败，12 个 accepted turn 与 writer probe 通过。新增回归必须证明：canonical 含混陪伴中“我在这儿陪你”不再被通用伪活动模板误杀，但带后台／处理／执行／未来回报的文本继续失败；“就那样吧／反而最累人”不得敷衍或命名含混感受；`RESPECT_AUTONOMY` 不得把关系写成游戏、虚拟次等或现实优先级；`CONTAINED_JEALOUSY` 的任意“不会干涉你”均触发重试。当前六组非安全回归 506 passed，新 SHA 先跑原四条；网络安全与 Pentest 不运行。
+
+`92c49e7c6` 的单条修复复验报告 SHA-256 为 `419bc4d8b060c44d4e0df6b2c18a040a6848effb6f24a08b159e9903bee3d460`。必须分别断言上游 typed plan 和最终可见正文：末轮上游为 `SAD / REPAIR / CONTAINED_HURT` 只证明情感因果正确，若实际 candidate selection 依赖 local fallback 或正文没有任何有界第一人称受伤，整条仍失败。当前回归新增三层要求：首轮 prompt 不得包含通用“禁止七海受伤”；纯流程道歉命中 `RELATIONAL_REPAIR_CONTAINED_HURT_MISSING`；两个合格中日候选应一次完成 `PAIRED_SELECTION` 且保留配对 Voice 文本。相邻非安全集合为 566 passed；下一次真实队列只含 `user_angry_at_natsume:1`，网络安全、Pentest 和远端 Edge 继续不运行。

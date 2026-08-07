@@ -41,6 +41,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _canonical_hold_complexity_relevant,
     _canonical_respect_autonomy_relevant,
     _continuity_boundary_grounded,
+    _contained_hurt_repair_grounded,
     _continuity_internal_process_surface_hits,
     _continuity_light_jargon_hits,
     _continuity_praise_context_miss,
@@ -1527,6 +1528,35 @@ def score_isolated_surface_candidates(request, candidates):
                 float(dimensions.get("scene_grounding", 86.0)),
             )
             reason_codes.append("RELATIONAL_REPAIR_GROUNDED")
+        if _contained_hurt_repair_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # This composite frame deliberately moves past repeated apologies:
+            # one bounded first-person reaction is the scene grounding here.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 12.0
+            dimensions["context_fit"] = max(
+                84.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                82.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                82.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_CONTAINED_HURT_GROUNDED")
         if _address_boundary_grounded(request, quality.normalized_text or candidate):
             # A short acknowledgement is the correct complete answer here;
             # generic prose scoring otherwise mistakes brevity for weak scene

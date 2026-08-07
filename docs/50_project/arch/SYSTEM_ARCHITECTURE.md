@@ -124,6 +124,8 @@ Scene 解析同样以已分类 route 为先：显式 `route=chat` 始终是 Chat
 
 关系修复也区分“七海被直接冒犯”和“用户在评价七海刚才的回复”。前者在没有待结算回复时形成克制的 `SET_BOUNDARY`；后者先关联上一条 accepted response，写成 `MISUNDERSTOOD` aftereffect。若当前反馈同时包含直接冒犯，Fusion 不再只保留责任而抹掉七海：它生成 `repair_under_directed_disrespect`，在同一 episode 中保留 `HURT + CARE + CAUTION`，Planner 仍执行 `REPAIR`，同时让文本、Voice 和 Avatar 表达克制受伤。明确空间优先，任何分支都不能用受伤或退出逼用户反过来安抚她。
 
+这一情感决定在 Surface 端不是软提示。首轮与唯一重试都从 typed frame 选择 composite 策略；候选若只有流程化道歉、没有任何克制的七海自我反应，会在发送前以 `RELATIONAL_REPAIR_CONTAINED_HURT_MISSING` 阻断。评分校准只承认有界第一人称难受，不放行归责、威胁、赌气退出或索取安抚。
+
 Surface 关系距离评分使用语义标记而不是裸单字包含：`抱歉／抱怨` 不属于身体亲密，`抱一下／抱你` 才进入亲密距离判断。这样修复回合可以自然道歉，不会为了通过分数被迫避开正常中文；安全候选仍最多使用既有的一次模型修复，不增加普通对话调用次数。
 
 `ReplyControlPacket.must_include` 仍是字面约束，不能承载“不要假装已经和好”这类生成指导；关系系统把后者作为只读 facts 交给 Surface。关系修复的 scene grounding 由 canonical guidance 与第一人称具体承担共同确定，不以一句通用“我在”冒充修复，也不靠降低全局质量阈值过关。

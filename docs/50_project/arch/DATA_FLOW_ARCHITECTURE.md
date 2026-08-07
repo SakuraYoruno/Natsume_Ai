@@ -413,6 +413,8 @@ flowchart LR
 
 `REPAIR` 的唯一一次候选重试还会把失败原因翻译成具体生成约束：普通修复承认“刚才没接住”；composite 修复先回应最新一句，再允许一处很短的第一人称受伤反应，不复演整套道歉，也不用赌气退出。关系 scorer 会把“抱歉”与真实身体亲密分开，避免正常道歉被错误扣到亲密越界；第二次仍命中硬门禁时继续 fail-closed，不新增第三次 provider 调用。
 
+composite 分支的候选还要通过 `RELATIONAL_REPAIR_CONTAINED_HURT_MISSING` 发送 Gate。该 Gate 读取 canonical frame，不把用户原文关键词当 authority；通过时只校准当前 scene grounding，其他操控、关系距离和安全规则继续生效。二次候选仍失败时，本地 fallback 也用同一 Gate 复核，并明确标记为非搜索收益。
+
 关系 guidance 中的完整自然语言约束进入 `facts/style` 平面，只有真正要求逐字出现的短标记才能进入 `must_include`。候选评分仅在 canonical `REPAIR` 且文本由七海第一人称具体承认“没听懂／没接住／误解”时认定修复已落地；因此后接一句克制的在场表达不会被技术场景模板误杀，缺少具体承担的泛化安慰仍不能通过。
 
 同一个 repair grounding 也区分语义方向：否定完成的“我没接住”表示承认失败，不进入 emotional-containment 模板；肯定能力的“我能接住／我接得住”仍受原门禁约束。该判断发生在本地评分，不新增模型调用、同步存储或普通对话审计。

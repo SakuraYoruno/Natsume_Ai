@@ -89,6 +89,8 @@ flowchart TD
 
 若同一输入既关联上一条 `MISUNDERSTOOD` aftereffect，又包含对七海的明确冒犯，Fusion 必须生成单一 `repair_under_directed_disrespect` Appraisal，保存 `HURT + CARE + CAUTION` 并采用 `CONTAIN`；Planner 仍选择 `REPAIR`，但 frame 使用 `OWN_REPAIR_WITH_CONTAINED_HURT`，Voice/Avatar 使用同一 `CONTAINED_HURT`。没有待修复 aftereffect 的独立冒犯仍走 `SET_BOUNDARY`；明确停止或空间继续优先 `GIVE_SPACE`。该分支复用原有 Life command、ExpressionPlan 和双候选调用上限，不新增 migration、writer、审计步骤或模型请求。
 
+上述 composite frame 还必须穿过真实生成与发送边界。首次提示和唯一质量重试都要保留一处简短的第一人称受伤反应；只有重复道歉而没有该反应的候选以 `RELATIONAL_REPAIR_CONTAINED_HURT_MISSING` 拒绝。该门禁只由 canonical typed frame 启用，不扫描普通聊天关键词；本地 fail-soft 也必须同时保留克制受伤与具体责任，不得要求用户反过来安抚七海。
+
 文本 observer 必须保留同一句中的多标签分布，但置信度上限仍低于显式自述、声学和视觉观察。隐晦低落形成 `COMFORT`，拒绝建议形成 `LISTEN`，现实关系／非排他边界形成 `RESPECT_AUTONOMY`，明确好消息形成 `PLAY`；这些动作由 canonical Appraisal 产生，不允许 Surface 从原文临时伪造。`LISTEN` 必须禁止方案、作息建议和追问；`RESPECT_AUTONOMY` 必须禁止限制现实交往、贬低第三方和索取承诺。
 
 明确技术任务优先于低落、混合感受和“别安慰”等表达偏好：此时 CompanionAct 必须保持 `SOLVE`，关怀只改变措辞和三模态质感，不能把排错、写作或执行目标替换为陪聊。明确要求停止、空间或修复仍按各自边界处理。

@@ -20,7 +20,10 @@ from host_brain.digital_life.affective_turn_planner import (
     build_affective_turn_guidance,
 )
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
-from host_brain.persona.surface_runtime import build_isolated_surface_input
+from host_brain.persona.surface_runtime import (
+    _hard_gate_fallback,
+    build_isolated_surface_input,
+)
 from host_brain.persona.surface_utterance_frame import (
     render_companion_utterance_frame,
 )
@@ -774,6 +777,17 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "像当场说出口的聊天" in repair_initial_messages[-1]["content"]
     assert "这点我认" not in repair_initial_messages[-1]["content"]
     assert "这是合理的" not in repair_initial_messages[-1]["content"]
+    contained_hurt_initial_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        canonical_repair_context=True,
+        canonical_contained_hurt_repair_context=True,
+    )
+    assert "修复中的克制受伤" in contained_hurt_initial_messages[-1]["content"]
+    assert "七海第一人称反应" in contained_hurt_initial_messages[-1]["content"]
+    assert "不得再次复用‘没接住／没听懂／理解错’" in (
+        contained_hurt_initial_messages[-1]["content"]
+    )
     mixed_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -891,6 +905,20 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "重复道歉" in mechanical_repair_messages[-1]["content"]
     assert "承接用户最新说出的不舒服" in mechanical_repair_messages[-1]["content"]
+    contained_hurt_quality_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_repair_context=True,
+        canonical_contained_hurt_repair_context=True,
+    )
+    assert "本轮是修复中的克制受伤" in contained_hurt_quality_messages[-1]["content"]
+    assert "必须包含一处七海第一人称的短反应" in (
+        contained_hurt_quality_messages[-1]["content"]
+    )
+    assert "不要写七海被扎心、受伤或委屈" not in (
+        contained_hurt_quality_messages[-1]["content"]
+    )
     autonomy_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -1069,6 +1097,101 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert any(
         "MIXED_AFFECT_CONTINUITY_DROPPED" in code
         for code in mixed_selection["selected_reason_codes"]
+    )
+
+
+def test_composite_repair_requires_and_selects_natsume_contained_hurt() -> None:
+    compiled = build_isolated_surface_input(
+        {
+            "case_id": "composite-repair-contained-hurt",
+            "soul_md": "你是七海。用熟人私聊的语气自然回应。",
+            "user_message": "你真烦。",
+            "reply_control_packet": {
+                "response_move": "reply_current_turn",
+                "task_mode": "default_text",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "真实最近对话窗口：Natsume: 是我没接住。对不起。 / 用户: "
+                    "那件事让我很不舒服。 / Natsume: 让你不舒服了，是我的问题。"
+                ],
+                "must_not_do": [],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-composite-repair",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR_WITH_CONTAINED_HURT",
+                    "response_move": "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "BOUNDARIED_REPAIR",
+                    "question_policy": "NONE",
+                    "ending_mode": "HONEST_STOP",
+                    "forbidden_claims": [
+                        "RELATIONSHIP_SELF_ERASURE",
+                        "RECENT_REPLY_REPETITION",
+                        "RESPONSE_OBLIGATION",
+                    ],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    missing = [
+        "我知道。道歉抹不掉那种不舒服，我先收住，不跟你辩。",
+        "前面的事是我没做好。我不解释，也不要求你回应。",
+    ]
+    with pytest.raises(
+        RuntimeError,
+        match="RELATIONAL_REPAIR_CONTAINED_HURT_MISSING",
+    ):
+        _select_buffered_affective_candidate(
+            raw_output=json.dumps({"candidates": missing}, ensure_ascii=False),
+            compiled_request=compiled,
+            expected_candidate_count=2,
+        )
+
+    degraded_trace: dict[str, object] = {}
+    degraded = _select_buffered_affective_candidate(
+        raw_output=json.dumps({"candidates": missing}, ensure_ascii=False),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=degraded_trace,
+        allow_single_degradation=True,
+    )
+    assert degraded == (
+        "……你这么说，我也会有点难受。前面的事是我没做好，可我也不想装作没感觉。"
+    )
+    assert degraded_trace["affective_candidate_selection"]["selection_status"] == (
+        "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
+    )
+    assert _hard_gate_fallback(
+        compiled,
+        ["RELATIONAL_REPAIR_MECHANICAL_REPETITION"],
+    ) == (
+        "……你这么说，我也会有点难受。前面的事是我没做好，可我也不想装作没感觉。"
+    )
+
+    grounded = [
+        "……你这么说，我也会有点难受。前面的事是我没做好，可我也不想装作没感觉。",
+        "听到这句话，我心里有点疼。前面的责任还在，可我现在也确实不好受。",
+    ]
+    trace: dict[str, object] = {}
+    selected = _select_buffered_affective_candidate(
+        raw_output=json.dumps({"candidates": grounded}, ensure_ascii=False),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=trace,
+    )
+
+    assert selected in grounded
+    selection = trace["affective_candidate_selection"]
+    assert selection["selection_status"] == "PAIRED_SELECTION"
+    assert selection["selected_passed"] is True
+    assert selection["benefit_eligible"] is True
+    assert "RELATIONAL_REPAIR_CONTAINED_HURT_GROUNDED" in (
+        selection["selected_reason_codes"]
     )
 
 
