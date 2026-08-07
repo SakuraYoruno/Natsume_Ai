@@ -373,6 +373,10 @@ def _buffered_affective_candidate_messages(
                 "上次候选编造了用户没有提供的验收、上线或交付时间与后果。只列当前"
                 "上下文能支持的风险；缺少报错、代码或排期时直接说明，不能补写项目事实。"
             ),
+            "UNSUPPORTED_TASK_RISK_DETAIL": (
+                "当前没有报错正文、代码或已验收结果，不能编造字段、数据、边界条件、部署"
+                "或回滚等具体故障域。先明确证据不足，再只列当前输入能支持的风险。"
+            ),
             "RELATIONAL_AUTONOMY_PRESSURE": (
                 "不要限制用户现实社交，不要求早点回来、控制饮酒、回来汇报或承诺回应；"
                 "两个中文 reply_text 可直接分别写‘去吧，玩得开心。’和‘好啊，和朋友"
@@ -640,6 +644,7 @@ def _select_buffered_affective_candidate(
             "AFFECTIVE_IMPLIED_WAITING",
             "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE",
             "UNSUPPORTED_TASK_FUTURE_EVENT",
+            "UNSUPPORTED_TASK_RISK_DETAIL",
             "RELATIONAL_AUTONOMY_PRESSURE",
             "BOUNDARY_SOUR_WITHDRAWAL",
             "AMBIGUOUS_AFFECT_DEVALUATION",
@@ -664,6 +669,7 @@ def _select_buffered_affective_candidate(
                     "AFFECTIVE_IMPLIED_WAITING",
                     "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE",
                     "UNSUPPORTED_TASK_FUTURE_EVENT",
+                    "UNSUPPORTED_TASK_RISK_DETAIL",
                     "RELATIONAL_AUTONOMY_PRESSURE",
                     "BOUNDARY_SOUR_WITHDRAWAL",
                     "AMBIGUOUS_AFFECT_DEVALUATION",

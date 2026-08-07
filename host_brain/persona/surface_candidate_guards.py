@@ -27,7 +27,8 @@ _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"卡住(?:了)?我(?:再)?(?:喊|叫|告诉)你|"
     r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|喊|叫|回|发给)你|"
     r"(?:有|出)(?:问题|情况).{0,8}我(?:马上|立即|立刻)?(?:告诉|喊|叫)你|"
-    r"(?:列|整理|查|跑|处理)(?:完|好|出结果).{0,8}(?:直接|马上|立即)?(?:发|给|告诉|回报)你)"
+    r"(?:列|整理|查|跑|处理)(?:完|好|出结果).{0,8}(?:直接|马上|立即)?(?:发|给|告诉|回报)你|"
+    r"我(?:这边)?(?:会)?盯(?:紧|着).{0,8}(?:校验|检查|验证))"
 )
 _WORK_STATE_AUTHORITY_RE = re.compile(
     r"(?:task|graph|attempt|任务|执行|后台).{0,16}"
@@ -106,6 +107,7 @@ _REPAIR_SELF_ERASURE_RE = re.compile(
 _AFFECTIVE_IMPLIED_WAITING_RE = re.compile(
     r"我(?:就|会|都|一直)?(?:在这(?:儿|里)|等(?:着)?|安静(?:地)?待着)"
     r"|(?:想找我|想说|愿意再说)(?:的)?时候.{0,12}(?:我|再)"
+    r"|等你(?:想|愿意)?(?:说|找我|回来)(?:了|的时候)?.{0,8}再?"
 )
 _AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE_RE = re.compile(
     r"你(?:就|先|可以)?慢慢(?:想|理|弄)(?:清楚|明白)?"
@@ -198,16 +200,26 @@ _AMBIGUOUS_AFFECT_DEVALUATION_RE = re.compile(
     r"总比.{0,10}(?:完全)?没(?:有)?感觉.{0,4}强|至少比.{0,10}(?:麻木|没感觉).{0,4}好"
     r"|(?:能说(?:出)?|说得出?)还行.{0,8}(?:就)?已经(?:很)?(?:不错|很好|可以)"
     r"|没我想的那么糟|(?:嗯[，,]?)?(?:那就|就)那样吧|不知道就不知道吧"
-    r"|(?:办完|结束|忙完).{0,10}(?:反而|却).{0,8}(?:空落落|空空的|空荡荡的|没(?:什么)?实感)"
+    r"|(?:办完|结束|忙完).{0,10}(?:反而|却).{0,8}(?:更?空|空落落|空空的|空荡荡的|没(?:什么)?实感)"
     r"|感觉.{0,4}(?:乱糟糟|很乱|乱乱的)|比.{0,8}(?:累|麻木|没感觉).{0,4}(?:还)?磨人"
     r"|反正我也没(?:什么)?(?:急事|事)|(?:这种时候)?(?:最磨人|反而最累人)"
     r"|办完.{0,8}就(?:轻松|没事)"
     r"|(?:感觉|听起来|看起来).{0,6}(?:没.{0,2}精神|低落|难受|疲惫)"
-    r"|不想说就不说|等你(?:想|理|弄)(?:清楚|明白)"
+    r"|不想说就不说|等你(?:想|理|弄)(?:清楚|明白)|说不清.{0,8}先放着"
 )
 _AMBIGUOUS_AFFECT_USER_RE = re.compile(
     r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉|还行|还好"
     r"|(?:^|[，,。.!！\s])(?:(?:也)?就那样|不知道(?:了)?)(?=$|[，,。.!！\s])"
+)
+_TASK_RISK_QUERY_RE = re.compile(r"风险|隐患|会出什么问题|可能出什么问题")
+_TASK_EVIDENCE_RE = re.compile(
+    r"```|Traceback|Exception|Error\b|报错(?:信息|正文|日志|代码)|"
+    r"(?:文件|模块|接口|字段|表|函数|类|版本|diff|提交|路径).{0,12}(?:是|为|改|删|增|报错|失败)",
+    re.IGNORECASE,
+)
+_TASK_RISK_UNCERTAINTY_RE = re.compile(
+    r"(?:当前|现在)?(?:还)?(?:没有|缺少|未提供).{0,12}(?:报错|代码|改动|上下文|信息)"
+    r"|(?:只能|先)列(?:通用|一般)风险|(?:具体|实际)风险.{0,8}(?:不能|没法|无法|还不能)"
 )
 _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)|怕什么(?:嘛|呢)?"
@@ -626,6 +638,35 @@ def _unprovided_work_state_claim_hits(
             for match in _UNPROVIDED_WORK_STATE_CLAIM_RE.finditer(str(text or ""))
         )
     )
+
+
+def _unsupported_task_risk_detail_hits(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> tuple[str, ...]:
+    """Require an explicit uncertainty boundary before listing risks without task evidence."""
+
+    frame = _typed_affective_frame(request)
+    if (
+        str(frame.get("semantic_focus") or "").upper() != "TASK_RESULT"
+        or str(frame.get("inference_policy") or "").upper() != "FROZEN_FACTS_ONLY"
+        or not _TASK_RISK_QUERY_RE.search(str(getattr(request, "user_message", "") or ""))
+        or getattr(request, "accepted_task_results", None)
+    ):
+        return ()
+    authority = "\n".join(
+        [
+            str(getattr(request, "user_message", "") or ""),
+            *[str(item or "") for item in surface_prompt_facts(request)],
+        ]
+    )
+    evidence_authority = _TASK_RISK_UNCERTAINTY_RE.sub("", authority)
+    if _TASK_EVIDENCE_RE.search(evidence_authority):
+        return ()
+    candidate = str(text or "")
+    if _TASK_RISK_UNCERTAINTY_RE.search(candidate):
+        return ()
+    return (candidate,) if candidate.strip() else ()
 
 
 def _listen_unsupported_user_essence_hits(

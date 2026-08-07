@@ -841,3 +841,5 @@ causal self-exclusion 的同库真实复验报告 SHA-256 为 `6fbe0a45d0db2f927
 `7268ac768` 的真实 `user_angry_at_natsume:1` 报告 SHA-256 为 `955f09555ada2b768f927e084b1cc7afea415abe635c8f4d35df3045c3c881ac`，自动与本轮逐句检查均通过，3 个 accepted turn 的 canonical writer 正常且旧 writer 增量为 0。该专用根因关闭。下一步仍按小队列而非完整 48 条运行 `ambiguous_affect:4`、`task_with_low_mood:5`、`space_and_boundary:3`、`shared_joy_and_mixed_feeling:3`；每条自动和当前逐句检查均通过后，才允许扩大 cohort。网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。
 
 上述四条报告 SHA-256 为 `1db345eb74ba7b5f3ffb116a49b707facd343021ff44a256aa4540a187d9f15a`，自动 4/4 但当前逐句只接受 mixed。复验新增三个强制语义：含混状态不得用“我在这儿／你慢慢想”制造等候或要求用户解决情绪；没有 server-authored Task 快照时不得声称后台 Codex／Agent 已有改动或已开始定位；`GIVE_SPACE` 必须只确认减少主动联系，不得把七海写成持续在线等待。512 项代码回归后只重跑这三条；它们全部自动和逐句通过，才更新 8 类 frame 计数并决定是否重跑 48 条。
+
+三条复验报告 SHA-256 为 `5515f04c1ad1e0fe64637f62f3b88b988acbf05ebfd5bf92276352755486a3d1`。空间边界已自动和逐句通过；含混回复仍替用户编造“办完反而更空”并安排“等你想说了再说”，技术回复仍在零任务证据下编造字段／边界／部署回滚风险和后台校验状态。下一轮只重跑含混与技术两条，验收除既有结构项外必须断言：未命名感受不新增原因、标签或未来回应义务；技术风险必须引用当前输入／accepted Task 结果，或明确说明证据不足。当前核心 298 项、相邻 219 项回归通过，但只能作为代码证据；两条真实 Provider 逐句通过后，8 类 frame 才可从 6/8 更新并决定是否重跑 48 条。

@@ -49,7 +49,8 @@ from host_brain.persona.surface_candidate_guards import (
     _surface_internal_authorship_hits, _text_input_boundary_active,
     _ungrounded_physical_copresence_hits, _unprovided_notification_action_hits,
     _unprovided_work_state_claim_hits, _unresolved_affect_false_resolution_hits,
-    _unsupported_task_future_event_hits, _user_affect_perspective_reversal_hits,
+    _unsupported_task_future_event_hits, _unsupported_task_risk_detail_hits,
+    _user_affect_perspective_reversal_hits,
 )
 from host_brain.persona.surface_deictic import (
     _current_phase_family_from_facts,
@@ -1261,6 +1262,8 @@ def _surface_hard_gate_violations(request: IsolatedSurfaceInput, text: str) -> t
         codes.append("UNPROVIDED_WORK_STATE_CLAIM")
     if _unsupported_task_future_event_hits(request, value):
         codes.append("UNSUPPORTED_TASK_FUTURE_EVENT")
+    if _unsupported_task_risk_detail_hits(request, value):
+        codes.append("UNSUPPORTED_TASK_RISK_DETAIL")
     if _accepted_task_result_synthesis_clarification(request, value):
         codes.append("ACCEPTED_TASK_RESULT_CLARIFICATION")
     if _accepted_task_result_synthesis_inadequate(request, value):
@@ -2556,6 +2559,15 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "好。把具体内容发来，我直接处理。"
     if "UNSUPPORTED_TASK_FUTURE_EVENT" in codes:
         return "现在能确认的是时间紧，但还缺报错和代码上下文。把这两样贴来，我再按优先级列具体风险。"
+    if "UNSUPPORTED_TASK_RISK_DETAIL" in codes:
+        authority = "\n".join(
+            [
+                str(getattr(request, "user_message", "") or ""),
+                *[str(item or "") for item in surface_prompt_facts(request)],
+            ]
+        )
+        prefix = "目前只知道今晚时间紧。" if "今晚" in authority else ""
+        return prefix + "现在还没有报错和代码，无法列出具体风险；把实际改动贴来，我再按影响和回滚难度排序。"
     if "USER_AFFECT_PERSPECTIVE_REVERSAL" in codes:
         return "我不想替你下结论。听起来像事情结束了，情绪还没跟上；先不用急着给它命名。"
     if "AUDITORY_CHECK_PRETEND_HEARD" in codes or "AUDITORY_CHECK_MISSING_TEXT_GROUNDING" in codes:

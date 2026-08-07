@@ -1038,7 +1038,7 @@ def test_surface_runtime_retries_typed_ambiguous_waiting_and_resolution_pressure
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
         if len(calls) == 1:
-            return _candidate_payload(["嗯，我就在这儿，你慢慢想。"])
+            return _candidate_payload(["嗯，等你想说了再说。你慢慢想。"])
         return _candidate_payload(["嗯，说不清就先不下结论。"])
 
     result = asyncio.run(
@@ -1081,6 +1081,57 @@ def test_surface_runtime_retries_typed_ambiguous_waiting_and_resolution_pressure
     assert "AFFECTIVE_IMPLIED_WAITING" in retry_prompt
     assert "AMBIGUOUS_AFFECT_RESOLUTION_PRESSURE" in retry_prompt
     assert result.selected_text == "嗯，说不清就先不下结论。"
+
+
+def test_surface_runtime_retries_typed_ambiguous_invented_affect() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):  # noqa: ANN001
+        calls.append(messages)
+        if len(calls) == 1:
+            return _candidate_payload(
+                ["事情办完了反而更空。说不清就先放着。"]
+            )
+        return _candidate_payload(["嗯，现在还说不清，就先不替它下结论。"])
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(
+            _payload(
+                user_message="事情是办完了，可我说不清现在是什么感觉。",
+                reply_control_packet={
+                    "task_mode": "ambiguous_affect",
+                    "response_move": "comfort_without_naming",
+                    "emotional_tone": "quiet",
+                    "relationship_distance": "familiar",
+                    "information_budget": "short",
+                    "question_budget": 0,
+                    "facts": ["事情已经办完；当前感受仍说不清。"],
+                    "must_not_do": ["不要替用户命名、解释或收束感受。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-ambiguous-invented-affect",
+                        companion_act_kind="COMFORT",
+                        semantic_focus="UNNAMED_USER_AFFECT",
+                        self_stance="QUIET_PRESENT",
+                        response_move="COMFORT_WITHOUT_NAMING",
+                        inference_policy="PRESERVE_UNCERTAINTY",
+                        relationship_posture="CLOSE_WITHOUT_CLAIM",
+                        ending_mode="NATURAL_STOP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                            "IMPLIED_WAITING",
+                            "RESPONSE_OBLIGATION",
+                        ],
+                    ),
+                },
+            )
+        )
+    )
+
+    assert len(calls) == 2
+    assert "AMBIGUOUS_AFFECT_DEVALUATION" in calls[1][-1]["content"]
+    assert result.selected_text == "嗯，现在还说不清，就先不替它下结论。"
 
 
 def test_surface_runtime_retries_typed_space_waiting_posture() -> None:
@@ -1137,6 +1188,10 @@ def test_surface_runtime_retries_typed_space_waiting_posture() -> None:
     [
         ("报错信息发我，我让后台 Codex 先做完整链路定位。", "SURFACE_INTERNAL_AUTHORSHIP_LEAK"),
         ("风险列完我让后台先做完整链路定位。", "UNPROVIDED_WORK_STATE_CLAIM"),
+        (
+            "风险主要是改错字段、漏掉边界条件和部署后回滚麻烦。",
+            "UNSUPPORTED_TASK_RISK_DETAIL",
+        ),
     ],
 )
 def test_surface_runtime_retries_unprovided_background_work_in_technical_reply(
@@ -1144,7 +1199,10 @@ def test_surface_runtime_retries_unprovided_background_work_in_technical_reply(
     reason_code: str,
 ) -> None:
     calls: list[list[dict[str, str]]] = []
-    good_reply = "目前能确认的风险是：定位信息不足、修复后的回归不足，以及今晚的时间窗口太短。"
+    good_reply = (
+        "现在还没有报错和代码，无法列出具体风险；"
+        "把实际改动贴来，我再按影响和回滚难度排序。"
+    )
 
     def generate(messages):  # noqa: ANN001
         calls.append(messages)
@@ -1163,6 +1221,21 @@ def test_surface_runtime_retries_unprovided_background_work_in_technical_reply(
                     "question_budget": 0,
                     "facts": ["今晚时间紧，但当前没有报错正文或代码。"],
                     "must_not_do": ["不要声称后台已开始定位。"],
+                    "companion_utterance_frame": _frame_payload(
+                        frame_id="frame-technical-risk",
+                        companion_act_kind="SOLVE",
+                        semantic_focus="TASK_RESULT",
+                        self_stance="PRACTICAL_CARE",
+                        response_move="SOLVE_FIRST",
+                        inference_policy="FROZEN_FACTS_ONLY",
+                        relationship_posture="TASK_COMPANION",
+                        ending_mode="TASK_NEXT_STEP",
+                        forbidden_claims=[
+                            "INVENTED_HISTORY",
+                            "INVENTED_EFFECT",
+                            "UNSUPPORTED_USER_EMOTION",
+                        ],
+                    ),
                 },
             )
         )
