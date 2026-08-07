@@ -47,6 +47,12 @@ CANON_SYNC_KEY = "current"
 STARTUP_SNAPSHOT_KIND = "startup_snapshot"
 STARTUP_SNAPSHOT_KEY = "current"
 REMAINING_QUERY_MAX_AGE_MS = 15_000
+# Canon drift is a low-frequency health fact refreshed by one job in the
+# 22-job serial OBS wave.  A 15-second read window can expire while that same
+# healthy wave is still running, turning an unchanged ``OK`` result into a
+# false ``STALE``.  Keep the generic interactive views at 15 seconds and give
+# only canon health enough time to span a complete production wave.
+CANON_SYNC_MAX_AGE_MS = 180_000
 
 
 def read_from_store(
@@ -436,6 +442,7 @@ __all__ = [
     "CHECKPOINT_KIND",
     "CANON_SYNC_KEY",
     "CANON_SYNC_KIND",
+    "CANON_SYNC_MAX_AGE_MS",
     "MEMORY_CONTEXT_KIND",
     "MEMORY_EVENTS_KIND",
     "MEMORY_HEALTH_KIND",

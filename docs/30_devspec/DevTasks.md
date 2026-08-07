@@ -93,6 +93,8 @@
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
+- [x] 修复最终 SHA Host 探针只按 HTTP 200 产生假绿的问题：Health／Ready／Canon 必须校验业务语义，Host-only pending external 只能通过显式参数接受。
+- [ ] 在修复提交上重启 Host／OBS，保持 Gateway、隧道、Docker 与远端 Edge 不动，重新采集 Canon `OK`、真实 Chat COMMIT 和 Host-only pending external 报告。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。
 - [ ] 邀请至少 3 名评审，与稳定基线盲测并达到 PRD 门槛。
 - [ ] 重点检查情绪变化幅度、混合情绪、裂痕／修复和技术任务中的人格连续性。

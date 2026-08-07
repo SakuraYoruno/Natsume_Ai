@@ -592,3 +592,15 @@ python -m pytest -q `
 `60cab0e1e` 的三条语义槽复验报告 SHA-256 为 `11a46672e27c4728df1208b1807ce34b1d5499e0d62d1d89efd06b46b6d2604e`，自动 1 待人工／2 失败，人工 0/3；抽象槽不能作为完成方案。新增回归要求 `mixed_resonance_style_cues()` 对相同规范化输入确定性一致，对 `offer` 与项目发布选择不同的两组喜悦／悬心碎片；首次和唯一重试均只能把碎片标为不可直接复制的语感，回复仍需包含当前具体结果并在 20～52 字、最多两句内停住。相关五文件仍为 380 passed。新 SHA 重跑同三条，一条 advice、local fallback、非收益 selection 或整图失败都保持 FAIL。
 
 `f87ad26f8` 的短语感碎片报告 SHA-256 为 `708a0808b0372e02fc599f4618ce3dce5b12c84471bcc5f66ca48c65670f442b`，仍是自动 1/3、2 条失败；停止条件触发。测试基线恢复到 `b11de0f11` 的最佳已知 mixed prompt，实验 helper 与其专用断言删除，五文件回归仍为 380 passed。后续不得再以 prompt 词形修复这一组；下一次 mixed 试验必须改变模型或使用版本化真实自然文本微调，并以新的变体 cohort 比较重复率、建议率、selection 收益和人工偏好。
+
+最终 SHA 的 Host-only 快速实测使用：
+
+```powershell
+python scripts/runtime/test_full_service.py `
+  --base-url http://127.0.0.1:18080 `
+  --skip-dependency-probes `
+  --allow-pending-external `
+  --report-dir <隔离验收报告目录>
+```
+
+`--allow-pending-external` 只允许 required unavailable 为 0、且未完成项确实属于远端 Edge／设备的结果；它不允许 `ready=false` 的其他原因，也不允许 Canon `DEGRADED`、漂移或过期投影通过。网络安全、A09、A12、Security Monitor 与 Pentest 保持 `NOT_RUN_USER_SKIPPED`。

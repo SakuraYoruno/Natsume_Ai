@@ -40,6 +40,7 @@ from host_brain.app.settings import get_persistence_settings
 from host_brain.app.observability_runtime.remaining_query_projection import (
     CANON_SYNC_KEY,
     CANON_SYNC_KIND,
+    CANON_SYNC_MAX_AGE_MS,
     STARTUP_SNAPSHOT_KEY,
     STARTUP_SNAPSHOT_KIND,
     read_from_store,
@@ -805,6 +806,7 @@ async def canon_sync_health_check(
         projection_store,
         CANON_SYNC_KIND,
         CANON_SYNC_KEY,
+        max_age_ms=CANON_SYNC_MAX_AGE_MS,
     )
     return HealthResponse(
         status=str((payload or {}).get("status") or "DEGRADED"),

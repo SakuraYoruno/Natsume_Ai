@@ -884,3 +884,9 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 精确加载 `f87ad26f8` 后的同三条报告 SHA-256 为 `708a0808b0372e02fc599f4618ce3dce5b12c84471bcc5f66ca48c65670f442b`，结果仍为 1 条自动待人工、2 条失败，9 个 accepted turn 的 writer probe 通过。`:1` 的三轮可接受但发生一次 mixed 语义重试；`:4` 末轮“后续数据出来我帮你一起看”被正确标成 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`；`:6` 末轮两次候选丢失 mixed 连续性后使用 local fallback，仍不可计收益。短语感碎片没有达到门槛。
 
 依照预先冻结的停止条件，本轮不继续增加提示、禁词或第三次请求。实验 helper 已从生产代码删除，mixed prompt 与单测精确恢复到 `b11de0f11` 的最佳已知版本；`git diff b11de0f11 --` 对相关生产文件和测试为空，380 项回归通过。之前的单轨迹 scope-bound PASS 与五变体 4/5 结果可作为内容等价证据继续引用，但不能提升当前 SHA 为完整 mixed PASS。剩余问题转入模型路由或真实自然对话文本微调，必须使用新预注册变体验证，禁止重复抽样挑绿灯。
+
+## 2026-08-08 A15 最终 SHA Host 探针判定纠偏
+
+Host 与 OBS 重启到 `28c77d2e2` 后，真实 Chat 已形成 `APPROVE / COMMIT`，但两份旧探针给出了互相矛盾且都不可信的结论。基础脚本把远端 Edge 明确未测试导致的 `ACCEPTANCE_PENDING_EXTERNAL` 计作 Host 失败；全服务脚本则只检查 HTTP 200，把 `ready=false` 和 `canon_sync=DEGRADED / OPERATOR_PROJECTION_STALE` 全部计作 PASS。该轮“全服务 PASS”撤销，不作为最终证据。
+
+修复后的全服务探针必须逐项验证 Health 无 required unavailable、Ready 语义、Chat COMMIT 和 Canon `OK + drift_count=0`。Host-only 验收必须显式声明跳过依赖探针并允许仅由远端 Edge／设备造成的 pending external，默认严格模式不放宽。Canon 内容没有版本漂移；误报来自 22 个串行投影任务的一轮耗时超过通用 15 秒读取窗口，因此只为低频 Canon health 设置 180 秒读取窗口，刷新频率仍为 15 秒、普通对话零新增步骤。相邻合同与脚本回归 10 项通过；必须提交、推送、重启当前代码 SHA 后重新采集真实报告，当前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

@@ -434,3 +434,5 @@ python tools/doc_lint/doc_link_gate.py --root .
 - `f87ad26f8` 的短语感碎片复验报告 SHA-256 为 `708a0808b0372e02fc599f4618ce3dce5b12c84471bcc5f66ca48c65670f442b`：仍只有 1 条自动待人工、2 条失败，9 个 accepted turn 与 writer probe 通过；`项目发布` 继续虚构“后续数据我帮你看”，`像做梦` 依赖固定 local fallback 且不可计收益。该实验没有超过完整正例版本的 4/5 自动结果，已停止 prompt-only 迭代并删除实验 helper；生产提示恢复为经 `b11de0f11` 真实验证的最佳已知版本，相关文件与该提交内容一致、380 项回归通过。mixed 单例因果仍是 scope-bound PASS，但语言多样性正式定级为 `MODEL_OR_REAL_TEXT_TUNING_REQUIRED`，不再靠增加 Gate 或重跑挑样本。
 
 因此当前结论仍是 `INCOMPLETE`，不是 Full Architecture `PASS`。
+
+- 最终 SHA 本地 Host 探针首次复跑发现验收脚本存在假绿：旧 `test_full_service.py` 仅凭 HTTP 200，把 `ready=false` 和 `canon_sync=DEGRADED` 也写成 PASS；旧快速脚本则把按要求未连接的远端 Edge 记成 Host 故障。当前代码已要求 Health、Ready、Canon 的响应语义同时成立，并为 Host-only 运行增加显式 `--skip-dependency-probes --allow-pending-external`；Canon 只把读取窗口从通用 15 秒调整为覆盖完整 22-job 串行波次的 180 秒，不改变生产刷新频率、普通对话路径或存储。10 项相邻回归通过，真实新提交重启复验前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

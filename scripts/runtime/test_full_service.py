@@ -181,8 +181,16 @@ def _health_summary(health_body: Any) -> JsonDict:
     return {}
 
 
-def build_probe_report(*, base_url: str, timeout_s: float = 10.0, chat_timeout_s: float = 90.0) -> JsonDict:
-    health = _http_json("GET", f"{base_url}/health", timeout_s=timeout_s)
+def build_probe_report(
+    *,
+    base_url: str,
+    timeout_s: float = 10.0,
+    chat_timeout_s: float = 90.0,
+    skip_dependency_probes: bool = False,
+    allow_pending_external: bool = False,
+) -> JsonDict:
+    health_path = "/health?skip_dependency_probes=1" if skip_dependency_probes else "/health"
+    health = _http_json("GET", f"{base_url}{health_path}", timeout_s=timeout_s)
     ready = _http_json("GET", f"{base_url}/ready", timeout_s=timeout_s)
     metrics = _http_json("GET", f"{base_url}/metrics", timeout_s=timeout_s)
     canon_sync = _http_json("GET", f"{base_url}/health/canon_sync", timeout_s=timeout_s)
@@ -201,11 +209,35 @@ def build_probe_report(*, base_url: str, timeout_s: float = 10.0, chat_timeout_s
     canon_sync_body = canon_sync.get("body") if isinstance(canon_sync.get("body"), dict) else {}
     commit_event = chat.get("commit_event") if isinstance(chat.get("commit_event"), dict) else {}
     summary = _health_summary(health_body)
+    health_status = str(health_body.get("status") or "").upper()
+    overall_status = str(summary.get("overall_status") or "").upper()
+    required_unavailable = int(summary.get("required_unavailable") or 0)
+    pending_external = health_status == "ACCEPTANCE_PENDING_EXTERNAL" and required_unavailable == 0
+    health_contract_passed = (
+        health_status == "OK"
+        or overall_status in {"OK", "UP", "HEALTHY"}
+        or (allow_pending_external and pending_external)
+    ) and required_unavailable == 0
+
+    ready_status = str(ready_body.get("status") or "").upper()
+    ready_reason = str(ready_body.get("reason_code") or "").upper()
+    ready_contract_passed = bool(ready_body.get("ready")) or (
+        allow_pending_external
+        and pending_external
+        and ready_status == "ACCEPTANCE_PENDING_EXTERNAL"
+        and ready_reason == "ACCEPTANCE_PENDING_EXTERNAL"
+    )
+
+    canon_details = canon_sync_body.get("details") if isinstance(canon_sync_body.get("details"), dict) else {}
+    canon_status = str(canon_sync_body.get("status") or "").upper()
+    canon_drift_count = int(canon_details.get("drift_count") or 0)
 
     checks = [
         {
             "check": "health",
-            "passed": bool(health.get("ok")) and int(health.get("status_code") or 0) == 200,
+            "passed": bool(health.get("ok"))
+            and int(health.get("status_code") or 0) == 200
+            and health_contract_passed,
             "detail": {
                 "status": health_body.get("status"),
                 "overall_status": summary.get("overall_status"),
@@ -215,7 +247,9 @@ def build_probe_report(*, base_url: str, timeout_s: float = 10.0, chat_timeout_s
         },
         {
             "check": "ready",
-            "passed": bool(ready.get("ok")) and int(ready.get("status_code") or 0) == 200,
+            "passed": bool(ready.get("ok"))
+            and int(ready.get("status_code") or 0) == 200
+            and ready_contract_passed,
             "detail": {
                 "ready": ready_body.get("ready"),
                 "status": ready_body.get("status"),
@@ -247,18 +281,17 @@ def build_probe_report(*, base_url: str, timeout_s: float = 10.0, chat_timeout_s
         },
         {
             "check": "canon_sync",
-            "passed": bool(canon_sync.get("ok")) and int(canon_sync.get("status_code") or 0) == 200,
+            "passed": bool(canon_sync.get("ok"))
+            and int(canon_sync.get("status_code") or 0) == 200
+            and canon_status == "OK"
+            and canon_drift_count == 0,
             "detail": {
                 "status": canon_sync_body.get("status"),
                 "detail": (
-                    canon_sync_body.get("details", {}).get("detail")
-                    if isinstance(canon_sync_body.get("details"), dict)
-                    else None
+                    canon_details.get("detail")
                 ),
                 "drift_count": (
-                    canon_sync_body.get("details", {}).get("drift_count")
-                    if isinstance(canon_sync_body.get("details"), dict)
-                    else None
+                    canon_details.get("drift_count")
                 ),
             },
         },
@@ -270,6 +303,8 @@ def build_probe_report(*, base_url: str, timeout_s: float = 10.0, chat_timeout_s
             "script": "test_full_service.py",
             "base_url": base_url,
             "generated_at_ms": int(time.time() * 1000),
+            "skip_dependency_probes": bool(skip_dependency_probes),
+            "allow_pending_external": bool(allow_pending_external),
         },
         "checks": checks,
         "responses": {
@@ -310,13 +345,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout-s", type=float, default=10.0, help="HTTP timeout seconds")
     parser.add_argument("--chat-timeout-s", type=float, default=90.0, help="SSE timeout seconds")
     parser.add_argument("--report-dir", default=str(DEFAULT_REPORT_DIR), help="Directory for JSON report output")
+    parser.add_argument(
+        "--skip-dependency-probes",
+        action="store_true",
+        help="Do not probe remote Edge dependencies from this Host-only run.",
+    )
+    parser.add_argument(
+        "--allow-pending-external",
+        action="store_true",
+        help="Accept ACCEPTANCE_PENDING_EXTERNAL only when no required service is unavailable.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     base_url = _resolve_base_url(explicit_url=args.base_url)
-    report = build_probe_report(base_url=base_url, timeout_s=args.timeout_s, chat_timeout_s=args.chat_timeout_s)
+    report = build_probe_report(
+        base_url=base_url,
+        timeout_s=args.timeout_s,
+        chat_timeout_s=args.chat_timeout_s,
+        skip_dependency_probes=args.skip_dependency_probes,
+        allow_pending_external=args.allow_pending_external,
+    )
 
     report_dir = Path(args.report_dir)
     report_dir.mkdir(parents=True, exist_ok=True)

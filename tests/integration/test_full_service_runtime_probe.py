@@ -100,6 +100,83 @@ def test_build_probe_report_marks_all_checks_passed_with_healthy_payloads(monkey
     assert all(row["passed"] for row in report["checks"])
 
 
+def test_probe_rejects_http_200_when_ready_or_canon_is_degraded(monkeypatch) -> None:
+    module = _load_module()
+
+    def _fake_http_json(method: str, url: str, *, payload=None, timeout_s=10.0):
+        if "/health?" in url:
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {
+                    "status": "ACCEPTANCE_PENDING_EXTERNAL",
+                    "details": {
+                        "summary": {
+                            "overall_status": "ACCEPTANCE_PENDING_EXTERNAL",
+                            "required_unavailable": 0,
+                            "required_not_tested": 5,
+                        }
+                    },
+                },
+            }
+        if url.endswith("/ready"):
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {
+                    "ready": False,
+                    "status": "ACCEPTANCE_PENDING_EXTERNAL",
+                    "reason_code": "ACCEPTANCE_PENDING_EXTERNAL",
+                },
+            }
+        if url.endswith("/metrics"):
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {"reason_code_distribution": {}},
+            }
+        if url.endswith("/health/canon_sync"):
+            return {
+                "ok": True,
+                "status_code": 200,
+                "body": {
+                    "status": "DEGRADED",
+                    "details": {
+                        "reason_code": "OPERATOR_PROJECTION_STALE",
+                        "drift_count": 0,
+                    },
+                },
+            }
+        raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr(module, "_http_json", _fake_http_json)
+    monkeypatch.setattr(
+        module,
+        "_stream_chat_sse",
+        lambda **kwargs: {
+            "ok": True,
+            "status_code": 200,
+            "events": [{}],
+            "commit_event": {"phase": "COMMIT", "done": True},
+        },
+    )
+
+    strict = module.build_probe_report(
+        base_url="http://127.0.0.1:18080",
+        skip_dependency_probes=True,
+    )
+    pending_allowed = module.build_probe_report(
+        base_url="http://127.0.0.1:18080",
+        skip_dependency_probes=True,
+        allow_pending_external=True,
+    )
+
+    assert strict["overall"]["failed_checks"] == ["health", "ready", "canon_sync"]
+    assert pending_allowed["overall"]["failed_checks"] == ["canon_sync"]
+    assert pending_allowed["meta"]["skip_dependency_probes"] is True
+    assert pending_allowed["meta"]["allow_pending_external"] is True
+
+
 def test_main_writes_report_and_returns_nonzero_when_probe_fails(tmp_path, monkeypatch, capsys) -> None:
     module = _load_module()
     monkeypatch.setattr(module.time, "time", lambda: 1_800_800_000)
