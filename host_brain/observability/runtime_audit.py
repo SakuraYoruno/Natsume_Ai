@@ -31,6 +31,7 @@ from host_brain.core.runtime_helpers import (  # noqa: F401
     _summarize_emotion_context_for_trace,
     _summarize_persona_resident_memory_for_trace,
 )
+import asyncio
 import json
 import time
 
@@ -603,7 +604,7 @@ def _trace_node_sort_key(node: Mapping[str, Any]) -> tuple[int, int, str]:
     return (priority, ts_ms, node_id)
 
 
-async def _persist_post_process_audit(
+def _persist_post_process_audit_sync(
     *,
     audit_ledger: Callable[[], Any],
     request_id: str,
@@ -1122,3 +1123,14 @@ async def _persist_post_process_audit(
             "ts_ms": _now,
         }
     )
+
+
+async def _persist_post_process_audit(**kwargs: Any) -> None:
+    """Persist the diagnostic trace without occupying the Host event loop.
+
+    This projection performs JSON normalization and several synchronous SQLite
+    writes.  It is useful for diagnostics, but it is not part of the visible
+    companion response and must never delay the next ordinary chat request.
+    """
+
+    await asyncio.to_thread(_persist_post_process_audit_sync, **kwargs)

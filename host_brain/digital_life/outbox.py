@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 import inspect
 from typing import Any
@@ -141,12 +142,16 @@ class LifeOutboxDispatcher:
             dispatch_at_ms if dispatch_at_ms is not None else self._clock()
         )
         max_items = max(1, int(limit))
-        self.reconcile_completed_relationship_deliveries(limit=max_items)
+        await asyncio.to_thread(
+            self.reconcile_completed_relationship_deliveries,
+            limit=max_items,
+        )
         claimed = 0
         delivered = 0
         failed = 0
         for _index in range(max_items):
-            messages = self.repository.claim_deliveries(
+            messages = await asyncio.to_thread(
+                self.repository.claim_deliveries,
                 owner_token=self.owner_id,
                 now_ms=claimed_at,
                 lease_ms=self.claim_lease_ms,
@@ -156,10 +161,14 @@ class LifeOutboxDispatcher:
                 break
             message = messages[0]
             claimed += 1
-            if self.repository.get_delivery_receipt(message.outbox_id) is not None:
+            if await asyncio.to_thread(
+                self.repository.get_delivery_receipt,
+                message.outbox_id,
+            ) is not None:
                 delivered += 1
                 continue
-            self.repository.renew_delivery_claim(
+            await asyncio.to_thread(
+                self.repository.renew_delivery_claim,
                 message,
                 owner_token=self.owner_id,
                 now_ms=max(claimed_at, int(self._clock())),
@@ -179,14 +188,16 @@ class LifeOutboxDispatcher:
                     renew_claim,
                     lease_ms=self.claim_lease_ms,
                 ):
-                    result = self.handler(message)
-                    if inspect.isawaitable(result):
-                        result = await result
+                    result = await _invoke_delivery_handler_async(
+                        self.handler,
+                        message,
+                    )
             except LifeLeaseHeartbeatError:
                 raise
             except Exception as exc:
                 failed_at = int(self._clock())
-                self.repository.fail_delivery(
+                await asyncio.to_thread(
+                    self.repository.fail_delivery,
                     message,
                     owner_token=self.owner_id,
                     error=f"{type(exc).__name__}: {exc}",
@@ -196,13 +207,18 @@ class LifeOutboxDispatcher:
                 failed += 1
                 continue
             completed_at = int(self._clock())
-            receipt = self.repository.complete_delivery(
+            receipt = await asyncio.to_thread(
+                self.repository.complete_delivery,
                 message,
                 owner_token=self.owner_id,
                 result=dict(result or {}),
                 now_ms=completed_at,
             )
-            self._reconcile_completed_delivery(message, receipt)
+            await asyncio.to_thread(
+                self._reconcile_completed_delivery,
+                message,
+                receipt,
+            )
             delivered += 1
         return LifeDispatchSummary(
             claimed=claimed,
@@ -282,6 +298,24 @@ class LifeOutboxDispatcher:
             self.base_retry_ms
             * (2 ** min(20, max(0, message.attempt_count - 1))),
         )
+
+
+async def _invoke_delivery_handler_async(
+    handler: Callable[
+        [LifeOutboxMessage],
+        Mapping[str, Any] | Awaitable[Mapping[str, Any] | None] | None,
+    ],
+    message: LifeOutboxMessage,
+) -> Mapping[str, Any] | None:
+    """Run synchronous transport adapters without blocking realtime chat."""
+
+    if inspect.iscoroutinefunction(handler):
+        result = handler(message)
+    else:
+        result = await asyncio.to_thread(handler, message)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
 
 __all__ = ["LifeOutboxDispatcher"]

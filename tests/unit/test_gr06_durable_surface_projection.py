@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +9,7 @@ import pytest
 from host_brain.agent_runtime.postprocess import _async_post_process
 from host_brain.app import acceptance_effect_handlers
 from host_brain.composition.life import PROCESS_LIFE_PROVIDER
+from host_brain.observability import runtime_audit
 from natsume_contracts.life import LifeCommand
 
 
@@ -90,6 +93,64 @@ async def test_durable_projection_accepts_idempotent_replays() -> None:
     await _run(ports)
 
     assert ports.memory.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_durable_projection_assistant_writer_does_not_block_event_loop() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    ports = _ports(
+        assistant_result={"status": "OK"},
+        memory_receipt={
+            "status": "COMMITTED",
+            "request_id": "request-gr06-durable-projection",
+        },
+    )
+
+    def blocking_record_assistant_turn(**_kwargs):  # noqa: ANN003, ANN202
+        entered.set()
+        if not release.wait(timeout=1.0):
+            raise AssertionError("assistant projection blocked the event loop")
+        return {"status": "OK"}
+
+    ports.record_assistant_turn = blocking_record_assistant_turn
+    task = asyncio.create_task(_run(ports))
+    try:
+        assert await asyncio.to_thread(entered.wait, 0.5)
+        await asyncio.sleep(0.01)
+        release.set()
+        await task
+    finally:
+        release.set()
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_trace_persistence_does_not_block_event_loop(
+    monkeypatch,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocking_persist(**_kwargs):  # noqa: ANN003, ANN202
+        entered.set()
+        if not release.wait(timeout=1.0):
+            raise AssertionError("diagnostic trace blocked the event loop")
+
+    monkeypatch.setattr(
+        runtime_audit,
+        "_persist_post_process_audit_sync",
+        blocking_persist,
+    )
+    task = asyncio.create_task(
+        runtime_audit._persist_post_process_audit(request_id="request-audit-offload")
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 0.5)
+        await asyncio.sleep(0.01)
+        release.set()
+        await task
+    finally:
+        release.set()
 
 
 @pytest.mark.asyncio

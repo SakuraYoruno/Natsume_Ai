@@ -926,3 +926,11 @@ SQLite 中实际存在 6 个 trusted run receipt、3 个 report、3 个 proposal
 NE-05 运行 19 项非网络测试，19/19 通过；log/JUnit SHA-256 分别为 `ee294424670931d80f23fa309884498b8d674e3b5a7e6248fc9165bf2fc910dd` 和 `a3695f7ae5a5028a51e390a557be36fd1e2399e329dd4bb4d98a4362e1523cc1`。真实文件 bundle 没有被 import，签名后篡改在 store 前拒绝；V2 SQLite authority 完成 activate、幂等 replay、v2→v1 exact rollback、degrade，并让 Host registry 只解析 active version。测试中的 Lab/Review/Sandbox/Canary evidence 由 fixture 构造，因此不能写成真实外部 Skill 激活 PASS。
 
 NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d` 和 `b74dbc1e3d5d63784da0456cb2d707a98825fdfe6810faab41ad7775e87391fb`。Feedback、Knowledge、Identity 的真实 SQLite 状态迁移和旧 V1 query-only 边界成立，但未通过本机 Gateway/Host 触发真实 Operator Review、版本切换并观察下一轮七海文本／Voice／Avatar。因此 NE-05、NE-06 只关闭本地 authority 语义，不关闭 live behavior。
+
+## 2026-08-08 普通对话事件循环与真实首句延迟
+
+新的直接 SSE 探针以同一 session 连续发送 20 个低风险日常回合，只记录阶段、字符数和正文摘要，不持久化正文。原始报告 SHA-256 为 `292bae13dd718cc2eb9263cc34caf5cdcb187f1100f4c079caae83acf2adbf21`：20/20 到达 `RENDER` 和 `COMMIT`，首 `RENDER` p50／p95 为 `5097.5／8287 ms`，HTTP header p50／p95 为 `742.5／3390 ms`，最坏 header 为 `9245 ms`。这撤销此前以 `user_to_surface_commit_ms` 代理首可见 Token 的口径；真实实时 Gate 明确失败。
+
+Host 日志与 SQLite attempt 对齐后确认，最坏一轮 provider 只有一次约 1.3 秒成功 attempt，但上一轮提交后约 7 秒 Host 未开始接收新请求。根因是 `surface.post_process` 虽由 durable projection 触发，诊断 Trace 的 JSON/SQLite 写入和 assistant turn 仍同步执行；Life projection/outbox 的 async dispatcher 也直接调用同步 Repository 和关系 reconciliation。修复将这些提交后工作移入线程，保留 canonical Life intent、lease/fence、exact receipt 和失败重试，不增加普通聊天表、审计内容、模型请求或重试上限。76 项 Life／关系／重启／reconciliation 回归通过，新增的 projection/outbox 事件循环阻塞用例也通过。
+
+第二次预提交 20 回合报告 SHA-256 为 `7500bf59fa8d334aca62170c53c9e9227d3bd09a8e67a5dd9d2cb30e5576c68c`。HTTP header p50／p95 降至 `132／1439.7 ms`，首 `RENDER` p50／p95 降至 `4380／8015.9 ms`；相比原始基线，header 中位数改善约 82%，首句中位数改善约 14%。但首句仍明显超过 `900／1800 ms`，20 回合中 6 回合发生 `SEMANTIC_RETRY_REQUESTED`，最慢回合为 `11832 ms`。结论为 `EVENT_LOOP_BLOCKING_REMEDIATED / REAL_FIRST_RENDER_FAIL`，不能写成实时性能 PASS；后续转向模型路由、首句生成与版本化真实自然文本调优，不继续给日常聊天增加审计或模板。

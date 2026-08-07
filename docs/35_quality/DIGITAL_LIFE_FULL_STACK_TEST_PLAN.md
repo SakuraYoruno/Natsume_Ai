@@ -643,6 +643,8 @@ PlanningSearch 集成夹具必须让不同节点返回可区分、足以验证�
 
 性能计时必须分开记录 provider、TaskGraph、用户轮次提交、Surface delivery 和后台 Life／Expression 完成时间。编译器标记的普通 Chat 以 `conversation.user_turn → surface.reply_delivery` 为唯一同步 Acceptance 前缀；其余持久 effect 必须在 delivery 后立即唤醒恢复 Runtime，不能等固定轮询，也不能丢失。后台 Life、Expression、Memory 与 Preference 的同步存储主体不得占用 ASGI 事件循环；连续输入必须证明下一轮 admission／effect creation 能与上一轮后台 drain 重叠推进。真实报告只有在文本提前完成、连续输入不被上一轮后台链阻塞、后台 effect 最终收敛、Voice receipt 仍存在且重复发送为 0 时，才可关闭该性能断点。
 
+正式首句指标必须直接读取 `/v1/chat` 的 SSE `RENDER` 到达时间；`COMMIT`、Gateway terminal、provider terminal 或内部 `user_to_surface_commit_ms` 均不能冒充首可见文本。连续样本同时记录 HTTP header、首 `PRESENCE`、首 `RENDER` 和 `COMMIT`，但不保存回复正文。2026-08-08 的 20 回合基线首 `RENDER` p50／p95 为 `5097.5／8287 ms`；移除 post-process 与 Life dispatcher 的事件循环同步阻塞后，预提交对照为 `4380／8015.9 ms`，请求头 p50／p95 从 `742.5／3390 ms` 降至 `132／1439.7 ms`。事件循环响应性改善，但首句 Gate 仍为 `FAIL`；6/20 语义重试和真实 provider／首句完成时间必须作为后续模型层问题保留。
+
 2 小时运行期间观察：
 
 - Host／OBS／Edge 内存没有持续无界增长。

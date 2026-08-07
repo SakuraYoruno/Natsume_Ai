@@ -189,7 +189,8 @@ async def _async_post_process(
                 provider_name=provider_name,
                 model_id=model_id,
             )
-            assistant_turn_result = application_ports.record_assistant_turn(
+            assistant_turn_result = await _run_in_post_process_executor(
+                application_ports.record_assistant_turn,
                 request_id=request_id,
                 session_id=session_id,
                 person_id=person_id,

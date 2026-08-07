@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 import inspect
 from typing import Any
@@ -121,7 +122,11 @@ class LifeProjectionDispatcher:
         delivered = 0
         failed = 0
         for _index in range(max_items):
-            messages = self._claim(limit=1, dispatch_at_ms=dispatch_at_ms)
+            messages = await asyncio.to_thread(
+                self._claim,
+                limit=1,
+                dispatch_at_ms=dispatch_at_ms,
+            )
             if not messages:
                 break
             message = messages[0]
@@ -130,7 +135,8 @@ class LifeProjectionDispatcher:
                 int(self._clock()),
                 int(dispatch_at_ms or 0),
             )
-            self.repository.renew_projection_claim(
+            await asyncio.to_thread(
+                self.repository.renew_projection_claim,
                 message,
                 owner_token=self.owner_id,
                 now_ms=renew_at,
@@ -150,16 +156,15 @@ class LifeProjectionDispatcher:
                     renew_claim,
                     lease_ms=self.claim_lease_ms,
                 ):
-                    result = self.handler(message)
-                    if inspect.isawaitable(result):
-                        result = await result
+                    result = await _invoke_handler_async(self.handler, message)
             except LifeLeaseHeartbeatError:
                 raise
             except Exception as exc:
-                self._fail(message, exc)
+                await asyncio.to_thread(self._fail, message, exc)
                 failed += 1
                 continue
-            self.repository.complete_projection(
+            await asyncio.to_thread(
+                self.repository.complete_projection,
                 message,
                 owner_token=self.owner_id,
                 result=dict(result or {}),
@@ -179,22 +184,30 @@ class LifeProjectionDispatcher:
         exact_intent = str(intent_id or "").strip()
         if not exact_intent:
             raise ValueError("intent_id is required")
-        existing = self.repository.get_projection_receipt(exact_intent)
+        existing = await asyncio.to_thread(
+            self.repository.get_projection_receipt,
+            exact_intent,
+        )
         if existing is not None:
             return existing
-        messages = self._claim(
+        messages = await asyncio.to_thread(
+            self._claim,
             limit=1,
             dispatch_at_ms=dispatch_at_ms,
             intent_id=exact_intent,
         )
         if not messages:
-            return self.repository.get_projection_receipt(exact_intent)
+            return await asyncio.to_thread(
+                self.repository.get_projection_receipt,
+                exact_intent,
+            )
         message = messages[0]
         renew_at = max(
             int(self._clock()),
             int(dispatch_at_ms or 0),
         )
-        self.repository.renew_projection_claim(
+        await asyncio.to_thread(
+            self.repository.renew_projection_claim,
             message,
             owner_token=self.owner_id,
             now_ms=renew_at,
@@ -214,15 +227,14 @@ class LifeProjectionDispatcher:
                 renew_claim,
                 lease_ms=self.claim_lease_ms,
             ):
-                result = self.handler(message)
-                if inspect.isawaitable(result):
-                    result = await result
+                result = await _invoke_handler_async(self.handler, message)
         except LifeLeaseHeartbeatError:
             raise
         except Exception as exc:
-            self._fail(message, exc)
+            await asyncio.to_thread(self._fail, message, exc)
             raise
-        return self.repository.complete_projection(
+        return await asyncio.to_thread(
+            self.repository.complete_projection,
             message,
             owner_token=self.owner_id,
             result=dict(result or {}),
@@ -272,6 +284,21 @@ class LifeProjectionDispatcher:
             retry_at_ms=failed_at + retry_delay,
             now_ms=failed_at,
         )
+
+
+async def _invoke_handler_async(
+    handler: ProjectionHandler,
+    message: LifeProjectionMessage,
+) -> Mapping[str, Any] | None:
+    """Run synchronous projection handlers away from the Host event loop."""
+
+    if inspect.iscoroutinefunction(handler):
+        result = handler(message)
+    else:
+        result = await asyncio.to_thread(handler, message)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
 
 __all__ = ["LifeProjectionDispatcher", "ProjectionHandler"]
