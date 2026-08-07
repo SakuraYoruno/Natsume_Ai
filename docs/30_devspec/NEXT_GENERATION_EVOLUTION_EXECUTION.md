@@ -71,6 +71,8 @@ flowchart LR
 
 `43014e45c` 的 mixed 单轨迹自动 1/1，但人工拒绝末轮纯镜像与“先这样待着”的情绪安排；报告 SHA-256 为 `6d12c4744c8bd6dccf79f1955b4c8c3674ba0ad5c1d654d1d2b2e51bce9f957a`。上游 frame 已正确，当前切片只修可见生成边界：typed shared-mixed frame 必须写七海自己的高兴与悬心，纯镜像进入既有一次重试。380 项相关回归通过；提交后只重启本机 Host 并重跑同一 case，不启动或探测远端 Edge，也不扩大到完整 48 条。
 
+`b11de0f11` 的复验报告 SHA-256 为 `e35254a294e5616f6c0da5107f7b0b18c955527575dab5960827437cf9204465`。两个 mixed 深路径均一次真实 Flash 双候选通过，无重试或本地 fallback，三句经当前逐句复核接受；该窄根因关闭。候选结构复用和实时延迟仍是独立缺口，下一步转向更宽代表场景或 Architecture 2.0 非安全验收，不重复挑跑本 case；远端 Edge 继续不启动、不探测。
+
 ## 6. 最终验收
 
 最终验收必须使用：真实 Docker 服务、真实 Host／OBS／Monitor／Gateway 进程、至少一个真实模型 provider，以及在用户允许后启动的目标 Edge。TTS、Avatar、重启、打断、网络恢复和长期多轮必须走真实传输，不得用端口占位、fixture 或 scripted replay 冒充。
