@@ -53,6 +53,8 @@
 - [x] 拆分后的受影响波次回归 306 项通过，pytest 全量收集通过。
 - [x] 在当前运行时代码 SHA 上启动真实 Docker、Host、OBS、Nginx Monitor 与 Gateway；Neo4j／Chroma／Redis 完成隔离写入、容器重启、重读和清理，Monitor 的普通会话与非安全核心页面 E2E 通过。
 - [x] 当前运行时代码 SHA 的 4 类 12 回合真实 Gateway／DeepSeek 数字生命冒烟为 4/4 自动待人工，12 个 turn 全部 accepted，旧情感 writer 增量为 0。
+- [x] 非安全 Monitor read-model 扩展到 45 项并全部通过；当前工作树 LCOV 为 line 93.67%、branch 70.83%、function 83.90%。该切片显式排除 Security 页面和安全 organ model，排除项保持 `NOT_RUN_USER_SKIPPED`，不能表述为完整前端覆盖率。
+- [x] Python Unit 覆盖预检定位并修复 5 个非安全回归：Scheduler 冻结时钟、Gateway 已退役线程断言、OBS 隔离测试的新鲜度耦合，以及缺失 canonical ports 时 Prefrontal 重新获得 Endocrine／Limbic／Pain writer 的历史测试语义。相邻回归 29 项通过，完整 Unit 分片仍需在提交 SHA 上重跑。
 - [ ] 完成剩余非安全故障／回滚、当前 SHA 覆盖率和三人盲评；A09、A12、Pentest 按用户要求不运行。全部强制结论满足前不宣称 Architecture 2.0 完成。
 
 ## P0：真实对话体验

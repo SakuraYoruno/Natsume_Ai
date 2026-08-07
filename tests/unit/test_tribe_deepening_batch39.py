@@ -4,7 +4,7 @@
 1. T-274：PrefrontalAgent.export_runtime_state() 方法存在且返回正确字段
 2. T-275：SocialBrainAgent.export_runtime_state() 方法存在且返回正确字段
 3. T-278：vital_signs 包含 drift_alert_level/bond_repair_needed 字段
-4. T-279：PrefrontalAgent 高漂移时调用 EndocrineAgent.record_stress_event()
+4. T-279：PrefrontalAgent 漂移不得恢复已退役 Endocrine writer
 5. T-280：SocialBrainAgent Bond 修复时调用 LimbicAgent.drive_emotion_metabolism()
 6. T-281：DefaultModeAgent 高连续性时将 ANSAgent._recovery_mode 设为 False
 7. T-282：CortexAgent.collect_tribe_context() 包含 interoception_state
@@ -129,9 +129,9 @@ class TestVitalSignsDriftBondRepair:
 # ── T-279 ────────────────────────────────────────────────────────────────────
 
 class TestPrefrontalDriftEndocrineLink:
-    """T-279：PrefrontalAgent 高漂移时调用 EndocrineAgent.record_stress_event()。"""
+    """T-279：缺少 canonical ports 时也必须 fail-closed。"""
 
-    def test_moderate_drift_calls_endocrine_record_stress(self):
+    def test_moderate_drift_does_not_restore_retired_endocrine_writer(self):
         from host_brain.tribe.prefrontal_agent import PrefrontalAgent
         agent = PrefrontalAgent()
         mock_endocrine = MagicMock()
@@ -139,8 +139,16 @@ class TestPrefrontalDriftEndocrineLink:
         mock_limbic = MagicMock()
         mock_limbic.drive_emotion_metabolism = MagicMock()
 
-        with patch("host_brain.tribe.prefrontal_agent.get_endocrine_agent", return_value=mock_endocrine):
-            with patch("host_brain.tribe.prefrontal_agent.get_limbic_agent", return_value=mock_limbic):
+        with patch(
+            "host_brain.tribe.prefrontal_event_handlers.get_endocrine_agent",
+            return_value=mock_endocrine,
+            create=True,
+        ):
+            with patch(
+                "host_brain.tribe.prefrontal_event_handlers.get_limbic_agent",
+                return_value=mock_limbic,
+                create=True,
+            ):
                 # 模拟 run_growth_feedback_cycle 返回 MODERATE 漂移
                 with patch("host_brain.tribe.prefrontal_agent.PrefrontalAgent.run_growth_feedback_cycle", return_value={
                     "drift_alert_level": "MODERATE",
@@ -157,10 +165,8 @@ class TestPrefrontalDriftEndocrineLink:
                         }))
                     )
 
-        assert mock_endocrine.record_stress_event.called, \
-            "MODERATE 漂移时应调用 EndocrineAgent.record_stress_event()"
-        call_kwargs = mock_endocrine.record_stress_event.call_args.kwargs
-        assert "persona_drift" in str(call_kwargs.get("source") or "")
+        mock_endocrine.record_stress_event.assert_not_called()
+        mock_limbic.drive_emotion_metabolism.assert_not_called()
 
 
 # ── T-280 ────────────────────────────────────────────────────────────────────

@@ -643,6 +643,7 @@ def build_governed_scheduler_runtime(
     runtime_context_application: Any | None = None,
     action_preview_service: Any | None = None,
     acceptance_effect_dispatcher: Any | None = None,
+    clock: Callable[[], int] | None = None,
 ) -> GovernedSchedulerRuntime:
     definitions = definition_repository or getattr(
         task_runtime_container,
@@ -673,10 +674,12 @@ def build_governed_scheduler_runtime(
         ledger=ledger,
         token_service=token_service,
         review_store=continuation_store,
+        clock=clock,
     )
     node_grant_verifier = DurableNodeGrantVerifier(
         ledger=ledger,
         review_store=continuation_store,
+        clock=clock,
     )
     projection_store = getattr(
         task_runtime_container,

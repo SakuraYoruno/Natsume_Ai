@@ -825,3 +825,5 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 本轮若用户明确跳过网络安全，真实 Monitor Core Release 用例必须设置 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0`。测试仍须覆盖生产 Nginx、普通 operator session、Host／OBS health、Task Runtime、Trace SSE、Observability 与 Gateway；`/obs/security/*`、Security Immune 页面、A09、A12 与 Pentest 必须逐项记录 `NOT_RUN_USER_SKIPPED`，不得从分母中静默删除或写成 PASS。默认不设置该变量时，完整用例仍包含安全投影。
 
 结构拆分后的最小回归固定为两组：`test_dl02_affect_fusion.py + test_dl02_affect_fusion_restart.py` 验证观察抽取没有改变 TTL、冲突、CAS 与重启语义；`test_surface_runtime.py + test_aw08_surface_runtime_ports.py` 验证候选规则抽取没有改变生成和端口合同。当前工作树分别为 52/52、162/162。该证据只证明等价拆分与 Gate 3，不改变完整 48 条人感失败结论。
+
+覆盖率预检还必须验证“兼容模块不会复活第二套 self-affect writer”。Prefrontal 即使缺失 app-local `TribeApplicationPorts` 也要 fail-closed；drift 事件不得调用 Endocrine、Limbic 或 PainReward 写路径。当前目标回归已覆盖 moderate／severe drift 和无 drift，29 项 Scheduler／Gateway／OBS／Prefrontal 相邻测试通过；完整 Unit 分片仍须在候选提交上重跑。该工程封口不能替代 48 条人感和三人盲评。

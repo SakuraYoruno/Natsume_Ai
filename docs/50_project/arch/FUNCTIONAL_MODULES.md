@@ -108,3 +108,7 @@ Monitor 的 Closed Loop、Reply Outbox、Terminal 三组指标分别展示上述
 兼容入口仍从原模块重导出必要符号，以保持调用合同；新实现边界本身才是职责 owner。后续修改应直接进入对应模块，禁止把逻辑重新堆回 facade。
 
 Monitor 的生产 E2E 现在可以按验收范围拆开执行：默认仍包含全部页面；显式设置 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0` 时，只验证 Host／OBS 健康、Task Runtime、Trace、Observability、Gateway 与真实 read model，不请求 Security Immune 投影。该模式用于本次用户要求的非安全验收，不能把未执行的安全页面写成 PASS。
+
+非安全 Monitor read-model 当前由 45 项 Node 测试覆盖 System Config、Organ System、HTTP Client、Token Metrics、Observability handoff 与 Runtime Health，line／branch／function 为 93.67%／70.83%／83.90%。上述数字的分母明确不含 Security 页面和安全 organ model；完整 npm 默认测试入口仍保留安全模块，未运行项继续记为 `NOT_RUN_USER_SKIPPED`。
+
+Tribe／Prefrontal 的兼容事件处理不再拥有自我情感 authority。即使 app-local `TribeApplicationPorts` 缺失或类型错误，Prefrontal 也必须按 canonical affective life 启用处理，禁止重新调用 Endocrine、Limbic、PainReward 或 volatile Bond writer；这些模块若保留，只能作为只读兼容投影。

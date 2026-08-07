@@ -298,6 +298,17 @@ def test_seven_gets_keep_two_obs_apps_and_sqlite_databases_distinct(
     )
 
     now_ms = int(time.time() * 1000)
+    # This test proves app-local store isolation, not the 30-second Life
+    # freshness policy. Coverage instrumentation can make the fourteen real
+    # HTTP reads exceed that production window, so keep this observation
+    # window deterministic without changing the production default.
+    from host_brain.app.observability_runtime import domain_state_projection
+
+    monkeypatch.setattr(
+        domain_state_projection,
+        "LIFE_MAX_AGE_MS",
+        60 * 60_000,
+    )
     ports_one = _seed_ports(tmp_path / "one.sqlite3", label="one", now_ms=now_ms)
     ports_two = _seed_ports(tmp_path / "two.sqlite3", label="two", now_ms=now_ms)
     assert ports_one.query_projection_store.db_path != ports_two.query_projection_store.db_path

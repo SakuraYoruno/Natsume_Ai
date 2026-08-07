@@ -45,6 +45,7 @@ flowchart LR
 | Python line coverage | 72.22%（199504/276262） | Unit／Contract／Integration／Security／本地 E2E 离线稳定基线；低于 75% Gate，真实服务仍待补测 |
 | Python branch coverage | 55.08%（49976/90738） | 同一去重数据集的 branch baseline；低于 65% Gate |
 | Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
+| Monitor 非安全当前工作树 line／branch／function | 93.67%／70.83%／83.90% | 45 项通过；显式排除 Security 页面与安全 organ model，只证明非安全 read-model 达到 80%／70% 门槛，安全范围为 `NOT_RUN_USER_SKIPPED` |
 | Unit 分片预检 | `02a24e4b8` 上 18/18 JUnit：8310 passed／8 skipped／0 failed／0 errors | 930 个 Unit 文件均进入固定分片；记 `PASS_WITH_8_CLASSIFIED_SKIPS`，不代表 Contract／Integration／E2E 或覆盖率通过 |
 | Contract 分片预检 | `4724af2f9` 上 4/4 JUnit：1949 passed／0 skipped／failed／errors | 当前稳定 Contract 全绿；不代表真实服务、覆盖率或体验验收 |
 | Integration 稳定预检 | `15cebc540` 六片首跑 849 passed／3 failed／4 skipped；`8fbb6a833` 只修复两项时间夹具后重跑受影响 shard-0／2 为 302 passed | 合并未变化四片后为 852 passed／4 classified skips／0 failed／error，记 `PASS_WITH_4_CLASSIFIED_SKIPS`；不包含真实 Docker／Redis、E2E、Security、覆盖率或体验验收 |
@@ -54,6 +55,8 @@ flowchart LR
 > 11573 条离线 JUnit 的去重 coverage 为 line 72.22%、branch 55.08%；真实 Docker、Provider、远端 Edge／硬件和 runtime probe 尚未加入，而且当前结果低于 75%/65% 放行门槛。
 
 测试数、历史 PASS、静态类和 fixture 均不得推导出覆盖率百分比。
+
+2026-08-07 的当前非安全 Unit 覆盖预检在约 4800 个已执行测试后暴露 5 个过时或非确定性断言：Scheduler 子授权时钟早于冻结父授权、Gateway 仍期待已拆分的旧 delivery thread、OBS app-local 隔离受 30 秒 Life freshness 干扰，以及两组 Prefrontal 测试仍要求恢复已退役的 Endocrine／Limbic／Pain writer。修复后的 29 项相邻回归通过；失败预检 coverage 数据不得合并为发布收据，完整 Unit／Contract／Integration／本地 E2E 必须从新提交重新采集。
 
 ### 1.2 功能和验收覆盖
 

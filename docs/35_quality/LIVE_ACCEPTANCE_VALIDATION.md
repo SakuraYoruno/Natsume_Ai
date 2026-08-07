@@ -730,3 +730,11 @@ Research/Code PlanningSearch 的当前工作树非 Pentest 机械回归为 128 p
 同一运行时代码 SHA 又执行低落、生气后的修复、喜忧并存和亲密边界四类真实 Gateway cohort，共 12 个 accepted turn。四类均为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；DeepSeek `deepseek-v4-flash` 形成 12 条 succeeded 和 3 条 rejected attempt 记录，最终 12 个 turn 均完成，rejected 记录未被计作成功。Gateway→Host terminal 中位数 6,718 ms，TaskGraph 中位数 4,498 ms，provider terminal 中位数 2,304.5 ms；仍显著高于实时目标。canonical affect／relationship／Life／turn delivery writer 分别前进 33／18／75／12 行，所有 legacy emotion table 与旧文件变化为 0。报告 SHA-256 为 `c466a0b385dc535071c27963eac5bcbe6e652f397abb44fd2ed3fb5ea466cd42`。
 
 这四类冒烟证明结构拆分没有破坏真实主链，不覆盖 `f378fa80d` 完整 48 条的 38/48 自动结果、人感人工失败和 p95 10,044 ms，也不能替代三人盲评。当前总体仍为 `INCOMPLETE`；网络安全、Pentest、A09、A12 均未运行，覆盖率门槛和剩余非安全回滚／性能项继续待收口。
+
+## 2026-08-07 A15 非安全覆盖预检与旧情感写入封口
+
+Monitor read-model 新增 System Config、Organ System、HTTP Client、Token Metrics、Observability handoff 与 Runtime Health 的真实分支测试；显式不加载 Security 页面和安全 organ model 的 45 项全部通过，当前工作树 LCOV 为 line 93.67%、branch 70.83%、function 83.90%。该结果只说明非安全 Monitor 切片达到 80%／70% 门槛；默认 npm 脚本仍保留 Security 测试，安全范围本轮没有执行，也没有从全产品合同中删除。
+
+Python Unit 非安全覆盖首次分成六片运行，约 4800 项执行后有五片分别在一个问题处停止，另一片 1420 passed、1 项 Windows symlink 权限分类跳过。五个问题分别为：测试冻结父授权却让 Scheduler 子授权读取真实墙钟；Gateway 断言已拆为 inbox／outbox 的旧 delivery thread；OBS 两实例隔离测试在 coverage 插桩下超过 30 秒 freshness；两组历史 Prefrontal 测试仍期望 drift 恢复已由 canonical Digital Life 取代的 Endocrine／Limbic／Pain writer。
+
+修复保持生产默认不变：Scheduler factory 只增加可注入 clock；OBS 只在隔离测试内冻结 freshness；Gateway 测试改验真实 inbox／outbox；Prefrontal 在组合端口缺失或类型错误时 fail-closed，禁止裸实例重新拥有旧情感 writer。29 项相邻回归全部通过。首次失败运行的数据不作为覆盖率证据；完整非安全 Unit 分片将在提交 SHA 上从零重跑。A09、A12、Pentest 与网络安全继续为 `NOT_RUN_USER_SKIPPED`，A15 总体仍为 `INCOMPLETE`。

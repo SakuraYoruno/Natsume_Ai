@@ -394,6 +394,10 @@ async def test_scheduler_occurrence_uses_frozen_definition_real_handler_and_repl
             runtime_context_application=runtime_context,
             action_preview_service=preview_authority,
             acceptance_effect_dispatcher=dispatcher,
+            # The test admits several parent decisions at NOW..NOW+6s. Keep
+            # the child-grant clock after every parent issuance while still
+            # remaining inside every frozen expiry window.
+            clock=lambda: NOW + 10_000,
         )
         await runtime.activate()
         engine = _IntentEngine(ledger, token_service)

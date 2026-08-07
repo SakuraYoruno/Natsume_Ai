@@ -137,3 +137,5 @@ flowchart LR
 - `affect_fusion.py` 负责 Appraisal 候选和 canonical Life command，不再包含观察解析实现。
 - `surface_candidate_guards.py` 与 `surface_deictic.py` 都是无持久化、无模型、无交付 authority 的纯规则模块。
 - `surface_runtime.py` 保留生成、候选择优和降级编排；既定 3100 行上限没有放宽。
+
+Prefrontal／Tribe 兼容层不再以端口缺失作为恢复旧情感 writer 的开关。`TribeApplicationPorts` 缺失或畸形时必须 fail-closed，禁止调用 Endocrine、Limbic、PainReward 或 volatile Bond writer；canonical Digital Life journal 保持 self-affect 唯一写 authority。

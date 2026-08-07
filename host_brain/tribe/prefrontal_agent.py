@@ -69,13 +69,17 @@ class PrefrontalAgent(PrefrontalEventHandlersMixin):
         return self.descriptor.to_dict()
 
     def _uses_canonical_affective_life(self) -> bool:
-        """Whether this app-local agent must reject legacy affect/Bond paths."""
+        """Whether this agent must reject legacy affect/Bond paths.
+
+        Missing or malformed composition is fail-closed. A bare agent must
+        never silently regain the retired Limbic, Endocrine, Pain or Bond
+        writer graph merely because its canonical ports were not injected.
+        """
 
         ports = self.application_ports
-        return bool(
-            isinstance(ports, TribeApplicationPorts)
-            and ports.uses_canonical_affective_life()
-        )
+        if not isinstance(ports, TribeApplicationPorts):
+            return True
+        return bool(ports.uses_canonical_affective_life())
 
     def uses_canonical_affective_life(self) -> bool:
         """Expose the composition boundary without exposing mutable ports.

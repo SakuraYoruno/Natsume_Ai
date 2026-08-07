@@ -168,6 +168,8 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 
 当前非安全 A15 已把真实 Docker、Host、OBS、Nginx Monitor 与 Gateway 绑定到同一隔离数据根。Neo4j／Chroma／Redis 的写入、容器重启、重读与清理通过；Monitor 从真实 OBS 投影读取 TaskGraph、预算、验证、Gateway 和 Life Body，并允许用 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0` 单独执行非安全生产 E2E。这个开关只裁剪测试范围，不改变生产路由或安全默认值；A09、A12 和 Pentest 仍明确为 `NOT_RUN_USER_SKIPPED`。
 
+当前非安全 Monitor read-model 测试已覆盖 System Config、Organ System、HTTP Client、Token Metrics、Observability handoff 和 Runtime Health，共 45 项；工作树 LCOV 为 line 93.67%、branch 70.83%、function 83.90%。Security 页面和安全 organ model 没有进入本轮分母，故这只是非安全前端覆盖收据，不是全 Monitor PASS。Python Unit 覆盖预检同时把 Prefrontal 的缺失组合端口改为 fail-closed：canonical ports 不存在时也不能恢复 Endocrine／Limbic／Pain 等旧情感写图，Digital Life journal 继续是七海 self-affect 的唯一写 authority。
+
 ## 12. PlanningSearch Research 的双臂身份
 
 Research 的可验收单位不是一个共享 profile prompt，而是两个预注册 arm。baseline 和 selected 可以共享 provider、model、budget 与冻结 corpus，却必须分别绑定自己的 candidate path、source set、graph/path digest 和渲染后的 prompt digest。外部模型 receipt 只有与对应 arm 的 durable prompt identity 精确一致时才可进入配对终态；调用者临时提交的摘要不具 authority。

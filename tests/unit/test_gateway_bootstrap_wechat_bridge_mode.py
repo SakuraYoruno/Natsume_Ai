@@ -311,7 +311,9 @@ def test_durable_intake_kill_switch_keeps_worker_without_legacy_drain(monkeypatc
     instance = _start_gateway(GatewayConfig(enabled_platforms=()))
 
     names = [thread.name for thread in _FakeThread.created if thread.started]
-    assert "gateway-durable-delivery" in names
+    assert "gateway-durable-inbox" in names
+    assert "gateway-durable-outbox" in names
+    assert "gateway-durable-delivery" not in names
     assert "gateway-server" in names
     assert instance.delivery_runtime.delivery_enabled is True
     assert instance.delivery_runtime.intake_enabled is False
@@ -400,7 +402,8 @@ def test_startup_activation_failure_cleans_started_components(monkeypatch) -> No
         _start_gateway(GatewayConfig(enabled_platforms=()))
 
     assert not any(
-        thread.name == "gateway-durable-delivery"
+        thread.name in {"gateway-durable-inbox", "gateway-durable-outbox"}
+        and thread.is_alive()
         for thread in _FakeThread.created
     )
     assert _ExplodingServer.instances[-1].stopped is True
@@ -506,11 +509,13 @@ def test_telegram_listener_commits_to_0059_without_legacy_reporter(monkeypatch) 
             return True
 
         async def start_listening(self, callback) -> None:  # noqa: ANN001
-            worker = next(
-                thread for thread in _FakeThread.created
-                if thread.name == "gateway-durable-delivery"
-            )
-            assert worker.started is True
+            workers = {
+                thread.name: thread
+                for thread in _FakeThread.created
+                if thread.name in {"gateway-durable-inbox", "gateway-durable-outbox"}
+            }
+            assert set(workers) == {"gateway-durable-inbox", "gateway-durable-outbox"}
+            assert all(worker.started for worker in workers.values())
             self.listen_loop = asyncio.get_running_loop()
             self.listening = True
             callback(_FakeMessage())
