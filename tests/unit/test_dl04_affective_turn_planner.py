@@ -572,6 +572,8 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         retry_reason="RELATIONAL_AUTONOMY_PRESSURE",
     )
     assert "不要求早点回来、控制饮酒" in autonomy_retry_messages[-1]["content"]
+    assert "去吧，玩得开心" in autonomy_retry_messages[-1]["content"]
+    assert "回来告诉我" in autonomy_retry_messages[-1]["content"]
     autonomy_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,

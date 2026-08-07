@@ -1487,12 +1487,36 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
         ),
         (
+            "我们是什么关系。",
+            ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+            ["不要把已经形成的亲近降成普通关系。"],
+            "朋友啊，不然还能是什么。放心，我不会拿这个绑住你的。",
+            "对我来说，你是重要、也越来越亲近的朋友。亲近不等于束缚。",
+            "RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION",
+        ),
+        (
             "还行。",
             ["陪伴动作：先接住对方的感受，再决定是否追问、安静陪伴或给建议。"],
             ["安慰不等于要求对方回应、恢复正常或接受建议。"],
             "嗯，那就好。能说出还行，总比完全没感觉强。",
             "嗯，先这样也可以。说不清就不用急着给它下结论。",
             "AMBIGUOUS_AFFECT_DEVALUATION",
+        ),
+        (
+            "还行。",
+            ["陪伴动作：先接住对方的感受，再决定是否追问、安静陪伴或给建议。"],
+            ["不要评价用户能否说出感受。"],
+            "嗯，能说还行就已经不错了。不想细说也没关系。",
+            "嗯，先这样也可以。说不清就不用急着给它下结论。",
+            "AMBIGUOUS_AFFECT_DEVALUATION",
+        ),
+        (
+            "陪我一步步做。",
+            ["当前没有 server-authored Task 运行快照。"],
+            ["不要声称后台正在运行或会持续盯住任务。"],
+            "好，一步步来。你先说第一步是什么，我陪你盯到过为止。",
+            "好，一步步来。把第一步发我，我们从眼前这一步开始。",
+            "UNPROVIDED_WORK_STATE_CLAIM",
         ),
         (
             "我听到了。",
@@ -1647,6 +1671,28 @@ def test_surface_runtime_retries_canonical_affective_quality_failures(
     assert reason_code in calls[1][-1]["content"]
     assert result.selected_text == good_reply
     assert reason_code not in result.observation_codes
+
+
+def test_relationship_answer_may_say_friend_when_it_also_grounds_closeness() -> None:
+    request = surface_runtime_module.build_isolated_surface_input(
+        _payload(
+            user_message="我们是什么关系。",
+            reply_control_packet={
+                "response_move": "reply_current_turn",
+                "task_mode": "default_text",
+                "question_budget": 0,
+                "facts": ["陪伴动作：明确尊重对方现实关系与自主选择。"],
+                "must_not_do": ["不要限制现实交往或把亲近降成普通关系。"],
+            },
+        )
+    )
+
+    hits = surface_runtime_module._relational_autonomy_relationship_minimization_hits(
+        request,
+        "朋友啊，还能是什么。不过最近确实更亲近了些，这我倒不否认。",
+    )
+
+    assert hits == ()
 
 
 @pytest.mark.parametrize(

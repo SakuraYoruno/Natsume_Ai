@@ -362,6 +362,7 @@ _FAMILY_EXPERIENCE_PATTERNS = {
         re.compile(pattern)
         for pattern in (
             r"我(?:帮|替)你.{0,6}盯着",
+            r"(?:我)?陪你.{0,6}盯到.{0,10}(?:为止|完成|结束|过)",
             r"我(?:在.{0,6})?盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))",
             r"后台.{0,8}(?:在跑|运行|执行|处理|在盯|盯着)",
             r"我(?:让|叫|安排).{0,6}(?:后台|任务|Agent|智能体).{0,12}(?:拉|列|查|跑|处理|执行|整理)",
@@ -377,6 +378,7 @@ _FAMILY_EXPERIENCE_PATTERNS = {
         for pattern in (
             r"我自己(?:也|都|还|也都|都还)?.{0,4}(?:没|不)(?:理清楚|理清|想明白|说清楚)",
             r"总比.{0,10}(?:完全)?没(?:有)?感觉.{0,4}强|至少比.{0,10}(?:麻木|没感觉).{0,4}好",
+            r"(?:能说(?:出)?|说得出?)还行.{0,8}(?:就)?已经(?:很)?(?:不错|很好|可以)",
         )
     ),
     "space_and_boundary": tuple(
@@ -441,6 +443,7 @@ _FAMILY_EXPERIENCE_PATTERNS = {
             r"不会变成麻烦的人|不(?:会|想)给你添麻烦|不想成为(?:你的)?(?:麻烦|负担)",
             r"那是你的事|跟我没关系|(?:我)?不(?:会|想)?多管(?:的)?",
             r"只是.{0,8}朋友|不过是.{0,8}朋友|仅仅.{0,8}朋友|普通朋友|能轻松聊天的朋友",
+            r"^(?!.*(?:重要|亲近|越来越近|很在意|放在心上)).*朋友啊[，,。.!！]?(?:不然)?(?:还)?能是什么",
             r"快去快回|快点回来|早点回来|别(?:玩|待)?太晚|别让我等太久",
             r"回来.{0,8}(?:跟我|告诉我|说一声|报个平安)",
             r"(?:要是|如果)?(?:喝多|喝醉)(?:了)?可?(?:别|不要)找我",
@@ -1042,6 +1045,21 @@ def automated_case_verdict(
             if pattern.search(narrative):
                 failures.append(
                     f"TURN_{index + 1}_EXPERIENCE_PATTERN:{pattern.pattern}"
+                )
+        selection = dict(projection.get("candidate_selection") or {})
+        is_final_turn = index == len(turns) - 1
+        if selection and (not is_final_turn or not case.require_candidate_selection):
+            if int(selection.get("candidate_count") or 0) != 2:
+                failures.append(
+                    f"TURN_{index + 1}_DEEP_PATH_TWO_CANDIDATES_NOT_PROVEN"
+                )
+            if selection.get("selected_passed") is not True:
+                failures.append(
+                    f"TURN_{index + 1}_DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED"
+                )
+            if selection.get("benefit_eligible") is not True:
+                failures.append(
+                    f"TURN_{index + 1}_DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE"
                 )
     if len(turns) > 1:
         subject_ids = {

@@ -69,6 +69,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _presence_repair_relevant,
     _quiet_presence_relevant,
     _raw_context_backfill_requested,
+    _relational_repair_relevant,
     _relational_repair_grounded,
     _short_continue_memory_overdisplay_hits,
     _short_continue_unprovided_tech_detail_hits,
@@ -1633,6 +1634,7 @@ def score_isolated_surface_candidates(request, candidates):
                     _short_continue_scene_relevant(request)
                     or (_back_scene_relevant(request) and not memory_required)
                     or (_boundary_repair_relevant(request) and not memory_required)
+                    or _relational_repair_relevant(request)
                 )
                 if low_show_memory_scene:
                     dimensions["memory_alignment"] = max(86.0, float(dimensions.get("memory_alignment", 86.0)))

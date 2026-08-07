@@ -540,3 +540,15 @@ python -m pytest -q `
 ```
 
 当前结果为 443 passed。真实复验顺序固定为 `user_angry_at_natsume:1`、`user_angry_at_natsume:6`、`ambiguous_affect:2`、`shared_joy_and_mixed_feeling:4`、`intimacy_and_jealousy_boundary:3`、`intimacy_and_jealousy_boundary:5`；六条自动与逐句检查均通过后才允许使用另一份全新 SQLite 重跑完整 48 条。Pentest、渗透与网络安全目录不运行，统一记为 `NOT_RUN_USER_SKIPPED`。
+
+`6f6140db1` 的六条报告 SHA-256 为 `0eb658029df474e5c8debaed3a7cf12efe4677cd3a8ae30d63e51c48b5bf13f4`，自动与当前逐句检查均为 6/6。随后完整 48 条报告 SHA-256 为 `155d2d84b0ba0493eea24da5037bdf3ae171ba128830dc5f7d2a25d20bcc2920`；旧 runner 输出 47/48，但每轮重开 `candidate_selection` 后确认两条关系修复首轮 `selected_passed=false`、一条 mixed 中间轮和一条现实自主末轮 `benefit_eligible=false`，纠偏结果应为 44/48。测试器必须检查所有非空 selection，而不只是末轮；fast-path 的空 selection 不得误判为失败。
+
+人工回归必须额外覆盖：
+
+- “能说还行就已经不错了”属于对含混感受的居高临下评价，应触发语义修复；
+- 没有 accepted Task 事实时，“陪你盯到过为止”属于虚构持续执行；
+- “朋友啊，不然还能是什么”在未承认重要／亲近时属于关系降格；同句后明确“最近确实更亲近”应保持合法；
+- 用户以“上次没听懂”提出修复时，合格回复可只承担具体失误，不得为了命中 memory term 编造旧内容；
+- 任一中间深路径若少于两个候选、selected 未过线或依赖本地降级，整个场景自动判失败。
+
+当前非安全回归命令仍为上面的五个文件，结果更新为 453 passed。下一次真实定向队列固定为 `user_angry_at_natsume:3`、`user_angry_at_natsume:5`、`shared_joy_and_mixed_feeling:3`、`intimacy_and_jealousy_boundary:1`、`ambiguous_affect:2`、`task_with_low_mood:6`、`intimacy_and_jealousy_boundary:5`；其中两条关系修复共用首轮根因，但都保留以证明关系状态差异不会改变评分。逐轮证据和人工正文全部通过后，才允许重跑完整 48 条。网络安全与 Pentest 继续为 `NOT_RUN_USER_SKIPPED`。

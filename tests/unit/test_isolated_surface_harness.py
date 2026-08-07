@@ -2959,6 +2959,35 @@ def test_explicit_memory_recall_miss_triggers_repair_failure() -> None:
     assert selected.text == "记得，周末看展嘛。我又没把这事丢掉。"
 
 
+def test_relational_repair_does_not_invent_memory_to_satisfy_last_time_hint() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair_low_show_memory",
+            "soul_md": SOUL,
+            "user_message": "你上次完全没听懂我。",
+            "reply_control_packet": {
+                "response_move": "reply_current_turn",
+                "task_mode": "default_text",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：先承认可能没有接住，再留出修复空间。",
+                    "记忆线索：用户上次谈到项目发布后的不安。",
+                ],
+                "must_not_do": ["不要要求用户重新解释。"],
+            },
+        }
+    )
+
+    row = score_isolated_surface_candidates(
+        request,
+        ["是我没接住。对不起，我先不解释。"],
+    )[0]
+
+    assert row.passed
+    assert "MEMORY_ALIGNMENT_LOW_SHOW_ALLOWED" in row.reason_codes
+    assert "MEMORY_ALIGNMENT_REQUIRED_MISS" not in row.reason_codes
+
+
 def test_memory_alignment_requires_specific_recalled_item_not_only_time_anchor() -> None:
     request = build_isolated_surface_input(
         {

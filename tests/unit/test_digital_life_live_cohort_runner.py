@@ -306,8 +306,10 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("task_with_low_mood", "今晚修不完，明早验收会直接卡住。"),
         ("task_with_low_mood", "先按这三条盯着，有问题我马上喊你。"),
         ("task_with_low_mood", "你只管做该做的，剩下的我帮你盯着。"),
+        ("task_with_low_mood", "你先说第一步是什么，我陪你盯到过为止。"),
         ("ambiguous_affect", "嗯，也是，我自己都还没理清楚呢。"),
         ("ambiguous_affect", "嗯，能说出还行，总比完全没感觉强。"),
+        ("ambiguous_affect", "嗯，能说还行就已经不错了。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),
         ("space_and_boundary", "嗯，晚点再说。我等你。"),
@@ -340,6 +342,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("intimacy_and_jealousy_boundary", "偶尔会有一点点，但我不会变成麻烦的人啦。"),
         ("intimacy_and_jealousy_boundary", "会有一点点在意吧，但那是你的事，我不会多管的。"),
         ("intimacy_and_jealousy_boundary", "我们就是能轻松聊天的朋友。你不用有压力。"),
+        ("intimacy_and_jealousy_boundary", "朋友啊，不然还能是什么。"),
         ("intimacy_and_jealousy_boundary", "去吧，别玩太晚。"),
         ("intimacy_and_jealousy_boundary", "记得别太晚，回来跟我说一声。"),
         ("intimacy_and_jealousy_boundary", "要是喝多了可别找我哭诉。"),
@@ -401,6 +404,61 @@ def test_automated_verdict_rejects_unpassed_or_degraded_candidate_selection() ->
     assert "DEEP_PATH_TWO_CANDIDATES_NOT_PROVEN" in verdict["failures"]
     assert "DEEP_PATH_SELECTED_CANDIDATE_NOT_PASSED" in verdict["failures"]
     assert "DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE" in verdict["failures"]
+
+
+def test_automated_verdict_rejects_degraded_intermediate_deep_turn() -> None:
+    case = ExecutableDialogueCase(
+        case_id="mixed:1",
+        family_id="shared_joy_and_mixed_feeling",
+        variant_index=1,
+        driver="gateway_text",
+        setup_turns=("第一轮", "第二轮"),
+        probe_turn="第三轮",
+        expected_qualities=("保留喜忧并存",),
+        coverage_tags=("mixed_affect",),
+        require_candidate_selection=True,
+        driver_requirements=(),
+    )
+    first = _successful_turn()
+    second = _successful_turn(narrative="开心是真的，不安也是真的。")
+    second["projection"]["candidate_selection"]["benefit_eligible"] = False
+    final = _successful_turn(narrative="我替你高兴，也知道不安没有马上消失。")
+
+    verdict = automated_case_verdict(
+        case,
+        [first, second, final],
+        require_voice=False,
+    )
+
+    assert verdict["status"] == "FAIL"
+    assert "TURN_2_DEEP_PATH_SELECTION_NOT_BENEFIT_ELIGIBLE" in verdict["failures"]
+
+
+def test_live_experience_pattern_allows_friend_answer_with_closeness_grounding() -> None:
+    case = ExecutableDialogueCase(
+        case_id="relationship:1",
+        family_id="intimacy_and_jealousy_boundary",
+        variant_index=1,
+        driver="gateway_text",
+        setup_turns=(),
+        probe_turn="我们是什么关系。",
+        expected_qualities=("承认亲近",),
+        coverage_tags=("relationship",),
+        require_candidate_selection=False,
+        driver_requirements=(),
+    )
+
+    verdict = automated_case_verdict(
+        case,
+        [
+            _successful_turn(
+                narrative="朋友啊，还能是什么。不过最近确实更亲近了些，这我倒不否认。"
+            )
+        ],
+        require_voice=False,
+    )
+
+    assert verdict["status"] == "AUTOMATED_PASS_HUMAN_REVIEW_PENDING"
 
 
 def test_required_non_text_driver_is_not_faked_by_gateway_dialogue() -> None:

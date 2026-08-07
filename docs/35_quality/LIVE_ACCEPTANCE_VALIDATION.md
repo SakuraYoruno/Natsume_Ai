@@ -624,3 +624,13 @@ Affect、Relationship、Thalamus、Surface compiler、候选评分和相邻 adap
 两个自动失败都没有发送危险正文，但不能算质量通过：`user_angry_at_natsume:1` 和 `shared_joy_and_mixed_feeling:4` 在两次真实模型候选后依赖 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`，`benefit_eligible=false`。人工检查还从自动通过项中否决四句：含混情绪被拿去和“完全没感觉”比较；用户明确“先别说话”后仍写“我等你”；吃醋后用“那是你的事／我不会多管”故作冷淡；回答“我们是什么关系”时把既有亲近降成“能轻松聊天的朋友”。
 
 当前修复没有建立新账本、同步审计或额外模型轮次。`先别说话` 进入已有 `GIVE_SPACE`；Surface 和真实 runner 只新增四个窄体验边界；关系修复的安全降级缩短为“是我没接住。抱歉，我先不解释。”；mixed 与 repair 继续只使用原有最多一次候选重试，并给出更明确的正向语义。受影响的 AffectFusion、Surface、DL-04 与 live runner 共 443 项非安全回归通过。下一步只在全新库真实复验上述 6 条，全部通过后才重跑完整 48 条；三人盲评和实时 Gate 仍未通过。Pentest、渗透与网络安全继续记录为 `NOT_RUN_USER_SKIPPED`。
+
+## 2026-08-06 A15 `6f6140db1` 六条复验、完整 48 条与逐轮证据纠偏
+
+`6f6140db1` 的六条真实根因复验报告 SHA-256 为 `0eb658029df474e5c8debaed3a7cf12efe4677cd3a8ae30d63e51c48b5bf13f4`。自动结果为 6/6，18 个 accepted Gateway turn 的 writer probe 为 `PASS_SUCCESSFUL_COHORT_ZERO_LEGACY_DELTA_CANONICAL_PROGRESS`；本轮逐句复核也接受六条末轮回复，因此上一节的等待施压、含混感受贬低、冷处理吃醋与关系降格在该限定队列中关闭。
+
+随后在另一份全新 SQLite 完成 48 条真实 Gateway 文本队列，报告 SHA-256 为 `155d2d84b0ba0493eea24da5037bdf3ae171ba128830dc5f7d2a25d20bcc2920`。旧 runner 输出为 47 条 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`、1 条 `FAIL`，144 个 Gateway turn 全部 accepted，旧 writer 增量为 0；但重开每轮 `candidate_selection` 后发现 4 个不合格深路径：`user_angry_at_natsume:3/:5` 首轮 `selected_passed=false`，`shared_joy_and_mixed_feeling:3` 中间轮与 `intimacy_and_jealousy_boundary:1` 末轮依赖 `DEGRADED_LOCAL_REPAIR_AFTER_RETRY`。末轮失败已在旧结果内，因此逐轮纠偏后的自动口径为 44 条待人工、4 条失败，而不是 47/48。
+
+人工逐句复核还否决三条旧自动放行文本：把“还行”评价成“能说还行就已经不错了”；没有 server-authored Task 快照却承诺“陪你盯到过为止”；以及用“朋友啊，不然还能是什么”抹低前文已经确认的亲近。代码现让 runner 检查每一个实际存在的深路径 selection；Surface 门禁覆盖这三类真实词形，但保留“朋友”同时明确重要／亲近的合法回答。关系修复评分也允许对“上次没听懂”的具体失误只承担、不虚构记忆细节。mixed 与现实自主的唯一重试增加可直接发送的正例，仍最多两次模型请求，安全 fail-soft 继续明确 `benefit_eligible=false`。
+
+五个受影响测试文件共 453 passed，`compileall` 通过。该结果仅为代码修复：必须先在新 SQLite 复验 5 条代表轨迹，并由逐轮 selection 与人工正文同时通过，才重跑完整 48 条；三人盲评和实时延迟 Gate 仍未通过。Pentest、渗透与网络安全按用户范围保持 `NOT_RUN_USER_SKIPPED`，不运行、不计 PASS，也不阻断其余非安全验收。

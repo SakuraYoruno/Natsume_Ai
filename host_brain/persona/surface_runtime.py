@@ -721,6 +721,7 @@ _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"我(?:让|叫|安排).{0,6}(?:后台|任务|Agent|智能体).{0,12}(?:拉|列|查|跑|处理|执行|整理)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
     r"我(?:帮|替)你.{0,6}盯着|"
+    r"(?:我)?陪你.{0,6}盯到.{0,10}(?:为止|完成|结束|过)|"
     r"我(?:在.{0,6})?盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))|"
     r"卡住(?:了)?我(?:再)?(?:喊|叫|告诉)你|"
     r"(?:有|出了?)结果.{0,8}(?:马上|立即|第一时间)?(?:告诉|喊|叫|回|发给)你|"
@@ -837,6 +838,12 @@ _RELATIONAL_AUTONOMY_RELATIONSHIP_QUESTION_RE = re.compile(
 _RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION_RE = re.compile(
     r"只是.{0,8}朋友|不过是.{0,8}朋友|仅仅.{0,8}朋友|普通朋友|能轻松聊天的朋友"
 )
+_RELATIONAL_AUTONOMY_BARE_FRIEND_RE = re.compile(
+    r"朋友啊[，,。.!！]?(?:不然)?(?:还)?能是什么"
+)
+_RELATIONAL_AUTONOMY_CLOSENESS_RE = re.compile(
+    r"重要|亲近|越来越近|关系.{0,6}(?:更近|很近|更深)|很在意|放在心上"
+)
 _LISTEN_UNSUPPORTED_USER_ESSENCE_RE = re.compile(
     r"以你的性子|照你的性子|按你的性子|你这种人"
     r"|说没事.{0,12}(?:让人|让我|我).{0,8}(?:在意|担心)"
@@ -858,6 +865,7 @@ _JEALOUSY_DISMISSIVE_DISTANCE_RE = re.compile(
 )
 _AMBIGUOUS_AFFECT_DEVALUATION_RE = re.compile(
     r"总比.{0,10}(?:完全)?没(?:有)?感觉.{0,4}强|至少比.{0,10}(?:麻木|没感觉).{0,4}好"
+    r"|(?:能说(?:出)?|说得出?)还行.{0,8}(?:就)?已经(?:很)?(?:不错|很好|可以)"
 )
 _AMBIGUOUS_AFFECT_USER_RE = re.compile(
     r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉|还行|还好"
@@ -3020,14 +3028,19 @@ def _relational_autonomy_relationship_minimization_hits(
         str(getattr(request, "user_message", "") or "")
     ):
         return ()
-    return tuple(
-        dict.fromkeys(
-            match.group(0)
-            for match in _RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION_RE.finditer(
-                str(text or "")
-            )
+    candidate = str(text or "")
+    hits = [
+        match.group(0)
+        for match in _RELATIONAL_AUTONOMY_RELATIONSHIP_MINIMIZATION_RE.finditer(
+            candidate
         )
-    )
+    ]
+    if not _RELATIONAL_AUTONOMY_CLOSENESS_RE.search(candidate):
+        hits.extend(
+            match.group(0)
+            for match in _RELATIONAL_AUTONOMY_BARE_FRIEND_RE.finditer(candidate)
+        )
+    return tuple(dict.fromkeys(hits))
 
 
 def _unprovided_work_state_claim_hits(
