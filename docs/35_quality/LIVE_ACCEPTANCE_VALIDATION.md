@@ -889,4 +889,8 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 
 Host 与 OBS 重启到 `28c77d2e2` 后，真实 Chat 已形成 `APPROVE / COMMIT`，但两份旧探针给出了互相矛盾且都不可信的结论。基础脚本把远端 Edge 明确未测试导致的 `ACCEPTANCE_PENDING_EXTERNAL` 计作 Host 失败；全服务脚本则只检查 HTTP 200，把 `ready=false` 和 `canon_sync=DEGRADED / OPERATOR_PROJECTION_STALE` 全部计作 PASS。该轮“全服务 PASS”撤销，不作为最终证据。
 
-修复后的全服务探针必须逐项验证 Health 无 required unavailable、Ready 语义、Chat COMMIT 和 Canon `OK + drift_count=0`。Host-only 验收必须显式声明跳过依赖探针并允许仅由远端 Edge／设备造成的 pending external，默认严格模式不放宽。Canon 内容没有版本漂移；误报来自 22 个串行投影任务的一轮耗时超过通用 15 秒读取窗口，因此只为低频 Canon health 设置 180 秒读取窗口，刷新频率仍为 15 秒、普通对话零新增步骤。相邻合同与脚本回归 10 项通过；必须提交、推送、重启当前代码 SHA 后重新采集真实报告，当前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+修复后的全服务探针必须逐项验证 Health 无 required unavailable、Ready 语义、Chat COMMIT 和 Canon `OK + drift_count=0`。Host-only 验收必须显式声明跳过依赖探针并允许仅由远端 Edge／设备造成的 pending external，默认严格模式不放宽。第一层 `OPERATOR_PROJECTION_STALE` 来自 22 个串行投影任务的一轮耗时超过通用 15 秒读取窗口，因此只为低频 Canon health 设置 180 秒读取窗口，刷新频率仍为 15 秒、普通对话零新增步骤。相邻合同与脚本回归 10 项通过后提交为 `f1d039677`。
+
+严格探针在 `f1d039677` 上再次运行，Health／Ready／Metrics／真实 Chat COMMIT 通过，Canon 被正确判失败；报告 SHA-256 为 `ff3a0c05e2fe3fe58482d4d5ed0bb73fb8e744878dac97ab583663e82d3fbe10`。新鲜 projection 的原始脱敏文档显示一条 `WORLD_CANON_INVALID_DOC`；使用同一 Canon application/repository 重开后确认是生产资产 `wc-004-persona-growth-rules.json` 的 hash 为空，真实 loader 报 `WORLD_CANON_HASH_MISMATCH`。该缺陷之所以此前显示 source unavailable，是 projection job 将任何 `CANON_SYNC_FAILED` 都误分类成读取失败，并且样本读取了不存在的 `reason_code` 字段而非 canonical `code`。
+
+当前修复写入由 canonical identity 计算出的 hash，新增覆盖全部 `wc-*` 生产资产的真实 loader 合同；projection payload 以 `source_available` 区分“成功读到漂移”和“来源读取失败”，并只暴露脱敏文件名与正确 reason code。22 项 Canon、OBS、Host route 与探针回归通过。必须在该修复提交上让 Host startup 同步资产、等待 Obs 投影刷新并重跑严格探针；状态继续为 `CODE_REMEDIATED_REAL_RETEST_PENDING`，不能使用旧 HTTP 200 假绿报告。

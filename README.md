@@ -436,3 +436,4 @@ python tools/doc_lint/doc_link_gate.py --root .
 因此当前结论仍是 `INCOMPLETE`，不是 Full Architecture `PASS`。
 
 - 最终 SHA 本地 Host 探针首次复跑发现验收脚本存在假绿：旧 `test_full_service.py` 仅凭 HTTP 200，把 `ready=false` 和 `canon_sync=DEGRADED` 也写成 PASS；旧快速脚本则把按要求未连接的远端 Edge 记成 Host 故障。当前代码已要求 Health、Ready、Canon 的响应语义同时成立，并为 Host-only 运行增加显式 `--skip-dependency-probes --allow-pending-external`；Canon 只把读取窗口从通用 15 秒调整为覆盖完整 22-job 串行波次的 180 秒，不改变生产刷新频率、普通对话路径或存储。10 项相邻回归通过，真实新提交重启复验前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+- `f1d039677` 的严格语义复验按预期拒绝了 Canon，失败报告 SHA-256 为 `ff3a0c05e2fe3fe58482d4d5ed0bb73fb8e744878dac97ab583663e82d3fbe10`；Chat COMMIT、Host-only Health／Ready 和 Metrics 通过。重开真实投影后定位到 `wc-004-persona-growth-rules.json` 的 hash 自历史提交起为空，生产 loader 正确报 `WORLD_CANON_HASH_MISMATCH`；Obs 又把已读到的漂移误分类为来源不可用，遮蔽了原因。当前代码补齐可复现 hash、让漂移保持可读而只把真正读取失败标为 source unavailable，并新增全部 `wc-*` 资产经真实 loader 扫描的合同测试。22 项相邻回归通过，新提交实测前仍为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。

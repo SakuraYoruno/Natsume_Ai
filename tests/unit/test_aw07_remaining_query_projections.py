@@ -169,6 +169,46 @@ def test_background_job_materializes_metadata_without_private_bodies(
     assert b"canon://world/relative-city" in raw
 
 
+def test_canon_projection_distinguishes_drift_from_unavailable_source() -> None:
+    from host_brain.app.observability_runtime.remaining_query_projection import (
+        _canon_sync_payload,
+    )
+
+    class CanonService:
+        @staticmethod
+        def preview_sync():
+            issue = type(
+                "Issue",
+                (),
+                {
+                    "source_path": r"C:\private\canon\wc-invalid.json",
+                    "detail": "WORLD_CANON_HASH_MISMATCH:wc-invalid",
+                },
+            )()
+            return type(
+                "Preview",
+                (),
+                {"issues": (issue,), "records": (), "removed_doc_ids": ()},
+            )()
+
+    payload, cursor = _canon_sync_payload(CanonService())
+
+    assert cursor > 0
+    assert payload["status"] == "DEGRADED"
+    assert payload["source_available"] is True
+    assert payload["drift_count"] == 1
+    assert payload["drift_sample"] == [
+        {
+            "doc_id": None,
+            "file_version": None,
+            "indexed_version": None,
+            "reason_code": "WORLD_CANON_INVALID_DOC",
+            "source_name": "wc-invalid.json",
+        }
+    ]
+    assert "C:\\private" not in str(payload)
+
+
 def test_remaining_gets_return_empty_projection_metadata_without_source_access(
     monkeypatch,
 ) -> None:

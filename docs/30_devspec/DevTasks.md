@@ -94,6 +94,7 @@
 - [ ] 使用至少一个真实非 mock provider 跑固定 72 条场景。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [x] 修复最终 SHA Host 探针只按 HTTP 200 产生假绿的问题：Health／Ready／Canon 必须校验业务语义，Host-only pending external 只能通过显式参数接受。
+- [x] 修复 `wc-004` 空 hash 与 Canon 漂移被误分类为 source unavailable；全部 `wc-*` 生产资产必须通过真实 loader 合同。
 - [ ] 在修复提交上重启 Host／OBS，保持 Gateway、隧道、Docker 与远端 Edge 不动，重新采集 Canon `OK`、真实 Chat COMMIT 和 Host-only pending external 报告。
 - [ ] 从 72 条场景中冻结 48 条多轮盲测集。
 - [ ] 邀请至少 3 名评审，与稳定基线盲测并达到 PRD 门槛。

@@ -12,6 +12,7 @@ import os
 import time
 from collections import defaultdict
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState
@@ -411,11 +412,15 @@ def _canon_sync_payload(service: CanonApplicationService) -> tuple[dict[str, Any
                     "doc_id": row.get("doc_id"),
                     "file_version": row.get("file_version"),
                     "indexed_version": row.get("indexed_version"),
-                    "reason_code": row.get("reason_code"),
+                    "reason_code": row.get("reason_code") or row.get("code"),
+                    "source_name": (
+                        Path(str(row.get("source_path") or "")).name or None
+                    ),
                 }
             )
         payload = {
             "status": "DEGRADED" if drifts else "OK",
+            "source_available": True,
             "drift_count": len(drifts),
             "drift_sample": samples,
             "reason_code": "CANON_SYNC_FAILED" if drifts else None,
@@ -425,6 +430,7 @@ def _canon_sync_payload(service: CanonApplicationService) -> tuple[dict[str, Any
     except Exception:
         payload = {
             "status": "DEGRADED",
+            "source_available": False,
             "drift_count": 0,
             "drift_sample": [],
             "reason_code": "CANON_SYNC_FAILED",

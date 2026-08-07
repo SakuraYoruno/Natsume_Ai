@@ -604,3 +604,15 @@ python scripts/runtime/test_full_service.py `
 ```
 
 `--allow-pending-external` 只允许 required unavailable 为 0、且未完成项确实属于远端 Edge／设备的结果；它不允许 `ready=false` 的其他原因，也不允许 Canon `DEGRADED`、漂移或过期投影通过。网络安全、A09、A12、Security Monitor 与 Pentest 保持 `NOT_RUN_USER_SKIPPED`。
+
+`f1d039677` 的第一次严格报告 SHA-256 为 `ff3a0c05e2fe3fe58482d4d5ed0bb73fb8e744878dac97ab583663e82d3fbe10`，Canon 失败有效保留。修复后先运行：
+
+```powershell
+python -m pytest -q `
+  tests/contract/test_world_canon_sync_contract.py `
+  tests/unit/test_aw07_remaining_query_projections.py `
+  tests/unit/test_aw07_host_query_cutover.py `
+  tests/integration/test_full_service_runtime_probe.py
+```
+
+当前结果为 22 passed。合同必须发现任一 `wc-*` hash／schema 问题；drift projection 必须保留 canonical reason code 和脱敏文件名，只有真实读取异常才允许 `SOURCE_UNAVAILABLE`。之后在新提交上重启 Host 并重跑上面的 Host-only 严格命令。
