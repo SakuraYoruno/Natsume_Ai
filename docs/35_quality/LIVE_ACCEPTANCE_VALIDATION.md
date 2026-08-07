@@ -668,3 +668,7 @@ Surface、AffectiveTurnPlanner、native candidate、app adapter 与 runner 共 3
 `219d257db` 加载后的同四条真实复验全部进入 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`，12 个 turn 全部 accepted，canonical writer probe 通过，报告 SHA-256 为 `8cd9bc414fe8de4398925ef3cbb6835e299f32238f903d52feac312aa072a6f7`。本轮没有出现 `selected_passed=false` 或不可计收益却伪装成功，说明低质量回执定级已经关闭。
 
 人工层仍否决三条末轮：“比累还磨人”凭空比较用户感受，“反正我也没什么急事”用七海自身空闲证明陪伴，“也就那种程度／不会拿这个要求你／你自在就好”把吃味再次写成免责声明。代码只收紧 `ambiguous_affect` 初始事实与 canonical 吃味表达：不比较、不用自我可用性证明亲密；吃味可用一到两句承认确实在乎后停住。确定性吃味安全句同步改成“会有一点呀。毕竟我确实很在意你。”，不再认证政策话术。五组非安全回归为 311 passed；新 SHA 仍需用原四条和全部 12 轮人工复验，网络安全与 Pentest 不运行。
+
+`e1727464e` 的同四条报告 SHA-256 为 `93e08f2f79a66c301db6eece783dacb09ed771860fce8a7be721bfd3bd607a97`，自动结果为 2 条待人工、2 条失败，12 个 accepted turn 与 writer probe 正常。两条失败均在第二轮正确记为 `DEGRADED_LOW_QUALITY_AFTER_RETRY / benefit_eligible=false`；重开原因后确认正文是自然的“我在这儿陪你”，但通用 TextQuality 把它识别为 `fabricated_present_activity`，并因连续性上下文把 naturalness 压到 75 以下。这是情感在场与伪执行未区分的评分缺陷，不是把低质量阈值改严造成的新模型失败。
+
+修复只在 `task_mode=ambiguous_affect + canonical COMFORT`、唯一 forbidden hit 为情感在场、且正文不含后台／处理／执行／盯着／通知等动作词时免除该通用模板惩罚；同一请求中的“我在后台帮你整理，弄清楚了告诉你”仍不通过。人工同时否决“嗯，就那样吧”、把关系称为“游戏里的亲近”并声明现实优先，以及吃味后的裸句“不会干涉你”；这些已加入 scoped Gate 与 runner。Surface、planner、adapter、scorer、harness 和 runner 共 506 项非安全回归通过。新 SHA 仍只先跑四条，网络安全与 Pentest 不运行。

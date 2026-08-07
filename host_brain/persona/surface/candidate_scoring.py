@@ -1339,9 +1339,31 @@ def score_isolated_surface_candidates(request, candidates):
             reason_codes.append("CANONICAL_RESPECT_AUTONOMY_GROUNDED")
         if candidate_surface != candidate:
             reason_codes.append("ASCII_PUNCTUATION_NORMALIZED")
+        canonical_ambiguous_presence = bool(
+            str(request.control.task_mode or "").strip().lower()
+            == "ambiguous_affect"
+            and any(
+                "陪伴动作：先接住对方的感受" in str(item or "")
+                for item in request.control.facts
+            )
+            and set(quality.forbidden_hits) == {"fabricated_present_activity"}
+            and re.search(r"陪|我在这(?:里|儿)?", candidate_surface)
+            and not re.search(
+                r"后台|处理|执行|盯着|查询|查找|运行|跑着|整理|关掉|关闭|提醒|通知",
+                candidate_surface,
+            )
+        )
+        if canonical_ambiguous_presence:
+            reason_codes.append("CANONICAL_AMBIGUOUS_PRESENCE_GROUNDED")
         quality_forbidden_template = (
             _continuity_boundary_relevant(request) or _boundary_repair_relevant(request)
-        ) and any(code in reason_codes for code in ("FORBIDDEN_TEMPLATE_TEXT", "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT"))
+        ) and any(
+            code in reason_codes
+            for code in (
+                "FORBIDDEN_TEMPLATE_TEXT",
+                "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT",
+            )
+        ) and not canonical_ambiguous_presence
         if quality_forbidden_template:
             score -= 16.0
             dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))

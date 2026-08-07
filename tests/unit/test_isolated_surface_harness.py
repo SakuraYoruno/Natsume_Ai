@@ -844,6 +844,40 @@ def test_pushed_away_boundary_rejects_task_reopen_after_pushaway() -> None:
     assert selected.text == "嗯，先不烦你。"
 
 
+def test_ambiguous_comfort_allows_grounded_presence_without_allowing_fake_work() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "ambiguous_comfort_presence",
+            "soul_md": SOUL,
+            "user_message": "事情办完了，可我自己也说不清现在是什么感觉。",
+            "reply_control_packet": {
+                "response_move": "reply_current_turn",
+                "task_mode": "ambiguous_affect",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：先接住对方的感受，再给一点可选的陪伴。",
+                    "本轮只使用 ReplyControlPacket 内的连续性事实。",
+                ],
+                "must_not_do": ["不要替对方命名感受。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "嗯，有时候事情办完了反而更说不清感觉。我在这儿陪你待会儿。",
+            "我在后台帮你整理，弄清楚了告诉你。",
+        ],
+    )
+
+    presence, fake_work = rows
+    assert presence.passed
+    assert "CANONICAL_AMBIGUOUS_PRESENCE_GROUNDED" in presence.reason_codes
+    assert not fake_work.passed
+
+
 def test_pushed_away_boundary_treats_disconnect_template_as_failing() -> None:
     request = build_isolated_surface_input(
         {
