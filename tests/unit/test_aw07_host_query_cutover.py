@@ -213,7 +213,7 @@ def test_canon_sync_read_window_spans_a_complete_projection_wave(monkeypatch) ->
     def _read_from_store(_store, _kind, _key, *, max_age_ms):
         observed["max_age_ms"] = max_age_ms
         return (
-            {"status": "OK", "drift_count": 0, "detail": "canon sync healthy"},
+            {"status": "OK", "drift_count": 0},
             {
                 "schema_version": "Natsume.operator.query_projection.v1",
                 "projection_version": 1,
@@ -227,5 +227,6 @@ def test_canon_sync_read_window_spans_a_complete_projection_wave(monkeypatch) ->
     response = asyncio.run(health_routes.canon_sync_health_check(projection_store=object()))
 
     assert response.status == "OK"
+    assert response.details["detail"] == "canon sync healthy"
     assert observed["max_age_ms"] == CANON_SYNC_MAX_AGE_MS
     assert CANON_SYNC_MAX_AGE_MS >= 180_000

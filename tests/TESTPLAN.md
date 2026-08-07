@@ -616,3 +616,5 @@ python -m pytest -q `
 ```
 
 当前结果为 22 passed。合同必须发现任一 `wc-*` hash／schema 问题；drift projection 必须保留 canonical reason code 和脱敏文件名，只有真实读取异常才允许 `SOURCE_UNAVAILABLE`。之后在新提交上重启 Host 并重跑上面的 Host-only 严格命令。
+
+Canon route 单测还必须覆盖 privacy-redacted payload：`status=OK` 且 detail 被隐藏时返回固定 `canon sync healthy`；任何非 OK 状态不得借用该文案或获得 PASS。
