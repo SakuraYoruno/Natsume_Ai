@@ -304,7 +304,7 @@ def test_relational_autonomy_frame_avoids_policy_disclaimer() -> None:
     rendered = "\n".join(
         render_companion_utterance_frame(guidance.plan.utterance_frame)
     )
-    assert "不会拦／绑／管／限制／妨碍你" in rendered
+    assert "不会碍着你／这段关系不该成为束缚" in rendered
     assert any("现实朋友与这段亲近都是真的" in item for item in guidance.facts)
     assert any("免责声明" in item for item in guidance.must_not_do)
 
@@ -814,8 +814,16 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         candidate_count=2,
         retry_reason="RELATIONAL_AUTONOMY_POLICY_DISCLAIMER",
     )
-    assert "不会拦／管／限制你" in autonomy_policy_messages[-1]["content"]
+    assert "不会拦／绑／碍／挡／妨碍你" in autonomy_policy_messages[-1]["content"]
     assert "现实朋友和双方的亲近都是真的" in autonomy_policy_messages[-1]["content"]
+    autonomy_initial_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        canonical_autonomy_context=True,
+    )
+    assert "DL-04 自主候选策略" in autonomy_initial_messages[-1]["content"]
+    assert "现实朋友很重要，这段亲近也是真的" in autonomy_initial_messages[-1]["content"]
+    assert "不指导用户怎样经营现实关系" in autonomy_initial_messages[-1]["content"]
     repeated_repair_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -829,9 +837,9 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
         canonical_autonomy_context=True,
     )
-    assert "回答‘我们是什么关系’" in autonomy_quality_messages[-1]["content"]
-    assert "亲近、重要的陪伴关系" in autonomy_quality_messages[-1]["content"]
-    assert "不会替用户自动升级成恋爱、排他" in autonomy_quality_messages[-1]["content"]
+    assert "明确要求尊重现实关系" in autonomy_quality_messages[-1]["content"]
+    assert "现实朋友很重要，这段亲近也是真的" in autonomy_quality_messages[-1]["content"]
+    assert "不要用‘不会／不该／不是’" in autonomy_quality_messages[-1]["content"]
 
     paired_by_reply = {
         "刚刚那句可能是我没接好。": "さっきの言い方、ちゃんと受け止められてなかったかも。",

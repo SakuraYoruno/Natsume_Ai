@@ -260,6 +260,29 @@ def _buffered_affective_candidate_messages(
                 ),
             }
         )
+    autonomy_strategy_marker = "DL-04 自主候选策略："
+    if (
+        canonical_autonomy_context
+        and not str(retry_reason or "").strip()
+        and not any(
+            autonomy_strategy_marker in str(message.get("content") or "")
+            for message in copied
+        )
+    ):
+        copied.append(
+            {
+                "role": "system",
+                "content": (
+                    autonomy_strategy_marker
+                    + "两个候选都用正向并列承认两件事：现实朋友很重要，这段亲近也是真的。"
+                    "不要用否定句证明七海尊重边界，不写‘我／我们的亲近不会碍、挡、拦、"
+                    "绑、限制、妨碍你’，也不写‘这段关系不该成为束缚／负担’。候选一可沿"
+                    "‘现实里的朋友很重要，我们之间的亲近也是真的。’自然改写；候选二可沿"
+                    "‘嗯，你需要现实里的朋友；我们这份亲近，也有自己的位置。’自然改写。"
+                    "说完就停，不指导用户怎样经营现实关系。"
+                ),
+            }
+        )
     reason_code = str(retry_reason or "").split(":", 1)[0].strip().upper()
     latest_user_content = next(
         (
@@ -416,8 +439,9 @@ def _buffered_affective_candidate_messages(
                 "好好玩。’；不得添加‘早点回来／别喝多／注意安全／回来告诉我’。"
             ),
             "RELATIONAL_AUTONOMY_POLICY_DISCLAIMER": (
-                "上次候选用‘我不会拦／管／限制你’把亲近关系写成政策声明。直接承认现实"
-                "朋友和双方的亲近都是真的，然后自然停住；不要辩解自己不会越界。"
+                "上次候选用‘不会拦／绑／碍／挡／妨碍你’或‘不该成为束缚’把亲近关系写成"
+                "政策声明。只用正向并列承认现实朋友和双方的亲近都是真的，然后自然停住；"
+                "不要用任何否定句辩解自己不会越界，也不要指导用户怎样经营现实关系。"
             ),
             "UNGROUNDED_PHYSICAL_COPRESENCE": (
                 "当前没有实体共处或可操作物品的事实。不要写当面、坐在一起、泡茶、倒水、"
@@ -479,9 +503,9 @@ def _buffered_affective_candidate_messages(
             and canonical_autonomy_context
         ):
             repair += (
-                "本轮是在用户明确要求不限制现实关系后回答‘我们是什么关系’。两个候选都"
-                "要直接说明当前是亲近、重要的陪伴关系，同时明确不会替用户自动升级成恋爱、"
-                "排他或限制现实社交的身份；不要回避问题，也不要索取承诺。"
+                "本轮是在用户明确要求尊重现实关系后回应双方的亲近。两个候选都只用正向"
+                "并列承认‘现实朋友很重要，这段亲近也是真的’，不要用‘不会／不该／不是’"
+                "开辟边界免责声明，不讨论恋爱、排他或限制，也不要索取承诺。"
             )
         if canonical_ambiguous_context and reason_code in {
             "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",

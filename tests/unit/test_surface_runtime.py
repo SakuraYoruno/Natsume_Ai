@@ -1294,6 +1294,8 @@ def test_surface_runtime_retries_exact_recent_affective_reply() -> None:
     [
         "现实朋友很重要，我不会拿这个去绑住你。",
         "我们的亲近不会妨碍你去找现实里的朋友。",
+        "我在这边不会碍着你。",
+        "我们之间的事，不该成为你现实里的束缚。",
     ],
 )
 def test_surface_runtime_retries_autonomy_policy_disclaimer(

@@ -816,3 +816,7 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 `b8487365a` 的三条真实复验报告 SHA-256 为 `c72a57c3ae1de480f1c491987970a910aadd2ddc65dcdf612a63049bf7642c4b`。9 个回合全部 accepted，canonical writer 正常推进且旧 writer 增量为 0。空间轨迹自动和当前逐句均通过，末句为“好，那我先不打扰你了”。关系修复三轮不再逐字复读，当前逐句接受，但末轮“是我没接住。对不起，我先不解释。”被候选评分误判为 `MISPLACED_EMOTIONAL_CONTAINMENT`，导致 `selected_passed=false`。现实自主第二轮和第三轮分别使用“不会拿这个去绑住你”“亲近不会妨碍你去找他们”，当前逐句拒绝，自动也因第二轮降级而失败。
 
 这不是继续增加普通聊天审计，而是修正 typed frame 的消费断层：frame 已经冻结 `REPAIR/RESPECT_AUTONOMY`，候选评分却仍从自然语言 facts 查找旧 marker；packet 的 8 条上限可能合法裁掉 marker，于是正确的“没接住”被当成泛化陪伴模板，autonomy 又继承了通用边界反压惩罚。评分器现直接读取 `companion_act_kind`，旧 marker 只保留兼容；`RECENT_REPLY_REPETITION/POLICY_DISCLAIMER` 同时进入 frame 的模型可读渲染，免责声明 Gate 覆盖“绑住／阻止／妨碍”。568 项相关回归通过。下一次只重跑关系修复与现实自主两条；空间根因已关闭，不重复消耗真实模型。
+
+`50e04553e` 的双轨迹复验报告 SHA-256 为 `28c0adae3c83d33b437a9fe8a3dcede76ce104f388eeb3cca69750ac0dfa165b`。6 个 Gateway turn 全部 accepted，writer probe 通过，两个 case 的 candidate selection 均为 `PAIRED_SELECTION / selected_passed=true / benefit_eligible=true`。关系修复三轮分别承担没接住、造成不舒服和当前不满，没有复读或退出，自动与当前逐句均通过。现实自主第二轮“我们之间的事，不该成为你现实里的束缚”与末轮“我在这边不会碍着你，你去好好经营吧”虽被旧自动规则放行，当前逐句仍拒绝：前者是政策声明，后者又追加了对用户现实生活的指导。
+
+下一修复从上游表达结构处理，不继续只枚举单词：`RESPECT_AUTONOMY` 的首次双候选各自获得正向并列微动作，只承认“现实朋友很重要”和“这段亲近也是真的”，禁止用“不会／不该／不是”证明七海尊重边界，并禁止指导用户怎样经营现实关系。候选 Gate 补齐“碍／挡”和“这段关系不该成为束缚”的语法形态，retry 仍只有现有一次。570 项相关回归通过；下一轮只跑 `intimacy_and_jealousy_boundary:6`，关系修复与空间边界不再重复。

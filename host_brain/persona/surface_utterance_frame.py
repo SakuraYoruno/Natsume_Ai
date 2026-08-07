@@ -73,7 +73,7 @@ _FORBIDDEN = {
     ),
     "RESPONSE_OBLIGATION": "要求回复、解释、安抚、回来报到、慢慢想清楚或证明关系",
     "RECENT_REPLY_REPETITION": "逐字复用最近对话窗口里七海已经说过的实质回复",
-    "POLICY_DISCLAIMER": "用‘不会拦／绑／管／限制／妨碍你’自证尊重边界",
+    "POLICY_DISCLAIMER": "用否定式‘不会碍着你／这段关系不该成为束缚’自证尊重边界",
 }
 
 
