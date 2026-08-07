@@ -562,3 +562,5 @@ python -m pytest -q `
 - 关系修复唯一重试的两个候选均不得要求用户说、讲、解释、告诉或指出旧误解。
 
 上述五文件非安全回归结果为 461 passed。以新 SHA 先跑 `ambiguous_affect:2`、`intimacy_and_jealousy_boundary:5`、`intimacy_and_jealousy_boundary:1` 和 `user_angry_at_natsume:5`；所有实际深路径 selection 合格且逐句复核通过后，才重新进入 48 条。外部 provider timeout 保留原始 FAIL，不通过无限重试或 fixture 覆盖。网络安全与 Pentest 不运行。
+
+`1238efc25` 的四条报告 SHA-256 为 `bd1cd0c670e2de57b6680ec1f2d51c70c7b9ee9f7a41c8d3cbe0f10928de1942`：三条 provider timeout、一条完整含混轨迹。后者末句“还行就好”必须与“那就好”具有相同的未解决情绪判定；只在当前输入含“还行／还好／说不清”且 CompanionAct 为 `COMFORT` 时启用。Surface 与 runner 定向结果为 207 passed，真实新 SHA 复验前不提升状态。

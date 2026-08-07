@@ -856,7 +856,7 @@ _LISTEN_UNSUPPORTED_USER_ESSENCE_RE = re.compile(
     r"|(?:反倒|更|才)(?:让我|让人).{0,6}(?:在意|担心)"
 )
 _UNRESOLVED_AFFECT_FALSE_RESOLUTION_RE = re.compile(
-    r"那就好|这就好|没事就好|没事了就好|既然没事|看来没事|一切正常|已经没事"
+    r"那就好|这就好|(?:还行|还好)就好|没事就好|没事了就好|既然没事|看来没事|一切正常|已经没事"
 )
 _JEALOUSY_DEFLECTION_RE = re.compile(
     r"料理\s*AI|醋瓶子|调味料|(?:没有|没)(?:那种)?功能|不具备.{0,6}功能"

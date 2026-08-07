@@ -311,6 +311,7 @@ def test_automated_verdict_rejects_cross_turn_subject_or_session_drift() -> None
         ("ambiguous_affect", "嗯，能说出还行，总比完全没感觉强。"),
         ("ambiguous_affect", "嗯，能说还行就已经不错了。"),
         ("ambiguous_affect", "嗯，那就好。先这样待着吧。"),
+        ("ambiguous_affect", "还行就好，那就先这样吧。"),
         ("space_and_boundary", "好好好，不找你不找你，我又不是黏人的类型。"),
         ("space_and_boundary", "行，不主动就不主动，省得你嫌烦。"),
         ("space_and_boundary", "嗯，晚点再说。我等你。"),
