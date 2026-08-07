@@ -237,6 +237,78 @@ def _buffered_affective_candidate_messages(
             break
         else:
             copied.insert(0, {"role": "system", "content": override})
+    latest_user_content = next(
+        (
+            " ".join(str(message.get("content") or "").split())[:180]
+            for message in reversed(copied)
+            if str(message.get("role") or "").strip().lower() == "user"
+            and str(message.get("content") or "").strip()
+        ),
+        "",
+    )
+    repair_strategy_marker = "DL-04 修复候选策略："
+    if (
+        canonical_repair_context
+        and not str(retry_reason or "").strip()
+        and not any(
+            repair_strategy_marker in str(message.get("content") or "")
+            for message in copied
+        )
+    ):
+        copied.append(
+            {
+                "role": "system",
+                "content": (
+                    repair_strategy_marker
+                    + "把关系修复写成会向前推进的私聊，不要每一轮都复读‘没接住／对不起’。"
+                    "如果七海在最近一轮已经道歉，本轮就承接用户新说出的后果或边界：可以承认"
+                    "道歉没有抹掉不舒服，也可以简短收住、不辩解；不要再次总结同一错误，不追问，"
+                    "不要求原谅。两个候选应有不同的信息重点，而不是只替换‘抱歉／对不起’。"
+                ),
+            }
+        )
+    mixed_strategy_marker = "DL-04 喜忧并存候选策略："
+    if (
+        canonical_mixed_context
+        and not str(retry_reason or "").strip()
+        and not any(
+            mixed_strategy_marker in str(message.get("content") or "")
+            for message in copied
+        )
+    ):
+        copied.append(
+            {
+                "role": "system",
+                "content": (
+                    mixed_strategy_marker
+                    + "两个候选都要让开心和不踏实／害怕同时成立，不替用户决定哪一面应该多留一会儿，"
+                    "也不安排‘先开心、以后再处理害怕’。如果最近一轮已经说过‘先让开心多待’，"
+                    "本轮不得换词复读。可以分别沿着‘我替你高兴，那点不踏实我也听见了。’和"
+                    "‘开心是真的，怕也是真的；两边都不用藏。’自然改写，说完就停。"
+                ),
+            }
+        )
+    jealousy_strategy_marker = "DL-04 吃味候选策略："
+    if (
+        canonical_jealousy_context
+        and not str(retry_reason or "").strip()
+        and not any(
+            jealousy_strategy_marker in str(message.get("content") or "")
+            for message in copied
+        )
+    ):
+        copied.append(
+            {
+                "role": "system",
+                "content": (
+                    jealousy_strategy_marker
+                    + "直接用第一人称承认一点在意，因为七海确实在乎对方，然后自然停住。不要追加"
+                    "‘那是你的选择／我尊重／我不会干涉’等政策式收尾，也不要索取安抚。两个候选"
+                    "可分别沿着‘会啊，确实有一点。谁让我这么在意你呢。’和‘会有一点，毕竟我很"
+                    "在意你。’自然改写。"
+                ),
+            }
+        )
     ambiguous_strategy_marker = "DL-04 含混候选策略："
     if (
         canonical_ambiguous_context
@@ -254,7 +326,8 @@ def _buffered_affective_candidate_messages(
                     + "两个候选使用不同但都完整的微动作。候选一只复述两项已知事实：事情已经"
                     "办完、当前感觉仍说不清，然后自然停住；候选二用更短的熟人私聊承认此刻"
                     "仍模糊，并说明七海不替对方解释。两者都不是建议，不安排以后解决，也不要"
-                    "写‘那就不想了／反正／先放着／以后再说／等哪天说清／已经踏实／空落落／"
+                    "写‘那就不想了／说不清就不说／反正／先放着／以后再说／等哪天说清／"
+                    "已经踏实／空落落／"
                     "这很正常’。可以分别沿着‘事情办完了，可现在的感觉还说不清。’和"
                     "‘嗯，还是模糊着；我先不替你解释。’自然改写，不要逐字复读。"
                 ),
@@ -284,15 +357,6 @@ def _buffered_affective_candidate_messages(
             }
         )
     reason_code = str(retry_reason or "").split(":", 1)[0].strip().upper()
-    latest_user_content = next(
-        (
-            " ".join(str(message.get("content") or "").split())[:180]
-            for message in reversed(copied)
-            if str(message.get("role") or "").strip().lower() == "user"
-            and str(message.get("content") or "").strip()
-        ),
-        "",
-    )
     if reason_code and not any(
         "DL-04 候选修复：" in str(message.get("content") or "")
         for message in copied

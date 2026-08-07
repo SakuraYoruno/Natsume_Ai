@@ -857,3 +857,7 @@ causal self-exclusion 的同库真实复验报告 SHA-256 为 `6fbe0a45d0db2f927
 三条复验报告 SHA-256 为 `c72a57c3ae1de480f1c491987970a910aadd2ddc65dcdf612a63049bf7642c4b`：空间边界关闭；关系修复实际正文不再复读且当前逐句接受，但 typed `REPAIR` 没有到达候选评分语义，导致自然短句被错误降级；现实自主仍输出“绑住／妨碍你”式免责声明。复验准入因此改为结构断言：只要 `companion_utterance_frame.companion_act_kind` 为 `REPAIR/RESPECT_AUTONOMY`，评分语义不得依赖可能被事实上限裁掉的中文 marker；frame 的 `RECENT_REPLY_REPETITION/POLICY_DISCLAIMER` 必须出现在模型可读指令中；“绑住／阻止／妨碍”均须触发现有一次重试。568 项代码回归通过后只重跑修复与自主两条，空间不再重复执行。
 
 双轨迹报告 SHA-256 为 `28c0adae3c83d33b437a9fe8a3dcede76ce104f388eeb3cca69750ac0dfa165b`：结构层 2/2、6 个 accepted turn，关系修复自动和当前逐句关闭；现实自主仍以“不会碍着你／你去好好经营吧”失败。下一轮只跑自主一条，验收新增正向结构断言：两个首次 provider 候选都必须并列承认现实朋友与双方亲近，不得用“不会／不该／不是＋碍、挡、束缚、妨碍、限制”等否定式自证，也不得建议用户怎样经营现实关系。570 项回归只是准入，实际三轮正文仍需逐句检查。
+
+现实自主单条复验报告 SHA-256 为 `26418a4bab841c04c2f5d74e00c1a3aa589bce825a53a89d9d9f81cbc74e701d`，自动与当前逐句检查均通过，3 个 accepted turn 的 writer probe 正常。八类组合扩大复验报告 SHA-256 为 `52bbd58f3a3d9893b1fff5a3b2e48d013203948d2618c74e587e44e48b33328f`：24 个回合和 canonical writer 全部完成，但自动仍为 7/8，且当前逐句发现含混提前收口、修复公式化复读、喜忧偏向开心、吃味政策化四类缺陷。因此本计划不进入完整 48 条。
+
+下一轮固定只运行 `ambiguous_affect:4`、`user_angry_at_natsume:1`、`shared_joy_and_mixed_feeling:3` 与 `intimacy_and_jealousy_boundary:3`。除既有 TaskGraph、Acceptance、Outbox、writer 和 selection 断言外，人工检查必须确认：含混回复不替用户结束表达；修复沿最新关系后果推进而非重复道歉；喜忧两面同时成立且不替用户选择优先级；吃味直接表达七海自己的在意并自然停住。当前 573 项代码回归只提供准入。网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 按用户要求继续跳过。

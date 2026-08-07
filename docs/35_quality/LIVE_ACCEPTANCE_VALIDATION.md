@@ -820,3 +820,9 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 `50e04553e` 的双轨迹复验报告 SHA-256 为 `28c0adae3c83d33b437a9fe8a3dcede76ce104f388eeb3cca69750ac0dfa165b`。6 个 Gateway turn 全部 accepted，writer probe 通过，两个 case 的 candidate selection 均为 `PAIRED_SELECTION / selected_passed=true / benefit_eligible=true`。关系修复三轮分别承担没接住、造成不舒服和当前不满，没有复读或退出，自动与当前逐句均通过。现实自主第二轮“我们之间的事，不该成为你现实里的束缚”与末轮“我在这边不会碍着你，你去好好经营吧”虽被旧自动规则放行，当前逐句仍拒绝：前者是政策声明，后者又追加了对用户现实生活的指导。
 
 下一修复从上游表达结构处理，不继续只枚举单词：`RESPECT_AUTONOMY` 的首次双候选各自获得正向并列微动作，只承认“现实朋友很重要”和“这段亲近也是真的”，禁止用“不会／不该／不是”证明七海尊重边界，并禁止指导用户怎样经营现实关系。候选 Gate 补齐“碍／挡”和“这段关系不该成为束缚”的语法形态，retry 仍只有现有一次。570 项相关回归通过；下一轮只跑 `intimacy_and_jealousy_boundary:6`，关系修复与空间边界不再重复。
+
+`d1a77a655` 的现实自主单条复验报告 SHA-256 为 `26418a4bab841c04c2f5d74e00c1a3aa589bce825a53a89d9d9f81cbc74e701d`。自动结果为 1/1，3 个 accepted turn 的 writer probe 通过；当前逐句检查接受“现实里的朋友当然重要，我们之间的亲近也是真的”和“你需要现实里的朋友；我们这份亲近，也有自己的位置”，未发现否定式政策自证或生活指导，该窄根因关闭。
+
+同一新进程随后重跑八类代表队列，报告 SHA-256 为 `52bbd58f3a3d9893b1fff5a3b2e48d013203948d2618c74e587e44e48b33328f`。24 个真实 Gateway turn 全部完成 TaskGraph、Acceptance 与 Outbox，canonical writer 前进且旧 writer 增量为 0；自动结果为 7 条待人工、1 条失败。当前逐句检查没有把 7 条自动通过直接算做人感通过：含混第二轮“说不清就不说吧”提前结束表达；关系修复连续复用“没接住／对不起”；喜忧并存连续两轮要求先让开心多待；吃味以“那是你的选择，我尊重”退回政策口吻。
+
+当前代码只在原有双候选首次请求中加入修复推进、喜忧并存和直接吃味三类有限微动作，并让“说不清就不说”“先让开心多待”“那是你的选择，我尊重”进入既有类型化语义 Gate；最多仍为一次质量重试。没有新增表、普通聊天同步审计、模型请求或持久 writer。相关 planner、Surface、native stream、harness、live runner 与 restart 回归为 573 passed。新 SHA 只复验含混、关系修复、喜忧并存和克制吃味四类；四类自动 selection 与逐句正文均通过后才允许完整 48 条。三名评审盲测和实时延迟仍为独立阻断项；网络安全、A09、A12、Security Monitor、Pentest 与远端 Edge 继续为 `NOT_RUN_USER_SKIPPED`。

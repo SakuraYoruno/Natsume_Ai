@@ -738,7 +738,30 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "DL-04 含混候选策略" in ambiguous_initial_messages[-1]["content"]
     assert "两个候选使用不同但都完整的微动作" in ambiguous_initial_messages[-1]["content"]
-    assert "那就不想了／反正／先放着" in ambiguous_initial_messages[-1]["content"]
+    assert "说不清就不说／反正／先放着" in ambiguous_initial_messages[-1]["content"]
+    repair_initial_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        canonical_repair_context=True,
+    )
+    assert "DL-04 修复候选策略" in repair_initial_messages[-1]["content"]
+    assert "不要每一轮都复读‘没接住／对不起’" in repair_initial_messages[-1]["content"]
+    assert "不同的信息重点" in repair_initial_messages[-1]["content"]
+    mixed_initial_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        canonical_mixed_context=True,
+    )
+    assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
+    assert "不替用户决定哪一面应该多留一会儿" in mixed_initial_messages[-1]["content"]
+    assert "两边都不用藏" in mixed_initial_messages[-1]["content"]
+    jealousy_initial_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        canonical_jealousy_context=True,
+    )
+    assert "DL-04 吃味候选策略" in jealousy_initial_messages[-1]["content"]
+    assert "那是你的选择／我尊重／我不会干涉" in jealousy_initial_messages[-1]["content"]
     ambiguous_quality_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
