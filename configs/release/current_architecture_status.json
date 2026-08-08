@@ -598,6 +598,7 @@
       "expression_live_acceptance_human_experience": "UNPROVEN_SINGLE_SAMPLE_NOT_A_BLIND_COMPARISON",
       "knowledge_identity_surface_consumer": "CODE_WIRED_ACTIVE_KNOWLEDGE_RECALL_ONLY_ACTIVE_IDENTITY_BOUNDED_COMPACT_DIRECTIVE",
       "knowledge_identity_surface_regression": "PASS_353",
+      "knowledge_identity_live_runner": "CODE_READY_REAL_RUN_PENDING",
       "knowledge_no_recall_query_count": 0,
       "knowledge_identity_live_causal_acceptance": "PENDING_CURRENT_COMMIT",
       "ordinary_chat_added_writes_or_model_calls": 0,

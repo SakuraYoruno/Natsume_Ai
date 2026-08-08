@@ -17,6 +17,9 @@ from host_brain.surface_runtime.input_compiler import (
     _active_identity_release_directive,
     _apply_active_identity_release,
 )
+from scripts.runtime.run_ne06_knowledge_identity_live_acceptance import (
+    _build_identity_pair,
+)
 
 
 def _identity_projection(*, warmth: float = 0.82) -> dict:
@@ -148,3 +151,18 @@ def test_identity_projection_failure_keeps_chat_available(
             resolve_active_identity=unavailable,
         ),
     ) == control
+
+
+def test_live_runner_identity_pair_has_distinct_safe_runtime_directives() -> None:
+    previous, proposed = _build_identity_pair(run_id="unit-ne06-identity")
+
+    previous_directive = _active_identity_release_directive(
+        {"snapshot": previous.to_dict()}
+    )
+    proposed_directive = _active_identity_release_directive(
+        {"snapshot": proposed.to_dict()}
+    )
+    assert previous.snapshot_ref != proposed.snapshot_ref
+    assert previous_directive
+    assert proposed_directive
+    assert previous_directive != proposed_directive
