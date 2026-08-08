@@ -9,6 +9,8 @@
 
 > 这里的“数字生命”指一套具有连续状态、因果记忆、自主节律和具身表达的软件系统，不声称生物意识或人类心智已经被复刻。当前版本已接通 canonical Life 主链和文本交互；长期关系自然度、专属声线和远端 Avatar 联合体验仍在验证，整体状态为 `INCOMPLETE`。
 
+> 删除对话记录或换新任务时，请先读 [当前架构、双节点环境与验收交接](docs/50_project/CURRENT_PROJECT_HANDOFF.md)；其中已区分当前进程状态、历史范围收据和尚未验收项。
+
 2026-08-07 的当前工程切片已把此前残留的大文件按真实职责拆开：Surface 的候选约束、时间指向与生成编排分离，Digital Life 的观察采集与 Appraisal 分离；Task Acceptance、Operator effect、Embodiment command、TTS prosody、Tribe 事件订阅和 Life delivery 也各有独立边界。当前工作树的非安全静态门禁 A01～A08、A10～A11、A13～A14 已通过；A09、A12 依用户要求保持 `NOT_RUN_USER_SKIPPED`。非安全 A15 已在当前运行时代码 SHA 上通过真实 Docker 三库写入／重启／重读、Host／OBS／Nginx Monitor／Gateway 健康、Monitor 真实后端浏览器 E2E，以及 4 类 12 回合 Gateway→DeepSeek→TaskGraph→Acceptance 数字生命冒烟；PlanningSearch Research／Code 也完成最终树继承判定。完整 48 条人感仍为失败、三人盲评与覆盖率 Gate 未通过，VTS 仍待外部授权，因此总体状态继续是 `INCOMPLETE`。
 
 2026-08-08 的最终本机复验已关闭“服务是否真的起来”这一问题：隔离 Docker 中 Neo4j、Chroma、Redis 的真实写入、重启、重读与清理通过；Host、OBS、Nginx Monitor 和本地 Unified Gateway 在线；真实 Chrome 的核心交互、外周状态与 Operator Session 3/3 通过；翻译、Memory Store、多 Skill Plan 和重复 webhook 均贯通真实 Gateway→TaskGraph→Acceptance／Outbox。远端 Edge 没有启动或探测，网络安全按用户要求跳过，二者都没有被写成 PASS。
