@@ -300,7 +300,7 @@ def _run_knowledge_flow(
         action="knowledge-deprecate",
         operator_id=operator_id,
         subject_ref=subject_ref,
-        subject_version=1,
+        subject_version=_transition_subject_version(1),
         lab=deprecate_authority,
         evidence_refs=evidence_refs,
     )
@@ -498,7 +498,7 @@ def _run_identity_flow(
         action="identity-rollback",
         operator_id=operator_id,
         subject_ref=previous.snapshot_ref,
-        subject_version=2,
+        subject_version=_transition_subject_version(2),
         lab=rollback_authority,
         evidence_refs=evidence_refs,
     )
@@ -663,6 +663,12 @@ def _create_review(
         "status_version": int(record["status_version"]),
         "decision_actor": str(review.get("decision_actor") or ""),
     }
+
+
+def _transition_subject_version(expected_generation: int) -> int:
+    """Bind terminal Review to the generation produced by the transition."""
+
+    return max(0, int(expected_generation)) + 1
 
 
 def _run_host_turn(

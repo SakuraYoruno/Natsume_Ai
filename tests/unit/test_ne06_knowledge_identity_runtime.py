@@ -19,6 +19,7 @@ from host_brain.surface_runtime.input_compiler import (
 )
 from scripts.runtime.run_ne06_knowledge_identity_live_acceptance import (
     _build_identity_pair,
+    _transition_subject_version,
 )
 
 
@@ -166,3 +167,8 @@ def test_live_runner_identity_pair_has_distinct_safe_runtime_directives() -> Non
     assert previous_directive
     assert proposed_directive
     assert previous_directive != proposed_directive
+
+
+def test_live_runner_terminal_reviews_bind_the_result_generation() -> None:
+    assert _transition_subject_version(1) == 2
+    assert _transition_subject_version(2) == 3

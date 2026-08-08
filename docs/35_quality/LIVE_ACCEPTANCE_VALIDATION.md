@@ -933,6 +933,8 @@ Knowledge／Identity 随后完成生产消费接线，但本段不越级记为 l
 
 当前仓库已提供单入口真实 runner：Knowledge 使用唯一合成 marker 验证 baseline 无 active fact、activate 后 fact 进入真实 `foreground_completed.reply_plan` 与最终 prompt、deprecate 后消失；Identity 使用同一仓库 Soul／Canon 构建两个结构化 release snapshot，验证 candidate directive／prompt 改变及 exact previous rollback。四次 authority 变化各绑定独立 Docker 双臂与 production Review；回执只保存合成输出 digest、fact/style digest、provider usage 和 transport identity，不保存密钥，也不探测远端 Edge。脚本提交后的实跑结果才可改变机器状态。
 
+`707332f1a` 首轮真实执行已完成 Knowledge apply 的 Docker 双臂、production Review、baseline/candidate 两次外部 Host 回合；deprecate 在写 projection 前以 `EVOLUTION_ACTIVATION_V2_REVIEW_REJECTED` fail-closed。原因是 runner 把 terminal Review 绑定到 source generation 1，而 repository 的 transition subject 是将要提交的 generation 2；同理 Identity rollback 应从 expected generation 2 绑定 result generation 3。代码已统一显式计算 `expected_generation + 1`。失败 ledger 不删除；首轮仅含合成内容的 active Knowledge 会以新的正确 Review 正常退役后再重跑。
+
 精确提交 `f2c13de42` 的首次预检完成两组 Docker evidence 并批准第一条 Review，但 runner 将 ReviewStore 的外层 record 和内层 ReviewItem 混为同一层，读取 `status` 时在任何 apply 前中止。SQLite 核对 active version 仍是 baseline、generation 仍为 1；该次没有候选版本切流或 Host 行为污染。读取已改为显式拆分两层，真实重跑前状态保持 `REAL_RERUN_PENDING`。
 
 精确提交 `7d296dc9e` 重跑又在 apply 前暴露中断恢复问题：首次 staged proposal 已注册相同 payload digest 的内容寻址版本，新 run 的独立反馈 trace 使用不同 provenance，旧 Repository 因 provenance 不同误判 version drift。版本 identity 实际只由不可变 payload 决定；修复后同 payload／同 version 保留 first-seen provenance 并允许独立 proposal trace，任何 payload 或 digest 变化仍 fail-closed。active version／generation 再次核对未改变，真实重跑仍待执行。

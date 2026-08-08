@@ -599,6 +599,7 @@
       "knowledge_identity_surface_consumer": "CODE_WIRED_ACTIVE_KNOWLEDGE_RECALL_ONLY_ACTIVE_IDENTITY_BOUNDED_COMPACT_DIRECTIVE",
       "knowledge_identity_surface_regression": "PASS_353",
       "knowledge_identity_live_runner": "CODE_READY_REAL_RUN_PENDING",
+      "knowledge_identity_live_attempt_1": "FAIL_CLOSED_KNOWLEDGE_DEPRECATE_REVIEW_SOURCE_GENERATION_BOUND_INSTEAD_OF_RESULT_GENERATION_FIX_PENDING_RETEST",
       "knowledge_no_recall_query_count": 0,
       "knowledge_identity_live_causal_acceptance": "PENDING_CURRENT_COMMIT",
       "ordinary_chat_added_writes_or_model_calls": 0,
