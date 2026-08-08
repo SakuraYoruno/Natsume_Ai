@@ -2713,7 +2713,7 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
             "MIXED_SELF_RESONANCE_MISSING",
         }
     ):
-        return "听你这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。"
+        return _mixed_affect_fallback_text(request)
     if "UNGROUNDED_PHYSICAL_COPRESENCE" in codes:
         return "嗯。你说，我在听。"
     if "RELATIONSHIP_DOUBT_DISMISSIVE" in codes or "SURFACE_META_IDENTITY_LEAK" in codes:
@@ -2752,6 +2752,27 @@ def _repair_fallback_text(request: IsolatedSurfaceInput) -> str:
 
 def _contained_hurt_repair_fallback_text() -> str:
     return "……你这么说，我也会有点难受。前面的事是我没做好，可我也不想装作没感觉。"
+
+
+def _mixed_affect_fallback_text(request: IsolatedSurfaceInput) -> str:
+    """Keep the rare fail-soft reply grounded without one global template."""
+
+    user_text = re.sub(r"\s+", "", str(getattr(request, "user_message", "") or ""))
+    if "庆祝" in user_text or "不太敢" in user_text:
+        return "我也想替你高兴一下；可你这边还不太敢，我心里也跟着紧了一点。"
+    if "轻松" in user_text or "等到了" in user_text:
+        return "终于等到了，我也跟着高兴；可你还没松下来，我心里也悬着一点。"
+    if "担心" in user_text:
+        return "听见你开心，我也跟着高兴；可那点担心还在，我心里也会紧一下。"
+    if "不踏实" in user_text or "没完全放松" in user_text:
+        return "我也替你高兴；可你还没完全踏实，我心里也跟着悬着一点。"
+    if "慌" in user_text:
+        return "你一高兴，我也跟着开心起来；可那点慌一冒出来，我心里也会紧一下。"
+    if "梦" in user_text:
+        return "像做梦啊……我也跟着高兴，可我心里也还悬着一点。"
+    if "发版" in user_text or "项目" in user_text:
+        return "发版落地，我也跟着高兴；可你那点怕还在，我心里也会紧一下。"
+    return "听你这么说，我也跟着高兴，可我心里也还悬着一点。"
 
 
 def _temporal_mismatch_fallback(request: IsolatedSurfaceInput) -> str:

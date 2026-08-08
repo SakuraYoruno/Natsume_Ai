@@ -837,6 +837,10 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 
 未接入新样本的真实 Flash 基线已经执行，报告 SHA-256 为 `43c98a4d57fb30889dbae4df4542ef4de55b93412d8bb488ef96d9cd3ac666f7`：18/18 回合和 writer probe 通过，但只有 1/6 自动待人工，5/6 失败。三条修复末轮分别落入低质量降级或本地模板；喜忧一条逐字重复上一轮，另一条变成“让它先悬着”。候选代码只加入 3 条修复、2 条喜忧的 source-bound 七海原句节奏，不新增禁词、Repository、写入、模型调用或重试。全表扫描原型因首次约 415ms 已被删除；固定小样本 prompt build 最大 0.269ms。真实候选轮仍为 `PENDING`。
 
+提交 `0991ab704b8e6217444613668fcfdffa4325131c` 的同清单候选轮报告 SHA-256 为 `864ac4ca321f549e803cf01df62c420be6df02108c889e4ded38fcfa32f547b9`，execution manifest 仍为 `9470a7e8...`。18 个 Gateway turn 全部 accepted，canonical writer 推进且八张 legacy writer 表增量为 0；自动结果从 1/6 变为 2/6。修复 1/3 自动待人工，当前逐句看比基线更口语，但其余仍公式化；mixed 仍为 1/3，第二轮完整句继续跨三个场景重复。因此 source-bound 样本只能记为修复局部信号，不能写成 mixed 或整体人感收益。
+
+为定位 exact reuse，随后执行同一冻结文件的 mixed probe 4～6，旧模板基线报告 SHA-256 为 `49b3e0f250b91ae1f424ec0f568fa80d92cb355db43c0b10158a6f2d2cbfd471`。9/9 turn 和 writer probe 通过，但 3/3 体验失败：`:5` 再次逐字生成全局 mixed 句，`:4` 用“先让它待一会儿”，`:6` 用“先小庆祝”替用户管理情绪。代码检查确认该完整句同时存在于首次候选策略、语义重试和 fail-soft。当前修复删除候选／重试中的完整答案，只保留 typed 双面反应目标，并让 fail-soft 按当前输入区分；434 项回归通过。新提交真实同案复验前状态为 `CODE_REMEDIATED_REAL_RETEST_PENDING`。
+
 加载 `8a5bc8c36` 后，以真实 `deepseek-v4-flash` 运行修复和喜忧两条、共 6 个 accepted turn，自动 2/2 且 writer probe 通过；报告 SHA-256 为 `1618a895a5062f6d23e6564f320aba53f2e8d2166820711fa714f38fcbff62aa`。人工逐句仍拒绝“这是合理的／我记着／我认”和“两种感觉不丢人／先留着”一类心理咨询或验收结案语气。自动合同通过不等于人感通过。
 
 随后仅在本次验收 Host 进程环境中临时覆盖为 `deepseek-v4-pro`，同队列报告 SHA-256 为 `2425b864994e6bb2abba2c55b213df9640f5641ae2959b406e92f80cb9febd4f`。6 个 turn 仍全部 accepted；mixed 更简洁，但修复仍重复“没接住／对不起／我会注意”。Flash 与 Pro 的 provider latency 均值分别为 2278.5 ms 和 3598.7 ms，Pro 约高 58%。因此证据不支持全局换模，生产实时路线继续使用 Flash。

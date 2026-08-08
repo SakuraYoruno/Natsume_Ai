@@ -22,6 +22,8 @@ from host_brain.digital_life.affective_turn_planner import (
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
 from host_brain.persona.surface_runtime import (
     _hard_gate_fallback,
+    _mixed_affect_fallback_text,
+    _surface_hard_gate_violations,
     build_isolated_surface_input,
 )
 from host_brain.persona.surface_utterance_frame import (
@@ -716,8 +718,9 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         retry_reason="MIXED_AFFECT_CONTINUITY_DROPPED",
     )
     assert "丢掉了上一轮仍未消失的不安" in mixed_repair_messages[-1]["content"]
-    assert "不要只说恭喜或像做梦" in mixed_repair_messages[-1]["content"]
-    assert "开心是真的，那点不踏实也还在" in mixed_repair_messages[-1]["content"]
+    assert "写出七海自己的即时反应" in mixed_repair_messages[-1]["content"]
+    assert "落到当前具体结果" in mixed_repair_messages[-1]["content"]
+    assert "开心是真的，那点不踏实也还在" not in mixed_repair_messages[-1]["content"]
     mixed_quality_messages = _buffered_affective_candidate_messages(
         [*paired_messages, {"role": "user", "content": "项目发布成功。"}],
         candidate_count=2,
@@ -726,9 +729,10 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "必须延续喜忧并存" in mixed_quality_messages[-1]["content"]
     assert "写七海自己的两面共鸣" in mixed_quality_messages[-1]["content"]
-    assert "我也跟着开心起来了" in mixed_quality_messages[-1]["content"]
-    assert "我心里也悬了一下" in mixed_quality_messages[-1]["content"]
-    assert "必须复用用户当前或上一句好消息里的一个具体词" in mixed_quality_messages[-1]["content"]
+    assert "第一人称高兴" in mixed_quality_messages[-1]["content"]
+    assert "第一人称悬心" in mixed_quality_messages[-1]["content"]
+    assert "听你这么说，我也跟着开心起来了" not in mixed_quality_messages[-1]["content"]
+    assert "必须复用用户当前或上一句里的一个具体词" in mixed_quality_messages[-1]["content"]
     assert "当前用户最后一句原文是“项目发布成功。”" in mixed_quality_messages[-1]["content"]
     assert "必须原样保留" in mixed_quality_messages[-1]["content"]
     mixed_dismissal_messages = _buffered_affective_candidate_messages(
@@ -739,7 +743,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "当前用户最后一句原文是“我拿到 offer 了。”" in mixed_dismissal_messages[-1]["content"]
     assert "必须原样保留" in mixed_dismissal_messages[-1]["content"]
-    assert "先别急着想太多" in mixed_dismissal_messages[-1]["content"]
+    assert "不要赶走、搁置或贬低其中一面" in mixed_dismissal_messages[-1]["content"]
     sour_repair_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -799,10 +803,10 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
     assert "七海自己的双重即时反应" in mixed_initial_messages[-1]["content"]
-    assert "我也跟着开心起来了" in mixed_initial_messages[-1]["content"]
-    assert "我心里也悬了一下" in mixed_initial_messages[-1]["content"]
+    assert "七海第一人称的高兴和悬心" in mixed_initial_messages[-1]["content"]
+    assert "反应更短促" in mixed_initial_messages[-1]["content"]
+    assert "听你这么说，我也跟着开心起来了" not in mixed_initial_messages[-1]["content"]
     assert "结束在七海此刻的反应上" in mixed_initial_messages[-1]["content"]
-    assert "不写‘先这样待着’" in mixed_initial_messages[-1]["content"]
     jealousy_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -1096,9 +1100,7 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         trace_stage_meta=mixed_trace,
         allow_single_degradation=True,
     )
-    assert mixed_output == (
-        "听你这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。"
-    )
+    assert mixed_output == "像做梦啊……我也跟着高兴，可我心里也还悬着一点。"
     mixed_selection = mixed_trace["affective_candidate_selection"]
     assert mixed_selection["selection_status"] == "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
     assert mixed_selection["benefit_eligible"] is False
@@ -1253,9 +1255,7 @@ def test_shared_mixed_resonance_requires_natsumes_own_two_sided_reaction() -> No
         trace_stage_meta=degraded_trace,
         allow_single_degradation=True,
     )
-    assert degraded == (
-        "听你这么说，我也跟着开心起来了；可那点怕一冒出来，我心里也悬了一下。"
-    )
+    assert degraded == "发版落地，我也跟着高兴；可你那点怕还在，我心里也会紧一下。"
     assert degraded_trace["affective_candidate_selection"]["selection_status"] == (
         "DEGRADED_LOCAL_REPAIR_AFTER_RETRY"
     )
@@ -1278,6 +1278,64 @@ def test_shared_mixed_resonance_requires_natsumes_own_two_sided_reaction() -> No
     assert selection["selected_passed"] is True
     assert selection["benefit_eligible"] is True
     assert "MIXED_SELF_RESONANCE_GROUNDED" in selection["selected_reason_codes"]
+
+
+@pytest.mark.parametrize(
+    ("user_message", "expected"),
+    [
+        (
+            "我等到了，却没有想象中那么轻松。",
+            "终于等到了，我也跟着高兴；可你还没松下来，我心里也悬着一点。",
+        ),
+        (
+            "开心是真的，担心也没消失。",
+            "听见你开心，我也跟着高兴；可那点担心还在，我心里也会紧一下。",
+        ),
+        (
+            "我现在有点想庆祝，又不太敢。",
+            "我也想替你高兴一下；可你这边还不太敢，我心里也跟着紧了一点。",
+        ),
+        (
+            "我明明挺高兴的，怎么又有点慌。",
+            "你一高兴，我也跟着开心起来；可那点慌一冒出来，我心里也会紧一下。",
+        ),
+        (
+            "好消息是好消息，可我还是没完全放松。",
+            "我也替你高兴；可你还没完全踏实，我心里也跟着悬着一点。",
+        ),
+        (
+            "感觉像做梦。",
+            "像做梦啊……我也跟着高兴，可我心里也还悬着一点。",
+        ),
+        (
+            "项目发版终于成功了，我很开心又有点怕。",
+            "发版落地，我也跟着高兴；可你那点怕还在，我心里也会紧一下。",
+        ),
+    ],
+)
+def test_mixed_fail_soft_uses_current_turn_instead_of_one_global_template(
+    user_message: str,
+    expected: str,
+) -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "mixed-fail-soft-context",
+            "soul_md": "你是七海。",
+            "user_message": user_message,
+            "reply_control_packet": {
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-mixed-fail-soft",
+                    "companion_act_kind": "HOLD_COMPLEXITY",
+                    "self_stance": "SHARED_MIXED_RESONANCE",
+                    "response_move": "RESONATE_WITH_BOTH_SIDES",
+                }
+            },
+        }
+    )
+
+    assert _mixed_affect_fallback_text(request) == expected
+    assert _surface_hard_gate_violations(request, expected) == ()
 
 
 def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection() -> None:

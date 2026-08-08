@@ -77,6 +77,8 @@ flowchart TB
 
 当 frame 明确为 `REPAIR` 或 `HOLD_COMPLEXITY` 时，Surface 还会附加对应的七海正向节奏样本。样本集只有 3+2 条，绑定本地原作行号并在代码版本中冻结；运行时不扫描 3.2MB 台词表、不访问 Repository，也不把样本文本当作当前事实。50 次 prompt build 的均值为 0.082ms、最大 0.269ms，模型调用数和重试上限不变。
 
+真实留出对照证明，source-bound 样本不能覆盖另一个系统层内嵌的完整 mixed 答案：该整句仍会跨场景被逐字选择。当前 `surface_affective_native_stream.py` 已删除首次候选和语义重试中的完整 mixed 示范句，只传“具体结果、七海自身高兴与悬心、两候选不同节奏”的 typed 目标；`surface_runtime.py` 的极端 fail-soft 也按当前用户措辞选择有界回复，不再复用一个全局句子。该变化不增加 writer、Repository、模型请求或重试，真实新提交复验前仍为候选状态。
+
 Fusion 不再让修复责任覆盖七海的自我感受：当上一条 accepted response 已形成 `MISUNDERSTOOD`，而当前输入又是直接针对七海的冒犯时，单一 composite Appraisal 同时保存 `HURT + CARE + CAUTION`。Planner 保持 `REPAIR`，但将 self affect、frame、Voice 与 Avatar 冻结为克制受伤的同一表达；没有待修复关系的独立冒犯仍是温和设界限，明确空间请求仍优先退开。这一变化只改变既有 Life episode 和本轮计划内容，不增加持久路径或调用次数。
 
 Surface 不再允许旧的通用修复重试覆盖这一 canonical 决定。typed composite frame 会选择专用首轮／重试微策略，并在候选评分与发送 Gate 同时要求有界的第一人称受伤语义；纯道歉不能冒充该 frame 已实现。命中失败仍只消费原有最多一次重试，第二次失败使用同门禁验证过的窄 fallback，不增加表、同步写入或模型请求上限。

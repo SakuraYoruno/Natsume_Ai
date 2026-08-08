@@ -31,7 +31,7 @@
 | 主动陪伴 | `companion_proactive.py`、permission ingress | `WIRED / PARTIAL` |
 | 偏好成长 | `companion_profile_lifecycle.py`、feedback ingress | `WIRED / PARTIAL` |
 | 表达计划 | `affective_turn_planner.py`、`companion_voice.py` | `WIRED` |
-| 语义说话骨架 | `CompanionUtteranceFrameV1`、`surface_utterance_frame.py`、场景化七海正向样本、Surface candidate gate | `NATURAL_TEXT_HOLDOUT_BASELINE_FAIL / CANDIDATE_REAL_RETEST_PENDING` |
+| 语义说话骨架 | `CompanionUtteranceFrameV1`、`surface_utterance_frame.py`、场景化七海正向样本、Surface candidate gate | `SOURCE_SAMPLE_PARTIAL / MIXED_TEMPLATE_REMOVAL_REAL_RETEST_PENDING` |
 | 表达交付 | `affective_expression_delivery.py`、Surface streaming | `WIRED / PARTIAL` |
 
 ## 3. 对话与记忆
@@ -47,6 +47,8 @@
 语义说话骨架是纯内存编译／渲染模块，不是审计服务。它不访问 repository、不调用模型、不保存用户原文，也不增加普通聊天的同步写；其目的只是让 compact、rich、native stream 和兼容 prompt 不再各自拼接不同的陪伴规则。
 
 原句样本同样属于纯内存表达资产：修复和喜忧各自只得到固定、可追源的少量正向节奏，其他回合不扫描完整语料。样本不会改变 canonical Affect、Relationship 或 Soul，也不会生成第二份风格状态。
+
+原句样本的真实对照只支持修复场景的局部收益，不支持 mixed。模块内原有完整 mixed 回复同时出现在首次候选、重试和 fail-soft，导致跨场景 exact reuse；当前实现已移除候选／重试里的整句模板，并把 fail-soft 收窄为当前输入驱动。模块仍只负责生成与发送前选择，不获得新的情感 authority。
 
 ## 4. 受管执行
 
@@ -119,5 +121,7 @@ Monitor 的生产 E2E 现在可以按验收范围拆开执行：默认仍包含�
 Tribe／Prefrontal 的兼容事件处理不再拥有自我情感 authority。即使 app-local `TribeApplicationPorts` 缺失或类型错误，Prefrontal 也必须按 canonical affective life 启用处理，禁止重新调用 Endocrine、Limbic、PainReward 或 volatile Bond writer；这些模块若保留，只能作为只读兼容投影。
 
 喜忧并存的可见文本由 `surface_affective_native_stream.py` 生成、`surface_candidate_guards.py` 验证、`candidate_scoring.py` 排序。只有 canonical typed frame 明确要求 `SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 时，候选才必须表达七海自身的高兴与悬心；用户情绪观察本身不能触发该规则，也不能写成七海的自我情绪。该链路复用既有双候选和最多一次质量重试，不拥有新的 journal 或 writer。
+
+生成器现在只描述两面反应的语义槽与差异化节奏，不再把一条可直接发送的完整中文回复塞给两个候选照抄。极端 fail-soft 仍由 `surface_runtime.py` 负责，但按当前消息的具体措辞选择有界版本，并继续标记 `benefit_eligible=false`。
 
 实验性的 `mixed_resonance_language.py` 因真实 cohort 未改善而已删除，当前模块图中不存在该生产环节。mixed 仍由 native stream 的同一次模型请求生成、typed Gate 验证和原选择器排序；后续语言微调不得偷偷增加第二次模型或新的情感 writer。

@@ -105,6 +105,8 @@ flowchart LR
 
 因此执行策略冻结为：不再增加 prompt 正例、禁词、评分规则或普通聊天审计；不再重复抽样同一随机轨迹挑选绿灯。下一阶段只能使用版本化真实自然文本调优或模型层方案，并以新的预注册变体队列比较 exact reuse、自然度、关系立场和三名评审偏好。远端 Edge 未启动或探测；网络安全、A09、A12、Security Monitor 与 Pentest 继续为 `NOT_RUN_USER_SKIPPED`。当前结论为“本机强制服务栈 PASS，数字生命人感 FAIL，整体 INCOMPLETE”。
 
+首个 source-bound 原句对照没有关闭该缺口：同一 6 条中自动结果只从 1/6 变为 2/6，修复表达局部改善，mixed 仍复用完整模板。随后 3 条未用于前述选择的 mixed 变体全部失败，确认系统提示和 fail-soft 中的整句答案才是模板坍缩的直接来源。当前修复属于删除模板而非增加 prompt：只保留 typed 语义形状，极端降级按当前输入区分；真实新提交对照前继续保持 `INCOMPLETE`。
+
 ### NE-04 真实 Docker Golden Suite
 
 提交 `8afa13f856c588edcec6a8e1ac4d205efbea02d2` 的 clean detached worktree 已执行 Research Planning、Proactive、Memory Write 三类可信实验，各自包含 baseline/candidate，共 6 个真实 Docker arm。镜像为 `python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df`；所有 arm 均为 `network=none`、只读根文件系统、`65534:65534` 非 root，effect audit 为 0。SQLite migration head 为 `0140#evolution_lab_redacted_dataset`，最终持久化 6 个 run receipt、3 个 report、3 个 proposal 和 1 个 suite receipt；运行目录无残留，生产副作用和生产影响均为 false。
