@@ -441,7 +441,7 @@ Secure Ingress
 |---|---|---|
 | A Architecture 2.0 | A01～A15 全部绑定最终 SHA 通过 | `NON_SECURITY_STATIC_249_RUNTIME_AND_REAL_STACK_PASS_A09_A12_SKIPPED_COVERAGE_PENDING` |
 | B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `RESEARCH_CODE_PASS_SCOPE_INHERITED_PENTEST_NOT_RUN_USER_SKIPPED` |
-| C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `FAIL_REAL_48_QUEUE_PENDING_THREE_REVIEWERS` |
+| C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `FAIL_REAL_48_TEXT_PLUS_RESTART_STRUCTURAL_6_OF_6_HUMAN_FULL_0_OF_6_18_DRIVER_PENDING` |
 | D 真实全栈 | 本地强制服务、路线、故障、恢复、性能和回滚通过 | `PARTIAL_NON_SECURITY_DOCKER_HOST_OBS_MONITOR_GATEWAY_PASS` |
 | 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `FAIL_CURRENT_SHA_LINE_68_50_BRANCH_51_40` |
 | pytest 收集 | 0 error | `PASS_11881_ITEMS` |

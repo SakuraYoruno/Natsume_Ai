@@ -102,6 +102,9 @@ def test_host_orchestrator_isolates_child_script_process_control() -> None:
     assert source.count("-TimeoutSeconds ([Math]::Max(60, (2 * $WaitSeconds) + 30))") == 1
     assert source.count("-TimeoutSeconds ([Math]::Max(30, $WaitSeconds + 30))") == 1
     assert "Start-Process -Wait" not in source
+    assert "$hostCatalogRecoveryWaitSeconds" in source
+    assert "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS" in source
+    assert "-TimeoutSeconds $hostCatalogRecoveryWaitSeconds" in source
 
 
 def test_obs_sidecar_receives_secret_file_references_without_copying_values() -> None:

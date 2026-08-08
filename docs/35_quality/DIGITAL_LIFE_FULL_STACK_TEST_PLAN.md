@@ -873,3 +873,25 @@ Flash 双轨迹报告 SHA-256 为 `1618a895a5062f6d23e6564f320aba53f2e8d21668207
 `1779108de` compact prompt 报告 SHA-256 为 `a67178c425cb4373c915e1b6290daa043050313223cb6162b39a77509f2975a2`：自动 1/2、6 个 accepted turn、writer probe 通过，人工仍拒绝“这我认”和“挺正常／待着”。这些词来自模型提示中的禁止示例，下一轮因此只验证删除反例词表、改用正向候选动作后是否消除负面词汇诱导。若同六轮仍未逐句通过，停止继续堆叠禁词，转为从已清洗七海原语料提供少量 scene-bound 正向节奏样本；不得直接扩大队列。
 
 删除反例词表后的真实 Flash 报告 SHA-256 为 `7a74162af8c8f1890d10c233e99e1043fed5385ec957b0c5864051780ceda8ab`：自动 2/2、6 个 accepted turn 和 writer probe 通过，但人工仍拒绝修复三轮的流程化道歉，以及 mixed 三轮的情绪解释／安排。持久 artifact 表明修复末轮 canonical self affect 仍为 `CALM + REPAIR_OPEN`，因此下一步不是继续堆提示词，而是验收复合情感因果：有 `MISUNDERSTOOD` aftereffect 的“你真烦”必须得到 `repair_under_directed_disrespect`、`SAD`、`REPAIR`、`CONTAINED_HURT` 和对应 frame；单独冒犯仍是 `SET_BOUNDARY`，明确空间仍是 `GIVE_SPACE`。564 项相邻回归通过只准入修复单条真实复验，不能恢复八类或完整 48 条。
+
+### 12.5 跨重启关系连续性真实驱动
+
+跨重启测试使用 `scripts/runtime/test_digital_life_restart_driver.py`，每次只执行一个冻结变体。`prepare` 必须通过真实 Host／真实模型形成 accepted response、canonical relationship episode 和 checkpoint；随后从测试进程外强杀并重启 Host；`resume` 必须重新打开同一 SQLite 数据根，逐字段核对 relationship state／revision／digest，再发送自然探针并把新 aftereffect 精确连接到重启前 response receipt。该驱动不经过 Gateway、远端 Edge 或 TaskGraph，因此不得外推为全链路通过。
+
+```powershell
+python scripts/runtime/test_digital_life_restart_driver.py prepare `
+  --variant <1..6> --host-base-url http://127.0.0.1:18080 `
+  --db-path <隔离 audit.sqlite3> --runtime-root <Host 运行目录> `
+  --checkpoint <checkpoint.json>
+
+# 在测试进程外强杀并使用生产脚本重启 Host
+
+python scripts/runtime/test_digital_life_restart_driver.py resume `
+  --variant <1..6> --host-base-url http://127.0.0.1:18080 `
+  --db-path <同一 audit.sqlite3> --runtime-root <同一 Host 运行目录> `
+  --checkpoint <同一 checkpoint.json>
+```
+
+`resume` 会在 checkpoint 同目录生成 `*-final.json`。当前六个变体结构恢复为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；但当前单人逐句复核为 0/6：回复没有自然续接冻结的“工作和休息怎么平衡”具体线程，只在部分变体保留了关系语气。因此工程结论为 `STRUCTURAL_PASS`，人感结论为 `FAIL`。测试还发现强杀后 loopback listener 已释放、Service Catalog 60 秒协调租约仍存在的启动窗口；修复必须只在精确 Host loopback endpoint 空闲时有界等待旧租约，端口被占用时立即拒绝，不能借机接管活实例。当前工作树 6/6 与修复回归仅作为候选证据，提交后仍须用精确 commit SHA 重跑一个代表变体并保存 tested-code fingerprint。
+
+主动陪伴、多模态和 Edge 故障共 18 个变体仍为 `NOT_RUN_REQUIRED_DRIVER`：生产 `life_tick` 会把 `proactive.gateway` outbox 经本机 19000 SSH tunnel 发往另一台电脑，用户已明确禁止本轮触碰远端 Edge。不得通过 scripted replay、mock transport 或直接写数据库替代真实驱动。

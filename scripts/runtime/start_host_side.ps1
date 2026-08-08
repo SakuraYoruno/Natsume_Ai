@@ -1608,6 +1608,30 @@ if (-not $envValues.ContainsKey("HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_
   $envValues["HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S"] = $candidateStartupTimeout
   $env:HOST_SERVICE_CATALOG_CANDIDATE_STARTUP_TIMEOUT_S = $candidateStartupTimeout
 }
+$catalogCoordinatorLeaseMs = 60000
+$catalogCoordinatorLeaseRaw = Get-EnvSetting `
+  -Values $envValues `
+  -Name "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS" `
+  -DefaultValue "60000"
+$parsedCatalogCoordinatorLeaseMs = 0L
+if (
+  [long]::TryParse(
+    [string]$catalogCoordinatorLeaseRaw,
+    [ref]$parsedCatalogCoordinatorLeaseMs
+  ) -and
+  $parsedCatalogCoordinatorLeaseMs -ge 60000 -and
+  $parsedCatalogCoordinatorLeaseMs -le 300000
+) {
+  $catalogCoordinatorLeaseMs = [long]$parsedCatalogCoordinatorLeaseMs
+}
+# A force-killed Host leaves only its bounded coordinator lease behind.  The
+# Python runtime waits for that stale lease only while the loopback listener is
+# free; the launcher must keep its health window open for that recovery wait
+# plus the normal candidate startup budget.
+$hostCatalogRecoveryWaitSeconds = [int][Math]::Min(
+  660,
+  $WaitSeconds + [Math]::Ceiling($catalogCoordinatorLeaseMs / 1000.0) + 5
+)
 
 $configuredAgentWorkspaceRoot = if (-not [string]::IsNullOrWhiteSpace($AgentWorkspaceRoot)) {
   [string]$AgentWorkspaceRoot
@@ -2023,7 +2047,7 @@ $healthUrl = "http://$probeHost`:$Port/health?skip_dependency_probes=1"
 $healthOk = Wait-HostCatalogStage `
   -Url $healthUrl `
   -ExpectedCatalogStage $catalogTargetStage `
-  -TimeoutSeconds $WaitSeconds `
+  -TimeoutSeconds $hostCatalogRecoveryWaitSeconds `
   -ExpectedProcessId ([int]$proc.Id)
 if (-not $healthOk) {
   Stop-ProcessTree -ProcessId ([int]$proc.Id) | Out-Null
@@ -2033,7 +2057,7 @@ if (-not $healthOk) {
   }
   throw (
     "host service failed final catalog stage health check at $healthUrl " +
-    "for stage $catalogTargetStage within $WaitSeconds seconds.`n$stderrTail"
+    "for stage $catalogTargetStage within $hostCatalogRecoveryWaitSeconds seconds.`n$stderrTail"
   )
 }
 

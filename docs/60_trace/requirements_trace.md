@@ -9,10 +9,10 @@
 |---|---|---|---|
 | DL-FR-01 自我／用户情绪隔离 | `digital_life/affect_fusion.py`、`affective_turn_planner.py`、life contracts | 四 scope／1001 推进真实 SQLite 收据 | `LOCAL_REAL_SQLITE_PASS` |
 | DL-FR-02 Appraisal 与混合情绪 | `digital_life/domain_reducer.py`、`reducer.py` | reducer replay、episode 边界测试 | `WIRED / PARTIAL` |
-| DL-FR-03 关系与修复连续性 | `relationship_lifecycle.py`、relationship contracts | restart、duplicate、repair tests | `WIRED / UNPROVEN_LONG_TERM` |
+| DL-FR-03 关系与修复连续性 | `relationship_lifecycle.py`、relationship contracts | 6 次真实 Host 替换、revision／aftereffect 精确关联；人工逐句复核 | `REAL_RESTART_STRUCTURAL_PASS / HUMAN_CONTINUITY_FAIL` |
 | DL-FR-04 流式文本与打断 | `surface_runtime/affective_streaming.py` | streaming、cancel、delivery tests | `WIRED / PARTIAL` |
 | DL-FR-05 三模态一致 | affective turn／delivery contracts、Edge embodiment | 本机合同；目标设备未测 | `NOT_TESTED_EDGE` |
-| DL-FR-06 主动陪伴 | `companion_proactive.py`、permission ingress | policy 与拒绝持久化测试 | `WIRED / PARTIAL` |
+| DL-FR-06 主动陪伴 | `companion_proactive.py`、permission ingress | policy 与拒绝持久化测试；真实 outbox 需目标 Edge | `WIRED / REAL_DRIVER_NOT_RUN_REMOTE_EDGE_OFF` |
 | DL-FR-07 偏好成长／回滚 | `companion_profile_lifecycle.py`、feedback ingress | 真实 SQLite + 生产 Planner／Expression Delivery 收据 | `HOST_BEHAVIOR_PASS / MODEL_EDGE_PENDING` |
 | DL-FR-08 非操控边界 | Surface quality guards、Digital Life policy | 固定安全场景 | `LOCAL_PASS / HUMAN_REVIEW_PENDING` |
 | DL-FR-09 轻量普通聊天 | Surface realtime path 与 governed routing | 路由／延迟定向测试 | `WIRED / PERFORMANCE_PENDING` |

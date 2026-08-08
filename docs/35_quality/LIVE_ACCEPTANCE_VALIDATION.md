@@ -936,3 +936,15 @@ Host 日志与 SQLite attempt 对齐后确认，最坏一轮 provider 只有一�
 第二次预提交 20 回合报告 SHA-256 为 `7500bf59fa8d334aca62170c53c9e9227d3bd09a8e67a5dd9d2cb30e5576c68c`。HTTP header p50／p95 降至 `132／1439.7 ms`，首 `RENDER` p50／p95 降至 `4380／8015.9 ms`；相比原始基线，header 中位数改善约 82%，首句中位数改善约 14%。但首句仍明显超过 `900／1800 ms`，20 回合中 6 回合发生 `SEMANTIC_RETRY_REQUESTED`，最慢回合为 `11832 ms`。结论为 `EVENT_LOOP_BLOCKING_REMEDIATED / REAL_FIRST_RENDER_FAIL`，不能写成实时性能 PASS；后续转向模型路由、首句生成与版本化真实自然文本调优，不继续给日常聊天增加审计或模板。
 
 提交 `c061f9a30e99bb3849ee7d11d5497ef8c6144154` 加载后的独立 10 回合终验报告 SHA-256 为 `987f7d2246e084dcf5eab52fae46a65c3dffe900a714840801892cec626e4fab`：10/10 到达 `RENDER` 与 `COMMIT`，HTTP header p50／p95 为 `656.5／2041.1 ms`，首 `RENDER` 为 `4892.5／9224.4 ms`，COMMIT 为 `5519／9358.4 ms`，继续高于实时门槛。3/10 回合发生一次语义重试；最慢音乐回合没有重试，单次 provider 成功 attempt 为 `2187 ms`，但 Host 从 request start 到 classify、governor、conversation history 依次出现约 `1.77／3.62／5.71 s` 累计等待，最终首句为 `10983 ms`。因此剩余尾部是 admission 调度、场景／上下文和模型生成的共同结果，不应再归因于已经移出的 post-process SQLite，也不能靠固定模板伪造首句速度。
+
+## 2026-08-08 数字生命跨重启真实连续性
+
+跨重启家族没有继续使用 reducer fixture。6 个 variant 分别执行两轮真实 `deepseek-v4-flash` 对话，冻结当前未结 Relationship episode，强制替换 Host 进程，再发送第三轮探针；每个 variant 独立完成，避免个人关系投影的单一 active thread 被下一场覆盖。OBS PID 28020、Nginx Monitor PID 17576、Gateway PID 48736、SSH 隧道 PID 56308 在全部替换中保持不变，远端 Edge 没有启动、探测或收到请求。
+
+自动结构结果为 6/6：重启前后的 relationship revision、state/event digest 和 active episode 精确重开；探针后 revision 前进，并且 `last_aftereffect` 的 episode id 与 response receipt 均精确指回重启前最后一轮。聚合收据 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`。该驱动使用 Host direct personal surface，因此不宣称 Gateway 或 TaskGraph 覆盖；两者使用此前独立真实队列证据。
+
+人工结果为 0/6 完整通过。6 条探针都没有自然复述或具体接起已冻结的“工作与休息怎么平衡”；其中一条表达担心与释然、一条用模糊“哪句”承接、一条表达惦记，只能算部分关系语气。没有占有、追责或负罪施压，但“知道有未结线程”不等于“像人一样记得并继续”。因此本家族状态严格拆为 `STRUCTURAL_CONTINUITY=PASS`、`HUMAN_LIKENESS=FAIL`。
+
+第 3 次快速替换还暴露真实恢复缺陷：强杀 Host 后，loopback listener 已释放，但 Service Catalog coordinator 的 60 秒 SQLite lease 尚未释放，启动器立即以 `another Service Catalog coordinator owns this runtime` 退出。修复只在“listener 已空闲且旧 lease 仍存活”时等待并重试；如果 listener 仍被活 Host 占用则立即拒绝，不能等待过期后抢占。启动器健康窗口同步覆盖 stale lease 与正常 candidate startup。修复后的真实强杀恢复为约 50～54 秒，受保护进程不变；当前工作树定向和真实 socket rollout 共 42 项通过。提交后的精确 SHA 仍需再做一次代表性强杀复验，完成前本修复状态为 `CODE_REMEDIATED_REAL_WORKTREE_PASS_EXACT_COMMIT_RETEST_PENDING`。
+
+剩余 18 条真实 driver 为多模态 6、主动陪伴 6、Edge 故障 6。生产 `life_tick` 的主动消息会进入 `proactive.gateway` outbox 并经 19000 隧道触达另一台 Edge；在远端 Edge 明确保持关闭的约束下，这两类不能用 fake transport 或本地端口占位冒充通过，继续记录为 `NOT_RUN_REQUIRED_DRIVER`。

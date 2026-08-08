@@ -644,3 +644,11 @@ Canon route 单测还必须覆盖 privacy-redacted payload：`status=OK` 且 det
 NE-05 本地 Gate 由 19 项 unit/contract/integration 构成，必须同时验证 Compiler 决定性、accepted trace 私密正文拒绝、真实文件签名与 quarantine、tamper fail-closed、V2 activation/rollback/degrade 同库原子性、未知 canary reconciliation、Host active-version 解析和旧 mutation authority 物理缺失。当前 19/19 通过，日志 SHA-256 为 `ee294424670931d80f23fa309884498b8d674e3b5a7e6248fc9165bf2fc910dd`。由于 Lab/Review/Canary 为测试 evidence，状态不得高于 `PARTIAL_LOCAL_PRODUCTION_SQLITE_AUTHORITY_PASS`。
 
 NE-06 本地 Gate 必须覆盖 Feedback subject-bound baseline、apply→rollback→新版本、签名 ingress scope；Knowledge expiry、shadow/enforce、冲突 cursor、winner 和 deprecation；Identity no-change、重大差异阻断与 exact rollback；V1 只读。当前 19/19 通过，日志 SHA-256 为 `38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d`。要提升为完整 PASS，必须由真实 Operator Review 和在线 Host 下一轮行为证明版本切换，不得用 Repository 断言替代。
+
+## 2026-08-08 数字生命跨重启真实驱动
+
+`scripts/runtime/test_digital_life_restart_driver.py` 采用 `prepare → 外部强杀／生产重启 → resume` 两阶段协议，一次严格运行一个 `1..6` 变体。定向测试必须覆盖参数拒绝、checkpoint tamper、tested-code fingerprint 漂移、狭义 pending-external readiness、精确 state／revision／digest 恢复和 aftereffect receipt 链接。Service Catalog 回归必须额外覆盖：endpoint 空闲时等待旧租约、endpoint 被占用时立即拒绝、等待期间出现新 listener 时停止，及生产 PowerShell 健康轮询窗口覆盖 coordinator lease。
+
+当前候选工作树结果：42 项新增定向测试通过；包含 socket rollout、DL-03 relationship restart、DL-06 proactive tick 与文档 Gate 的集中回归为 194 passed、2 warnings。六次真实 Host 强杀／重启结构结果为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；当前人工连续性为 0/6，不能标记数字生命体验通过。提交后必须再以精确 commit SHA 运行至少一个代表性强杀变体；报告中的 `tested_code.base_commit_sha`、fingerprint 与 scoped clean-worktree 必须匹配该提交。
+
+主动陪伴、多模态与 Edge 故障的 18 个真实变体因远端 Edge 禁止触碰而保持 `NOT_RUN_REQUIRED_DRIVER`。网络安全、A09、A12、Security Monitor 和 Pentest 继续记为 `NOT_RUN_USER_SKIPPED`，不纳入本轮阻断项。
