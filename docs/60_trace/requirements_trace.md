@@ -14,7 +14,7 @@
 | DL-FR-05 三模态一致 | affective turn／delivery contracts、Edge embodiment | 本机合同；目标设备未测 | `NOT_TESTED_EDGE` |
 | DL-FR-06 主动陪伴 | `companion_proactive.py`、permission ingress | policy 与拒绝持久化测试；真实 outbox 需目标 Edge | `WIRED / REAL_DRIVER_NOT_RUN_REMOTE_EDGE_OFF` |
 | DL-FR-07 偏好成长／回滚 | `companion_profile_lifecycle.py`、feedback ingress | 真实 SQLite + 生产 Planner／Expression Delivery 收据 | `HOST_BEHAVIOR_PASS / MODEL_EDGE_PENDING` |
-| DL-FR-07a NE-06 表达版本激活 | `companion_expression_experiment.py`、`version_activation_feedback.py`、Surface app-local expression projection port、compact prompt directive | `58c4e6ea5` 真实 candidate prompt digest／Token 变化并 exact rollback；265 项 allowlisted directive digest 回归，最终新提交待复验 | `PROMPT_CAUSAL_PASS / DURABLE_DIRECTIVE_EVIDENCE_PENDING` |
+| DL-FR-07a NE-06 表达版本激活 | `companion_expression_experiment.py`、`version_activation_feedback.py`、Surface app-local expression projection port、compact prompt directive | `7ab64a246` v3 正式收据 `8431de7c...`：19 项真实 Docker／Review／Host／directive digest／prompt delta／exact rollback 全过；265 项回归 | `LIVE_CAUSAL_PASS_SCOPE_BOUND / HUMAN_EXPERIENCE_UNPROVEN` |
 | DL-FR-08 非操控边界 | Surface quality guards、Digital Life policy | 固定安全场景 | `LOCAL_PASS / HUMAN_REVIEW_PENDING` |
 | DL-FR-09 轻量普通聊天 | Surface realtime path 与 governed routing | 路由／延迟定向测试 | `WIRED / PERFORMANCE_PENDING` |
 | DL-FR-10 真实 TTS／Avatar | GPT-SoVITS V4 B config、Edge runtime | 本机 CUDA语音通过；远端未测 | `LOCAL_PASS / EDGE_PENDING` |

@@ -901,3 +901,5 @@ python scripts/runtime/test_digital_life_restart_driver.py resume `
 `scripts/runtime/run_ne06_expression_live_acceptance.py` 必须在同一隔离 SQLite 和同一真实 Host 上依次执行 baseline、Docker Lab 双臂、production Review、candidate apply、candidate turn、第二组 Docker 双臂、rollback Review、exact rollback 和 rollback turn。三轮都必须命中真实 external provider；candidate 的 `reply_plan` directive、最终 ModelAttempt directive digest 与目标 payload 必须精确一致，candidate prompt digest 必须不同于 baseline，最终 projection 必须恢复 exact predecessor。Token 数只作为观察值，不再作为 prompt 是否变化的代理，因为不同文本可能产生相同 Token 计数。
 
 该 runner 不启动、停止或探测远端 Edge；Voice／Avatar 固定记为 `NOT_TESTED_REMOTE_EDGE_DISABLED`。单条模型输出差异只能证明版本指令进入真实生成链，不能替代 48 条盲测或“更像人”的人工结论。网络安全、Pentest、A09、A12 与 Security Monitor 按用户要求记为 `NOT_RUN_USER_SKIPPED`。
+
+当前正式执行绑定 `7ab64a2462755622a538c6267f35123ba497a006`，收据 SHA-256 为 `8431de7c3b3badaa61e2411d15d2dbe58752c835e924c661ca754a2dfe531b0c`。19 项强制检查全部通过；candidate prompt digest／Token／directive digest 变化并在 rollback 后恢复。该项工程因果关闭，体验结论仍为 `UNPROVEN_SINGLE_SAMPLE_NOT_A_BLIND_COMPARISON`。

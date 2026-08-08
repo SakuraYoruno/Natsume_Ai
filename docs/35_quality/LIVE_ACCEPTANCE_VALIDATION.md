@@ -943,6 +943,8 @@ NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070
 
 `58c4e6ea57e792133667cddc39f7142140302f91` 的下一次真实收据 SHA-256 为 `26f1fb1589a13b23548c60de0db9df8ed217a1005971abb10adfa7cc47e78a9a`。candidate 最终 prompt digest 已从 baseline 的 `5ec07f...` 变为 `afac03...`，prompt token 从 1628 变为 1654；rollback 又恢复原 digest 与 1628，证明 compact prompt 因果已经真实进入模型。Gate 仍保持 FAIL，因为 ModelAttempt Service 有意过滤 caller 任意 metadata，candidate 的 directive digest 未进入 durable row。当前仅把合法 64 位 `surface_expression_directive_digest` 加入显式 public allowlist，其他 caller metadata 继续拒绝；265 项相关回归通过。最终新提交复验前状态为 `PROMPT_CAUSAL_PASS / DURABLE_DIRECTIVE_EVIDENCE_PENDING`。
 
+精确提交 `7ab64a2462755622a538c6267f35123ba497a006` 的 v3 正式收据 SHA-256 为 `8431de7c3b3badaa61e2411d15d2dbe58752c835e924c661ca754a2dfe531b0c`，状态为 `PASS_REAL_DOCKER_REVIEW_ACTIVATION_SURFACE_CAUSAL_ROLLBACK`。19 项强制检查全部通过：两组 Docker 双臂各 2 个 run、production side effect 为 0、两个 Review 批准、三次真实 external Host turn、candidate active projection／style directive／directive digest 精确一致，最终 prompt digest `5ec07f...→afac03...` 且 Token `1628→1654`，rollback projection、style directive、prompt digest 与 1628 Token 全部恢复。最终 active version 是原 baseline，generation 9。远端 Voice／Avatar 仍为 `NOT_TESTED_REMOTE_EDGE_DISABLED`，网络安全为 `NOT_RUN_USER_SKIPPED`；单条正文差异不能替代盲测，所以 `human_experience_verdict` 保持 `UNPROVEN_SINGLE_SAMPLE_NOT_A_BLIND_COMPARISON`。
+
 ## 2026-08-08 普通对话事件循环与真实首句延迟
 
 新的直接 SSE 探针以同一 session 连续发送 20 个低风险日常回合，只记录阶段、字符数和正文摘要，不持久化正文。原始报告 SHA-256 为 `292bae13dd718cc2eb9263cc34caf5cdcb187f1100f4c079caae83acf2adbf21`：20/20 到达 `RENDER` 和 `COMMIT`，首 `RENDER` p50／p95 为 `5097.5／8287 ms`，HTTP header p50／p95 为 `742.5／3390 ms`，最坏 header 为 `9245 ms`。这撤销此前以 `user_to_surface_commit_ms` 代理首可见 Token 的口径；真实实时 Gate 明确失败。
