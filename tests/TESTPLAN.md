@@ -645,6 +645,20 @@ NE-05 本地 Gate 由 19 项 unit/contract/integration 构成，必须同时验�
 
 NE-06 本地 Gate 必须覆盖 Feedback subject-bound baseline、apply→rollback→新版本、签名 ingress scope；Knowledge expiry、shadow/enforce、冲突 cursor、winner 和 deprecation；Identity no-change、重大差异阻断与 exact rollback；V1 只读。当前 19/19 通过，日志 SHA-256 为 `38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d`。要提升为完整 PASS，必须由真实 Operator Review 和在线 Host 下一轮行为证明版本切换，不得用 Repository 断言替代。
 
+表达偏好 live acceptance 使用 production SQLite、真实 Docker 和真实非 mock Host 模型，但不触碰 Gateway／远端 Edge：
+
+```powershell
+python scripts/runtime/run_ne06_expression_live_acceptance.py `
+  --db-path <acceptance-audit.sqlite3> `
+  --runtime-root <ignored-runtime-root> `
+  --image-reference python@sha256:<digest> `
+  --commit-sha <exact-head> `
+  --host-base-url http://127.0.0.1:18080 `
+  --receipt-path <ignored-receipt.json>
+```
+
+通过必须同时满足：apply 与 rollback 各两个独立 Docker arm；容器禁网、只读、非 root且 effect count 为 0；两个不同 ReviewItem 都由明确 operator actor 批准；active projection 精确切到候选并恢复旧 digest；三个 Host 回合均有真实 external transport identity。单个文本样本不作为人感 A/B，Voice／Avatar 在远端 Edge 关闭时必须明确为 `NOT_TESTED_REMOTE_EDGE_DISABLED`。
+
 ## 2026-08-08 数字生命跨重启真实驱动
 
 `scripts/runtime/test_digital_life_restart_driver.py` 采用 `prepare → 外部强杀／生产重启 → resume` 两阶段协议，一次严格运行一个 `1..6` 变体。定向测试必须覆盖参数拒绝、checkpoint tamper、tested-code fingerprint 漂移、狭义 pending-external readiness、精确 state／revision／digest 恢复和 aftereffect receipt 链接。Service Catalog 回归必须额外覆盖：endpoint 空闲时等待旧租约、endpoint 被占用时立即拒绝、等待期间出现新 listener 时停止，及生产 PowerShell 健康轮询窗口覆盖 coordinator lease。

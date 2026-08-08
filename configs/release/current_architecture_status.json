@@ -587,7 +587,11 @@
       "log_sha256": "38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d",
       "junit_sha256": "b74dbc1e3d5d63784da0456cb2d707a98825fdfe6810faab41ad7775e87391fb",
       "verified": "FEEDBACK_APPLY_ROLLBACK_NEW_VERSION_SIGNED_INGRESS_KNOWLEDGE_EXPIRY_SHADOW_ENFORCE_CONFLICT_CURSOR_DEPRECATION_IDENTITY_NO_CHANGE_MAJOR_BLOCK_EXACT_ROLLBACK_V1_QUERY_ONLY",
-      "not_proven": "LIVE_HOST_NEXT_TURN_BEHAVIOR_AND_REAL_OPERATOR_REVIEW_CHAIN"
+      "not_proven": "LIVE_HOST_NEXT_TURN_BEHAVIOR_AND_REAL_OPERATOR_REVIEW_CHAIN",
+      "expression_live_acceptance_code": "CODE_COMPLETE_REAL_DOCKER_REVIEW_HOST_APPLY_ROLLBACK_RUN_PENDING",
+      "expression_live_acceptance_regression": "PASS_42",
+      "ordinary_chat_added_writes_or_model_calls": 0,
+      "remote_edge": "NOT_STARTED_OR_PROBED"
     },
     "integration_shard_preflight": {
       "status": "PASS_CURRENT_SHA_WITH_2_CLASSIFIED_REDIS_SKIPS",

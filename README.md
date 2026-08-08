@@ -17,7 +17,7 @@
 
 Architecture 2.0 的 Evolution Lab 也已在提交 `8afa13f85` 上完成真实 Docker Golden Suite：Research Planning、Proactive、Memory Write 各执行独立 baseline/candidate，共 6 个 arm；镜像以 digest 固定，容器禁网、只读根文件系统、非 root，外部副作用为 0。最终只持久化 3 份 Report 和 3 个 Proposal，`production_influence_enabled=false`；完成后响应丢失的 exact receipt 重开用例也通过。该 PASS 只关闭 NE-04 Lab 可信执行，不提升数字生命人感或整体发布状态。
 
-NE-05／NE-06 的 production Repository 与 Composition 也完成 38 项本地 authority 集成：Skill Compiler、签名隔离、篡改拒绝、activate／exact replay／rollback／degrade、Host active-version 解析，以及 Feedback、Knowledge、Identity 的 apply／冲突／过期／重大差异阻断／exact rollback 全部通过。这里的证据使用真实 SQLite 和文件系统，但 Lab/Review/Canary 数据仍由测试构造，尚未证明在线 Host 下一轮行为或真实外部 Skill 激活；因此两波仍是 `PARTIAL`，不是完整生产闭环。
+NE-05／NE-06 的 production Repository 与 Composition也完成 38 项本地 authority 集成：Skill Compiler、签名隔离、篡改拒绝、activate／exact replay／rollback／degrade、Host active-version 解析，以及 Feedback、Knowledge、Identity 的 apply／冲突／过期／重大差异阻断／exact rollback 全部通过。NE-06 现另有一条表达偏好真实验收入口：它在禁网、只读、非 root 的 Docker Lab 中比较当前版本与候选版本，再由既有 Review／Activation 切换在线 Host，最后恢复精确旧版本；普通对话不新增表、审计或模型轮次。该入口尚需绑定提交后的真实收据；NE-05 的外部 Skill canary、NE-06 的 Knowledge／Identity 在线行为和远端 Voice／Avatar 仍未完成，因此两波仍是 `PARTIAL`。
 
 普通对话的真实 SSE 延迟已不再用 Surface commit 代理。20 个连续低风险回合的原始基线为首句 p50／p95 `5097.5／8287 ms`，请求头 p50／p95 `742.5／3390 ms`；定位发现上一轮 `surface.post_process` 的 Trace、assistant turn 以及 Life projection/outbox 的同步 SQLite 操作仍占用 Host 事件循环。当前切片只把这些提交后的投影移到后台线程，不增加表、模型调用或普通对话审计。修复后预提交 20 轮请求头降至 `132／1439.7 ms`，首句降至 `4380／8015.9 ms`。精确提交 `c061f9a30` 的独立 10 轮复验为 10/10 完成，请求头 p50／p95 `656.5／2041.1 ms`，首句 `4892.5／9224.4 ms`；3/10 触发既有语义重试，最慢音乐回合没有重试，但 Host admission、场景／上下文和模型阶段共同形成 10.98 秒首句尾部。事件循环热点已改善，但实时门槛仍明确为 `FAIL`；下一步属于模型／首句生成策略和真实文本调优，不再靠增加审计或模板假装变快。
 
