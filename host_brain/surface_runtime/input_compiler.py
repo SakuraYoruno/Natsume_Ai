@@ -13,6 +13,9 @@ from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMo
 from host_brain.persona.body_sense import project_body_sense_from_life_snapshot
 from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.tribe.default_mode_agent import get_default_mode_agent
+from host_brain.tribe.prefrontal_runtime_policy import (
+    expression_preference_directive,
+)
 import re
 import time
 
@@ -351,6 +354,11 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
+    task_control = _apply_active_expression_preferences(
+        task_control,
+        agent_input=agent_input,
+        ports=ports,
+    )
     _surface_sync_reply_plan(
         agent_input=agent_input,
         trace_stage_meta=trace_stage_meta,
@@ -498,6 +506,45 @@ def build_surface_main_chain_input_from_surface_reply_input(
         liveliness=_liveliness,
         active_loops=_active_loops,
     )
+
+
+def _apply_active_expression_preferences(
+    task_control: Any,
+    *,
+    agent_input: Any,
+    ports: SurfaceRuntimePorts,
+) -> dict[str, Any]:
+    """Put the active expression version on the actual Surface prompt path.
+
+    This is a single local projection read.  It performs no model call and no
+    durable write; an unavailable optional preference projection must not make
+    ordinary companion chat unavailable.
+    """
+
+    control = dict(task_control or {})
+    resolver = ports.resolve_expression_preferences
+    if not callable(resolver):
+        return control
+    try:
+        policy = resolver(
+            persona_user_id=str(
+                getattr(agent_input, "person_id", "") or ""
+            ).strip()
+        )
+    except Exception:
+        return control
+    directive = expression_preference_directive(policy)
+    if not directive:
+        return control
+    existing = [
+        str(item).strip()
+        for item in list(control.get("style_anchor") or [])
+        if str(item).strip()
+    ]
+    control["style_anchor"] = list(
+        dict.fromkeys([directive, *existing])
+    )
+    return control
 
 
 def _apply_affective_turn_guidance(

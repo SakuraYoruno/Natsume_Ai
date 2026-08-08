@@ -935,6 +935,10 @@ NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070
 
 `414917c7b` 已完成 baseline 真实 Host 回合，apply 仍在事务前置 Review 校验中被拒绝。逐字段对照确认 report、proposal、evidence、actor、expiry 和 status 均正确，错误是 runner 把 Review subject version 绑定到“当前 generation”；生产 authority 的冻结合同要求绑定本次 transition 将创建的 generation，即 apply 为 `current + 1`、rollback 为再 `+ 1`。现在由类型化 helper 统一计算；本次同样没有发生 active projection 切换。
 
+精确提交 `d2a528bc7b3c854f0ce3dcd273d4df0b64c1ee70` 随后完成完整结构闭环：apply／rollback 各两个 digest-pinned Docker arm，容器禁网、只读、非 root且外部副作用为 0；两个 Review 分别批准 generation 2 与 3；active version 从 `expression-baseline-3bdf52b760c59b2e59e9c97c` 切到 `expression-5bef30cdff50408e4bc15969` 后精确恢复；三次 Host 均命中真实 `deepseek-v4-flash` external transport。收据 SHA-256 为 `0df41437d507326fb9cc38f54c6f5a888a2ae5a6c8bfa5c1fdf8593bc8c717af`。
+
+该次三轮 prompt token 均为 1628，不能把三个随机输出差异当成偏好因果。调用图复核确认 `resolve_persona_expression_hint()` 只有定义和单测，没有任何生产调用者；版本 authority 已切换，但 Surface 模型输入未消费。当前修复不增加新表、写入、审计、模型调用或远端请求，只经 app-local port 读取一次 active expression projection，并把最多三条有界偏好合并成 Surface 第一条语言锚；不可用时普通聊天保持原行为。56 项 Surface／Prefrontal／NE-06 activation 回归通过。精确提交真实重跑前状态为 `LIVE_STRUCTURE_PASS / CAUSAL_RETEST_PENDING`，单样本人感仍为 `UNPROVEN`。
+
 ## 2026-08-08 普通对话事件循环与真实首句延迟
 
 新的直接 SSE 探针以同一 session 连续发送 20 个低风险日常回合，只记录阶段、字符数和正文摘要，不持久化正文。原始报告 SHA-256 为 `292bae13dd718cc2eb9263cc34caf5cdcb187f1100f4c079caae83acf2adbf21`：20/20 到达 `RENDER` 和 `COMMIT`，首 `RENDER` p50／p95 为 `5097.5／8287 ms`，HTTP header p50／p95 为 `742.5／3390 ms`，最坏 header 为 `9245 ms`。这撤销此前以 `user_to_surface_commit_ms` 代理首可见 Token 的口径；真实实时 Gate 明确失败。

@@ -67,6 +67,7 @@ from host_brain.persistence.evolution_lab_v2_repository import (  # noqa: E402
 )
 from host_brain.persistence.review_repository import ReviewStore  # noqa: E402
 from host_brain.tribe.prefrontal_runtime_policy import (  # noqa: E402
+    expression_preference_directive,
     expression_preference_hints,
 )
 
@@ -309,6 +310,22 @@ def main(argv: list[str] | None = None) -> int:
             else active_after_rollback["payload"]
         )
         == expression_preference_hints(original_payload),
+        "baseline_surface_policy_exact": (
+            _turn_expression_directive(baseline_turn)
+            == expression_preference_directive(original_payload)
+        ),
+        "candidate_surface_policy_exact": (
+            _turn_expression_directive(candidate_turn)
+            == expression_preference_directive(target_payload)
+        ),
+        "rollback_surface_policy_exact": (
+            _turn_expression_directive(rollback_turn)
+            == expression_preference_directive(original_payload)
+        ),
+        "candidate_prompt_tokens_changed": (
+            int(dict(candidate_turn.get("model") or {}).get("prompt_tokens") or 0)
+            != int(dict(baseline_turn.get("model") or {}).get("prompt_tokens") or 0)
+        ),
         "docker_apply_two_arms": len(apply_authority["report"].runs) == 2,
         "docker_rollback_two_arms": (
             len(rollback_authority["report"].runs) == 2
@@ -325,12 +342,12 @@ def main(argv: list[str] | None = None) -> int:
         "rollback_error_empty": not rollback_error,
     }
     status = (
-        "PASS_REAL_DOCKER_REVIEW_ACTIVATION_HOST_TURN_ROLLBACK"
+        "PASS_REAL_DOCKER_REVIEW_ACTIVATION_SURFACE_CAUSAL_ROLLBACK"
         if all(checks.values())
         else "FAIL"
     )
     payload = {
-        "schema": "natsume.ne06.expression-live-acceptance.v1",
+        "schema": "natsume.ne06.expression-live-acceptance.v2",
         "status": status,
         "run_id": run_id,
         "commit_sha": commit,
@@ -579,6 +596,11 @@ def _run_host_turn(
         {},
     )
     attempt = _model_attempt(db_path, request_id)
+    surface_style_anchors = _surface_style_anchors(
+        db_path,
+        request_id,
+        timeout_s=min(10.0, max(1.0, timeout_s / 3.0)),
+    )
     return {
         "status_code": status_code,
         "request_id": request_id,
@@ -588,7 +610,56 @@ def _run_host_turn(
         "commit_status": str(commit.get("status") or ""),
         "commit_reason_code": str(commit.get("reason_code") or ""),
         "model": attempt,
+        "surface_style_anchors": surface_style_anchors,
     }
+
+
+def _surface_style_anchors(
+    db_path: Path,
+    request_id: str,
+    *,
+    timeout_s: float,
+) -> list[str]:
+    """Read the existing accepted foreground projection, without new audit."""
+
+    if not request_id:
+        return []
+    deadline = time.monotonic() + max(0.0, float(timeout_s))
+    while True:
+        with sqlite3.connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM life_command
+                WHERE correlation_id = ?
+                  AND command_type = 'foreground_completed'
+                ORDER BY created_at_ms DESC
+                LIMIT 1
+                """,
+                (request_id,),
+            ).fetchone()
+        if row is not None:
+            try:
+                payload = json.loads(str(row[0] or "{}"))
+            except json.JSONDecodeError:
+                return []
+            reply_plan = dict(payload.get("reply_plan") or {})
+            return [
+                str(item).strip()
+                for item in list(reply_plan.get("style_anchor") or [])
+                if str(item).strip()
+            ]
+        if time.monotonic() >= deadline:
+            return []
+        time.sleep(0.05)
+
+
+def _turn_expression_directive(turn: Mapping[str, Any]) -> str:
+    for item in list(turn.get("surface_style_anchors") or []):
+        text = str(item or "").strip()
+        if text.startswith("已激活的长期表达偏好（本轮执行）："):
+            return text
+    return ""
 
 
 def _model_attempt(db_path: Path, request_id: str) -> dict[str, Any]:

@@ -33,6 +33,10 @@ from host_brain.app.route_execution_ports import (
 from host_brain.app.surface_runtime_composition import build_surface_runtime_ports
 from host_brain.app.user_preference_store import build_user_preference_pack
 from host_brain.observability.runtime_audit import _persist_post_process_audit
+from host_brain.tribe.prefrontal_runtime_policy import (
+    resolve_prefrontal_persona_id,
+    resolve_prefrontal_persona_workspace_id,
+)
 
 
 class AgentRuntimeCompositionError(RuntimeError):
@@ -207,6 +211,23 @@ def build_agent_runtime_application_ports(
 
         return build_conversation_experience_read_pack(ledger=ledger(), **kwargs)
 
+    def resolve_expression_preferences(
+        *,
+        persona_user_id: str,
+    ) -> dict[str, Any] | None:
+        provider = host_services.evolution_activation_service
+        if not callable(provider):
+            return None
+        service = provider()
+        resolver = getattr(service, "resolve_expression_preferences", None)
+        if not callable(resolver):
+            return None
+        payload = resolver(
+            workspace_id=resolve_prefrontal_persona_workspace_id(),
+            subject_id=resolve_prefrontal_persona_id(persona_user_id),
+        )
+        return dict(payload) if isinstance(payload, dict) else None
+
     async def stream_realtime_chat(**kwargs: Any):
         if realtime_companion_ports is None:
             raise AgentRuntimeCompositionError(
@@ -248,6 +269,7 @@ def build_agent_runtime_application_ports(
             audit_ledger=ledger,
         ),
         stream_realtime_chat=stream_realtime_chat,
+        resolve_expression_preferences=resolve_expression_preferences,
     )
     surface_runtime_ports = build_surface_runtime_ports(
         agent_runtime_ports=application_ports,

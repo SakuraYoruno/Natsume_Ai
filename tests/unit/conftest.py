@@ -48,6 +48,7 @@ def surface_runtime_ports_factory():
                 "agent_role": "surface_reply",
             },
             "model_attempt_service": _model_attempt_service,
+            "resolve_expression_preferences": lambda **_kwargs: None,
         }
         values.update(overrides)
         return SurfaceRuntimePorts(**values)

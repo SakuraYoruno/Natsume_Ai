@@ -31,6 +31,11 @@ class AgentRuntimeApplicationPorts:
     # callable is optional so isolated read/worker fixtures remain small;
     # production composition always binds it.
     stream_realtime_chat: Callable[..., Any] | None = None
+    # One bounded active-projection read.  Expression preferences are
+    # self/persona scoped, not user-authored render policy, and therefore the
+    # app adapter resolves their canonical workspace/subject before Surface
+    # sees them.
+    resolve_expression_preferences: Callable[..., dict[str, Any] | None] | None = None
 
 
 __all__ = [

@@ -665,6 +665,8 @@ ReviewStore 的命令返回值是外层 durable record，其中 `status_version`
 
 Activation Review 的 `subject_version` 绑定将被创建的新 projection generation，而不是调用前的 current generation：若 `expected_generation=N`，Review 必须为 `N+1`。apply 与 rollback 各自计算一次，禁止手写偏移。
 
+真实结构闭环通过后还必须检查激活版本是否进入生产 Surface prompt；Repository 中 `candidate_hints_active=true` 本身不够。active projection 必须经 app-local port 在下一轮读取，并位于最终 `ReplyControlPacket.style_anchor` 前三条中的首位；rollback 后该指令必须消失或恢复为旧版本。不得为此增加普通对话表、同步写、额外模型调用或远端请求。`d2a528bc7` 的结构收据 SHA-256 为 `0df41437d507326fb9cc38f54c6f5a888a2ae5a6c8bfa5c1fdf8593bc8c717af`，三轮 prompt token 均为 1628，故只记 `LIVE_STRUCTURE_PASS`；当前因果接线 56 项回归通过，真实 delta 待新提交复验。
+
 ## 2026-08-08 数字生命跨重启真实驱动
 
 `scripts/runtime/test_digital_life_restart_driver.py` 采用 `prepare → 外部强杀／生产重启 → resume` 两阶段协议，一次严格运行一个 `1..6` 变体。定向测试必须覆盖参数拒绝、checkpoint tamper、tested-code fingerprint 漂移、狭义 pending-external readiness、精确 state／revision／digest 恢复和 aftereffect receipt 链接。Service Catalog 回归必须额外覆盖：endpoint 空闲时等待旧租约、endpoint 被占用时立即拒绝、等待期间出现新 listener 时停止，及生产 PowerShell 健康轮询窗口覆盖 coordinator lease。

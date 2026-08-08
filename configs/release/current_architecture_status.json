@@ -579,7 +579,7 @@
       "not_proven": "REAL_SKILL_SPECIFIC_DOCKER_LAB_REPORT_EXTERNAL_CANARY_AND_PRODUCTION_HOST_ACTIVATION"
     },
     "feedback_knowledge_identity_local_authority_acceptance": {
-      "status": "PARTIAL_LOCAL_PRODUCTION_SQLITE_AUTHORITY_PASS_LIVE_HOST_BEHAVIOR_PENDING",
+      "status": "PARTIAL_LOCAL_AUTHORITY_AND_LIVE_STRUCTURE_PASS_EXPRESSION_CAUSAL_RETEST_PENDING",
       "evidence_commit_sha": "2b9d42f4b28c6328c6e2922a0fe3b048ea52c4c8",
       "selected_tests": 19,
       "passed": 19,
@@ -587,10 +587,11 @@
       "log_sha256": "38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d",
       "junit_sha256": "b74dbc1e3d5d63784da0456cb2d707a98825fdfe6810faab41ad7775e87391fb",
       "verified": "FEEDBACK_APPLY_ROLLBACK_NEW_VERSION_SIGNED_INGRESS_KNOWLEDGE_EXPIRY_SHADOW_ENFORCE_CONFLICT_CURSOR_DEPRECATION_IDENTITY_NO_CHANGE_MAJOR_BLOCK_EXACT_ROLLBACK_V1_QUERY_ONLY",
-      "not_proven": "LIVE_HOST_NEXT_TURN_BEHAVIOR_AND_REAL_OPERATOR_REVIEW_CHAIN",
-      "expression_live_acceptance_code": "CODE_COMPLETE_REAL_DOCKER_REVIEW_HOST_APPLY_ROLLBACK_RUN_PENDING",
-      "expression_live_acceptance_regression": "PASS_42",
-      "expression_live_acceptance_preflight": "THREE_PRE_APPLY_DEFECTS_FIXED_REVIEW_RECORD_NESTING_CONTENT_ADDRESSED_PROVENANCE_REUSE_AND_TARGET_GENERATION_BINDING_REAL_RERUN_PENDING",
+      "not_proven": "EXPRESSION_PROMPT_CAUSAL_DELTA_KNOWLEDGE_IDENTITY_LIVE_BEHAVIOR_AND_REMOTE_VOICE_AVATAR",
+      "expression_live_acceptance_code": "CODE_COMPLETE_APP_LOCAL_ACTIVE_PROJECTION_TO_SURFACE_FIRST_STYLE_ANCHOR_REAL_CAUSAL_RERUN_PENDING",
+      "expression_live_acceptance_regression": "PASS_56",
+      "expression_live_acceptance_preflight": "PASS_REAL_DOCKER_REVIEW_HOST_APPLY_ROLLBACK_STRUCTURE_D2A528BC7_PROMPT_TOKENS_IDENTICAL_CAUSAL_CLAIM_REJECTED",
+      "expression_live_acceptance_structure_receipt_sha256": "0df41437d507326fb9cc38f54c6f5a888a2ae5a6c8bfa5c1fdf8593bc8c717af",
       "ordinary_chat_added_writes_or_model_calls": 0,
       "remote_edge": "NOT_STARTED_OR_PROBED"
     },
