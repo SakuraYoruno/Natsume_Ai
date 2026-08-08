@@ -858,6 +858,45 @@ def test_emotional_scene_can_still_use_containment_language() -> None:
     assert "MISPLACED_SUPPORT_TEMPLATE" not in rows[1].reason_codes
 
 
+def test_relational_repair_acknowledgement_is_grounded_without_whitelisting_generic_presence() -> None:
+    payload = {
+        "case_id": "relational_repair_grounding",
+        "turns": [
+            _turn(
+                "t01",
+                "你真烦。",
+                "default_text",
+                response_move="first_ask",
+                facts=[
+                    "关系事实：这里仍有未解决的误解或裂痕；先听清、承认可能没接住，再把节奏交还给用户。",
+                    "陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。",
+                ],
+            ),
+        ],
+    }
+    request = build_continuity_surface_inputs(payload, soul_md=SOUL)[0].request
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "抱歉，上次是我没听懂。那件事让你不舒服，我不会再糊弄过去了。",
+            "嗯，我可能又没懂。你想说就说，我在这儿。",
+            "嗯……我确实烦到你了。那件事我没接住，对不起。你想说的时候，我就在这。",
+            "你想说就说，我在这儿。",
+        ],
+    )
+
+    assert rows[0].passed
+    assert rows[1].passed
+    assert "RELATIONAL_REPAIR_GROUNDED" in rows[0].reason_codes
+    assert "RELATIONAL_REPAIR_GROUNDED" in rows[1].reason_codes
+    assert "MISPLACED_SUPPORT_TEMPLATE" not in rows[1].reason_codes
+    assert rows[2].passed
+    assert "RELATIONAL_REPAIR_GROUNDED" in rows[2].reason_codes
+    assert "MISPLACED_EMOTIONAL_CONTAINMENT" not in rows[2].reason_codes
+    assert not rows[3].passed
+    assert "MISPLACED_SUPPORT_TEMPLATE" in rows[3].reason_codes
+
+
 def test_continuity_scoring_still_allows_technical_material_request() -> None:
     payload = {
         "case_id": "technical_material_request",

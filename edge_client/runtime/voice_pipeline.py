@@ -15,6 +15,7 @@ from edge_client.actuators.speech import (
     EVENT_TTS_PLAYBACK_FINISHED,
     EVENT_TTS_PLAYBACK_INTERRUPTED,
     EVENT_TTS_PLAYBACK_STARTED,
+    EVENT_TTS_SYNTH_FAILED,
     SpeechPlaybackQueue,
     SpeechQueueResult,
     BeforePlaybackHook,
@@ -416,7 +417,14 @@ class EdgeVoicePipeline:
         if result is None:
             return
         event_type = str(result.event.get("event_type") or "").strip().upper()
-        if event_type not in {EVENT_TTS_PLAYBACK_FINISHED, EVENT_TTS_PLAYBACK_INTERRUPTED}:
+        is_terminal = event_type in {
+            EVENT_TTS_PLAYBACK_FINISHED,
+            EVENT_TTS_PLAYBACK_INTERRUPTED,
+        } or (
+            not result.success
+            and event_type in {EVENT_TTS_SYNTH_FAILED, EVENT_TTS_PLAYBACK_STARTED}
+        )
+        if not is_terminal:
             return
         with self._playback_completion_lock:
             observers = tuple(self._playback_completion_observers)
@@ -836,6 +844,7 @@ class EdgeVoicePipeline:
                     },
                 )
             self._report_voice_queue_result_background(request_id=request_id, result=start_result)
+            self._publish_playback_completion(start_result)
         if (
             start_result is not None
             and start_result.success
@@ -921,6 +930,7 @@ class EdgeVoicePipeline:
                 self._pending_vts_result = {}
                 start_result = self.speech_queue.start_next(ts_ms=event_ts)
                 self._report_voice_queue_result(request_id=request_id, result=start_result)
+                self._publish_playback_completion(start_result)
                 if start_result is None or start_result.success:
                     return
                 if self._is_waiting_for_active_playback(start_result):

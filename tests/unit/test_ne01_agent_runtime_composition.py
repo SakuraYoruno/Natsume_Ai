@@ -204,9 +204,12 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
 ) -> None:
     ledger = object()
     life_memory_store = object()
+    chroma_client = object()
+    episodic_store = type("EpisodicStore", (), {"chroma": chroma_client})()
     conversation_history = object()
     recall_service = object()
     captured: dict[str, object] = {}
+    recall_service_builds: list[dict[str, object]] = []
     legacy_bond_client_calls: list[str] = []
 
     async def fake_run_retrieval(**kwargs):  # noqa: ANN003, ANN202
@@ -215,6 +218,7 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
 
     def fake_build_recall_service(**kwargs):  # noqa: ANN003, ANN202
         captured["recall_service"] = kwargs
+        recall_service_builds.append(dict(kwargs))
         return recall_service
 
     def fake_build_user_preference_pack(**kwargs):  # noqa: ANN003, ANN202
@@ -236,6 +240,7 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
         host_services=_host_services(
             ledger=lambda: ledger,
             life_memory_store=lambda: life_memory_store,
+            episodic_store=lambda: episodic_store,
             conversation_history=lambda: conversation_history,
             bond_neo4j_client=lambda: legacy_bond_client_calls.append("resolved"),
         ),
@@ -265,11 +270,74 @@ def test_agent_runtime_composition_binds_chat_retrieval_to_host_scope(
     ) == {"status": "OK"}
     assert dict(captured["preference_pack"])["ledger"] is ledger
     assert retrieval_kwargs["recall_service_factory"]() is recall_service
+    assert retrieval_kwargs["recall_service_factory"]() is recall_service
     assert dict(captured["recall_service"]) == {
         "ledger": ledger,
         "life_memory_store": life_memory_store,
+        "chroma_client": chroma_client,
     }
+    assert len(recall_service_builds) == 1
     assert legacy_bond_client_calls == []
+
+
+def test_agent_runtime_binds_active_knowledge_and_identity_read_ports(
+    monkeypatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+    active_identity = {
+        "workspace_id": "host-default",
+        "snapshot": {"snapshot_ref": "identity-snapshot://active"},
+    }
+
+    class EvolutionService:
+        def search_active_knowledge(self, **kwargs):  # noqa: ANN003, ANN201
+            calls.append(dict(kwargs))
+            namespace = str(kwargs["namespace"])
+            if namespace.startswith("project-knowledge://"):
+                return [
+                    {
+                        "doc_id": "knowledge://active/project",
+                        "content": "PROJECT_NE06_ACTIVE",
+                        "score": 0.8,
+                        "metadata": {"namespace": namespace},
+                    }
+                ]
+            return []
+
+        def active_identity(self, **kwargs):  # noqa: ANN003, ANN201
+            calls.append({"identity": dict(kwargs)})
+            return active_identity
+
+    monkeypatch.setenv("HOST_KNOWLEDGE_WORKSPACE_ID", "host-default")
+    service = EvolutionService()
+    ports = build_agent_runtime_application_ports(
+        host_services=_host_services(
+            evolution_activation_service=lambda: service,
+        ),
+        life_authority_provider=lambda: (object(), object()),
+    )
+
+    assert ports.search_active_knowledge is not None
+    rows = ports.search_active_knowledge(
+        query="PROJECT_NE06_ACTIVE",
+        person_id="default",
+        top_k=4,
+        threshold=0.05,
+    )
+    assert [item["doc_id"] for item in rows] == [
+        "knowledge://active/project"
+    ]
+    searched_namespaces = [
+        str(call["namespace"])
+        for call in calls
+        if "namespace" in call
+    ]
+    assert searched_namespaces == [
+        "life-memory://person/default",
+        "project-knowledge://workspace/host-default",
+    ]
+    assert ports.resolve_active_identity is not None
+    assert ports.resolve_active_identity() == active_identity
 
 
 def test_agent_runtime_scope_fails_closed_when_nested_host_provider_is_missing() -> None:

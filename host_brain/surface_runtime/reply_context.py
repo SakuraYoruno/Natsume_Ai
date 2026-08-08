@@ -89,7 +89,7 @@ from host_brain.surface_runtime.quality_guards import (
 )
 from host_brain.surface_runtime.subagent_context import (
     _surface_pragmatic_guidance_action,
-    _surface_pragmatic_guidance_must_include,
+    _surface_pragmatic_guidance_fact_lines,
     _surface_pragmatic_guidance_must_not_do,
     _surface_pragmatic_intent_fact_lines,
     _surface_sub_agent_result_fact_lines,
@@ -565,11 +565,16 @@ def _surface_task_control_from_reply_plan(
     ):
         task_mode = "memory_followup"
         response_move = "memory_followup"
+    relationship_guidance = build_relationship_reply_guidance(
+        _safe_mapping(getattr(agent_input, "emotion_context", None))
+    )
     pragmatic_guidance_action = (
         ""
         if accepted_result_synthesis
         else _surface_pragmatic_guidance_action(agent_input, ports=ports)
     )
+    if relationship_guidance.repair_required and pragmatic_guidance_action == "clarify_reference":
+        pragmatic_guidance_action = ""
     if pragmatic_guidance_action == "clarify_reference":
         task_mode = "reference_clarification"
         response_move = "clarify_reference"
@@ -582,9 +587,6 @@ def _surface_task_control_from_reply_plan(
     )
     if isinstance(trace_stage_meta, dict) and life_director_pack:
         trace_stage_meta["life_director"] = dict(life_director_pack)
-    relationship_guidance = build_relationship_reply_guidance(
-        _safe_mapping(getattr(agent_input, "emotion_context", None))
-    )
     if isinstance(trace_stage_meta, dict) and relationship_guidance.available:
         trace_stage_meta["relationship_life_guidance"] = (
             relationship_guidance.trace()
@@ -620,6 +622,11 @@ def _surface_task_control_from_reply_plan(
             ]
         )
     pragmatic_fact_lines = _surface_pragmatic_intent_fact_lines(agent_input, ports=ports)
+    if pragmatic_guidance_action == "clarify_reference":
+        pragmatic_fact_lines = (
+            *_surface_pragmatic_guidance_fact_lines(agent_input, ports=ports),
+            *pragmatic_fact_lines,
+        )
     if pragmatic_fact_lines and not accepted_result_synthesis:
         task_facts = _clean_list(
             [
@@ -693,7 +700,11 @@ def _surface_task_control_from_reply_plan(
                     trace_stage_meta=trace_stage_meta,
                 ),
                 *_surface_user_preference_must_not_do(agent_input, ports=ports),
-                *_surface_pragmatic_guidance_must_not_do(agent_input, ports=ports),
+                *(
+                    _surface_pragmatic_guidance_must_not_do(agent_input, ports=ports)
+                    if pragmatic_guidance_action == "clarify_reference"
+                    else ()
+                ),
                 *(
                     ()
                     if preference_query_owned
@@ -788,10 +799,6 @@ def _surface_task_control_from_reply_plan(
                             agent_input=agent_input,
                             ports=ports,
                             trace_stage_meta=trace_stage_meta,
-                        ),
-                        *_surface_pragmatic_guidance_must_include(
-                            agent_input,
-                            ports=ports,
                         ),
                         *(
                             ()

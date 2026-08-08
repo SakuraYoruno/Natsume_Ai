@@ -8,9 +8,10 @@ execution, or recovery authority of its own.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+import logging
 import re
 import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
 
@@ -19,6 +20,7 @@ ContinuationRunner = Callable[
     Awaitable[Sequence[Mapping[str, Any]]],
 ]
 _REASON_CODE = re.compile(r"[A-Z][A-Z0-9_]{0,119}")
+_LOGGER = logging.getLogger(__name__)
 
 
 class PeriodicDurableContinuation:
@@ -55,6 +57,7 @@ class PeriodicDurableContinuation:
         self._wake_event: asyncio.Event | None = None
         self._last_report: tuple[dict[str, Any], ...] = ()
         self._last_failure: dict[str, Any] | None = None
+        self._last_logged_failure: tuple[str, str] | None = None
         self._completed_cycles = 0
 
     async def run_once(self) -> tuple[dict[str, Any], ...]:
@@ -73,8 +76,25 @@ class PeriodicDurableContinuation:
                     "error_type": type(exc).__name__,
                     "ts_ms": time.time_ns() // 1_000_000,
                 }
+                failure_key = (
+                    str(self._last_failure["reason_code"]),
+                    str(self._last_failure["error_type"]),
+                )
+                if failure_key != self._last_logged_failure:
+                    _LOGGER.error(
+                        "%s: durable continuation failed (%s)",
+                        failure_key[0],
+                        failure_key[1],
+                    )
+                    self._last_logged_failure = failure_key
                 raise
             self._last_report = report
+            if self._last_logged_failure is not None:
+                _LOGGER.info(
+                    "%s: durable continuation recovered",
+                    self._last_logged_failure[0],
+                )
+                self._last_logged_failure = None
             self._last_failure = None
             self._completed_cycles += 1
             return tuple(dict(item) for item in report)

@@ -252,7 +252,7 @@ class InternalStartupCheckpointContinuation:
             )
         terminal: dict[str, Any] | None = None
         terminal_count = 0
-        async for event in self._application.execute_stream(
+        async for event in self._application.execute_startup_continuation_stream(
             command=command,
             work_order=work_order,
             assignment=assignment,

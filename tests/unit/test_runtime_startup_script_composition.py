@@ -40,6 +40,46 @@ def test_edge_side_stop_wrapper_uses_named_parameter_splatting() -> None:
     assert "$invokeArgs = @()" not in source
 
 
+def test_edge_stop_reaps_repo_scoped_model_workers_and_process_tree() -> None:
+    source = (ROOT / "scripts/runtime/stop_edge.ps1").read_text(encoding="utf-8")
+
+    assert "function Get-DescendantProcessIds" in source
+    assert "function Stop-ProcessTree" in source
+    assert "function Stop-StaleRepoEdgeProcesses" in source
+    assert 'edge_client\\actuators\\tts_persistent_worker.py' in source
+    assert '$normalized.Contains("-m edge_client")' in source
+    assert "Stop-ProcessTree -RootProcessId $edgePid" in source
+    assert "Stop-ProcessTree -RootProcessId $listeningPid" in source
+    assert 'Join-Path $env:SystemRoot "System32\\taskkill.exe"' in source
+    assert "/PID $RootProcessId /T /F" in source
+    assert "stale_repo_edge_process_ids" in source
+
+
+def test_edge_start_supports_explicit_isolated_data_root() -> None:
+    edge = (ROOT / "scripts/runtime/start_edge.ps1").read_text(encoding="utf-8")
+    wrapper = (ROOT / "scripts/runtime/start_edge_side.ps1").read_text(encoding="utf-8")
+
+    assert '[string]$DataRoot = ""' in edge
+    assert '[System.IO.Path]::GetFullPath($DataRoot)' in edge
+    assert 'SetEnvironmentVariable("NATSUME_DATA_DIR", $resolvedDataRoot, "Process")' in edge
+    assert 'data_root = if ([string]::IsNullOrWhiteSpace($resolvedDataRoot))' in edge
+    assert '[string]$DataRoot = ""' in wrapper
+    assert "-DataRoot $DataRoot `" in wrapper
+
+
+def test_real_edge_voice_probe_never_accepts_a_secret_argument_or_mock() -> None:
+    source = (ROOT / "scripts/runtime/test_edge_real_voice_acceptance.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'os.environ.get("EDGE_HMAC_SHARED_KEY")' in source
+    assert 'parser.add_argument("--expected-data-root"' in source
+    assert "--shared-key" not in source
+    assert '"mock_transport": False' in source
+    assert '"physical_playback_requested": True' in source
+    assert 'barge_summary["reason_code"] == "VOICE_INTERRUPTED"' in source
+
+
 def test_host_orchestrator_isolates_child_script_process_control() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"
@@ -62,6 +102,9 @@ def test_host_orchestrator_isolates_child_script_process_control() -> None:
     assert source.count("-TimeoutSeconds ([Math]::Max(60, (2 * $WaitSeconds) + 30))") == 1
     assert source.count("-TimeoutSeconds ([Math]::Max(30, $WaitSeconds + 30))") == 1
     assert "Start-Process -Wait" not in source
+    assert "$hostCatalogRecoveryWaitSeconds" in source
+    assert "HOST_SERVICE_CATALOG_COORDINATOR_LEASE_MS" in source
+    assert "-TimeoutSeconds $hostCatalogRecoveryWaitSeconds" in source
 
 
 def test_obs_sidecar_receives_secret_file_references_without_copying_values() -> None:
@@ -306,6 +349,41 @@ def test_host_listener_lookup_is_scoped_to_the_configured_bind_address() -> None
     assert "Get-ListeningPid -ProbePort $Port -ProbeHost $BindHost" in stop_source
 
 
+def test_explicit_host_stop_keeps_sidecar_children_scoped_to_runtime_root() -> None:
+    host = (ROOT / "scripts/runtime/stop_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    obs = (ROOT / "scripts/runtime/stop_obs_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    monitor = (ROOT / "scripts/runtime/stop_monitor_proxy.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    child_env = host.index("$childEnvFile = ")
+    stop_obs = host.index("$obsRaw = & $stopObsScript", child_env)
+    stop_monitor = host.index("$monitorRaw = & $stopMonitorScript", stop_obs)
+    remove_snapshot = host.index("Remove-Item -Path $runtimeEnvFile", stop_monitor)
+    assert child_env < stop_obs < stop_monitor < remove_snapshot
+    assert "-EnvFile $childEnvFile -RuntimeRoot $RuntimeRoot" in host
+    assert (
+        '-EnvFile $childEnvFile -RuntimeRoot (Join-Path $RuntimeRoot "monitor_proxy")'
+        in host
+    )
+
+    assert "$runtimeRootWasExplicit = " in obs
+    assert obs.count("if (-not $stopped -and -not $runtimeRootWasExplicit) {") == 2
+    assert "global process and port fallback disabled" in obs
+
+    assert "$runtimeRootWasExplicit = " in monitor
+    assert "$listenerMatchesScope = $matchingPids -contains [int]$listeningPid" in monitor
+    assert (
+        "$listenerMatchesScope -or "
+        "(-not $runtimeRootWasExplicit -and $null -eq $proxyPid)"
+        in monitor
+    )
+
+
 def test_host_waits_for_final_catalog_identity_not_an_intermediate_listener() -> None:
     source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
         encoding="utf-8"
@@ -477,6 +555,26 @@ def test_host_launcher_exports_explicit_workspace_root_to_runtime_snapshot() -> 
         in source[preflight:docker_start]
     )
     assert "agent_workspace_root = $resolvedAgentWorkspaceRoot" in source
+
+
+def test_host_launcher_exports_resolved_bind_to_runtime_snapshot() -> None:
+    source = (ROOT / "scripts/runtime/start_host_side.ps1").read_text(
+        encoding="utf-8"
+    )
+    bind_resolution = source.index("if (-not $BindHost) {")
+    port_resolution = source.index("if ($Port -le 0) {", bind_resolution)
+    probe_resolution = source.index("$probeHost = ", port_resolution)
+    runtime_snapshot = source.index("$null = Write-RuntimeEnvFile", probe_resolution)
+    resolved_bind_source = source[port_resolution:probe_resolution]
+
+    for expected in (
+        '$env:HOST_APP_HOST = [string]$BindHost',
+        '$envValues["HOST_APP_HOST"] = [string]$BindHost',
+        '$env:HOST_APP_PORT = [string]$Port',
+        '$envValues["HOST_APP_PORT"] = [string]$Port',
+    ):
+        assert expected in resolved_bind_source
+    assert bind_resolution < port_resolution < probe_resolution < runtime_snapshot
 
 
 def test_child_script_capture_does_not_wait_for_long_lived_descendant(

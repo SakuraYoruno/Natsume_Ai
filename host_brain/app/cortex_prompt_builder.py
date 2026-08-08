@@ -262,6 +262,15 @@ def _build_interaction_state_summary(context_plane: Any) -> str:
             "不要只回语气词，不要复读上一句，也不要转成固定开放问句。"
         )
 
+    if ongoing_thread == "deictic_topic_update":
+        context = f"上一轮明确说的是“{followup_context_excerpt}”。" if followup_context_excerpt else ""
+        return (
+            "【当前对话线程】\n"
+            f"对方是在更新刚才那个具体话题的进展，不是在开启一个没有来由的新话题。{context}"
+            "自然点出一次具体话题再回应结果，让对方听得出你知道‘那件事’指什么；"
+            "不要复述整段历史，不要补造未说过的细节，也不要只回泛泛的‘解决就好’。"
+        )
+
     if ongoing_thread == "identity_loop":
         return (
             "【当前对话线程】\n"

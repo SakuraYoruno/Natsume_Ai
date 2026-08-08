@@ -61,6 +61,40 @@ def test_persistent_worker_is_closed_after_synthesis_timeout(monkeypatch) -> Non
     close.assert_called_once_with()
 
 
+def test_persistent_worker_is_closed_after_startup_timeout(monkeypatch) -> None:
+    adapter = _PersistentProcessSoVITSAdapter(config=TtsConfig(device="cpu"))
+    monkeypatch.setattr(adapter, "_start_process_locked", lambda: None)
+    monkeypatch.setattr(
+        adapter,
+        "_read_message",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("ready timeout")),
+    )
+    close = MagicMock()
+    monkeypatch.setattr(adapter, "close", close)
+
+    with pytest.raises(TimeoutError, match="ready timeout"):
+        adapter.start()
+
+    close.assert_called_once_with()
+
+
+def test_persistent_worker_is_closed_after_ready_rejection(monkeypatch) -> None:
+    adapter = _PersistentProcessSoVITSAdapter(config=TtsConfig(device="cpu"))
+    monkeypatch.setattr(adapter, "_start_process_locked", lambda: None)
+    monkeypatch.setattr(
+        adapter,
+        "_read_message",
+        lambda **_kwargs: {"event": "ready", "success": False, "detail": "load rejected"},
+    )
+    close = MagicMock()
+    monkeypatch.setattr(adapter, "close", close)
+
+    with pytest.raises(RuntimeError, match="load rejected"):
+        adapter.start()
+
+    close.assert_called_once_with()
+
+
 def test_tts_manager_rejects_utterance_language_that_does_not_match_voice(
     monkeypatch,
 ) -> None:

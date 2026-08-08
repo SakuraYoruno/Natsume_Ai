@@ -222,6 +222,11 @@ def _provider_transport_measurements(metadata: Mapping[str, Any] | None) -> dict
     external = metadata.get("transport_external")
     if isinstance(external, bool):
         result["transport_external"] = external
+    cost_policy_digest = str(metadata.get("model_cost_policy_digest") or "").strip().lower()
+    if len(cost_policy_digest) == 64 and all(
+        char in "0123456789abcdef" for char in cost_policy_digest
+    ):
+        result["model_cost_policy_digest"] = cost_policy_digest
     return result
 
 
@@ -286,6 +291,10 @@ class ModelAttemptService:
         prompt = prepared.prompt
         last_error_code = "MODEL_ROUTE_EXHAUSTED"
         last_error_message = "model route exhausted without a successful attempt"
+        previsibility_transport_retries = int(
+            request.previsibility_transport_retries
+        )
+        availability_first = previsibility_transport_retries > 0
 
         while len(attempts) < budget and target_index < len(prepared.route.targets):
             remaining_ms = self._remaining_ms(prepared.deadline_at)
@@ -414,24 +423,26 @@ class ModelAttemptService:
             except AttemptAuditError:
                 raise
             except TimeoutError as exc:
+                timeout_status = (
+                    AttemptStatus.TIMED_OUT
+                    if availability_first or guard is None
+                    else AttemptStatus.REJECTED
+                )
+                timeout_error_code = (
+                    "PROVIDER_TIMEOUT"
+                    if availability_first or guard is None
+                    else "MODEL_PROVIDER_USAGE_UNPROVEN"
+                )
                 terminal = self._terminal_record(
                     started,
                     started_monotonic=started_monotonic,
-                    status=(
-                        AttemptStatus.REJECTED
-                        if guard is not None
-                        else AttemptStatus.TIMED_OUT
-                    ),
-                    error_code=(
-                        "MODEL_PROVIDER_USAGE_UNPROVEN"
-                        if guard is not None
-                        else "PROVIDER_TIMEOUT"
-                    ),
+                    status=timeout_status,
+                    error_code=timeout_error_code,
                     error_message=_safe_error_message(exc),
                 )
                 await self._audit(terminal)
                 attempts.append(terminal)
-                if guard is not None:
+                if guard is not None and not availability_first:
                     return ModelAttemptResult(
                         request_id=request.request_id,
                         success=False,
@@ -442,29 +453,41 @@ class ModelAttemptService:
                     )
                 last_error_code = "PROVIDER_TIMEOUT"
                 last_error_message = "provider attempt timed out"
+                if (
+                    previsibility_transport_retries > 0
+                    and len(attempts) < budget
+                ):
+                    previsibility_transport_retries -= 1
+                    retry_reason = "previsibility_transport_retry:provider_timeout"
+                    continue
             except Exception as exc:
+                provider_error_code = str(
+                    getattr(exc, "code", type(exc).__name__.upper())
+                ).strip() or "PROVIDER_ERROR"
+                provider_failure_status = (
+                    AttemptStatus.FAILED
+                    if availability_first or guard is None
+                    else AttemptStatus.REJECTED
+                )
+                audited_error_code = (
+                    provider_error_code
+                    if availability_first or guard is None
+                    else "MODEL_PROVIDER_USAGE_UNPROVEN"
+                )
                 terminal = self._terminal_record(
                     started,
                     started_monotonic=started_monotonic,
-                    status=(
-                        AttemptStatus.REJECTED
-                        if guard is not None
-                        else AttemptStatus.FAILED
-                    ),
-                    error_code=(
-                        "MODEL_PROVIDER_USAGE_UNPROVEN"
-                        if guard is not None
-                        else type(exc).__name__.upper()
-                    ),
+                    status=provider_failure_status,
+                    error_code=audited_error_code,
                     error_message=(
-                        "guarded provider call failed without canonical usage"
-                        if guard is not None
-                        else _safe_error_message(exc)
+                        _safe_error_message(exc)
+                        if availability_first or guard is None
+                        else "guarded provider call failed without canonical usage"
                     ),
                 )
                 await self._audit(terminal)
                 attempts.append(terminal)
-                if guard is not None:
+                if guard is not None and not availability_first:
                     return ModelAttemptResult(
                         request_id=request.request_id,
                         success=False,
@@ -473,8 +496,18 @@ class ModelAttemptService:
                         error_code="MODEL_PROVIDER_USAGE_UNPROVEN",
                         error_message="guarded provider call failed without canonical usage",
                     )
-                last_error_code = terminal.error_code or "PROVIDER_ERROR"
+                last_error_code = provider_error_code
                 last_error_message = terminal.error_message or "provider attempt failed"
+                if (
+                    previsibility_transport_retries > 0
+                    and len(attempts) < budget
+                ):
+                    previsibility_transport_retries -= 1
+                    retry_reason = (
+                        "previsibility_transport_retry:"
+                        f"{last_error_code.lower()}"
+                    )
+                    continue
 
             target_index += 1
             retry_reason = f"provider_fallback:{last_error_code.lower()}"
@@ -1002,12 +1035,40 @@ class ModelAttemptService:
             "scene_type": request.scene_type,
             "cognitive_tier": request.cognitive_tier,
         }
-        # Model-node identity is a governed public dimension.  Preserve only
-        # this explicit key from caller metadata; arbitrary request metadata
-        # must never enter the durable audit journal.
+        # Model-node identity and the secret-free digests proving bounded
+        # Surface directives are governed public dimensions.
+        # Preserve only these explicit keys; arbitrary request metadata must
+        # never enter the durable audit journal.
         model_node_id = str(request.metadata.get("model_node_id") or "").strip()
         if model_node_id:
             audit_metadata["model_node_id"] = model_node_id
+        expression_directive_digest = str(
+            request.metadata.get("surface_expression_directive_digest") or ""
+        ).strip().lower()
+        if len(expression_directive_digest) == 64 and all(
+            char in "0123456789abcdef"
+            for char in expression_directive_digest
+        ):
+            audit_metadata[
+                "surface_expression_directive_digest"
+            ] = expression_directive_digest
+        knowledge_set_digest = str(
+            request.metadata.get("surface_active_knowledge_set_digest") or ""
+        ).strip().lower()
+        knowledge_count = request.metadata.get("surface_active_knowledge_count")
+        if (
+            len(knowledge_set_digest) == 64
+            and all(
+                char in "0123456789abcdef" for char in knowledge_set_digest
+            )
+            and isinstance(knowledge_count, int)
+            and not isinstance(knowledge_count, bool)
+            and 1 <= knowledge_count <= 4
+        ):
+            audit_metadata[
+                "surface_active_knowledge_set_digest"
+            ] = knowledge_set_digest
+            audit_metadata["surface_active_knowledge_count"] = knowledge_count
         started = ModelAttemptRecord(
             attempt_id=attempt_id,
             request_id=request.request_id,

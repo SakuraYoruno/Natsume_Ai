@@ -1013,6 +1013,7 @@ async def test_internal_accepted_artifact_promotes_with_real_git_and_sqlite(
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="internal-accepted-owner",
+            clock=lambda: NOW,
             canonical_executor=AgentRuntimeExecutor(
                 artifact_store=artifacts,
                 workspace_runtime=workspace_runtime,
@@ -1228,6 +1229,7 @@ async def test_internal_checkpoint_charge_and_terminal_bundle_preserve_abc_bound
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="internal-budget-rejected-owner",
+            clock=clock,
             canonical_executor=_ProtectedExecutor(calls),
             runtime_context_application=_RuntimeContextAuthority(
                 principal_id=principal_id
@@ -1463,6 +1465,7 @@ async def test_internal_boundary_c_rolls_back_every_terminal_bundle_fault(
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="internal-budget-rejected-fault-owner",
+            clock=clock,
             canonical_executor=_ProtectedExecutor([]),
             runtime_context_application=_RuntimeContextAuthority(
                 principal_id=principal_id
@@ -1790,6 +1793,7 @@ async def test_internal_real_sealed_budget_rejection_restarts_to_tombstone_and_c
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id=owner_id,
+            clock=clock,
             canonical_executor=canonical_executor,
             runtime_context_application=_RuntimeContextAuthority(
                 principal_id=principal_id
@@ -2296,6 +2300,7 @@ async def test_internal_post_review_cancellation_recovers_sealed_checkpoint_afte
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id=owner_id,
+            clock=clock,
             canonical_executor=canonical_executor,
             cancellation_authority_verifier=(
                 SecureIngressGraphCancellationAuthorityVerifier(claim_store)
@@ -2724,6 +2729,7 @@ async def test_internal_seal_recovers_projection_after_restart_without_agent_rep
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id=owner_id,
+            clock=clock,
             canonical_executor=canonical_executor,
             runtime_context_application=_RuntimeContextAuthority(
                 principal_id=principal_id
@@ -3133,16 +3139,17 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
     runtime_group = None
     claim_store = SQLiteSecureIngressStore(db_path)
     try:
-        task_store = DurableTaskStore(db_path)
+        clock = _MutableClock()
+        task_store = DurableTaskStore(db_path, clock=clock)
         event_store = RuntimeEventStore(db_path)
-        review_store = ReviewStore(db_path)
+        review_store = ReviewStore(db_path, clock=clock)
         infrastructure = SimpleNamespace(
             task_store=task_store,
             review_store=review_store,
-            review_continuation_store=ReviewContinuationStore(db_path),
-            command_repository=HostCommandRepository(db_path),
+            review_continuation_store=ReviewContinuationStore(db_path, clock=clock),
+            command_repository=HostCommandRepository(db_path, clock=clock),
             outbox_publisher=RuntimeOutboxPublisher(task_store, event_store),
-            worker_projection_store=WorkerProjectionStore(db_path),
+            worker_projection_store=WorkerProjectionStore(db_path, clock=clock),
         )
         infrastructure.internal_agent_checkpoint_uow = _checkpoint_uow(
             task_store,
@@ -3182,6 +3189,7 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="internal-owner",
+            clock=clock,
             canonical_executor=executor,
             runtime_context_application=runtime_context,
             action_preview_service=preview_authority,
@@ -3336,6 +3344,7 @@ async def test_internal_work_order_is_governed_durable_and_replay_safe(tmp_path:
             audit_ref=review_audit_ref,
         )
         executor.review_required = True
+        clock.advance(10_000)
         review_order = AgentWorkOrder(
             work_order_id="work-order-internal-runtime-review",
             domain="code",
@@ -3629,6 +3638,7 @@ async def test_write_agent_finish_cannot_create_durable_acceptance(
             result_repository=result_repository,
             runtime_router=CanonicalRuntimeRouter(),
             owner_id="internal-write-finish-owner",
+            clock=lambda: NOW,
             canonical_executor=AgentRuntimeExecutor(
                 artifact_store=AgentArtifactStore(tmp_path / "agent-runs"),
                 model_attempt_service=attempt_service,

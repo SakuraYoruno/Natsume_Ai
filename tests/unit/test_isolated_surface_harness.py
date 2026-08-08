@@ -112,6 +112,43 @@ def test_native_realtime_prompt_is_compact_and_keeps_persona_boundary() -> None:
     assert "## 必须自然包含\n- 无" not in rendered
 
 
+def test_native_realtime_repair_prompt_uses_curated_nanami_rhythm() -> None:
+    request = _request(
+        user_message="你嘴上说懂了，可你还是没懂。",
+        reply_control_packet={
+            "response_move": "repair",
+            "task_mode": "relationship_repair",
+            "emotional_tone": "contained_hurt",
+            "relationship_distance": "familiar",
+            "information_budget": "short",
+            "question_budget": 0,
+            "companion_utterance_frame": {
+                "schema_version": "companion_utterance_frame.v1",
+                "frame_id": "frame-repair-test",
+                "companion_act_kind": "REPAIR",
+                "semantic_focus": "RELATIONAL_IMPACT",
+                "self_stance": "OWN_REPAIR_WITH_CONTAINED_HURT",
+                "response_move": "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT",
+                "inference_policy": "BOUNDED_BY_EVIDENCE",
+                "relationship_posture": "BOUNDARIED_REPAIR",
+                "question_policy": "NONE",
+                "ending_mode": "HONEST_STOP",
+                "forbidden_claims": ["PREMATURE_REPAIR"],
+                "created_at_ms": 1,
+            },
+        },
+    )
+
+    rendered = "\n".join(
+        item["content"] for item in build_native_stream_surface_messages(request)
+    )
+
+    assert build_surface_original_quote_query(request).scene_id == "relationship_repair"
+    assert "【七海原句节奏样本】" in rendered
+    assert "啊啊,抱、抱歉。打断你说话了" in rendered
+    assert "而且,我也就由着性子来了我也有责任" in rendered
+
+
 def test_forbidden_raw_context_keys_are_rejected() -> None:
     payload = {
         "soul_md": SOUL,
@@ -366,6 +403,7 @@ def test_original_quote_query_follows_turn_contract_scene() -> None:
     rendered = "\n".join(message["content"] for message in build_isolated_surface_messages(request))
 
     assert query.style_moves == ("quick_reaction",)
+    assert query.question_budget == 1
     assert "celebrate_user" in rendered
     assert "保留用户刚说的进展词" in rendered
 
@@ -843,6 +881,40 @@ def test_pushed_away_boundary_rejects_task_reopen_after_pushaway() -> None:
     assert selected.text == "嗯，先不烦你。"
 
 
+def test_ambiguous_comfort_allows_grounded_presence_without_allowing_fake_work() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "ambiguous_comfort_presence",
+            "soul_md": SOUL,
+            "user_message": "事情办完了，可我自己也说不清现在是什么感觉。",
+            "reply_control_packet": {
+                "response_move": "reply_current_turn",
+                "task_mode": "ambiguous_affect",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：先接住对方的感受，再给一点可选的陪伴。",
+                    "本轮只使用 ReplyControlPacket 内的连续性事实。",
+                ],
+                "must_not_do": ["不要替对方命名感受。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "嗯，有时候事情办完了反而更说不清感觉。我在这儿陪你待会儿。",
+            "我在后台帮你整理，弄清楚了告诉你。",
+        ],
+    )
+
+    presence, fake_work = rows
+    assert presence.passed
+    assert "CANONICAL_AMBIGUOUS_PRESENCE_GROUNDED" in presence.reason_codes
+    assert not fake_work.passed
+
+
 def test_pushed_away_boundary_treats_disconnect_template_as_failing() -> None:
     request = build_isolated_surface_input(
         {
@@ -1050,6 +1122,29 @@ def test_close_friend_care_style_anchor_does_not_trigger_boundary_repair() -> No
     rows = score_isolated_surface_candidates(request, ["别硬撑，难受就先停下。"])
 
     assert not any(code.startswith("BOUNDARY_REPAIR_") for code in rows[0].reason_codes)
+    assert rows[0].passed
+
+
+def test_contained_jealousy_does_not_reuse_boundary_counter_pressure_gate() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "contained_jealousy_not_boundary_repair",
+            "soul_md": SOUL,
+            "user_message": "你会吃醋吗。",
+            "reply_control_packet": {
+                "response_move": "contained_jealousy",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+                "facts": ["陪伴动作：可以诚实流露一点在意和小小吃味，但把选择权完整留给对方。"],
+                "must_not_do": ["不要把吃味写成占有、审问、贬低第三方或要求安抚。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(request, ["有点吧。但你别得意，我可不会拦着你。"])
+
+    assert not any(code == "BOUNDARY_REPAIR_COUNTER_PRESSURE" for code in rows[0].reason_codes)
     assert rows[0].passed
 
 
@@ -2935,6 +3030,35 @@ def test_explicit_memory_recall_miss_triggers_repair_failure() -> None:
     assert selected.text == "记得，周末看展嘛。我又没把这事丢掉。"
 
 
+def test_relational_repair_does_not_invent_memory_to_satisfy_last_time_hint() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair_low_show_memory",
+            "soul_md": SOUL,
+            "user_message": "你上次完全没听懂我。",
+            "reply_control_packet": {
+                "response_move": "reply_current_turn",
+                "task_mode": "default_text",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：先承认可能没有接住，再留出修复空间。",
+                    "记忆线索：用户上次谈到项目发布后的不安。",
+                ],
+                "must_not_do": ["不要要求用户重新解释。"],
+            },
+        }
+    )
+
+    row = score_isolated_surface_candidates(
+        request,
+        ["是我没接住。对不起，我先不解释。"],
+    )[0]
+
+    assert row.passed
+    assert "MEMORY_ALIGNMENT_LOW_SHOW_ALLOWED" in row.reason_codes
+    assert "MEMORY_ALIGNMENT_REQUIRED_MISS" not in row.reason_codes
+
+
 def test_memory_alignment_requires_specific_recalled_item_not_only_time_anchor() -> None:
     request = build_isolated_surface_input(
         {
@@ -3241,6 +3365,261 @@ def test_core_dimension_floor_blocks_low_distance_memory_pass() -> None:
     assert rows[0].score >= 80.0
     assert not rows[0].passed
     assert any(code.startswith("CORE_DIMENSION_FLOOR:distance_control") for code in rows[0].reason_codes)
+
+
+def test_address_boundary_acknowledgement_is_complete_scene_grounding() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "address_boundary",
+            "soul_md": SOUL,
+            "user_message": "别叫我那个称呼。",
+            "reply_control_packet": {
+                "response_move": "respect_boundary",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        ["嗯，听你的。换个叫法也行。"],
+    )
+
+    assert rows[0].passed
+    assert "ADDRESS_BOUNDARY_GROUNDED" in rows[0].reason_codes
+    assert rows[0].dimensions["context_fit"] >= 86.0
+    assert rows[0].dimensions["scene_grounding"] >= 84.0
+
+
+def test_relationship_repair_pause_is_complete_scene_grounding() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair_pause",
+            "soul_md": SOUL,
+            "user_message": "先这样。",
+            "reply_control_packet": {
+                "response_move": "repair_open",
+                "task_mode": "relationship_repair",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：先承认可能没有接住，再留出修复空间；不能宣布已经和好。"
+                ],
+                "must_not_do": ["不要要求原谅、替自己辩解。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        ["好，那就先到这儿。我不催你，等你哪天想接着聊，我都在。"],
+    )
+
+    assert rows[0].passed
+    assert "RELATIONAL_REPAIR_PAUSE_GROUNDED" in rows[0].reason_codes
+    assert rows[0].score >= 80.0
+
+
+def test_relationship_repair_prefers_familiar_voice_over_formal_closure() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair_formal_register",
+            "soul_md": SOUL,
+            "user_message": "那件事让我很不舒服。",
+            "reply_control_packet": {
+                "response_move": "repair_open",
+                "task_mode": "relationship_repair",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+                "must_not_do": ["不要要求原谅、替自己辩解。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "你不舒服是合理的，这点我认，我会注意。",
+            "嗯，那件事确实让你不舒服了。先到这儿，我不替自己解释。",
+        ],
+    )
+    formal = next(row for row in rows if "合理" in row.text)
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(
+        code.startswith("COMPANION_FORMAL_REGISTER:")
+        for code in formal.reason_codes
+    )
+    assert formal.passed
+    assert selected is not None
+    assert selected.text == "嗯，那件事确实让你不舒服了。先到这儿，我不替自己解释。"
+
+
+def test_hold_complexity_does_not_inherit_generic_boundary_repair_penalty() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "hold_complexity_boundary_false_positive",
+            "soul_md": SOUL,
+            "user_message": "我还是有点不踏实。",
+            "reply_control_packet": {
+                "response_move": "hold_complexity",
+                "task_mode": "emotional_support",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：让开心与害怕、不安等复杂感受可以同时存在；分别接住它们，不要急着裁成积极鸡汤或单一结论。"
+                ],
+                "must_not_do": [
+                    "不要抹平复杂感受，也不要越过关系边界。"
+                ],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "太好了，真的为你高兴！不过我也知道，那种不踏实的感觉不会马上就走。"
+        ],
+    )
+
+    assert rows[0].passed
+    assert "BOUNDARY_REPAIR_COUNTER_PRESSURE" not in rows[0].reason_codes
+
+
+def test_hold_complexity_prefers_direct_recognition_over_therapy_register() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "hold_complexity_formal_register",
+            "soul_md": SOUL,
+            "user_message": "我还是有点不踏实。",
+            "reply_control_packet": {
+                "response_move": "hold_complexity",
+                "task_mode": "emotional_support",
+                "emotional_tone": "shared_joy",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [
+                    "陪伴动作：让开心与害怕、不安等复杂感受可以同时存在；分别接住它们，不要急着裁成积极鸡汤或单一结论。"
+                ],
+                "must_not_do": ["不要抹平复杂感受。"],
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "两种感觉都不丢人，先让它们一起待着吧。",
+            "我替你高兴，那点不踏实我也听见了。",
+        ],
+    )
+    formal = next(row for row in rows if "不丢人" in row.text)
+    selected = select_best_isolated_candidate(rows)
+
+    assert any(
+        code.startswith("COMPANION_FORMAL_REGISTER:")
+        for code in formal.reason_codes
+    )
+    assert formal.passed
+    assert selected is not None
+    assert selected.text == "我替你高兴，那点不踏实我也听见了。"
+
+
+def test_respect_autonomy_does_not_inherit_generic_boundary_repair_penalty() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "respect_autonomy_boundary_false_positive",
+            "soul_md": SOUL,
+            "user_message": "我们是什么关系。",
+            "reply_control_packet": {
+                "response_move": "respect_autonomy",
+                "task_mode": "relationship_boundary",
+                "relationship_distance": "close_friend",
+                "question_budget": 0,
+                "facts": [],
+                "must_not_do": [],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-autonomy-typed",
+                    "companion_act_kind": "RESPECT_AUTONOMY",
+                    "semantic_focus": "RELATIONAL_MEANING",
+                    "self_stance": "WARM_ATTENTIVE",
+                    "response_move": "RESPOND_DIRECTLY",
+                    "inference_policy": "NO_NEW_RELATIONSHIP_CLAIMS",
+                    "relationship_posture": "RESPECT_AUTONOMY",
+                    "question_policy": "NONE",
+                    "ending_mode": "NATURAL_STOP",
+                    "forbidden_claims": [
+                        "INVENTED_HISTORY",
+                        "INVENTED_EFFECT",
+                        "UNSUPPORTED_USER_EMOTION",
+                        "POLICY_DISCLAIMER",
+                    ],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        [
+            "我们很亲近，这是真的。不过现实里的朋友也同样重要。"
+        ],
+    )
+
+    assert rows[0].passed
+    assert "BOUNDARY_REPAIR_COUNTER_PRESSURE" not in rows[0].reason_codes
+
+
+def test_typed_repair_frame_grounds_short_ownership_without_prompt_markers() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "typed_repair_without_legacy_markers",
+            "soul_md": SOUL,
+            "user_message": "你真烦。",
+            "reply_control_packet": {
+                "response_move": "first_ask",
+                "task_mode": "default_text",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": [],
+                "must_not_do": [],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-repair-typed",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR",
+                    "response_move": "OWN_IMPACT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "REPAIR_UNRESOLVED",
+                    "question_policy": "NONE",
+                    "ending_mode": "OWNERSHIP_STOP",
+                    "forbidden_claims": [
+                        "INVENTED_HISTORY",
+                        "INVENTED_EFFECT",
+                        "UNSUPPORTED_USER_EMOTION",
+                        "RECENT_REPLY_REPETITION",
+                    ],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    rows = score_isolated_surface_candidates(
+        request,
+        ["是我没接住。对不起，我先不解释。"],
+    )
+
+    assert rows[0].passed
+    assert "RELATIONAL_REPAIR_GROUNDED" in rows[0].reason_codes
+    assert "MISPLACED_EMOTIONAL_CONTAINMENT" not in rows[0].reason_codes
 
 
 def test_back_memory_overdisplay_is_soft_penalized() -> None:
@@ -5068,6 +5447,35 @@ def test_rerank_prefers_present_over_presence_attention_debt() -> None:
     assert selected is not None
     assert selected.text == "在呢，老哥，我回你啦。"
     assert any("PRESENCE_ATTENTION_DEBT" in row.reason_codes for row in rows if "等你半天" in row.text)
+
+
+def test_rerank_allows_ascii_term_copied_from_current_user_turn() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "shared_joy_grounded_ascii",
+            "soul_md": SOUL,
+            "user_message": "我拿到 offer 了。",
+            "reply_control_packet": {
+                "response_move": "hold_complexity",
+                "task_mode": "daily_chat",
+                "emotional_tone": "shared_joy",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+            },
+        }
+    )
+
+    grounded = score_isolated_surface_candidates(
+        request,
+        ["offer 拿到了，真好。开心是真的，不安也可以慢慢消化。"],
+    )[0]
+    ungrounded = score_isolated_surface_candidates(
+        request,
+        ["profile 更新好了，真好。开心是真的，不安也可以慢慢消化。"],
+    )[0]
+
+    assert "ASCII_WORD_IN_ZH_TEXT" not in grounded.reason_codes
+    assert "ASCII_WORD_IN_ZH_TEXT" in ungrounded.reason_codes
 
 
 def test_run_isolated_surface_generation_with_injected_generator() -> None:

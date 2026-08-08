@@ -52,7 +52,7 @@ def _safe_int(value: Any, *, default: int = 0) -> int:
         return int(default)
 
 
-def _require_durable_assistant_turn_result(value: Any) -> None:
+def _require_durable_conversation_turn_result(value: Any, *, role: str) -> None:
     result = dict(value or {}) if isinstance(value, Mapping) else {}
     status = str(result.get("status") or "").strip().upper()
     reason_code = str(result.get("reason_code") or "").strip().upper()
@@ -61,12 +61,22 @@ def _require_durable_assistant_turn_result(value: Any) -> None:
     if status == "SKIPPED" and reason_code in {
         "DUPLICATE_CONVERSATION_TURN",
         "DUPLICATE_COMMAND",
+        "DUPLICATE_VISIBLE_TURN",
     }:
         return
+    normalized_role = str(role or "turn").strip().upper() or "TURN"
     raise RuntimeError(
-        (reason_code or "CONVERSATION_ASSISTANT_TURN_NOT_DURABLE")
-        + ": accepted assistant turn was not durably recorded"
+        (reason_code or f"CONVERSATION_{normalized_role}_TURN_NOT_DURABLE")
+        + f": accepted {normalized_role.lower()} turn was not durably recorded"
     )
+
+
+def _require_durable_user_turn_result(value: Any) -> None:
+    _require_durable_conversation_turn_result(value, role="user")
+
+
+def _require_durable_assistant_turn_result(value: Any) -> None:
+    _require_durable_conversation_turn_result(value, role="assistant")
 
 
 def _require_durable_life_memory_result(
@@ -178,6 +188,27 @@ async def _async_post_process(
     except Exception as exc:
         _logger.debug("[%s] cortex_orchestrator post_process audit persist failed: %s", request_id, exc)
 
+    if str(user_message or "").strip():
+        try:
+            user_turn_result = await _run_in_post_process_executor(
+                application_ports.record_user_turn,
+                request_id=request_id,
+                session_id=session_id,
+                person_id=person_id,
+                content=user_message,
+                ts_ms=ts_ms,
+                lang=render_target_lang,
+                metadata={
+                    "message_kind": "accepted_user_message",
+                    "source": "surface_post_process",
+                },
+            )
+            if durable_projection_mode:
+                _require_durable_user_turn_result(user_turn_result)
+        except Exception:
+            if durable_projection_mode:
+                raise
+
     try:
         if suppress_final_reply:
             _logger.debug("[%s] cortex_orchestrator skipped assistant turn: suppressed final reply", request_id)
@@ -189,7 +220,8 @@ async def _async_post_process(
                 provider_name=provider_name,
                 model_id=model_id,
             )
-            assistant_turn_result = application_ports.record_assistant_turn(
+            assistant_turn_result = await _run_in_post_process_executor(
+                application_ports.record_assistant_turn,
                 request_id=request_id,
                 session_id=session_id,
                 person_id=person_id,

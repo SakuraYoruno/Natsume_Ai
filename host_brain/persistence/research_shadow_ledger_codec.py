@@ -314,6 +314,7 @@ def research_arm_plan_from_dict(raw: Any) -> ResearchArmPlanV1:
             source_ids=tuple(as_sequence(raw.get("source_ids"), field="source_ids")),
             graph_digest=raw.get("graph_digest"),
             path_digest=raw.get("path_digest"),
+            prompt_digest=raw.get("prompt_digest"),
             generated_by=raw.get("generated_by", "RESEARCH_SUCCESSOR_CATALOG"),
         )
     except (TypeError, ValueError) as exc:

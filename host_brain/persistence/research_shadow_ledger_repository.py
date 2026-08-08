@@ -1064,6 +1064,7 @@ class SQLiteResearchShadowLedger:
                 source_ids=tuple(raw_plan["source_ids"]),
                 graph_digest=str(raw_plan.get("graph_digest") or ""),
                 path_digest=str(raw_plan.get("path_digest") or ""),
+                prompt_digest=raw_plan.get("prompt_digest"),
                 generated_by=str(raw_plan.get("generated_by") or ""),
             )
         except (TypeError, ValueError) as exc:

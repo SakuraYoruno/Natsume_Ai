@@ -988,6 +988,7 @@ def test_asgi_builds_publishes_injects_and_closes_security_container(
                 "internal_agent_artifact_store"
             ],
             "internal_agent_workspace_runtime": workspace_runtime,
+            "episodic_store": kwargs["episodic_store"],
             "life_receipt_reader_provider": kwargs[
                 "life_receipt_reader_provider"
             ],

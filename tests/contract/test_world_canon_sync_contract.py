@@ -66,6 +66,33 @@ class TestWorldCanonSyncIdempotency(unittest.TestCase):
             expected_hash = compute_world_canon_hash(hash_payload)
             self.assertEqual(expected_hash, payload["hash"], msg=f"{doc_id} hash 不一致")
 
+    def test_t_wcanon_04a2_all_core_assets_scan_without_contract_issues(self) -> None:
+        """所有 wc-* 生产资产都必须通过真实 Canon loader，而非只校验三份 fixture。"""
+
+        store = WorldCanonStore(
+            world_root=SSOT_WORLD,
+            ledger=None,
+            create_directories=False,
+        )
+        documents, issues = store.scan_documents()
+        core_ids = {document.doc_id for document in documents if document.doc_id.startswith("wc-")}
+        core_issues = [
+            issue
+            for issue in issues
+            if Path(issue.source_path).name.startswith("wc-")
+        ]
+
+        self.assertEqual(
+            {
+                "wc-001-system-terms",
+                "wc-002-architecture-invariants",
+                "wc-003-persona-core",
+                "wc-004-persona-growth-rules",
+            },
+            core_ids,
+        )
+        self.assertEqual([], core_issues)
+
     def test_t_wcanon_04b_sync_indexes_seed_files(self) -> None:
         """种子条目可被 canon_sync 扫描并写入 world_canon_doc 索引。"""
         with tempfile.TemporaryDirectory(prefix="wcanon_sync_seed_") as tmp:

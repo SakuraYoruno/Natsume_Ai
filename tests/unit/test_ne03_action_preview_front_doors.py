@@ -36,6 +36,9 @@ from host_brain.runtime.action_preview_authority import (
     ActionPreviewAuthorityError,
     require_scheduler_derived_action,
 )
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 from host_brain.runtime.action_preview_resolver import (
     DERIVED_EFFECT_AUTHORITY_SCHEMA,
     EFFECT_DESCRIPTOR_SCHEMA,
@@ -415,6 +418,69 @@ async def test_acceptance_surface_allows_only_exact_minimal_text_payload(
 
 
 @pytest.mark.asyncio
+async def test_accepted_text_effect_uses_exact_claim_proof_without_preview_reopen(
+    monkeypatch,
+) -> None:
+    effect_id = "acceptance-effect://surface/ordinary-chat"
+    accepted_args = {
+        "request_id": "request-ordinary-chat",
+        "session_id": "session-ordinary-chat",
+        "person_id": "person-ordinary-chat",
+        "reply_channel": "qq",
+        "reply_target": "conversation-ordinary-chat",
+        "decision": "APPROVE",
+        "narrative": "我在这儿。",
+        "authority": {"request_id": "request-ordinary-chat"},
+    }
+    proof = AcceptanceEffectExecutionProof(
+        effect_id=effect_id,
+        effect_type="surface.reply_delivery",
+        graph_id="graph-ordinary-chat",
+        graph_revision=1,
+        node_id="node-ordinary-chat",
+        attempt_id="attempt-ordinary-chat",
+        lease_owner_id="acceptance-effect-owner",
+        fencing_token=1,
+        payload_sha256="sha256:" + "1" * 64,
+        action_args=accepted_args,
+    )
+    network_calls: list[dict[str, Any]] = []
+
+    async def _submit(**kwargs):
+        network_calls.append(dict(kwargs))
+        return {"success": True, "status": "ACCEPTED"}
+
+    monkeypatch.setattr(
+        "host_brain.channels.edge_transport._submit_gateway_payload",
+        _submit,
+    )
+    accepted = await submit_gateway_reply(
+        platform="qq",
+        conversation_id="conversation-ordinary-chat",
+        content="我在这儿。",
+        msg_type="text",
+        request_id="request-ordinary-chat",
+        effect_id=effect_id,
+        accepted_effect_proof=proof,
+    )
+
+    assert accepted["success"] is True
+    assert len(network_calls) == 1
+
+    drifted = await submit_gateway_reply(
+        platform="qq",
+        conversation_id="conversation-ordinary-chat",
+        content="被替换的回复",
+        msg_type="text",
+        request_id="request-ordinary-chat",
+        effect_id=effect_id,
+        accepted_effect_proof=proof,
+    )
+    assert getattr(drifted, "reason_code", "") == "ACCEPTANCE_EFFECT_DRIFT"
+    assert len(network_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_accepted_surface_handler_skips_unbound_reply_transformers(
     monkeypatch,
 ) -> None:
@@ -469,35 +535,18 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
     result = await acceptance_effect_handlers._deliver_accepted_surface_reply(
         {
             **accepted_value,
-            "_action_preview_terminal_proof": {
-                "service": SimpleNamespace(
-                    require_execution=lambda **_kwargs: object()
-                ),
-                "event_id": "runtime-event://accepted-handler",
-                "boundary": {
-                    "action_kind": "acceptance-effect.surface.reply_delivery",
-                    "action_scope": effect_id,
-                    "risk_level": 3,
-                    "action_args": accepted_value,
-                    "context_pack_digest": "sha256:" + "1" * 64,
-                    "scene_identity": "scene://accepted-handler",
-                    "task_graph_id": "graph-accepted-handler",
-                    "graph_revision": 1,
-                    "task_node_id": "node-accepted-handler",
-                    "parent_governor_grant_ref": "grant://accepted-parent",
-                    "node_grant_ref": "grant://accepted-node",
-                    "node_grant": {"grant_ref": "grant://accepted-node"},
-                    "authority_context": {
-                        "schema_version": (
-                            "Natsume.action_preview."
-                            "acceptance_effect_authority_request.v1"
-                        ),
-                        "effect_id": effect_id,
-                        "lease_owner_id": "accepted-handler-owner",
-                        "fencing_token": 1,
-                    },
-                },
-            },
+            "_acceptance_effect_execution_proof": AcceptanceEffectExecutionProof(
+                effect_id=effect_id,
+                effect_type="surface.reply_delivery",
+                graph_id="graph-accepted-handler",
+                graph_revision=1,
+                node_id="node-accepted-handler",
+                attempt_id="attempt-accepted-handler",
+                lease_owner_id="accepted-handler-owner",
+                fencing_token=1,
+                payload_sha256="sha256:" + "1" * 64,
+                action_args=accepted_value,
+            ),
         }
     )
 
@@ -515,6 +564,10 @@ async def test_accepted_surface_handler_skips_unbound_reply_transformers(
     assert submitted[0]["content"] == "immutable accepted narrative"
     assert submitted[0]["msg_type"] == "text"
     assert submitted[0]["effect_id"] == effect_id
+    assert isinstance(
+        submitted[0]["accepted_effect_proof"],
+        AcceptanceEffectExecutionProof,
+    )
     assert "raw_extra" not in submitted[0]
     assert "media_path" not in submitted[0]
     assert "authority" not in submitted[0]

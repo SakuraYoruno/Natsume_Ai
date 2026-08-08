@@ -805,3 +805,76 @@ def test_build_cortex_prompt_projects_emoji_social_user_message() -> None:
     assert "不要描述图片" in messages[0]["content"]
     assert messages[-1] == {"role": "user", "content": "（委屈）"}
     assert runtime_payload["effective_user_message_for_prompt"] == "（委屈）"
+
+
+def test_build_cortex_prompt_anchors_deictic_topic_update_without_replaying_history() -> None:
+    plane = _plane()
+    thread_payload = {
+        "thread_kind": "deictic_topic_update",
+        "source_topic": "recent_dialogue_topic",
+        "source_modality": "text",
+        "source_excerpt": "别把休息当成浪费时间。",
+        "source_context_excerpt": "我们上次没说完的是工作和休息怎么平衡。",
+        "emotion_anchor": "",
+        "open": True,
+        "source_turn_index": 1,
+        "last_assistant_move": "previous_reply",
+        "last_user_reaction": "topic_update",
+        "turn_count": 1,
+        "reason_tags": ["recent_deictic_topic_update"],
+    }
+    plane.interaction_thread = SimpleNamespace(
+        state=SimpleNamespace(
+            thread_kind="deictic_topic_update",
+            source_excerpt=thread_payload["source_excerpt"],
+            source_context_excerpt=thread_payload["source_context_excerpt"],
+            emotion_anchor="",
+            as_dict=lambda: thread_payload,
+        )
+    )
+    plane.interaction_state = SimpleNamespace(
+        state=SimpleNamespace(
+            current_topic="",
+            interaction_move="first_ask",
+            user_stance="neutral",
+            followup_target="recent_dialogue_topic",
+            ongoing_thread="deictic_topic_update",
+            perception_summary="",
+            as_dict=lambda: {
+                "current_topic": "",
+                "interaction_move": "first_ask",
+                "user_stance": "neutral",
+                "followup_target": "recent_dialogue_topic",
+                "ongoing_thread": "deictic_topic_update",
+                "affect": {"emotion_tag": "CALM"},
+                "relationship": {"bond_stage": "FRIEND"},
+                "drive": {"continuity_drive": 0.42},
+                "topic_ledger": {},
+                "tactic_ledger": {},
+                "perception_summary": "",
+                "reason_tags": ["ongoing_thread:deictic_topic_update"],
+            },
+        )
+    )
+
+    with patch(
+        "host_brain.app.cortex_prompt_builder.assemble_prompt_context_plane",
+        return_value=plane,
+    ), patch(
+        "host_brain.app.cortex_prompt_builder.get_compiled_soul",
+        return_value=_compiled_soul(),
+    ):
+        messages, _gen_params, runtime_payload = build_cortex_prompt(
+            user_message="那件事后来解决了。",
+            render_target_lang="zh",
+            person_id="p1",
+            session_id="sess",
+            request_id="req",
+            include_runtime_payload=True,
+        )
+
+    system_prompt = messages[0]["content"]
+    assert "上一轮明确说的是“我们上次没说完的是工作和休息怎么平衡。”" in system_prompt
+    assert "自然点出一次具体话题" in system_prompt
+    assert "不要复述整段历史" in system_prompt
+    assert runtime_payload["interaction_thread"]["thread_kind"] == "deictic_topic_update"

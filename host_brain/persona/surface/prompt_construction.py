@@ -15,6 +15,10 @@ from host_brain.persona.surface_original_quote_bank import (
     render_surface_original_quote_guidance,
     select_surface_original_quotes,
 )
+from host_brain.persona.surface_utterance_frame import (
+    normalize_companion_utterance_frame,
+    render_companion_utterance_frame,
+)
 from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
     IsolatedCandidateScore,
@@ -383,6 +387,7 @@ def build_surface_original_quote_query(request: IsolatedSurfaceInput, *, limit: 
         scene_id=scene,
         user_message=quote_user_message,
         limit=max(1, min(int(limit or 16), 24)),
+        question_budget=max(0, int(request.control.question_budget or 0)),
     )
 
 
@@ -420,6 +425,14 @@ def _surface_temporal_mismatch_greeting_quote_scene(request: IsolatedSurfaceInpu
 
 
 def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_scene_id: str = "") -> str:
+    utterance_frame = normalize_companion_utterance_frame(
+        getattr(request.control, "companion_utterance_frame", {})
+    )
+    companion_act = str(utterance_frame.get("companion_act_kind") or "").upper()
+    if companion_act == "REPAIR":
+        return "relationship_repair"
+    if companion_act == "HOLD_COMPLEXITY":
+        return "mixed_affect"
     for raw in (
         request.control.task_mode,
         request.control.response_move,
@@ -449,6 +462,10 @@ def build_native_stream_surface_messages(
     ).as_dict()
     facts = surface_prompt_facts(request)
     must_not_do = merged_must_not_do(request)
+    utterance_frame_lines = render_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {}),
+        question_budget=int(control.question_budget or 0),
+    )
     # This is the realtime prompt, not the archived Soul or the buffered
     # candidate/judge contract.  Keep the compiled, relationship-safe Soul
     # projection intact while avoiding repeated policy prose and verbose JSON
@@ -503,6 +520,10 @@ def build_native_stream_surface_messages(
         ),
         f"关系尺度：{relationship_scale}",
     ]
+    if utterance_frame_lines:
+        user_parts.extend(
+            ("【本轮说话骨架】", *(f"- {item}" for item in utterance_frame_lines))
+        )
     if inner_state_lines:
         user_parts.extend(("【你的当前感受】", *inner_state_lines))
     if facts:
@@ -510,6 +531,12 @@ def build_native_stream_surface_messages(
     style_anchor = _clean_list(control.style_anchor)[:3]
     if style_anchor:
         user_parts.extend(("【语言节奏】", *(f"- {item}" for item in style_anchor)))
+    quote_guidance = render_surface_original_quote_guidance(
+        build_surface_original_quote_query(request, limit=3),
+        limit=3,
+    )
+    if quote_guidance:
+        user_parts.extend(("【七海原句节奏样本】", quote_guidance))
     must_include = _clean_list(control.must_include)[:8]
     if must_include:
         user_parts.extend(("【必须自然包含】", *(f"- {item}" for item in must_include)))
@@ -539,6 +566,10 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
     control_payload = _model_dump(control)
     control_payload["facts"] = surface_prompt_facts(request)
     control_payload["must_not_do"] = merged_must_not_do(request)
+    utterance_frame_lines = render_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", {}),
+        question_budget=int(control.question_budget or 0),
+    )
     relationship_axes_payload = relationship_control_axes_for_distance(control.relationship_distance).as_dict()
     no_question_line = (
         "本轮 question_budget=0：不要写真正问句或追问；“哈？/嗯？”以及“累了？那...”这类短促反应反问可以少量使用，但后面必须直接落地。"
@@ -605,6 +636,14 @@ def build_isolated_surface_messages(request: IsolatedSurfaceInput) -> list[dict[
         "## TurnSurfaceContract",
         json.dumps(turn_contract_payload, ensure_ascii=False, indent=2, sort_keys=True),
     ]
+    if utterance_frame_lines:
+        user_parts.extend(
+            [
+                "",
+                "## 本轮说话骨架",
+                "\n".join(f"- {item}" for item in utterance_frame_lines),
+            ]
+        )
 
     # --- Inner-state leakage section ---
     # Inject a natural-language inner-weather block so the LLM can feel

@@ -81,6 +81,71 @@ def test_route_boundary_normalizes_sdk_max_output_tokens_alias() -> None:
     }
 
 
+def test_route_boundary_normalizes_and_validates_thinking_mode() -> None:
+    decision = route_decision_from_graph_runtime(
+        _runtime(
+            provider_name="deepseek",
+            model_id="deepseek-v4-flash",
+            agent_gen_params={"thinking_mode": " DISABLED ", "max_tokens": 640},
+        ),
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+    )
+
+    assert decision.targets[0].metadata["generation_parameters"] == {
+        "thinking_mode": "disabled",
+        "max_tokens": 640,
+    }
+    with pytest.raises(RouteNotConfiguredError, match="thinking_mode"):
+        route_decision_from_graph_runtime(
+            _runtime(agent_gen_params={"thinking_mode": "sometimes"}),
+            scene_type="CHAT_SURFACE_REALTIME",
+            cognitive_tier="B",
+        )
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_id", "expected_thinking"),
+    (
+        ("deepseek", "deepseek-v4-flash", {"type": "disabled"}),
+        ("gemini", "gemini-test", None),
+    ),
+)
+def test_provider_payload_maps_thinking_mode_only_for_deepseek(
+    provider: str,
+    model_id: str,
+    expected_thinking: dict[str, str] | None,
+) -> None:
+    target = route_decision_from_graph_runtime(
+        _runtime(
+            provider_name=provider,
+            model_id=model_id,
+            agent_gen_params={"thinking_mode": "disabled", "max_tokens": 640},
+        ),
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id=f"request-thinking-{provider}",
+        attempt_id=f"attempt-thinking-{provider}",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    payload = production_provider_payload(request, stream=False)
+
+    assert "thinking_mode" not in payload
+    if expected_thinking is None:
+        assert "thinking" not in payload
+    else:
+        assert payload["thinking"] == expected_thinking
+
+
 def test_server_owned_tier_and_cloud_lanes_choose_route_without_request_hints(monkeypatch) -> None:
     monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_A_MODEL_ID", raising=False)
     monkeypatch.delenv("HOST_MODEL_ROUTE_SCENE_NATSUME_AGENT_TIER_C_MODEL_ID", raising=False)
@@ -371,6 +436,7 @@ async def test_vault_backed_adapter_forwards_real_final_usage_stream_without_est
     assert events[-1].response.usage == {
         "total_tokens": 9,
         "completion_tokens": 4,
+        "tool_call_count": 0,
     }
     # The adapter forwards only provider-owned values.  A missing price stays
     # missing so the guarded ModelAttempt service can reject it fail-closed.
@@ -378,6 +444,79 @@ async def test_vault_backed_adapter_forwards_real_final_usage_stream_without_est
     assert events[-1].response.metadata["transport_external"] is True
     assert received[0]["model_id"] == "gpt-stream"
     assert received[0]["base_url_override"] == "https://api.openai.com/v1"
+
+
+def test_official_deepseek_v4_usage_gets_versioned_exact_cost_and_zero_tools() -> None:
+    registry = build_vault_backed_provider_registry(
+        ("deepseek",),
+        credential_resolver=lambda _provider: "deepseek-key",
+        base_url_resolver=lambda _provider: "https://api.deepseek.com/v1",
+        transport=lambda **_kwargs: {
+            "content": '{"ok":true}',
+            "usage": {
+                "prompt_tokens": 1_000,
+                "prompt_cache_hit_tokens": 400,
+                "prompt_cache_miss_tokens": 600,
+                "completion_tokens": 200,
+                "total_tokens": 1_200,
+            },
+        },
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(provider_name="deepseek", model_id="deepseek-v4-flash"),
+        scene_type="RESEARCH",
+        cognitive_tier="RESEARCH",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-deepseek-cost",
+        attempt_id="attempt-deepseek-cost",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="RESEARCH",
+        cognitive_tier="RESEARCH",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    response = asyncio.run(registry.get("production.deepseek").complete(request))
+
+    # ceil((400*2_800 + 600*140_000 + 200*280_000) / 1_000_000)
+    assert response.usage["model_cost_micros"] == 142
+    assert response.usage["tool_call_count"] == 0
+    assert len(response.metadata["model_cost_policy_digest"]) == 64
+
+
+def test_deepseek_cost_stays_unpriced_for_proxy_or_incomplete_cache_usage() -> None:
+    from host_brain.model_runtime.provider_cost_policy import enrich_provider_usage
+
+    complete = {
+        "prompt_tokens": 10,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 10,
+        "completion_tokens": 2,
+    }
+    proxied, proxy_policy = enrich_provider_usage(
+        provider="deepseek",
+        model_id="deepseek-v4-flash",
+        base_url="https://models.example.com/v1",
+        usage=complete,
+        tool_calls_enabled=False,
+    )
+    incomplete, incomplete_policy = enrich_provider_usage(
+        provider="deepseek",
+        model_id="deepseek-v4-flash",
+        base_url="https://api.deepseek.com/v1",
+        usage={"prompt_tokens": 10, "completion_tokens": 2},
+        tool_calls_enabled=False,
+    )
+
+    assert "model_cost_micros" not in proxied
+    assert "model_cost_micros" not in incomplete
+    assert proxy_policy is None
+    assert incomplete_policy is None
+    assert proxied["tool_call_count"] == 0
+    assert incomplete["tool_call_count"] == 0
 
 
 @pytest.mark.parametrize(

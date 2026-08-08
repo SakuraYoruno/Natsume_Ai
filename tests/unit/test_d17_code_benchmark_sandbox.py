@@ -261,6 +261,50 @@ def test_private_bare_paired_worktrees_do_not_modify_protected_source(tmp_path: 
     assert str(worktree_root) not in serialized
 
 
+def test_paired_worktree_executor_honors_owner_randomized_arm_order(tmp_path: Path) -> None:
+    sandbox, source_ref, commit, policy, _source, private_root, worktree_root = _sandbox(
+        tmp_path
+    )
+    verifier = _Verifier()
+
+    report = sandbox.run_paired(
+        run_id="selected-first",
+        workload=_workload(source_ref=source_ref, commit=commit, policy=policy),
+        baseline=_arm("baseline"),
+        selected=_arm("selected"),
+        path_policy=policy,
+        baseline_executor=_Writer(),
+        selected_executor=_Writer(),
+        verifier=verifier,
+        arm_order=("SELECTED", "BASELINE"),
+    )
+
+    assert list(verifier.seen) == ["selected", "baseline"]
+    assert report.baseline_evidence.arm_id == "baseline"
+    assert report.selected_evidence.arm_id == "selected"
+    assert list(private_root.iterdir()) == []
+    assert list(worktree_root.iterdir()) == []
+
+
+def test_paired_worktree_rejects_invalid_arm_order_before_execution(tmp_path: Path) -> None:
+    sandbox, source_ref, commit, policy, _source, _private_root, _worktree_root = _sandbox(
+        tmp_path
+    )
+
+    with pytest.raises(CodeBenchmarkSandboxError, match="arm_order"):
+        sandbox.run_paired(
+            run_id="invalid-order",
+            workload=_workload(source_ref=source_ref, commit=commit, policy=policy),
+            baseline=_arm("baseline"),
+            selected=_arm("selected"),
+            path_policy=policy,
+            baseline_executor=_Writer(),
+            selected_executor=_Writer(),
+            verifier=_Verifier(),
+            arm_order=("BASELINE", "BASELINE"),
+        )
+
+
 def test_path_escape_fails_closed_and_still_cleans_private_artifacts(tmp_path: Path) -> None:
     sandbox, source_ref, commit, policy, source, private_root, worktree_root = _sandbox(tmp_path)
 

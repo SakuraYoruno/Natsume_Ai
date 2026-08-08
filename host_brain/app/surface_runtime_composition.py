@@ -118,6 +118,10 @@ def build_surface_runtime_ports(
             agent_runtime_ports.resolve_surface_reply_llm_runtime
         ),
         model_attempt_service=agent_runtime_ports.model_attempt_service,
+        resolve_expression_preferences=(
+            agent_runtime_ports.resolve_expression_preferences
+        ),
+        resolve_active_identity=agent_runtime_ports.resolve_active_identity,
     )
 
 

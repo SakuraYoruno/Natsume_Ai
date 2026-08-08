@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from types import SimpleNamespace
 from typing import Any
 
@@ -24,6 +26,9 @@ from host_brain.digital_life.reader import LifeSnapshotReader
 from host_brain.persistence.context_memory_repository import MemoryEventRepository
 from host_brain.persistence.context_repository import ContextRepository
 from host_brain.persistence.life_command_repository import LifeCommandRepository
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     ACCEPTANCE_EFFECT_RECONCILIATION_REQUIRED,
     AcceptanceEffectOutcomeUnknown,
@@ -131,6 +136,49 @@ def _ack_surface_projection(message) -> dict[str, Any]:  # noqa: ANN001
     }
 
 
+@pytest.mark.asyncio
+async def test_life_foreground_writer_does_not_block_event_loop(monkeypatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    payload = _life_payload()
+
+    def blocking_submit(_payload, **_kwargs):  # noqa: ANN001, ANN003, ANN202
+        entered.set()
+        if not release.wait(timeout=1.0):
+            raise AssertionError("Life foreground writer blocked the event loop")
+        return {"command_id": payload["command_id"]}
+
+    monkeypatch.setattr(
+        acceptance_effect_handlers,
+        "_submit_accepted_life_foreground",
+        blocking_submit,
+    )
+    monkeypatch.setattr(
+        acceptance_effect_handlers,
+        "require_life_projection_admission",
+        lambda **_kwargs: {
+            "status": "APPLIED",
+            "receipt_ref": "life-projection-admission://thread-offload",
+        },
+    )
+    handler = build_production_acceptance_effect_handlers(
+        life_receipt_reader_provider=object,
+    )["life.foreground_completed"]
+    task = asyncio.create_task(handler(payload))
+
+    try:
+        for _ in range(100):
+            if entered.is_set():
+                break
+            await asyncio.sleep(0.005)
+        assert entered.is_set()
+        assert not task.done()
+    finally:
+        release.set()
+
+    assert (await task)["status"] == "APPLIED"
+
+
 def _surface_payload() -> dict[str, Any]:
     value = {
         "request_id": "request-ne01-surface-response-loss",
@@ -150,36 +198,18 @@ def _surface_payload() -> dict[str, Any]:
     effect_id = "effect-ne01-surface-response-loss"
     return {
         **value,
-        "_action_preview_terminal_proof": {
-            "service": SimpleNamespace(require_execution=lambda **_kwargs: object()),
-            "event_id": "runtimeevent://ne01/surface-response-loss",
-            "boundary": {
-                "action_kind": "acceptance-effect.surface.reply_delivery",
-                "action_scope": effect_id,
-                "risk_level": 3,
-                "action_args": value,
-                "context_pack_digest": "sha256:" + "1" * 64,
-                "scene_identity": "scene://ne01/surface-response-loss",
-                "task_graph_id": "graph-ne01-surface-response-loss",
-                "graph_revision": 1,
-                "task_node_id": "node-ne01-surface-response-loss",
-                "parent_governor_grant_ref": "governor-grant://ne01/surface",
-                "node_grant_ref": "node-grant://ne01/surface",
-                "node_grant": {
-                    "grant_ref": "node-grant://ne01/surface",
-                    "binding_digest": "sha256:" + "2" * 64,
-                },
-                "authority_context": {
-                    "schema_version": (
-                        "Natsume.action_preview."
-                        "acceptance_effect_authority_request.v1"
-                    ),
-                    "effect_id": effect_id,
-                    "lease_owner_id": "acceptance-effect-owner",
-                    "fencing_token": 1,
-                },
-            },
-        },
+        "_acceptance_effect_execution_proof": AcceptanceEffectExecutionProof(
+            effect_id=effect_id,
+            effect_type="surface.reply_delivery",
+            graph_id="graph-ne01-surface-response-loss",
+            graph_revision=1,
+            node_id="node-ne01-surface-response-loss",
+            attempt_id="attempt-ne01-surface-response-loss",
+            lease_owner_id="acceptance-effect-owner",
+            fencing_token=1,
+            payload_sha256="sha256:" + "1" * 64,
+            action_args=value,
+        ),
     }
 
 
@@ -513,9 +543,7 @@ async def test_surface_non_success_without_explicit_no_effect_stays_unknown(
                     acceptance_effect_handlers._surface_gateway_payload_digest(
                         payload,
                         effect_id=str(
-                            payload["_action_preview_terminal_proof"]["boundary"][
-                                "action_scope"
-                            ]
+                            payload["_acceptance_effect_execution_proof"].effect_id
                         ),
                     )
                 ),

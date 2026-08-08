@@ -23,6 +23,7 @@ Model Plane 为不同认知角色选择真实模型，同时保证普通陪伴�
 
 ```text
 AffectiveTurnPlan
+→ CompanionUtteranceFrame（内存语义骨架）
 → 一次 surface 模型流式请求
 → 中文 display text + 可选日语 speech text
 → 稳定分句质量检查
@@ -30,6 +31,14 @@ AffectiveTurnPlan
 ```
 
 当 `HOST_COMPANION_TTS_LANGUAGE=ja` 时，同一次模型响应携带中文屏显与自然日语 speech text，避免第二次翻译调用。模型不能自行声明七海的 self affect，必须遵守冻结计划。
+
+`CompanionUtteranceFrameV1` 不是新的审计或规划层。它只包含有限枚举：语义焦点、七海姿态、回应动作、事实推断边界、关系姿态、问句策略和收尾方式；不包含用户原文、私密记忆、生成正文或 raw thought，也不单独持久化。普通回合仍为一次请求；高歧义回合仍为同一次请求返回两个候选，最多沿用既有的一次语义重试。
+
+修复与喜忧深路径可以附带一个版本化正向样本片段：当前只包含 5 条经源行号绑定的七海原句，分别提供具体道歉、责任、克制受伤以及喜忧并存的口语节奏。它们常驻代码内存，不调用 Chroma、SQLite 或外部检索，不建立新状态，也不改变一次请求／最多一次重试的预算。其他场景不会收到这组样本。
+
+同队列对照显示这组样本只对修复产生局部改善，mixed 没有可归因收益，原因是候选生成器另有完整回复模板覆盖了节奏样本。当前模型平面已删除 mixed 首次请求和重试中的完整答案句，只保留 typed 语义目标和 source-bound 原句节奏；降级文本按当前措辞分支且仍标记为非收益。`00c52762f` 的真实同案复验确认 exact reuse 为 0，但 0/3 仍失败，说明删除模板只消除了污染，当前 Flash 的自然 mixed 生成能力未提升。模型、provider、候选数和重试预算没有变化；下一实验必须改变模型层或受版本控制的真实文本资产。
+
+模型候选必须先通过 transport feasibility。MiniMax-M2.7 当前因真实 HTTP 402 余额不足而不可验收；Gemini 2.5 Flash Lite 已到达真实 provider，但原生客户端之前没有收到 JSON mode/schema，连续输出非 JSON 后被现有 `OutputContract` 正确拒绝。适配层现在把 `json_object/json_schema` 分别映射为 Gemini 原生 `response_mime_type=application/json` 与可选 `response_schema`；该映射不改变 server-owned schema，也不新增 retry 或文本 fallback。
 
 ## 4. 深路径
 

@@ -15,7 +15,14 @@ from host_brain.model_runtime.contracts import (
     sha256_digest,
 )
 from host_brain.model_runtime.production_provider_adapters import production_adapter_id
-from host_brain.model_runtime.live_prompts import GRAPH_NODE_PROMPT_IDS, TRIBE_PROMPT_IDS
+from host_brain.model_runtime.live_prompts import (
+    CODE_BENEFIT_EXECUTION_PROMPT_ID,
+    CODE_BENEFIT_GENERATION_PARAMETERS,
+    GRAPH_NODE_PROMPT_IDS,
+    RESEARCH_EXECUTION_PROMPT_ID,
+    RESEARCH_QUALITY_VERIFIER_PROMPT_ID,
+    TRIBE_PROMPT_IDS,
+)
 from host_brain.model_runtime.route_catalog import ServerRouteCatalog
 from host_brain.model_runtime.route_policy import (
     CallableRoutePolicy,
@@ -25,7 +32,17 @@ from host_brain.model_runtime.route_policy import (
 
 
 _GENERATION_KEYS = frozenset(
-    {"temperature", "top_p", "top_k", "max_tokens", "stop", "seed", "presence_penalty", "frequency_penalty"}
+    {
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "seed",
+        "presence_penalty",
+        "frequency_penalty",
+        "thinking_mode",
+    }
 )
 ProductionRuntimeResolver = Callable[
     [ModelAttemptRequest, RenderedPrompt],
@@ -34,7 +51,17 @@ ProductionRuntimeResolver = Callable[
 
 _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
     "THALAMUS_INTENT": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 400},
-    "CHAT_SURFACE_REALTIME": {"temperature": 0.72, "top_p": 0.9, "max_tokens": 192},
+    # The realtime Surface returns paired Chinese text and Japanese TTS JSON.
+    # Ordinary companionship needs direct expression instead of a hidden
+    # reasoning budget; the provider adapter applies this hint only to a
+    # provider that explicitly supports it.  Plan/Research routes keep their
+    # independent defaults.  The per-target 15 s timeout still bounds latency.
+    "CHAT_SURFACE_REALTIME": {
+        "temperature": 0.72,
+        "top_p": 0.9,
+        "max_tokens": 640,
+        "thinking_mode": "disabled",
+    },
     "CHAT_SURFACE_MEMORY_REPAIR": {"temperature": 0.65, "max_tokens": 120},
     "RESOURCE_MANAGEMENT": {"temperature": 0.1, "top_p": 0.8, "max_tokens": 900},
     "MEMORY_DISTILLATION": {"temperature": 0.35, "max_tokens": 400},
@@ -67,6 +94,19 @@ _SCENE_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
 }
 
 _PROMPT_GENERATION_PARAMETERS: dict[str, dict[str, Any]] = {
+    CODE_BENEFIT_EXECUTION_PROMPT_ID: dict(CODE_BENEFIT_GENERATION_PARAMETERS),
+    RESEARCH_EXECUTION_PROMPT_ID: {
+        "temperature": 0.1,
+        "top_p": 0.8,
+        "max_tokens": 900,
+        "thinking_mode": "disabled",
+    },
+    RESEARCH_QUALITY_VERIFIER_PROMPT_ID: {
+        "temperature": 0.0,
+        "top_p": 0.8,
+        "max_tokens": 240,
+        "thinking_mode": "disabled",
+    },
     GRAPH_NODE_PROMPT_IDS["chat_direct_ja"]: {"temperature": 0.45, "max_tokens": 420},
     GRAPH_NODE_PROMPT_IDS["core_reasoner_primary"]: {"temperature": 0.35, "max_tokens": 420},
     GRAPH_NODE_PROMPT_IDS["core_reasoner_secondary"]: {"temperature": 0.30, "max_tokens": 360},
@@ -248,6 +288,13 @@ def route_decision_from_graph_runtime(
             "unsupported graph runtime generation parameters: "
             + ", ".join(sorted(str(key) for key in unknown_generation_keys))
         )
+    if "thinking_mode" in generation_parameters:
+        thinking_mode = str(generation_parameters["thinking_mode"] or "").strip().lower()
+        if thinking_mode not in {"enabled", "disabled"}:
+            raise RouteNotConfiguredError(
+                "graph runtime thinking_mode must be enabled or disabled"
+            )
+        generation_parameters["thinking_mode"] = thinking_mode
     target = ProviderTarget(
         adapter_id=adapter_id,
         provider=provider,

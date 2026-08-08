@@ -154,7 +154,10 @@ class RuntimeReadRepository:
                     or _safe_int(row.get("ts_ms")) <= boundary_ts_ms
                 )
             ]
-            selected.sort(key=lambda row: _safe_int(row.get("ts_ms")), reverse=True)
+            selected.sort(
+                key=lambda row: _safe_int(row.get("turn_index")),
+                reverse=True,
+            )
             return [str(row.get("content") or "").strip() for row in selected[:row_limit]]
         with self._read_operation() as conn:
             boundary_ts_ms: int | None = None
@@ -244,18 +247,18 @@ class RuntimeReadRepository:
             if boundary_turn_index is not None:
                 rows = conn.execute(
                     """
-                    SELECT role, content, ts_ms, metadata FROM conversation_turn
+                    SELECT role, content, ts_ms, turn_index, metadata FROM conversation_turn
                     WHERE session_id = ? AND turn_index < ?
-                    ORDER BY ts_ms DESC LIMIT ?
+                    ORDER BY turn_index DESC, ts_ms DESC LIMIT ?
                     """,
                     (session_key, boundary_turn_index, row_limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     """
-                    SELECT role, content, ts_ms, metadata FROM conversation_turn
+                    SELECT role, content, ts_ms, turn_index, metadata FROM conversation_turn
                     WHERE session_id = ?
-                    ORDER BY ts_ms DESC LIMIT ?
+                    ORDER BY turn_index DESC, ts_ms DESC LIMIT ?
                     """,
                     (session_key, row_limit),
                 ).fetchall()

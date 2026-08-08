@@ -139,6 +139,7 @@ def _quality_receipt(
         severe_conflict_errors=severe_conflict_errors,
         evidence_class=evidence_class,
         hidden_verifier=True,
+        verifier_prompt_digest=_digest(f"verifier-prompt:{arm_execution_id}"),
         attestation_ref=(
             None if attestation is None else attestation.attestation_ref
         ),

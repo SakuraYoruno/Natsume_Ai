@@ -17,6 +17,9 @@ from host_brain.app.acceptance_effect_handler_common import (
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
 )
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 
 
 class _AcceptedSurfaceNoEffectFailure(RuntimeError):
@@ -63,11 +66,10 @@ class _AcceptedSurfaceReplyDeliveryHandler:
                 "has no authenticated Gateway outbox query port for delivery "
                 f"identity {_surface_delivery_id(value)}"
             )
-        value, terminal_proof = _accepted_surface_invocation(payload)
+        value, execution_proof = _accepted_surface_invocation(payload)
         effect_id = _surface_effect_id(
             value=value,
-            terminal_proof=terminal_proof,
-            reopen_preview=True,
+            execution_proof=execution_proof,
         )
         delivery_id = _surface_delivery_id(value)
         payload_digest = _surface_gateway_payload_digest(
@@ -103,14 +105,13 @@ async def _deliver_accepted_surface_reply(
         submit_gateway_reply,
     )
 
-    value, terminal_proof = _accepted_surface_invocation(payload)
+    value, execution_proof = _accepted_surface_invocation(payload)
     channel = value["reply_channel"]
     target = value["reply_target"]
     request_id = value["request_id"]
     effect_id = _surface_effect_id(
         value=value,
-        terminal_proof=terminal_proof,
-        reopen_preview=False,
+        execution_proof=execution_proof,
     )
     delivery_id = _surface_delivery_id(value)
     # The Acceptance Effect binds one exact, visible text result.  Reply-form,
@@ -129,9 +130,7 @@ async def _deliver_accepted_surface_reply(
         # concern and must not add its retry/timeout window to an interactive
         # Host turn.
         wait_result=False,
-        action_preview_service=terminal_proof.get("service"),
-        action_preview_event_id=str(terminal_proof.get("event_id") or ""),
-        action_preview_boundary=dict(terminal_proof.get("boundary") or {}),
+        accepted_effect_proof=execution_proof,
     )
     projected = (
         dict(result.as_dict())
@@ -203,6 +202,7 @@ async def _deliver_accepted_surface_reply(
 def _accepted_surface_request(payload: Mapping[str, Any]) -> dict[str, Any]:
     value = dict(payload or {})
     value.pop("_action_preview_terminal_proof", None)
+    value.pop("_acceptance_effect_execution_proof", None)
     required = {
         "request_id",
         "session_id",
@@ -251,32 +251,19 @@ def _accepted_surface_request(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def _accepted_surface_invocation(
     payload: Mapping[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Validate all local input/proof structure before Gateway invocation."""
+) -> tuple[dict[str, Any], AcceptanceEffectExecutionProof]:
+    """Validate accepted-effect identity before Gateway invocation."""
 
     value = _accepted_surface_request(payload)
-    terminal_proof = dict(payload).get("_action_preview_terminal_proof")
-    if not isinstance(terminal_proof, Mapping) or set(terminal_proof) != {
-        "service",
-        "event_id",
-        "boundary",
-    }:
-        raise ValueError("accepted delivery lacks exact terminal ActionPreview proof")
-    service = terminal_proof.get("service")
-    event_id = str(terminal_proof.get("event_id") or "").strip()
-    boundary = terminal_proof.get("boundary")
+    proof = dict(payload).get("_acceptance_effect_execution_proof")
+    if not isinstance(proof, AcceptanceEffectExecutionProof):
+        raise ValueError("accepted delivery lacks typed Acceptance Effect proof")
     if (
-        not callable(getattr(service, "require_execution", None))
-        or not event_id
-        or not isinstance(boundary, Mapping)
-        or not boundary
+        proof.effect_type != "surface.reply_delivery"
+        or proof.action_args_dict() != value
     ):
-        raise ValueError("accepted delivery terminal ActionPreview proof is incomplete")
-    return value, {
-        "service": service,
-        "event_id": event_id,
-        "boundary": dict(boundary),
-    }
+        raise ValueError("accepted delivery differs from its Acceptance Effect proof")
+    return value, proof
 
 
 def _surface_delivery_id(value: Mapping[str, Any]) -> str:
@@ -333,67 +320,19 @@ def _surface_gateway_payload_digest(
 def _surface_effect_id(
     *,
     value: Mapping[str, Any],
-    terminal_proof: Mapping[str, Any],
-    reopen_preview: bool,
+    execution_proof: AcceptanceEffectExecutionProof,
 ) -> str:
-    """Reopen the stable Effect id; claim owner/fence remain live authority.
+    """Return the immutable effect id carried by the live dispatcher claim."""
 
-    The effect id is persisted inside the Gateway payload digest.  The current
-    Acceptance Effect owner/fence is checked through ActionPreview but is not
-    persisted downstream, so a later recovery owner can reconcile the same
-    immutable outbox after a claim takeover.
-    """
-
-    boundary = terminal_proof.get("boundary")
-    if not isinstance(boundary, Mapping):
-        raise AcceptanceEffectOutcomeUnknown(
-            "surface reply delivery lacks an exact ActionPreview boundary"
-        )
-    exact = dict(boundary)
-    effect_id = str(exact.get("action_scope") or "")
-    authority = exact.get("authority_context")
-    args = exact.get("action_args")
-    valid = (
-        _is_exact_effect_identity(effect_id, limit=255)
-        and exact.get("action_kind")
-        == "acceptance-effect.surface.reply_delivery"
-        and isinstance(authority, Mapping)
-        and set(authority)
-        == {
-            "schema_version",
-            "effect_id",
-            "lease_owner_id",
-            "fencing_token",
-        }
-        and authority.get("schema_version")
-        == "Natsume.action_preview.acceptance_effect_authority_request.v1"
-        and authority.get("effect_id") == effect_id
-        and _is_exact_effect_identity(authority.get("lease_owner_id"), limit=255)
-        and isinstance(authority.get("fencing_token"), int)
-        and not isinstance(authority.get("fencing_token"), bool)
-        and int(authority.get("fencing_token")) >= 1
-        and isinstance(args, Mapping)
-        and dict(args) == dict(value)
-    )
-    if not valid:
+    effect_id = str(execution_proof.effect_id or "")
+    if (
+        not _is_exact_effect_identity(effect_id, limit=255)
+        or execution_proof.effect_type != "surface.reply_delivery"
+        or execution_proof.action_args_dict() != dict(value)
+    ):
         raise AcceptanceEffectOutcomeUnknown(
             "surface reply authority/effect identity drifted"
         )
-    if not reopen_preview:
-        # The terminal POST boundary below performs the authoritative Preview
-        # reopen.  Avoid consuming or double-counting a one-shot implementation
-        # while still persisting the stable effect id in the outbox digest.
-        return effect_id
-    try:
-        terminal_proof["service"].require_execution(
-            event_id=str(terminal_proof.get("event_id") or ""),
-            **exact,
-        )
-    except Exception as exc:
-        raise AcceptanceEffectOutcomeUnknown(
-            "surface reply query could not reopen current Preview authority "
-            f"after {_opaque_failure(exc)}"
-        ) from exc
     return effect_id
 
 

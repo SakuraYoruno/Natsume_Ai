@@ -104,6 +104,33 @@ class ResearchPairedExecutionResult:
     receipt_ref: str
     receipt: PairedResearchRunReceiptV1
     replayed_terminal_receipt: bool
+    transient_outputs: tuple["ResearchTransientArmOutputV1", ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchTransientArmOutputV1:
+    """Process-local output needed by a same-run hidden quality verifier.
+
+    This type deliberately has no serialization method.  A restarted process
+    can reopen the public terminal receipt but cannot reconstruct response
+    bodies from the Research ledger; it must start a new preregistered cohort
+    version rather than pretending a missing quality judgement was replayed.
+    """
+
+    role: str
+    run: AttestedExternalResearchRun
+
+    def __post_init__(self) -> None:
+        role = str(self.role or "").strip().upper()
+        if role not in {"BASELINE", "SELECTED"}:
+            raise ResearchPairedExecutionError(
+                "transient Research output role must be BASELINE or SELECTED"
+            )
+        if not isinstance(self.run, AttestedExternalResearchRun):
+            raise ResearchPairedExecutionError(
+                "transient Research output must bind an attested external run"
+            )
+        object.__setattr__(self, "role", role)
 
 
 class ResearchPairedExecutionRunner:
@@ -176,6 +203,7 @@ class ResearchPairedExecutionRunner:
                 receipt_ref=terminal.receipt_ref,
                 receipt=terminal.receipt,
                 replayed_terminal_receipt=True,
+                transient_outputs=(),
             )
 
         if not spec.owner_randomized:
@@ -188,6 +216,7 @@ class ResearchPairedExecutionRunner:
             )
         inputs = _arm_inputs(arm_inputs)
         verifier_instances: list[ResearchCitationVerifierPort] = []
+        transient_runs: dict[str, AttestedExternalResearchRun] = {}
         for role in spec.arm_order:
             await self._ensure_arm_evidence(
                 spec=spec,
@@ -195,6 +224,7 @@ class ResearchPairedExecutionRunner:
                 runtime_input=inputs[role],
                 owner_id=normalized_owner_id,
                 verifier_instances=verifier_instances,
+                transient_runs=transient_runs,
             )
 
         baseline = self._ledger.get_arm_execution(run_id=spec.run_id, role="BASELINE")
@@ -213,6 +243,11 @@ class ResearchPairedExecutionRunner:
             receipt_ref=receipt_ref,
             receipt=receipt,
             replayed_terminal_receipt=False,
+            transient_outputs=tuple(
+                ResearchTransientArmOutputV1(role=role, run=transient_runs[role])
+                for role in ("BASELINE", "SELECTED")
+                if role in transient_runs
+            ),
         )
 
     async def _ensure_arm_evidence(
@@ -223,6 +258,7 @@ class ResearchPairedExecutionRunner:
         runtime_input: ResearchArmRuntimeInputV1,
         owner_id: str,
         verifier_instances: list[ResearchCitationVerifierPort],
+        transient_runs: dict[str, AttestedExternalResearchRun],
     ) -> ResearchArmExecutionSnapshot:
         plan = spec.baseline if role == "BASELINE" else spec.selected
         execution_id = self.execution_id_for(
@@ -346,6 +382,7 @@ class ResearchPairedExecutionRunner:
                 arm=persisted,
                 expected_execution_id=started.execution_id,
             )
+            transient_runs[role] = external_run
             return persisted
         except Exception as exc:
             recovered = self._recover_after_started_failure(
@@ -542,18 +579,22 @@ def _assert_model_matches_spec(
     expected_execution_id: str,
 ) -> None:
     attestation = model.attestation
+    expected_prompt_digest = _expected_arm_prompt_digest(
+        spec=spec,
+        arm_id=expected_arm_id,
+    )
     if (
         model.execution_id != expected_execution_id
         or model.arm_id != expected_arm_id
         or model.evidence_class != "ATTESTED_EXTERNAL"
         or not model.benefit_eligible
-        or model.prompt_digest != spec.profile.prompt_digest
+        or model.prompt_digest != expected_prompt_digest
         or model.total_tokens is None
         or model.tool_call_count is None
         or attestation is None
     ):
         raise ResearchPairedExecutionError(
-            "Research arm evidence does not bind the preregistered execution profile"
+            "Research arm evidence does not bind the preregistered execution profile and arm prompt"
         )
     if (
         model.total_tokens > spec.budget.arm_max_tokens
@@ -561,6 +602,31 @@ def _assert_model_matches_spec(
         or attestation.total_latency_ms > spec.budget.arm_max_wall_time_ms
     ):
         raise ResearchPairedExecutionError("Research arm evidence exceeded its preregistered budget")
+
+
+def _expected_arm_prompt_digest(
+    *,
+    spec: ResearchPairedRunSpecSnapshot,
+    arm_id: str,
+) -> str:
+    """Resolve the durable rendered prompt identity for one A/B arm.
+
+    Older RunSpecs intentionally omit the field and retain their historical
+    shared-profile behavior.  New real cohorts bind each arm separately so a
+    PlanningSearch-selected source set can differ from the baseline without
+    trusting transient caller input.
+    """
+
+    matches = tuple(
+        plan
+        for plan in (spec.baseline, spec.selected)
+        if plan.arm_id == arm_id
+    )
+    if len(matches) != 1:
+        raise ResearchPairedExecutionError(
+            "Research arm identity does not bind exactly one preregistered plan"
+        )
+    return matches[0].prompt_digest or spec.profile.prompt_digest
 
 
 def _assert_pair_budget(
@@ -645,4 +711,5 @@ __all__ = [
     "ResearchPairedExecutionError",
     "ResearchPairedExecutionResult",
     "ResearchPairedExecutionRunner",
+    "ResearchTransientArmOutputV1",
 ]

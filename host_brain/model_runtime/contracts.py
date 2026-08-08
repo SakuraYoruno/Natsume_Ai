@@ -622,6 +622,7 @@ class ModelAttemptRequest:
     retry_evaluator: RetryEvaluator | None = None
     metadata: JsonMapping = field(default_factory=dict)
     model_budget_guard: ModelBudgetGuard | None = None
+    previsibility_transport_retries: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "request_id", _clean_required(self.request_id, field_name="request_id"))
@@ -639,6 +640,21 @@ class ModelAttemptRequest:
         object.__setattr__(self, "max_attempts", int(self.max_attempts))
         object.__setattr__(self, "foreground", bool(self.foreground))
         object.__setattr__(self, "metadata", dict(self.metadata or {}))
+        try:
+            transport_retries = int(self.previsibility_transport_retries)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "previsibility_transport_retries must be zero or one"
+            ) from exc
+        if transport_retries not in {0, 1}:
+            raise ValueError(
+                "previsibility_transport_retries must be zero or one"
+            )
+        object.__setattr__(
+            self,
+            "previsibility_transport_retries",
+            transport_retries,
+        )
         if self.model_budget_guard is not None and not isinstance(
             self.model_budget_guard,
             ModelBudgetGuard,

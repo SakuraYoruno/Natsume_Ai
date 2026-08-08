@@ -384,6 +384,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     prefetch_persona_inputs_ms = 0
     retrieval_wait_ms = 0
     prompt_filter_ms = 0
+    user_preference_pack_ms = 0
     llm_runtime_resolve_ms = 0
     _hard_state_summary = gov.get("hard_state_summary") if isinstance(gov.get("hard_state_summary"), Mapping) else {}
     retrieval_mood_state = (
@@ -520,6 +521,7 @@ async def _cortex_orchestrator_sse_generator_impl(
     except Exception as prompt_filter_exc:
         _logger.debug("[%s] cortex_orchestrator prompt retrieval filter failed: %s", request_id, prompt_filter_exc)
 
+    user_preference_pack_started_ms = int(time.time() * 1000)
     try:
         user_preference_pack = application_ports.build_user_preference_pack(
             person_id=person_id,
@@ -533,6 +535,11 @@ async def _cortex_orchestrator_sse_generator_impl(
             retrieval_summary["user_preference_pack"] = dict(user_preference_pack)
     except Exception as preference_pack_exc:
         _logger.debug("[%s] user preference pack build skipped: %s", request_id, preference_pack_exc)
+    finally:
+        user_preference_pack_ms = max(
+            0,
+            int(time.time() * 1000) - user_preference_pack_started_ms,
+        )
 
     # 人格聊天链不再使用 slot 投影。
     # 运行时只保留五路召回原始结果，由 prompt 直接消费检索证据；
@@ -549,13 +556,19 @@ async def _cortex_orchestrator_sse_generator_impl(
         stream_realtime_chat = realtime_chat_port
         if not callable(stream_realtime_chat):  # defensive; checked above
             raise RuntimeError("REALTIME_COMPANION_RUNTIME_INVARIANT_BROKEN")
+        context_ready_ms = int(time.time() * 1000)
         trace_stage_meta = {
             "runtime_path": "realtime_companion",
             "orchestrator_started_ms": orchestrator_started_ms,
-            "context_ready_ms": int(time.time() * 1000),
+            "context_ready_ms": context_ready_ms,
+            "context_pipeline_ms": max(0, context_ready_ms - orchestrator_started_ms),
             "prefetch_persona_inputs_ms": prefetch_persona_inputs_ms,
             "retrieval_wait_ms": retrieval_wait_ms,
+            "retrieval_runtime_timings_ms": dict(
+                retrieval_summary.get("runtime_timings_ms") or {}
+            ),
             "prompt_filter_ms": prompt_filter_ms,
+            "user_preference_pack_ms": user_preference_pack_ms,
             "llm_runtime_resolve_ms": llm_runtime_resolve_ms,
             "pii_ingress": dict(_pii_ingress_stats),
         }

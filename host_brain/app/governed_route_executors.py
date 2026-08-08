@@ -466,8 +466,17 @@ def _chat_call_kwargs(
         "pii_ingress_stats": _safe_mapping(input_pack.get("pii_ingress_stats")),
         "motive_state": _safe_mapping(input_pack.get("motive_state")),
     }
-    accepted_artifact_items: list[dict[str, Any]] = []
     input_artifacts = frozen.input_artifacts
+    if (
+        str(raw_body.get("input_source") or "").strip().upper() == "GATEWAY"
+        and not input_artifacts
+    ):
+        # A one-node personal companion reply still uses Task Acceptance for
+        # durable Gateway delivery, but its language generation belongs to the
+        # low-latency companion lane.  Data-dependent Plan synthesis carries
+        # accepted predecessor artifacts and deliberately remains quality-first.
+        trace_stage_meta["runtime_path"] = "realtime_companion"
+    accepted_artifact_items: list[dict[str, Any]] = []
     if input_artifacts:
         try:
             artifact_attestation = build_node_input_artifact_attestation(

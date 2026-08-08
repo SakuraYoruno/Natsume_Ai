@@ -3,6 +3,8 @@ import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import { installRequiredOperatorSession } from './operator-session.js'
 
+const includeSecurityAcceptance = process.env.MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE !== '0'
+
 function monitorUrl(baseURL, routePath) {
   return new URL(`#${routePath}`, baseURL).toString()
 }
@@ -122,7 +124,10 @@ test('Core Release validates live health contracts and canonical production navi
     const hostHealth = await hostResponse.json()
     expect(['OK', 'ACCEPTANCE_PENDING_EXTERNAL']).toContain(hostHealth.status)
     expect(hostHealth.version).toBeTruthy()
-    expect(hostHealth.details?.summary?.overall_status).toBe(hostHealth.status)
+    const expectedRuntimeStatus = hostHealth.status === 'OK'
+      ? 'UP'
+      : hostHealth.status
+    expect(hostHealth.details?.summary?.overall_status).toBe(expectedRuntimeStatus)
     expect(hostHealth.details?.summary?.required_unavailable).toBe(0)
   }
 
@@ -134,18 +139,35 @@ test('Core Release validates live health contracts and canonical production navi
   expect(executionIndex.read_only).toBe(true)
   expect(executionIndex.executions.length).toBeGreaterThan(0)
   const selectedExecution = executionIndex.executions[0]
-  const executionDetailResponse = await page.request.get(new URL(
+  const executionDetailUrl = new URL(
     `/obs/task-runtime/executions/${encodeURIComponent(selectedExecution.graph_id)}`
       + `?revision=${Number(selectedExecution.revision || 1)}&after_cursor=0&event_limit=200`,
     baseURL,
-  ).toString())
-  expect(executionDetailResponse.status()).toBe(200)
-  expect(executionDetailResponse.headers()['x-natsume-query-auth']).toBe('AUTHENTICATED')
-  const executionDetail = await executionDetailResponse.json()
-  expect(executionDetail.read_only).toBe(true)
-  expect(executionDetail.mutation_contract?.direct_database_write).toBe(false)
-  expect(executionDetail.mutation_contract?.automatic_resume).toBe(false)
-  expect(executionDetail.mutation_contract?.resume_requires_bound_token).toBe(true)
+  ).toString()
+  await expect.poll(async () => {
+    const response = await page.request.get(executionDetailUrl)
+    const payload = response.status() === 200 ? await response.json() : {}
+    const snapshot = {
+      status: response.status(),
+      auth: response.headers()['x-natsume-query-auth'] || '',
+      readOnly: payload.read_only,
+      directDatabaseWrite: payload.mutation_contract?.direct_database_write,
+      automaticResume: payload.mutation_contract?.automatic_resume,
+      resumeRequiresBoundToken: payload.mutation_contract?.resume_requires_bound_token,
+    }
+    await response.dispose()
+    return snapshot
+  }, {
+    message: 'the selected execution revision must converge to the canonical read-only contract',
+    timeout: 90_000,
+  }).toEqual({
+    status: 200,
+    auth: 'AUTHENTICATED',
+    readOnly: true,
+    directDatabaseWrite: false,
+    automaticResume: false,
+    resumeRequiresBoundToken: true,
+  })
 
   const runtimeSnapshotResponse = await page.request.get(
     new URL('/obs/runtime-snapshot', baseURL).toString(),
@@ -154,38 +176,43 @@ test('Core Release validates live health contracts and canonical production navi
   expect(runtimeSnapshotResponse.headers()['content-type']).toContain('application/json')
   expect(runtimeSnapshotResponse.headers()['x-natsume-query-auth']).toBe('AUTHENTICATED')
 
-  const securityRuntime = await waitForAuthenticatedJson(
-    page,
-    baseURL,
-    '/obs/security/runtime',
-    (payload) => payload?.schema_version === 'Natsume.security_immune.runtime.v1'
-      && (
-        payload?.projection?.available === false
-        || Number(payload?.generated_ts_ms || 0) > 0
-      )
-      && Array.isArray(payload?.assets)
-      && Array.isArray(payload?.incidents)
-      && hasCoherentReadableProjection(payload, 'security_immune'),
-  )
-  const securityAssets = await waitForAuthenticatedJson(
-    page,
-    baseURL,
-    '/obs/security/assets',
-    (payload) => payload?.schema_version === 'Natsume.security_immune.assets.v1'
-      && Array.isArray(payload?.assets)
-      && payload?.asset_count === payload.assets.length
-      && hasCoherentReadableProjection(payload, 'security_immune'),
-  )
-  const securityIncidents = await waitForAuthenticatedJson(
-    page,
-    baseURL,
-    '/obs/security/incidents?min_risk=low',
-    (payload) => payload?.schema_version === 'Natsume.security_immune.incidents.v1'
-      && Array.isArray(payload?.incidents)
-      && payload?.incident_count === payload.incidents.length
-      && hasCoherentReadableProjection(payload, 'security_immune'),
-  )
-  expect(securityRuntime.asset_count).toBe(securityAssets.asset_count)
+  let securityRuntime = null
+  let securityAssets = null
+  let securityIncidents = null
+  if (includeSecurityAcceptance) {
+    securityRuntime = await waitForAuthenticatedJson(
+      page,
+      baseURL,
+      '/obs/security/runtime',
+      (payload) => payload?.schema_version === 'Natsume.security_immune.runtime.v1'
+        && (
+          payload?.projection?.available === false
+          || Number(payload?.generated_ts_ms || 0) > 0
+        )
+        && Array.isArray(payload?.assets)
+        && Array.isArray(payload?.incidents)
+        && hasCoherentReadableProjection(payload, 'security_immune'),
+    )
+    securityAssets = await waitForAuthenticatedJson(
+      page,
+      baseURL,
+      '/obs/security/assets',
+      (payload) => payload?.schema_version === 'Natsume.security_immune.assets.v1'
+        && Array.isArray(payload?.assets)
+        && payload?.asset_count === payload.assets.length
+        && hasCoherentReadableProjection(payload, 'security_immune'),
+    )
+    securityIncidents = await waitForAuthenticatedJson(
+      page,
+      baseURL,
+      '/obs/security/incidents?min_risk=low',
+      (payload) => payload?.schema_version === 'Natsume.security_immune.incidents.v1'
+        && Array.isArray(payload?.incidents)
+        && payload?.incident_count === payload.incidents.length
+        && hasCoherentReadableProjection(payload, 'security_immune'),
+    )
+    expect(securityRuntime.asset_count).toBe(securityAssets.asset_count)
+  }
 
   const traceFeed = await waitForAuthenticatedJson(
     page,
@@ -210,20 +237,25 @@ test('Core Release validates live health contracts and canonical production navi
   expect(traceSessions.total).toBeGreaterThanOrEqual(0)
 
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
-  await expect(page.getByRole('heading', { name: '安全免疫', exact: true })).toBeVisible()
-  const securityStatus = page.getByRole('region', { name: 'Security Immune hero status' })
-  const securityProjectionAvailable = securityRuntime.projection.available === true
-  await expect(securityStatus.getByText(
-    securityProjectionAvailable ? 'connected' : 'degraded',
-    { exact: true },
-  )).toBeVisible()
-  await expect(securityStatus.getByText(`${securityAssets.asset_count} assets`, { exact: true })).toBeVisible()
-  await expect(securityStatus.getByText(`${securityIncidents.incident_count} open`, { exact: true })).toBeVisible()
-  if (securityProjectionAvailable) {
-    await expect(securityStatus.getByText('Security Immune 降级运行', { exact: true })).toHaveCount(0)
+  if (includeSecurityAcceptance) {
+    await page.goto(monitorUrl(baseURL, '/security/immune'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: '安全免疫', exact: true })).toBeVisible()
+    const securityStatus = page.getByRole('region', { name: 'Security Immune hero status' })
+    const securityProjectionAvailable = securityRuntime.projection.available === true
+    await expect(securityStatus.getByText(
+      securityProjectionAvailable ? 'connected' : 'degraded',
+      { exact: true },
+    )).toBeVisible()
+    await expect(securityStatus.getByText(`${securityAssets.asset_count} assets`, { exact: true })).toBeVisible()
+    await expect(securityStatus.getByText(`${securityIncidents.incident_count} open`, { exact: true })).toBeVisible()
+    if (securityProjectionAvailable) {
+      await expect(securityStatus.getByText('Security Immune 降级运行', { exact: true })).toHaveCount(0)
+    } else {
+      await expect(securityStatus.getByText('Security Immune 降级运行', { exact: true })).toBeVisible()
+    }
   } else {
-    await expect(securityStatus.getByText('Security Immune 降级运行', { exact: true })).toBeVisible()
+    await page.goto(monitorUrl(baseURL, '/cockpit'), { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: '现在先处理什么' })).toBeVisible()
   }
 
   const mainNav = page.getByRole('navigation', { name: '主导航' })

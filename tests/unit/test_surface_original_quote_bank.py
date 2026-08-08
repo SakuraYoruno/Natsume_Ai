@@ -73,6 +73,143 @@ def test_surface_original_quote_runtime_uses_vector_collection_constant() -> Non
     assert DEFAULT_SURFACE_ORIGINAL_QUOTE_COLLECTION == "surface_original_quotes"
 
 
+def test_riddle_joker_lexical_runtime_prefers_natsume_voice_and_caches_rows(
+    monkeypatch,
+) -> None:
+    primary = _vector_row(
+        {
+            **_quote_record("嗯，先在这陪你。"),
+            "quote_id": "riddle_joker_tsv::primary",
+            "source_ref": "dialogue.tsv:1:七海",
+            "source_digest": "primary",
+            "character_confidence": 1.0,
+        }
+    )
+    secondary = _vector_row(
+        {
+            **_quote_record("那就先停一下。"),
+            "quote_id": "riddle_joker_tsv::secondary",
+            "source_ref": "dialogue.tsv:2:其他角色",
+            "source_digest": "secondary",
+            "character_confidence": 0.62,
+        }
+    )
+    calls = 0
+
+    def rows():
+        nonlocal calls
+        calls += 1
+        return [primary, secondary]
+
+    quote_mod.clear_surface_original_quote_bank_cache()
+    monkeypatch.setenv("HOST_SURFACE_RIDDLE_JOKER_PRIMARY_CHARACTER_ONLY", "1")
+    monkeypatch.setattr(quote_mod, "_fetch_riddle_joker_dialogue_tsv_rows", rows)
+
+    query = SurfaceOriginalQuoteQuery(user_message="今天不太顺", question_budget=0)
+    first = quote_mod._query_riddle_joker_dialogue_tsv(query, top_k=4)
+    second = quote_mod._query_riddle_joker_dialogue_tsv(query, top_k=4)
+
+    assert [row["memory_id"] for row in first] == ["riddle_joker_tsv::primary"]
+    assert [row["memory_id"] for row in second] == ["riddle_joker_tsv::primary"]
+    assert calls == 1
+
+
+def test_original_quote_query_excludes_question_examples_when_budget_is_zero(
+    monkeypatch,
+) -> None:
+    statement = _vector_row(
+        {
+            **_quote_record("嗯，先在这陪你。"),
+            "quote_id": "riddle_joker_tsv::statement",
+            "source_ref": "dialogue.tsv:1:七海",
+            "source_digest": "statement",
+            "character_confidence": 1.0,
+        }
+    )
+    question = _vector_row(
+        {
+            **_quote_record("要不要先停一下？"),
+            "quote_id": "riddle_joker_tsv::question",
+            "source_ref": "dialogue.tsv:2:七海",
+            "source_digest": "question",
+            "character_confidence": 1.0,
+        }
+    )
+    quote_mod.clear_surface_original_quote_bank_cache()
+    monkeypatch.setenv("HOST_SURFACE_RIDDLE_JOKER_PRIMARY_CHARACTER_ONLY", "1")
+    monkeypatch.setattr(
+        quote_mod,
+        "_fetch_riddle_joker_dialogue_tsv_rows",
+        lambda: [statement, question],
+    )
+
+    result = quote_mod._query_riddle_joker_dialogue_tsv(
+        SurfaceOriginalQuoteQuery(
+            user_message="今天不太顺",
+            question_budget=0,
+        ),
+        top_k=4,
+    )
+
+    assert [row["memory_id"] for row in result] == [
+        "riddle_joker_tsv::statement"
+    ]
+
+
+def test_local_lexical_miss_does_not_open_slow_vector_fallback_by_default(
+    monkeypatch,
+) -> None:
+    question = _vector_row(
+        {
+            **_quote_record("要不要先停一下？"),
+            "quote_id": "riddle_joker_tsv::question-only",
+            "source_ref": "dialogue.tsv:1:七海",
+            "source_digest": "question-only",
+            "character_confidence": 1.0,
+        }
+    )
+    vector_calls = 0
+
+    def vector_rows(*_args, **_kwargs):
+        nonlocal vector_calls
+        vector_calls += 1
+        return []
+
+    quote_mod.clear_surface_original_quote_bank_cache()
+    monkeypatch.setenv("HOST_SURFACE_RIDDLE_JOKER_PRIMARY_CHARACTER_ONLY", "1")
+    monkeypatch.delenv(
+        "HOST_SURFACE_RIDDLE_JOKER_VECTOR_FALLBACK_AFTER_LEXICAL_MISS",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        quote_mod,
+        "_fetch_riddle_joker_dialogue_tsv_rows",
+        lambda: [question],
+    )
+    monkeypatch.setattr(
+        quote_mod,
+        "_query_riddle_joker_dialogue_vector_collection",
+        vector_rows,
+    )
+    monkeypatch.setattr(
+        quote_mod,
+        "_query_surface_original_quote_collection",
+        vector_rows,
+    )
+
+    selection = select_surface_original_quotes(
+        SurfaceOriginalQuoteQuery(
+            user_message="今天不太顺",
+            scene_id="implicit_low_mood",
+            question_budget=0,
+        ),
+        limit=4,
+    )
+
+    assert selection.quotes == ()
+    assert vector_calls == 0
+
+
 def test_render_surface_original_quote_guidance_includes_vector_quotes_not_source_refs(monkeypatch) -> None:
     _patch_vector_rows(monkeypatch, [_vector_row(_quote_record())])
 
@@ -92,8 +229,28 @@ def test_surface_original_quote_policy_splits_scene_strength() -> None:
     assert surface_original_quote_policy_for_scene("short_continue").max_quotes == 3
     assert surface_original_quote_policy_for_scene("lover_presence").max_quotes == 3
     assert surface_original_quote_policy_for_scene("ambiguous_affection").max_quotes == 1
+    assert surface_original_quote_policy_for_scene("relationship_repair").max_quotes == 3
+    assert surface_original_quote_policy_for_scene("mixed_affect").max_quotes == 2
     assert surface_original_quote_policy_for_scene("technical_next_step").mode == "need_samples"
     assert surface_original_quote_policy_for_scene("daily_morning").mode == "need_samples"
+
+
+def test_curated_relationship_repair_quotes_keep_fixed_source_order() -> None:
+    selection = select_surface_original_quotes(
+        SurfaceOriginalQuoteQuery(
+            scene_id="relationship_repair",
+            relationship_stage="familiar",
+            question_budget=0,
+            limit=3,
+        ),
+        limit=3,
+    )
+
+    assert [quote.quote_id for quote in selection.quotes] == [
+        "riddle_joker_tsv::741",
+        "riddle_joker_tsv::1588",
+        "riddle_joker_tsv::8895",
+    ]
 
 
 def test_surface_original_quote_policy_disables_morning_without_samples(monkeypatch) -> None:

@@ -415,7 +415,7 @@ def _surface_pragmatic_guidance_action(
     return str(ambiguity.get("recommended_action") or "").strip()
 
 
-def _surface_pragmatic_guidance_must_include(
+def _surface_pragmatic_guidance_fact_lines(
     agent_input: Any,
     *,
     ports: SurfaceRuntimePorts,

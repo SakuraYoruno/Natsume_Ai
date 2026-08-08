@@ -11,6 +11,9 @@ from host_brain.app.surface_main_chain_adapter import (
     run_surface_main_chain_for_surface_reply_input,
     surface_main_chain_sse_generator as _surface_main_chain_sse_generator,
 )
+from host_brain.app.surface_main_chain_support import (
+    _surface_model_request_profile,
+)
 from host_brain.surface_runtime.eligibility import surface_main_chain_enabled
 from host_brain.surface_runtime.input_compiler import build_surface_main_chain_input_from_surface_reply_input
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
@@ -211,6 +214,29 @@ def _candidate_payload(candidates: list[str]) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def test_realtime_companion_buffered_candidate_selection_stays_tier_b() -> None:
+    """双候选择优不能把普通陪伴静默升级到高延迟 A 档模型。"""
+
+    assert _surface_model_request_profile(
+        {
+            "runtime_path": "realtime_companion",
+            "affective_turn_plan": {
+                "generation_mode": "BUFFERED_CANDIDATE_SELECTION",
+                "candidate_count": 2,
+            },
+        }
+    ) == ("CHAT_SURFACE_REALTIME", "B", "realtime_companion")
+    assert _surface_model_request_profile(
+        {
+            "runtime_path": "governed_task",
+            "affective_turn_plan": {
+                "generation_mode": "BUFFERED_CANDIDATE_SELECTION",
+                "candidate_count": 2,
+            },
+        }
+    ) == ("CHAT_SURFACE", "A", "surface_reply")
 
 
 def _surface_json_result(text: str, *, final_provider: str = "mock", final_model: str = "mock-chat") -> SimpleNamespace:
@@ -442,6 +468,313 @@ async def test_surface_semantic_retry_is_owned_by_one_model_attempt_request(
 
 
 @pytest.mark.asyncio
+async def test_buffered_affective_quality_floor_gets_one_semantic_repair(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    provider_calls: list[dict[str, Any]] = []
+
+    def _payload(candidates: list[tuple[str, str]]) -> str:
+        return json.dumps(
+            {
+                "candidates": [
+                    {
+                        "reply_text": reply,
+                        "tts_text_ja": speech,
+                        "natsume_emotion_tag": "CALM",
+                        "user_emotion_tag": "SAD",
+                        "emotion_confidence": 0.7,
+                    }
+                    for reply, speech in candidates
+                ]
+            },
+            ensure_ascii=False,
+        )
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        provider_calls.append(kwargs)
+        if len(provider_calls) == 1:
+            content = _payload(
+                [
+                    ("好好好，那你先别理我。", "わかった。じゃあ、しばらく放っておくね。"),
+                    ("行，你缓过来再说。", "うん。落ち着いたら、また話して。"),
+                ]
+            )
+        else:
+            content = _payload(
+                [
+                    ("刚才那句是我没接好。你不想现在说也没关系。", "さっきは、私がちゃんと受け止められなかった。今は話さなくてもいいよ。"),
+                    ("我先把距离收住，不催你。你想说的时候我还在。", "少し距離を置いて、急かさないよ。話したくなったら、私はここにいる。"),
+                ]
+            )
+        return SimpleNamespace(
+            content=content,
+            pool_exhausted=False,
+            final_provider="mock",
+            final_model="mock-chat",
+            provider_name="mock",
+            model_id="mock-chat",
+            latency_ms=1,
+            first_token_ms=1,
+        )
+
+    from host_brain.persona.surface.data_models import IsolatedCandidateScore
+
+    def _fake_scores(_request, candidates):  # noqa: ANN001
+        passed = any("没接好" in candidate or "不催你" in candidate for candidate in candidates)
+        return [
+            IsolatedCandidateScore(
+                text=candidate,
+                score=90.0 - index,
+                passed=passed,
+                hard_fail=False,
+                reason_codes=() if passed else ("WEAK_SCENE_GROUNDING",),
+                control_violations=(),
+                dimensions={"context_fit": 82.0 if passed else 66.0},
+                quality={},
+            )
+            for index, candidate in enumerate(candidates)
+        ]
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_complete,
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.surface.candidate_scoring.score_isolated_surface_candidates",
+        _fake_scores,
+    )
+    context = {
+        "_affective_life_internal": True,
+        "affective_life": {
+            "schema_version": "affective_turn_context.v1",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace-a",
+            "relationship_subject_id": "user-1",
+            "session_id": "sess-surface-app",
+            "self_affect": {
+                "self_id": "natsume_ai",
+                "relationship_subject_id": "user-1",
+                "revision": 12,
+                "components": [{"emotion": "CARE", "intensity": 0.64}],
+                "last_regulation": {
+                    "regulation_id": "regulation-a",
+                    "mode": "SEEK_REPAIR",
+                },
+            },
+            "user_observations": [
+                {
+                    "modality": "TEXT",
+                    "emotion_distribution": {"SAD": 0.86},
+                    "valence": -0.72,
+                    "confidence": 0.72,
+                    "evidence_summary": "opaque digest only",
+                }
+            ],
+            "conflict": True,
+            "relationship_life": {
+                "state": {
+                    "relationship_subject_id": "user-1",
+                    "revision": 4,
+                    "repair_required": True,
+                    "proactive_permission": "UNKNOWN",
+                },
+                "aftereffect": {"outcome": "MISUNDERSTOOD"},
+            },
+        },
+    }
+    trace: dict[str, object] = {"runtime_path": "realtime_companion"}
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(
+            workspace_id="workspace-a",
+            user_message="我有点不想说了。",
+            render_policy={
+                "primary_topic": "relationship_repair",
+                "interaction_move": "repair",
+                "response_goal": "承认没接住并留出空间",
+                "response_form": "text",
+                "max_questions": 0,
+            },
+            emotion_context=context,
+        ),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert len(provider_calls) == 2
+    first_prompt = "\n".join(
+        str(item.get("content") or "")
+        for item in provider_calls[0]["messages"]
+    )
+    assert "你是七海，直接回复眼前的人" in first_prompt
+    assert "DL-04 高歧义回合" in first_prompt
+    assert "你是隔离的最终表层文本生成器" not in first_prompt
+    assert "TurnSurfaceContract" not in first_prompt
+    assert trace["affective_turn_plan"]["companion_act"]["kind"] == "REPAIR"
+    assert "没有达到当前关系和场景的质量下限" in str(
+        provider_calls[1]["messages"][-1]["content"]
+    )
+    assert "不得写问号、追问哪里没听懂" in str(
+        provider_calls[1]["messages"][-1]["content"]
+    )
+    assert "没接好" in result.selected_text or "不催你" in result.selected_text
+    assert trace["affective_candidate_selection"]["selected_passed"] is True
+    attempts = trace["surface_model_attempt"]["attempts"]
+    assert [item["status"] for item in attempts] == ["rejected", "succeeded"]
+    assert attempts[0]["error_code"] == "SEMANTIC_RETRY_REQUESTED"
+    assert attempts[1]["retry_reason"] == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+
+
+@pytest.mark.asyncio
+async def test_composite_repair_frame_reaches_real_candidate_prompt(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    provider_calls: list[dict[str, Any]] = []
+    candidates = [
+        (
+            "……你这么说，我也会有点难受。前面的事是我没做好，可我也不想装作没感觉。",
+            "……そう言われると、私もちょっとつらい。前のことは私が悪かったけど、何も感じないふりはしたくない。",
+        ),
+        (
+            "听到这句话，我心里有点疼。前面的责任还在，可我现在也确实不好受。",
+            "その言葉を聞くと、少し胸が痛い。前のことへの責任はあるけど、今の私もやっぱりつらい。",
+        ),
+    ]
+
+    async def _fake_complete(**kwargs):  # noqa: ANN003
+        provider_calls.append(kwargs)
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "reply_text": reply,
+                            "tts_text_ja": speech,
+                            "natsume_emotion_tag": "SAD",
+                            "user_emotion_tag": "ANGRY",
+                            "emotion_confidence": 0.72,
+                        }
+                        for reply, speech in candidates
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            pool_exhausted=False,
+            final_provider="mock",
+            final_model="mock-chat",
+            provider_name="mock",
+            model_id="mock-chat",
+            latency_ms=1,
+            first_token_ms=1,
+        )
+
+    monkeypatch.setattr(
+        "host_brain.integrations.llm_helpers.acomplete_llm_with_pool",
+        _fake_complete,
+    )
+    appraisal_id = "appraisal-composite-repair"
+    context = {
+        "_affective_life_internal": True,
+        "affective_life": {
+            "schema_version": "affective_turn_context.v1",
+            "self_id": "natsume_ai",
+            "workspace_id": "workspace-a",
+            "relationship_subject_id": "user-1",
+            "session_id": "sess-surface-app",
+            "appraisal_id": appraisal_id,
+            "self_affect": {
+                "self_id": "natsume_ai",
+                "relationship_subject_id": "user-1",
+                "revision": 15,
+                "components": [
+                    {"emotion": "HURT", "intensity": 0.58},
+                    {"emotion": "CARE", "intensity": 0.48},
+                ],
+                "last_appraisal": {
+                    "appraisal_id": appraisal_id,
+                    "event_kind": "REPAIR_UNDER_DIRECTED_DISRESPECT",
+                },
+                "last_regulation": {
+                    "regulation_id": "regulation-composite-repair",
+                    "mode": "CONTAIN",
+                    "reason_refs": [f"appraisal://{appraisal_id}"],
+                },
+            },
+            "user_observations": [
+                {
+                    "modality": "TEXT",
+                    "emotion_distribution": {"ANGRY": 0.62},
+                    "valence": -0.48,
+                    "confidence": 0.38,
+                    "evidence_summary": "opaque digest only",
+                }
+            ],
+            "conflict": False,
+            "relationship_life": {
+                "state": {
+                    "relationship_subject_id": "user-1",
+                    "revision": 5,
+                    "repair_required": True,
+                    "proactive_permission": "UNKNOWN",
+                },
+                "aftereffect": {"outcome": "MISUNDERSTOOD"},
+            },
+        },
+    }
+    trace: dict[str, object] = {"runtime_path": "realtime_companion"}
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(
+            workspace_id="workspace-a",
+            user_message="你真烦。",
+            render_policy={
+                "primary_topic": "relationship_repair",
+                "interaction_move": "repair",
+                "response_goal": "承认责任，同时诚实保留七海的克制受伤",
+                "response_form": "text",
+                "max_questions": 0,
+            },
+            emotion_context=context,
+            retrieval_summary={},
+        ),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert len(provider_calls) == 1, json.dumps(
+        trace.get("affective_candidate_selection", {}),
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    rendered = "\n".join(
+        str(item.get("content") or "")
+        for item in provider_calls[0]["messages"]
+    )
+    assert "当前是修复中的克制受伤" in rendered
+    assert "不要写七海被扎心、受伤或委屈" not in rendered
+    assert trace["affective_turn_plan"]["self_emotion_tag"] == "SAD"
+    assert trace["affective_turn_plan"]["expression_plan"]["voice_style"] == (
+        "CONTAINED_HURT"
+    )
+    assert trace["affective_turn_plan"]["utterance_frame"]["response_move"] == (
+        "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+    )
+    assert result.selected_text in {reply for reply, _speech in candidates}
+    assert trace["affective_candidate_selection"]["selected_passed"] is True
+    assert trace["affective_candidate_selection"]["benefit_eligible"] is True
+
+
+@pytest.mark.asyncio
 async def test_surface_main_chain_binds_frozen_governed_budget_to_model_attempt(
     monkeypatch,
     surface_runtime_ports_factory,
@@ -497,6 +830,66 @@ async def test_surface_main_chain_binds_frozen_governed_budget_to_model_attempt(
     assert guard.as_dict() == _governed_model_budget_payload(deadline_ms=321)
     assert request.deadline_ms == 321
     assert request.metadata["model_node_id"] == "node::chat"
+
+
+@pytest.mark.asyncio
+async def test_buffered_gateway_companion_uses_realtime_model_profile(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    """Structured output must not force ordinary Gateway chat onto tier A."""
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    captured_requests: list[object] = []
+
+    class _CapturingModelAttemptService:
+        async def complete(self, request):  # noqa: ANN001
+            captured_requests.append(request)
+            return SimpleNamespace(
+                success=True,
+                content=_candidate_payload(["先陪你安静一会儿。"]),
+            )
+
+    monkeypatch.setattr(
+        "host_brain.composition.process_services.get_model_attempt_service",
+        lambda: _CapturingModelAttemptService(),
+    )
+    monkeypatch.setattr(
+        "host_brain.model_runtime.trace.model_attempt_result_trace",
+        lambda _result: {
+            "success": True,
+            "attempt_ids": ["attempt::model-realtime"],
+            "budget_measurement": {
+                "token_count": 12,
+                "completion_tokens": 4,
+            },
+        },
+    )
+    trace: dict[str, object] = {
+        "runtime_path": "realtime_companion",
+        "governed_model_budget": _governed_model_budget_payload(deadline_ms=321),
+    }
+
+    result = await run_surface_main_chain_for_surface_reply_input(
+        _agent_input(),
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+
+    assert result.selected_text == "先陪你安静一会儿。"
+    request = captured_requests[0]
+    assert request.scene_type == "CHAT_SURFACE_REALTIME"
+    assert request.cognitive_tier == "B"
+    assert request.previsibility_transport_retries == 1
+    assert request.metadata["route_lane"] == "realtime_companion"
+    assert trace["surface_model_route"] == {
+        "scene_type": "CHAT_SURFACE_REALTIME",
+        "cognitive_tier": "B",
+        "route_lane": "realtime_companion",
+    }
 
 
 def test_build_surface_main_chain_input_from_surface_reply_input_compresses_app_context(
@@ -1317,7 +1710,7 @@ async def test_governed_surface_model_failure_rejects_without_approval_fallback(
     commit = events[0]
     assert commit["decision"] == "REJECT"
     assert commit["reason_code"] == "MODEL_PROVIDER_USAGE_REQUIRED"
-    assert commit["narrative"] == "受治理的模型预算未满足，当前节点已停止。"
+    assert commit["narrative"] == "模型调用未满足当前节点约束，当前节点已停止。"
     assert commit["audit_refs"]["trace_stage_meta"]["reply_source"] == "surface_main_chain_budget_reject"
 
 

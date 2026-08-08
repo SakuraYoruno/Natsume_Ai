@@ -32,6 +32,8 @@ _COMPANION_ACT_KINDS = frozenset(
         "ACKNOWLEDGE",
         "HOLD_COMPLEXITY",
         "CONTAINED_JEALOUSY",
+        "LISTEN",
+        "RESPECT_AUTONOMY",
     }
 )
 _TEXT_PACING = frozenset({"STEADY", "SOFT", "BRISK", "SPARSE"})
@@ -45,6 +47,80 @@ _PREVIOUS_EXPRESSION_SOURCES = frozenset(
 )
 _COMPANION_PROFILE_STAGES = frozenset(
     {"BASELINE", "CANARY", "ACTIVE", "COMPATIBILITY_UNBOUND"}
+)
+_UTTERANCE_SEMANTIC_FOCI = frozenset(
+    {
+        "CURRENT_TURN",
+        "UNNAMED_USER_AFFECT",
+        "MIXED_USER_AFFECT",
+        "RELATIONAL_IMPACT",
+        "RELATIONAL_MEANING",
+        "TASK_RESULT",
+    }
+)
+_UTTERANCE_SELF_STANCES = frozenset(
+    {
+        "WARM_ATTENTIVE",
+        "SHARED_MIXED_RESONANCE",
+        "QUIET_PRESENT",
+        "OWN_REPAIR",
+        "OWN_REPAIR_WITH_CONTAINED_HURT",
+        "HONEST_BOUNDARY",
+        "CONTAINED_JEALOUSY",
+        "SHARED_JOY",
+        "PRACTICAL_CARE",
+    }
+)
+_UTTERANCE_RESPONSE_MOVES = frozenset(
+    {
+        "RESPOND_DIRECTLY",
+        "COMFORT_WITHOUT_NAMING",
+        "HOLD_BOTH_SIDES",
+        "RESONATE_WITH_BOTH_SIDES",
+        "OWN_IMPACT",
+        "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT",
+        "STATE_BOUNDARY",
+        "RESPECT_SPACE",
+        "SHARE_FEELING",
+        "SHARE_JOY",
+        "SOLVE_FIRST",
+    }
+)
+_UTTERANCE_INFERENCE_POLICIES = frozenset(
+    {
+        "BOUNDED_BY_EVIDENCE",
+        "PRESERVE_UNCERTAINTY",
+        "FROZEN_FACTS_ONLY",
+        "NO_NEW_RELATIONSHIP_CLAIMS",
+    }
+)
+_UTTERANCE_RELATIONSHIP_POSTURES = frozenset(
+    {
+        "CLOSE_WITHOUT_CLAIM",
+        "REPAIR_UNRESOLVED",
+        "BOUNDARIED_REPAIR",
+        "RESPECT_AUTONOMY",
+        "BOUNDARIED_CARE",
+        "MUTUAL_WARMTH",
+        "TASK_COMPANION",
+    }
+)
+_UTTERANCE_QUESTION_POLICIES = frozenset({"NONE", "OPTIONAL_ONE", "TASK_ONLY"})
+_UTTERANCE_ENDING_MODES = frozenset(
+    {"NATURAL_STOP", "QUIET_STOP", "OWNERSHIP_STOP", "HONEST_STOP", "TASK_NEXT_STEP"}
+)
+_UTTERANCE_FORBIDDEN_CLAIMS = frozenset(
+    {
+        "INVENTED_HISTORY",
+        "INVENTED_EFFECT",
+        "UNSUPPORTED_USER_EMOTION",
+        "IMPLIED_WAITING",
+        "PREMATURE_REPAIR",
+        "RELATIONSHIP_SELF_ERASURE",
+        "RESPONSE_OBLIGATION",
+        "RECENT_REPLY_REPETITION",
+        "POLICY_DISCLAIMER",
+    }
 )
 
 
@@ -186,6 +262,107 @@ class CompanionActV1:
             "kind": self.kind,
             "intensity": self.intensity,
             "reason_refs": list(self.reason_refs),
+            "created_at_ms": self.created_at_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionUtteranceFrameV1:
+    """A small semantic envelope for natural wording, not another state log.
+
+    The frame contains enums only.  It deliberately excludes the user's raw
+    message, private memory bodies and generated prose, so it can travel with
+    the already-existing affective turn plan without adding a persistence
+    write or an ordinary-chat audit step.
+    """
+
+    frame_id: str
+    companion_act_kind: str
+    semantic_focus: str
+    self_stance: str
+    response_move: str
+    inference_policy: str
+    relationship_posture: str
+    question_policy: str
+    ending_mode: str
+    forbidden_claims: Sequence[str]
+    created_at_ms: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "frame_id", _required(self.frame_id, "frame_id"))
+        act = _required(self.companion_act_kind, "companion_act_kind", limit=64).upper()
+        if act not in _COMPANION_ACT_KINDS:
+            raise ValueError(
+                "companion_act_kind must be one of "
+                f"{sorted(_COMPANION_ACT_KINDS)}"
+            )
+        object.__setattr__(self, "companion_act_kind", act)
+        for name, allowed in (
+            ("semantic_focus", _UTTERANCE_SEMANTIC_FOCI),
+            ("self_stance", _UTTERANCE_SELF_STANCES),
+            ("response_move", _UTTERANCE_RESPONSE_MOVES),
+            ("inference_policy", _UTTERANCE_INFERENCE_POLICIES),
+            ("relationship_posture", _UTTERANCE_RELATIONSHIP_POSTURES),
+            ("question_policy", _UTTERANCE_QUESTION_POLICIES),
+            ("ending_mode", _UTTERANCE_ENDING_MODES),
+        ):
+            normalized = _required(getattr(self, name), name, limit=64).upper()
+            if normalized not in allowed:
+                raise ValueError(f"{name} must be one of {sorted(allowed)}")
+            object.__setattr__(self, name, normalized)
+        claims = tuple(
+            _required(item, f"forbidden_claims[{index}]", limit=64).upper()
+            for index, item in enumerate(self.forbidden_claims or ())
+        )
+        if len(claims) > 8:
+            raise ValueError("forbidden_claims cannot contain more than 8 items")
+        if len(set(claims)) != len(claims):
+            raise ValueError("forbidden_claims must not contain duplicates")
+        unknown = sorted(set(claims).difference(_UTTERANCE_FORBIDDEN_CLAIMS))
+        if unknown:
+            raise ValueError(
+                "forbidden_claims contains unsupported values: " + ", ".join(unknown)
+            )
+        object.__setattr__(self, "forbidden_claims", claims)
+        object.__setattr__(
+            self,
+            "created_at_ms",
+            _non_negative_int(self.created_at_ms, "created_at_ms"),
+        )
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> "CompanionUtteranceFrameV1":
+        payload = dict(value) if isinstance(value, Mapping) else {}
+        schema = str(payload.get("schema_version") or "").strip()
+        if schema and schema != "companion_utterance_frame.v1":
+            raise ValueError("unsupported companion utterance frame schema")
+        return cls(
+            frame_id=payload.get("frame_id"),
+            companion_act_kind=payload.get("companion_act_kind"),
+            semantic_focus=payload.get("semantic_focus"),
+            self_stance=payload.get("self_stance"),
+            response_move=payload.get("response_move"),
+            inference_policy=payload.get("inference_policy"),
+            relationship_posture=payload.get("relationship_posture"),
+            question_policy=payload.get("question_policy"),
+            ending_mode=payload.get("ending_mode"),
+            forbidden_claims=payload.get("forbidden_claims") or (),
+            created_at_ms=payload.get("created_at_ms"),
+        )
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": "companion_utterance_frame.v1",
+            "frame_id": self.frame_id,
+            "companion_act_kind": self.companion_act_kind,
+            "semantic_focus": self.semantic_focus,
+            "self_stance": self.self_stance,
+            "response_move": self.response_move,
+            "inference_policy": self.inference_policy,
+            "relationship_posture": self.relationship_posture,
+            "question_policy": self.question_policy,
+            "ending_mode": self.ending_mode,
+            "forbidden_claims": list(self.forbidden_claims),
             "created_at_ms": self.created_at_ms,
         }
 
@@ -378,6 +555,7 @@ class AffectiveTurnPlanV1:
     relationship_revision: int
     regulation_ref: str | None
     companion_act: CompanionActV1
+    utterance_frame: CompanionUtteranceFrameV1
     expression_plan: ExpressionPlanV1
     generation_mode: str
     candidate_count: int
@@ -404,6 +582,8 @@ class AffectiveTurnPlanV1:
             raise ValueError("self_id must be natsume_ai")
         if not isinstance(self.companion_act, CompanionActV1):
             raise ValueError("companion_act must be CompanionActV1")
+        if not isinstance(self.utterance_frame, CompanionUtteranceFrameV1):
+            raise ValueError("utterance_frame must be CompanionUtteranceFrameV1")
         if not isinstance(self.expression_plan, ExpressionPlanV1):
             raise ValueError("expression_plan must be ExpressionPlanV1")
         object.__setattr__(self, "plan_id", _required(self.plan_id, "plan_id"))
@@ -486,6 +666,8 @@ class AffectiveTurnPlanV1:
                 raise ValueError("turn affect_repair_target scope or revision drift")
         if self.companion_act.relationship_subject_id != self.relationship_subject_id:
             raise ValueError("companion_act relationship subject differs from turn plan")
+        if self.utterance_frame.companion_act_kind != self.companion_act.kind:
+            raise ValueError("utterance frame companion act differs from turn plan")
         if self.expression_plan.self_affect_revision != self.self_affect_revision:
             raise ValueError("expression plan affect revision differs from turn plan")
         if (
@@ -511,6 +693,7 @@ class AffectiveTurnPlanV1:
             "relationship_revision": self.relationship_revision,
             "regulation_ref": self.regulation_ref,
             "companion_act": self.companion_act.as_dict(),
+            "utterance_frame": self.utterance_frame.as_dict(),
             "expression_plan": self.expression_plan.as_dict(),
             "generation_mode": self.generation_mode,
             "candidate_count": self.candidate_count,
@@ -530,5 +713,6 @@ class AffectiveTurnPlanV1:
 __all__ = [
     "AffectiveTurnPlanV1",
     "CompanionActV1",
+    "CompanionUtteranceFrameV1",
     "ExpressionPlanV1",
 ]

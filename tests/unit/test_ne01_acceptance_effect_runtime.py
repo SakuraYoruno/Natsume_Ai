@@ -118,6 +118,34 @@ async def test_runtime_group_owns_one_shared_effect_recovery_loop() -> None:
 
 
 @pytest.mark.asyncio
+async def test_effect_runtime_wake_interrupts_long_recovery_poll() -> None:
+    dispatcher = _dispatcher()
+    passes = 0
+    background_drained = asyncio.Event()
+
+    async def drain_ready(*, limit: int):
+        nonlocal passes
+        passes += 1
+        if passes > 1:
+            background_drained.set()
+        return ()
+
+    dispatcher.drain_ready = drain_ready  # type: ignore[method-assign]
+    runtime = AcceptanceEffectRuntime(
+        dispatcher=dispatcher,
+        poll_seconds=60.0,
+    )
+
+    await runtime.activate()
+    try:
+        runtime.wake()
+        await asyncio.wait_for(background_drained.wait(), timeout=0.5)
+        assert passes == 2
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_effect_runtime_shutdown_waits_for_in_flight_handler_pass() -> None:
     dispatcher = _dispatcher()
     started = asyncio.Event()
@@ -396,6 +424,16 @@ async def test_governed_projection_reports_visible_reply_and_background_work() -
                     "status": "COMMITTED",
                 },
                 {
+                    "effect_type": "life.foreground_completed",
+                    "status": "PENDING",
+                    "attempt_count": 0,
+                },
+                {
+                    "effect_type": "host.companion_expression_enqueue",
+                    "status": "PENDING",
+                    "attempt_count": 0,
+                },
+                {
                     "effect_type": "conversation.preference_signal",
                     "status": "PENDING",
                     "attempt_count": 0,
@@ -419,14 +457,14 @@ async def test_governed_projection_reports_visible_reply_and_background_work() -
 
     assert calls == [("graph-interactive-summary", 2)]
     assert projected["audit_refs"]["acceptance_effects"] == {
-        "count": 3,
+        "count": 5,
         "committed": 2,
         "failed": 0,
-        "pending": 1,
+        "pending": 3,
         "recovery_pending": 0,
         "dispatch_status": "DELIVERY_COMMITTED_BACKGROUND_PENDING",
         "delivery_committed": True,
-        "background_pending": 1,
+        "background_pending": 3,
     }
 
 

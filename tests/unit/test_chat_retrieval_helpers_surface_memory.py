@@ -69,6 +69,11 @@ async def test_semantic_embedding_load_does_not_block_conversation_event_loop(
 
     assert evidence_items == []
     assert summary["embedding_model_id"] == "slow-test-embedding"
+    timings = summary["runtime_timings_ms"]
+    assert timings["embedding"] >= 0
+    assert timings["service_resolve"] >= 0
+    assert timings["recall"] >= 0
+    assert timings["total"] >= timings["embedding"]
     assert embedding_thread_ids
     assert all(thread_id != event_loop_thread_id for thread_id in embedding_thread_ids)
 
@@ -511,6 +516,13 @@ async def test_run_retrieval_skips_low_signal_short_turn_without_embedding(monke
 
 @pytest.mark.asyncio
 async def test_run_retrieval_skips_generic_plain_answer_without_memory_hint(monkeypatch) -> None:
+    history_reads: list[str] = []
+
+    class _History:
+        def fetch_recent_turns(self, *, session_id, max_turns, exclude_request_id=None):  # noqa: ANN001
+            history_reads.append(str(session_id))
+            return []
+
     def _unexpected_embed(_query):  # noqa: ANN001
         raise AssertionError("generic daily turns should not build embeddings")
 
@@ -531,9 +543,11 @@ async def test_run_retrieval_skips_generic_plain_answer_without_memory_hint(monk
         emotion_tag="NEUTRAL",
         render_target_lang="zh",
         intent_draft={"route": "plain_answer"},
+        conversation_history=_History(),
     )
 
     assert evidence_items == []
+    assert history_reads == []
     assert summary["status"] == "SKIPPED"
     assert summary["query_plan"]["recall_policy"] == "NO_RECALL"
     assert summary["surface_memory_recall_packet"]["trace"]["plan"]["reason"] == "no_memory_recall_needed"
@@ -634,6 +648,81 @@ def test_chat_retrieval_helpers_do_not_import_process_service_locator() -> None:
                 alias.name != "host_brain.composition.process_services"
                 for alias in node.names
             )
+
+
+@pytest.mark.asyncio
+async def test_lightnovel_review_skips_preference_ledger_for_unrelated_companion_turn() -> None:
+    calls: list[dict[str, object]] = []
+    packet = SimpleNamespace(as_dict=lambda: {"facts": [], "trace": {}})
+
+    result = await helpers._maybe_apply_lightnovel_deep_review(
+        packet=packet,
+        message="今天有点累，安静陪我一句。",
+        request_id="req-companion-no-lightnovel",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        life_memory_store=_LIFE_MEMORY_STORE,
+        build_user_preference_pack=lambda **kwargs: calls.append(dict(kwargs)),
+    )
+
+    assert result is packet
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_lightnovel_review_reads_recent_recommendation_once_for_anaphoric_query(monkeypatch) -> None:
+    from host_brain.persona.surface_memory_recall import SurfaceMemoryRecallPacket
+
+    calls: list[dict[str, object]] = []
+
+    def build_pack(**kwargs):  # noqa: ANN003, ANN202
+        calls.append(dict(kwargs))
+        return {
+            "recent_recommendation_context": {
+                "referenced_item": {
+                    "rank": 2,
+                    "title": "与神在河岸",
+                    "detail_url": "https://www.lightnovel.fun/cn/detail/2",
+                    "selection_reason": "奇幻身份钩子",
+                },
+                "items": [],
+            }
+        }
+
+    monkeypatch.setattr(
+        "host_brain.agent_runtime.lightnovel_deep_reviewer.review_lightnovel_selection_from_memory_packet",
+        lambda **_kwargs: {
+            "status": "OK",
+            "reason_code": "LIGHTNOVEL_DEEP_REVIEW_OK",
+            "fact": "网页深读结果：第二本《与神在河岸》有可读详情证据。",
+            "selected": {"index": 2, "title": "与神在河岸"},
+            "items": [{"index": 2}],
+            "evidence_refs": ["https://www.lightnovel.fun/cn/detail/2"],
+            "cached": True,
+            "source": "cache",
+        },
+    )
+    packet = SurfaceMemoryRecallPacket(
+        query="刚才第二本的详情",
+        reason_code="SURFACE_MEMORY_RECALL_SKIPPED",
+        trace={"skipped": True},
+    )
+
+    result = await helpers._maybe_apply_lightnovel_deep_review(
+        packet=packet,
+        message="刚才推荐的第二本详情",
+        request_id="req-lightnovel-anaphoric",
+        person_id="person-1",
+        session_id="sess-1",
+        ts_ms=123,
+        life_memory_store=_LIFE_MEMORY_STORE,
+        build_user_preference_pack=build_pack,
+    )
+
+    assert len(calls) == 1
+    assert result.trace["lightnovel_deep_review"]["status"] == "OK"
+    assert result.facts[0].startswith("网页深读结果")
 
 
 @pytest.mark.asyncio

@@ -507,6 +507,12 @@ class TestChatEndpoint:
         terminal_event = next(event for event in events if event.get("done"))
         assert "execution_receipt" not in terminal_event
         trace_stage_meta = terminal_event["audit_refs"]["trace_stage_meta"]
+        assert trace_stage_meta["context_pipeline_ms"] >= 0
+        assert trace_stage_meta["user_preference_pack_ms"] >= 0
+        retrieval_timings = trace_stage_meta["retrieval_runtime_timings_ms"]
+        assert retrieval_timings["total"] >= retrieval_timings["plan"]
+        assert retrieval_timings["embedding"] >= 0
+        assert retrieval_timings["recall"] >= 0
         turn_plan = trace_stage_meta["affective_turn_plan"]
         guidance = trace_stage_meta["affective_turn_guidance"]
         assert turn_plan["self_id"] == "natsume_ai"

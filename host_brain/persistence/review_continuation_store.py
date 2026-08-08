@@ -839,6 +839,11 @@ class ReviewContinuationStore:
                 fencing_token=fencing_token,
                 expected_version=expected_version,
                 now=now,
+                # Event-loop or SQLite pressure may schedule the owner just
+                # after its deadline.  The transaction remains fenced by the
+                # exact token/version: if another worker already took over,
+                # these fields have changed and the late heartbeat loses.
+                allow_expired=True,
             )
             cursor = conn.execute(
                 f"""

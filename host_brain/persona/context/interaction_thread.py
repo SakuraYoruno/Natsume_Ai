@@ -61,6 +61,11 @@ _ASSISTANT_REPLY_OBJECT_RE = re.compile(
     r"^(?:知道|懂|明白|清楚|看见|看到|说|回|回复|讲|问|指|是|算|觉得|以为).{0,6}(?:什么|啥)[?？!！。…~\s]*$",
     re.IGNORECASE,
 )
+_DEICTIC_TOPIC_UPDATE_RE = re.compile(
+    r"^(?:那|这)(?:件事|件事情|个事|个事情|个问题|个话题)"
+    r"(?:后来|现在|已经|终于|刚刚|刚才|总算)?(?:已经)?"
+    r"(?:解决|处理好|搞定|有结果|结束|过去|办完|完成)(?:了|啦|掉了|好了)?$"
+)
 
 
 def _normalize_text(raw: Any) -> str:
@@ -218,6 +223,30 @@ def detect_assistant_reply_followup_kind(text: str, latest_assistant_text: str =
         if compact in {"什么", "啥", "说什么", "回什么", "问什么"}:
             return "ask_object"
     return ""
+
+
+def _is_deictic_topic_update(text: str) -> bool:
+    """Return whether the turn reports progress on the immediately prior topic."""
+
+    return bool(_DEICTIC_TOPIC_UPDATE_RE.match(_compact_text(text)))
+
+
+def _has_concrete_topic_context(text: str) -> bool:
+    """Reject low-information turns that cannot safely ground a deictic update."""
+
+    normalized = _normalize_text(text)
+    compact = _compact_text(normalized)
+    if len(compact) < 8:
+        return False
+    if (
+        _GREETING_RE.match(normalized)
+        or _PRESENCE_PING_RE.match(normalized)
+        or _LIGHT_ACK_RE.match(normalized)
+        or _PLAYFUL_PING_RE.match(normalized)
+        or _IMAGE_MESSAGE_RE.match(normalized)
+    ):
+        return False
+    return not _DEICTIC_TOPIC_UPDATE_RE.match(compact)
 
 
 def _derive_emotion_anchor(text: str) -> str:
@@ -390,6 +419,37 @@ def resolve_interaction_thread(
             last_user_reaction=detect_image_social_followup_kind(current_user_message),
             turn_count=max(1, len(turns) - image_source_index),
             reason_tags=tuple(dict.fromkeys([*reason_tags, "recent_image_social_metadata"])),
+        )
+
+    if (
+        latest_assistant_text
+        and _has_concrete_topic_context(latest_assistant_context_text)
+        and _is_deictic_topic_update(current_user_message)
+        and current_topic not in {
+            "identity",
+            "relationship_boundary",
+            "motivation",
+            "help_commitment",
+            "emoji_social_reply",
+            "emoji_social_followup",
+            "meme_meaning",
+            "literal_description",
+            "screenshot_analysis",
+            "capability_check",
+        }
+    ):
+        return InteractionThreadState(
+            thread_kind="deictic_topic_update",
+            source_topic="recent_dialogue_topic",
+            source_modality="text",
+            source_excerpt=latest_assistant_text[:160],
+            source_context_excerpt=latest_assistant_context_text[:160],
+            open=True,
+            source_turn_index=max(0, len(turns) - 1),
+            last_assistant_move="previous_reply",
+            last_user_reaction="topic_update",
+            turn_count=1,
+            reason_tags=("recent_deictic_topic_update",),
         )
 
     assistant_followup_kind = detect_assistant_reply_followup_kind(

@@ -413,11 +413,17 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         )
 
     def frozen_skill_worker(_order, *, store, run_dir, **_kwargs):  # noqa: ANN001, ARG001
-        skill_calls.append(str(_order.metadata.get("skill_id") or ""))
+        skill_id = str(_order.metadata.get("skill_id") or "")
+        skill_calls.append(skill_id)
+        result_text = (
+            "文档审查结果：先核对目标、信息层级与关键说明，再记录缺失证据和待确认边界。"
+            if skill_id == "agent_document_digest"
+            else "前端验收结果：覆盖主要流程、空态、错误态、响应式与键盘无障碍，并按影响分级。"
+        )
         return {
             "status": "EXECUTED",
             "summary": "frozen skill completed",
-            "result_text": "skill:curated plan input",
+            "result_text": result_text,
             "metadata": {"worker_terminal": True},
         }
 
@@ -429,6 +435,13 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
     async def frozen_gateway_transport(*, path, payload, timeout_ms):  # noqa: ANN001
         request_id = str(payload.get("request_id") or "")
         with sqlite3.connect(db_path) as conn:
+            user_turn_count = conn.execute(
+                """
+                SELECT COUNT(*) FROM conversation_turn
+                WHERE request_id = ? AND role = 'user'
+                """,
+                (request_id,),
+            ).fetchone()[0]
             assistant_turn_count = conn.execute(
                 """
                 SELECT COUNT(*) FROM conversation_turn
@@ -451,16 +464,18 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
                 """,
                 (request_id,),
             ).fetchone()[0]
-        # The canonical Life command and exact projection intent must exist
-        # before Gateway intake.  Derived conversation/memory rows are allowed
-        # to settle asynchronously and therefore do not extend reply latency.
-        assert projection_intent_count == 1
+        # Only the canonical user turn belongs to the ordinary Chat reply
+        # prefix. Life, assistant/memory projections and expression intents
+        # remain durable but settle after Gateway intake.
+        assert user_turn_count == 1
+        assert projection_intent_count == 0
         delivered_replies.append(
             {
                 "request_id": request_id,
                 "payload": dict(payload),
                 "path": path,
                 "timeout_ms": timeout_ms,
+                "user_turn_count_before_delivery": user_turn_count,
                 "assistant_turn_count_before_delivery": assistant_turn_count,
                 "memory_receipt_count_before_delivery": memory_receipt_count,
                 "projection_intent_count_before_delivery": (
@@ -935,24 +950,27 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
             == "qq_dm_gr05_universal"
         )
         assert (
+            delivered_replies[0]["user_turn_count_before_delivery"],
             delivered_replies[0]["assistant_turn_count_before_delivery"],
             delivered_replies[0]["memory_receipt_count_before_delivery"],
             delivered_replies[0]["projection_intent_count_before_delivery"],
-        ) == (0, 0, 1)
+        ) == (1, 0, 0, 0)
         assert all(
             attempt.model_budget_guard is not None
             for attempt in provider_calls
         )
 
-        # The interactive path commits accepted memory/Life state, expression
-        # intents, and the visible reply without waiting for preference
-        # learning.  Exercise the same durable background pass owned by the
-        # app-local Acceptance Effect recovery Runtime.
+        # The interactive path commits the user turn and visible reply first.
+        # Exercise the same durable background pass owned by the app-local
+        # Acceptance Effect recovery Runtime.
         background_effects = await acceptance_effect_dispatcher.drain_ready(
             limit=100
         )
         assert [row["effect_type"] for row in background_effects] == [
-            "conversation.preference_signal"
+            "life.conversation_turn_recorded",
+            "life.foreground_completed",
+            "host.companion_expression_enqueue",
+            "conversation.preference_signal",
         ]
         assert await acceptance_effect_dispatcher.drain_ready(limit=100) == ()
 
@@ -1383,13 +1401,13 @@ async def test_chat_skill_delegate_and_plan_share_real_governed_runtime(
         ]
         assert results["chat"][-1]["audit_refs"]["acceptance_effects"] == {
             "count": 6,
-            "committed": 5,
+            "committed": 2,
             "failed": 0,
-            "pending": 1,
+            "pending": 4,
             "recovery_pending": 0,
             "dispatch_status": "DELIVERY_COMMITTED_BACKGROUND_PENDING",
             "delivery_committed": True,
-            "background_pending": 1,
+            "background_pending": 4,
         }
         assert all(
             results[route][-1]["audit_refs"]["acceptance_effects"]

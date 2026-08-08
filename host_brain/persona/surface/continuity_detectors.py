@@ -62,6 +62,88 @@ from host_brain.persona.surface.scene_constants import (
     _WAIT_SCENE_THIN_HOLD_RE,
 )
 from host_brain.persona.surface.util import _clean_list, _clean_text
+from host_brain.persona.surface_utterance_frame import (
+    normalize_companion_utterance_frame,
+)
+
+
+def _canonical_companion_act_kind(request: IsolatedSurfaceInput) -> str:
+    control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", None)
+    )
+    return str(frame.get("companion_act_kind") or "").strip().upper()
+
+
+_CONTAINED_HURT_REPAIR_GROUNDING_RE = re.compile(
+    r"(?:这|那|刚才)?(?:一)?(?:句|句话|话).{0,8}(?:刺到我|扎到我|让我有点难受)"
+    r"|我(?:听着|心里)?(?:也|确实|还是|会|有点){0,3}(?:难受|不好受|受伤)"
+    r"|听到(?:这|那)?(?:句|句话|话).{0,8}(?:有点难受|心里有点疼)"
+)
+
+
+def _contained_hurt_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", None)
+    )
+    return bool(
+        str(frame.get("companion_act_kind") or "").upper() == "REPAIR"
+        and (
+            str(frame.get("self_stance") or "").upper()
+            == "OWN_REPAIR_WITH_CONTAINED_HURT"
+            or str(frame.get("response_move") or "").upper()
+            == "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+        )
+    )
+
+
+def _contained_hurt_repair_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    return bool(
+        _contained_hurt_repair_relevant(request)
+        and _CONTAINED_HURT_REPAIR_GROUNDING_RE.search(str(text or ""))
+    )
+
+
+_MIXED_SELF_JOY_RE = re.compile(
+    r"(?:我|我这边|听你这么说).{0,8}(?:也|都|跟着|替你){1,3}.{0,4}(?:开心|高兴)"
+    r"|我替你(?:开心|高兴)"
+)
+_MIXED_SELF_CAUTION_RE = re.compile(
+    r"(?:我|我心里|我这边).{0,8}(?:也|都|跟着|有点){1,3}.{0,5}"
+    r"(?:悬|紧|担心|怕|不踏实)"
+)
+
+
+def _shared_mixed_resonance_relevant(request: IsolatedSurfaceInput) -> bool:
+    control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", None)
+    )
+    return bool(
+        str(frame.get("companion_act_kind") or "").upper() == "HOLD_COMPLEXITY"
+        and (
+            str(frame.get("self_stance") or "").upper()
+            == "SHARED_MIXED_RESONANCE"
+            or str(frame.get("response_move") or "").upper()
+            == "RESONATE_WITH_BOTH_SIDES"
+        )
+    )
+
+
+def _shared_mixed_resonance_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    value = str(text or "")
+    return bool(
+        _shared_mixed_resonance_relevant(request)
+        and _MIXED_SELF_JOY_RE.search(value)
+        and _MIXED_SELF_CAUTION_RE.search(value)
+    )
 
 
 def _raw_context_backfill_requested(
@@ -404,7 +486,51 @@ def _misplaced_emotional_containment(
 ) -> bool:
     if _emotional_containment_context(request):
         return False
+    if _relational_repair_grounded(request, text):
+        # "我没接住" owns a concrete failure in a repair turn; it is not the
+        # generic promise "我能接住你" that this detector was built to reject.
+        return False
     return bool(_MISPLACED_EMOTIONAL_CONTAINMENT_RE.search(text))
+
+
+def _relational_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "REPAIR":
+        return True
+    surface = "\n".join(
+        _clean_list(
+            [
+                request.user_message,
+                request.control.task_mode,
+                request.control.response_move,
+                *request.control.facts,
+                *request.control.must_include,
+                *request.control.must_not_do,
+            ]
+        )
+    )
+    return any(
+        marker in surface
+        for marker in (
+            "陪伴动作：先承认可能没有接住",
+            "未解决的误解或裂痕",
+            "先听清、承认可能没接住",
+        )
+    )
+
+
+def _relational_repair_grounded(
+    request: IsolatedSurfaceInput, text: str
+) -> bool:
+    if not _relational_repair_relevant(request):
+        return False
+    normalized = _clean_text(text)
+    return bool(
+        re.search(
+            r"(?:我|刚才|上次|这次).{0,8}(?:没听懂|没有听懂|没懂|"
+            r"没接住|没有接住|没理解|没有理解|误解|曲解)",
+            normalized,
+        )
+    )
 
 
 def _misplaced_support_template(
@@ -413,6 +539,11 @@ def _misplaced_support_template(
     if not _continuity_boundary_relevant(request):
         return False
     if _emotional_containment_context(request):
+        return False
+    if _relational_repair_grounded(request, text):
+        # A short presence phrase can follow a concrete acknowledgement in a
+        # relationship repair.  It remains a misplaced template when the
+        # acknowledgement is absent, so generic "我在这儿" replies still lose.
         return False
     return bool(_MISPLACED_SUPPORT_TEMPLATE_RE.search(f" {text} "))
 
@@ -675,6 +806,10 @@ def _surface_process_meta_hits(
             for term in _SURFACE_PROCESS_META_CHAT
             if term and term in text
         )
+    if _contained_hurt_repair_grounded(request, text):
+        # "这句话有点刺到我" is ordinary relational speech in this exact
+        # typed frame, not commentary about a generated candidate.
+        hits = [item for item in hits if item not in {"这句", "这一句", "这条"}]
     if _continuity_boundary_relevant(request):
         surface = "\n".join(
             _clean_list(
@@ -813,7 +948,76 @@ def _short_continue_unprovided_tech_detail_hits(
     )
 
 
+def _canonical_contained_jealousy_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "CONTAINED_JEALOUSY":
+        return True
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return any(
+        marker in canonical_context
+        for marker in (
+            "陪伴动作：可以诚实流露一点在意和小小吃味",
+            "不要把吃味写成占有",
+        )
+    )
+
+
+def _canonical_hold_complexity_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "HOLD_COMPLEXITY":
+        return True
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return any(
+        marker in canonical_context
+        for marker in (
+            "陪伴动作：让开心与害怕、不安等复杂感受可以同时存在",
+            "不要抹平复杂感受",
+        )
+    )
+
+
+def _canonical_respect_autonomy_relevant(request: IsolatedSurfaceInput) -> bool:
+    if _canonical_companion_act_kind(request) == "RESPECT_AUTONOMY":
+        return True
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return any(
+        marker in canonical_context
+        for marker in (
+            "陪伴动作：明确尊重对方现实关系与自主选择",
+            "不要限制现实交往",
+        )
+    )
+
+
 def _boundary_repair_relevant(request: IsolatedSurfaceInput) -> bool:
+    if (
+        _canonical_contained_jealousy_relevant(request)
+        or _canonical_hold_complexity_relevant(request)
+        or _canonical_respect_autonomy_relevant(request)
+    ):
+        # These canonical acts already carry dedicated gates. Generic
+        # relationship guidance may still mention a boundary; that must not
+        # turn valid mixed-affect or autonomy language into counter-pressure.
+        return False
     surface = "\n".join(
         _clean_list(
             [

@@ -442,7 +442,7 @@ class ContextRepository:
                 f"""
                 SELECT {', '.join(_TURN_COLUMNS)} FROM conversation_turn
                 WHERE {' AND '.join(clauses)}
-                ORDER BY ts_ms DESC, turn_index DESC LIMIT ?
+                ORDER BY turn_index DESC, ts_ms DESC LIMIT ?
                 """,
                 tuple(params),
             ).fetchall()

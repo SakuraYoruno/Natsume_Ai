@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
@@ -19,6 +20,116 @@ from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_id,
     _surface_sub_agent_result_text,
 )
+
+
+_ACTIVE_EXPRESSION_PREFERENCE_PREFIX = (
+    "已激活的长期表达偏好（本轮执行）："
+)
+_ACTIVE_KNOWLEDGE_FACT_PREFIX = "已激活知识："
+_ACTIVE_KNOWLEDGE_EVIDENCE_PREFIX = "evolution-knowledge-entry://sha256/"
+
+
+def _surface_active_knowledge_set_digest(entry_digests: Sequence[Any]) -> str:
+    """Return a stable digest for a bounded set of public Knowledge digests."""
+
+    raw = tuple(str(value or "").strip().lower() for value in entry_digests)
+    if (
+        not raw
+        or len(raw) > 4
+        or any(
+            len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+            for value in raw
+        )
+    ):
+        return ""
+    normalized = sorted(set(raw))
+    if len(normalized) != len(raw):
+        return ""
+    payload = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _surface_active_knowledge_prompt_evidence(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    memory_packet: Any,
+) -> dict[str, Any]:
+    """Prove active Knowledge reached the final prompt without storing content."""
+
+    packet = _memory_packet_payload_for_guard(memory_packet)
+    active_facts = tuple(
+        str(value or "").strip()
+        for value in list(packet.get("facts") or [])
+        if str(value or "").strip().startswith(_ACTIVE_KNOWLEDGE_FACT_PREFIX)
+    )
+    entry_digests = tuple(
+        str(value or "").strip()[len(_ACTIVE_KNOWLEDGE_EVIDENCE_PREFIX) :]
+        for value in list(packet.get("evidence_refs") or [])
+        if str(value or "").strip().startswith(
+            _ACTIVE_KNOWLEDGE_EVIDENCE_PREFIX
+        )
+    )
+    if (
+        not active_facts
+        or len(active_facts) > 4
+        or len(entry_digests) != len(active_facts)
+    ):
+        return {}
+    rendered = "\n".join(
+        str(message.get("content") or "") for message in messages
+    )
+    if any(fact not in rendered for fact in active_facts):
+        return {}
+    set_digest = _surface_active_knowledge_set_digest(entry_digests)
+    if not set_digest:
+        return {}
+    return {
+        "surface_active_knowledge_set_digest": set_digest,
+        "surface_active_knowledge_count": len(active_facts),
+    }
+
+
+def _surface_expression_prompt_evidence(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    style_anchors: Sequence[Any],
+) -> dict[str, str]:
+    """Return secret-free evidence only when the active directive is rendered.
+
+    The actual registered prompt already has a durable digest.  This optional
+    digest identifies the one bounded expression-version directive inside the
+    final message list, without storing the prompt or adding another ordinary
+    chat write.
+    """
+
+    directive = next(
+        (
+            str(item or "").strip()
+            for item in style_anchors
+            if str(item or "").strip().startswith(
+                _ACTIVE_EXPRESSION_PREFERENCE_PREFIX
+            )
+        ),
+        "",
+    )
+    if not directive:
+        return {}
+    rendered = "\n".join(
+        str(message.get("content") or "") for message in messages
+    )
+    if directive not in rendered:
+        return {}
+    return {
+        "surface_expression_directive_digest": hashlib.sha256(
+            directive.encode("utf-8")
+        ).hexdigest()
+    }
 
 
 def _surface_main_chain_response_format() -> dict[str, str] | None:
@@ -48,21 +159,21 @@ def _surface_model_deadline_ms(governed_model_budget: Any | None) -> int:
 
 def _surface_model_request_profile(
     trace_stage_meta: Mapping[str, Any] | None,
-    *,
-    realtime_eligible: bool,
 ) -> tuple[str, str, str]:
     """Select the server-owned model lane at the actual ModelAttempt boundary.
 
     Route projection alone is insufficient because the Surface main chain
-    creates the canonical ModelAttemptRequest itself.  Only the ordinary
-    native sentence stream may use the low-latency companion lane; buffered
-    repair/ambiguity and governed nodes retain the quality-first Surface lane.
+    creates the canonical ModelAttemptRequest itself.  The server-owned
+    ``runtime_path`` determines whether this is ordinary companionship or a
+    quality-first execution route.  A two-candidate wording pass may stay
+    buffered without silently upgrading an ordinary companion turn from the
+    latency-bounded B lane to the A-lane model.
     """
 
     runtime_path = str(
         _safe_mapping(trace_stage_meta).get("runtime_path") or ""
     ).strip().lower()
-    if realtime_eligible and runtime_path == "realtime_companion":
+    if runtime_path == "realtime_companion":
         return "CHAT_SURFACE_REALTIME", "B", "realtime_companion"
     return "CHAT_SURFACE", "A", "surface_reply"
 
@@ -168,6 +279,10 @@ def _has_governed_model_budget(trace_stage_meta: Mapping[str, Any] | None) -> bo
 def _governed_model_budget_failure_reason(exc: BaseException) -> str:
     candidate = str(exc).split(":", 1)[0].strip().upper()
     if candidate.startswith("MODEL_"):
+        return candidate
+    if candidate == "ATTEMPT_BUDGET_EXHAUSTED":
+        return "MODEL_SEMANTIC_RETRY_EXHAUSTED"
+    if candidate.startswith(("AFFECTIVE_", "JAPANESE_SPEECH_", "SURFACE_")):
         return candidate
     return "MODEL_BUDGET_GUARD_REJECTED"
 

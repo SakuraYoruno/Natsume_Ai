@@ -35,6 +35,9 @@ from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.persistence.gateway_transport_repository import (
     SQLiteGatewayTransportStore,
 )
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 from host_brain.task_runtime.acceptance_effect_dispatcher import (
     AcceptanceEffectOutcomeUnknown,
 )
@@ -459,47 +462,20 @@ async def test_surface_response_loss_restart_reopens_without_second_post(
         },
     }
 
-    class _Preview:
-        def __init__(self) -> None:
-            self.reopens = 0
-
-        def require_execution(self, **_kwargs: Any) -> object:
-            self.reopens += 1
-            return object()
-
-    preview = _Preview()
-    boundary = {
-        "action_kind": "acceptance-effect.surface.reply_delivery",
-        "action_scope": effect_id,
-        "risk_level": 3,
-        "action_args": value,
-        "context_pack_digest": "sha256:" + "1" * 64,
-        "scene_identity": "scene://ne01/query",
-        "task_graph_id": "graph-ne01-query",
-        "graph_revision": 1,
-        "task_node_id": "node-ne01-query",
-        "parent_governor_grant_ref": "governor-grant://ne01/surface-query",
-        "node_grant_ref": "node-grant://ne01/surface-query",
-        "node_grant": {
-            "grant_ref": "node-grant://ne01/surface-query",
-            "binding_digest": "sha256:" + "2" * 64,
-        },
-        "authority_context": {
-            "schema_version": (
-                "Natsume.action_preview.acceptance_effect_authority_request.v1"
-            ),
-            "effect_id": effect_id,
-            "lease_owner_id": "acceptance-owner-first",
-            "fencing_token": 1,
-        },
-    }
     payload = {
         **value,
-        "_action_preview_terminal_proof": {
-            "service": preview,
-            "event_id": "runtimeevent://ne01/surface-query",
-            "boundary": boundary,
-        },
+        "_acceptance_effect_execution_proof": AcceptanceEffectExecutionProof(
+            effect_id=effect_id,
+            effect_type="surface.reply_delivery",
+            graph_id="graph-ne01-query",
+            graph_revision=1,
+            node_id="node-ne01-query",
+            attempt_id="attempt-ne01-query",
+            lease_owner_id="acceptance-owner-first",
+            fencing_token=1,
+            payload_sha256="sha256:" + "1" * 64,
+            action_args=value,
+        ),
     }
     delivery_id = acceptance_effect_handlers._surface_delivery_id(value)
     expected_digest = acceptance_effect_handlers._surface_gateway_payload_digest(
@@ -516,6 +492,10 @@ async def test_surface_response_loss_restart_reopens_without_second_post(
             post_calls += 1
             assert kwargs.get("delivery_id") is None
             assert kwargs["effect_id"] == effect_id
+            assert isinstance(
+                kwargs.get("accepted_effect_proof"),
+                AcceptanceEffectExecutionProof,
+            )
             body = _reply_body(effect_id=effect_id)
             body.update(
                 {
@@ -607,7 +587,6 @@ async def test_surface_response_loss_restart_reopens_without_second_post(
     assert reopened["receipt_ref"].startswith("gateway-outbox://id/")
     assert post_calls == 1
     assert len(adapter.sent) == 1
-    assert preview.reopens == 1
     assert _observable_snapshot(
         restarted_store.get_outbox(outbox_id=outbox_id)
     ) == before

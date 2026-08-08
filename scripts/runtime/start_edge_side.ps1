@@ -2,6 +2,7 @@
 param(
   [string]$EnvFile = "",
   [string]$LogDir = "",
+  [string]$DataRoot = "",
   [int]$WaitSeconds = 120,
   [int]$StabilityWaitSeconds = 8,
   [switch]$ForceRestart,
@@ -96,6 +97,7 @@ $resolvedBreakawayFromSsh = if ($Background.IsPresent -or $sshSessionDetected) {
 $edgeRaw = & $startEdgeScript `
   -EnvFile $EnvFile `
   -LogDir $LogDir `
+  -DataRoot $DataRoot `
   -WaitSeconds $WaitSeconds `
   -StabilityWaitSeconds $StabilityWaitSeconds `
   -ForceRestart:$ForceRestart.IsPresent `

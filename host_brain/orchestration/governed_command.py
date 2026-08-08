@@ -377,7 +377,7 @@ class GovernedCommandApplication:
         live parent preflight before any immutable admission is created.
         """
 
-        if self._intent_admission is None or not isinstance(command, HostCommand):
+        if not isinstance(command, HostCommand):
             return False
         getter = getattr(self._commands, "get", None)
         if not callable(getter):
@@ -412,11 +412,11 @@ class GovernedCommandApplication:
             return False
         if not exact_contracts:
             return False
-        # A matching durable command is only admission identity, never proof
-        # that Intent arbitration finished.  Parent-grant preflight may be
-        # skipped only after the verifier reopens the graph-level prepared
-        # marker *and* every exact per-node preparation receipt.  Partial
-        # writes therefore fail closed instead of inheriting replay authority.
+        if self._intent_admission is None:
+            return True
+        # With a separate Intent authority, exact command identity is not
+        # enough: its graph marker and every per-node preparation receipt must
+        # also be complete before parent preflight can be skipped.
         prove = getattr(
             self._intent_admission,
             "has_prepared_intent_receipt_set",
@@ -969,6 +969,60 @@ class GovernedCommandApplication:
                     GOVERNED_ADMISSION_INVALID,
                     f"TaskGraph admission state is invalid: {exc}",
                 ) from exc
+
+    async def execute_startup_continuation_stream(
+        self,
+        *,
+        command: HostCommand,
+        work_order: Any,
+        assignment: ExecutorAssignment,
+        graph: Any,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Resume an already-admitted graph without reopening parent admission.
+
+        The parent Governor grant authorizes immutable admission and may expire
+        while a durable Attempt is being recovered.  Startup continuation must
+        therefore require an exact repository replay, then reopen the existing
+        child-grant batch.  A missing batch still follows ordinary derivation,
+        which refuses to mint from an expired parent.
+        """
+
+        admitted, persisted_command, persisted_work_order, persisted_graph = (
+            await self._admit(
+                command=command,
+                work_order=work_order,
+                assignment=assignment,
+                graph=graph,
+            )
+        )
+        if not admitted.replayed:
+            raise GovernedRuntimeError(
+                GOVERNED_ADMISSION_INVALID,
+                "startup continuation requires an exact durable admission replay",
+            )
+        intent_terminal = await self._verify_intent_admission(
+            admitted=admitted,
+            command=persisted_command,
+            work_order=persisted_work_order,
+            graph=persisted_graph,
+        )
+        if intent_terminal is not None:
+            yield intent_terminal
+            return
+        execution_kwargs: dict[str, Any] = {
+            "admitted": admitted,
+            "command": persisted_command,
+            "work_order": persisted_work_order,
+        }
+        if self._node_grants is not None:
+            execution_kwargs["node_grant_refs"] = await self._derive_node_grant_refs(
+                admitted=admitted,
+                command=persisted_command,
+                work_order=persisted_work_order,
+                graph=persisted_graph,
+            )
+        async for event in self._coordinator.execute_stream(**execution_kwargs):
+            yield event
 
 
 __all__ = [

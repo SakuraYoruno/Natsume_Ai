@@ -13,6 +13,9 @@ from host_brain.persona.inner_monologue import build_inner_weather_hint, InnerMo
 from host_brain.persona.body_sense import project_body_sense_from_life_snapshot
 from host_brain.persona.context.soul_runtime import get_compiled_soul, render_runtime_soul_prompt
 from host_brain.tribe.default_mode_agent import get_default_mode_agent
+from host_brain.tribe.prefrontal_runtime_policy import (
+    expression_preference_directive,
+)
 import re
 import time
 
@@ -78,6 +81,51 @@ _TEXT_RESPONSE_FORMS = {"", "text", "plain_text", "chat_text", "zh_text"}
 
 
 _AUDIO_INPUT_SOURCES = {"asr", "audio", "voice", "speech", "mic", "microphone", "voice_chat"}
+
+_AFFECTIVE_TECHNICAL_TEXT_RE = re.compile(
+    r"报错|代码|堆栈|排错|修复|调试|部署|发布|风险|测试失败|上线"
+)
+_AFFECTIVE_TECHNICAL_CONTINUATION_RE = re.compile(
+    r"一步步|继续(?:做|弄|排|修)?|陪我.{0,6}(?:做|排|修)|先(?:看|做|排|修)|帮我"
+)
+_AFFECTIVE_AMBIGUOUS_TEXT_RE = re.compile(
+    r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉"
+)
+_AFFECTIVE_AMBIGUOUS_FOLLOWUP_RE = re.compile(
+    r"^(?:嗯|还行|还好|就那样|不知道|反正结束了)[。.!！]?$"
+)
+
+
+def _affective_task_mode_for_turn(
+    *,
+    task_mode: str,
+    user_message: str,
+    facts: Any,
+) -> str:
+    """Preserve the current conversational objective for the affect planner.
+
+    The general conversation interpreter intentionally treats short follow-ups
+    as chat.  For the affective plan, however, a short ``陪我一步步做`` after
+    an explicit error-fixing turn is still a task, while an explicit
+    ``说不清是什么感觉`` is the bounded ambiguous path promised by DL-02.
+    This is a prompt-time decision only; it adds no durable writer or ordinary
+    chat model call.
+    """
+
+    mode = str(task_mode or "").strip()
+    current = str(user_message or "").strip()
+    fact_text = "\n".join(str(item or "") for item in list(facts or []))
+    technical_context = bool(_AFFECTIVE_TECHNICAL_TEXT_RE.search(fact_text))
+    if _AFFECTIVE_TECHNICAL_TEXT_RE.search(current) or (
+        technical_context and _AFFECTIVE_TECHNICAL_CONTINUATION_RE.search(current)
+    ):
+        return "technical_help"
+    ambiguous_context = bool(_AFFECTIVE_AMBIGUOUS_TEXT_RE.search(fact_text))
+    if _AFFECTIVE_AMBIGUOUS_TEXT_RE.search(current) or (
+        ambiguous_context and _AFFECTIVE_AMBIGUOUS_FOLLOWUP_RE.fullmatch(current)
+    ):
+        return "ambiguous_affect"
+    return mode
 
 
 _DETERMINISTIC_RESULT_AGENT_IDS = {
@@ -306,6 +354,15 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
+    task_control = _apply_active_identity_release(
+        task_control,
+        ports=ports,
+    )
+    task_control = _apply_active_expression_preferences(
+        task_control,
+        agent_input=agent_input,
+        ports=ports,
+    )
     _surface_sync_reply_plan(
         agent_input=agent_input,
         trace_stage_meta=trace_stage_meta,
@@ -455,6 +512,119 @@ def build_surface_main_chain_input_from_surface_reply_input(
     )
 
 
+def _apply_active_expression_preferences(
+    task_control: Any,
+    *,
+    agent_input: Any,
+    ports: SurfaceRuntimePorts,
+) -> dict[str, Any]:
+    """Put the active expression version on the actual Surface prompt path.
+
+    This is a single local projection read.  It performs no model call and no
+    durable write; an unavailable optional preference projection must not make
+    ordinary companion chat unavailable.
+    """
+
+    control = dict(task_control or {})
+    resolver = ports.resolve_expression_preferences
+    if not callable(resolver):
+        return control
+    try:
+        policy = resolver(
+            persona_user_id=str(
+                getattr(agent_input, "person_id", "") or ""
+            ).strip()
+        )
+    except Exception:
+        return control
+    directive = expression_preference_directive(policy)
+    if not directive:
+        return control
+    existing = [
+        str(item).strip()
+        for item in list(control.get("style_anchor") or [])
+        if str(item).strip()
+    ]
+    control["style_anchor"] = list(
+        dict.fromkeys([directive, *existing])
+    )
+    return control
+
+
+def _apply_active_identity_release(
+    task_control: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+) -> dict[str, Any]:
+    """Apply the active release style base without exposing identity data.
+
+    IdentitySnapshot stores structured release summaries rather than private
+    bodies.  Only the bounded style fingerprint becomes a Surface directive;
+    Soul, relationship permissions and current affect retain higher authority.
+    """
+
+    control = dict(task_control or {})
+    resolver = ports.resolve_active_identity
+    if not callable(resolver):
+        return control
+    try:
+        active = resolver()
+    except Exception:
+        return control
+    directive = _active_identity_release_directive(active)
+    if not directive:
+        return control
+    existing = [
+        str(item).strip()
+        for item in list(control.get("style_anchor") or [])
+        if str(item).strip()
+    ]
+    control["style_anchor"] = list(
+        dict.fromkeys([directive, *existing])
+    )
+    return control
+
+
+def _active_identity_release_directive(active: Any) -> str:
+    payload = _safe_mapping(active)
+    snapshot = _safe_mapping(payload.get("snapshot"))
+    style = _safe_mapping(snapshot.get("style_fingerprint"))
+    raw_dimensions = style.get("dimensions")
+    if not isinstance(raw_dimensions, list):
+        return ""
+    dimensions: dict[str, float] = {}
+    for item in raw_dimensions:
+        if not isinstance(item, list) or len(item) != 2:
+            continue
+        try:
+            dimensions[str(item[0])] = float(item[1])
+        except (TypeError, ValueError):
+            continue
+    hints: list[str] = []
+    if dimensions.get("warmth", 0.5) >= 0.75:
+        hints.append("语气温暖但不黏腻")
+    elif dimensions.get("warmth", 0.5) <= 0.35:
+        hints.append("语气克制但不冷淡")
+    if dimensions.get("curiosity", 0.5) >= 0.75:
+        hints.append("自然保留好奇心")
+    if dimensions.get("humor", 0.5) >= 0.7:
+        hints.append("合适时带一点轻松幽默")
+    if dimensions.get("sensitivity", 0.5) >= 0.75:
+        hints.append("先照顾细微感受")
+    if dimensions.get("assertiveness", 0.5) >= 0.7:
+        hints.append("需要时清楚表达判断和边界")
+    if dimensions.get("playfulness", 0.5) >= 0.7:
+        hints.append("熟悉场景可以更俏皮")
+    if dimensions.get("resilience", 0.5) >= 0.75:
+        hints.append("遇到低落保持稳定而不强行积极")
+    if not hints:
+        return ""
+    return (
+        "已激活身份版本的表达底色（不覆盖 Soul）："
+        + "；".join(hints[:4])
+    )[:180]
+
+
 def _apply_affective_turn_guidance(
     task_control: Any,
     *,
@@ -472,6 +642,9 @@ def _apply_affective_turn_guidance(
     control = _safe_mapping(
         task_control.as_dict() if callable(getattr(task_control, "as_dict", None)) else task_control
     )
+    # This field is never accepted from render_policy or another caller.  It
+    # is rebuilt below only from the canonical Life hand-off.
+    control.pop("companion_utterance_frame", None)
     emotion_context = _safe_mapping(getattr(agent_input, "emotion_context", None))
     is_internal = bool(emotion_context.get("_affective_life_internal"))
     previous_expression, previous_expression_source = _previous_avatar_expression(
@@ -479,13 +652,18 @@ def _apply_affective_turn_guidance(
         ports=ports,
     )
     try:
+        effective_task_mode = _affective_task_mode_for_turn(
+            task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
+            user_message=str(getattr(agent_input, "user_message", "") or ""),
+            facts=control.get("facts"),
+        )
         guidance = build_affective_turn_guidance(
             emotion_context=emotion_context,
             request_id=str(getattr(agent_input, "request_id", "") or ""),
             workspace_id=str(getattr(agent_input, "workspace_id", "") or ""),
             relationship_subject_id=str(getattr(agent_input, "person_id", "") or ""),
             session_id=str(getattr(agent_input, "session_id", "") or ""),
-            task_mode=str(control.get("task_mode") or control.get("response_move") or ""),
+            task_mode=effective_task_mode,
             created_at_ms=_coerce_int(getattr(agent_input, "ts_ms", 0), default=0),
             previous_avatar_expression=previous_expression,
             previous_expression_source=previous_expression_source,
@@ -512,9 +690,17 @@ def _apply_affective_turn_guidance(
         ]
         return list(dict.fromkeys([*existing, *values]))
 
-    control["facts"] = merge("facts", guidance.facts)
-    control["must_not_do"] = merge("must_not_do", guidance.must_not_do)
+    # The typed frame now owns action, inference, relationship and ending
+    # semantics.  Do not duplicate its policy as a page of natural-language
+    # facts/prohibitions in every ordinary chat prompt.  Only actual continuity
+    # facts remain on the fact plane during the compatibility window.
+    continuity_facts = tuple(
+        item for item in guidance.facts if item.startswith("上下文连续性：")
+    )
+    control["facts"] = merge("facts", continuity_facts)
     control["style_anchor"] = merge("style_anchor", guidance.style_anchor)
+    control["affective_continuity_kind"] = guidance.continuity_kind
+    control["companion_utterance_frame"] = guidance.plan.utterance_frame.as_dict()
     if isinstance(trace_stage_meta, dict):
         trace_stage_meta["affective_turn_plan"] = guidance.plan.as_dict()
         trace_stage_meta["affective_turn_guidance"] = guidance.trace()

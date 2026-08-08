@@ -348,6 +348,87 @@ def test_surface_foreground_stages_same_call_japanese_speech_text(monkeypatch) -
     assert voice["payload"]["lang_hint"] == "ja"
 
 
+def test_surface_foreground_missing_japanese_speech_suppresses_voice_only(
+    monkeypatch,
+) -> None:
+    from host_brain.surface_runtime import delivery_audit
+
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    submitted: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        delivery_audit,
+        "submit_life_command",
+        lambda **kwargs: submitted.append(kwargs)
+        or {
+            "status": "APPLIED",
+            "command_id": kwargs["command_id"],
+            "event_id": "event-dl05-ja-degraded",
+            "state_version": 1,
+            "replayed": False,
+        },
+    )
+    agent = SimpleNamespace(
+        request_id="request-dl05-ja-degraded",
+        workspace_id="workspace-dl05",
+        person_id="person-dl05",
+        session_id="session-dl05",
+        user_message="给我三个步骤。",
+        ts_ms=NOW,
+        reply_channel="gateway",
+        reply_target="target-dl05",
+        bond_summary={},
+        emotion_context={},
+        emotion_snapshot={},
+        render_policy={},
+        governor_result={"decision": "APPROVE"},
+        delivery_authorization={},
+        defer_effects_to_task_runtime=False,
+    )
+    narrative = "先列清单，再定优先级，最后执行。"
+    result = SimpleNamespace(
+        selected_text=narrative,
+        tts_text_ja="",
+        natsume_emotion_tag="CALM",
+        user_emotion_tag="NEUTRAL",
+        vts_expression_id="calm",
+        observation_codes=(),
+        compiled=SimpleNamespace(trace={}),
+        runtime=SimpleNamespace(
+            tts_text_ja="",
+            emotion_confidence=0.8,
+            generation_trace={},
+            latency_ms=12,
+        ),
+    )
+
+    delivery_audit._submit_surface_foreground_completed(
+        life_command_service=object(),
+        life_snapshot_reader=object(),
+        relationship_lifecycle_service=None,
+        agent_input=agent,
+        result=result,
+        envelope=ReplyEnvelope.final_reply(text=narrative, source="test"),
+        narrative=narrative,
+        trace_stage_meta={"affective_turn_plan": _plan()},
+        timings_ms={"surface_main_chain_ms": 12},
+        total_latency_ms=12,
+        llm_latency_ms=10,
+    )
+
+    payload = submitted[0]["payload"]
+    assert isinstance(payload, dict)
+    assert payload["expression_delivery_suppressed_channels"] == ["VOICE"]
+    assert payload["expression_delivery_suppressed_reason"] == (
+        "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
+    )
+    assert [item["channel"] for item in payload["expression_delivery_intents"]] == [
+        "AVATAR"
+    ]
+    assert [item["channel"] for item in payload["expression_delivery_controls"]] == [
+        "AVATAR"
+    ]
+
+
 def _governed_foreground(*, narrative: str = "我在，慢一点也没关系。") -> dict[str, object]:
     plan = _plan()
     intents, controls, receipts = build_buffered_expression_delivery(
@@ -507,6 +588,63 @@ def test_governed_expression_acceptance_allows_explicit_japanese_voice_degradati
     )
 
     assert effects == ()
+
+
+def test_governed_expression_acceptance_rebuilds_avatar_when_only_voice_degrades() -> None:
+    narrative = "先列清单，再定优先级，最后执行。"
+    foreground = _governed_foreground(narrative=narrative)
+    payload = foreground["payload"]
+    assert isinstance(payload, dict)
+    plan = payload["affective_turn_plan"]
+    assert isinstance(plan, dict)
+    pair, pair_receipts = build_sentence_expression_delivery(
+        affective_turn_plan=plan,
+        sentence=narrative,
+        sentence_index=0,
+        created_at_ms=NOW + 3,
+    )
+    controls, control_receipts = build_expression_delivery_controls(
+        affective_turn_plan=plan,
+        action="RELEASE",
+        sent_sentence_count=1,
+        created_at_ms=NOW + 3,
+    )
+    payload["expression_delivery_intents"] = [
+        item.as_dict() for item in pair if item.channel == "AVATAR"
+    ]
+    payload["expression_delivery_controls"] = [
+        item.as_dict() for item in controls if item.channel == "AVATAR"
+    ]
+    payload["expression_delivery_receipts"] = [
+        item.as_dict()
+        for item in (*pair_receipts, *control_receipts)
+        if item.channel == "AVATAR"
+    ]
+    payload["expression_delivery_suppressed_reason"] = (
+        "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
+    )
+    payload["expression_delivery_suppressed_channels"] = ["VOICE"]
+
+    effects = compile_companion_expression_effect_payloads(
+        graph_id="graph-dl05",
+        graph_revision=1,
+        node_id="node-dl05",
+        attempt_id="attempt-dl05",
+        request_id="request-dl05",
+        principal_id="person-dl05",
+        relationship_subject_id="person-dl05",
+        workspace_id="workspace-dl05",
+        session_id="session-dl05",
+        node_grant_ref="node-grant://dl05",
+        foreground=foreground,
+    )
+
+    parsed = parse_companion_expression_effect_batch_payload(effects[0])
+    assert [item["command"].kind for item in parsed] == ["avatar", "avatar"]
+    assert [item["command"].action for item in parsed] == [
+        "set_expression",
+        "release",
+    ]
 
 
 def test_governed_expression_acceptance_rejects_worker_protocol_drift() -> None:

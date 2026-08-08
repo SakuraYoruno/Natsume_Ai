@@ -440,6 +440,60 @@ def _wait_until_bind_is_free(
     return probe.inspect(endpoint).available is True
 
 
+def _acquire_coordinator_authority_with_crash_recovery(
+    *,
+    store: SQLiteServiceCatalogRolloutRepository,
+    runtime_scope_id: str,
+    owner_id: str,
+    lease_ms: int,
+    endpoint: EndpointSpec,
+    reservation_probe: OwnedSocketReservationProbe | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> Any | None:
+    """Acquire the coordinator after a crashed owner's bounded stale lease.
+
+    A graceful shutdown releases the lease immediately.  After a forced
+    process termination the listener is already free while SQLite retains the
+    prior lease until expiry.  Waiting only in that exact shape makes restart
+    self-healing without allowing a second Host to wait out and supersede a
+    live listener.
+    """
+
+    authority = store.acquire_authority(
+        runtime_scope_id=runtime_scope_id,
+        owner_id=owner_id,
+        lease_ms=lease_ms,
+    )
+    if authority is not None:
+        return authority
+
+    probe = reservation_probe or OwnedSocketReservationProbe()
+    owns_probe = reservation_probe is None
+    try:
+        if probe.inspect(endpoint).available is not True:
+            return None
+        deadline = monotonic() + (lease_ms / 1000.0) + 1.0
+        while monotonic() < deadline:
+            sleep(min(0.25, max(0.0, deadline - monotonic())))
+            # A competing coordinator that obtained the lease may bind while
+            # this process waits.  Stop immediately instead of waiting out a
+            # now-live Host.
+            if probe.inspect(endpoint).available is not True:
+                return None
+            authority = store.acquire_authority(
+                runtime_scope_id=runtime_scope_id,
+                owner_id=owner_id,
+                lease_ms=lease_ms,
+            )
+            if authority is not None:
+                return authority
+        return None
+    finally:
+        if owns_probe:
+            probe.close()
+
+
 @dataclass(slots=True)
 class HostCatalogRuntime:
     outcome: CatalogActivationOutcomeV1
@@ -494,10 +548,13 @@ def start_host_through_service_catalog(
     endpoint = snapshot.by_id()[HOST_MAIN_ENDPOINT_ID]
     store = SQLiteServiceCatalogRolloutRepository(db_path)
     runtime_scope = EmbodimentOutboxRepository(db_path).runtime_scope_id
-    authority = store.acquire_authority(
+    authority_owner_id = f"host.main.catalog::{os.getpid()}::{uuid4().hex}"
+    authority = _acquire_coordinator_authority_with_crash_recovery(
+        store=store,
         runtime_scope_id=runtime_scope,
-        owner_id=f"host.main.catalog::{os.getpid()}::{uuid4().hex}",
+        owner_id=authority_owner_id,
         lease_ms=coordinator_lease_ms,
+        endpoint=endpoint,
     )
     if authority is None:
         raise ServiceCatalogRolloutError("another Service Catalog coordinator owns this runtime")

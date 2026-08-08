@@ -19,6 +19,10 @@ from host_brain.model_runtime.production_composition import (
 from host_brain.model_runtime.production_route_policy import (
     build_production_server_route_catalog,
 )
+from host_brain.model_runtime.live_prompts import (
+    CODE_BENEFIT_EXECUTION_PROMPT_ID,
+    CODE_BENEFIT_GENERATION_PARAMETERS,
+)
 
 
 _ROUTE_ENV_PREFIXES = (
@@ -150,6 +154,29 @@ def test_realtime_companion_uses_tier_b_without_surface_pro_override(monkeypatch
     assert governed["scene_type"] == "CHAT_SURFACE"
     assert governed["model_id"] == "deepseek-v4-pro"
     assert governed["timeout_ms"] == 45000
+
+    production_realtime = build_production_server_route_catalog().resolve(
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+        prompt_id="surface.main_chain.live.json",
+    )
+    assert production_realtime["generation_parameters"]["max_tokens"] == 640
+    assert production_realtime["generation_parameters"]["thinking_mode"] == "disabled"
+
+
+def test_code_benefit_prompt_uses_a_bounded_non_thinking_profile(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
+    monkeypatch.setenv("HOST_MODEL_ROUTE_SCENE_CODE_BENCHMARK_TIMEOUT_MS", "30000")
+
+    route = build_production_server_route_catalog().resolve(
+        scene_type="CODE_BENCHMARK",
+        cognitive_tier="RESEARCH",
+        prompt_id=CODE_BENEFIT_EXECUTION_PROMPT_ID,
+    )
+
+    assert route["timeout_ms"] == 30000
+    assert route["generation_parameters"] == dict(CODE_BENEFIT_GENERATION_PARAMETERS)
 
 
 def test_realtime_companion_accepts_dedicated_provider_override(monkeypatch) -> None:  # noqa: ANN001

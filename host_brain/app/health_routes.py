@@ -40,6 +40,7 @@ from host_brain.app.settings import get_persistence_settings
 from host_brain.app.observability_runtime.remaining_query_projection import (
     CANON_SYNC_KEY,
     CANON_SYNC_KIND,
+    CANON_SYNC_MAX_AGE_MS,
     STARTUP_SNAPSHOT_KEY,
     STARTUP_SNAPSHOT_KIND,
     read_from_store,
@@ -805,16 +806,25 @@ async def canon_sync_health_check(
         projection_store,
         CANON_SYNC_KIND,
         CANON_SYNC_KEY,
+        max_age_ms=CANON_SYNC_MAX_AGE_MS,
     )
+    status_text = str((payload or {}).get("status") or "DEGRADED")
+    detail = str((payload or {}).get("detail") or "").strip()
+    if not detail:
+        detail = (
+            "canon sync healthy"
+            if status_text == "OK"
+            else "canon sync projection unavailable"
+        )
     return HealthResponse(
-        status=str((payload or {}).get("status") or "DEGRADED"),
+        status=status_text,
         version="0.1.0",
         timestamp=ts_ms,
         details={
             "drift_count": int((payload or {}).get("drift_count") or 0),
             "drift_sample": list((payload or {}).get("drift_sample") or []),
             "reason_code": (payload or {}).get("reason_code") or meta.get("reason_code"),
-            "detail": (payload or {}).get("detail") or "canon sync projection unavailable",
+            "detail": detail,
             **response_meta(meta),
         },
     )

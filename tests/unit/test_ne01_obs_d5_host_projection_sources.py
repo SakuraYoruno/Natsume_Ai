@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -381,7 +382,11 @@ def test_durable_lineage_rejects_revision_rollback_across_reader_restart(
         ts_ms=NOW,
     )
     assert migrated.success is True
-    store = QueryProjectionStore(db_path, clock=lambda: NOW)
+    store = QueryProjectionStore(
+        db_path,
+        clock=lambda: NOW,
+        journal_checkpoint_interval_ms=3_600_000,
+    )
 
     first, _calls, first_payloads = _sources(
         monkeypatch,
@@ -392,6 +397,15 @@ def test_durable_lineage_rejects_revision_rollback_across_reader_restart(
         "source_revision"
     ] = 5
     first.capability_forge()
+    first_payloads["/internal/obs-sources/capability-forge"][
+        "source_revision"
+    ] = 6
+    first.capability_forge()
+
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM operator_query_projection_journal"
+        ).fetchone()[0] == 1
 
     restarted, _calls, restarted_payloads = _sources(
         monkeypatch,
@@ -542,7 +556,11 @@ def test_retired_epoch_replay_remains_rejected_after_more_than_64_restarts(
         request_id="test-host-source-long-lineage",
         ts_ms=NOW,
     ).success
-    store = QueryProjectionStore(db_path, clock=lambda: NOW)
+    store = QueryProjectionStore(
+        db_path,
+        clock=lambda: NOW,
+        journal_checkpoint_interval_ms=3_600_000,
+    )
     transport = HostReadTransport(
         base_url="https://host-runtime:18080",
         token="dedicated-token",

@@ -260,6 +260,22 @@ def test_thalamus_keeps_actionable_workspace_requests_on_codex_skill() -> None:
     assert write_decision["target_id"] == "agent_worker"
 
 
+def test_thalamus_keeps_answer_shape_followup_in_conversation_context() -> None:
+    for classifier in (classify_task_intent_by_rules, classify_task_intent_fastpath):
+        decision = classifier("只给我最短修复。")
+
+        assert decision is not None
+        assert decision["route"] == "chat"
+        assert decision["target_id"] == ""
+        assert decision["reason_code"] == "THALAMUS_RULE_CONTEXTUAL_FIX_SHAPE"
+        assert decision["semantic_intent"]["context_binding"] == "recent_conversation"
+
+    actionable = classify_task_intent_by_rules("修复主链路由")
+    assert actionable is not None
+    assert actionable["route"] == "skill"
+    assert actionable["target_id"] == "agent_worker"
+
+
 def test_thalamus_routes_strict_recent_assistant_query_to_recent_turn() -> None:
     decision = classify_task_intent_by_rules("你刚刚说了什么")
 
@@ -1323,6 +1339,37 @@ def test_classify_task_intent_keeps_real_test_work_on_codex() -> None:
     assert decision is not None
     assert decision["route"] == "skill"
     assert decision["target_id"] == "agent_worker"
+
+
+def test_underspecified_error_statement_stays_in_affective_chat_until_context_exists() -> None:
+    text = "但这个报错今晚必须修，别把任务全变成安慰。"
+
+    rules = classify_task_intent_by_rules(text)
+    fastpath = classify_task_intent_fastpath(text)
+
+    assert rules is not None
+    assert rules["route"] == "chat"
+    assert rules["target_id"] == ""
+    assert rules["reason_code"] == "THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT"
+    assert fastpath is not None
+    assert fastpath["route"] == "chat"
+    assert fastpath["reason_code"] == "THALAMUS_RULE_CODE_CONTEXT_REQUIRED_CHAT"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "帮我修复这个报错",
+        "src/app.py 第 42 行 ValueError，帮我修",
+        "检查仓库里的测试失败",
+    ],
+)
+def test_concrete_or_explicit_code_work_still_routes_to_governed_worker(text: str) -> None:
+    decision = classify_task_intent_by_rules(text)
+
+    assert decision is not None
+    assert decision["route"] == "skill"
+    assert decision["target_id"] in {"agent_worker", "agent_inspect"}
 
 
 def test_classify_task_intent_fastpath_routes_english_greeting_to_chat() -> None:

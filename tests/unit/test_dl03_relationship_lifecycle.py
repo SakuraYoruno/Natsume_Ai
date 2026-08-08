@@ -152,6 +152,60 @@ def test_explicit_stop_persists_a_boundary_even_when_it_contains_disrespect(
     }
 
 
+def test_annoyance_after_an_accepted_reply_is_feedback_and_keeps_repair_open(
+    tmp_path: Path,
+) -> None:
+    relationship, fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="accepted-before-annoyance",
+        response_receipt=_accepted_foreground(command_id="before-annoyance"),
+        response_text="我明白，不舒服的话不用马上说清楚。",
+    )
+
+    result = fusion.resolve_request(
+        request_body=_request("你真烦。"),
+        request_id="user-annoyed-after-reply",
+    )
+    relationship_context = result.as_emotion_context()["affective_life"][
+        "relationship_life"
+    ]
+    affective = reader.get_snapshot(result.scope.aggregate_id).state["affective"]
+    guidance = build_affective_turn_guidance(
+        emotion_context=result.as_emotion_context(),
+        request_id="user-annoyed-after-reply",
+        workspace_id=result.scope.workspace_id,
+        relationship_subject_id=result.scope.relationship_subject_id,
+        session_id=result.scope.session_id,
+        created_at_ms=NOW,
+    )
+
+    assert relationship_context["aftereffect"]["outcome"] == "MISUNDERSTOOD"
+    assert relationship_context["state"]["repair_required"] is True
+    assert affective["last_appraisal"]["event_kind"] == (
+        "repair_under_directed_disrespect"
+    )
+    assert {item["emotion"] for item in affective["components"]} == {
+        "HURT",
+        "CARE",
+        "CAUTION",
+    }
+    assert affective["last_regulation"]["mode"] == "CONTAIN"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "REPAIR"
+    assert guidance.plan.self_emotion_tag == "SAD"
+    assert guidance.plan.expression_plan.voice_style == "CONTAINED_HURT"
+    assert guidance.plan.expression_plan.avatar_expression == "CONTAINED_HURT"
+    assert guidance.plan.utterance_frame.self_stance == (
+        "OWN_REPAIR_WITH_CONTAINED_HURT"
+    )
+    assert guidance.plan.utterance_frame.response_move == (
+        "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+    )
+
+
 def test_aftereffect_is_exactly_replayed_and_does_not_cross_workspace(
     tmp_path: Path,
 ) -> None:
@@ -248,6 +302,70 @@ def test_repair_requires_later_user_acknowledgement_and_never_uses_raw_text(
     assert "别问了" not in serialized
     assert "愿意继续" not in serialized
     assert first_reply.event_id
+
+
+def test_unresolved_rupture_survives_neutral_followups_until_explicit_acceptance(
+    tmp_path: Path,
+) -> None:
+    relationship, _fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="reply-misread",
+        response_receipt=_accepted_foreground(command_id="foreground-misread"),
+        response_text="我明白了。",
+    )
+    misunderstood = relationship.record_followup(
+        request_body=_request("你刚才把我的意思完全弄反了。"),
+        request_id="misread-followup",
+    )
+    assert misunderstood.aftereffect is not None
+    assert misunderstood.aftereffect.outcome == "MISUNDERSTOOD"
+
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="reply-repair-open",
+        response_receipt=_accepted_foreground(command_id="foreground-repair-open"),
+        response_text="是我没接住。",
+    )
+    neutral = relationship.record_followup(
+        request_body=_request("我听到了。"),
+        request_id="neutral-followup",
+    )
+
+    assert neutral.aftereffect is not None
+    assert neutral.aftereffect.outcome == "REPAIR_UNRESOLVED"
+    scope = RelationshipScope.from_request(_request("", session_id="other-session"))
+    state = reader.get_snapshot(scope.aggregate_id).state["relationship_v2"]
+    assert state["repair_required"] is True
+
+
+def test_explicit_unresolved_repair_opens_rupture_without_a_prior_flag(
+    tmp_path: Path,
+) -> None:
+    relationship, _fusion, reader = _runtime(tmp_path)
+    relationship.provision_accepted_response(
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        request_id="reply-apology",
+        response_receipt=_accepted_foreground(command_id="foreground-apology"),
+        response_text="对不起，是我没接住。",
+    )
+
+    unresolved = relationship.record_followup(
+        request_body=_request("你已经道歉了，但我还没有觉得这件事过去了。"),
+        request_id="explicit-unresolved",
+    )
+
+    assert unresolved.aftereffect is not None
+    assert unresolved.aftereffect.outcome == "REPAIR_UNRESOLVED"
+    scope = RelationshipScope.from_request(_request("", session_id="other-session"))
+    state = reader.get_snapshot(scope.aggregate_id).state["relationship_v2"]
+    assert state["repair_required"] is True
 
 
 def test_user_accepted_repair_reopens_foreground_without_restoring_proactive_permission(

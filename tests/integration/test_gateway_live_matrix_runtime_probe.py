@@ -1338,6 +1338,73 @@ def test_fetch_gateway_event_by_conversation_returns_bound_failure_by_default(
     assert event["event_type"] == "INPUT_FAILED"
 
 
+def test_fetch_gateway_event_by_conversation_binds_current_message_within_grace_window(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE voice_event_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id TEXT,
+            event_type TEXT,
+            status TEXT,
+            reason_code TEXT,
+            detail TEXT,
+            payload TEXT,
+            ts_ms INTEGER
+        )
+        """
+    )
+    conn.executemany(
+        """
+        INSERT INTO voice_event_log
+        (request_id, event_type, status, reason_code, detail, payload, ts_ms)
+        VALUES (?, ?, 'OK', NULL, 'event', ?, ?)
+        """,
+        (
+            (
+                "req_old",
+                "INPUT_COMPLETED",
+                json.dumps(
+                    {
+                        "source": "GATEWAY",
+                        "conversation_id": "case_multiturn",
+                        "msg_id": "turn-old",
+                    }
+                ),
+                1_950,
+            ),
+            (
+                "req_current",
+                "INPUT_ACCEPTED",
+                json.dumps(
+                    {
+                        "source": "GATEWAY",
+                        "conversation_id": "case_multiturn",
+                        "msg_id": "turn-current",
+                    }
+                ),
+                2_500,
+            ),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    event = probe._fetch_gateway_event_by_conversation(
+        db_path,
+        conversation_id="case_multiturn",
+        min_ts_ms=2_000,
+        msg_id="turn-current",
+    )
+
+    assert event is not None
+    assert event["request_id"] == "req_current"
+    assert event["payload"]["msg_id"] == "turn-current"
+
+
 def test_edge_voice_pipeline_idle_returns_true_when_queue_and_playback_are_clear() -> None:
     body = {
         "event": {

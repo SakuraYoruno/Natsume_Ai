@@ -200,3 +200,33 @@ def test_host_test_factory_composes_projection_ports_for_mounted_gets() -> None:
     for payload in (startup_payload, canon_payload, memory_payload):
         assert payload["degraded_state"] == "REBUILDING"
         assert int(payload["projection_version"]) == 0
+
+
+def test_canon_sync_read_window_spans_a_complete_projection_wave(monkeypatch) -> None:
+    from host_brain.app import health_routes
+    from host_brain.app.observability_runtime.remaining_query_projection import (
+        CANON_SYNC_MAX_AGE_MS,
+    )
+
+    observed: dict[str, int] = {}
+
+    def _read_from_store(_store, _kind, _key, *, max_age_ms):
+        observed["max_age_ms"] = max_age_ms
+        return (
+            {"status": "OK", "drift_count": 0},
+            {
+                "schema_version": "Natsume.operator.query_projection.v1",
+                "projection_version": 1,
+                "source_cursor": 1,
+                "freshness_ts_ms": 1,
+                "degraded_state": "HEALTHY",
+            },
+        )
+
+    monkeypatch.setattr(health_routes, "read_from_store", _read_from_store)
+    response = asyncio.run(health_routes.canon_sync_health_check(projection_store=object()))
+
+    assert response.status == "OK"
+    assert response.details["detail"] == "canon sync healthy"
+    assert observed["max_age_ms"] == CANON_SYNC_MAX_AGE_MS
+    assert CANON_SYNC_MAX_AGE_MS >= 180_000

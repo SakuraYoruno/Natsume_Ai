@@ -12,6 +12,7 @@ import os
 import time
 from collections import defaultdict
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from natsume_contracts.operator.v1 import ProjectionDegradedState
@@ -47,6 +48,12 @@ CANON_SYNC_KEY = "current"
 STARTUP_SNAPSHOT_KIND = "startup_snapshot"
 STARTUP_SNAPSHOT_KEY = "current"
 REMAINING_QUERY_MAX_AGE_MS = 15_000
+# Canon drift is a low-frequency health fact refreshed by one job in the
+# 22-job serial OBS wave.  A 15-second read window can expire while that same
+# healthy wave is still running, turning an unchanged ``OK`` result into a
+# false ``STALE``.  Keep the generic interactive views at 15 seconds and give
+# only canon health enough time to span a complete production wave.
+CANON_SYNC_MAX_AGE_MS = 180_000
 
 
 def read_from_store(
@@ -405,11 +412,15 @@ def _canon_sync_payload(service: CanonApplicationService) -> tuple[dict[str, Any
                     "doc_id": row.get("doc_id"),
                     "file_version": row.get("file_version"),
                     "indexed_version": row.get("indexed_version"),
-                    "reason_code": row.get("reason_code"),
+                    "reason_code": row.get("reason_code") or row.get("code"),
+                    "source_name": (
+                        Path(str(row.get("source_path") or "")).name or None
+                    ),
                 }
             )
         payload = {
             "status": "DEGRADED" if drifts else "OK",
+            "source_available": True,
             "drift_count": len(drifts),
             "drift_sample": samples,
             "reason_code": "CANON_SYNC_FAILED" if drifts else None,
@@ -419,6 +430,7 @@ def _canon_sync_payload(service: CanonApplicationService) -> tuple[dict[str, Any
     except Exception:
         payload = {
             "status": "DEGRADED",
+            "source_available": False,
             "drift_count": 0,
             "drift_sample": [],
             "reason_code": "CANON_SYNC_FAILED",
@@ -436,6 +448,7 @@ __all__ = [
     "CHECKPOINT_KIND",
     "CANON_SYNC_KEY",
     "CANON_SYNC_KIND",
+    "CANON_SYNC_MAX_AGE_MS",
     "MEMORY_CONTEXT_KIND",
     "MEMORY_EVENTS_KIND",
     "MEMORY_HEALTH_KIND",

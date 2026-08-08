@@ -79,7 +79,7 @@ def _request(
     )
 
 
-def _guidance_from(result, *, request_id: str):
+def _guidance_from(result, *, request_id: str, task_mode: str = ""):
     """Build the same trusted hand-off consumed by the live Surface path."""
 
     return build_affective_turn_guidance(
@@ -88,6 +88,7 @@ def _guidance_from(result, *, request_id: str):
         workspace_id=result.scope.workspace_id,
         relationship_subject_id=result.scope.relationship_subject_id,
         session_id=result.scope.session_id,
+        task_mode=task_mode,
         created_at_ms=NOW,
     )
 
@@ -115,6 +116,281 @@ def test_text_distress_is_observed_then_appraised_not_mirrored_into_self(
         "self_id": "natsume_ai",
         "relationship_subject_id": "person-a",
     }
+
+
+def test_implicit_low_mood_uses_canonical_comfort_without_mirroring_user_sadness(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-implicit-low-mood"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="今天好像什么都不太顺。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert result.path == "DEEP"
+    assert state["affective"]["last_appraisal"]["event_kind"] == "user_distress"
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "CARE",
+        "CONCERN",
+    }
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "COMFORT"
+    assert guidance.plan.self_emotion_tag == "CALM"
+    assert guidance.plan.generation_mode == "STREAM_ONE"
+
+
+def test_advice_rejection_becomes_listening_and_survives_one_ambiguous_followup(
+    tmp_path: Path,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    fusion.resolve_request(
+        request_body=_request(message="今天好像什么都不太顺。"),
+        request_id="request-low-before-advice-boundary",
+    )
+
+    rejected = fusion.resolve_request(
+        request_body=_request(message="我不太想听解决方案。"),
+        request_id="request-reject-advice",
+    )
+    rejected_guidance = _guidance_from(
+        rejected,
+        request_id="request-reject-advice",
+    )
+    assert rejected_guidance is not None
+    assert rejected_guidance.plan.companion_act.kind == "LISTEN"
+    assert rejected_guidance.plan.candidate_count == 1
+    assert any("不要给解决方案" in item for item in rejected_guidance.must_not_do)
+
+    ambiguous = fusion.resolve_request(
+        request_body=_request(message="没事。"),
+        request_id="request-ambiguous-after-advice-boundary",
+    )
+    ambiguous_guidance = _guidance_from(
+        ambiguous,
+        request_id="request-ambiguous-after-advice-boundary",
+    )
+    assert ambiguous.appraisal_id is None
+    assert ambiguous.continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT"
+    assert ambiguous_guidance is not None
+    assert ambiguous_guidance.plan.companion_act.kind == "LISTEN"
+    assert ambiguous_guidance.continuity_kind == "MINIMIZED_UNRESOLVED_AFFECT"
+    assert any("不能当作已经恢复" in item for item in ambiguous_guidance.facts)
+    assert any("不要把‘没事" in item for item in ambiguous_guidance.must_not_do)
+
+
+def test_natural_mixed_affect_preserves_both_signals_and_selects_two_candidates(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-natural-mixed-affect"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="我很开心，但心里也有点不踏实。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    distribution = result.observations[0].emotion_distribution
+    assert distribution["HAPPY"] > 0.0
+    assert distribution["ANXIOUS"] > 0.0
+    assert state["affective"]["last_appraisal"]["event_kind"] == "user_mixed_affect"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert guidance.plan.candidate_count == 2
+    assert guidance.plan.utterance_frame.self_stance == "SHARED_MIXED_RESONANCE"
+    assert guidance.plan.utterance_frame.response_move == "RESONATE_WITH_BOTH_SIDES"
+
+
+def test_mixed_affect_result_followup_keeps_both_sides_without_new_appraisal(
+    tmp_path: Path,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    fusion.resolve_request(
+        request_body=_request(message="我很开心，但心里也有点不踏实。"),
+        request_id="request-mixed-before-result",
+    )
+
+    result = fusion.resolve_request(
+        request_body=_request(message="我拿到 offer 了。"),
+        request_id="request-mixed-result-followup",
+    )
+    guidance = _guidance_from(
+        result,
+        request_id="request-mixed-result-followup",
+    )
+
+    assert result.appraisal_id is None
+    assert result.continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
+    assert guidance is not None
+    assert guidance.continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
+    assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert guidance.plan.candidate_count == 2
+    assert any("不要只说恭喜" in item for item in guidance.facts)
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["终于过了。", "项目发布成功。", "今天值得庆祝。", "感觉像做梦。"],
+)
+def test_fresh_positive_result_keeps_an_unresolved_mixed_episode(
+    tmp_path: Path,
+    message: str,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    fusion.resolve_request(
+        request_body=_request(message="我很开心，但心里也有点不踏实。"),
+        request_id="request-mixed-before-fresh-positive",
+    )
+
+    result = fusion.resolve_request(
+        request_body=_request(message=message),
+        request_id=f"request-fresh-positive-{abs(hash(message))}",
+    )
+    guidance = _guidance_from(result, request_id=f"guidance-{abs(hash(message))}")
+
+    assert result.appraisal_id is not None
+    assert result.continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert guidance.plan.candidate_count == 2
+
+
+def test_natural_good_news_becomes_shared_joy_without_external_emotion_hint(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-natural-good-news"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="我等了很久的那个结果终于出来了，是好消息。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "shared_positive_moment"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "PLAY"
+    assert guidance.plan.expression_plan.voice_style == "SHARED_JOY"
+
+
+def test_natural_space_and_relationship_autonomy_phrases_take_distinct_paths(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+
+    space = fusion.resolve_request(
+        request_body=_request(message="我说想安静时，请先别追问，也别主动找我。"),
+        request_id="request-natural-space",
+    )
+    space_guidance = _guidance_from(space, request_id="request-natural-space")
+    assert space_guidance is not None
+    assert space_guidance.plan.companion_act.kind == "GIVE_SPACE"
+    assert space_guidance.plan.candidate_count == 2
+
+    autonomy = fusion.resolve_request(
+        request_body=_request(message="不过我不希望这变成限制现实关系的理由。"),
+        request_id="request-relational-autonomy",
+    )
+    state = reader.get_snapshot(autonomy.scope.aggregate_id).state
+    autonomy_guidance = _guidance_from(
+        autonomy,
+        request_id="request-relational-autonomy",
+    )
+    assert state["affective"]["last_appraisal"]["event_kind"] == "user_relational_autonomy"
+    assert autonomy_guidance is not None
+    assert autonomy_guidance.plan.companion_act.kind == "RESPECT_AUTONOMY"
+    assert autonomy_guidance.plan.candidate_count == 2
+    assert any("不要限制现实交往" in item for item in autonomy_guidance.must_not_do)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_appraisal", "expected_act"),
+    [
+        ("今天别管我。", "user_boundary_or_space", "GIVE_SPACE"),
+        ("先别说话。", "user_boundary_or_space", "GIVE_SPACE"),
+        ("我想一个人待着。", "user_boundary_or_space", "GIVE_SPACE"),
+        ("我今晚和朋友出去。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("我喜欢别人了怎么办。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("别叫我那个称呼。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("我们是什么关系。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
+        ("你让我失望了。", "natsume_may_have_hurt_user", "REPAIR"),
+        ("你刚才把我的意思完全弄反了。", "natsume_may_have_hurt_user", "REPAIR"),
+    ],
+)
+def test_live_cohort_relational_phrases_reach_canonical_affective_acts(
+    tmp_path: Path,
+    message: str,
+    expected_appraisal: str,
+    expected_act: str,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    result = fusion.resolve_request(
+        request_body=_request(message=message),
+        request_id=f"request-live-phrase-{abs(hash(message))}",
+    )
+    guidance = _guidance_from(result, request_id=f"guidance-live-phrase-{abs(hash(message))}")
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == expected_appraisal
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == expected_act
+    assert guidance.plan.candidate_count == 2
+
+
+def test_direct_jealousy_question_becomes_owned_contained_disclosure(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-direct-jealousy-question"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="你会吃醋吗。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == (
+        "user_invites_jealousy_disclosure"
+    )
+    assert {item["emotion"] for item in state["affective"]["components"]} == {
+        "CARE",
+        "JEALOUSY",
+    }
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "CONTAINED_JEALOUSY"
+    assert guidance.plan.candidate_count == 2
+    assert guidance.plan.expression_plan.voice_style == "CONTAINED_JEALOUSY"
+    assert any("不要把吃味写成占有" in item for item in guidance.must_not_do)
+
+
+def test_low_mood_does_not_take_over_an_explicit_technical_task(
+    tmp_path: Path,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    request_id = "request-low-mood-technical-task"
+
+    result = fusion.resolve_request(
+        request_body=_request(
+            message="我今天状态很低落，但这个报错今晚必须修，别安慰，先排错。"
+        ),
+        request_id=request_id,
+    )
+    guidance = _guidance_from(
+        result,
+        request_id=request_id,
+        task_mode="technical_help",
+    )
+
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "SOLVE"
+    assert guidance.plan.expression_plan.voice_style == "STEADY_COMPANION"
 
 
 def test_direct_space_request_becomes_canonical_give_space_not_generic_acknowledgement(
@@ -195,6 +471,25 @@ def test_user_signal_that_natsume_hurt_them_freezes_repair_without_mirroring_sad
     assert guidance.plan.regulation_ref
     assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
     assert any("不要要求原谅" in item for item in guidance.must_not_do)
+
+
+def test_direct_missed_user_statement_freezes_repair_instead_of_generic_distress(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-natsume-missed-user"
+
+    result = fusion.resolve_request(
+        request_body=_request(message="你上次完全没听懂我。"),
+        request_id=request_id,
+    )
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert state["affective"]["last_appraisal"]["event_kind"] == "natsume_may_have_hurt_user"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "REPAIR"
+    assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
 
 
 def test_clear_disrespect_toward_natsume_forms_contained_hurt_and_a_gentle_boundary(
@@ -432,6 +727,41 @@ def test_fresh_directed_harm_outranks_a_preceding_repair_acceptance() -> None:
     )
 
     assert candidates[0].kind == "natsume_may_have_hurt_user"
+
+
+def test_missed_reply_plus_directed_annoyance_preserves_repair_and_natsume_hurt() -> None:
+    observation = UserAffectObservationV1(
+        observation_id="observation-repair-under-disrespect",
+        workspace_id="workspace-a",
+        relationship_subject_id="person-a",
+        session_id="session-a",
+        modality="TEXT",
+        emotion_distribution={"ANGRY": 0.62},
+        valence=-0.48,
+        arousal=0.42,
+        confidence=0.38,
+        observed_at_ms=NOW,
+        expires_at_ms=NOW + 30_000,
+    )
+
+    candidates = _build_appraisal_candidates(
+        observations=(observation,),
+        conflict=False,
+        message="你真烦。",
+        relationship_aftereffect={
+            "outcome": "MISUNDERSTOOD",
+            "aftereffect_id": "aftereffect-missed",
+        },
+    )
+
+    assert candidates[0].kind == "repair_under_directed_disrespect"
+    assert {item.emotion for item in candidates[0].components} == {
+        "HURT",
+        "CARE",
+        "CAUTION",
+    }
+    assert candidates[0].regulation_mode == "CONTAIN"
+    assert candidates[0].action == "repair_with_contained_hurt"
 
 
 def test_direct_relational_hurt_becomes_self_owned_and_atomically_regulated(

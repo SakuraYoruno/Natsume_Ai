@@ -653,6 +653,7 @@ def test_compiler_rebuilds_graph_scoped_user_life_and_delivery_effects() -> None
     assert all(item.attempt_id == "attempt-gr06-compiler" for item in first)
     user = first[0].payload
     assert user["content"] == "original user turn"
+    assert user["metadata"]["route_type"] == "chat"
     preference = first[1].payload
     assert preference["schema_version"] == "Natsume.conversation.preference_signal.v1"
     assert preference["operation_id"].startswith("preference-effect://sha256/")

@@ -8,6 +8,7 @@ is disconnected or API calls fail.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -509,6 +510,8 @@ class VTubeStudioDriver:
         self._total_reconnects = 0
         self._total_reconnect_failures = 0
         self._reconnect_thread: threading.Thread | None = None
+        self._reconnect_cooldown_until_monotonic = 0.0
+        self._authentication_pending = False
         self._reconnect_events: list[dict[str, Any]] = []
         self._shutdown_event = threading.Event()
         self._expression_hotkey_overrides: dict[str, str] = {}
@@ -584,6 +587,48 @@ class VTubeStudioDriver:
                     action="connect",
                 )
 
+            reconnect_thread = self._reconnect_thread
+            if (
+                reconnect_thread is not None
+                and reconnect_thread.is_alive()
+                and threading.current_thread() is not reconnect_thread
+            ):
+                return VtsDriverResult(
+                    success=False,
+                    reason_code=VTS_CONNECTION_FAILED,
+                    detail="VTS reconnect is already in progress",
+                    action="connect",
+                )
+            if (
+                self._authentication_pending
+                and threading.current_thread() is not reconnect_thread
+            ):
+                return VtsDriverResult(
+                    success=False,
+                    reason_code=VTS_CONNECTION_FAILED,
+                    detail=(
+                        "VTS authentication approval pending; automatic retries "
+                        "are paused until Edge restart or forced reconnect"
+                    ),
+                    action="connect",
+                )
+            cooldown_remaining = (
+                self._reconnect_cooldown_until_monotonic - time.monotonic()
+            )
+            if (
+                cooldown_remaining > 0.0
+                and threading.current_thread() is not reconnect_thread
+            ):
+                return VtsDriverResult(
+                    success=False,
+                    reason_code=VTS_CONNECTION_FAILED,
+                    detail=(
+                        "VTS reconnect cooldown active; "
+                        f"retry_after_s={cooldown_remaining:.1f}"
+                    ),
+                    action="connect",
+                )
+
             self._state = VtsState.CONNECTING
 
             try:
@@ -600,6 +645,8 @@ class VTubeStudioDriver:
                 )
                 self._state = VtsState.AUTHENTICATED
                 self._connection_error = None
+                self._authentication_pending = False
+                self._reconnect_cooldown_until_monotonic = 0.0
                 self._refresh_mouth_parameter_plan()
                 self._hotkey_catalog = _list_vts_hotkeys(
                     vts=self._vts,
@@ -617,8 +664,11 @@ class VTubeStudioDriver:
                     action="connect",
                 )
             except ImportError as e:
+                failed_vts = self._vts
+                self._vts = None
                 self._state = VtsState.ERROR
                 self._connection_error = str(e)
+                _close_vts_connection(failed_vts)
                 logger.error("pyvts not installed: %s", e)
                 return VtsDriverResult(
                     success=False,
@@ -627,8 +677,17 @@ class VTubeStudioDriver:
                     action="connect",
                 )
             except Exception as e:
+                failed_vts = self._vts
+                self._vts = None
                 self._state = VtsState.ERROR
                 self._connection_error = str(e)
+                self._authentication_pending = _is_vts_authentication_pending_error(e)
+                if self._authentication_pending:
+                    self._reconnect_cooldown_until_monotonic = max(
+                        self._reconnect_cooldown_until_monotonic,
+                        time.monotonic() + max(30.0, self._config.reconnect.max_delay_s),
+                    )
+                _close_vts_connection(failed_vts)
                 logger.error("VTS connection failed: %s", e)
                 return VtsDriverResult(
                     success=False,
@@ -641,17 +700,21 @@ class VTubeStudioDriver:
         """Disconnect from VTube Studio."""
         with self._lock:
             self._shutdown_event.set()
+            vts = self._vts
             self._vts = None
             self._state = VtsState.DISCONNECTED
             self._talking = False
             self._current_expression = None
-            logger.info("VTS disconnected")
-            return VtsDriverResult(
-                success=True,
-                reason_code=None,
-                detail="VTS disconnected",
-                action="disconnect",
-            )
+            self._authentication_pending = False
+            self._reconnect_cooldown_until_monotonic = 0.0
+        _close_vts_connection(vts)
+        logger.info("VTS disconnected")
+        return VtsDriverResult(
+            success=True,
+            reason_code=None,
+            detail="VTS disconnected",
+            action="disconnect",
+        )
 
     def talk_start(self) -> VtsDriverResult:
         """Signal talk gate start (open mouth parameter)."""
@@ -746,9 +809,11 @@ class VTubeStudioDriver:
         self._connection_error = str(reason or "").strip() or None
         logger.warning("VTS runtime reconnect requested: %s", reason)
         with self._lock:
+            stale_vts = self._vts
             self._vts = None
             self._state = VtsState.DISCONNECTED
             self._talking = False
+        _close_vts_connection(stale_vts)
         self._shutdown_event.clear()
         result = self.connect()
         event = {
@@ -1857,6 +1922,8 @@ class VTubeStudioDriver:
         rc = self._config.reconnect
         delay = rc.base_delay_s
         self._reconnect_attempts = 0
+        attempts_made = 0
+        authentication_pending = False
 
         # tate  trigger_reconnect ?lock  RECONNECTING
         # ?
@@ -1871,6 +1938,7 @@ class VTubeStudioDriver:
                 return
 
             self._reconnect_attempts = attempt
+            attempts_made = attempt
             logger.info(
                 "VTS reconnect attempt %d/%d (delay=%.1fs)",
                 attempt, rc.max_attempts, delay,
@@ -1895,6 +1963,12 @@ class VTubeStudioDriver:
                     )
                     return
                 else:
+                    if self._authentication_pending:
+                        authentication_pending = True
+                        logger.warning(
+                            "VTS reconnect paused pending device-side authentication approval"
+                        )
+                        break
                     # connect ?state  RECONNECTING
                     with self._lock:
                         if self._state != VtsState.SHUTDOWN:
@@ -1917,19 +1991,30 @@ class VTubeStudioDriver:
         self._total_reconnect_failures += 1
         with self._lock:
             self._state = VtsState.DISCONNECTED
+            self._reconnect_cooldown_until_monotonic = max(
+                self._reconnect_cooldown_until_monotonic,
+                time.monotonic() + max(30.0, rc.max_delay_s),
+            )
 
+        failure_detail = (
+            "device-side VTS authentication approval pending"
+            if authentication_pending
+            else f"all {rc.max_attempts} reconnect attempts exhausted"
+        )
         event = {
             "event": VTS_RECONNECT_EXHAUSTED,
-            "attempts": rc.max_attempts,
+            "attempts": attempts_made,
             "ts_ms": now_ms(),
-            "detail": f"all {rc.max_attempts} reconnect attempts exhausted",
+            "detail": failure_detail,
         }
         self._reconnect_events.append(event)
         logger.error(
-            "VTS reconnect exhausted after %d attempts", rc.max_attempts,
+            "VTS reconnect stopped after %d attempts: %s",
+            attempts_made,
+            failure_detail,
         )
 
-    def trigger_reconnect(self) -> VtsDriverResult:
+    def trigger_reconnect(self, *, force: bool = False) -> VtsDriverResult:
         """ WebSocket ?
         ?API ?         no-op?        """
         rc = self._config.reconnect
@@ -1942,11 +2027,38 @@ class VTubeStudioDriver:
             )
 
         with self._lock:
-            if self._state == VtsState.RECONNECTING:
+            reconnect_thread = self._reconnect_thread
+            if reconnect_thread is not None and reconnect_thread.is_alive():
+                self._state = VtsState.RECONNECTING
                 return VtsDriverResult(
                     success=True,
                     reason_code=None,
                     detail="reconnect already in progress",
+                    action="trigger_reconnect",
+                )
+            if self._authentication_pending and not force:
+                return VtsDriverResult(
+                    success=True,
+                    reason_code=None,
+                    detail=(
+                        "authentication approval pending; automatic reconnect paused"
+                    ),
+                    action="trigger_reconnect",
+                )
+            if force:
+                self._authentication_pending = False
+                self._reconnect_cooldown_until_monotonic = 0.0
+            cooldown_remaining = (
+                self._reconnect_cooldown_until_monotonic - time.monotonic()
+            )
+            if cooldown_remaining > 0.0:
+                return VtsDriverResult(
+                    success=True,
+                    reason_code=None,
+                    detail=(
+                        "reconnect cooldown active; "
+                        f"retry_after_s={cooldown_remaining:.1f}"
+                    ),
                     action="trigger_reconnect",
                 )
             if self._state == VtsState.SHUTDOWN:
@@ -2047,6 +2159,18 @@ class VTubeStudioDriver:
                 "total_reconnect_failures": self._total_reconnect_failures,
                 "reconnect_attempts": self._reconnect_attempts,
                 "reconnecting": self._state == VtsState.RECONNECTING,
+                "thread_alive": bool(
+                    self._reconnect_thread is not None
+                    and self._reconnect_thread.is_alive()
+                ),
+                "cooldown_remaining_s": round(
+                    max(
+                        0.0,
+                        self._reconnect_cooldown_until_monotonic - time.monotonic(),
+                    ),
+                    3,
+                ),
+                "authentication_pending": self._authentication_pending,
                 "reconnect_events_count": len(self._reconnect_events),
             },
         }
@@ -2150,6 +2274,49 @@ def _create_vts_connection(config: VtsConfig) -> Any:
         },
     )
     return vts
+
+
+def _is_vts_authentication_pending_error(error: Any) -> bool:
+    text = str(error or "").strip().lower()
+    return bool(
+        "api error 51" in text
+        or "authentication is currently ongoing" in text
+        or "authentication request window is open" in text
+    )
+
+
+def _close_vts_connection(vts: Any, *, timeout_s: float = 2.0) -> None:
+    """Best-effort close for failed or intentionally stopped pyvts sessions.
+
+    A rejected authentication still leaves a live WebSocket in pyvts.  Losing
+    the instance without closing it leaks one Windows select handle per retry
+    and can eventually stall the entire Edge RPC process.
+    """
+
+    if vts is None:
+        return
+
+    async def _close() -> None:
+        for name in ("close", "disconnect"):
+            closer = getattr(vts, name, None)
+            if not callable(closer):
+                continue
+            result = closer()
+            if inspect.isawaitable(result):
+                await asyncio.wait_for(result, timeout=max(0.1, timeout_s))
+            return
+
+        websocket = getattr(vts, "websocket", None) or getattr(vts, "ws", None)
+        closer = getattr(websocket, "close", None)
+        if callable(closer):
+            result = closer()
+            if inspect.isawaitable(result):
+                await asyncio.wait_for(result, timeout=max(0.1, timeout_s))
+
+    try:
+        _run_in_vts_loop(_close(), timeout_s=max(0.2, timeout_s + 0.5))
+    except Exception as exc:
+        logger.debug("VTS connection close failed during cleanup: %s", exc)
 
 
 def _authenticate_vts(
@@ -2476,14 +2643,35 @@ def _run_in_vts_loop(coro: Any, *, timeout_s: float) -> Any:
 def _ensure_vts_io_loop() -> asyncio.AbstractEventLoop:
     global _VTS_IO_LOOP, _VTS_IO_THREAD
     with _VTS_IO_LOCK:
-        if _VTS_IO_LOOP is not None and not _VTS_IO_LOOP.is_closed():
+        if (
+            _VTS_IO_LOOP is not None
+            and not _VTS_IO_LOOP.is_closed()
+            and _VTS_IO_THREAD is not None
+            and _VTS_IO_THREAD.is_alive()
+        ):
             return _VTS_IO_LOOP
+
+        if _VTS_IO_LOOP is not None and not _VTS_IO_LOOP.is_closed():
+            try:
+                _VTS_IO_LOOP.close()
+            except Exception:
+                pass
 
         loop = asyncio.new_event_loop()
 
         def _runner() -> None:
             asyncio.set_event_loop(loop)
-            loop.run_forever()
+            try:
+                loop.run_forever()
+            except Exception:
+                logger.exception("VTS IO loop terminated unexpectedly")
+            finally:
+                for task in asyncio.all_tasks(loop):
+                    task.cancel()
+                try:
+                    loop.close()
+                except Exception:
+                    pass
 
         thread = threading.Thread(
             target=_runner,

@@ -425,6 +425,13 @@ def test_parallel_failure_budget_and_retry_settle_once_after_process_restart(
     assert terminal["terminal_count"] == 0
     assert terminal["graph"] == recovered["graph"]
     assert terminal["terminal_outbox"] == recovered["terminal_outbox"]
+    inventory = DurableTaskStore(
+        db_path,
+        clock=lambda: NOW,
+    ).inventory_terminal_reconciliation_cases(limit=10_000)
+    assert inventory["discovered_count"] == 0
+    assert inventory["inserted_count"] == 0
+    assert not inventory["cases"]
 
 
 def test_parallel_review_blocks_then_denies_without_worker_replay_after_restart(

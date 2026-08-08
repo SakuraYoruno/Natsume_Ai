@@ -77,6 +77,8 @@ from host_brain.app.surface_main_chain_support import (
     _native_stream_failure_reason,
     _record_surface_memory_guard_packet,
     _sse,
+    _surface_active_knowledge_prompt_evidence,
+    _surface_expression_prompt_evidence,
     _surface_failure_fallback_text,
     _surface_main_chain_response_format,
     _surface_model_deadline_ms,
@@ -111,12 +113,49 @@ async def run_surface_main_chain_for_surface_reply_input(
         trace_stage_meta=trace_stage_meta,
     )
     compiled_request = compile_surface_main_chain_input(surface_input).request
+    affective_turn_plan = affective_turn_plan_from_trace(trace_stage_meta)
+    canonical_companion_act = (
+        str(
+            _safe_mapping(affective_turn_plan.get("companion_act")).get("kind")
+            or ""
+        )
+        .strip()
+        .upper()
+    )
+    canonical_repair_context = (
+        canonical_companion_act == "REPAIR"
+    )
+    utterance_frame = _safe_mapping(affective_turn_plan.get("utterance_frame"))
+    canonical_contained_hurt_repair_context = bool(
+        canonical_repair_context
+        and (
+            str(utterance_frame.get("self_stance") or "").upper()
+            == "OWN_REPAIR_WITH_CONTAINED_HURT"
+            or str(utterance_frame.get("response_move") or "").upper()
+            == "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT"
+        )
+    )
+    canonical_mixed_context = canonical_companion_act == "HOLD_COMPLEXITY"
+    canonical_give_space_context = canonical_companion_act in {
+        "GIVE_SPACE",
+        "SILENCE",
+    }
+    canonical_autonomy_context = canonical_companion_act == "RESPECT_AUTONOMY"
+    canonical_ambiguous_context = bool(
+        canonical_companion_act == "COMFORT"
+        and str(getattr(compiled_request.control, "task_mode", "") or "")
+        .strip()
+        .lower()
+        == "ambiguous_affect"
+    )
+    canonical_jealousy_context = canonical_companion_act == "CONTAINED_JEALOUSY"
     _record_surface_memory_guard_packet(
         agent_input=agent_input,
         surface_input=surface_input,
         trace_stage_meta=trace_stage_meta,
     )
     affective_candidate_count = _buffered_affective_candidate_count(trace_stage_meta)
+    affective_candidate_degraded = False
 
     async def _generate(messages: list[dict[str, str]]) -> str:
         from host_brain.model_runtime.contracts import (  # noqa: PLC0415
@@ -137,25 +176,84 @@ async def run_surface_main_chain_for_surface_reply_input(
         )
 
         def _retry_evaluator(response: Any, attempt: Any) -> Any:
+            nonlocal affective_candidate_degraded
             if affective_candidate_count is not None:
+                evaluation_trace: dict[str, Any] = {}
+                allow_single_degradation = int(
+                    getattr(attempt, "attempt_index", 1) or 1
+                ) >= 2
                 try:
                     _select_buffered_affective_candidate(
                         raw_output=str(response.content or ""),
                         compiled_request=compiled_request,
                         expected_candidate_count=affective_candidate_count,
+                        trace_stage_meta=evaluation_trace,
+                        allow_single_degradation=allow_single_degradation,
                     )
                 except RuntimeError as exc:
+                    retry_reason = str(exc).split(":", 1)[0]
                     repaired_messages = _buffered_affective_candidate_messages(
                         attempt.prompt.messages,
                         candidate_count=affective_candidate_count,
+                        retry_reason=retry_reason,
+                        canonical_repair_context=canonical_repair_context,
+                        canonical_contained_hurt_repair_context=(
+                            canonical_contained_hurt_repair_context
+                        ),
+                        canonical_mixed_context=canonical_mixed_context,
+                        canonical_give_space_context=canonical_give_space_context,
+                        canonical_autonomy_context=canonical_autonomy_context,
+                        canonical_ambiguous_context=canonical_ambiguous_context,
+                        canonical_jealousy_context=canonical_jealousy_context,
                     )
                     return RetryDirective(
                         retry=True,
-                        reason=str(exc).split(":", 1)[0],
+                        reason=retry_reason,
                         rendered_prompt=attempt.prompt.with_messages(repaired_messages),
                         reuse_target=True,
                         metadata={
                             "expected_candidate_count": affective_candidate_count,
+                        },
+                    )
+                selection = _safe_mapping(
+                    evaluation_trace.get("affective_candidate_selection")
+                )
+                affective_candidate_degraded = selection.get(
+                    "selection_status"
+                ) in {
+                    "DEGRADED_SINGLE_AFTER_RETRY",
+                    "DEGRADED_LOCAL_REPAIR_AFTER_RETRY",
+                    "DEGRADED_LOW_QUALITY_AFTER_RETRY",
+                }
+                if (
+                    not bool(selection.get("selected_passed"))
+                    and int(getattr(attempt, "attempt_index", 1) or 1) < 2
+                ):
+                    retry_reason = "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+                    repaired_messages = _buffered_affective_candidate_messages(
+                        attempt.prompt.messages,
+                        candidate_count=affective_candidate_count,
+                        retry_reason=retry_reason,
+                        canonical_repair_context=canonical_repair_context,
+                        canonical_contained_hurt_repair_context=(
+                            canonical_contained_hurt_repair_context
+                        ),
+                        canonical_mixed_context=canonical_mixed_context,
+                        canonical_give_space_context=canonical_give_space_context,
+                        canonical_autonomy_context=canonical_autonomy_context,
+                        canonical_ambiguous_context=canonical_ambiguous_context,
+                        canonical_jealousy_context=canonical_jealousy_context,
+                    )
+                    return RetryDirective(
+                        retry=True,
+                        reason=retry_reason,
+                        rendered_prompt=attempt.prompt.with_messages(repaired_messages),
+                        reuse_target=True,
+                        metadata={
+                            "expected_candidate_count": affective_candidate_count,
+                            "selected_reason_codes": list(
+                                selection.get("selected_reason_codes") or []
+                            )[:16],
                         },
                     )
                 return RetryDirective.accept()
@@ -188,25 +286,64 @@ async def run_surface_main_chain_for_surface_reply_input(
         model_deadline_ms = _surface_model_deadline_ms(governed_model_budget)
         if governed_model_budget is not None and model_deadline_ms <= 0:
             raise RuntimeError("MODEL_BUDGET_DEADLINE_EXHAUSTED")
+        model_scene_type, model_cognitive_tier, model_route_lane = (
+            _surface_model_request_profile(trace_stage_meta)
+        )
+        if isinstance(trace_stage_meta, dict):
+            trace_stage_meta["surface_model_route"] = {
+                "scene_type": model_scene_type,
+                "cognitive_tier": model_cognitive_tier,
+                "route_lane": model_route_lane,
+            }
+        rendered_messages = _buffered_affective_candidate_messages(
+            (
+                build_native_stream_surface_messages(compiled_request)
+                if affective_candidate_count is not None
+                else messages
+            ),
+            candidate_count=affective_candidate_count,
+            canonical_repair_context=canonical_repair_context,
+            canonical_contained_hurt_repair_context=(
+                canonical_contained_hurt_repair_context
+            ),
+            canonical_mixed_context=canonical_mixed_context,
+            canonical_give_space_context=canonical_give_space_context,
+            canonical_autonomy_context=canonical_autonomy_context,
+            canonical_ambiguous_context=canonical_ambiguous_context,
+            canonical_jealousy_context=canonical_jealousy_context,
+        )
+        expression_prompt_evidence = _surface_expression_prompt_evidence(
+            messages=rendered_messages,
+            style_anchors=tuple(
+                getattr(compiled_request.control, "style_anchor", ()) or ()
+            ),
+        )
+        active_knowledge_prompt_evidence = (
+            _surface_active_knowledge_prompt_evidence(
+                messages=rendered_messages,
+                memory_packet=surface_input.memory_packet,
+            )
+        )
         result = await ports.model_attempt_service().complete(
             ModelAttemptRequest(
                 request_id=request_id or "surface-main-chain",
-                scene_type="CHAT_SURFACE",
-                cognitive_tier="A",
+                scene_type=model_scene_type,
+                cognitive_tier=model_cognitive_tier,
                 prompt=PromptRef(
                     prompt_id,
-                    {
-                        "messages": _buffered_affective_candidate_messages(
-                            messages,
-                            candidate_count=affective_candidate_count,
-                        )
-                    },
+                    {"messages": rendered_messages},
                 ),
                 deadline_ms=model_deadline_ms,
                 foreground=True,
                 retry_evaluator=_retry_evaluator,
+                previsibility_transport_retries=(
+                    1 if model_route_lane == "realtime_companion" else 0
+                ),
                 metadata={
                     "chain": "surface_main",
+                    "route_lane": model_route_lane,
+                    **expression_prompt_evidence,
+                    **active_knowledge_prompt_evidence,
                     **(
                         {"model_node_id": governed_model_budget.node_id}
                         if governed_model_budget is not None
@@ -239,6 +376,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                 compiled_request=compiled_request,
                 expected_candidate_count=affective_candidate_count,
                 trace_stage_meta=trace_stage_meta,
+                allow_single_degradation=affective_candidate_degraded,
             )
         return content
 
@@ -483,7 +621,7 @@ async def surface_main_chain_sse_generator(
                     "done": True,
                     "decision": "REJECT",
                     "reason_code": reason_code,
-                    "narrative": "受治理的模型预算未满足，当前节点已停止。",
+                    "narrative": "模型调用未满足当前节点约束，当前节点已停止。",
                     "request_id": request_id,
                     "audit_refs": {
                         "request_id": request_id,

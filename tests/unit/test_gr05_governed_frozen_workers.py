@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Any
 
 import pytest
@@ -238,6 +240,60 @@ async def test_chat_worker_uses_frozen_binding_and_stages_projection_before_comm
     copied_budget = dict(executor.inputs[0].budget)
     copied_budget["remaining"]["token_count"] = 999
     assert executor.inputs[0].budget["remaining"]["token_count"] == 120
+
+
+@pytest.mark.asyncio
+async def test_projection_lock_wait_does_not_block_other_interactive_coroutines() -> None:
+    command, order, context = _contracts()
+    entered = threading.Event()
+    release = threading.Event()
+
+    class _BlockingProjectionStore(_ProjectionStore):
+        def stage(self, *, projection_id: str, projection):  # noqa: ANN001
+            entered.set()
+            if not release.wait(timeout=2):
+                raise AssertionError("projection writer was not released")
+            return super().stage(
+                projection_id=projection_id,
+                projection=projection,
+            )
+
+    worker = GovernedFrozenNodeWorker(
+        route_kind="chat",
+        executor=_Executor(
+            {
+                "phase": "COMMIT",
+                "done": True,
+                "decision": "APPROVE",
+                "narrative": "projection lock wait",
+                "route_type": "chat",
+                "target_id": "surface_reply",
+                "audit_refs": {},
+            }
+        ),
+        node_grants=_GrantVerifier(),
+        projections=_BlockingProjectionStore(),
+    )
+
+    consume = asyncio.create_task(
+        anext(
+            worker.execute_stream(
+                command=command,
+                work_order=order,
+                execution_context=context,
+            )
+        )
+    )
+    assert await asyncio.to_thread(entered.wait, 1)
+
+    # A synchronous SQLite busy wait here used to freeze the ASGI event loop.
+    loop_progress = asyncio.Event()
+    asyncio.get_running_loop().call_soon(loop_progress.set)
+    await asyncio.wait_for(loop_progress.wait(), timeout=0.1)
+
+    release.set()
+    terminal = await asyncio.wait_for(consume, timeout=1)
+    assert terminal["narrative"] == "projection lock wait"
 
 
 @pytest.mark.asyncio

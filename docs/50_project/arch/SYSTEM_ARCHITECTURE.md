@@ -69,6 +69,8 @@ Ingress → observation/fusion → appraisal/fold → AffectiveTurnPlan
 
 该链只保留幂等交付、关系连续性和必要的错误证据。本地／HTTP 普通闲聊不创建复杂 TaskGraph；来自 Gateway 的聊天因为需要产生可恢复的外部回信，会编译为单节点受管图，由 Acceptance 生成唯一 delivery intent。它不会把整段日常对话升级成多节点任务规划。
 
+模型路由同样按体验分层：普通 Gateway 陪伴使用 `CHAT_SURFACE_REALTIME`／Tier B，并由服务端为支持该能力的 DeepSeek transport 显式关闭 thinking；Plan、Research 和深路径候选不继承该设置。`thinking_mode` 只存在于冻结的 route metadata，在 provider adapter 边界转换为供应商字段，其他 provider 会删除该提示而不是收到未知参数。
+
 ### 受管执行主链
 
 ```text
@@ -90,7 +92,7 @@ HostCommand → immutable TaskGraph → node attempt
 
 ## 7. 安全与隐私
 
-原始音视频默认只在 Edge 内存中处理；Host 保存脱敏观察摘要。外部 effect 需要明确 grant 与 Preview。用户可关闭观察、主动陪伴与学习。密钥只运行时注入，Monitor 和日志不得暴露用户正文或模型内部推理。
+原始音视频与分块 ASR 默认只在 Edge／Host 短期内存中处理；Host 只保存脱敏观察摘要和必要终态。外部 effect 需要明确 grant 与 Preview。用户可关闭观察、主动陪伴与学习。密钥只运行时注入，Monitor 和日志不得暴露用户正文或模型内部推理。
 
 ## 8. 当前状态
 
@@ -115,3 +117,15 @@ flowchart LR
 ```
 
 `worker_dispatch` 只把 `gateway_delivery_authority=acceptance_effect_outbox` 与 `gateway_delivery_state=OUTBOX_COMMITTED` 两个无正文枚举写入完成事件。OBS 用它们判断当前请求是否已完成 Host→Gateway 的可恢复提交；平台物理送达仍由独立 terminal/ACK 证据负责。Life Body 则直接从 canonical runtime snapshot 的 `hard_state` 派生当前情绪，旧 `emotion_context` 仅作历史兼容读取。
+
+普通陪伴文字回复属于已经通过 Task Verification／Acceptance 的低风险终态投影。dispatcher 从持久 effect row 与当前 claim fence 构造进程内 typed `AcceptanceEffectExecutionProof`，Gateway transport 只允许 proof 中的 effect id、请求、目标和正文做固定的 text-outbox 转换。它不再对同一回复追加第二次 Scene／Guardian 策略判断，从而避免心跳或场景 revision 更新把合法回复误判为 `ACTION_PREVIEW_DRIFT`。该简化只适用于 `surface.reply_delivery`；Skill、Delegate 的实际工具动作、Operator、Scheduler、Edge embodiment 与系统状态变更仍保留原 ActionPreview／Review 边界。
+
+Scene 解析同样以已分类 route 为先：显式 `route=chat` 始终是 Chat task kind，文本中出现“发布成功”或“部署结束”不会反向制造维护权限与 Review；只有可执行 route 才使用 research、debug、refactor、release 等关键词补全 task kind。这保证日常聊天不会因为谈论工作而进入工程控制流。
+
+关系修复也区分“七海被直接冒犯”和“用户在评价七海刚才的回复”。前者在没有待结算回复时形成克制的 `SET_BOUNDARY`；后者先关联上一条 accepted response，写成 `MISUNDERSTOOD` aftereffect。若当前反馈同时包含直接冒犯，Fusion 不再只保留责任而抹掉七海：它生成 `repair_under_directed_disrespect`，在同一 episode 中保留 `HURT + CARE + CAUTION`，Planner 仍执行 `REPAIR`，同时让文本、Voice 和 Avatar 表达克制受伤。明确空间优先，任何分支都不能用受伤或退出逼用户反过来安抚她。
+
+这一情感决定在 Surface 端不是软提示。首轮与唯一重试都从 typed frame 选择 composite 策略；候选若只有流程化道歉、没有任何克制的七海自我反应，会在发送前以 `RELATIONAL_REPAIR_CONTAINED_HURT_MISSING` 阻断。评分校准只承认有界第一人称难受，不放行归责、威胁、赌气退出或索取安抚。
+
+Surface 关系距离评分使用语义标记而不是裸单字包含：`抱歉／抱怨` 不属于身体亲密，`抱一下／抱你` 才进入亲密距离判断。这样修复回合可以自然道歉，不会为了通过分数被迫避开正常中文；安全候选仍最多使用既有的一次模型修复，不增加普通对话调用次数。
+
+`ReplyControlPacket.must_include` 仍是字面约束，不能承载“不要假装已经和好”这类生成指导；关系系统把后者作为只读 facts 交给 Surface。关系修复的 scene grounding 由 canonical guidance 与第一人称具体承担共同确定，不以一句通用“我在”冒充修复，也不靠降低全局质量阈值过关。

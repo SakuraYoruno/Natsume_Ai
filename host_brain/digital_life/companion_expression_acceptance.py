@@ -14,6 +14,7 @@ import json
 from typing import Any
 
 from host_brain.digital_life.affective_expression_delivery import (
+    bounded_expression_segments,
     build_expression_delivery_controls,
     build_sentence_expression_delivery,
     parse_expression_delivery_intent,
@@ -340,15 +341,84 @@ def _rebuild_frozen_expression_protocol(
         payload.get("expression_delivery_suppressed_reason") or ""
     ).strip().upper()
     if suppression_reason:
+        raw_suppressed_channels = payload.get(
+            "expression_delivery_suppressed_channels"
+        )
+        suppressed_channels = ()
+        if raw_suppressed_channels is not None:
+            if not isinstance(raw_suppressed_channels, Sequence) or isinstance(
+                raw_suppressed_channels, (str, bytes, bytearray)
+            ):
+                raise CompanionExpressionEffectError(
+                    "AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT"
+                )
+            suppressed_channels = tuple(
+                str(item or "").strip().upper()
+                for item in raw_suppressed_channels
+            )
         if (
             suppression_reason != "JAPANESE_SPEECH_TEXT_UNAVAILABLE"
-            or raw_intents
-            or raw_controls
-            or raw_receipts
             or str(payload.get("tts_text_ja") or "").strip()
         ):
             raise CompanionExpressionEffectError("AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT")
-        return (), (), ()
+        if not suppressed_channels:
+            if raw_intents or raw_controls or raw_receipts:
+                raise CompanionExpressionEffectError(
+                    "AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT"
+                )
+            return (), (), ()
+        if suppressed_channels != ("VOICE",):
+            raise CompanionExpressionEffectError(
+                "AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT"
+            )
+        try:
+            parsed_intents = tuple(
+                parse_expression_delivery_intent(item) for item in raw_intents
+            )
+            parsed_controls = tuple(
+                parse_expression_delivery_intent(item) for item in raw_controls
+            )
+            parsed_receipts = tuple(
+                parse_expression_delivery_receipt(item) for item in raw_receipts
+            )
+            first_segment = bounded_expression_segments(narrative)[0]
+            pair, pair_receipts = build_sentence_expression_delivery(
+                affective_turn_plan=affective_turn_plan,
+                sentence=first_segment,
+                sentence_index=0,
+                created_at_ms=foreground_created_at_ms,
+            )
+            controls, control_receipts = build_expression_delivery_controls(
+                affective_turn_plan=affective_turn_plan,
+                action="RELEASE",
+                sent_sentence_count=1,
+                created_at_ms=foreground_created_at_ms,
+            )
+        except (IndexError, ValueError) as exc:
+            raise CompanionExpressionEffectError(
+                "AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT"
+            ) from exc
+        expected_intents = tuple(item for item in pair if item.channel == "AVATAR")
+        expected_controls = tuple(
+            item for item in controls if item.channel == "AVATAR"
+        )
+        expected_receipts = tuple(
+            item
+            for item in (*pair_receipts, *control_receipts)
+            if item.channel == "AVATAR"
+        )
+        if (
+            [item.as_dict() for item in parsed_intents]
+            != [item.as_dict() for item in expected_intents]
+            or [item.as_dict() for item in parsed_controls]
+            != [item.as_dict() for item in expected_controls]
+            or [item.as_dict() for item in parsed_receipts]
+            != [item.as_dict() for item in expected_receipts]
+        ):
+            raise CompanionExpressionEffectError(
+                "AFFECTIVE_EXPRESSION_PROTOCOL_DRIFT"
+            )
+        return expected_intents, expected_controls, expected_receipts
     expected_tts_text_ja = str(payload.get("tts_text_ja") or "").strip()
     try:
         parsed_intents = tuple(

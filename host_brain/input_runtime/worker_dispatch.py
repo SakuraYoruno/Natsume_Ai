@@ -127,6 +127,7 @@ async def _dispatch_to_graph_worker(
 
     del run_in_thread
 
+    stage_started = time.perf_counter()
     dispatch_ts = int(time.time() * 1000)
     source_upper = str(source or "").strip().upper()
     progress_push_stop_event: asyncio.Event | None = None
@@ -156,6 +157,7 @@ async def _dispatch_to_graph_worker(
     except Exception as intent_exc:
         _logger.warning("[%s] thalamus intent draft build degraded before input dispatch: %s", request_id, intent_exc)
         thalamus_intent_draft = None
+    intent_ready_at = time.perf_counter()
 
     if source_upper == "GATEWAY":
         should_push, push_reason = _should_start_gateway_progress_push(
@@ -231,6 +233,7 @@ async def _dispatch_to_graph_worker(
             ts_ms=int(time.time() * 1000),
         )
         raise RuntimeError("gateway_multimodal_observation_incomplete")
+    multimodal_ready_at = time.perf_counter()
     try:
         pipeline_result = await _run_cortex_orchestrator_pipeline(
             request_id=request_id,
@@ -246,6 +249,7 @@ async def _dispatch_to_graph_worker(
             command_authority=dict(command_authority or {}),
             ports=ports,
         )
+        pipeline_ready_at = time.perf_counter()
         deviation_meta: dict[str, Any] | None = None
         if source_upper == "GATEWAY":
             pipeline_result, deviation_meta = await _maybe_realign_gateway_pipeline(
@@ -608,12 +612,17 @@ async def _dispatch_to_graph_worker(
             ts_ms=complete_ts,
         )
         _logger.info(
-            "input_routes: dispatch completed request_id=%s source=%s decision=%s latency_ms=%d mode=%s",
+            "input_routes: dispatch completed request_id=%s source=%s decision=%s latency_ms=%d mode=%s "
+            "intent_ms=%d multimodal_ms=%d cortex_ms=%d finalize_ms=%d",
             request_id,
             source,
             decision,
             latency_ms,
             dispatch_mode,
+            int((intent_ready_at - stage_started) * 1000),
+            int((multimodal_ready_at - intent_ready_at) * 1000),
+            int((pipeline_ready_at - multimodal_ready_at) * 1000),
+            int((time.perf_counter() - pipeline_ready_at) * 1000),
         )
         return pipeline_result
     except Exception as exc:

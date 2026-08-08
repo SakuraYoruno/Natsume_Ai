@@ -47,8 +47,21 @@ def _cache_enabled() -> bool:
     return load_lightnovel_review_settings().cache_enabled
 
 
-def should_deep_review_lightnovel_selection(*, user_message: str, packet: Mapping[str, Any]) -> bool:
+def may_deep_review_lightnovel_selection(*, user_message: str) -> bool:
+    """Cheap necessary-condition check before loading recommendation context.
+
+    A full decision still needs the recalled packet, but an unrelated chat turn
+    cannot become a light-novel selection review merely because a previous
+    recommendation exists in the preference ledger.
+    """
     if not _enabled():
+        return False
+    text = _clean_text(user_message)
+    return bool(_CHOICE_QUERY_RE.search(text) or _DETAIL_ONLY_QUERY_RE.search(text))
+
+
+def should_deep_review_lightnovel_selection(*, user_message: str, packet: Mapping[str, Any]) -> bool:
+    if not may_deep_review_lightnovel_selection(user_message=user_message):
         return False
     text = _clean_text(user_message)
     review_items = _trace_review_items(packet)
@@ -1687,6 +1700,7 @@ def _spoken_memory_reason_bits(observations: Sequence[str]) -> list[str]:
 
 
 __all__ = [
+    "may_deep_review_lightnovel_selection",
     "review_lightnovel_selection_from_memory_packet",
     "should_deep_review_lightnovel_selection",
 ]

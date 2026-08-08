@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import sqlite3
 import time
+import zlib
 from collections.abc import Iterable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -41,6 +44,10 @@ _BOUND_LEADER_LEASE: ContextVar[ProjectionLeaderLease | None] = ContextVar(
     default=None,
 )
 _UNCONDITIONAL_CURRENT = object()
+_JOURNAL_PAYLOAD_SCHEMA = "Natsume.operator.query_projection.journal_payload.zlib.v1"
+_JOURNAL_COMPRESSION_MIN_BYTES = 8 * 1024
+_JOURNAL_MAX_UNCOMPRESSED_BYTES = 16 * 1024 * 1024
+_JOURNAL_MAX_ENCODED_BYTES = ((_JOURNAL_MAX_UNCOMPRESSED_BYTES + 1024) * 4 // 3) + 4
 
 
 class QueryProjectionError(RuntimeError):
@@ -56,6 +63,118 @@ def canonical_json(value: Any) -> str:
 
 def digest_json(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _encode_journal_payload(
+    value: Mapping[str, Any],
+    *,
+    source_digest: str,
+) -> str:
+    """Compact large derived snapshots without changing their public digest.
+
+    The materialized document remains ordinary JSON for low-latency Monitor
+    reads.  Only the immutable replay journal uses this envelope, represented
+    as a JSON array so it cannot collide with a valid object payload.
+    """
+
+    raw = canonical_json(value)
+    raw_bytes = raw.encode("utf-8")
+    if (
+        len(raw_bytes) < _JOURNAL_COMPRESSION_MIN_BYTES
+        or len(raw_bytes) > _JOURNAL_MAX_UNCOMPRESSED_BYTES
+    ):
+        return raw
+    compressed = zlib.compress(raw_bytes, level=1)
+    encoded = canonical_json(
+        [
+            _JOURNAL_PAYLOAD_SCHEMA,
+            len(raw_bytes),
+            source_digest,
+            base64.b64encode(compressed).decode("ascii"),
+        ]
+    )
+    return encoded if len(encoded.encode("utf-8")) < len(raw_bytes) else raw
+
+
+def _decode_journal_payload(
+    encoded: str,
+    *,
+    expected_digest: str,
+) -> dict[str, Any]:
+    """Decode legacy object rows and bounded compressed journal envelopes."""
+
+    try:
+        stored = json.loads(encoded)
+    except json.JSONDecodeError as exc:
+        raise QueryProjectionError(
+            PROJECTION_DATA_INVALID,
+            "projection journal source_payload_json is invalid",
+        ) from exc
+
+    if isinstance(stored, dict):
+        payload = stored
+    elif (
+        isinstance(stored, list)
+        and len(stored) == 4
+        and stored[0] == _JOURNAL_PAYLOAD_SCHEMA
+    ):
+        declared_size, envelope_digest, payload_text = stored[1:]
+        if (
+            type(declared_size) is not int
+            or declared_size < 0
+            or declared_size > _JOURNAL_MAX_UNCOMPRESSED_BYTES
+            or not isinstance(envelope_digest, str)
+            or envelope_digest != expected_digest
+            or not isinstance(payload_text, str)
+            or len(payload_text) > _JOURNAL_MAX_ENCODED_BYTES
+        ):
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection journal compressed envelope is invalid",
+            )
+        try:
+            compressed = base64.b64decode(payload_text, validate=True)
+            inflater = zlib.decompressobj()
+            raw_bytes = inflater.decompress(compressed, declared_size + 1)
+            if (
+                len(raw_bytes) > declared_size
+                or inflater.unconsumed_tail
+                or not inflater.eof
+                or inflater.unused_data
+            ):
+                raise ValueError("compressed payload boundary mismatch")
+            raw_bytes += inflater.flush()
+            if len(raw_bytes) != declared_size:
+                raise ValueError("compressed payload size mismatch")
+            payload = json.loads(raw_bytes.decode("utf-8"))
+        except (
+            binascii.Error,
+            UnicodeDecodeError,
+            ValueError,
+            zlib.error,
+            json.JSONDecodeError,
+        ) as exc:
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection journal compressed payload is invalid",
+            ) from exc
+        if not isinstance(payload, dict):
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection journal payload must be an object",
+            )
+    else:
+        raise QueryProjectionError(
+            PROJECTION_DATA_INVALID,
+            "projection journal payload must be an object or supported envelope",
+        )
+
+    if digest_json(payload) != expected_digest:
+        raise QueryProjectionError(
+            PROJECTION_DATA_INVALID,
+            "projection journal payload digest mismatch",
+        )
+    return payload
 
 
 def public_projection_payload(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -79,6 +198,18 @@ def _public_degraded_detail(value: str | None) -> str | None:
     return str(sanitized)[:1000] if sanitized is not None else None
 
 
+def _state_signature(row: sqlite3.Row | None) -> tuple[int, int, int, str, int] | None:
+    if row is None:
+        return None
+    return (
+        int(row["projection_version"]),
+        int(row["projection_cursor"]),
+        int(row["source_cursor"]),
+        str(row["source_digest"]),
+        int(row["updated_ts_ms"]),
+    )
+
+
 class QueryProjectionStore:
     """Migration-first projection repository with no domain-specific branches.
 
@@ -92,13 +223,57 @@ class QueryProjectionStore:
         db_path: str | Path,
         *,
         clock: Callable[[], int] | None = None,
+        journal_checkpoint_interval_ms: int = 0,
     ) -> None:
         raw = str(db_path or "").strip()
         if not raw:
             raise ValueError("db_path is required")
         self.db_path = raw
         self._clock = clock or (lambda: int(time.time() * 1000))
+        self._journal_checkpoint_interval_ms = max(
+            0,
+            int(journal_checkpoint_interval_ms),
+        )
         self._assert_schema()
+
+    def _journal_checkpoint_required(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        current: sqlite3.Row | None,
+        operation_now: int,
+        source_cursor: int,
+        source_digest: str,
+        force: bool,
+    ) -> bool:
+        if current is None:
+            return True
+        journal = conn.execute(
+            """
+            SELECT source_cursor, source_digest, observed_ts_ms
+            FROM operator_query_projection_journal
+            WHERE cursor = ?
+            """,
+            (int(current["journal_cursor"]),),
+        ).fetchone()
+        if journal is None:
+            raise QueryProjectionError(
+                PROJECTION_DATA_INVALID,
+                "projection current references a missing journal checkpoint",
+            )
+        if (
+            int(journal["source_cursor"]) == int(source_cursor)
+            and str(journal["source_digest"]) == str(source_digest)
+        ):
+            # An identical immutable checkpoint already represents this
+            # materialized state. Avoid INSERT OR IGNORE because SQLite would
+            # still advance AUTOINCREMENT and dirty the WAL on every refresh.
+            return False
+        if force or self._journal_checkpoint_interval_ms <= 0:
+            return True
+        checkpoint_ts_ms = int(journal["observed_ts_ms"])
+        elapsed_ms = int(operation_now) - checkpoint_ts_ms
+        return elapsed_ms < 0 or elapsed_ms >= self._journal_checkpoint_interval_ms
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=10.0)
@@ -406,21 +581,10 @@ class QueryProjectionStore:
             ).fetchall()
         values: set[str] = set()
         for row in rows:
-            try:
-                payload = json.loads(str(row["source_payload_json"]))
-            except json.JSONDecodeError as exc:
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal source_payload_json is invalid",
-                ) from exc
-            if (
-                not isinstance(payload, dict)
-                or digest_json(payload) != str(row["source_digest"])
-            ):
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal payload digest mismatch",
-                )
+            payload = _decode_journal_payload(
+                str(row["source_payload_json"]),
+                expected_digest=str(row["source_digest"]),
+            )
             value = payload.get(field_name)
             if isinstance(value, str) and value.strip():
                 values.add(value.strip())
@@ -439,6 +603,7 @@ class QueryProjectionStore:
         degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
         degraded_detail: str | None = None,
         freshness_ts_ms: int | None = None,
+        force_journal_checkpoint: bool = False,
     ) -> ProjectionDocument:
         """Atomically compare the current document and commit its successor."""
 
@@ -452,6 +617,7 @@ class QueryProjectionStore:
             degraded_state=degraded_state,
             degraded_detail=degraded_detail,
             freshness_ts_ms=freshness_ts_ms,
+            force_journal_checkpoint=force_journal_checkpoint,
             _expected_current=expected_current,
         )
 
@@ -467,6 +633,7 @@ class QueryProjectionStore:
         degraded_state: ProjectionDegradedState | str = ProjectionDegradedState.HEALTHY,
         degraded_detail: str | None = None,
         freshness_ts_ms: int | None = None,
+        force_journal_checkpoint: bool = False,
         _expected_current: ProjectionDocument | None | object = _UNCONDITIONAL_CURRENT,
     ) -> ProjectionDocument:
         projection_kind = self._required(kind, "kind")
@@ -547,34 +714,46 @@ class QueryProjectionStore:
                         PROJECTION_CURSOR_CONFLICT,
                         "the current source cursor is already bound to a different digest",
                     )
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO operator_query_projection_journal(
-                    schema_version, projection_kind, document_key, source_cursor,
-                    source_digest, source_payload_json, source_ref, observed_ts_ms
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    OPERATOR_PROJECTION_SCHEMA_VERSION,
-                    projection_kind,
-                    document_key,
-                    cursor,
-                    source_hash,
-                    canonical_json(body),
-                    source_reference,
-                    operation_now,
-                ),
+            checkpoint_required = self._journal_checkpoint_required(
+                conn,
+                current=current,
+                operation_now=operation_now,
+                source_cursor=cursor,
+                source_digest=source_hash,
+                force=bool(force_journal_checkpoint),
             )
-            journal = conn.execute(
-                """
-                SELECT cursor FROM operator_query_projection_journal
-                WHERE projection_kind = ? AND document_key = ?
-                  AND source_cursor = ? AND source_digest = ?
-                """,
-                (projection_kind, document_key, cursor, source_hash),
-            ).fetchone()
-            assert journal is not None
-            journal_cursor = int(journal[0])
+            if checkpoint_required:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO operator_query_projection_journal(
+                        schema_version, projection_kind, document_key, source_cursor,
+                        source_digest, source_payload_json, source_ref, observed_ts_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        OPERATOR_PROJECTION_SCHEMA_VERSION,
+                        projection_kind,
+                        document_key,
+                        cursor,
+                        source_hash,
+                        _encode_journal_payload(body, source_digest=source_hash),
+                        source_reference,
+                        operation_now,
+                    ),
+                )
+                journal = conn.execute(
+                    """
+                    SELECT cursor FROM operator_query_projection_journal
+                    WHERE projection_kind = ? AND document_key = ?
+                      AND source_cursor = ? AND source_digest = ?
+                    """,
+                    (projection_kind, document_key, cursor, source_hash),
+                ).fetchone()
+                assert journal is not None
+                journal_cursor = int(journal[0])
+            else:
+                assert current is not None
+                journal_cursor = int(current["journal_cursor"])
             unchanged = bool(
                 current
                 and str(current["source_digest"]) == source_hash
@@ -710,6 +889,8 @@ class QueryProjectionStore:
         *,
         source_ref: str = "projection-rebuild",
         _expected_journal_cursor: int | None = None,
+        _expected_current_state: tuple[int, int, int, str, int] | None | object = _UNCONDITIONAL_CURRENT,
+        _allow_source_cursor_regression: bool = False,
     ) -> dict[str, Any]:
         projection_kind = self._required(kind, "kind")
         source_reference = self._required(source_ref, "source_ref")
@@ -755,6 +936,23 @@ class QueryProjectionStore:
                         PROJECTION_CURSOR_CONFLICT,
                         "projection journal advanced while rebuild snapshot was materialized",
                     )
+            current_state = conn.execute(
+                """
+                SELECT projection_version, projection_cursor, source_cursor,
+                       source_digest, updated_ts_ms
+                FROM operator_query_projection_state
+                WHERE projection_kind = ?
+                """,
+                (projection_kind,),
+            ).fetchone()
+            if (
+                _expected_current_state is not _UNCONDITIONAL_CURRENT
+                and _state_signature(current_state) != _expected_current_state
+            ):
+                raise QueryProjectionError(
+                    PROJECTION_CURSOR_CONFLICT,
+                    "projection current changed while rebuild snapshot was materialized",
+                )
             current_rows = {
                 str(row["document_key"]): row
                 for row in conn.execute(
@@ -767,18 +965,14 @@ class QueryProjectionStore:
                     (projection_kind,),
                 ).fetchall()
             }
-            current_state = conn.execute(
-                """
-                SELECT projection_version
-                FROM operator_query_projection_state
-                WHERE projection_kind = ?
-                """,
-                (projection_kind,),
-            ).fetchone()
             shadow: list[tuple[str, dict[str, Any], int, str, str, int, int]] = []
             for key, body, source_cursor, source_hash, payload_digest in prepared:
                 old = current_rows.get(key)
-                if old is not None and source_cursor < int(old["source_cursor"]):
+                if (
+                    old is not None
+                    and source_cursor < int(old["source_cursor"])
+                    and not _allow_source_cursor_regression
+                ):
                     raise QueryProjectionError(
                         PROJECTION_CURSOR_REGRESSION,
                         f"rebuild source cursor {source_cursor} is older than current cursor {int(old['source_cursor'])}",
@@ -796,7 +990,7 @@ class QueryProjectionStore:
                         key,
                         source_cursor,
                         source_hash,
-                        canonical_json(body),
+                        _encode_journal_payload(body, source_digest=source_hash),
                         source_reference,
                         now,
                     ),
@@ -862,7 +1056,9 @@ class QueryProjectionStore:
                     for item in sorted(shadow, key=lambda value: value[0])
                 ]
             )
-            generation_version = int(current_state[0] if current_state else 0) + 1
+            generation_version = (
+                int(current_state["projection_version"] if current_state else 0) + 1
+            )
             conn.execute(
                 """
                 INSERT INTO operator_query_projection_state(
@@ -953,6 +1149,7 @@ class QueryProjectionStore:
 
         projection_kind = self._required(kind, "kind")
         with self._connect() as conn:
+            conn.execute("BEGIN")
             rows = conn.execute(
                 """
                 WITH kind_journal AS (
@@ -975,21 +1172,23 @@ class QueryProjectionStore:
                 """,
                 (projection_kind, projection_kind),
             ).fetchall()
+            current_state = conn.execute(
+                """
+                SELECT projection_version, projection_cursor, source_cursor,
+                       source_digest, updated_ts_ms
+                FROM operator_query_projection_state
+                WHERE projection_kind = ?
+                """,
+                (projection_kind,),
+            ).fetchone()
+            expected_current_state = _state_signature(current_state)
         journal_head = int(rows[0]["rebuild_head"]) if rows else 0
         sources: list[tuple[str, Mapping[str, Any], int, str]] = []
         for row in rows:
-            try:
-                payload = json.loads(str(row["source_payload_json"]))
-            except json.JSONDecodeError as exc:
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal source_payload_json is invalid",
-                ) from exc
-            if not isinstance(payload, dict):
-                raise QueryProjectionError(
-                    PROJECTION_DATA_INVALID,
-                    "projection journal payload must be an object",
-                )
+            payload = _decode_journal_payload(
+                str(row["source_payload_json"]),
+                expected_digest=str(row["source_digest"]),
+            )
             sources.append(
                 (
                     str(row["document_key"]),
@@ -1003,6 +1202,8 @@ class QueryProjectionStore:
             sources,
             source_ref=source_ref,
             _expected_journal_cursor=journal_head,
+            _expected_current_state=expected_current_state,
+            _allow_source_cursor_regression=True,
         )
 
 

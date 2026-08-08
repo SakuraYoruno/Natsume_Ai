@@ -243,8 +243,9 @@ def _send_gateway_webhook(
 ) -> dict[str, Any]:
     ts_ms = _now_ms()
     connect_timeout_s = max(5, min(int(timeout_s), 25))
+    msg_id = f"{case.case_id}::{ts_ms}"
     payload = {
-        "msg_id": f"{case.case_id}::{ts_ms}",
+        "msg_id": msg_id,
         "sender": f"wxid_{case.case_id}",
         "from_wxid": f"wxid_{case.case_id}",
         "receiver": "wxid_natsume_live_probe",
@@ -301,6 +302,8 @@ def _send_gateway_webhook(
                 parsed_body = {"raw": raw_body}
             return {
                 "sent_ts_ms": ts_ms,
+                "msg_id": msg_id,
+                "conversation_id": conversation_id,
                 "http_status": response.status,
                 "body": parsed_body,
                 "latency_ms": int((time.time() - started_at) * 1000),
@@ -314,6 +317,8 @@ def _send_gateway_webhook(
             parsed_body = {"raw": raw_body}
         return {
             "sent_ts_ms": ts_ms,
+            "msg_id": msg_id,
+            "conversation_id": conversation_id,
             "http_status": exc.code,
             "body": parsed_body,
             "latency_ms": int((time.time() - started_at) * 1000),
@@ -322,6 +327,8 @@ def _send_gateway_webhook(
     except Exception as exc:  # pragma: no cover - live runtime branch
         return {
             "sent_ts_ms": ts_ms,
+            "msg_id": msg_id,
+            "conversation_id": conversation_id,
             "http_status": None,
             "body": None,
             "latency_ms": int((time.time() - started_at) * 1000),
@@ -971,6 +978,7 @@ def _fetch_gateway_event_by_conversation(
     *,
     conversation_id: str,
     min_ts_ms: int,
+    msg_id: str | None = None,
     event_types: tuple[str, ...] = (
         "INPUT_FAILED",
         "INPUT_ROUTE_DECIDED",
@@ -981,6 +989,7 @@ def _fetch_gateway_event_by_conversation(
 ) -> dict[str, Any] | None:
     if not conversation_id:
         return None
+    expected_msg_id = str(msg_id or "").strip()
     connection = _connect_db(db_path)
     try:
         cursor = connection.cursor()
@@ -1008,6 +1017,10 @@ def _fetch_gateway_event_by_conversation(
             if (
                 payload.get("source") == "GATEWAY"
                 and str(payload.get("conversation_id") or "").strip() == conversation_id
+                and (
+                    not expected_msg_id
+                    or str(payload.get("msg_id") or "").strip() == expected_msg_id
+                )
             ):
                 return record
         return None
@@ -1331,6 +1344,7 @@ def _run_case(
             notes=case.notes,
         )
     sent_ts_ms = int(webhook.get("sent_ts_ms") or _now_ms())
+    webhook_msg_id = str(webhook.get("msg_id") or "").strip()
     deadline = time.time() + timeout_s
     graph_row: dict[str, Any] | None = None
     request_id: str | None = None
@@ -1341,6 +1355,7 @@ def _run_case(
             db_path,
             conversation_id=conversation_id,
             min_ts_ms=sent_ts_ms,
+            msg_id=webhook_msg_id,
         )
         if gateway_event is not None:
             gateway_request_id = (

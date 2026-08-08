@@ -1,5 +1,6 @@
 """Production handlers for committed governed Acceptance Effects."""
 from __future__ import annotations
+import asyncio
 from collections.abc import Callable, Mapping
 import hashlib
 import re
@@ -291,6 +292,9 @@ class _AcceptedLifeConversationHandler:
         self._projection_dispatcher = projection_dispatcher
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return await asyncio.to_thread(self._execute, payload)
+
+    def _execute(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         request = AcceptedLifeConversationProjectionV1.from_mapping(
             _without_terminal_preview_proof(payload)
         )
@@ -392,6 +396,9 @@ class _AcceptedLifeForegroundHandler:
         )
 
     async def __call__(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return await asyncio.to_thread(self._execute, payload)
+
+    def _execute(self, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         value = _accepted_life_request(payload)
         try:
             command_receipt = _submit_accepted_life_foreground(

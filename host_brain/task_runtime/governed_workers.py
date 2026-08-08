@@ -307,7 +307,7 @@ class GovernedFrozenNodeWorker:
                 GOVERNED_NODE_COMMIT_INVALID,
                 f"frozen executor must emit exactly one terminal event, got {terminal_count}",
             )
-        yield self._stage_terminal_projection(
+        yield await self._stage_terminal_projection_without_blocking_loop(
             frozen=frozen,
             verified_grant=_projection(verified),
             preview=preview,
@@ -315,6 +315,35 @@ class GovernedFrozenNodeWorker:
             buffered_event_count=buffered_event_count,
             visible_event_count=visible_event_count,
         )
+
+    async def _stage_terminal_projection_without_blocking_loop(
+        self,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Stage a SQLite projection without freezing other interactive turns.
+
+        The writer opens its own connection and is safe to run in a worker
+        thread.  Shielding plus joining on caller cancellation keeps the
+        durable outcome known before the Task Runtime classifies the
+        interrupted operation; the SQLite write is never abandoned in an
+        unobserved background future.
+        """
+
+        stage_task = asyncio.create_task(
+            asyncio.to_thread(self._stage_terminal_projection, **kwargs),
+            name="governed-worker-projection-stage",
+        )
+        try:
+            return await asyncio.shield(stage_task)
+        except asyncio.CancelledError:
+            try:
+                await stage_task
+            except BaseException:
+                # Caller cancellation remains the lifecycle authority.  The
+                # outer operation recovery path reopens the exact projection
+                # if this durable write committed before interruption.
+                pass
+            raise
 
     def recover_sealed_checkpoint(
         self,

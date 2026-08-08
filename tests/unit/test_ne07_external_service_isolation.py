@@ -157,6 +157,12 @@ def test_host_acceptance_can_pin_the_canonical_audit_database() -> None:
         '[string]::IsNullOrWhiteSpace($AuditDbPath))' in source
     )
     assert '[string]$AuditDbPath' in source
+    assert '} elseif ($runtimeRootWasExplicit) {' in source
+    isolated_branch = source.split('} elseif ($runtimeRootWasExplicit) {', 1)[1].split(
+        '} else {', 1
+    )[0]
+    assert 'Join-Path $RuntimeRoot "audit.sqlite3"' in isolated_branch
+    assert "NATSUME_AUDIT_DB" not in isolated_branch
 
 
 def test_remote_gateway_breaks_away_and_records_the_listener_pid() -> None:

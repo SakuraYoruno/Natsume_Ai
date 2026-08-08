@@ -12,6 +12,9 @@ import secrets
 from typing import Any
 
 from host_brain.runtime.action_preview_proof import ActionPreviewExecutionProof
+from host_brain.runtime.acceptance_effect_execution import (
+    AcceptanceEffectExecutionProof,
+)
 from host_brain.agent_runtime.workspace_artifact_effect import (
     AGENT_WORKSPACE_ACTION_PREVIEW_CONTEXT_SCHEMA,
     AGENT_WORKSPACE_ARTIFACT_EFFECT_TYPE,
@@ -62,6 +65,7 @@ _LOCAL_ACCEPTANCE_PROJECTION_TYPES = frozenset(
 
 AcceptanceEffectHandler = Callable[[Mapping[str, Any]], Mapping[str, Any] | str | Awaitable[Any]]
 AcceptanceEffectRecoveryObserver = Callable[[Mapping[str, Any]], Any]
+AcceptanceEffectRecoveryWake = Callable[[], Any]
 
 
 _EFFECT_TYPE_ORDER = {
@@ -152,12 +156,23 @@ class AcceptanceEffectDispatcher:
         self._retry_base_ms = max(0, int(retry_base_ms))
         self._retry_max_ms = max(self._retry_base_ms, int(retry_max_ms))
         self._action_preview_service = action_preview_service
+        self._recovery_wake: AcceptanceEffectRecoveryWake | None = None
         # Exact-effect calls must serialize, but unrelated Scheduler,
         # Operator, and conversation effects must not share one global lock.
         # The durable claim/fence remains the cross-process authority; these
         # ref-counted locks only prevent same-process duplicate invocation.
         self._dispatch_locks_guard = asyncio.Lock()
         self._dispatch_locks: dict[str, tuple[asyncio.Lock, int]] = {}
+
+    def bind_recovery_wake(
+        self,
+        callback: AcceptanceEffectRecoveryWake | None,
+    ) -> None:
+        """Bind the one app-local recovery Runtime's non-blocking wake hook."""
+
+        if callback is not None and not callable(callback):
+            raise TypeError("recovery wake callback must be callable")
+        self._recovery_wake = callback
 
     async def dispatch_effect(self, effect_id: str) -> dict[str, Any] | None:
         # Inline dispatch and the recovery drain share one process owner.  A
@@ -352,6 +367,32 @@ class AcceptanceEffectDispatcher:
                 "Acceptance Effect preview context schema drifted",
             )
         effect_type = str(effect.get("effect_type") or "").strip()
+        if effect_type == "surface.reply_delivery":
+            # A visible text reply is the terminal projection of an already
+            # verified and accepted node.  Re-running Guardian/Scene policy at
+            # delivery time made ordinary chat depend on unrelated heartbeat
+            # revisions and could turn a valid reply into ACTION_PREVIEW_DRIFT.
+            # Keep exact durable lineage and the live claim fence, but do not
+            # create a second policy decision for this low-risk text effect.
+            self._require_local_acceptance_projection_lineage(
+                effect=effect,
+                context=context,
+            )
+            payload["_acceptance_effect_execution_proof"] = (
+                AcceptanceEffectExecutionProof(
+                    effect_id=str(effect.get("effect_id") or ""),
+                    effect_type=effect_type,
+                    graph_id=str(effect.get("graph_id") or ""),
+                    graph_revision=int(effect.get("graph_revision") or 0),
+                    node_id=str(effect.get("node_id") or ""),
+                    attempt_id=str(effect.get("attempt_id") or ""),
+                    lease_owner_id=str(effect.get("lease_owner") or ""),
+                    fencing_token=int(effect.get("fencing_token") or 0),
+                    payload_sha256=str(effect.get("payload_sha256") or ""),
+                    action_args=payload,
+                )
+            )
+            return payload, None
         if effect_type in _LOCAL_ACCEPTANCE_PROJECTION_TYPES:
             # These effects append Host-local state only after the owning node
             # has passed Verification and Acceptance.  Reissuing a terminal
@@ -545,11 +586,12 @@ class AcceptanceEffectDispatcher:
         """Commit the visible reply, leaving passive projections durable.
 
         Graphs without a Surface delivery retain the original full-chain
-        behavior.  For an interactive graph, the user turn, accepted Life
-        projection, foreground affect state, and expression intents remain
-        ahead of the reply boundary.  Explicit memory indexing and preference
-        learning stay in the same durable queue and are completed by the
-        app-local recovery Runtime after the reply is visible.
+        behavior.  Compiler-marked realtime chat commits the canonical user
+        turn and visible Surface delivery only.  Life, foreground affect,
+        expression, explicit memory and preference effects remain in the same
+        durable queue and are immediately handed to the app-local recovery
+        Runtime after the reply is visible.  Unmarked and non-chat graphs keep
+        the conservative full prefix for compatibility and control safety.
         """
 
         identity = {
@@ -566,18 +608,56 @@ class AcceptanceEffectDispatcher:
         ):
             return await self.dispatch_graph(limit=limit, **identity)
 
-        await self._dispatch_graph(
-            limit=limit,
-            stop_after_effect_type="surface.reply_delivery",
-            **identity,
-        )
+        if _is_realtime_chat_effect_bundle(rows):
+            await self._dispatch_realtime_chat_prefix(rows=rows, limit=limit)
+        else:
+            await self._dispatch_graph(
+                limit=limit,
+                stop_after_effect_type="surface.reply_delivery",
+                **identity,
+            )
         # Return the complete durable state, not merely the synchronous
         # prefix, so callers cannot report an inaccurate all-committed result.
         current = self._store.list_acceptance_effect_intents(
             **identity,
             limit=1_000,
         )
+        if _realtime_chat_reply_committed(current):
+            wake = self._recovery_wake
+            if wake is not None:
+                wake()
         return tuple(dict(row) for row in sorted(current, key=_effect_dispatch_key))
+
+    async def _dispatch_realtime_chat_prefix(
+        self,
+        *,
+        rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+        limit: int,
+    ) -> None:
+        requested_limit = min(1_000, max(1, int(limit)))
+        newly_dispatched = 0
+        by_type = {
+            str(row.get("effect_type") or ""): row
+            for row in rows
+            if str(row.get("effect_type") or "")
+            in {"conversation.user_turn", "surface.reply_delivery"}
+        }
+        for effect_type in (
+            "conversation.user_turn",
+            "surface.reply_delivery",
+        ):
+            row = by_type[effect_type]
+            status = str(row.get("status") or "")
+            if status == "COMMITTED":
+                continue
+            if status == "FAILED" or newly_dispatched >= requested_limit:
+                break
+            dispatched = await self.dispatch_effect(str(row.get("effect_id") or ""))
+            if dispatched is None:
+                break
+            newly_dispatched += 1
+            if str(dispatched.get("status") or "") != "COMMITTED":
+                break
 
     async def _dispatch_graph(
         self,
@@ -808,6 +888,7 @@ class AcceptanceEffectRuntime:
         self._recovery_failure_observed = False
         self._pending_failure_observation: dict[str, Any] | None = None
         self._stop = asyncio.Event()
+        self._wake = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._lifecycle_lock = asyncio.Lock()
 
@@ -819,6 +900,11 @@ class AcceptanceEffectRuntime:
     def active(self) -> bool:
         task = self._task
         return task is not None and not task.done()
+
+    def wake(self) -> None:
+        """Request an immediate recovery pass without spawning a loose task."""
+
+        self._wake.set()
 
     async def activate(self) -> None:
         async with self._lifecycle_lock:
@@ -850,6 +936,8 @@ class AcceptanceEffectRuntime:
                 # breach. Resolve it only after a real clean startup pass.
                 await self._record_recovery_success(force=True)
             self._stop.clear()
+            self._wake.clear()
+            self._dispatcher.bind_recovery_wake(self.wake)
             self._task = asyncio.create_task(
                 self._run(),
                 name="governed-acceptance-effect-recovery",
@@ -862,23 +950,28 @@ class AcceptanceEffectRuntime:
         async with self._lifecycle_lock:
             task = self._task
             if task is None:
+                self._dispatcher.bind_recovery_wake(None)
                 return
             self._stop.set()
+            self._wake.set()
             # Never cancel a pass which may already be executing a handler.
             await asyncio.shield(task)
             if self._task is task:
                 self._task = None
+            self._dispatcher.bind_recovery_wake(None)
 
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
                 await asyncio.wait_for(
-                    self._stop.wait(),
+                    self._wake.wait(),
                     timeout=self._poll_seconds,
                 )
-                continue
             except TimeoutError:
                 pass
+            self._wake.clear()
+            if self._stop.is_set():
+                break
             try:
                 await self._flush_pending_failure_observation()
                 await self._dispatcher.drain_ready(limit=self._recovery_limit)
@@ -1045,6 +1138,45 @@ def _effect_dispatch_key(effect: Mapping[str, Any]) -> tuple[int, int, str]:
         int(effect.get("created_ts_ms") or 0),
         str(effect.get("effect_id") or ""),
     )
+
+
+def _is_realtime_chat_effect_bundle(
+    rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> bool:
+    user_turns = [
+        row
+        for row in rows
+        if str(row.get("effect_type") or "") == "conversation.user_turn"
+    ]
+    deliveries = [
+        row
+        for row in rows
+        if str(row.get("effect_type") or "") == "surface.reply_delivery"
+    ]
+    if len(user_turns) != 1 or len(deliveries) != 1:
+        return False
+    payload = user_turns[0].get("payload")
+    metadata = payload.get("metadata") if isinstance(payload, Mapping) else None
+    return (
+        isinstance(metadata, Mapping)
+        and str(metadata.get("route_type") or "").strip().lower() == "chat"
+    )
+
+
+def _realtime_chat_reply_committed(
+    rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...],
+) -> bool:
+    if not _is_realtime_chat_effect_bundle(rows):
+        return False
+    committed = {
+        str(row.get("effect_type") or "")
+        for row in rows
+        if str(row.get("status") or "") == "COMMITTED"
+    }
+    return {
+        "conversation.user_turn",
+        "surface.reply_delivery",
+    }.issubset(committed)
 
 
 def _recovery_pending_projection(effect: Mapping[str, Any]) -> dict[str, Any]:

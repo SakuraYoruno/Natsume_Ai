@@ -309,6 +309,10 @@ def compile_graph_acceptance_effects(
         "ts_ms": command.created_at_ms,
         "lang": render_lang,
         "metadata": {
+            # The dispatcher uses this immutable compiler-owned marker to
+            # distinguish ordinary realtime chat from control/skill routes.
+            # Worker output cannot move a graph onto the low-latency path.
+            "route_type": command.route_type,
             "input_source": str(request_body.get("input_source") or ""),
             "reply_channel": str(delivery_context.get("reply_channel") or ""),
             "reply_target": str(delivery_context.get("reply_target") or ""),

@@ -49,16 +49,23 @@ _BOUNDARY_MARKERS = (
     "少管我",
     "闭嘴",
     "滚开",
-    "不舒服",
     "越界",
     "停止",
 )
 _MISUNDERSTANDING_MARKERS = (
+    "你真烦",
+    "你好烦",
+    "你烦死了",
+    "没听懂",
+    "没有听懂",
+    "没理解",
+    "让我很不舒服",
     "你不懂",
     "不是这样",
     "你误会了",
     "没有理解",
     "别曲解",
+    "弄反了",
 )
 _REPAIR_ACCEPTANCE_MARKERS = (
     "没关系",
@@ -68,6 +75,17 @@ _REPAIR_ACCEPTANCE_MARKERS = (
     "谢谢你愿意听",
     "好一些了",
     "我理解了",
+)
+_REPAIR_UNRESOLVED_MARKERS = (
+    "还没原谅",
+    "没有原谅",
+    "没觉得这件事过去",
+    "没有觉得这件事过去",
+    "这件事还没过去",
+    "这件事没有过去",
+    "道歉不等于",
+    "还没有翻篇",
+    "还没翻篇",
 )
 _HELPFUL_MARKERS = ("谢谢", "有帮助", "好多了", "舒服些", "被理解")
 
@@ -764,12 +782,20 @@ class RelationshipLifecycleService:
         if any(marker in normalized for marker in _MISUNDERSTANDING_MARKERS):
             return "MISUNDERSTOOD", 0.0, False, False
         repair_required = bool(relationship_state.get("repair_required"))
+        if any(marker in normalized for marker in _REPAIR_UNRESOLVED_MARKERS):
+            # A user can explicitly say that an apology did not repair the
+            # rupture even when this fresh session has no earlier canonical
+            # rupture flag.  Treat that statement as the relationship fact;
+            # do not wait for a later neutral turn to infer it.
+            return "REPAIR_UNRESOLVED", 0.0, False, False
         if repair_required and any(
             marker in normalized for marker in _REPAIR_ACCEPTANCE_MARKERS
         ):
             return "REPAIR_ACCEPTED", 0.72, True, True
-        if repair_required and "对不起" in normalized:
-            # An apology is a signal to keep working, never an automatic cure.
+        if repair_required:
+            # Only an explicit user acceptance closes a rupture.  Apologies,
+            # neutral continuations and terse acknowledgements all preserve
+            # the open repair thread instead of silently clearing it.
             return "REPAIR_UNRESOLVED", 0.0, False, False
         if any(marker in normalized for marker in _HELPFUL_MARKERS):
             return "HELPFUL", 0.72, True, False

@@ -282,6 +282,13 @@ def _task_kind(intent_draft: Mapping[str, Any] | None) -> str:
     target = str(intent.get("target_id") or intent.get("skill_id") or "").lower()
     task = str(intent.get("task") or "").lower()
     searchable = f"{target}\n{task}"
+    # The route is the caller's already-classified action semantics.  A chat
+    # turn may mention that a release succeeded or that deployment was tiring
+    # without requesting a maintenance action.  Keyword inference is only a
+    # fallback for actionable routes; otherwise an ordinary companion reply
+    # would inherit the release Review constraints.
+    if route == "CHAT":
+        return "CHAT"
     if route == "PLAN" or any(word in searchable for word in ("research", "检索", "研究")):
         return "RESEARCH"
     if any(word in searchable for word in ("debug", "调试", "故障")):

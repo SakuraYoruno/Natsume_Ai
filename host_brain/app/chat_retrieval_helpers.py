@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import os
 import re
 import time
@@ -232,6 +233,7 @@ async def _run_retrieval(
     conversation_history: Any | None = None,
     build_user_preference_pack: Callable[..., Any] | None = None,
     recall_service_factory: Callable[[], Any] | None = None,
+    active_knowledge_search: Callable[..., list[dict[str, Any]]] | None = None,
     request_id: str,
     message: str,
     person_id: str,
@@ -250,14 +252,27 @@ async def _run_retrieval(
     main chain only needs a compressed surface_memory_recall_packet; raw recall
     rows and evidence packs must not be returned to the final text layer.
     """
+    runtime_started = time.perf_counter()
+    runtime_timings_ms: dict[str, int] = {
+        "plan": 0,
+        "explicit_memory": 0,
+        "collection_fastpath": 0,
+        "embedding": 0,
+        "service_resolve": 0,
+        "recall": 0,
+        "active_knowledge": 0,
+        "lightnovel_review": 0,
+        "generic_evidence_review": 0,
+        "total": 0,
+    }
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
+        plan_started = time.perf_counter()
         from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext  # noqa: PLC0415
         from host_brain.persona.surface_memory_recall import (  # noqa: PLC0415
             SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
             SURFACE_MEMORY_RECALL_SKIPPED,
             SurfaceMemoryRecallPacket,
+            SurfaceMemoryFactRow,
             build_surface_memory_recall_packet,
             build_surface_memory_recall_decision_trace,
             plan_surface_memory_recall,
@@ -275,12 +290,26 @@ async def _run_retrieval(
             ),
         )
         plan = plan_surface_memory_recall(context)
+        runtime_timings_ms["plan"] = _elapsed_perf_ms(plan_started)
         embedding_model_id = ""
-        short_term_memory_facts = _recent_explicit_memory_facts(
-            message=message,
-            session_id=session_id,
-            request_id=request_id,
-            conversation_history=conversation_history,
+        # ``NO_RECALL`` is the common low-latency companion path.  Make the
+        # plan-level short circuit explicit instead of entering the separate
+        # explicit-memory compatibility helper.  That helper already rejects
+        # unrelated messages before querying history; this is therefore a
+        # contract simplification, not by itself a measured latency win.
+        explicit_memory_started = time.perf_counter()
+        short_term_memory_facts = (
+            _recent_explicit_memory_facts(
+                message=message,
+                session_id=session_id,
+                request_id=request_id,
+                conversation_history=conversation_history,
+            )
+            if plan.should_recall
+            else []
+        )
+        runtime_timings_ms["explicit_memory"] = _elapsed_perf_ms(
+            explicit_memory_started
         )
         if plan.should_recall and short_term_memory_facts:
             packet = SurfaceMemoryRecallPacket(
@@ -309,6 +338,7 @@ async def _run_retrieval(
                 },
             )
         elif not short_term_memory_facts:
+            collection_fastpath_started = time.perf_counter()
             packet = _maybe_recall_collection_fastpath(
                 plan=plan,
                 request_id=request_id,
@@ -318,6 +348,9 @@ async def _run_retrieval(
                 build_packet_fn=build_surface_memory_recall_packet,
                 life_memory_store=life_memory_store,
             )
+            runtime_timings_ms["collection_fastpath"] = _elapsed_perf_ms(
+                collection_fastpath_started
+            )
             recall_invoked = packet is not None
             if packet is None:
                 # Semantic model import/load can take tens of seconds on the
@@ -325,6 +358,7 @@ async def _run_retrieval(
                 # bounded relational-retrieval timeout can actually fire and
                 # the conversation can continue with canonical short-term and
                 # relationship context while the local model warms in a worker.
+                embedding_started = time.perf_counter()
                 embed_task = asyncio.to_thread(
                     _embed_surface_memory_query,
                     plan.query,
@@ -368,11 +402,19 @@ async def _run_retrieval(
                         )
                 else:
                     query_embedding, embedding_model_id = await embed_task
+                runtime_timings_ms["embedding"] = _elapsed_perf_ms(
+                    embedding_started
+                )
                 if packet is None:
                     recall_invoked = True
+                    service_resolve_started = time.perf_counter()
                     recall_service = (
                         recall_service_factory or _build_surface_memory_recall_service
                     )()
+                    runtime_timings_ms["service_resolve"] = _elapsed_perf_ms(
+                        service_resolve_started
+                    )
+                    recall_started = time.perf_counter()
                     packet = recall_surface_memory_packet(
                         recall_service=recall_service,
                         request_id=request_id,
@@ -424,6 +466,9 @@ async def _run_retrieval(
                         render_target_lang=render_target_lang,
                         coverage_failed_reason_code=SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
                     )
+                    runtime_timings_ms["recall"] = _elapsed_perf_ms(
+                        recall_started
+                    )
             packet = replace(
                 packet,
                 trace={
@@ -436,6 +481,18 @@ async def _run_retrieval(
                     ),
                 },
             )
+        active_knowledge_started = time.perf_counter()
+        packet = _apply_active_knowledge_to_surface_packet(
+            packet=packet,
+            plan=plan,
+            search=active_knowledge_search,
+            person_id=person_id,
+            fact_row_type=SurfaceMemoryFactRow,
+        )
+        runtime_timings_ms["active_knowledge"] = _elapsed_perf_ms(
+            active_knowledge_started
+        )
+        lightnovel_review_started = time.perf_counter()
         packet = await _maybe_apply_lightnovel_deep_review(
             packet=packet,
             message=message,
@@ -446,6 +503,10 @@ async def _run_retrieval(
             life_memory_store=life_memory_store,
             build_user_preference_pack=build_user_preference_pack,
         )
+        runtime_timings_ms["lightnovel_review"] = _elapsed_perf_ms(
+            lightnovel_review_started
+        )
+        generic_review_started = time.perf_counter()
         packet = await _maybe_apply_generic_evidence_review(
             packet=packet,
             message=message,
@@ -455,12 +516,18 @@ async def _run_retrieval(
             ts_ms=ts_ms,
             life_memory_store=life_memory_store,
         )
-        return _surface_memory_retrieval_summary(
+        runtime_timings_ms["generic_evidence_review"] = _elapsed_perf_ms(
+            generic_review_started
+        )
+        runtime_timings_ms["total"] = _elapsed_perf_ms(runtime_started)
+        summary = _surface_memory_retrieval_summary(
             request_id=request_id,
             ts_ms=ts_ms,
             packet=packet,
             embedding_model_id=embedding_model_id,
-        ), []
+        )
+        summary["runtime_timings_ms"] = dict(runtime_timings_ms)
+        return summary, []
     except Exception as exc:
         return (
             {
@@ -479,6 +546,118 @@ async def _run_retrieval(
             },
             [],
         )
+
+
+def _elapsed_perf_ms(started: float) -> int:
+    return max(0, int(round((time.perf_counter() - float(started)) * 1000)))
+
+
+def _apply_active_knowledge_to_surface_packet(
+    *,
+    packet: Any,
+    plan: Any,
+    search: Callable[..., list[dict[str, Any]]] | None,
+    person_id: str,
+    fact_row_type: Any,
+) -> Any:
+    """Merge a bounded active Knowledge projection into a recall packet.
+
+    The planner remains the admission gate.  A normal no-recall turn returns
+    before invoking the repository, and a failed optional read leaves the
+    existing memory packet unchanged.
+    """
+
+    if not bool(getattr(plan, "should_recall", False)) or not callable(search):
+        return packet
+    try:
+        rows = search(
+            query=str(getattr(plan, "query", "") or ""),
+            person_id=str(person_id or ""),
+            top_k=max(1, min(int(getattr(plan, "max_facts", 4) or 4), 4)),
+            threshold=0.05,
+        )
+    except Exception:
+        return packet
+    selected = [dict(item) for item in list(rows or []) if isinstance(item, Mapping)]
+    if not selected:
+        return packet
+    knowledge_rows: list[Any] = []
+    knowledge_facts: list[str] = []
+    evidence_refs: list[str] = []
+    source_refs: list[str] = []
+    scores: list[float] = []
+    for item in selected[:4]:
+        content = re.sub(r"\s+", " ", str(item.get("content") or "").strip())[:320]
+        if not content:
+            continue
+        metadata = dict(item.get("metadata") or {})
+        digest = str(metadata.get("entry_digest") or "").strip().lower()
+        evidence_ref = (
+            f"evolution-knowledge-entry://sha256/{digest}"
+            if re.fullmatch(r"[0-9a-f]{64}", digest)
+            else str(item.get("doc_id") or "").strip()
+        )
+        source_ref = str(metadata.get("provenance_ref") or "").strip()
+        score = max(0.0, min(float(item.get("score") or 0.0), 1.0))
+        fact = f"已激活知识：{content}"
+        knowledge_facts.append(fact)
+        if evidence_ref:
+            evidence_refs.append(evidence_ref)
+        if source_ref:
+            source_refs.append(source_ref)
+        scores.append(score)
+        knowledge_rows.append(
+            fact_row_type(
+                fact=fact,
+                store_id="semantic_memory",
+                source_ref=source_ref,
+                evidence_ref=evidence_ref,
+                score=score,
+            )
+        )
+    if not knowledge_rows:
+        return packet
+    trace = dict(getattr(packet, "trace", None) or {})
+    route_ids = tuple(
+        dict.fromkeys(
+            ["knowledge_os_v2", *list(getattr(packet, "route_ids", ()) or ())]
+        )
+    )
+    trace["knowledge_os_active"] = {
+        "status": "SELECTED",
+        "selected_count": len(knowledge_rows),
+        "read_only": True,
+    }
+    trace["route_count"] = len(route_ids)
+    return replace(
+        packet,
+        facts=tuple(
+            dict.fromkeys(
+                [*knowledge_facts, *list(getattr(packet, "facts", ()) or ())]
+            )
+        )[:8],
+        rows=tuple([*knowledge_rows, *list(getattr(packet, "rows", ()) or ())])[:8],
+        evidence_refs=tuple(
+            dict.fromkeys(
+                [*evidence_refs, *list(getattr(packet, "evidence_refs", ()) or ())]
+            )
+        )[:16],
+        source_refs=tuple(
+            dict.fromkeys(
+                [*source_refs, *list(getattr(packet, "source_refs", ()) or ())]
+            )
+        )[:16],
+        route_ids=route_ids,
+        candidate_count=int(getattr(packet, "candidate_count", 0) or 0)
+        + len(knowledge_rows),
+        confidence=max(
+            float(getattr(packet, "confidence", 0.0) or 0.0),
+            max(scores or [0.0]),
+        ),
+        degraded=False,
+        reason_code=None,
+        trace=trace,
+    )
 
 
 def _maybe_recall_collection_fastpath(
@@ -827,17 +1006,17 @@ async def _maybe_apply_lightnovel_deep_review(
     build_user_preference_pack: Callable[..., Any] | None,
 ) -> Any:
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
         from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
-            review_lightnovel_selection_from_memory_packet,
+            may_deep_review_lightnovel_selection,
             should_deep_review_lightnovel_selection,
         )
-        from host_brain.app.observability_persist import (  # noqa: PLC0415
-            persist_life_action_event_memory,
-        )
-
     except Exception:
+        return packet
+    # Do not query the durable recommendation/preference ledger on every
+    # ordinary companion turn.  The message predicate is a necessary (not
+    # sufficient) condition; the full packet-aware predicate still decides
+    # whether a deep review is allowed after contextual enrichment.
+    if not may_deep_review_lightnovel_selection(user_message=message):
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
     packet_payload = _recent_lightnovel_delivery_packet_payload(
@@ -848,6 +1027,17 @@ async def _maybe_apply_lightnovel_deep_review(
         build_user_preference_pack=build_user_preference_pack,
     )
     if not should_deep_review_lightnovel_selection(user_message=message, packet=packet_payload):
+        return packet
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.agent_runtime.lightnovel_deep_reviewer import (  # noqa: PLC0415
+            review_lightnovel_selection_from_memory_packet,
+        )
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
+    except Exception:
         return packet
     started_ms = int(time.time() * 1000)
     try:
@@ -880,13 +1070,6 @@ async def _maybe_apply_lightnovel_deep_review(
     fact = str(review.get("fact") or "").strip()
     if not fact:
         return packet
-    packet_payload = _recent_lightnovel_delivery_packet_payload(
-        packet_payload=packet.as_dict() if hasattr(packet, "as_dict") else packet_payload,
-        message=message,
-        person_id=person_id,
-        session_id=session_id,
-        build_user_preference_pack=build_user_preference_pack,
-    )
     previous_facts = list(getattr(packet, "facts", ()) or [])
     anchor_fact = _lightnovel_recommendation_anchor_fact(packet_payload)
     if anchor_fact and (
@@ -1152,19 +1335,24 @@ async def _maybe_apply_generic_evidence_review(
     life_memory_store: Any,
 ) -> Any:
     try:
-        from dataclasses import replace  # noqa: PLC0415
-
         from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
-            review_generic_evidence_from_memory_packet,
             should_review_generic_evidence,
-        )
-        from host_brain.app.observability_persist import (  # noqa: PLC0415
-            persist_life_action_event_memory,
         )
     except Exception:
         return packet
     packet_payload = packet.as_dict() if hasattr(packet, "as_dict") else {}
     if not should_review_generic_evidence(user_message=message, packet=packet_payload):
+        return packet
+    try:
+        from dataclasses import replace  # noqa: PLC0415
+
+        from host_brain.agent_runtime.generic_evidence_reviewer import (  # noqa: PLC0415
+            review_generic_evidence_from_memory_packet,
+        )
+        from host_brain.app.observability_persist import (  # noqa: PLC0415
+            persist_life_action_event_memory,
+        )
+    except Exception:
         return packet
     started_ms = int(time.time() * 1000)
     try:

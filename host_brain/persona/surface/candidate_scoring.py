@@ -37,7 +37,11 @@ from host_brain.persona.surface.continuity_detectors import (
     _back_memory_overdisplay_hits,
     _back_scene_relevant,
     _boundary_repair_relevant,
+    _canonical_contained_jealousy_relevant,
+    _canonical_hold_complexity_relevant,
+    _canonical_respect_autonomy_relevant,
     _continuity_boundary_grounded,
+    _contained_hurt_repair_grounded,
     _continuity_internal_process_surface_hits,
     _continuity_light_jargon_hits,
     _continuity_praise_context_miss,
@@ -67,11 +71,14 @@ from host_brain.persona.surface.continuity_detectors import (
     _presence_repair_relevant,
     _quiet_presence_relevant,
     _raw_context_backfill_requested,
+    _relational_repair_relevant,
+    _relational_repair_grounded,
     _short_continue_memory_overdisplay_hits,
     _short_continue_unprovided_tech_detail_hits,
     _self_doubt_scene_relevant,
     _signature_texture_relevant,
     _surface_process_meta_hits,
+    _shared_mixed_resonance_grounded,
     _thin_continuity_generic_reply,
     _thin_daily_followup_reply,
     _thin_wait_scene_hold,
@@ -198,6 +205,19 @@ _ALLOWED_RHETORICAL_QUESTION_SEGMENTS = frozenset({
 })
 _QUESTION_SEGMENT_SPLIT_RE = re.compile(r"[。.!！?？\n\r，,；;：:]")
 _INFO_SEEKING_QUESTION_RE = re.compile(r"(?:什么|怎么|为什么|哪|哪里|哪儿|谁|几|多少|吗|么|是不是|有没有|能不能|可不可以|要不要)")
+_ADDRESS_BOUNDARY_USER_RE = re.compile(
+    r"(?:别|不要|不许)(?:再)?(?:叫|喊|称呼).{0,12}"
+    r"|(?:别|不要|不许).{0,8}(?:那个|这个)?称呼"
+)
+_ADDRESS_BOUNDARY_REPLY_RE = re.compile(
+    r"听你的|不(?:再)?叫|不会再叫|换(?:个|一个)?(?:叫法|称呼)"
+    r"|改(?:个|一个)?(?:叫法|称呼)|不用(?:这个|那个)?称呼"
+)
+_REPAIR_PAUSE_USER_RE = re.compile(r"先这样|先到这(?:里|儿)?|晚点再说|今天先到这")
+_REPAIR_PAUSE_REPLY_RE = re.compile(
+    r"先到这(?:里|儿)?|那就先这样|不催你|你(?:哪天|以后|之后)?想(?:接着聊|说)"
+    r"|你愿意(?:说|聊)的时候"
+)
 from host_brain.persona.surface.util import (
     _clean_list,
     _clean_text,
@@ -220,6 +240,31 @@ def _back_landing_hits(request, text):
     if _back_busy_done_relevant(request):
         return [marker for marker in _BACK_BUSY_DONE_LANDING_MARKERS if _relationship_marker_hit(text, marker)]
     return []
+
+
+def _address_boundary_grounded(request, text):
+    """Recognise a concise, non-defensive acknowledgement of an address boundary."""
+
+    return bool(
+        _ADDRESS_BOUNDARY_USER_RE.search(str(request.user_message or ""))
+        and _ADDRESS_BOUNDARY_REPLY_RE.search(str(text or ""))
+    )
+
+
+def _relational_repair_pause_grounded(request, text):
+    control = getattr(request, "control", None)
+    canonical_context = "\n".join(
+        str(item or "")
+        for item in [
+            *list(getattr(control, "facts", []) or []),
+            *list(getattr(control, "must_not_do", []) or []),
+        ]
+    )
+    return bool(
+        "陪伴动作：先承认可能没有接住" in canonical_context
+        and _REPAIR_PAUSE_USER_RE.search(str(request.user_message or ""))
+        and _REPAIR_PAUSE_REPLY_RE.search(str(text or ""))
+    )
 
 
 def _back_stage_texture_hits(request, text):
@@ -933,9 +978,13 @@ def _apply_control_affect_scoring(request, text, dimensions, reason_codes):
     affection_relevant = _lover_affection_relevant_for_axes(
         axes=relationship_axes, task_mode=task_mode, tone_family=tone_family,
     )
+    canonical_contained_jealousy = _canonical_contained_jealousy_relevant(request)
     jealousy_low_pressure_grounded = bool(
         _jealousy_scene_relevant(request)
-        and relationship_axes.stage in _LOVER_RELATIONSHIP_STAGES
+        and (
+            relationship_axes.stage in _LOVER_RELATIONSHIP_STAGES
+            or canonical_contained_jealousy
+        )
         and has_any(_JEALOUSY_LOW_PRESSURE_MARKERS)
     )
     if jealousy_low_pressure_grounded:
@@ -944,6 +993,12 @@ def _apply_control_affect_scoring(request, text, dimensions, reason_codes):
         raise_("role_fit", 5)
         raise_("emotional_containment", 5)
         raise_("non_oily", 4)
+        if canonical_contained_jealousy:
+            # This act came from the server-owned AffectiveTurnPlan.  A
+            # restrained first-person admission is therefore the required
+            # scene move even without a romantic relationship label.
+            raise_("context_fit", 12)
+            raise_("scene_grounding", 8)
         delta += 3.0
         reason_codes.append("JEALOUSY_LOW_PRESSURE_GROUNDED")
     affection_bonus_blocked = any(
@@ -1196,6 +1251,7 @@ def parse_surface_candidates(raw_output):
 # Jealousy constant (needed for _apply_control_affect_scoring)
 # ---------------------------------------------------------------------------
 _JEALOUSY_LOW_PRESSURE_MARKERS = (
+    "有点",
     "有一点",
     "一点点",
     "别笑",
@@ -1212,6 +1268,30 @@ _JEALOUSY_LOW_PRESSURE_MARKERS = (
 # re-export marker constants used by _apply_control_affect_scoring
 _RELATION_AXIS_PHYSICAL_MARKERS = ("抱一下", "抱抱", "抱", "过来", "靠我", "靠过来", "靠一下")
 _RELATION_AXIS_ROMANCE_MARKERS = ("爱你", "想你", "想我", "心里有我", "亲爱的", "宝贝", "只属于")
+
+_REPAIR_FORMAL_REGISTER_PATTERNS = (
+    re.compile(r"(?:这是|是)?合理的|不丢人"),
+    re.compile(r"(?:这点|这部分|不舒服的部分)[，,]?(?:我)?(?:认|记着)"),
+    re.compile(r"我会注意(?:的)?(?=[，,。.!！]|$)"),
+)
+_MIXED_FORMAL_REGISTER_PATTERNS = (
+    re.compile(r"不丢人|两种感觉"),
+    re.compile(r"(?:先让|都先|一起).{0,10}(?:留着|待着|多待)"),
+    re.compile(r"(?:开心|高兴).{0,6}(?:先)?(?:留着|多留|多待)"),
+)
+
+
+def _companion_formal_register_hits(request, text):
+    patterns = []
+    if _relational_repair_relevant(request):
+        patterns.extend(_REPAIR_FORMAL_REGISTER_PATTERNS)
+    if _canonical_hold_complexity_relevant(request):
+        patterns.extend(_MIXED_FORMAL_REGISTER_PATTERNS)
+    return [
+        match.group(0)
+        for pattern in patterns
+        for match in pattern.finditer(str(text or ""))
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1248,16 +1328,89 @@ def score_isolated_surface_candidates(request, candidates):
             contract=contract,
             quality=quality,
             relationship_axes=relationship_axes.as_dict(),
+            allowed_ascii_terms=re.findall(r"[A-Za-z]{2,}", str(request.user_message or "")),
         )
         violations = _control_violations(request, quality.normalized_text or candidate_surface)
         score = float(sample_score.score)
         dimensions = dict(sample_score.dimensions)
         reason_codes = [*sample_score.reason_codes, *quality.reason_codes]
+        formal_register_hits = _companion_formal_register_hits(
+            request,
+            quality.normalized_text or candidate_surface,
+        )
+        if formal_register_hits:
+            dimensions["naturalness"] = min(
+                82.0,
+                float(dimensions.get("naturalness", 86.0)),
+            )
+            dimensions["spoken_chat_texture"] = min(
+                80.0,
+                float(dimensions.get("spoken_chat_texture", 86.0)),
+            )
+            dimensions["character_freshness"] = min(
+                82.0,
+                float(dimensions.get("character_freshness", 86.0)),
+            )
+            reason_codes.append(
+                "COMPANION_FORMAL_REGISTER:" + ",".join(formal_register_hits[:4])
+            )
+        if (
+            _canonical_respect_autonomy_relevant(request)
+            and any(
+                marker in (quality.normalized_text or candidate_surface)
+                for marker in ("重要", "亲近", "陪伴", "关系")
+            )
+        ):
+            # The generic relationship-boundary contract asks for a distance
+            # repair move. A canonical RESPECT_AUTONOMY turn instead needs a
+            # direct, non-exclusive relationship answer; its dedicated hard
+            # gates own pressure and dismissiveness.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            dimensions["context_fit"] = max(
+                80.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                76.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            score += 4.0
+            reason_codes.append("CANONICAL_RESPECT_AUTONOMY_GROUNDED")
         if candidate_surface != candidate:
             reason_codes.append("ASCII_PUNCTUATION_NORMALIZED")
+        canonical_ambiguous_presence = bool(
+            str(request.control.task_mode or "").strip().lower()
+            == "ambiguous_affect"
+            and any(
+                "陪伴动作：先接住对方的感受" in str(item or "")
+                for item in request.control.facts
+            )
+            and set(quality.forbidden_hits) == {"fabricated_present_activity"}
+            and re.search(r"陪|我在这(?:里|儿)?", candidate_surface)
+            and not re.search(
+                r"后台|处理|执行|盯着|查询|查找|运行|跑着|整理|关掉|关闭|提醒|通知",
+                candidate_surface,
+            )
+        )
+        if canonical_ambiguous_presence:
+            reason_codes.append("CANONICAL_AMBIGUOUS_PRESENCE_GROUNDED")
         quality_forbidden_template = (
             _continuity_boundary_relevant(request) or _boundary_repair_relevant(request)
-        ) and any(code in reason_codes for code in ("FORBIDDEN_TEMPLATE_TEXT", "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT"))
+        ) and any(
+            code in reason_codes
+            for code in (
+                "FORBIDDEN_TEMPLATE_TEXT",
+                "QUALITY_SOFT_FORBIDDEN_TEMPLATE_TEXT",
+            )
+        ) and not canonical_ambiguous_presence
         if quality_forbidden_template:
             score -= 16.0
             dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
@@ -1361,6 +1514,117 @@ def score_isolated_surface_candidates(request, candidates):
             dimensions["naturalness"] = min(74.0, float(dimensions.get("naturalness", 86.0)))
             dimensions["character_freshness"] = max(0.0, float(dimensions.get("character_freshness", 86.0)) - 12.0)
             reason_codes.append("MISPLACED_SUPPORT_TEMPLATE")
+        if _relational_repair_grounded(request, quality.normalized_text or candidate):
+            # Concrete ownership is the scene grounding for a repair turn.  A
+            # generic presence sentence does not enter this branch, while an
+            # explicit "我没听懂/没接住" should not be scored like an unrelated
+            # continuity acknowledgement.
+            score += 15.0
+            dimensions["context_fit"] = max(
+                78.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                78.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_GROUNDED")
+        if _contained_hurt_repair_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # This composite frame deliberately moves past repeated apologies:
+            # one bounded first-person reaction is the scene grounding here.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 12.0
+            dimensions["context_fit"] = max(
+                84.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                82.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                82.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_CONTAINED_HURT_GROUNDED")
+        if _shared_mixed_resonance_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 12.0
+            dimensions["context_fit"] = max(
+                84.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                82.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                84.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("MIXED_SELF_RESONANCE_GROUNDED")
+        if _address_boundary_grounded(request, quality.normalized_text or candidate):
+            # A short acknowledgement is the correct complete answer here;
+            # generic prose scoring otherwise mistakes brevity for weak scene
+            # grounding and encourages unnecessary justification.
+            score += 18.0
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                84.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["distance_control"] = max(
+                84.0,
+                float(dimensions.get("distance_control", 86.0)),
+            )
+            dimensions["catchiness"] = max(
+                78.0,
+                float(dimensions.get("catchiness", 86.0)),
+            )
+            reason_codes.append("ADDRESS_BOUNDARY_GROUNDED")
+        if _relational_repair_pause_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            score += 10.0
+            dimensions["context_fit"] = max(
+                84.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                82.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["distance_control"] = max(
+                82.0,
+                float(dimensions.get("distance_control", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_PAUSE_GROUNDED")
         topic_mismatch = _current_user_topic_mismatch(request, quality.normalized_text or candidate)
         if topic_mismatch:
             score -= 20.0
@@ -1496,6 +1760,7 @@ def score_isolated_surface_candidates(request, candidates):
                     _short_continue_scene_relevant(request)
                     or (_back_scene_relevant(request) and not memory_required)
                     or (_boundary_repair_relevant(request) and not memory_required)
+                    or _relational_repair_relevant(request)
                 )
                 if low_show_memory_scene:
                     dimensions["memory_alignment"] = max(86.0, float(dimensions.get("memory_alignment", 86.0)))
@@ -1811,6 +2076,12 @@ def select_best_isolated_candidate(scores):
             1 if row.passed else 0,
             0 if row.hard_fail else 1,
             -len(row.control_violations),
+            0
+            if any(
+                code.startswith("COMPANION_FORMAL_REGISTER:")
+                for code in row.reason_codes
+            )
+            else 1,
             float(row.score),
             float(dict(row.dimensions).get("spoken_chat_texture", 86.0)),
             float(dict(row.dimensions).get("naturalness", 86.0)),

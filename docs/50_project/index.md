@@ -3,6 +3,10 @@
 
 # 项目文档目录
 
+## 当前交接
+
+- [当前架构、双节点环境与验收交接](CURRENT_PROJECT_HANDOFF.md)
+
 ## 架构
 
 - [当前代码架构](arch/CURRENT_CODE_ARCHITECTURE.md)

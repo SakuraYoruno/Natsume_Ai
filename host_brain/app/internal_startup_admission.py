@@ -49,7 +49,7 @@ async def execute_internal_startup_admission(
         INTERNAL_RUNTIME_AUTHORITY_INVALID,
     )
     result = await collect_internal_continuation_result(
-        application.execute_stream(
+        application.execute_startup_continuation_stream(
             command=command,
             work_order=work_order,
             assignment=assignment,

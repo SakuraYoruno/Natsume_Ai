@@ -172,7 +172,8 @@ class GatewayDeliveryRuntime:
         self._lease_ms = max(1_000, int(lease_ms))
         self._worker_id = str(worker_id or f"edge-gateway-{uuid.uuid4().hex}")
         self._shutdown = threading.Event()
-        self._worker: threading.Thread | None = None
+        self._inbox_worker: threading.Thread | None = None
+        self._outbox_worker: threading.Thread | None = None
         self._ready = False
         self._lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
@@ -225,33 +226,68 @@ class GatewayDeliveryRuntime:
             raise GatewayDeliveryError(GW_TRANSPORT_SCHEMA_UNAVAILABLE, str(exc)) from exc
 
     def start(self) -> None:
-        """Start workers only for explicitly enabled durable modes."""
+        """Start independent inbound and outbound durable workers.
+
+        Platform delivery may block on a remote client timeout.  It must never
+        hold up the durable inbox path that admits the user's next message.
+        Both workers retain their own stable lease identity and share only the
+        lifecycle shutdown signal.
+        """
 
         if not self.delivery_enabled:
             return
         with self._lifecycle_lock:
             self.assert_ready()
-            if self._worker is not None and self._worker.is_alive():
-                return
-            self._shutdown.clear()
-            worker = threading.Thread(
-                target=self._worker_loop,
-                name="gateway-durable-delivery",
-                daemon=True,
+            inbox_alive = bool(
+                self._inbox_worker is not None and self._inbox_worker.is_alive()
             )
-            self._worker = worker
+            outbox_alive = bool(
+                self._outbox_worker is not None and self._outbox_worker.is_alive()
+            )
+            if inbox_alive and outbox_alive:
+                self._ready = True
+                return
+            if self._inbox_worker is not None and not inbox_alive:
+                self._inbox_worker = None
+            if self._outbox_worker is not None and not outbox_alive:
+                self._outbox_worker = None
+            self._shutdown.clear()
             try:
-                worker.start()
+                if self._inbox_worker is None:
+                    self._inbox_worker = threading.Thread(
+                        target=self._inbox_worker_loop,
+                        name="gateway-durable-inbox",
+                        daemon=True,
+                    )
+                    self._inbox_worker.start()
+                if self._outbox_worker is None:
+                    self._outbox_worker = threading.Thread(
+                        target=self._outbox_worker_loop,
+                        name="gateway-durable-outbox",
+                        daemon=True,
+                    )
+                    self._outbox_worker.start()
             except BaseException:
-                # ``Thread.start`` can fail before the OS thread exists (for
-                # example, resource exhaustion).  Do not retain an unjoinable
-                # Thread object that would make every rollback attempt fail.
-                if not worker.is_alive():
-                    self._worker = None
-                    self._shutdown.set()
+                # ``Thread.start`` can fail before the OS thread exists. Stop
+                # a sibling that may already have started and retain only a
+                # genuinely live thread so rollback remains retryable.
+                self._shutdown.set()
+                for attribute in ("_inbox_worker", "_outbox_worker"):
+                    worker = getattr(self, attribute)
+                    if worker is None:
+                        continue
+                    if getattr(worker, "ident", None) is not None or worker.is_alive():
+                        worker.join(timeout=max(0.1, self._worker_interval_s * 2))
+                    if not worker.is_alive():
+                        setattr(self, attribute, None)
                 self._ready = False
                 raise
-            self._ready = True
+            self._ready = bool(
+                self._inbox_worker is not None
+                and self._inbox_worker.is_alive()
+                and self._outbox_worker is not None
+                and self._outbox_worker.is_alive()
+            )
 
     def disable_intake(self) -> None:
         """Permanently close new intake for this runtime instance."""
@@ -260,22 +296,35 @@ class GatewayDeliveryRuntime:
             self._accept_new_intake = False
 
     def stop(self, *, timeout_s: float = 5.0) -> None:
-        """Stop and join the worker, failing closed if an in-flight send remains."""
+        """Stop and join both workers, failing closed on an in-flight effect."""
 
         with self._lifecycle_lock:
             self._accept_new_intake = False
             self._shutdown.set()
-            worker = self._worker
-            if worker is not None:
+            deadline = time.monotonic() + max(0.1, float(timeout_s))
+            for attribute in ("_inbox_worker", "_outbox_worker"):
+                worker = getattr(self, attribute)
+                if worker is None:
+                    continue
                 if getattr(worker, "ident", None) is not None or worker.is_alive():
-                    worker.join(timeout=max(0.1, float(timeout_s)))
-                if worker.is_alive():
-                    raise GatewayDeliveryError(
-                        GW_TRANSPORT_WORKER_STOP_TIMEOUT,
-                        "durable delivery worker is still executing an in-flight operation",
-                    )
-                self._worker = None
+                    worker.join(timeout=max(0.0, deadline - time.monotonic()))
+                if not worker.is_alive():
+                    setattr(self, attribute, None)
             self._ready = False
+            alive_directions = [
+                direction
+                for direction, worker in (
+                    ("inbox", self._inbox_worker),
+                    ("outbox", self._outbox_worker),
+                )
+                if worker is not None and worker.is_alive()
+            ]
+            if alive_directions:
+                raise GatewayDeliveryError(
+                    GW_TRANSPORT_WORKER_STOP_TIMEOUT,
+                    "durable delivery worker is still executing an in-flight operation: "
+                    + ",".join(alive_directions),
+                )
 
     def accept_inbound(
         self,
@@ -666,7 +715,13 @@ class GatewayDeliveryRuntime:
         return last
 
     def stats(self) -> dict[str, Any]:
-        worker_alive = bool(self._worker is not None and self._worker.is_alive())
+        inbox_worker_alive = bool(
+            self._inbox_worker is not None and self._inbox_worker.is_alive()
+        )
+        outbox_worker_alive = bool(
+            self._outbox_worker is not None and self._outbox_worker.is_alive()
+        )
+        worker_alive = inbox_worker_alive and outbox_worker_alive
         with self._lock:
             return {
                 "mode": self.mode.value,
@@ -676,10 +731,12 @@ class GatewayDeliveryRuntime:
                 "delivery_enabled": self.delivery_enabled,
                 "ready": bool(self._ready and worker_alive),
                 "worker_alive": worker_alive,
+                "inbox_worker_alive": inbox_worker_alive,
+                "outbox_worker_alive": outbox_worker_alive,
                 **dict(self._stats),
             }
 
-    def _worker_loop(self) -> None:
+    def _inbox_worker_loop(self) -> None:
         while not self._shutdown.is_set():
             worked = False
             try:
@@ -694,6 +751,15 @@ class GatewayDeliveryRuntime:
                         break
                     worked = True
                     self._deliver_inbox(_mapping(inbox))
+            except Exception as exc:  # pragma: no cover - defensive worker boundary
+                self._record_worker_error(exc)
+            if not worked:
+                self._shutdown.wait(timeout=self._worker_interval_s)
+
+    def _outbox_worker_loop(self) -> None:
+        while not self._shutdown.is_set():
+            worked = False
+            try:
                 for _ in range(16):
                     if self._shutdown.is_set():
                         break

@@ -14,9 +14,19 @@ from host_brain.persona.surface_affect_control import (
     build_surface_input_with_affect_control,
     build_surface_input_with_affect_state,
 )
+from host_brain.persona.surface.relationship_affect import _relationship_marker_hits
 
 
 SOUL = "你是数字生命夏目蓝。说话短一点，有轻微二次元 galgame 私聊感。"
+
+
+def test_physical_bao_marker_does_not_treat_apology_as_a_hug() -> None:
+    markers = ("抱一下", "抱抱", "抱")
+
+    assert _relationship_marker_hits("抱歉，刚才是我没接住。", markers) == []
+    assert _relationship_marker_hits("别抱怨了。", markers) == []
+    assert _relationship_marker_hits("先抱一下。", markers) == ["抱一下"]
+    assert _relationship_marker_hits("想抱你一下。", markers) == ["抱"]
 
 
 def test_affect_control_packet_compresses_emotion_and_bond_without_raw_state() -> None:

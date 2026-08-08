@@ -179,10 +179,14 @@ class TestWeChatVtsVoiceRpcE2E(unittest.TestCase):
         self.assertTrue(report.success, msg=report.to_dict())
         self.assertEqual(2, report.accepted)
 
+        # ASR_CHUNK is an ephemeral transport fragment: the Host may consume it
+        # for the current turn, but it must not enter the durable voice ledger.
+        # Only terminal/output events such as TTS_PLAY remain as long-lived
+        # operational evidence.
         voice_rows = self.ledger._fetch_by_request("voice_event_log", request_id)
-        self.assertGreaterEqual(len(voice_rows), 2)
+        self.assertEqual(1, len(voice_rows))
         event_types = {row.get("event_type") for row in voice_rows}
-        self.assertIn("ASR_CHUNK", event_types)
+        self.assertNotIn("ASR_CHUNK", event_types)
         self.assertIn("TTS_PLAY", event_types)
 
         trace = self.ledger.trace_request(request_id)

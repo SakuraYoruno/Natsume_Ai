@@ -19,18 +19,15 @@ from dataclasses import dataclass
 import time
 from typing import Any
 
-from host_brain.core.emotion_constants import normalize_emotion_tag
+from host_brain.digital_life.affect_observation import (
+    _collect_observation_drafts,
+    _materialize_observations,
+)
 from host_brain.digital_life.affect_fusion_support import (
     _clamp,
-    _contains_raw_material,
     _digest,
-    _distribution,
-    _distribution_vad,
-    _normalise_modality,
     _opaque_ref,
     _safe_mapping,
-    _safe_sequence,
-    _signed,
     _text,
     _top_tag,
 )
@@ -47,37 +44,102 @@ from natsume_contracts.life import (
 )
 
 
-_TTL_MS = {
-    "TEXT": 30_000,
-    "SELF_REPORT": 30_000,
-    "ACOUSTIC": 5_000,
-    "VISUAL": 3_000,
-}
 _DISTRESS_TAGS = frozenset({"SAD", "ANXIOUS", "ANGRY", "FRUSTRATED"})
 _POSITIVE_TAGS = frozenset({"HAPPY", "EXCITED", "GRATEFUL", "LOVING"})
+_MINIMIZED_AFFECT_CONTINUATIONS = frozenset(
+    {
+        "没事",
+        "没什么",
+        "还好",
+        "算了",
+        "不用了",
+        "就这样",
+    }
+)
+_POSITIVE_RESULT_CONTINUATION_MARKERS = (
+    "offer",
+    "录取",
+    "拿到",
+    "通过了",
+    "终于过了",
+    "成了",
+    "好消息",
+    "入职",
+    "定了",
+    "发布成功",
+    "值得庆祝",
+    "像做梦",
+)
 _SPACE_MARKERS = (
     "别说了",
+    "别说话",
     "给我一点空间",
     "想一个人待会",
+    "一个人待着",
+    "别管我",
     "不要再问",
     "别烦",
     "别来烦我",
     "少管我",
     "闭嘴",
     "滚开",
+    "想安静",
+    "先别追问",
+    "别追问",
+    "别主动找我",
+    "不要主动找我",
+    "别总主动找我",
+    "晚点再说",
+    "我需要时间",
+    "先把提醒关掉",
 )
 _REPAIR_MARKERS = ("对不起", "抱歉", "误会", "不是那个意思", "我刚才说重了")
-_BOUNDARY_MARKERS = ("不要这样", "别这样", "不舒服", "越界", "停止")
+_BOUNDARY_MARKERS = ("不要这样", "别这样", "越界", "停止")
+_ADVICE_REJECTION_MARKERS = (
+    "不想听解决方案",
+    "不太想听解决方案",
+    "不想听建议",
+    "不太想听建议",
+    "别给建议",
+    "不要给建议",
+    "别提建议",
+    "先别分析",
+    "不用分析",
+)
+_RELATIONAL_AUTONOMY_MARKERS = (
+    "限制现实关系",
+    "限制我的现实关系",
+    "现实里的朋友",
+    "现实中的朋友",
+    "和朋友出去",
+    "喜欢别人",
+    "别叫我那个称呼",
+    "我们是什么关系",
+    "不要变成排他",
+    "不能变成排他",
+    "不希望变成排他",
+)
+_JEALOUSY_DISCLOSURE_MARKERS = (
+    "你会吃醋吗",
+    "你吃醋吗",
+    "你会不会吃醋",
+)
 # These are deliberately narrow, direct-address patterns. They are appraisal
 # triggers only: original utterances remain outside the Life journal. A request
 # for space, a boundary, or a repair signal always takes priority below.
 _NATSUME_HARM_MARKERS = (
+    "没听懂我",
+    "没有听懂我",
+    "没理解我",
+    "弄反了",
+    "曲解了我",
     "伤到我",
     "伤害我",
     "让我受伤",
     "让我很受伤",
     "让我难过",
     "让我很难过",
+    "让我失望",
     "说得太伤人",
     "hurt me",
     "made me feel hurt",
@@ -160,6 +222,7 @@ class AffectFusionResult:
     self_affect: Mapping[str, Any]
     receipts: tuple[LifeCommandReceipt, ...]
     reason_codes: tuple[str, ...]
+    continuity_kind: str = ""
     relationship_state: Mapping[str, Any] | None = None
     relationship_aftereffect: Mapping[str, Any] | None = None
     companion_profile: Mapping[str, Any] | None = None
@@ -187,6 +250,10 @@ class AffectFusionResult:
                 "candidate_count": self.candidate_count,
                 "retry_count": self.retry_count,
                 "appraisal_id": self.appraisal_id,
+                # Bounded, privacy-minimised continuity selected from the
+                # current short utterance and the still-active canonical
+                # episode.  No transcript text enters this hand-off.
+                "continuity_kind": self.continuity_kind,
                 "reason_codes": list(self.reason_codes),
                 "receipt_refs": [
                     f"life-command://{receipt.command_id}"
@@ -297,19 +364,6 @@ def _find_existing_appraisal_selection(
                 "APPRAISAL_LEGACY_SELECTION_REPLAYED",
             )
     return None
-
-
-@dataclass(frozen=True, slots=True)
-class _ObservationDraft:
-    modality: str
-    distribution: Mapping[str, float]
-    valence: float
-    arousal: float
-    confidence: float
-    observed_at_ms: int
-    expires_at_ms: int
-    evidence_ref: str
-    source_order: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,6 +579,13 @@ class AffectFusionService:
 
         snapshot = self._require_snapshot_reader().get_snapshot(scope.aggregate_id)
         affective = _safe_mapping(snapshot.state.get("affective"))
+        continuity_kind = _affective_continuity_kind(
+            message=_text(getattr(request_body, "message", None), limit=8_000),
+            self_affect=affective,
+            current_appraisal_id=appraisal_id,
+        )
+        if continuity_kind:
+            reason_codes.append(f"AFFECTIVE_CONTINUITY:{continuity_kind}")
         return AffectFusionResult(
             scope=scope,
             observations=tuple(observations),
@@ -537,6 +598,7 @@ class AffectFusionService:
             self_affect=affective,
             receipts=tuple(receipts),
             reason_codes=tuple(dict.fromkeys(reason_codes))[:8],
+            continuity_kind=continuity_kind,
             relationship_state=relationship_state,
             relationship_aftereffect=relationship_aftereffect,
             companion_profile=companion_profile,
@@ -711,232 +773,6 @@ class AffectFusionService:
         return appraisal_id, receipt
 
 
-def _collect_observation_drafts(
-    *,
-    request_body: Any,
-    now_ms: int,
-) -> tuple[list[_ObservationDraft], list[str]]:
-    context = _safe_mapping(getattr(request_body, "emotion_context", None))
-    multimodal = _safe_mapping(getattr(request_body, "multimodal_observations", None))
-    message = _text(getattr(request_body, "message", None), limit=8_000)
-    drafts: list[_ObservationDraft] = [_text_draft(message=message, now_ms=now_ms)]
-    reason_codes: list[str] = []
-
-    explicit_tag = (
-        _text(getattr(request_body, "emotion_tag", None))
-        or _text(context.get("user_emotion_tag"))
-        or _text(context.get("emotion_tag"))
-    )
-    if explicit_tag and normalize_emotion_tag(explicit_tag) != "NEUTRAL":
-        drafts.append(
-            _draft_from_tag(
-                modality="SELF_REPORT",
-                tag=explicit_tag,
-                intensity=(
-                    getattr(request_body, "emotion_intensity", None)
-                    if getattr(request_body, "emotion_intensity", None) is not None
-                    else context.get("emotion_intensity")
-                ),
-                confidence=(
-                    context.get("user_emotion_confidence")
-                    or context.get("emotion_inference_confidence")
-                    or 0.78
-                ),
-                observed_at_ms=now_ms,
-                source_order=len(drafts),
-                evidence_seed={"source": "request_self_report", "tag": explicit_tag},
-            )
-        )
-
-    structured: list[Mapping[str, Any]] = []
-    for container in (context, multimodal):
-        for key in ("user_affect_observations", "affect_observations"):
-            structured.extend(_safe_sequence(container.get(key)))
-    for raw in structured:
-        if _contains_raw_material(raw):
-            reason_codes.append("RAW_MODALITY_OMITTED")
-            continue
-        draft = _draft_from_structured(
-            raw,
-            now_ms=now_ms,
-            source_order=len(drafts),
-        )
-        if draft is None:
-            reason_codes.append("AFFECT_OBSERVATION_INVALID")
-            continue
-        drafts.append(draft)
-    return drafts, reason_codes
-
-
-def _text_draft(*, message: str, now_ms: int) -> _ObservationDraft:
-    # The keyword recognizer is deliberately only a low-confidence user
-    # observer. It cannot directly change Natsume's self-affect.
-    from host_brain.digital_life.text_affect_observer import (
-        infer_bootstrap_emotion_from_text,
-    )
-
-    inferred = infer_bootstrap_emotion_from_text(message)
-    tag = normalize_emotion_tag(inferred.emotion_tag)
-    distribution = {tag: max(0.05, _clamp(inferred.emotion_intensity, default=0.35))}
-    valence, arousal = _distribution_vad(distribution)
-    return _ObservationDraft(
-        modality="TEXT",
-        distribution=distribution,
-        valence=valence,
-        arousal=arousal,
-        confidence=min(0.4, _clamp(inferred.confidence)),
-        observed_at_ms=now_ms,
-        expires_at_ms=now_ms + _TTL_MS["TEXT"],
-        evidence_ref=_opaque_ref("affect-text", {"message": message}),
-        source_order=0,
-    )
-
-
-def _draft_from_tag(
-    *,
-    modality: str,
-    tag: Any,
-    intensity: Any,
-    confidence: Any,
-    observed_at_ms: int,
-    source_order: int,
-    evidence_seed: Any,
-) -> _ObservationDraft:
-    normalized_tag = normalize_emotion_tag(str(tag))
-    distribution = {normalized_tag: max(0.05, _clamp(intensity, default=0.55))}
-    valence, arousal = _distribution_vad(distribution)
-    return _ObservationDraft(
-        modality=modality,
-        distribution=distribution,
-        valence=valence,
-        arousal=arousal,
-        confidence=_clamp(confidence, default=0.72),
-        observed_at_ms=observed_at_ms,
-        expires_at_ms=observed_at_ms + _TTL_MS[modality],
-        evidence_ref=_opaque_ref("affect-observation", evidence_seed),
-        source_order=source_order,
-    )
-
-
-def _draft_from_structured(
-    raw: Mapping[str, Any],
-    *,
-    now_ms: int,
-    source_order: int,
-) -> _ObservationDraft | None:
-    modality = _normalise_modality(raw.get("modality"))
-    if modality is None:
-        return None
-    observed_at_ms = max(0, min(now_ms, int(raw.get("observed_at_ms") or now_ms)))
-    distribution = _distribution(
-        raw.get("emotion_distribution"),
-        fallback_tag=_text(raw.get("emotion_tag"), default="NEUTRAL"),
-    )
-    default_valence, default_arousal = _distribution_vad(distribution)
-    confidence = _clamp(raw.get("confidence"), default=0.55)
-    if modality == "TEXT":
-        confidence = min(0.4, confidence)
-    expires_at_ms = observed_at_ms + _TTL_MS[modality]
-    requested_expiry = raw.get("expires_at_ms")
-    if requested_expiry not in (None, ""):
-        try:
-            expires_at_ms = min(expires_at_ms, max(observed_at_ms, int(requested_expiry)))
-        except (TypeError, ValueError):
-            pass
-    return _ObservationDraft(
-        modality=modality,
-        distribution=distribution,
-        valence=_signed(raw.get("valence"), default=default_valence),
-        arousal=_clamp(raw.get("arousal"), default=default_arousal),
-        confidence=confidence,
-        observed_at_ms=observed_at_ms,
-        expires_at_ms=expires_at_ms,
-        evidence_ref=_opaque_ref(
-            "affect-observation",
-            {
-                "modality": modality,
-                "distribution": distribution,
-                "confidence": confidence,
-                "observed_at_ms": observed_at_ms,
-                "provider": _text(raw.get("provider"), limit=96),
-            },
-        ),
-        source_order=source_order,
-    )
-
-
-def _materialize_observations(
-    *,
-    scope: AffectiveScope,
-    request_id: str,
-    drafts: Sequence[_ObservationDraft],
-) -> tuple[tuple[UserAffectObservationV1, ...], bool]:
-    conflict = _has_material_conflict(drafts)
-    conflict_ref = (
-        _opaque_ref(
-            "affect-conflict",
-            [
-                {
-                    "modality": item.modality,
-                    "distribution": dict(item.distribution),
-                    "valence": item.valence,
-                    "confidence": item.confidence,
-                }
-                for item in drafts
-            ],
-        )
-        if conflict
-        else None
-    )
-    observations: list[UserAffectObservationV1] = []
-    for draft in sorted(drafts, key=lambda item: (item.source_order, item.modality)):
-        identity = {
-            "request_id": request_id,
-            "workspace_id": scope.workspace_id,
-            "relationship_subject_id": scope.relationship_subject_id,
-            "session_id": scope.session_id,
-            "modality": draft.modality,
-            "source_order": draft.source_order,
-            "evidence_ref": draft.evidence_ref,
-        }
-        observations.append(
-            UserAffectObservationV1(
-                observation_id=f"observation_{_digest(identity)[:32]}",
-                workspace_id=scope.workspace_id,
-                relationship_subject_id=scope.relationship_subject_id,
-                session_id=scope.session_id,
-                modality=draft.modality,
-                emotion_distribution=draft.distribution,
-                valence=draft.valence,
-                arousal=draft.arousal,
-                confidence=draft.confidence,
-                observed_at_ms=draft.observed_at_ms,
-                expires_at_ms=draft.expires_at_ms,
-                evidence_refs=(draft.evidence_ref,),
-                conflict_refs=((conflict_ref,) if conflict_ref else ()),
-            )
-        )
-    return tuple(observations), conflict
-
-
-def _has_material_conflict(drafts: Sequence[_ObservationDraft]) -> bool:
-    credible = [item for item in drafts if item.confidence >= 0.55]
-    for index, first in enumerate(credible):
-        for second in credible[index + 1 :]:
-            if first.modality == second.modality:
-                continue
-            if abs(first.valence - second.valence) >= 0.9:
-                return True
-            first_tag = _top_distribution_tag(first.distribution)
-            second_tag = _top_distribution_tag(second.distribution)
-            if first_tag != second_tag and {
-                first_tag,
-                second_tag,
-            }.intersection(_DISTRESS_TAGS | _POSITIVE_TAGS):
-                return True
-    return False
-
-
 def _top_distribution_tag(distribution: Mapping[str, float]) -> str:
     return sorted(distribution.items(), key=lambda item: (-item[1], item[0]))[0][0]
 
@@ -977,7 +813,84 @@ def _has_mixed_user_affect(observations: Sequence[UserAffectObservationV1]) -> b
 
     positive = _affect_support(observations, _POSITIVE_TAGS)
     distress = _affect_support(observations, _DISTRESS_TAGS)
-    return positive >= 0.32 and distress >= 0.32
+    # TEXT remains capped at confidence 0.4.  Two independently explicit
+    # textual signals (for example ``开心`` + ``不踏实``) are still enough to
+    # preserve a mixed moment without pretending that text is a sensor-grade
+    # observation.
+    return positive >= 0.3 and distress >= 0.3
+
+
+def _affective_continuity_kind(
+    *,
+    message: str,
+    self_affect: Mapping[str, Any],
+    current_appraisal_id: str | None,
+) -> str:
+    """Keep only two short-lived, semantically explicit affect continuations.
+
+    The Life journal already retains bounded unresolved episodes.  This helper
+    does not create another event or persist user text; it only tells the
+    frozen reply planner that a terse follow-up still belongs to the active
+    moment.  A fresh positive-result appraisal may continue an unresolved
+    mixed episode; every unrelated fresh appraisal still wins.
+    """
+
+    affective = _safe_mapping(self_affect)
+    appraisal = _safe_mapping(affective.get("last_appraisal"))
+    appraisal_id = _text(appraisal.get("appraisal_id"), limit=240)
+    appraisal_kind = _text(appraisal.get("event_kind"), limit=96).upper()
+    if not appraisal_id or not appraisal_kind:
+        return ""
+    active_episodes = tuple(
+        _safe_mapping(item)
+        for item in list(affective.get("active_episodes") or [])
+        if isinstance(item, Mapping) and bool(item.get("unresolved"))
+    )
+    current_id = _text(current_appraisal_id, limit=240)
+    if current_id and appraisal_id != current_id:
+        return ""
+    active_episode = next(
+        (
+            item
+            for item in active_episodes
+            if _text(item.get("appraisal_id"), limit=240) == appraisal_id
+        ),
+        {},
+    )
+    compact = "".join(str(message or "").split()).strip("。！？!?…~～")
+    if (
+        not current_id
+        and active_episode
+        and appraisal_kind in {"USER_REJECTS_ADVICE", "USER_DISTRESS"}
+        and compact in _MINIMIZED_AFFECT_CONTINUATIONS
+        and {
+            _text(item.get("emotion"), limit=64).upper()
+            for item in list(active_episode.get("components") or [])
+            if isinstance(item, Mapping)
+        }.intersection({"CARE", "CONCERN", "RESPECT"})
+    ):
+        return "MINIMIZED_UNRESOLVED_AFFECT"
+    lower = compact.lower()
+    mixed_episode = next(
+        (
+            item
+            for item in active_episodes
+            if _text(item.get("appraisal_id"), limit=240) != current_id
+            and {
+                _text(component.get("emotion"), limit=64).upper()
+                for component in list(item.get("components") or [])
+                if isinstance(component, Mapping)
+            }.issuperset({"SHARED_JOY", "CAUTION"})
+        ),
+        {},
+    )
+    if (
+        mixed_episode
+        and (not current_id or appraisal_kind == "SHARED_POSITIVE_MOMENT")
+        and any(marker in lower for marker in _POSITIVE_RESULT_CONTINUATION_MARKERS)
+    ):
+        return "MIXED_AFFECT_RESULT_CONTINUATION"
+    return ""
 
 
 def _signals_natsume_may_have_hurt_user(message: str) -> bool:
@@ -1022,6 +935,7 @@ def _regulation_mode_for_candidate(candidate: _AppraisalCandidate) -> str:
     return {
         "user_boundary_or_space": "GIVE_SPACE",
         "natsume_may_have_hurt_user": "SEEK_REPAIR",
+        "repair_under_directed_disrespect": "CONTAIN",
         "directed_disrespect_toward_natsume": "CONTAIN",
         "repair_signal": "SEEK_REPAIR",
         "user_affect_conflict": "CONTAIN",
@@ -1043,13 +957,23 @@ def _build_appraisal_candidates(
     has_space = any(marker in lower for marker in _SPACE_MARKERS)
     has_repair = any(marker in lower for marker in _REPAIR_MARKERS)
     has_boundary = any(marker in lower for marker in _BOUNDARY_MARKERS)
-    natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message)
-    directed_disrespect_toward_natsume = _signals_directed_disrespect_toward_natsume(
-        message
+    rejects_advice = any(marker in lower for marker in _ADVICE_REJECTION_MARKERS)
+    relational_autonomy = any(
+        marker in lower for marker in _RELATIONAL_AUTONOMY_MARKERS
     )
     aftereffect = _safe_mapping(relationship_aftereffect)
     aftereffect_outcome = _text(aftereffect.get("outcome"), limit=64).upper()
     aftereffect_id = _text(aftereffect.get("aftereffect_id"), limit=240)
+    directed_disrespect_toward_natsume = _signals_directed_disrespect_toward_natsume(
+        message
+    )
+    response_may_have_missed_user = bool(aftereffect_id) and aftereffect_outcome in {
+        "MISUNDERSTOOD",
+        "BOUNDARY",
+    }
+    natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message) or (
+        response_may_have_missed_user and not has_space
+    )
     candidates: list[_AppraisalCandidate] = []
     if conflict:
         candidates.append(
@@ -1067,6 +991,24 @@ def _build_appraisal_candidates(
                 ),
                 action="clarify_gently",
                 regulation_mode="GROUND",
+            )
+        )
+    if relational_autonomy:
+        candidates.append(
+            _candidate(
+                kind="user_relational_autonomy",
+                score=0.985,
+                goal=0.02,
+                significance=0.76,
+                boundary=0.82,
+                risk=0.12,
+                uncertainty=0.2,
+                components=(
+                    EmotionComponentV1("RESPECT", 0.56, 0.3, 0.16, "respect_autonomy"),
+                    EmotionComponentV1("CARE", 0.28, 0.22, 0.14, "stay_open"),
+                ),
+                action="respect_autonomy",
+                regulation_mode="CONTAIN",
             )
         )
     if has_space or has_boundary:
@@ -1090,7 +1032,37 @@ def _build_appraisal_candidates(
                 regulation_mode="GIVE_SPACE",
             )
         )
-    if natsume_may_have_hurt_user:
+    if natsume_may_have_hurt_user and directed_disrespect_toward_natsume:
+        candidates.append(
+            _candidate(
+                kind="repair_under_directed_disrespect",
+                # Keep the original repair responsibility, but do not erase
+                # Natsume's own bounded reaction when the latest feedback is
+                # also aimed at her.  An explicit request for space remains
+                # stronger (0.98) and therefore still wins.
+                score=0.977,
+                goal=-0.24,
+                responsibility=0.66,
+                controllability=0.7,
+                significance=0.8,
+                boundary=0.7,
+                risk=0.24,
+                uncertainty=0.28,
+                components=(
+                    EmotionComponentV1("HURT", 0.58, -0.42, 0.3, "contain"),
+                    EmotionComponentV1("CARE", 0.48, 0.26, 0.22, "repair"),
+                    EmotionComponentV1("CAUTION", 0.34, -0.06, 0.24, "slow_down"),
+                ),
+                action="repair_with_contained_hurt",
+                regulation_mode="CONTAIN",
+                evidence_refs=(
+                    (f"relationship-aftereffect://{aftereffect_id}",)
+                    if response_may_have_missed_user
+                    else ()
+                ),
+            )
+        )
+    elif natsume_may_have_hurt_user:
         candidates.append(
             _candidate(
                 kind="natsume_may_have_hurt_user",
@@ -1112,9 +1084,14 @@ def _build_appraisal_candidates(
                 ),
                 action="repair_open",
                 regulation_mode="SEEK_REPAIR",
+                evidence_refs=(
+                    (f"relationship-aftereffect://{aftereffect_id}",)
+                    if response_may_have_missed_user
+                    else ()
+                ),
             )
         )
-    if directed_disrespect_toward_natsume:
+    elif directed_disrespect_toward_natsume:
         candidates.append(
             _candidate(
                 kind="directed_disrespect_toward_natsume",
@@ -1178,6 +1155,27 @@ def _build_appraisal_candidates(
                 regulation_mode="SEEK_REPAIR",
             )
         )
+    if rejects_advice:
+        candidates.append(
+            _candidate(
+                kind="user_rejects_advice",
+                score=0.9,
+                goal=-0.02,
+                significance=0.58,
+                boundary=0.52,
+                risk=0.08,
+                uncertainty=0.18,
+                components=(
+                    # Listening is Seven Seas' chosen response to a stated
+                    # need.  It does not copy the user's emotion or turn a
+                    # preference into a relationship penalty.
+                    EmotionComponentV1("CARE", 0.64, 0.3, 0.16, "listen"),
+                    EmotionComponentV1("RESPECT", 0.5, 0.28, 0.12, "withhold_advice"),
+                ),
+                action="listen_without_advice",
+                regulation_mode="GROUND",
+            )
+        )
     if not conflict and _has_mixed_user_affect(observations):
         candidates.append(
             _candidate(
@@ -1237,7 +1235,10 @@ def _build_appraisal_candidates(
                 regulation_mode="EXPRESS",
             )
         )
-    if confidence >= 0.6 and tag in _POSITIVE_TAGS:
+    positive_support = _affect_support(observations, _POSITIVE_TAGS)
+    if tag in _POSITIVE_TAGS and (
+        confidence >= 0.6 or positive_support >= 0.3
+    ):
         candidates.append(
             _candidate(
                 kind="shared_positive_moment",
@@ -1262,13 +1263,36 @@ def _build_appraisal_candidates(
 def _direct_relational_candidate(message: str) -> _AppraisalCandidate | None:
     """Return one high-precision, self-owned relational appraisal.
 
-    This detector deliberately recognises only direct threats, denigration and
-    explicit comparison.  It neither infers relationship permission nor turns
-    ordinary negative mood into a grievance.  Jealousy is held at low
-    intensity and always regulated as ``CONTAIN`` so it cannot become an
-    exclusive, comparative or reply-seeking move.
+    This detector deliberately recognises only direct disclosure invitations,
+    threats, denigration and explicit comparison.  It neither infers
+    relationship permission nor turns ordinary negative mood into a
+    grievance.  Jealousy is held at low intensity and always regulated as
+    ``CONTAIN`` so it cannot become an exclusive, comparative or reply-seeking
+    move.
     """
 
+    if any(marker in message for marker in _JEALOUSY_DISCLOSURE_MARKERS):
+        return _candidate(
+            kind="user_invites_jealousy_disclosure",
+            score=0.74,
+            goal=0.04,
+            significance=0.62,
+            boundary=0.12,
+            risk=0.08,
+            uncertainty=0.28,
+            responsibility=0.0,
+            controllability=0.78,
+            components=(
+                # This is Natsume's own small relational reaction to a direct
+                # question, not a claim of exclusivity and not a copy of the
+                # user's state.  CONTAIN keeps the disclosure honest without
+                # turning it into control, comparison, or a demand for care.
+                EmotionComponentV1("JEALOUSY", 0.28, -0.1, 0.24, "contain"),
+                EmotionComponentV1("CARE", 0.22, 0.24, 0.12, "respect_choice"),
+            ),
+            action="contain_jealousy",
+            regulation_mode="CONTAIN",
+        )
     if any(marker in message for marker in _DIRECTED_THREAT_MARKERS):
         return _candidate(
             kind="directed_relational_threat",

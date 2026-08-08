@@ -237,6 +237,7 @@ def build_process_scheduler_container(
         runtime_context_application=runtime_context_application,
         action_preview_service=action_preview_service,
         acceptance_effect_dispatcher=acceptance_effect_dispatcher,
+        clock=clock_now,
     )
     service = SchedulerCommandService(
         runtime=runtime,

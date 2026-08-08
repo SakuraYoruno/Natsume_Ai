@@ -79,6 +79,14 @@ from .research_paired_execution import (
     ResearchPairedExecutionError,
     ResearchPairedExecutionResult,
     ResearchPairedExecutionRunner,
+    ResearchTransientArmOutputV1,
+)
+from .research_quality_verifier import (
+    AttestedResearchQualityVerifier,
+    RESEARCH_QUALITY_RUBRIC_V1,
+    ResearchQualityVerifierError,
+    research_quality_profile_digest,
+    research_quality_rubric_digest,
 )
 from .research_domain import (
     ResearchCognitiveRanker,
@@ -183,6 +191,12 @@ __all__ = [
     "ResearchPairedExecutionError",
     "ResearchPairedExecutionResult",
     "ResearchPairedExecutionRunner",
+    "ResearchTransientArmOutputV1",
+    "AttestedResearchQualityVerifier",
+    "RESEARCH_QUALITY_RUBRIC_V1",
+    "ResearchQualityVerifierError",
+    "research_quality_profile_digest",
+    "research_quality_rubric_digest",
     "ResearchCorpusBindingV1",
     "ResearchExecutionBudgetV1",
     "ResearchExecutionProfileV1",

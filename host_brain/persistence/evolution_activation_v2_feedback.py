@@ -59,9 +59,13 @@ class EvolutionActivationFeedbackMixin:
                 if (
                     str(existing["version_digest"]) != digest
                     or str(existing["payload_json"]) != encoded
-                    or str(existing["provenance_ref"]) != provenance
                 ):
                     self._invalid("EVOLUTION_POLICY_VERSION_REPLAY_DRIFT")
+                # The version name is content-addressed by ``payload``.  Two
+                # independently observed feedback signals may therefore
+                # converge on the same immutable version after an interrupted
+                # stage.  Keep the first-seen provenance on the version row;
+                # every signal still owns its separate proposal/trace record.
                 return digest
             conn.execute(
                 """

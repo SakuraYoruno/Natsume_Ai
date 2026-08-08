@@ -498,6 +498,7 @@ class TaskTerminalReconciliationClassifierMixin:
         return True
 
     def _parallel_terminal_snapshot_matches(
+        self,
         decision: Mapping[str, Any],
         observation: Mapping[str, Any],
     ) -> bool:

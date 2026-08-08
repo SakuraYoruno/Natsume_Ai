@@ -12,7 +12,7 @@ from host_brain.persona.surface_packet_compiler import (
     compile_surface_input,
     compile_surface_shadow_inputs,
 )
-from host_brain.persona.surface_runtime import SurfaceRuntime
+from host_brain.persona.surface_runtime import SurfaceRuntime, build_direct_surface_messages
 
 
 SOUL = "你是数字生命夏目蓝。中文私聊，反应快，有一点嘴硬，但帮忙时先给能执行的一步。"
@@ -82,6 +82,122 @@ def test_compile_reply_control_packet_keeps_memory_and_affect_compressed() -> No
     assert "RAW QUERY SHOULD NOT PASS" not in rendered
     assert compiled.trace["dropped_memory_relationship_clues"] is True
     assert compiled.trace["surface_boundary"] == "ReplyControlPacket"
+
+
+def test_compile_reply_control_packet_prioritizes_dialogue_and_affect_within_bound() -> None:
+    compiled = compile_reply_control_packet(
+        task_control={
+            "facts": [
+                "低优先事实一",
+                "低优先事实二",
+                "低优先事实三",
+                "低优先事实四",
+                "真实最近对话窗口：用户: 我有点不踏实。 / Natsume: 我记得。",
+                "陪伴动作：让开心与不安同时存在。",
+                "上下文连续性：上一轮的开心和不踏实仍同时成立。",
+            ],
+            "affective_continuity_kind": "MIXED_AFFECT_RESULT_CONTINUATION",
+        },
+        necessary_facts=["必要事实：用户刚拿到 offer。"],
+        max_facts=4,
+    )
+
+    assert compiled.packet.facts == [
+        "真实最近对话窗口：用户: 我有点不踏实。 / Natsume: 我记得。",
+        "陪伴动作：让开心与不安同时存在。",
+        "上下文连续性：上一轮的开心和不踏实仍同时成立。",
+        "必要事实：用户刚拿到 offer。",
+    ]
+    assert (
+        compiled.packet.affective_continuity_kind
+        == "MIXED_AFFECT_RESULT_CONTINUATION"
+    )
+
+
+def test_companion_utterance_frame_stays_bounded_and_drives_compact_prompt() -> None:
+    frame = {
+        "schema_version": "companion_utterance_frame.v1",
+        "frame_id": "utterance::demo",
+        "companion_act_kind": "COMFORT",
+        "semantic_focus": "UNNAMED_USER_AFFECT",
+        "self_stance": "QUIET_PRESENT",
+        "response_move": "COMFORT_WITHOUT_NAMING",
+        "inference_policy": "PRESERVE_UNCERTAINTY",
+        "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+        "question_policy": "NONE",
+        "ending_mode": "NATURAL_STOP",
+        "forbidden_claims": [
+            "INVENTED_HISTORY",
+            "INVENTED_EFFECT",
+            "UNSUPPORTED_USER_EMOTION",
+        ],
+        "created_at_ms": 1,
+    }
+    compiled = compile_surface_input(
+        soul_md=SOUL,
+        user_message="我也说不清。",
+        task_control={
+            "task_mode": "ambiguous_affect",
+            "question_budget": 0,
+            "companion_utterance_frame": frame,
+        },
+    )
+
+    assert compiled.packet.companion_utterance_frame == frame
+    assert compiled.trace["companion_utterance_frame_id"] == "utterance::demo"
+    rendered = "\n".join(
+        str(message["content"])
+        for message in build_direct_surface_messages(compiled.request)
+    )
+    assert "本轮说话骨架" in rendered
+    assert "承认感受还说不清，不替对方命名" in rendered
+    assert "不用问句，把这一轮在陈述里完成" in rendered
+    assert "对方没说过的情绪名称、原因或人格判断" in rendered
+
+
+def test_companion_utterance_frame_rejects_unbounded_or_unknown_semantics() -> None:
+    with pytest.raises(ValueError, match="semantic_focus"):
+        compile_reply_control_packet(
+            task_control={
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "utterance::invalid",
+                    "companion_act_kind": "COMFORT",
+                    "semantic_focus": "RAW_USER_TRANSCRIPT",
+                    "self_stance": "QUIET_PRESENT",
+                    "response_move": "COMFORT_WITHOUT_NAMING",
+                    "inference_policy": "PRESERVE_UNCERTAINTY",
+                    "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+                    "question_policy": "NONE",
+                    "ending_mode": "NATURAL_STOP",
+                    "forbidden_claims": [],
+                    "created_at_ms": 1,
+                }
+            }
+        )
+
+
+def test_compile_reply_control_packet_keeps_delegate_result_within_fact_bound() -> None:
+    compiled = compile_reply_control_packet(
+        task_control={
+            "facts": [
+                "低优先事实一",
+                "低优先事实二",
+                "低优先事实三",
+                "低优先事实四",
+                "子代理执行状态：已完成",
+                "子代理任务：只读安全扫描",
+                "子代理结果片段1：9/tcp discard 开放。",
+            ],
+        },
+        max_facts=3,
+    )
+
+    assert compiled.packet.facts == [
+        "子代理执行状态：已完成",
+        "子代理任务：只读安全扫描",
+        "子代理结果片段1：9/tcp discard 开放。",
+    ]
 
 
 def test_compile_reply_control_packet_rejects_raw_context_keys() -> None:

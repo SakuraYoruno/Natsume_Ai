@@ -930,12 +930,12 @@ def _remaining_queries_callback(
             source_ref="obs-app://remaining/canon-sync",
             degraded_state=(
                 ProjectionDegradedState.SOURCE_UNAVAILABLE
-                if str(canon_payload.get("reason_code") or "") == "CANON_SYNC_FAILED"
+                if canon_payload.get("source_available") is False
                 else ProjectionDegradedState.HEALTHY
             ),
             degraded_detail=(
                 "canon sync read source is unavailable"
-                if str(canon_payload.get("reason_code") or "") == "CANON_SYNC_FAILED"
+                if canon_payload.get("source_available") is False
                 else None
             ),
         )

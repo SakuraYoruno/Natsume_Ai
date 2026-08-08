@@ -45,6 +45,7 @@ flowchart LR
 | Python line coverage | 72.22%（199504/276262） | Unit／Contract／Integration／Security／本地 E2E 离线稳定基线；低于 75% Gate，真实服务仍待补测 |
 | Python branch coverage | 55.08%（49976/90738） | 同一去重数据集的 branch baseline；低于 65% Gate |
 | Monitor read-model line／branch／function | 61.31%／52.78%／53.59% | 27 项通过并生成 LCOV；低于 80%／70% 目标 |
+| Monitor 非安全当前工作树 line／branch／function | 93.67%／70.83%／83.90% | 45 项通过；显式排除 Security 页面与安全 organ model，只证明非安全 read-model 达到 80%／70% 门槛，安全范围为 `NOT_RUN_USER_SKIPPED` |
 | Unit 分片预检 | `02a24e4b8` 上 18/18 JUnit：8310 passed／8 skipped／0 failed／0 errors | 930 个 Unit 文件均进入固定分片；记 `PASS_WITH_8_CLASSIFIED_SKIPS`，不代表 Contract／Integration／E2E 或覆盖率通过 |
 | Contract 分片预检 | `4724af2f9` 上 4/4 JUnit：1949 passed／0 skipped／failed／errors | 当前稳定 Contract 全绿；不代表真实服务、覆盖率或体验验收 |
 | Integration 稳定预检 | `15cebc540` 六片首跑 849 passed／3 failed／4 skipped；`8fbb6a833` 只修复两项时间夹具后重跑受影响 shard-0／2 为 302 passed | 合并未变化四片后为 852 passed／4 classified skips／0 failed／error，记 `PASS_WITH_4_CLASSIFIED_SKIPS`；不包含真实 Docker／Redis、E2E、Security、覆盖率或体验验收 |
@@ -55,6 +56,10 @@ flowchart LR
 
 测试数、历史 PASS、静态类和 fixture 均不得推导出覆盖率百分比。
 
+2026-08-07 的当前非安全 Unit 覆盖预检在约 4800 个已执行测试后暴露 5 个过时或非确定性断言：Scheduler 子授权时钟早于冻结父授权、Gateway 仍期待已拆分的旧 delivery thread、OBS app-local 隔离受 30 秒 Life freshness 干扰，以及两组 Prefrontal 测试仍要求恢复已退役的 Endocrine／Limbic／Pain writer。修复后的 29 项相邻回归通过；失败预检 coverage 数据不得合并为发布收据，完整 Unit／Contract／Integration／本地 E2E 必须从新提交重新采集。
+
+随后 `d696417c47` 的六片完整非安全 Unit 首轮运行到终态：7939 passed、7 failed、8 classified skips、224 deselected。7 个失败并非生产异常：Mode fixture 二次读取墙钟导致 canonical timestamp 相差 1 ms；Thalamus 三项仍期待已退役的 IntentAgent／Workspace 路由；Prefrontal 三项没有显式选择 legacy compatibility ports。测试现与生产合同对齐，目标复跑 7/7。Pentest 静态路由被拆为名称含 `pentest` 的独立测试，使 `-k not pentest` 明确 deselect，而不是藏在通用矩阵中运行。完整六片仍须重新绿灯后才能合并 coverage。
+
 ### 1.2 功能和验收覆盖
 
 | 领域 | 当前事实 | 当前有效结论 |
@@ -64,7 +69,7 @@ flowchart LR
 | Architecture 静态 Gate | 大量切片已通过，状态文件仍包含不同时点的 PASS/FAIL 文本 | 必须在同一干净 SHA 重新采集 |
 | PlanningSearch 实现 | 通用 Service 已接入 Plan/Pentest，相关测试定义约 451 个 | 证明代码和合同存在，不证明真实收益 |
 | PlanningSearch shadow | 10 个 fixture 场景的 scripted/shadow 报告 | `SIMULATION_SHADOW`，无 promotion 资格 |
-| Research／Code／Pentest 真实收益 | 未找到 24／20／30 固定队列的合格最终回执 | 0/3 域通过 |
+| Research／Code／Pentest 真实收益 | Research 24 题与 Code v3 20 题真实外部双臂均已通过；Pentest 30 次待执行 | 2/3 域通过，三域总状态仍为 PARTIAL |
 | 数字生命工程链 | Affect、关系、语音、Avatar 有大量定向测试和局部实测 | `WIRED_PARTIAL` |
 | 72 条情感场景 | 机器状态为 `MEASUREMENT_PENDING` | 0/72 完成正式测量 |
 | 48 条多轮人工盲测 | 机器状态为 `NOT_RUN` | 0/48 完成正式评审 |
@@ -251,6 +256,8 @@ Secure Ingress
 - Lab 只能产出 proposal，不能直接写生产状态。
 - Skill/Feedback/Knowledge/Identity activation 必须查询真实 Lab、Review、Regression 和 version authority。
 - 完成真实 apply→rollback；Knowledge 冲突处置；Identity no-change 发布、重大差异阻断和 exact previous rollback。
+- Knowledge 必须在真实 Host 召回回合进入最终 Surface facts，`NO_RECALL` 普通回合查询数必须为 0；deprecate／rollback 后同一查询不得继续命中。
+- Identity candidate 必须改变真实 compact prompt 的 bounded style directive，exact rollback 必须恢复 previous snapshot、directive 与 prompt identity；不得用 release 快照覆盖当前 Affect 或 `Soul.md`。
 - Soul 核心价值、亲密身份和敏感推断不得由在线学习自动改写。
 
 ### A14 Edge、OBS 与 Operator
@@ -434,19 +441,28 @@ Secure Ingress
 
 | 轴 | PASS 条件 | 当前基线 |
 |---|---|---|
-| A Architecture 2.0 | A01～A15 全部绑定最终 SHA 通过 | `NOT_RUN_CURRENT_SHA` |
-| B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `BENEFIT_UNPROVEN` |
-| C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `MEASUREMENT_PENDING` |
-| D 真实全栈 | 本地强制服务、路线、故障、恢复、性能和回滚通过 | `RETEST_REQUIRED_FINAL_SHA` |
-| 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `UNKNOWN` |
+| A Architecture 2.0 | A01～A15 全部绑定最终 SHA 通过 | `NON_SECURITY_STATIC_249_RUNTIME_AND_REAL_STACK_PASS_A09_A12_SKIPPED_COVERAGE_PENDING` |
+| B PlanningSearch | 机械 Gate 全部通过，三域完成；至少一个非 Pentest 域收益通过 | `RESEARCH_CODE_PASS_SCOPE_INHERITED_PENTEST_NOT_RUN_USER_SKIPPED` |
+| C 数字生命人感 | 72 场景、48 盲测、七日体验及适用三模态门槛通过 | `FAIL_REAL_48_TEXT_PLUS_RESTART_STRUCTURAL_6_OF_6_HUMAN_FULL_0_OF_6_18_DRIVER_PENDING` |
+| D 真实全栈 | 本地强制服务、路线、故障、恢复、性能和回滚通过 | `PARTIAL_NON_SECURITY_DOCKER_HOST_OBS_MONITOR_GATEWAY_PASS` |
+| 全系统代码覆盖 | 全仓、关键模块、变更覆盖门槛通过 | `FAIL_CURRENT_SHA_LINE_68_50_BRANCH_51_40` |
 | pytest 收集 | 0 error | `PASS_11881_ITEMS` |
 
 当前唯一诚实结论：
 
 ```text
 SYSTEM_V2 = INCOMPLETE
-ARCHITECTURE_V2_ACCEPTANCE = NOT_RUN_CURRENT_SHA
-PLANNING_SEARCH_BENEFIT = UNPROVEN
-DIGITAL_LIFE_HUMAN_LIKENESS = NOT_RUN
-WHOLE_SYSTEM_LINE_BRANCH_COVERAGE = BASELINE_RUNNING
+ARCHITECTURE_V2_ACCEPTANCE = PARTIAL_NON_SECURITY_PASS_SECURITY_USER_SKIPPED
+PLANNING_SEARCH_BENEFIT = PARTIAL_RESEARCH_CODE_PASS_PENTEST_USER_SKIPPED
+DIGITAL_LIFE_HUMAN_LIKENESS = FAIL_PENDING_THREE_REVIEWERS
+WHOLE_SYSTEM_LINE_BRANCH_COVERAGE = FAIL_CURRENT_SHA_LINE_68_50_BRANCH_51_40
 ```
+
+## 11. 2026-08-07 非安全覆盖执行增量
+
+- Unit run7：7954 个 JUnit testcase，另有 2 个成功 subtest；合计 7956 个 pytest outcome，0 failure/error、8 classified skips；Unit-only line 57.55%、branch 39.85%。
+- Contract：1898/1898 通过。
+- 本地 E2E：68/68 通过，明确排除含 Pentest 的旧 golden fault matrix。
+- Integration：当前 SHA 完整六片为 862 passed、2 Redis env skips、0 failed/error；首轮 11 个失败已全部在完整相邻集合中关闭。修复覆盖共享 clock、startup exact replay 和 fenced late heartbeat，不涉及网络安全。
+- Unit／Contract／Integration／E2E 去重后共 10786 个 outcome：10776 passed、10 classified skips、0 failed/error。完整生产源码分母 line 68.50%（191578/279662）、branch 51.40%（47284/92000）、综合 64.27%，低于 75%／65% Gate，结论为 `FAIL_BELOW_COVERAGE_GATE`。
+- 覆盖摘要 SHA-256 为 `0e012682d1a50db53c5b2cac8e2b9186fe7e993d0a2ed3d72c203f38291a6bd2`。三人数字生命盲评仍缺，因此 A15 继续未完成；A09、A12、Pentest、网络安全维持 `NOT_RUN_USER_SKIPPED`。

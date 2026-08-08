@@ -142,6 +142,15 @@ def expression_preference_hints(
     return [instruction for _score, instruction in ranked[:3]]
 
 
+def expression_preference_directive(
+    policy: Mapping[str, Any] | None,
+) -> str:
+    hints = expression_preference_hints(policy)
+    if not hints:
+        return ""
+    return "已激活的长期表达偏好（本轮执行）：" + "；".join(hints)
+
+
 def resolve_prefrontal_bond_user_id(
     value: Any = None,
     *,
@@ -192,6 +201,7 @@ __all__ = [
     "evolution_startup_grace_s",
     "evolution_user_cooldown_s",
     "expression_preference_hints",
+    "expression_preference_directive",
     "loneliness_event_emit_cooldown_s",
     "loneliness_milestone_cooldown_s",
     "loneliness_signal_log_cooldown_s",

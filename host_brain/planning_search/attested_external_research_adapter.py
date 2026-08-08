@@ -1,11 +1,14 @@
-"""Canonical-model adapter for D20c external Research evidence.
+"""Canonical-model adapter for attested external planning evidence.
 
 This module is deliberately outside the pure Research successor catalog.  It
 does not choose a provider or inspect credentials: it asks the already
 composed :class:`ModelAttemptService` to execute one fresh foreground request,
 then converts only a complete, non-cached single-attempt result into the
-immutable D20c attestation contracts.  Missing external configuration remains
-an execution failure, not simulated benefit evidence.  Before that call it
+immutable D20c attestation contracts.  The public Research name remains for
+compatibility, while callers such as the Code benchmark preserve an explicit
+non-Research scene and generic planning metadata. Missing external
+configuration remains an execution failure, not simulated benefit evidence.
+Before that call it
 reopens the canonical audit and rejects any prior record for the exact
 execution identity, so a crash cannot silently reissue an external request.
 """
@@ -57,7 +60,7 @@ class AttestedExternalResearchRun:
 
 
 class AttestedExternalResearchAdapter:
-    """Run one fresh Research arm through canonical model-attempt authority."""
+    """Run one fresh planning arm through canonical model-attempt authority."""
 
     def __init__(
         self,
@@ -81,6 +84,7 @@ class AttestedExternalResearchAdapter:
         messages: Sequence[Mapping[str, Any]],
         deadline_ms: int,
         cognitive_tier: str = "RESEARCH",
+        scene_type: str = "RESEARCH",
     ) -> AttestedExternalResearchRun:
         """Execute one non-cached external arm or reject it as non-attestable.
 
@@ -95,6 +99,7 @@ class AttestedExternalResearchAdapter:
         normalized_arm_id = _text(arm_id, field="arm_id", limit=128)
         normalized_prompt_id = _text(prompt_id, field="prompt_id", limit=240)
         normalized_tier = _text(cognitive_tier, field="cognitive_tier", limit=80).upper()
+        normalized_scene = _text(scene_type, field="scene_type", limit=80).upper()
         if isinstance(messages, (str, bytes, bytearray)):
             raise AttestedExternalResearchError("messages must be an explicit sequence")
         normalized_messages = tuple(dict(item) for item in messages)
@@ -114,10 +119,22 @@ class AttestedExternalResearchAdapter:
             lookup=self._attempt_audit_lookup,
         )
 
+        metadata = (
+            {
+                "research_external_execution_id": normalized_execution_id,
+                "research_arm_id": normalized_arm_id,
+            }
+            if normalized_scene == "RESEARCH"
+            else {
+                "planning_external_execution_id": normalized_execution_id,
+                "planning_arm_id": normalized_arm_id,
+                "planning_scene_type": normalized_scene,
+            }
+        )
         result = await self._model_attempt_service.complete(
             ModelAttemptRequest(
                 request_id=normalized_execution_id,
-                scene_type="RESEARCH",
+                scene_type=normalized_scene,
                 cognitive_tier=normalized_tier,
                 prompt=PromptRef(
                     normalized_prompt_id,
@@ -126,10 +143,7 @@ class AttestedExternalResearchAdapter:
                 deadline_ms=deadline_ms,
                 max_attempts=1,
                 foreground=True,
-                metadata={
-                    "research_external_execution_id": normalized_execution_id,
-                    "research_arm_id": normalized_arm_id,
-                },
+                metadata=metadata,
             )
         )
         return _attest_result(

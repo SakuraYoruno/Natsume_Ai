@@ -16,7 +16,7 @@
 2. 记录 commit SHA、配置 digest、需要同步的非仓库模型资产清单。
 3. 用户明确允许后，在 Edge 电脑拉取同一 `dev`。
 4. 校验模型路径、GPU、ASR、TTS、VTS/VRM 与网络，不直接启动全部服务。
-5. 分别启动 Edge health、Voice、Avatar，再连接 Host。
+5. 以显式 `-DataRoot` 启动 Edge health、Voice、Avatar，再连接 Host；验收源码目录和运行数据目录都必须与日常环境隔离。
 6. 执行固定情感场景、断线、重连、barge-in 和同步偏差测试。
 7. 停止 Edge 服务并收集脱敏 receipt；模型和日志留在 Edge 本地。
 
@@ -30,3 +30,5 @@
 ## 同步内容
 
 Git 只同步代码、非密钥配置 schema 和声线 manifest。模型权重、参考音频、训练集、生成样例、用户数据和运行日志通过用户选择的本地方式同步并校验 digest。
+
+停止 Edge 时必须同时收口主进程及其 GPT-SoVITS persistent worker，并确认 17800 已释放。真实语音探针为 `scripts/runtime/test_edge_real_voice_acceptance.py`；它从进程环境读取 HMAC，不接受密钥参数，也不会把密钥写入报告。

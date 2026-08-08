@@ -22,7 +22,13 @@ async def _async_stub(**_kwargs: Any) -> Any:
     return None
 
 
-def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRuntimeApplicationPorts:
+def _agent_runtime_ports(
+    *,
+    ledger: Any,
+    model_attempt_service: Any,
+    resolve_expression_preferences: Any = None,
+    resolve_active_identity: Any = None,
+) -> AgentRuntimeApplicationPorts:
     context_read_ports = ConversationContextReadPorts(
         conversation_history=lambda: "conversation-history",
         conversation_turn_store=lambda: "conversation-turn-store",
@@ -51,6 +57,8 @@ def _agent_runtime_ports(*, ledger: Any, model_attempt_service: Any) -> AgentRun
         context_read_ports=context_read_ports,
         task_status_projection=lambda: object(),
         persist_post_process_audit=_async_stub,
+        resolve_expression_preferences=resolve_expression_preferences,
+        resolve_active_identity=resolve_active_identity,
     )
 
 
@@ -62,6 +70,8 @@ def test_surface_runtime_ports_bind_one_lifespan_authority_pair(
     snapshot_reader = object()
     model_attempt_service = object()
     observed: dict[str, Any] = {}
+    expression_policy = {"tag_scores": {"ai_tone": -1}}
+    active_identity = {"snapshot": {"snapshot_ref": "identity://active"}}
     monkeypatch.setattr(
         surface_runtime_composition,
         "build_surface_context_packet",
@@ -72,6 +82,10 @@ def test_surface_runtime_ports_bind_one_lifespan_authority_pair(
         agent_runtime_ports=_agent_runtime_ports(
             ledger=ledger,
             model_attempt_service=model_attempt_service,
+            resolve_expression_preferences=(
+                lambda **_kwargs: expression_policy
+            ),
+            resolve_active_identity=lambda: active_identity,
         ),
         life_authority_provider=lambda: (command_service, snapshot_reader),
     )
@@ -93,6 +107,12 @@ def test_surface_runtime_ports_bind_one_lifespan_authority_pair(
         },
     }
     assert ports.model_attempt_service() is model_attempt_service
+    assert ports.resolve_expression_preferences is not None
+    assert ports.resolve_expression_preferences(
+        persona_user_id="default"
+    ) == expression_policy
+    assert ports.resolve_active_identity is not None
+    assert ports.resolve_active_identity() == active_identity
     assert ports.build_surface_context_packet(user_message="显式端口") == {
         "status": "BOUND"
     }

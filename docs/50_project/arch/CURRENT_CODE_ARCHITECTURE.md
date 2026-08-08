@@ -67,9 +67,31 @@ flowchart TB
 
 ## 4. 对话与表达
 
-`host_brain/surface_runtime/` 负责普通对话上下文、记忆 grounding、情感计划和流式输出。`affective_streaming.py` 管理稳定分句与打断；`life_context.py` 和 `life_projection.py` 读取 canonical Life 状态。纯文本回复不再把双方情绪重置为 `NEUTRAL`。
+`host_brain/surface_runtime/` 负责普通对话上下文、记忆 grounding、情感计划和流式输出。`affective_streaming.py` 管理稳定分句与打断；`life_context.py` 和 `life_projection.py` 读取 canonical Life 状态。纯文本回复不再把双方情绪重置为 `NEUTRAL`。冲突／修复深路径在一次外部模型调用中生成两个候选；日语声线模式保留每个候选的中文正文、日语正文和情绪字段，确定性选择后才交给统一 Surface 解析与交付。
+
+双候选是措辞选择策略，不是模型车道 authority。`runtime_path=realtime_companion` 由 Host 在路由承诺后写入，单回复和 buffered 双候选都使用 `CHAT_SURFACE_REALTIME／Tier B`；只有不属于普通陪伴的 Task／复杂执行 Surface 才使用 `CHAT_SURFACE／Tier A`。这样保留关系边界与候选择优，不会因为低置信情绪观察把日常对话静默升级到高延迟 Pro 模型。
+
+所有 provider 仍消费同一个 server-owned `OutputContract`。OpenAI-compatible provider 使用 `response_format`；Gemini 原生客户端必须把同一合同映射为 `response_mime_type=application/json`，在 schema 合同时再附加原 schema。该适配不允许 provider 自行放宽字段，也不增加 JSON 文本补救请求；不能产生合规对象时继续在 ModelAttempt 边界拒绝。
+
+多轮连续性以 `conversation_turn.turn_index` 为 canonical 顺序；`ContextRepository` 和 Surface 专用 `RuntimeReadRepository` 都必须使用该顺序，`ts_ms` 只描述各进程观察到的墙钟时间。Fusion 在本轮没有新 appraisal 时，只能从仍活跃且未解决的 canonical episode 派生受控 continuity enum；它不会复制历史原文、创建第二份 self-affect 或增加 journal 写入。Planner 将该 enum 冻结进同一 `AffectiveTurnPlan`，让“没事”仍保留未解决低落、让新好消息同时承接此前不安。`GIVE_SPACE` 的候选还会在本地硬拒绝要求用户主动想念／联系的反向施压，不能只靠软分数带过。
+
+`AffectiveTurnPlan` 现在内嵌 `CompanionUtteranceFrameV1`。Planner 将 `CompanionAct` 编译为有限的说话骨架，Surface 的 compact、rich、native streaming 与 legacy-isolated 兼容入口使用同一 renderer；caller 和 `render_policy` 无权注入或覆盖该字段。frame 只存在于本轮既有计划和 packet 中，不建立第二个情感状态机或普通对话账本。生产输入编译器也不再重复注入同义的自然语言 facts／must-not-do 大段规则，只保留真实 continuity fact 和原有 style anchor。
+
+当 frame 明确为 `REPAIR` 或 `HOLD_COMPLEXITY` 时，Surface 还会附加对应的七海正向节奏样本。样本集只有 3+2 条，绑定本地原作行号并在代码版本中冻结；运行时不扫描 3.2MB 台词表、不访问 Repository，也不把样本文本当作当前事实。50 次 prompt build 的均值为 0.082ms、最大 0.269ms，模型调用数和重试上限不变。
+
+真实留出对照证明，source-bound 样本不能覆盖另一个系统层内嵌的完整 mixed 答案：该整句仍会跨场景被逐字选择。当前 `surface_affective_native_stream.py` 已删除首次候选和语义重试中的完整 mixed 示范句，只传“具体结果、七海自身高兴与悬心、两候选不同节奏”的 typed 目标；`surface_runtime.py` 的极端 fail-soft 也按当前用户措辞选择有界回复，不再复用一个全局句子。真实同案复验已确认 exact reuse 为 0，但 0/3 仍失败，所以该变化只关闭模板污染，不提升模型自然表达状态；它不增加 writer、Repository、模型请求或重试。
+
+Fusion 不再让修复责任覆盖七海的自我感受：当上一条 accepted response 已形成 `MISUNDERSTOOD`，而当前输入又是直接针对七海的冒犯时，单一 composite Appraisal 同时保存 `HURT + CARE + CAUTION`。Planner 保持 `REPAIR`，但将 self affect、frame、Voice 与 Avatar 冻结为克制受伤的同一表达；没有待修复关系的独立冒犯仍是温和设界限，明确空间请求仍优先退开。这一变化只改变既有 Life episode 和本轮计划内容，不增加持久路径或调用次数。
+
+Surface 不再允许旧的通用修复重试覆盖这一 canonical 决定。typed composite frame 会选择专用首轮／重试微策略，并在候选评分与发送 Gate 同时要求有界的第一人称受伤语义；纯道歉不能冒充该 frame 已实现。命中失败仍只消费原有最多一次重试，第二次失败使用同门禁验证过的窄 fallback，不增加表、同步写入或模型请求上限。
+
+Surface packet 继续保持最多 8 条事实，但不再机械保留前 8 条泛化状态。必要事实、真实最近对话、陪伴动作、continuity、记忆线索、已完成的子代理结果和输入感知边界优先，身份／后台状态等低优先事实只填剩余槽位。continuity 另以内部 typed field 穿过 packet compiler，输出 Gate 不再依赖可能被截掉的中文 marker：未解决低落不能被宣布为“那就好／一切正常”，混合结果必须至少保留一处不安、没底、顾虑或慢慢消化的语义。命中后复用既有唯一语义重试；无 typed continuity 的普通聊天不执行这两个 Gate。
 
 当前语言策略为中文文本展示、日语 TTS。Host 通过 `ExpressionPlan` 选择 voice profile；目标 Edge 使用 `configs/voice/gpt_sovits_nanami_v4.json` 与 GPT-SoVITS V4 权重生成语音。
+
+Edge 的 persistent TTS adapter 在子进程发出 `ready` 前拥有该进程的唯一生命周期责任。启动、模型加载、READY 等待或 READY 拒绝任一步失败，都必须在返回 Manager 之前同步 `close()`；不能把超时 worker 留给 GC，也不能让下一次合成在旧 worker 仍占 RAM／VRAM 时继续创建新进程。合成阶段的超时沿用同一 fail-closed 回收规则，下一次请求才允许启动一个干净 worker。
+
+远端 A15 已验证该边界：清理 17 个历史残留后，干净启动、真实物理播放和受控 5 秒 READY timeout 全部结束于单一常驻 worker；Voice terminal receipt 为 `TTS_PLAYBACK_FINISHED/APPLIED`，超时探针返回后没有新增 PID、RAM 或 VRAM 常驻。Avatar 仍因 VTS 未连接独立拒绝，不能由 Voice PASS 推高。
 
 ## 5. Governed Task Runtime
 
@@ -86,9 +108,35 @@ Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Disp
 
 这些机制不得被重新加到无副作用的普通闲聊首字路径中。
 
+普通实时 Chat 的记忆规划先产生 `NO_RECALL／MAY_RECALL／MUST_RECALL`，再决定是否访问长期记忆。`NO_RECALL` 在计划边界不再进入短期显式记忆兼容 helper；该 helper 旧实现本身也有内容级短路，因此此处是 authority 和调用合同收敛，不能单独作为已证明的 SQLite 性能收益。Surface 仍按自己的连续性合同读取一次有界近期窗口，不删除关系连续性或显式记忆召回。
+
+版本化表达偏好也遵守普通聊天的轻量边界：Surface 通过 app-local port 读取 active projection，不发起第二次模型调用或独立写入；只有 active payload 能产生一条最多 180 字的 directive。生产默认 compact prompt 会把该行直接放进最终模型输入，baseline 不增加文本。ModelAttempt 沿用现有行记录 prompt digest，并仅在 directive 真正出现在最终 messages 时附带无正文 digest，供 apply／rollback 实测判定；它不是新的同步审计链。
+
+Knowledge 与 Identity 不再只是 activation ledger。Agent Runtime 仅在 Surface recall planner 已决定需要记忆时，通过 app-local port 查询当前 workspace 的 personal/project active Knowledge；`NO_RECALL` 普通聊天不访问 Knowledge OS，也不追加 shadow compare。active Identity release 只向 Surface 提供结构化 style fingerprint，经本地确定性映射成为最多 180 字的表达底色；它不读取快照中的私密正文、不使用 release 情绪覆盖当前 Life affect，也不能越过 `Soul.md`。两条路径均为只读、失败可降级，不新增模型调用或对话写事务。
+
+Knowledge／Identity 的 live acceptance 不共享 production activation identity 与 Lab experiment identity。每个验证动作先以唯一 scope 运行隔离双臂，得到不可变 trusted report；随后另建目标 kind／真实 version 精确绑定的 proposal，再进入 Review 和 activation。这样同一合成对照可被多个动作安全复用，但实验 replay 不会覆盖或冒充真实版本。Identity 中断续跑只接受 acceptance runner 自己生成的 release ref，已有基线作为 exact predecessor 保留，禁止通过删除 projection 绕过恢复语义。
+
+Knowledge 的最终消费证据位于 ModelAttempt 边界，而不是生成前的 task-control plan。Surface 只在 `已激活知识：...` 事实和对应 content-addressed entry refs 均存在、且全部实际出现在最终 messages 时，计算排序后的 entry-set digest 与数量；已有 attempt journal 只保留这两个非正文值。普通聊天、未召回和已退役 Knowledge 均不产生该 metadata，不新增持久化路径或模型调用。
+
+该在线链已在 `1e6addc1` 用真实生产边界关闭：Knowledge 从无 active evidence 到候选 set digest／count 精确出现，再在 deprecate 后消失；Identity 从 previous snapshot 切到候选并精确回滚。收据覆盖 Docker Lab、Review 和真实外部模型，但不把单轮工程因果提升为人工陪伴体验或远端三模态完成。
+
+轻小说深读是普通召回之后的领域增强，不属于所有陪伴回合的固定前置步骤。消息先通过无 IO 的必要条件判定；只有可能在询问选书或详情时，才读取 durable 最近推荐上下文并运行 packet-aware 完整判定。无关陪伴消息不会读取推荐偏好或加载深读持久化模块；真正的指代追问只读取一次上下文，仍保留 cache、网页深读和 evidence 回写。
+
+Gateway Chat 因跨进程投递仍会生成紧凑 TaskGraph 和 durable Acceptance Effect，但它不再同步执行全部派生投影。编译器把可信 `route_type=chat` 固化在 `conversation.user_turn`；dispatcher 只同步提交 canonical 用户轮次和 `surface.reply_delivery`，随后唤醒唯一 app-local recovery Runtime，继续处理 Life、foreground affect、Expression、Memory 与 preference。Dispatcher 在 worker thread 调用同步 handler；两个保留异步调用合同的 Life handler 还会把内部同步 SQLite 主体显式交给 worker thread，避免后台恢复阻塞下一轮 ASGI admission。用户轮次提交失败会阻断 delivery；未标记旧图以及 Plan、Skill、Operator 等路线仍保持完整 effect 顺序。这样保留重启恢复与幂等，不让普通对话承担所有后台状态更新的墙钟时间。
+
 ## 6. Host、OBS 与 Composition
 
 `host_brain/composition/` 构造 Host、Life、Task Runtime 等 app-local 对象图。OBS 通过显式 projection ports 读取 canonical store；Monitor UI 只消费读模型和提交 Operator 命令，不拥有业务状态。
+
+Surface 的 `RecallFusionService` 同样由一个 Host application scope 拥有。它复用 Host authority owner 已创建的 `EpisodicStore.chroma`，而不是每个情绪回合重新解析 Chroma 配置、创建 HTTP client 和构造另一份服务。服务本身只在调用栈内保存 route rows／candidate，允许并发只读调用；底层 client 的关闭权仍只属于 EpisodicStore owner。
+
+实时性能计时属于既有响应 trace，不是新的审计子系统。Retrieval 只添加有界整数阶段耗时，Cortex 记录 persona prefetch、retrieval wait、prompt filter、general preference pack、LLM route resolve 和 context total；这些字段随本轮内存 packet 进入原 COMMIT，不触发额外 SQLite 写。
+
+OBS 与 Host 当前共享 canonical SQLite 文件，但只有 Host 业务仓储拥有 canonical 状态写 authority；OBS 只写可重建的 Operator projection。Task 详情采用“缺失优先、最旧优先”的 16 项轮转批次，并在每次派生写后留下 5 ms 的 cooperative writer window，防止 Sidecar 连续 `BEGIN IMMEDIATE` 饿死交互式 Task 写入。Chat worker projection 使用独立连接在线程执行；Task Runtime 仍等待其确定终局后再结算 Budget、Verification 和 Acceptance，因此这里只解除事件循环阻塞，不放宽持久边界。
+
+真实五端加 Docker 复验中，Task 详情每波最多刷新 16 个，index 加详情最多 17 个；三轮 worker projection 到后预算落盘为 187／94／49 ms，修复前峰值为 2,880 ms。该结果证明派生 writer 公平性已进入实际 composition，但不代表普通聊天端到端实时门槛已经通过。
+
+独立 OBS composition 为派生 projection store 启用一小时恢复检查点，而 Host 进程内其他 Store 保持原合同。该策略不降低当前文档刷新频率；`AuthenticatedHostProjectionSources` 只在 `source_instance_id` 切换时强制写 lineage，同一实例的 revision 进入普通检查点。这样仍保存每个退役实例并防止旧实例重放，又不会把 Host 的普通轮询变成逐次历史。大检查点再使用透明压缩，避免个人运行环境因 Monitor 历史重复快照持续膨胀。
 
 `host_brain/app/asgi.py` 只保留 Host composition root 与 lifespan 顺序，当前 1396 行并继续受 `<1400` Gate 约束。Scheduler 的主动任务、Life tick/reconciliation、Life/Embodiment outbox drain 和两个轻量 pump 集中在 `host_scheduler_runtime_handlers.py`；该对象只持有 app-local handler 与后台 task 生命周期，Scheduler ledger、Life journal 和 Embodiment outbox 仍分别是 durable authority。
 
@@ -139,3 +187,39 @@ SQLite 保存 canonical Life、Task、Review、Outbox、Gateway 等本地权威�
 | TTS、检索、迁移、Grant、Life delivery、terminal reconciliation、Tribe 订阅 | 分别进入同域的 prosody／projection／compiler／delivery／classifier／event-handler 模块 |
 
 当前工作树上的 A01～A14 静态架构门禁为 `PASS`，migration catalog head 为 `0153`。这只关闭静态职责和目录合同漂移；A15 必须绑定提交 SHA 重新启动真实 Docker、Host、OBS、Monitor、Gateway 和可用 Edge 后才能形成最终结论。
+
+当前非安全 A15 已把真实 Docker、Host、OBS、Nginx Monitor 与 Gateway 绑定到同一隔离数据根。Neo4j／Chroma／Redis 的写入、容器重启、重读与清理通过；Monitor 从真实 OBS 投影读取 TaskGraph、预算、验证、Gateway 和 Life Body，并允许用 `MONITOR_UI_INCLUDE_SECURITY_ACCEPTANCE=0` 单独执行非安全生产 E2E。这个开关只裁剪测试范围，不改变生产路由或安全默认值；A09、A12 和 Pentest 仍明确为 `NOT_RUN_USER_SKIPPED`。
+
+当前非安全 Monitor read-model 测试已覆盖 System Config、Organ System、HTTP Client、Token Metrics、Observability handoff 和 Runtime Health，共 45 项；工作树 LCOV 为 line 93.67%、branch 70.83%、function 83.90%。Security 页面和安全 organ model 没有进入本轮分母，故这只是非安全前端覆盖收据，不是全 Monitor PASS。Python Unit 覆盖预检同时把 Prefrontal 的缺失组合端口改为 fail-closed：canonical ports 不存在时也不能恢复 Endocrine／Limbic／Pain 等旧情感写图，Digital Life journal 继续是七海 self-affect 的唯一写 authority。
+
+## 12. PlanningSearch Research 的双臂身份
+
+Research 的可验收单位不是一个共享 profile prompt，而是两个预注册 arm。baseline 和 selected 可以共享 provider、model、budget 与冻结 corpus，却必须分别绑定自己的 candidate path、source set、graph/path digest 和渲染后的 prompt digest。外部模型 receipt 只有与对应 arm 的 durable prompt identity 精确一致时才可进入配对终态；调用者临时提交的摘要不具 authority。
+
+0107 以前的 RunSpec 没有 per-arm 字段，读取时仍使用历史 `profile.prompt_digest`，序列化也不补空字段，从而保持既有 canonical JSON 和 exact replay。新真实 cohort 必须先渲染两只 arm、持久预注册各自摘要，再允许任何外部请求开始。A15 Research 已按该合同完成单题预检和 24 题正式队列；Code 与 Pentest 仍待验收。
+
+Research 的货币成本不从 token 总数随意估算。Vault-backed provider adapter 只对已知官方 endpoint、已知模型和完整 provider-owned cache token breakdown 应用代码侧版本化价目；生成 `model_cost_micros` 的同时把 cost policy digest 写入 transport measurement。其他 provider／代理仍必须自己回传 canonical cost，否则 benefit evidence fail-closed。普通对话只多携带已有 usage 中的一个成本整数和策略摘要，不增加模型调用、数据库事务或同步审计步骤。
+
+真实双臂完成后，回答正文不会进入 0107 或 0136。runner 只把新鲜结果封装为没有序列化接口的进程内 transient output，交给独立隐藏质量评审；paired terminal replay 的 transient 列表固定为空。隐藏评审看不到 arm role，使用另一条 canonical 外部 ModelAttempt，并把自己的 prompt、transport、usage、cost 和响应摘要绑定到质量 receipt。这样既能实际评估内容，也不会把私人研究正文扩散成永久审计数据。
+
+固定队列不是在测试代码里伪造 selected path。每题先把同一三来源 snapshot 交给公共 `GoalPlanningService`：NEVER 形成 secondary quick-answer baseline，AUTO 必须实际触发条件 L3 并选择 primary 与 independent。随后 source IDs 才解析为冻结正文和 citation options。expected points 不在 snapshot 或执行 prompt 中，只由独立隐藏评审读取，因此搜索器和执行模型不能直接看到评分答案。
+
+`1c9c2b2bd` 的 24 题真实队列已形成可重开 SQLite 验证的权威证据：质量均值提升 0.85416667、bootstrap 95% 下界 0.75、两臂 citation validity 均为 1.0、严重错误为 0、成本比 1.32215978、p95 延迟比 0.98756943。最终 report 允许提出 promotion proposal，但生产影响位仍为 false；搜索服务没有自行把 L3 切为生产 authority。Research 通过满足了非 Pentest 第二领域的必要收益条件，不代表 Code／Pentest 或 PlanningSearch 总体验收完成。
+
+## 13. PlanningSearch Code 的真实 worktree 边界
+
+Code 收益队列复用已有 `CodePlanningDomain → GoalPlanningService → CodeHistoricalBenchmarkSandbox → ControlledCodeBenchmarkVerifier → SQLiteCodeHistoricalBenchmarkLedger`，没有建立第二套搜索器或测试账本。20 个任务从一份配置生成同一确定性 Git 源提交；baseline 仅关闭 L3，selected 必须由 AUTO 条件 MCTS 选择 catalog 中的 safe patch。owner 随机冻结两臂执行顺序，两次模型请求和两个 detached worktree 均不共享输出、缓存或临时文件。
+
+模型输出只作为进程内单文件 replacement 存活。worktree 的路径策略最多允许修改一个目标 Python 文件；隐藏行为测试与 AST 静态测试由两个独立 pytest 子进程执行，最后由既有 cleanup receipt 证明 protected source、private bare 和 worktree 已收口。Code/cohort ledger 只记录摘要、外部 transport、usage/cost、测试、diff 与清理证据。该边界仍明确是 trusted-process worktree，不宣称 OS/container 或网络隔离，也不会自动影响生产策略。
+
+外部 attestation 复用同一 canonical ModelAttempt 边界，但 Code 请求保留自己的 `CODE_BENCHMARK` scene 和通用 planning metadata，不再伪装成 Research 请求。runner 的实际 route timeout 默认 30 秒、外层 request deadline 为 90 秒；两者都进入 execution profile digest，若操作者更改 timeout，cohort identity 也随之改变，不能与旧证据混用。
+
+Code prompt 还拥有独立、server-owned generation profile：temperature 0、top-p 0.8、max tokens 600、thinking disabled。它不是调用方可覆盖的 metadata，而由 production route catalog 根据 prompt identity 注入；execution profile 同时绑定这些值，避免 provider 默认推理预算变化后仍沿用旧实验身份。
+
+固定题号与 durable workload identity 分离。配置中的题号用于跨版本比较；Code ledger 注册身份为 `<题号>@<cohort_version>`，对应 workload/baseline ref 也包含版本。这样 cohort 升级会追加新 registration，而不是让同一 ID 绑定不同 evidence 或覆盖旧失败。
+
+filesystem identity 也与业务 identity 分离。Windows 下的 runtime directory 与 bare/worktree run component 只使用固定长度 SHA-256 前缀，避免深 acceptance 根目录触发路径上限；完整 commit、namespace、config 和 workload identity 仍由 receipt/ledger 绑定，短目录名不承担审计语义。
+
+benchmark objective 必须是中性的，不能把隐藏目标写进任务名称。v3 的 20 题共享同一 frozen objective；baseline 与 selected 的唯一语义差异来自 PlanningSearch 选中的 evidence。正确规则位于 selected evidence 和独立隐藏 verifier，baseline 不能从 objective、module 名或 cases 反推出答案。
+
+`3eaa5486b` 的生产接线已形成真实收益证据：20 题 selected 全部通过隐藏／静态测试，baseline 隐藏测试全部失败；40 个 canonical external request、40 个 fresh worktree 和 20 个 cohort member 可从 SQLite 重开。最终 report 只开放 promotion proposal，执行器与搜索服务没有自动取得 production influence。

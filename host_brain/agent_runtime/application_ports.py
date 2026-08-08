@@ -31,6 +31,18 @@ class AgentRuntimeApplicationPorts:
     # callable is optional so isolated read/worker fixtures remain small;
     # production composition always binds it.
     stream_realtime_chat: Callable[..., Any] | None = None
+    # One bounded active-projection read.  Expression preferences are
+    # self/persona scoped, not user-authored render policy, and therefore the
+    # app adapter resolves their canonical workspace/subject before Surface
+    # sees them.
+    resolve_expression_preferences: Callable[..., dict[str, Any] | None] | None = None
+    # Active Knowledge is consulted only after the Surface recall planner has
+    # decided that this turn needs memory.  Ordinary no-recall chat pays no
+    # Knowledge OS query.
+    search_active_knowledge: Callable[..., list[dict[str, Any]]] | None = None
+    # A release Identity may contribute a structured style base, but cannot
+    # replace Soul or the current canonical affect state.
+    resolve_active_identity: Callable[..., dict[str, Any] | None] | None = None
 
 
 __all__ = [

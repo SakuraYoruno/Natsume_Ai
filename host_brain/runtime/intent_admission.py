@@ -10,6 +10,7 @@ they never need to re-authorize execution with an expired parent grant.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import logging
 import re
 import time
 from typing import Any
@@ -53,6 +54,9 @@ from .intent_admission_contracts import (
 from .intent_authority import IntentAuthorityError
 from .intent_review_continuation import _IntentReviewContinuationMixin
 from .production_intent_authority import ProductionIntentAuthorityPort
+
+
+_logger = logging.getLogger("Natsume.intent_admission")
 
 
 class DurableIntentAdmissionVerifier(_IntentReviewContinuationMixin):
@@ -807,6 +811,20 @@ class DurableIntentAdmissionVerifier(_IntentReviewContinuationMixin):
         except IntentAdmissionError:
             raise
         except Exception as exc:
+            diagnostic = (
+                str(exc)[:240]
+                if isinstance(exc, (IntentAuthorityError, ValueError, TypeError))
+                else type(exc).__name__
+            )
+            _logger.warning(
+                "canonical Intent arbitration failed request_id=%s graph_id=%s "
+                "node_id=%s error_type=%s diagnostic=%s",
+                command.request_id,
+                graph.graph_id,
+                node.node_id,
+                type(exc).__name__,
+                diagnostic,
+            )
             raise IntentAdmissionError(
                 INTENT_ADMISSION_INVALID,
                 "canonical Intent arbitration failed",

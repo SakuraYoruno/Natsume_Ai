@@ -29,13 +29,24 @@ from host_brain.model_runtime.provider_adapters import (
     StreamCallable,
     StreamResultCallable,
 )
+from host_brain.model_runtime.provider_cost_policy import enrich_provider_usage
 
 
 SUPPORTED_PRODUCTION_PROVIDERS = frozenset(
     {"openai", "openai_compatible", "gemini", "deepseek", "codex", "minimax"}
 )
 _GENERATION_KEYS = frozenset(
-    {"temperature", "top_p", "top_k", "max_tokens", "stop", "seed", "presence_penalty", "frequency_penalty"}
+    {
+        "temperature",
+        "top_p",
+        "top_k",
+        "max_tokens",
+        "stop",
+        "seed",
+        "presence_penalty",
+        "frequency_penalty",
+        "thinking_mode",
+    }
 )
 
 
@@ -87,6 +98,13 @@ def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
             "unsupported generation parameters: " + ", ".join(sorted(str(item) for item in unknown))
         )
     params = {str(key): value for key, value in source.items()}
+    if "thinking_mode" in params:
+        thinking_mode = str(params["thinking_mode"] or "").strip().lower()
+        if thinking_mode not in {"enabled", "disabled"}:
+            raise ProductionProviderConfigurationError(
+                "thinking_mode must be enabled or disabled"
+            )
+        params["thinking_mode"] = thinking_mode
     guard = request.model_budget_guard
     if guard is None:
         return params
@@ -103,9 +121,28 @@ def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[st
     """Keep the hard cap internal to the first-party transport adapter."""
 
     params = _generation_parameters(request)
+    if str(request.target.provider or "").strip().lower() != "deepseek":
+        # ``thinking_mode`` is provider-neutral route metadata.  It must never
+        # leak as an unsupported request field to another provider.
+        params.pop("thinking_mode", None)
     guard = request.model_budget_guard
     if guard is not None:
         params["_natsume_hard_max_output_tokens"] = guard.max_output_tokens
+    return params
+
+
+def _provider_payload_generation_parameters(
+    request: ProviderAttemptRequest,
+) -> dict[str, Any]:
+    """Map typed route hints to an injected provider's public payload."""
+
+    params = _generation_parameters(request)
+    thinking_mode = params.pop("thinking_mode", None)
+    if (
+        thinking_mode is not None
+        and str(request.target.provider or "").strip().lower() == "deepseek"
+    ):
+        params["thinking"] = {"type": thinking_mode}
     return params
 
 
@@ -134,7 +171,7 @@ def production_provider_payload(
     response_format = request.prompt.output_contract.response_format()
     if response_format is not None:
         payload["response_format"] = response_format
-    payload.update(_generation_parameters(request))
+    payload.update(_provider_payload_generation_parameters(request))
     if require_final_usage:
         # This is an explicit transport capability request, not a token/cost
         # estimate.  The binding must still return a terminal response with
@@ -270,6 +307,13 @@ class VaultBackedSingleAttemptAdapter:
         elapsed_ms = max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
         if isinstance(raw_response, Mapping):
             usage = raw_response.get("usage")
+            measured_usage, cost_policy_digest = enrich_provider_usage(
+                provider=provider_name,
+                model_id=request.target.model_id,
+                base_url=base_url_override,
+                usage=usage if isinstance(usage, Mapping) else None,
+                tool_calls_enabled=False,
+            )
             metadata = raw_response.get("metadata")
             transport_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
             transport_metadata.update(
@@ -279,6 +323,8 @@ class VaultBackedSingleAttemptAdapter:
                     "transport_external": transport_external,
                 }
             )
+            if cost_policy_digest is not None:
+                transport_metadata["model_cost_policy_digest"] = cost_policy_digest
             return ProviderResponse(
                 content=str(
                     raw_response.get("content")
@@ -291,7 +337,7 @@ class VaultBackedSingleAttemptAdapter:
                     if raw_response.get("finish_reason") is not None
                     else None
                 ),
-                usage=dict(usage) if isinstance(usage, Mapping) else {},
+                usage=measured_usage,
                 metadata=transport_metadata,
             )
         return ProviderResponse(
@@ -395,6 +441,13 @@ class VaultBackedSingleAttemptAdapter:
                 )
             elapsed_ms = max(0, (time.monotonic_ns() - started_ns) // 1_000_000)
             usage = event.get("usage")
+            measured_usage, cost_policy_digest = enrich_provider_usage(
+                provider=provider_name,
+                model_id=request.target.model_id,
+                base_url=base_url_override,
+                usage=usage if isinstance(usage, Mapping) else None,
+                tool_calls_enabled=False,
+            )
             metadata = event.get("metadata")
             transport_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
             transport_metadata.update(
@@ -404,6 +457,8 @@ class VaultBackedSingleAttemptAdapter:
                     "transport_external": transport_external,
                 }
             )
+            if cost_policy_digest is not None:
+                transport_metadata["model_cost_policy_digest"] = cost_policy_digest
             yield ProviderStreamEvent.final(
                 ProviderResponse(
                     content=str(event.get("content") or ""),
@@ -412,7 +467,7 @@ class VaultBackedSingleAttemptAdapter:
                         if event.get("finish_reason") is not None
                         else None
                     ),
-                    usage=dict(usage) if isinstance(usage, Mapping) else {},
+                    usage=measured_usage,
                     metadata=transport_metadata,
                 )
             )

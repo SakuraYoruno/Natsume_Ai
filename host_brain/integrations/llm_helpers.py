@@ -1229,6 +1229,7 @@ def _build_openai_compat_messages(messages: list[Mapping[str, Any]]) -> list[dic
 
 def _build_openai_compat_payload(
     *,
+    provider_name: str = "",
     model_id: str,
     messages: list[Mapping[str, Any]],
     gen_params: dict[str, Any] | None = None,
@@ -1247,6 +1248,11 @@ def _build_openai_compat_payload(
         "messages": _build_openai_compat_messages(messages),
         "stream": bool(stream),
     }
+    thinking_mode = str(params.pop("thinking_mode", "") or "").strip().lower()
+    if thinking_mode and thinking_mode not in {"enabled", "disabled"}:
+        raise ValueError("thinking_mode must be enabled or disabled")
+    if thinking_mode and str(provider_name or "").strip().lower() == "deepseek":
+        payload["thinking"] = {"type": thinking_mode}
     # This is requested only by the result-attested streaming path.  A final
     # provider usage frame is evidence, not an estimate from emitted text.
     # Normal live streaming remains compatible with transports that do not
@@ -1373,6 +1379,7 @@ def _invoke_openai_compat_text(
 ) -> str:
     endpoint = _resolve_openai_compat_chat_endpoint(provider_name, base_url_override=base_url_override)
     payload = _build_openai_compat_payload(
+        provider_name=provider_name,
         model_id=model_id,
         messages=messages,
         gen_params=gen_params,
@@ -1408,6 +1415,7 @@ def _iter_openai_compat_stream(
 ) -> "Generator[str, None, None]":
     endpoint = _resolve_openai_compat_chat_endpoint(provider_name, base_url_override=base_url_override)
     payload = _build_openai_compat_payload(
+        provider_name=provider_name,
         model_id=model_id,
         messages=messages,
         gen_params=gen_params,
@@ -1484,6 +1492,7 @@ def _iter_openai_compat_stream_events(
         base_url_override=base_url_override,
     )
     payload = _build_openai_compat_payload(
+        provider_name=provider_name,
         model_id=model_id,
         messages=messages,
         gen_params=gen_params,
@@ -1601,6 +1610,30 @@ def _build_chat_google_genai_kwargs(
     }
     if max_tokens is not None:
         llm_kwargs["max_tokens"] = max_tokens
+    response_format = params.get("response_format")
+    normalized_response_format = _normalize_response_format(response_format)
+    if (
+        normalized_response_format is None
+        and isinstance(response_format, Mapping)
+        and str(response_format.get("type") or "").strip().lower() == "json_schema"
+    ):
+        normalized_response_format = "json_schema"
+    if normalized_response_format in {"json_object", "json_schema"}:
+        # ChatGoogleGenerativeAI does not consume the OpenAI-compatible
+        # ``response_format`` nested inside generation parameters.  Bind the
+        # equivalent native Gemini controls so a server-owned JSON contract is
+        # enforced by the provider instead of relying on prompt wording.
+        llm_kwargs["response_mime_type"] = "application/json"
+    if normalized_response_format == "json_schema" and isinstance(
+        response_format,
+        Mapping,
+    ):
+        raw_schema = response_format.get("json_schema")
+        if isinstance(raw_schema, Mapping):
+            nested_schema = raw_schema.get("schema")
+            schema = nested_schema if isinstance(nested_schema, Mapping) else raw_schema
+            if schema:
+                llm_kwargs["response_schema"] = dict(schema)
     return llm_kwargs
 
 
