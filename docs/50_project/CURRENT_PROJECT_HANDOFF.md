@@ -11,7 +11,7 @@
 |---|---|
 | 产品定位 | 七海的个人实时情感数字生命，不是通用 Chatbot，也不是 SaaS |
 | 整体状态 | `INCOMPLETE`：工程主链大体成立，但人感、实时延迟、当前 Edge 三模态和最终 SHA 全量复验未通过 |
-| Git 真相 | 当前工作位于 `codex/system-v2-a15-full-acceptance@b168c4c99`，已推送；校准后相对 `origin/dev@d7e0cfba8` 为落后 0、超前 196，尚未进入 `dev` |
+| Git 真相 | 主变更已通过中文 PR #215 合并到 `dev`，merge commit 为 `b51f7a53d`；原远端工作分支已删除，本交接修正收尾时同步清理本地临时分支 |
 | 本机服务现状 | Docker daemon、Host、OBS 和本地验收 Gateway 当前已停；Nginx Monitor 仍能提供静态页；SSH 本地转发仍监听，但本轮未探测远端 Edge |
 | 本地真实服务栈 | Neo4j、Chroma、Redis 真实写入／重启／重读通过；Host、OBS、Nginx Monitor、Gateway 与真实浏览器曾在同一隔离环境通过 |
 | Architecture 2.0 | 非安全静态与主要 Runtime 机械证据大体通过；全系统覆盖率未达门槛，当前 SHA 最终联合验收未完成 |
@@ -263,12 +263,11 @@ EDGE_GATEWAY_REPLY_HMAC_SECRET
 
 ### P0：不关闭就不能声称完成
 
-1. **Git 收口**：当前 196 个提交仍不在 `dev`；需要创建中文 PR、合并，再删除本地／远端临时分支。
-2. **当前 SHA 最终复验**：所有代码合并后，在同一 SHA、同一 migration head、同一隔离根重跑本地 Docker、Host、OBS、Monitor、Gateway 和七路主链。
-3. **数字生命人感**：当前明确失败。需先完成模型层或版本化真实文本方案，再跑新的 48 条多轮队列和至少 3 名评审盲测，目标总体胜率≥65%。
-4. **实时性**：first render p50/p95 远高于 900/1800ms；需从模型首句策略、Host admission/context 和 30% 语义重试率下手，不再增加普通对话审计。
-5. **18 条真实驱动场景**：多模态、主动陪伴、Edge 故障／打断各 6 条，尚未在真实驱动上完成。
-6. **当前 Edge 三模态联合验收**：重新确认 `192.168.1.171` 上的 Edge RPC、Gateway、ASR、TTS、VTS/VRM 当前状态；实测同一 `synchronization_id` 的文本、声音、表情／动作和打断。
+1. **当前 SHA 最终复验**：在合并后的同一 SHA、同一 migration head、同一隔离根重跑本地 Docker、Host、OBS、Monitor、Gateway 和七路主链。
+2. **数字生命人感**：当前明确失败。需先完成模型层或版本化真实文本方案，再跑新的 48 条多轮队列和至少 3 名评审盲测，目标总体胜率≥65%。
+3. **实时性**：first render p50/p95 远高于 900/1800ms；需从模型首句策略、Host admission/context 和 30% 语义重试率下手，不再增加普通对话审计。
+4. **18 条真实驱动场景**：多模态、主动陪伴、Edge 故障／打断各 6 条，尚未在真实驱动上完成。
+5. **当前 Edge 三模态联合验收**：重新确认 `192.168.1.171` 上的 Edge RPC、Gateway、ASR、TTS、VTS/VRM 当前状态；实测同一 `synchronization_id` 的文本、声音、表情／动作和打断。
 
 ### P1：功能已有，但证据不完整
 
@@ -291,7 +290,7 @@ EDGE_GATEWAY_REPLY_HMAC_SECRET
 ## 7. 恢复工作的正确顺序
 
 1. 先读本文和 `configs/release/current_architecture_status.json`，不要从旧 Codex 对话推测状态。
-2. 确认当前分支已进入 `dev`；若未进入，先收口 Git，不要又建深层堆叠分支。
+2. 执行 `git fetch --prune` 并确认 `dev` 包含 PR #215；后续每个独立波次直接基于最新 `dev`，不再建深层堆叠分支。
 3. 启动新的隔离 acceptance 根，不复用用户正式 Memory、Persona、Gateway 会话或默认 Docker 数据根。
 4. 先完成 Gemini 修复后短复验；若仍不足以解决人感，停止 prompt/Gate 微调，转向模型或版本化真实文本训练。
 5. 完成新 48 条队列、三人盲评和首句延迟优化。
@@ -316,7 +315,7 @@ EDGE_GATEWAY_REPLY_HMAC_SECRET
 
 ## 9. 删除 Codex 对话前的保留提示
 
-- 已跟踪代码和文档已保存在远端工作分支；对话本身不是代码唯一存储。
+- 已跟踪代码和文档已通过 PR #215 保存在远端 `dev`；对话本身不是代码唯一存储。
 - `Codex-Dream-Skin-reference/`、`codex-main-*.png` 和 `miku-*.png` 仍是未跟踪本地资产，不在 Git 或远端分支中。删对话不影响它们，删整个工作区则会丢失。
 - 任何 secret、用户正文、语料、模型权重、原始音视频和 Docker volume 都不应为了“保留对话上下文”而提交进仓库。
 
@@ -331,4 +330,3 @@ EDGE_GATEWAY_REPLY_HMAC_SECRET
 | `NOT_RUN_USER_SKIPPED` | 用户明确跳过，不是 PASS |
 | `NOT_RUN_ACCOUNT_QUOTA` | 账户额度导致未运行，不是 CI 通过 |
 | `ACCEPTANCE_PENDING_EXTERNAL` | 只缺外部凭据、远端设备、平台客户端或人工评审 |
-
