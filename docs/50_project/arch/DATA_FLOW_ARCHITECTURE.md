@@ -80,6 +80,8 @@ flowchart LR
 
 低风险 Companion Profile 不旁路这条链路。五条跨日至少三天、helpfulness 下界不低于 0.85 且无边界违规的 canonical aftereffect 只能创建可回滚 canary；接下来的五次强后效应把同一候选自动激活。Planner 将 profile 变成文本 style anchor，ExpressionPlan 同步缩放 Voice rate 与 Avatar motion。Rollback 只能恢复 active profile 自带的 exact predecessor，不能由调用者指定任意历史版本。A15 隔离 SQLite canary 已验证 Host 协议上的 `文本策略改变 + Voice 1.0→1.15 + Avatar 0.5→0.8`，并在 rollback 后全部恢复；它没有执行模型生成和远端设备。
 
+版本化表达偏好经 app-local projection port 在每轮 Surface 编译时只读一次。完整 prompt 原本会消费 style anchor，但生产默认 compact prompt 为缩短首字延迟省略了整个控制包；因此 `a84fa23b8` 的真实 apply 虽改变 `reply_plan`，最终 prompt digest 仍不变。当前 compact 路径只在偏好实际激活时补入一条最多 180 字的长期表达指令，baseline 不增加 prompt 文本；既有 ModelAttempt 行只附带该指令的 SHA-256，不保存 prompt 正文，也不新增写事务。exact rollback 后下一轮自然恢复无指令状态。
+
 ```mermaid
 flowchart LR
     E["5 条跨日强 aftereffect"] --> C["Reversible profile canary"]

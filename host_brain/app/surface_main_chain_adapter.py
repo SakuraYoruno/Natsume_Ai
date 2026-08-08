@@ -77,6 +77,7 @@ from host_brain.app.surface_main_chain_support import (
     _native_stream_failure_reason,
     _record_surface_memory_guard_packet,
     _sse,
+    _surface_expression_prompt_evidence,
     _surface_failure_fallback_text,
     _surface_main_chain_response_format,
     _surface_model_deadline_ms,
@@ -293,6 +294,29 @@ async def run_surface_main_chain_for_surface_reply_input(
                 "cognitive_tier": model_cognitive_tier,
                 "route_lane": model_route_lane,
             }
+        rendered_messages = _buffered_affective_candidate_messages(
+            (
+                build_native_stream_surface_messages(compiled_request)
+                if affective_candidate_count is not None
+                else messages
+            ),
+            candidate_count=affective_candidate_count,
+            canonical_repair_context=canonical_repair_context,
+            canonical_contained_hurt_repair_context=(
+                canonical_contained_hurt_repair_context
+            ),
+            canonical_mixed_context=canonical_mixed_context,
+            canonical_give_space_context=canonical_give_space_context,
+            canonical_autonomy_context=canonical_autonomy_context,
+            canonical_ambiguous_context=canonical_ambiguous_context,
+            canonical_jealousy_context=canonical_jealousy_context,
+        )
+        expression_prompt_evidence = _surface_expression_prompt_evidence(
+            messages=rendered_messages,
+            style_anchors=tuple(
+                getattr(compiled_request.control, "style_anchor", ()) or ()
+            ),
+        )
         result = await ports.model_attempt_service().complete(
             ModelAttemptRequest(
                 request_id=request_id or "surface-main-chain",
@@ -300,27 +324,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                 cognitive_tier=model_cognitive_tier,
                 prompt=PromptRef(
                     prompt_id,
-                    {
-                        "messages": _buffered_affective_candidate_messages(
-                            (
-                                build_native_stream_surface_messages(
-                                    compiled_request
-                                )
-                                if affective_candidate_count is not None
-                                else messages
-                            ),
-                            candidate_count=affective_candidate_count,
-                            canonical_repair_context=canonical_repair_context,
-                            canonical_contained_hurt_repair_context=(
-                                canonical_contained_hurt_repair_context
-                            ),
-                            canonical_mixed_context=canonical_mixed_context,
-                            canonical_give_space_context=canonical_give_space_context,
-                            canonical_autonomy_context=canonical_autonomy_context,
-                            canonical_ambiguous_context=canonical_ambiguous_context,
-                            canonical_jealousy_context=canonical_jealousy_context,
-                        )
-                    },
+                    {"messages": rendered_messages},
                 ),
                 deadline_ms=model_deadline_ms,
                 foreground=True,
@@ -331,6 +335,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                 metadata={
                     "chain": "surface_main",
                     "route_lane": model_route_lane,
+                    **expression_prompt_evidence,
                     **(
                         {"model_node_id": governed_model_budget.node_id}
                         if governed_model_budget is not None

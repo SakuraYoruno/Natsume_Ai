@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from host_brain.digital_life.companion_voice import japanese_companion_voice_enabled
@@ -19,6 +20,48 @@ from host_brain.surface_runtime.subagent_context import (
     _surface_sub_agent_id,
     _surface_sub_agent_result_text,
 )
+
+
+_ACTIVE_EXPRESSION_PREFERENCE_PREFIX = (
+    "已激活的长期表达偏好（本轮执行）："
+)
+
+
+def _surface_expression_prompt_evidence(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    style_anchors: Sequence[Any],
+) -> dict[str, str]:
+    """Return secret-free evidence only when the active directive is rendered.
+
+    The actual registered prompt already has a durable digest.  This optional
+    digest identifies the one bounded expression-version directive inside the
+    final message list, without storing the prompt or adding another ordinary
+    chat write.
+    """
+
+    directive = next(
+        (
+            str(item or "").strip()
+            for item in style_anchors
+            if str(item or "").strip().startswith(
+                _ACTIVE_EXPRESSION_PREFERENCE_PREFIX
+            )
+        ),
+        "",
+    )
+    if not directive:
+        return {}
+    rendered = "\n".join(
+        str(message.get("content") or "") for message in messages
+    )
+    if directive not in rendered:
+        return {}
+    return {
+        "surface_expression_directive_digest": hashlib.sha256(
+            directive.encode("utf-8")
+        ).hexdigest()
+    }
 
 
 def _surface_main_chain_response_format() -> dict[str, str] | None:

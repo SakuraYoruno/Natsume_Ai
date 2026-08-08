@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from types import SimpleNamespace
 
 from host_brain.persona.surface_main_chain import (
     compile_surface_main_chain_input,
+)
+from host_brain.persona.surface_runtime import build_direct_surface_messages
+from host_brain.app.surface_main_chain_support import (
+    _surface_expression_prompt_evidence,
 )
 from host_brain.surface_runtime.input_compiler import (
     _apply_active_expression_preferences,
@@ -20,6 +25,7 @@ from scripts.runtime.run_ne06_expression_live_acceptance import (
 
 
 def test_active_expression_preferences_reach_first_surface_prompt_anchor(
+    monkeypatch,
     surface_runtime_ports_factory,
 ) -> None:
     ports = surface_runtime_ports_factory(
@@ -56,6 +62,33 @@ def test_active_expression_preferences_reach_first_surface_prompt_anchor(
     assert expression_preference_directive(
         {"tag_scores": {"ai_tone": -1, "template_like": -1}}
     ) == compiled.request.control.style_anchor[0]
+    for language in ("zh", "ja"):
+        monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", language)
+        rendered = "\n".join(
+            str(message["content"])
+            for message in build_direct_surface_messages(compiled.request)
+        )
+        assert compiled.request.control.style_anchor[0] in rendered
+
+
+def test_expression_prompt_evidence_requires_the_rendered_directive() -> None:
+    directive = (
+        "已激活的长期表达偏好（本轮执行）：避免机械 AI 腔；避免模板化分段"
+    )
+    evidence = _surface_expression_prompt_evidence(
+        messages=[{"role": "user", "content": f"本轮长期表达偏好：{directive}"}],
+        style_anchors=[directive],
+    )
+
+    assert evidence == {
+        "surface_expression_directive_digest": hashlib.sha256(
+            directive.encode("utf-8")
+        ).hexdigest()
+    }
+    assert _surface_expression_prompt_evidence(
+        messages=[{"role": "user", "content": "没有偏好指令"}],
+        style_anchors=[directive],
+    ) == {}
 
 
 def test_expression_preference_projection_failure_does_not_block_chat(

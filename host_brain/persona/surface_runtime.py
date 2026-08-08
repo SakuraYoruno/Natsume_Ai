@@ -726,6 +726,9 @@ def _accepted_task_results_prompt_block(
 
 def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list[dict[str, str]]:
     control_payload = _model_dump(request.control)
+    active_expression_preference = _active_expression_preference_directive(
+        request
+    )
     prompt_facts = _surface_runtime_prompt_facts(request)
     prompt_must_not_do = _surface_runtime_must_not_do(request)
     utterance_frame_lines = render_companion_utterance_frame(
@@ -807,6 +810,10 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
             user_lines.extend(
                 ["", "本轮说话骨架：", *(f"- {item}" for item in utterance_frame_lines)]
             )
+        if active_expression_preference:
+            user_lines.extend(
+                ["", "本轮长期表达偏好：", active_expression_preference]
+            )
         user_lines.extend(
             ["", "必须遵守的事实：", fact_lines, "", "禁止项：", must_lines]
         )
@@ -857,6 +864,10 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
         if utterance_frame_lines:
             user_lines.extend(
                 ["", "本轮说话骨架：", *(f"- {item}" for item in utterance_frame_lines)]
+            )
+        if active_expression_preference:
+            user_lines.extend(
+                ["", "本轮长期表达偏好：", active_expression_preference]
             )
         # --- Inner-state leakage for compact mode ---
         _compact_inner_parts: list[str] = []
@@ -1004,6 +1015,26 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
         {"role": "system", "content": "\n".join(system_lines)},
         {"role": "user", "content": "\n".join(user_lines)},
     ]
+
+
+def _active_expression_preference_directive(
+    request: IsolatedSurfaceInput,
+) -> str:
+    """Return the one bounded active-version directive for compact prompts.
+
+    Compact Surface prompts intentionally omit the full ReplyControlPacket to
+    keep ordinary companion turns fast.  The activated expression version is
+    the one exception: without this bounded line, version activation changes
+    the projection but cannot change the next reply.  Baseline turns add no
+    text and no extra model or storage call.
+    """
+
+    prefix = "已激活的长期表达偏好（本轮执行）："
+    for item in list(getattr(request.control, "style_anchor", ()) or ()):
+        text = str(item or "").strip()
+        if text.startswith(prefix):
+            return text[:180]
+    return ""
 
 
 def strip_surface_process_preface(text: str) -> str:

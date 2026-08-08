@@ -937,7 +937,9 @@ NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070
 
 精确提交 `d2a528bc7b3c854f0ce3dcd273d4df0b64c1ee70` 随后完成完整结构闭环：apply／rollback 各两个 digest-pinned Docker arm，容器禁网、只读、非 root且外部副作用为 0；两个 Review 分别批准 generation 2 与 3；active version 从 `expression-baseline-3bdf52b760c59b2e59e9c97c` 切到 `expression-5bef30cdff50408e4bc15969` 后精确恢复；三次 Host 均命中真实 `deepseek-v4-flash` external transport。收据 SHA-256 为 `0df41437d507326fb9cc38f54c6f5a888a2ae5a6c8bfa5c1fdf8593bc8c717af`。
 
-该次三轮 prompt token 均为 1628，不能把三个随机输出差异当成偏好因果。调用图复核确认 `resolve_persona_expression_hint()` 只有定义和单测，没有任何生产调用者；版本 authority 已切换，但 Surface 模型输入未消费。当前修复不增加新表、写入、审计、模型调用或远端请求，只经 app-local port 读取一次 active expression projection，并把最多三条有界偏好合并成 Surface 第一条语言锚；不可用时普通聊天保持原行为。56 项 Surface／Prefrontal／NE-06 activation 回归通过。精确提交真实重跑前状态为 `LIVE_STRUCTURE_PASS / CAUSAL_RETEST_PENDING`，单样本人感仍为 `UNPROVEN`。
+该次三轮 prompt token 均为 1628，不能把三个随机输出差异当成偏好因果。调用图复核确认 `resolve_persona_expression_hint()` 只有定义和单测，没有任何生产调用者；版本 authority 已切换，但 Surface 模型输入未消费。第一步修复经 app-local port 把 active expression projection 合并到 Surface 第一条语言锚；不可用时普通聊天保持原行为。
+
+精确提交 `a84fa23b8a491445d11eb1fc98cc16d34d585480` 的真实重跑继续正确失败，收据 SHA-256 为 `e4c6994a97172e92634c4852acfa55781b20226a013db1f971a6fe4dc3e15b81`。两组 Docker 双臂、两个 Review、apply／rollback、三次真实 `deepseek-v4-flash` turn 和 exact projection rollback 全部通过；候选 `reply_plan` 也精确出现“避免机械 AI 腔／避免模板化分段”。但三轮最终注册 prompt digest 都是 `5ec07fe5...df35`，prompt token 也都是 1628。根因是生产启用了 compact Surface prompt：它为低延迟省略完整 ReplyControlPacket 时，也遗漏了 active expression directive。当前修复只在偏好实际激活时向最终 compact prompt 增加一条最多 180 字的指令，并在已有 ModelAttempt metadata 附带该指令的 SHA-256；基线回合不增加 prompt 文本，不新增表、写入、模型轮次或远端请求。244 项相关回归通过。精确新提交实测前仍为 `LIVE_STRUCTURE_PASS / FINAL_PROMPT_CAUSAL_RETEST_PENDING`，单样本人感仍为 `UNPROVEN`。
 
 ## 2026-08-08 普通对话事件循环与真实首句延迟
 

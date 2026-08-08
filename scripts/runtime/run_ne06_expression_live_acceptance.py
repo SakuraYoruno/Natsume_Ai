@@ -322,9 +322,21 @@ def main(argv: list[str] | None = None) -> int:
             _turn_expression_directive(rollback_turn)
             == expression_preference_directive(original_payload)
         ),
-        "candidate_prompt_tokens_changed": (
-            int(dict(candidate_turn.get("model") or {}).get("prompt_tokens") or 0)
-            != int(dict(baseline_turn.get("model") or {}).get("prompt_tokens") or 0)
+        "baseline_prompt_directive_digest_exact": (
+            _turn_prompt_directive_digest(baseline_turn)
+            == _expression_directive_digest(original_payload)
+        ),
+        "candidate_prompt_directive_digest_exact": (
+            _turn_prompt_directive_digest(candidate_turn)
+            == _expression_directive_digest(target_payload)
+        ),
+        "rollback_prompt_directive_digest_exact": (
+            _turn_prompt_directive_digest(rollback_turn)
+            == _expression_directive_digest(original_payload)
+        ),
+        "candidate_prompt_digest_changed": (
+            str(dict(candidate_turn.get("model") or {}).get("prompt_digest") or "")
+            != str(dict(baseline_turn.get("model") or {}).get("prompt_digest") or "")
         ),
         "docker_apply_two_arms": len(apply_authority["report"].runs) == 2,
         "docker_rollback_two_arms": (
@@ -347,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
         else "FAIL"
     )
     payload = {
-        "schema": "natsume.ne06.expression-live-acceptance.v2",
+        "schema": "natsume.ne06.expression-live-acceptance.v3",
         "status": status,
         "run_id": run_id,
         "commit_sha": commit,
@@ -358,6 +370,22 @@ def main(argv: list[str] | None = None) -> int:
         "subject_id": subject_id,
         "policy_kind": EXPRESSION_PREFERENCE_POLICY_KIND,
         "checks": checks,
+        "observations": {
+            "candidate_prompt_tokens_changed": (
+                int(
+                    dict(candidate_turn.get("model") or {}).get(
+                        "prompt_tokens"
+                    )
+                    or 0
+                )
+                != int(
+                    dict(baseline_turn.get("model") or {}).get(
+                        "prompt_tokens"
+                    )
+                    or 0
+                )
+            ),
+        },
         "versions": {
             "original": original_version,
             "candidate": target_version,
@@ -662,6 +690,22 @@ def _turn_expression_directive(turn: Mapping[str, Any]) -> str:
     return ""
 
 
+def _expression_directive_digest(payload: Mapping[str, Any] | None) -> str:
+    directive = expression_preference_directive(payload)
+    if not directive:
+        return ""
+    return hashlib.sha256(directive.encode("utf-8")).hexdigest()
+
+
+def _turn_prompt_directive_digest(turn: Mapping[str, Any]) -> str:
+    return str(
+        dict(turn.get("model") or {}).get(
+            "surface_expression_directive_digest"
+        )
+        or ""
+    ).strip()
+
+
 def _model_attempt(db_path: Path, request_id: str) -> dict[str, Any]:
     if not request_id:
         return {}
@@ -669,7 +713,8 @@ def _model_attempt(db_path: Path, request_id: str) -> dict[str, Any]:
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             """
-            SELECT provider, model_id, status, latency_ms, metadata
+            SELECT provider, model_id, status, latency_ms,
+                   prompt_digest, metadata
             FROM model_attempt_log
             WHERE request_id = ?
             ORDER BY attempt_index DESC, id DESC
@@ -698,6 +743,10 @@ def _model_attempt(db_path: Path, request_id: str) -> dict[str, Any]:
         "model_id": str(row["model_id"] or ""),
         "status": str(row["status"] or ""),
         "latency_ms": int(row["latency_ms"] or 0),
+        "prompt_digest": str(row["prompt_digest"] or ""),
+        "surface_expression_directive_digest": str(
+            metadata.get("surface_expression_directive_digest") or ""
+        ),
         "transport_external": bool(transport.get("transport_external")),
         "transport_identity_digest": str(
             transport.get("transport_identity_digest") or ""

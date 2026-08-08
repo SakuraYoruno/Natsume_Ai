@@ -18,6 +18,7 @@ from host_brain.app.surface_main_chain_support import (
     _native_stream_failure_reason,
     _record_surface_memory_guard_packet,
     _sse,
+    _surface_expression_prompt_evidence,
     _surface_model_deadline_ms,
     _surface_model_request_profile,
 )
@@ -1106,6 +1107,12 @@ async def _native_affective_sentence_stream(
     }
 
     messages = build_native_stream_surface_messages(compiled_request)
+    expression_prompt_evidence = _surface_expression_prompt_evidence(
+        messages=messages,
+        style_anchors=tuple(
+            getattr(compiled_request.control, "style_anchor", ()) or ()
+        ),
+    )
     stream_started = time.perf_counter()
     first_token_ms: int | None = None
     splitter = SentenceSplitter()
@@ -1133,6 +1140,7 @@ async def _native_affective_sentence_stream(
             "affective_turn_plan_id": plan_id,
             "runtime_path": str(trace.get("runtime_path") or ""),
             "route_lane": model_route_lane,
+            **expression_prompt_evidence,
             **(
                 # The durable attempt journal must be tied to the immutable
                 # TaskNode that owns this stream.  The buffered Surface path

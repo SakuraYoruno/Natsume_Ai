@@ -895,3 +895,9 @@ python scripts/runtime/test_digital_life_restart_driver.py resume `
 `resume` 会在 checkpoint 同目录生成 `*-final.json`。当前六个变体结构恢复为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；但当前单人逐句复核为 0/6：回复没有自然续接冻结的“工作和休息怎么平衡”具体线程，只在部分变体保留了关系语气。因此工程结论为 `STRUCTURAL_PASS`，人感结论为 `FAIL`。`ac87ddd34` 关闭 stale lease 恢复，`13e537a3d` 证明 conversation spine 已按 user→assistant 恢复；`a586339c2` 的精确提交强杀复验又证明 typed 线程接线真实生效：tested-code clean，Host `20412→25572`，Relationship revision `233→235`，conversation 4→6 条精确交替，持久 trace 中 `deictic_topic_update.source_context_excerpt` 精确为“我们上次没说完的是工作和休息怎么平衡。”，报告 SHA-256 为 `dbfe4d40ace65194554d9b46e20745c10807e0b24eea1c9414683b9cbb9c7045`。真实 Flash 仍回复“那就好，能解决就行。我还惦记着呢。”，没有说出具体话题；这证明剩余失败在模型自然措辞，而非持久化或 typed context。按冻结停止条件不再增加提示、禁词、Gate、模型轮次或普通对话写入，后续进入模型／版本化真实文本调优，并用新预注册样本复验。
 
 主动陪伴、多模态和 Edge 故障共 18 个变体仍为 `NOT_RUN_REQUIRED_DRIVER`：生产 `life_tick` 会把 `proactive.gateway` outbox 经本机 19000 SSH tunnel 发往另一台电脑，用户已明确禁止本轮触碰远端 Edge。不得通过 scripted replay、mock transport 或直接写数据库替代真实驱动。
+
+### 12.6 版本化表达偏好真实因果
+
+`scripts/runtime/run_ne06_expression_live_acceptance.py` 必须在同一隔离 SQLite 和同一真实 Host 上依次执行 baseline、Docker Lab 双臂、production Review、candidate apply、candidate turn、第二组 Docker 双臂、rollback Review、exact rollback 和 rollback turn。三轮都必须命中真实 external provider；candidate 的 `reply_plan` directive、最终 ModelAttempt directive digest 与目标 payload 必须精确一致，candidate prompt digest 必须不同于 baseline，最终 projection 必须恢复 exact predecessor。Token 数只作为观察值，不再作为 prompt 是否变化的代理，因为不同文本可能产生相同 Token 计数。
+
+该 runner 不启动、停止或探测远端 Edge；Voice／Avatar 固定记为 `NOT_TESTED_REMOTE_EDGE_DISABLED`。单条模型输出差异只能证明版本指令进入真实生成链，不能替代 48 条盲测或“更像人”的人工结论。网络安全、Pentest、A09、A12 与 Security Monitor 按用户要求记为 `NOT_RUN_USER_SKIPPED`。
