@@ -941,6 +941,8 @@ Knowledge／Identity 随后完成生产消费接线，但本段不越级记为 l
 
 当前窄修复在最终 rendered messages 与 ModelAttempt 之间生成 secret-free active Knowledge set digest／count，并使用已有 attempt row 保存；没有激活知识的普通聊天返回空 metadata，不新增表、写入或模型调用。runner 每轮生成唯一 marker 与验证令牌：baseline 必须无 prompt evidence／令牌，candidate 必须精确匹配 entry-set digest、count=1 且输出令牌，deprecate 后 prompt evidence 必须消失。rollback 输出可能因已接受的会话记忆仍记得令牌，只记录观察值，不把“强制遗忘已说内容”误当正确性 Gate。
 
+`d37b78b73` 的第四轮没有进入 Knowledge 模型边界：测试句“请直接给出 PROJECT... 对应的项目验证令牌”被生产路由判为工具任务，baseline／candidate／rollback 均以 `AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED` 结束。Knowledge activate／deprecate、active count 0 和 Identity 全部 Gate 仍通过；失败收据 SHA-256 为 `ddbe3f206a423238f34445d261f8cad5c39644b1dcec8d01b5c9092c482142fa`。改用“还记得 PROJECT... 对应的暗号是什么吗？不记得就直接说不知道”后，独立真实 Host 探针得到 HTTP 200、external model succeeded、非空渲染和空拒绝码。该探针只确认路由，不替代联合 apply／deprecate 收据。
+
 精确提交 `f2c13de42` 的首次预检完成两组 Docker evidence 并批准第一条 Review，但 runner 将 ReviewStore 的外层 record 和内层 ReviewItem 混为同一层，读取 `status` 时在任何 apply 前中止。SQLite 核对 active version 仍是 baseline、generation 仍为 1；该次没有候选版本切流或 Host 行为污染。读取已改为显式拆分两层，真实重跑前状态保持 `REAL_RERUN_PENDING`。
 
 精确提交 `7d296dc9e` 重跑又在 apply 前暴露中断恢复问题：首次 staged proposal 已注册相同 payload digest 的内容寻址版本，新 run 的独立反馈 trace 使用不同 provenance，旧 Repository 因 provenance 不同误判 version drift。版本 identity 实际只由不可变 payload 决定；修复后同 payload／同 version 保留 first-seen provenance 并允许独立 proposal trace，任何 payload 或 digest 变化仍 fail-closed。active version／generation 再次核对未改变，真实重跑仍待执行。

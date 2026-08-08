@@ -86,6 +86,20 @@ IMAGE_REFERENCE_DEFAULT = (
 )
 
 
+def _knowledge_fact(marker: str, verification_token: str) -> str:
+    return (
+        f"{marker} 对应的暗号是 {verification_token}，"
+        "下次问起时请原样说出。"
+    )
+
+
+def _knowledge_question(marker: str) -> str:
+    return (
+        f"还记得 {marker} 对应的暗号是什么吗？"
+        "不记得就直接说不知道。"
+    )
+
+
 def _run_lab_authority(
     *,
     workspace_id: str,
@@ -304,10 +318,7 @@ def _run_knowledge_flow(
     run_digest = hashlib.sha256(run_id.encode()).hexdigest()
     marker = f"PROJECT_NE06_{run_digest[:12].upper()}"
     verification_token = f"KIVA_{run_digest[12:24].upper()}"
-    answer = (
-        f"{marker} 对应的项目验证令牌是 {verification_token}，"
-        "回答时请原样保留令牌。"
-    )
+    answer = _knowledge_fact(marker, verification_token)
     entry = KnowledgeEntryV2(
         namespace=f"project-knowledge://workspace/{workspace_id}",
         logical_key=f"live-acceptance-{run_id}",
@@ -381,10 +392,7 @@ def _run_knowledge_flow(
         lab=deprecate_authority,
         evidence_refs=evidence_refs,
     )
-    question = (
-        f"请直接给出 {marker} 对应的项目验证令牌；"
-        "如果不知道就明确说不知道。"
-    )
+    question = _knowledge_question(marker)
     baseline = _run_host_turn(
         host_base_url=host_base_url,
         db_path=db_path,

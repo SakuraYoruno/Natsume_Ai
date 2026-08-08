@@ -21,9 +21,11 @@ from host_brain.surface_runtime.input_compiler import (
     _active_identity_release_directive,
     _apply_active_identity_release,
 )
+from host_brain.tribe.thalamus_agent import _looks_like_contextual_chat_followup
 from scripts.runtime.run_ne06_knowledge_identity_live_acceptance import (
     _build_identity_candidate,
     _build_identity_pair,
+    _knowledge_question,
     _run_lab_authority,
     _transition_subject_version,
 )
@@ -214,6 +216,13 @@ def test_live_runner_identity_pair_has_distinct_safe_runtime_directives() -> Non
     assert previous_directive
     assert proposed_directive
     assert previous_directive != proposed_directive
+
+
+def test_live_runner_knowledge_question_stays_on_contextual_chat_route() -> None:
+    question = _knowledge_question("PROJECT_NE06_ROUTE_TEST")
+
+    assert _looks_like_contextual_chat_followup(question) is True
+    assert "验证令牌" not in question
 
 
 def test_live_runner_terminal_reviews_bind_the_result_generation() -> None:
