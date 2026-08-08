@@ -95,7 +95,7 @@
 - [x] 复验普通 Gateway 陪伴实时模型路由。`8cbdadb7d` 加载后真实命中 Tier B／`CHAT_SURFACE_REALTIME`／`deepseek-v4-flash`，webhook 63 ms；192-token 报告 SHA-256 为 `fc9b091c3a45b5774e9617e82486c3bfe6bff233064a6b11a8d676e5220487a1`。路由切换和入口 fail-fast 已证实，回复可用性由下一项继续验收。
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。
 - [x] 使用真实 `deepseek-v4-flash` 完成冻结的 48 条文本多轮场景：144/144 个 Gateway→TaskGraph 回合完成，自动 46 条待人工、2 条失败，单人复核确认模板坍缩，人感结论为 `FAIL`。
-- [ ] 完成剩余非文本真实 driver；不得用 scripted replay 或文本 fixture 代替。跨重启 6 条已使用真实 DeepSeek、Host 进程替换和 canonical SQLite 完成，结构连续性 6/6、人工完整人感 0/6，聚合收据 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`。剩余多模态 6、主动陪伴 6、Edge 故障 6，共 18 条；后两类会触达另一台 Edge，当前按用户约束保留 `NOT_RUN_REQUIRED_DRIVER`。
+- [ ] 完成剩余非文本真实 driver；不得用 scripted replay 或文本 fixture 代替。跨重启 6 条已使用真实 DeepSeek、Host 进程替换和 canonical SQLite 完成，结构连续性 6/6、人工完整人感 0/6，聚合收据 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；`ac87ddd34` 精确代码提交代表性强杀复验收据 SHA-256 为 `faa452f8ddece572a1df52c64b13ecdb2c412300c7d7bbe9eec5e215e46523d3`。剩余多模态 6、主动陪伴 6、Edge 故障 6，共 18 条；后两类会触达另一台 Edge，当前按用户约束保留 `NOT_RUN_REQUIRED_DRIVER`。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [x] 修复最终 SHA Host 探针只按 HTTP 200 产生假绿的问题：Health／Ready／Canon 必须校验业务语义，Host-only pending external 只能通过显式参数接受。
 - [x] 修复 `wc-004` 空 hash 与 Canon 漂移被误分类为 source unavailable；全部 `wc-*` 生产资产必须通过真实 loader 合同。

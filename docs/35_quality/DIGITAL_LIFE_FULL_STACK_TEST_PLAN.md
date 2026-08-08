@@ -892,6 +892,6 @@ python scripts/runtime/test_digital_life_restart_driver.py resume `
   --checkpoint <同一 checkpoint.json>
 ```
 
-`resume` 会在 checkpoint 同目录生成 `*-final.json`。当前六个变体结构恢复为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；但当前单人逐句复核为 0/6：回复没有自然续接冻结的“工作和休息怎么平衡”具体线程，只在部分变体保留了关系语气。因此工程结论为 `STRUCTURAL_PASS`，人感结论为 `FAIL`。测试还发现强杀后 loopback listener 已释放、Service Catalog 60 秒协调租约仍存在的启动窗口；修复必须只在精确 Host loopback endpoint 空闲时有界等待旧租约，端口被占用时立即拒绝，不能借机接管活实例。当前工作树 6/6 与修复回归仅作为候选证据，提交后仍须用精确 commit SHA 重跑一个代表变体并保存 tested-code fingerprint。
+`resume` 会在 checkpoint 同目录生成 `*-final.json`。当前六个变体结构恢复为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；但当前单人逐句复核为 0/6：回复没有自然续接冻结的“工作和休息怎么平衡”具体线程，只在部分变体保留了关系语气。因此工程结论为 `STRUCTURAL_PASS`，人感结论为 `FAIL`。测试还发现强杀后 loopback listener 已释放、Service Catalog 60 秒协调租约仍存在的启动窗口；修复必须只在精确 Host loopback endpoint 空闲时有界等待旧租约，端口被占用时立即拒绝，不能借机接管活实例。`ac87ddd34` 的变体 3 精确提交复验已经通过：tested-code worktree clean，Host `49448→42140`，恢复用时 42.6 秒，关系 revision `221→223`，episode／receipt 精确关联，受保护进程不变；报告 SHA-256 为 `faa452f8ddece572a1df52c64b13ecdb2c412300c7d7bbe9eec5e215e46523d3`。探针正文仍未具体提及工作／休息线索，故只关闭工程恢复缺陷，不改变人感失败结论。
 
 主动陪伴、多模态和 Edge 故障共 18 个变体仍为 `NOT_RUN_REQUIRED_DRIVER`：生产 `life_tick` 会把 `proactive.gateway` outbox 经本机 19000 SSH tunnel 发往另一台电脑，用户已明确禁止本轮触碰远端 Edge。不得通过 scripted replay、mock transport 或直接写数据库替代真实驱动。

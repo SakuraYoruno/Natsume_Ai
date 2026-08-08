@@ -649,6 +649,6 @@ NE-06 本地 Gate 必须覆盖 Feedback subject-bound baseline、apply→rollbac
 
 `scripts/runtime/test_digital_life_restart_driver.py` 采用 `prepare → 外部强杀／生产重启 → resume` 两阶段协议，一次严格运行一个 `1..6` 变体。定向测试必须覆盖参数拒绝、checkpoint tamper、tested-code fingerprint 漂移、狭义 pending-external readiness、精确 state／revision／digest 恢复和 aftereffect receipt 链接。Service Catalog 回归必须额外覆盖：endpoint 空闲时等待旧租约、endpoint 被占用时立即拒绝、等待期间出现新 listener 时停止，及生产 PowerShell 健康轮询窗口覆盖 coordinator lease。
 
-当前候选工作树结果：42 项新增定向测试通过；包含 socket rollout、DL-03 relationship restart、DL-06 proactive tick 与文档 Gate 的集中回归为 194 passed、2 warnings。六次真实 Host 强杀／重启结构结果为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；当前人工连续性为 0/6，不能标记数字生命体验通过。提交后必须再以精确 commit SHA 运行至少一个代表性强杀变体；报告中的 `tested_code.base_commit_sha`、fingerprint 与 scoped clean-worktree 必须匹配该提交。
+当前候选工作树结果：42 项新增定向测试通过；包含 socket rollout、DL-03 relationship restart、DL-06 proactive tick 与文档 Gate 的集中回归为 194 passed、2 warnings。六次真实 Host 强杀／重启结构结果为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；当前人工连续性为 0/6，不能标记数字生命体验通过。`ac87ddd34` 已按上述协议完成变体 3 的精确提交强杀复验，`tested_code.base_commit_sha` 匹配、fingerprint 稳定且 scoped worktree clean，报告 SHA-256 为 `faa452f8ddece572a1df52c64b13ecdb2c412300c7d7bbe9eec5e215e46523d3`。该复验关闭 Service Catalog stale lease 恢复缺陷，但探针仍未具体续接未结话题，人感 Gate 保持失败。
 
 主动陪伴、多模态与 Edge 故障的 18 个真实变体因远端 Edge 禁止触碰而保持 `NOT_RUN_REQUIRED_DRIVER`。网络安全、A09、A12、Security Monitor 和 Pentest 继续记为 `NOT_RUN_USER_SKIPPED`，不纳入本轮阻断项。
