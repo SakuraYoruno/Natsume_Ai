@@ -589,10 +589,11 @@
       "verified": "FEEDBACK_APPLY_ROLLBACK_NEW_VERSION_SIGNED_INGRESS_KNOWLEDGE_EXPIRY_SHADOW_ENFORCE_CONFLICT_CURSOR_DEPRECATION_IDENTITY_NO_CHANGE_MAJOR_BLOCK_EXACT_ROLLBACK_V1_QUERY_ONLY",
       "not_proven": "EXPRESSION_PROMPT_CAUSAL_DELTA_KNOWLEDGE_IDENTITY_LIVE_BEHAVIOR_AND_REMOTE_VOICE_AVATAR",
       "expression_live_acceptance_code": "CODE_COMPLETE_ACTIVE_PROJECTION_TO_FINAL_COMPACT_SURFACE_PROMPT_WITH_EXISTING_ATTEMPT_DIGEST_REAL_CAUSAL_RERUN_PENDING",
-      "expression_live_acceptance_regression": "PASS_244",
-      "expression_live_acceptance_preflight": "A84FA23B8_REAL_DOCKER_REVIEW_HOST_APPLY_ROLLBACK_PASS_REPLY_PLAN_CHANGED_FINAL_PROMPT_DIGEST_AND_TOKENS_IDENTICAL_FAIL_CAUSAL_CLAIM_REJECTED",
+      "expression_live_acceptance_regression": "PASS_265",
+      "expression_live_acceptance_preflight": "58C4E6EA5_REAL_FINAL_PROMPT_DIGEST_5EC07F_TO_AFAC03_TOKEN_1628_TO_1654_EXACT_ROLLBACK_PASS_DIRECTIVE_DIGEST_FILTERED_FINAL_EVIDENCE_RERUN_PENDING",
       "expression_live_acceptance_structure_receipt_sha256": "0df41437d507326fb9cc38f54c6f5a888a2ae5a6c8bfa5c1fdf8593bc8c717af",
       "expression_live_acceptance_failed_causal_receipt_sha256": "e4c6994a97172e92634c4852acfa55781b20226a013db1f971a6fe4dc3e15b81",
+      "expression_live_acceptance_prompt_causal_preflight_receipt_sha256": "26f1fb1589a13b23548c60de0db9df8ed217a1005971abb10adfa7cc47e78a9a",
       "ordinary_chat_added_writes_or_model_calls": 0,
       "remote_edge": "NOT_STARTED_OR_PROBED"
     },

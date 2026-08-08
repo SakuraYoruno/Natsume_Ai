@@ -941,6 +941,8 @@ NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070
 
 精确提交 `a84fa23b8a491445d11eb1fc98cc16d34d585480` 的真实重跑继续正确失败，收据 SHA-256 为 `e4c6994a97172e92634c4852acfa55781b20226a013db1f971a6fe4dc3e15b81`。两组 Docker 双臂、两个 Review、apply／rollback、三次真实 `deepseek-v4-flash` turn 和 exact projection rollback 全部通过；候选 `reply_plan` 也精确出现“避免机械 AI 腔／避免模板化分段”。但三轮最终注册 prompt digest 都是 `5ec07fe5...df35`，prompt token 也都是 1628。根因是生产启用了 compact Surface prompt：它为低延迟省略完整 ReplyControlPacket 时，也遗漏了 active expression directive。当前修复只在偏好实际激活时向最终 compact prompt 增加一条最多 180 字的指令，并在已有 ModelAttempt metadata 附带该指令的 SHA-256；基线回合不增加 prompt 文本，不新增表、写入、模型轮次或远端请求。244 项相关回归通过。精确新提交实测前仍为 `LIVE_STRUCTURE_PASS / FINAL_PROMPT_CAUSAL_RETEST_PENDING`，单样本人感仍为 `UNPROVEN`。
 
+`58c4e6ea57e792133667cddc39f7142140302f91` 的下一次真实收据 SHA-256 为 `26f1fb1589a13b23548c60de0db9df8ed217a1005971abb10adfa7cc47e78a9a`。candidate 最终 prompt digest 已从 baseline 的 `5ec07f...` 变为 `afac03...`，prompt token 从 1628 变为 1654；rollback 又恢复原 digest 与 1628，证明 compact prompt 因果已经真实进入模型。Gate 仍保持 FAIL，因为 ModelAttempt Service 有意过滤 caller 任意 metadata，candidate 的 directive digest 未进入 durable row。当前仅把合法 64 位 `surface_expression_directive_digest` 加入显式 public allowlist，其他 caller metadata 继续拒绝；265 项相关回归通过。最终新提交复验前状态为 `PROMPT_CAUSAL_PASS / DURABLE_DIRECTIVE_EVIDENCE_PENDING`。
+
 ## 2026-08-08 普通对话事件循环与真实首句延迟
 
 新的直接 SSE 探针以同一 session 连续发送 20 个低风险日常回合，只记录阶段、字符数和正文摘要，不持久化正文。原始报告 SHA-256 为 `292bae13dd718cc2eb9263cc34caf5cdcb187f1100f4c079caae83acf2adbf21`：20/20 到达 `RENDER` 和 `COMMIT`，首 `RENDER` p50／p95 为 `5097.5／8287 ms`，HTTP header p50／p95 为 `742.5／3390 ms`，最坏 header 为 `9245 ms`。这撤销此前以 `user_to_surface_commit_ms` 代理首可见 Token 的口径；真实实时 Gate 明确失败。

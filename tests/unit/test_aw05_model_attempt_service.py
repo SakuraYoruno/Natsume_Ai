@@ -651,6 +651,7 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
         max_attempts=1,
         metadata={
             "model_node_id": "core_reasoner_primary",
+            "surface_expression_directive_digest": "e" * 64,
             "private_context": "must-not-enter-audit",
         },
     )
@@ -663,6 +664,7 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
         "scene_type": "CHAT",
         "cognitive_tier": "A",
         "model_node_id": "core_reasoner_primary",
+        "surface_expression_directive_digest": "e" * 64,
     }
     assert terminal.metadata == {
         **started.metadata,
