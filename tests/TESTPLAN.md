@@ -410,6 +410,8 @@ Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Pla
 
 自然文本调优不得继续复用已经人工读过的 48 条 probe 来挑选实现。`dl07_live_natural_text_holdout_v1.json` 在第一次运行前冻结修复与喜忧各 6 条新 probe；第一轮必须在未接入候选策略的当前 `deepseek-v4-flash` 上建立基线，第二轮只允许改变预注册的场景化七海原句样本，provider、model、setup、预算、候选数和重试上限保持一致。runner 报告必须绑定 execution manifest 的 SHA-256；自动结果仍只能进入人工复核，不能替代三名评审盲测。
 
+冻结基线已得到 18 个 accepted 回合、1/6 自动待人工和 5/6 失败，报告 SHA-256 为 `43c98a4d57fb30889dbae4df4542ef4de55b93412d8bb488ef96d9cd3ac666f7`。候选准入测试必须证明：`REPAIR` 精确选择 3 条 source-bound 七海样本，`HOLD_COMPLEXITY` 精确选择 2 条；无 frame 的普通对话不收到它们；构造过程不读取 TSV、Chroma 或 SQLite；模型请求数和最多一次重试保持不变；50 次 prompt build 最大新增时间低于 1ms。代码通过后仍须加载新 Host 运行同 6 条，逐句人工比较才可判定收益。
+
 `CHAT_SURFACE_REALTIME` 当前冻结为 640 output tokens，并使用服务端 typed `thinking_mode=disabled`。Route boundary 只接受 `enabled/disabled`；DeepSeek provider adapter 必须把它转换为顶层 `thinking={"type":"disabled"}`，OpenAI、Gemini、Minimax 等 provider 必须删除提示而不是收到未知字段。Plan、Research 和高歧义深路径不得继承普通陪伴的 non-thinking 配置。回归仍要拒绝 `finish_reason=length` 且只有 `reasoning_content` 的空正文，不能把 reasoning 当用户可见回复；真实复验同时记录 completion token、content presence、provider latency 与最终 Voice receipt。
 
 `c6a6e0b36` 的三轮真实校准已关闭“默认 thinking 耗尽正文预算”断点：三轮图和 Acceptance 全部完成，最终轮 Voice 物理回执为 `APPLIED`。该报告仍不能关闭实时门槛或人感门槛；整轮 Host latency 为 7,739～12,715 ms，前两轮各需一次 `surface_hard_gate_repair`，必须继续测量首 token、确定性链路和语义修复比例。

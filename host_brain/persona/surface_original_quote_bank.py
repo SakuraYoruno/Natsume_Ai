@@ -168,6 +168,22 @@ _SCENE_LEXICAL_HINTS: dict[str, tuple[str, ...]] = {
     "explicit_memory": ("记得", "忘", "想起来", "知道", "当然"),
     "relationship_memory_reassurance": ("记得", "忘", "不记得", "别瞎想", "知道"),
 }
+_CURATED_SCENE_QUOTES: dict[str, tuple[tuple[str, str], ...]] = {
+    # These are fixed 七海 lines from the local RIDDLE JOKER corpus.  The
+    # repair set carries three different pieces of conversational posture:
+    # a concrete interruption apology, plain ownership, and a non-punitive
+    # first-person hurt reaction.  The mixed set preserves both sides in one
+    # breath instead of teaching an emotion-management template.
+    "relationship_repair": (
+        ("riddle_joker_tsv::741", "啊啊,抱、抱歉。打断你说话了"),
+        ("riddle_joker_tsv::1588", "而且,我也就由着性子来了我也有责任"),
+        ("riddle_joker_tsv::8895", "...真不想被阿晓那样说呐。明明以前每天都是我叫你起床"),
+    ),
+    "mixed_affect": (
+        ("riddle_joker_tsv::21108", "你这么夸我我是很高兴...不过让我更加担心了"),
+        ("riddle_joker_tsv::21447", "(明明知道这是好事...心里还是觉得好不舒服...好不舒服啊啊~)"),
+    ),
+}
 _SCENE_REQUIRES_LEXICAL_HIT = frozenset(
     {
         "short_continue",
@@ -193,6 +209,8 @@ _STRONG_SCENE_DEFAULT_LIMITS = {
     "pushed_away_boundary": 2,
     "lover_presence": 3,
     "ambiguous_affection": 1,
+    "relationship_repair": 3,
+    "mixed_affect": 2,
 }
 _SCENE_BLOCKED_MARKERS: dict[str, tuple[str, ...]] = {
     "temporal_mismatch_greeting": (
@@ -399,6 +417,48 @@ def select_surface_original_quotes(query: SurfaceOriginalQuoteQuery, *, limit: i
         return SurfaceOriginalQuoteSelection(query=query, degraded=True, reason=f"SURFACE_ORIGINAL_QUOTES_{policy.mode.upper()}")
 
     effective_limit = max(1, min(int(limit or query.limit or 12), int(query.limit or 12), int(policy.max_quotes or 1)))
+    curated_rows = _CURATED_SCENE_QUOTES.get(_clean_policy_scene(query.scene_id))
+    if curated_rows:
+        curated_quotes = tuple(
+            SurfaceOriginalQuote(
+                quote_id=quote_id,
+                text=quote_text,
+                source_ref=(
+                    "RIDDLE_JOKER_zh_dialogue.tsv:"
+                    f"{quote_id.rsplit('::', 1)[-1]}:七海"
+                ),
+                source_digest=quote_id,
+                prompt_text=quote_text,
+                source_score=1.0,
+                confidence=1.0,
+                character_confidence=1.0,
+                intent_tags=("daily",),
+                style_moves=("quick_reaction",),
+                relationship_stages=(
+                    "familiar",
+                    "trusted_friend",
+                    "close_friend",
+                    "close_but_not_romantic",
+                ),
+            )
+            for quote_id, quote_text in curated_rows
+        )
+        selected = tuple(
+            quote
+            for quote in curated_quotes
+            if not _quote_exceeds_question_budget(query, quote.prompt_text or quote.text)
+            and not _unsafe_runtime_quote_text(quote.prompt_text or quote.text)
+            and _stage_prompt_compatible(
+                quote.prompt_text or quote.text,
+                stage=query.relationship_stage,
+            )
+        )[:effective_limit]
+        return SurfaceOriginalQuoteSelection(
+            quotes=selected,
+            query=query,
+            degraded=not bool(selected),
+            reason="" if selected else "CURATED_SCENE_QUOTES_UNAVAILABLE",
+        )
     cache_ttl_s = _quote_selection_cache_ttl_s()
     cache_key = _quote_selection_cache_key(query, limit=effective_limit, policy=policy)
     if cache_ttl_s > 0:
@@ -536,6 +596,8 @@ _STRONG_QUOTE_SCENES = frozenset(
         "annoying_tease",
         "style_repair",
         "temporal_mismatch_greeting",
+        "relationship_repair",
+        "mixed_affect",
     }
 )
 _CAREFUL_QUOTE_SCENES = frozenset(

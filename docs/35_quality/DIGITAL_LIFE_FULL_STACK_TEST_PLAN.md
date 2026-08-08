@@ -836,6 +836,8 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 
 完整 48 条已经被反复读取，不能再当作自然文本调优的留出集。`dl07_live_natural_text_holdout_v1.json` 预注册修复与喜忧各 6 条全新 probe；首轮固定使用当前 `deepseek-v4-flash` 建立未调优基线，候选轮只允许接入经过场景过滤的少量七海原作正向节奏样本。两轮必须使用相同 setup、预算、候选数和最多一次重试，并在报告中保存 manifest SHA-256。该小队列只回答“真实原句是否改善这两类语言”，不能提升完整人感或三人盲评状态。
 
+基线绑定 `1854132e5`，manifest SHA-256 为 `9470a7e8a16f223891ea282cbea32c824df2ee6be35b650daea835b7332bffb8`，报告 SHA-256 为 `43c98a4d57fb30889dbae4df4542ef4de55b93412d8bb488ef96d9cd3ac666f7`。18/18 Gateway 回合、TaskGraph、Acceptance、Outbox 与 canonical writer 完成，旧 writer 增量为 0；结果为 1 条自动待人工、5 条失败。候选实现不得现场扫描完整 TSV；当前 5 条固定样本的 50 次 prompt build 均值／最大为 0.082／0.269ms。加载新 SHA 后才允许执行同一 6 条候选轮。
+
 首轮 frame 真实 Provider 小队列已经执行：8 类／24 个 accepted turn 中只有 2 条经当前人工复核可接受，2 条自动失败，另 4 条自动放行但人工拒绝，报告 SHA-256 为 `99c024f3dd02c6d2fe03cfdad64298b31c9ed57a00753996bd27c5a8a8d97fd4`。因此后续重测不能只检查 candidate score 和 frame 字段存在，还必须逐条检查 `surface_memory_recall_packet` 的 person/session 归属。统一 RecallFusion 已新增 fail-closed 终态过滤及 117 项回归；真实重测须在包含多个既存 subject 的库中证明跨 subject 候选为 0，并保留每路 raw/accepted/excluded 计数。该项通过后才继续人感约束和完整 48 条，不能用清空数据库掩盖污染。
 
 第一次同库隔离复验报告 SHA-256 为 `19f52e0b8141ce44864ad3f13f6414a17a65088bcbd1fb999e28e0dba6503cfe`：跨 subject 候选已归零，但两条首轮仍把当前 request 的 Intent 自己召回，形成 `_thalamus_meta` 假记忆并触发 `MEMORY_ALIGNMENT_REQUIRED_MISS`。验收因此增加 causal self-exclusion：同一 request/intent 不得出现在自己的 recall packet，路由收据必须给出 `self_excluded_candidate_count`。代码回归现为 118 项通过；必须在不清理既存数据的情况下再跑同两条并确认首轮假记忆为 0，之后才能评价模型语言质量。

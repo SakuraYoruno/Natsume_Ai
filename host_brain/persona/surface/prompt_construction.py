@@ -15,7 +15,10 @@ from host_brain.persona.surface_original_quote_bank import (
     render_surface_original_quote_guidance,
     select_surface_original_quotes,
 )
-from host_brain.persona.surface_utterance_frame import render_companion_utterance_frame
+from host_brain.persona.surface_utterance_frame import (
+    normalize_companion_utterance_frame,
+    render_companion_utterance_frame,
+)
 from host_brain.persona.surface.data_models import (
     IsolatedSurfaceInput,
     IsolatedCandidateScore,
@@ -422,6 +425,14 @@ def _surface_temporal_mismatch_greeting_quote_scene(request: IsolatedSurfaceInpu
 
 
 def _surface_original_quote_scene_id(request: IsolatedSurfaceInput, contract_scene_id: str = "") -> str:
+    utterance_frame = normalize_companion_utterance_frame(
+        getattr(request.control, "companion_utterance_frame", {})
+    )
+    companion_act = str(utterance_frame.get("companion_act_kind") or "").upper()
+    if companion_act == "REPAIR":
+        return "relationship_repair"
+    if companion_act == "HOLD_COMPLEXITY":
+        return "mixed_affect"
     for raw in (
         request.control.task_mode,
         request.control.response_move,
@@ -520,6 +531,12 @@ def build_native_stream_surface_messages(
     style_anchor = _clean_list(control.style_anchor)[:3]
     if style_anchor:
         user_parts.extend(("【语言节奏】", *(f"- {item}" for item in style_anchor)))
+    quote_guidance = render_surface_original_quote_guidance(
+        build_surface_original_quote_query(request, limit=3),
+        limit=3,
+    )
+    if quote_guidance:
+        user_parts.extend(("【七海原句节奏样本】", quote_guidance))
     must_include = _clean_list(control.must_include)[:8]
     if must_include:
         user_parts.extend(("【必须自然包含】", *(f"- {item}" for item in must_include)))

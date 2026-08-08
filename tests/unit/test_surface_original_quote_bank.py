@@ -229,8 +229,28 @@ def test_surface_original_quote_policy_splits_scene_strength() -> None:
     assert surface_original_quote_policy_for_scene("short_continue").max_quotes == 3
     assert surface_original_quote_policy_for_scene("lover_presence").max_quotes == 3
     assert surface_original_quote_policy_for_scene("ambiguous_affection").max_quotes == 1
+    assert surface_original_quote_policy_for_scene("relationship_repair").max_quotes == 3
+    assert surface_original_quote_policy_for_scene("mixed_affect").max_quotes == 2
     assert surface_original_quote_policy_for_scene("technical_next_step").mode == "need_samples"
     assert surface_original_quote_policy_for_scene("daily_morning").mode == "need_samples"
+
+
+def test_curated_relationship_repair_quotes_keep_fixed_source_order() -> None:
+    selection = select_surface_original_quotes(
+        SurfaceOriginalQuoteQuery(
+            scene_id="relationship_repair",
+            relationship_stage="familiar",
+            question_budget=0,
+            limit=3,
+        ),
+        limit=3,
+    )
+
+    assert [quote.quote_id for quote in selection.quotes] == [
+        "riddle_joker_tsv::741",
+        "riddle_joker_tsv::1588",
+        "riddle_joker_tsv::8895",
+    ]
 
 
 def test_surface_original_quote_policy_disables_morning_without_samples(monkeypatch) -> None:

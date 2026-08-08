@@ -112,6 +112,43 @@ def test_native_realtime_prompt_is_compact_and_keeps_persona_boundary() -> None:
     assert "## 必须自然包含\n- 无" not in rendered
 
 
+def test_native_realtime_repair_prompt_uses_curated_nanami_rhythm() -> None:
+    request = _request(
+        user_message="你嘴上说懂了，可你还是没懂。",
+        reply_control_packet={
+            "response_move": "repair",
+            "task_mode": "relationship_repair",
+            "emotional_tone": "contained_hurt",
+            "relationship_distance": "familiar",
+            "information_budget": "short",
+            "question_budget": 0,
+            "companion_utterance_frame": {
+                "schema_version": "companion_utterance_frame.v1",
+                "frame_id": "frame-repair-test",
+                "companion_act_kind": "REPAIR",
+                "semantic_focus": "RELATIONAL_IMPACT",
+                "self_stance": "OWN_REPAIR_WITH_CONTAINED_HURT",
+                "response_move": "ACKNOWLEDGE_IMPACT_WITH_HONEST_HURT",
+                "inference_policy": "BOUNDED_BY_EVIDENCE",
+                "relationship_posture": "BOUNDARIED_REPAIR",
+                "question_policy": "NONE",
+                "ending_mode": "HONEST_STOP",
+                "forbidden_claims": ["PREMATURE_REPAIR"],
+                "created_at_ms": 1,
+            },
+        },
+    )
+
+    rendered = "\n".join(
+        item["content"] for item in build_native_stream_surface_messages(request)
+    )
+
+    assert build_surface_original_quote_query(request).scene_id == "relationship_repair"
+    assert "【七海原句节奏样本】" in rendered
+    assert "啊啊,抱、抱歉。打断你说话了" in rendered
+    assert "而且,我也就由着性子来了我也有责任" in rendered
+
+
 def test_forbidden_raw_context_keys_are_rejected() -> None:
     payload = {
         "soul_md": SOUL,

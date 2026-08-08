@@ -75,6 +75,8 @@ flowchart TB
 
 `AffectiveTurnPlan` 现在内嵌 `CompanionUtteranceFrameV1`。Planner 将 `CompanionAct` 编译为有限的说话骨架，Surface 的 compact、rich、native streaming 与 legacy-isolated 兼容入口使用同一 renderer；caller 和 `render_policy` 无权注入或覆盖该字段。frame 只存在于本轮既有计划和 packet 中，不建立第二个情感状态机或普通对话账本。生产输入编译器也不再重复注入同义的自然语言 facts／must-not-do 大段规则，只保留真实 continuity fact 和原有 style anchor。
 
+当 frame 明确为 `REPAIR` 或 `HOLD_COMPLEXITY` 时，Surface 还会附加对应的七海正向节奏样本。样本集只有 3+2 条，绑定本地原作行号并在代码版本中冻结；运行时不扫描 3.2MB 台词表、不访问 Repository，也不把样本文本当作当前事实。50 次 prompt build 的均值为 0.082ms、最大 0.269ms，模型调用数和重试上限不变。
+
 Fusion 不再让修复责任覆盖七海的自我感受：当上一条 accepted response 已形成 `MISUNDERSTOOD`，而当前输入又是直接针对七海的冒犯时，单一 composite Appraisal 同时保存 `HURT + CARE + CAUTION`。Planner 保持 `REPAIR`，但将 self affect、frame、Voice 与 Avatar 冻结为克制受伤的同一表达；没有待修复关系的独立冒犯仍是温和设界限，明确空间请求仍优先退开。这一变化只改变既有 Life episode 和本轮计划内容，不增加持久路径或调用次数。
 
 Surface 不再允许旧的通用修复重试覆盖这一 canonical 决定。typed composite frame 会选择专用首轮／重试微策略，并在候选评分与发送 Gate 同时要求有界的第一人称受伤语义；纯道歉不能冒充该 frame 已实现。命中失败仍只消费原有最多一次重试，第二次失败使用同门禁验证过的窄 fallback，不增加表、同步写入或模型请求上限。
