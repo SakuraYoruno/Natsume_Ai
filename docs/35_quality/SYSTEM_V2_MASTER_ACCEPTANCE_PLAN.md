@@ -256,6 +256,8 @@ Secure Ingress
 - Lab 只能产出 proposal，不能直接写生产状态。
 - Skill/Feedback/Knowledge/Identity activation 必须查询真实 Lab、Review、Regression 和 version authority。
 - 完成真实 apply→rollback；Knowledge 冲突处置；Identity no-change 发布、重大差异阻断和 exact previous rollback。
+- Knowledge 必须在真实 Host 召回回合进入最终 Surface facts，`NO_RECALL` 普通回合查询数必须为 0；deprecate／rollback 后同一查询不得继续命中。
+- Identity candidate 必须改变真实 compact prompt 的 bounded style directive，exact rollback 必须恢复 previous snapshot、directive 与 prompt identity；不得用 release 快照覆盖当前 Affect 或 `Soul.md`。
 - Soul 核心价值、亲密身份和敏感推断不得由在线学习自动改写。
 
 ### A14 Edge、OBS 与 Operator

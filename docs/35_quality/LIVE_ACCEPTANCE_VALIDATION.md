@@ -929,6 +929,8 @@ NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070
 
 后续新增的 NE-06 表达偏好 runner 不再用 fixture Lab/Review：当前 active payload 与候选 payload 分别进入 digest-pinned Docker 双臂，独立 verifier 重开数据集；proposal 经 production ReviewStore 与版本服务切换在线 Host，之后再用第二组双臂和第二个 Review 恢复精确旧版本。三个回合均要求真实 external model transport。当前代码与相邻 42 项回归通过，提交绑定实测尚未执行；远端 Edge 按用户要求不启动，Voice／Avatar 不在本 runner 中冒充通过。
 
+Knowledge／Identity 随后完成生产消费接线，但本段不越级记为 live PASS。Knowledge 不再走会重复 Chroma 和写 shadow compare 的 legacy wrapper，而只在 recall planner admission 后查询 active personal/project namespace，并以 bounded facts 进入 Surface；`NO_RECALL` 路径不调用该 port。Identity 只读取 active release 的结构化 style fingerprint，并将确定性、最多 180 字的表达底色送入 compact prompt；Soul、当前 Affect 和关系权限不变。Surface、召回、composition 与 NE-06 集成共 353 项通过；下一步必须在隔离 A15 数据库用 production Review 与真实 Host 完成 apply→行为变化→deprecate／exact rollback。
+
 精确提交 `f2c13de42` 的首次预检完成两组 Docker evidence 并批准第一条 Review，但 runner 将 ReviewStore 的外层 record 和内层 ReviewItem 混为同一层，读取 `status` 时在任何 apply 前中止。SQLite 核对 active version 仍是 baseline、generation 仍为 1；该次没有候选版本切流或 Host 行为污染。读取已改为显式拆分两层，真实重跑前状态保持 `REAL_RERUN_PENDING`。
 
 精确提交 `7d296dc9e` 重跑又在 apply 前暴露中断恢复问题：首次 staged proposal 已注册相同 payload digest 的内容寻址版本，新 run 的独立反馈 trace 使用不同 provenance，旧 Repository 因 provenance 不同误判 version drift。版本 identity 实际只由不可变 payload 决定；修复后同 payload／同 version 保留 first-seen provenance 并允许独立 proposal trace，任何 payload 或 digest 变化仍 fail-closed。active version／generation 再次核对未改变，真实重跑仍待执行。

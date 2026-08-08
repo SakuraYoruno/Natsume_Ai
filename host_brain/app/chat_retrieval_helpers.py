@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import os
 import re
 import time
@@ -232,6 +233,7 @@ async def _run_retrieval(
     conversation_history: Any | None = None,
     build_user_preference_pack: Callable[..., Any] | None = None,
     recall_service_factory: Callable[[], Any] | None = None,
+    active_knowledge_search: Callable[..., list[dict[str, Any]]] | None = None,
     request_id: str,
     message: str,
     person_id: str,
@@ -258,19 +260,19 @@ async def _run_retrieval(
         "embedding": 0,
         "service_resolve": 0,
         "recall": 0,
+        "active_knowledge": 0,
         "lightnovel_review": 0,
         "generic_evidence_review": 0,
         "total": 0,
     }
     try:
         plan_started = time.perf_counter()
-        from dataclasses import replace  # noqa: PLC0415
-
         from host_brain.persona.isolated_surface_continuity import ThreeLayerContinuityContext  # noqa: PLC0415
         from host_brain.persona.surface_memory_recall import (  # noqa: PLC0415
             SURFACE_MEMORY_RECALL_COVERAGE_FAILED,
             SURFACE_MEMORY_RECALL_SKIPPED,
             SurfaceMemoryRecallPacket,
+            SurfaceMemoryFactRow,
             build_surface_memory_recall_packet,
             build_surface_memory_recall_decision_trace,
             plan_surface_memory_recall,
@@ -479,6 +481,17 @@ async def _run_retrieval(
                     ),
                 },
             )
+        active_knowledge_started = time.perf_counter()
+        packet = _apply_active_knowledge_to_surface_packet(
+            packet=packet,
+            plan=plan,
+            search=active_knowledge_search,
+            person_id=person_id,
+            fact_row_type=SurfaceMemoryFactRow,
+        )
+        runtime_timings_ms["active_knowledge"] = _elapsed_perf_ms(
+            active_knowledge_started
+        )
         lightnovel_review_started = time.perf_counter()
         packet = await _maybe_apply_lightnovel_deep_review(
             packet=packet,
@@ -537,6 +550,114 @@ async def _run_retrieval(
 
 def _elapsed_perf_ms(started: float) -> int:
     return max(0, int(round((time.perf_counter() - float(started)) * 1000)))
+
+
+def _apply_active_knowledge_to_surface_packet(
+    *,
+    packet: Any,
+    plan: Any,
+    search: Callable[..., list[dict[str, Any]]] | None,
+    person_id: str,
+    fact_row_type: Any,
+) -> Any:
+    """Merge a bounded active Knowledge projection into a recall packet.
+
+    The planner remains the admission gate.  A normal no-recall turn returns
+    before invoking the repository, and a failed optional read leaves the
+    existing memory packet unchanged.
+    """
+
+    if not bool(getattr(plan, "should_recall", False)) or not callable(search):
+        return packet
+    try:
+        rows = search(
+            query=str(getattr(plan, "query", "") or ""),
+            person_id=str(person_id or ""),
+            top_k=max(1, min(int(getattr(plan, "max_facts", 4) or 4), 4)),
+            threshold=0.05,
+        )
+    except Exception:
+        return packet
+    selected = [dict(item) for item in list(rows or []) if isinstance(item, Mapping)]
+    if not selected:
+        return packet
+    knowledge_rows: list[Any] = []
+    knowledge_facts: list[str] = []
+    evidence_refs: list[str] = []
+    source_refs: list[str] = []
+    scores: list[float] = []
+    for item in selected[:4]:
+        content = re.sub(r"\s+", " ", str(item.get("content") or "").strip())[:320]
+        if not content:
+            continue
+        metadata = dict(item.get("metadata") or {})
+        digest = str(metadata.get("entry_digest") or "").strip().lower()
+        evidence_ref = (
+            f"evolution-knowledge-entry://sha256/{digest}"
+            if re.fullmatch(r"[0-9a-f]{64}", digest)
+            else str(item.get("doc_id") or "").strip()
+        )
+        source_ref = str(metadata.get("provenance_ref") or "").strip()
+        score = max(0.0, min(float(item.get("score") or 0.0), 1.0))
+        fact = f"已激活知识：{content}"
+        knowledge_facts.append(fact)
+        if evidence_ref:
+            evidence_refs.append(evidence_ref)
+        if source_ref:
+            source_refs.append(source_ref)
+        scores.append(score)
+        knowledge_rows.append(
+            fact_row_type(
+                fact=fact,
+                store_id="semantic_memory",
+                source_ref=source_ref,
+                evidence_ref=evidence_ref,
+                score=score,
+            )
+        )
+    if not knowledge_rows:
+        return packet
+    trace = dict(getattr(packet, "trace", None) or {})
+    route_ids = tuple(
+        dict.fromkeys(
+            ["knowledge_os_v2", *list(getattr(packet, "route_ids", ()) or ())]
+        )
+    )
+    trace["knowledge_os_active"] = {
+        "status": "SELECTED",
+        "selected_count": len(knowledge_rows),
+        "read_only": True,
+    }
+    trace["route_count"] = len(route_ids)
+    return replace(
+        packet,
+        facts=tuple(
+            dict.fromkeys(
+                [*knowledge_facts, *list(getattr(packet, "facts", ()) or ())]
+            )
+        )[:8],
+        rows=tuple([*knowledge_rows, *list(getattr(packet, "rows", ()) or ())])[:8],
+        evidence_refs=tuple(
+            dict.fromkeys(
+                [*evidence_refs, *list(getattr(packet, "evidence_refs", ()) or ())]
+            )
+        )[:16],
+        source_refs=tuple(
+            dict.fromkeys(
+                [*source_refs, *list(getattr(packet, "source_refs", ()) or ())]
+            )
+        )[:16],
+        route_ids=route_ids,
+        candidate_count=int(getattr(packet, "candidate_count", 0) or 0)
+        + len(knowledge_rows),
+        confidence=max(
+            float(getattr(packet, "confidence", 0.0) or 0.0),
+            max(scores or [0.0]),
+        ),
+        degraded=False,
+        reason_code=None,
+        trace=trace,
+    )
 
 
 def _maybe_recall_collection_fastpath(

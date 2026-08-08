@@ -49,6 +49,7 @@ def surface_runtime_ports_factory():
             },
             "model_attempt_service": _model_attempt_service,
             "resolve_expression_preferences": lambda **_kwargs: None,
+            "resolve_active_identity": lambda **_kwargs: None,
         }
         values.update(overrides)
         return SurfaceRuntimePorts(**values)

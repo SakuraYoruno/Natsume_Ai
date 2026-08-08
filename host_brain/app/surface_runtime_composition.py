@@ -121,6 +121,7 @@ def build_surface_runtime_ports(
         resolve_expression_preferences=(
             agent_runtime_ports.resolve_expression_preferences
         ),
+        resolve_active_identity=agent_runtime_ports.resolve_active_identity,
     )
 
 

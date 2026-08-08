@@ -26,6 +26,7 @@ class SurfaceRuntimePorts:
     resolve_surface_reply_llm_runtime: Callable[..., dict[str, Any]]
     model_attempt_service: Callable[[], Any]
     resolve_expression_preferences: Callable[..., dict[str, Any] | None] | None = None
+    resolve_active_identity: Callable[..., dict[str, Any] | None] | None = None
 
 
 __all__ = ["SurfaceRuntimePorts"]

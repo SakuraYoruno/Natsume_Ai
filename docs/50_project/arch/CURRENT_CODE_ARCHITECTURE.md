@@ -106,6 +106,8 @@ Delegate 采用显式目标策略，而不是重新启用旧全局 SubAgent Disp
 
 版本化表达偏好也遵守普通聊天的轻量边界：Surface 通过 app-local port 读取 active projection，不发起第二次模型调用或独立写入；只有 active payload 能产生一条最多 180 字的 directive。生产默认 compact prompt 会把该行直接放进最终模型输入，baseline 不增加文本。ModelAttempt 沿用现有行记录 prompt digest，并仅在 directive 真正出现在最终 messages 时附带无正文 digest，供 apply／rollback 实测判定；它不是新的同步审计链。
 
+Knowledge 与 Identity 不再只是 activation ledger。Agent Runtime 仅在 Surface recall planner 已决定需要记忆时，通过 app-local port 查询当前 workspace 的 personal/project active Knowledge；`NO_RECALL` 普通聊天不访问 Knowledge OS，也不追加 shadow compare。active Identity release 只向 Surface 提供结构化 style fingerprint，经本地确定性映射成为最多 180 字的表达底色；它不读取快照中的私密正文、不使用 release 情绪覆盖当前 Life affect，也不能越过 `Soul.md`。两条路径均为只读、失败可降级，不新增模型调用或对话写事务。
+
 轻小说深读是普通召回之后的领域增强，不属于所有陪伴回合的固定前置步骤。消息先通过无 IO 的必要条件判定；只有可能在询问选书或详情时，才读取 durable 最近推荐上下文并运行 packet-aware 完整判定。无关陪伴消息不会读取推荐偏好或加载深读持久化模块；真正的指代追问只读取一次上下文，仍保留 cache、网页深读和 evidence 回写。
 
 Gateway Chat 因跨进程投递仍会生成紧凑 TaskGraph 和 durable Acceptance Effect，但它不再同步执行全部派生投影。编译器把可信 `route_type=chat` 固化在 `conversation.user_turn`；dispatcher 只同步提交 canonical 用户轮次和 `surface.reply_delivery`，随后唤醒唯一 app-local recovery Runtime，继续处理 Life、foreground affect、Expression、Memory 与 preference。Dispatcher 在 worker thread 调用同步 handler；两个保留异步调用合同的 Life handler 还会把内部同步 SQLite 主体显式交给 worker thread，避免后台恢复阻塞下一轮 ASGI admission。用户轮次提交失败会阻断 delivery；未标记旧图以及 Plan、Skill、Operator 等路线仍保持完整 effect 顺序。这样保留重启恢复与幂等，不让普通对话承担所有后台状态更新的墙钟时间。

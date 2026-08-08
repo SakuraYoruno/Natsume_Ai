@@ -354,6 +354,10 @@ def build_surface_main_chain_input_from_surface_reply_input(
         ports=ports,
         trace_stage_meta=trace_stage_meta,
     )
+    task_control = _apply_active_identity_release(
+        task_control,
+        ports=ports,
+    )
     task_control = _apply_active_expression_preferences(
         task_control,
         agent_input=agent_input,
@@ -545,6 +549,80 @@ def _apply_active_expression_preferences(
         dict.fromkeys([directive, *existing])
     )
     return control
+
+
+def _apply_active_identity_release(
+    task_control: Any,
+    *,
+    ports: SurfaceRuntimePorts,
+) -> dict[str, Any]:
+    """Apply the active release style base without exposing identity data.
+
+    IdentitySnapshot stores structured release summaries rather than private
+    bodies.  Only the bounded style fingerprint becomes a Surface directive;
+    Soul, relationship permissions and current affect retain higher authority.
+    """
+
+    control = dict(task_control or {})
+    resolver = ports.resolve_active_identity
+    if not callable(resolver):
+        return control
+    try:
+        active = resolver()
+    except Exception:
+        return control
+    directive = _active_identity_release_directive(active)
+    if not directive:
+        return control
+    existing = [
+        str(item).strip()
+        for item in list(control.get("style_anchor") or [])
+        if str(item).strip()
+    ]
+    control["style_anchor"] = list(
+        dict.fromkeys([directive, *existing])
+    )
+    return control
+
+
+def _active_identity_release_directive(active: Any) -> str:
+    payload = _safe_mapping(active)
+    snapshot = _safe_mapping(payload.get("snapshot"))
+    style = _safe_mapping(snapshot.get("style_fingerprint"))
+    raw_dimensions = style.get("dimensions")
+    if not isinstance(raw_dimensions, list):
+        return ""
+    dimensions: dict[str, float] = {}
+    for item in raw_dimensions:
+        if not isinstance(item, list) or len(item) != 2:
+            continue
+        try:
+            dimensions[str(item[0])] = float(item[1])
+        except (TypeError, ValueError):
+            continue
+    hints: list[str] = []
+    if dimensions.get("warmth", 0.5) >= 0.75:
+        hints.append("语气温暖但不黏腻")
+    elif dimensions.get("warmth", 0.5) <= 0.35:
+        hints.append("语气克制但不冷淡")
+    if dimensions.get("curiosity", 0.5) >= 0.75:
+        hints.append("自然保留好奇心")
+    if dimensions.get("humor", 0.5) >= 0.7:
+        hints.append("合适时带一点轻松幽默")
+    if dimensions.get("sensitivity", 0.5) >= 0.75:
+        hints.append("先照顾细微感受")
+    if dimensions.get("assertiveness", 0.5) >= 0.7:
+        hints.append("需要时清楚表达判断和边界")
+    if dimensions.get("playfulness", 0.5) >= 0.7:
+        hints.append("熟悉场景可以更俏皮")
+    if dimensions.get("resilience", 0.5) >= 0.75:
+        hints.append("遇到低落保持稳定而不强行积极")
+    if not hints:
+        return ""
+    return (
+        "已激活身份版本的表达底色（不覆盖 Soul）："
+        + "；".join(hints[:4])
+    )[:180]
 
 
 def _apply_affective_turn_guidance(

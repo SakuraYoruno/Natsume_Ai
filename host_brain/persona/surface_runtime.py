@@ -729,6 +729,7 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
     active_expression_preference = _active_expression_preference_directive(
         request
     )
+    active_identity_release = _active_identity_release_directive(request)
     prompt_facts = _surface_runtime_prompt_facts(request)
     prompt_must_not_do = _surface_runtime_must_not_do(request)
     utterance_frame_lines = render_companion_utterance_frame(
@@ -814,6 +815,10 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
             user_lines.extend(
                 ["", "本轮长期表达偏好：", active_expression_preference]
             )
+        if active_identity_release:
+            user_lines.extend(
+                ["", "本轮身份版本表达底色：", active_identity_release]
+            )
         user_lines.extend(
             ["", "必须遵守的事实：", fact_lines, "", "禁止项：", must_lines]
         )
@@ -868,6 +873,10 @@ def _direct_surface_messages_from_request(request: IsolatedSurfaceInput) -> list
         if active_expression_preference:
             user_lines.extend(
                 ["", "本轮长期表达偏好：", active_expression_preference]
+            )
+        if active_identity_release:
+            user_lines.extend(
+                ["", "本轮身份版本表达底色：", active_identity_release]
             )
         # --- Inner-state leakage for compact mode ---
         _compact_inner_parts: list[str] = []
@@ -1030,6 +1039,19 @@ def _active_expression_preference_directive(
     """
 
     prefix = "已激活的长期表达偏好（本轮执行）："
+    for item in list(getattr(request.control, "style_anchor", ()) or ()):
+        text = str(item or "").strip()
+        if text.startswith(prefix):
+            return text[:180]
+    return ""
+
+
+def _active_identity_release_directive(
+    request: IsolatedSurfaceInput,
+) -> str:
+    """Return the bounded active Identity style line for compact prompts."""
+
+    prefix = "已激活身份版本的表达底色（不覆盖 Soul）："
     for item in list(getattr(request.control, "style_anchor", ()) or ()):
         text = str(item or "").strip()
         if text.startswith(prefix):

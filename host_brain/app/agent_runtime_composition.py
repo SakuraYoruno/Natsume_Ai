@@ -148,6 +148,7 @@ def build_agent_runtime_application_ports(
             conversation_history=conversation_history(),
             build_user_preference_pack=build_user_preference_pack_with_ledger,
             recall_service_factory=build_surface_memory_recall_service,
+            active_knowledge_search=search_active_knowledge,
             **kwargs,
         )
 
@@ -228,6 +229,91 @@ def build_agent_runtime_application_ports(
         )
         return dict(payload) if isinstance(payload, dict) else None
 
+    def search_active_knowledge(
+        *,
+        query: str,
+        person_id: str,
+        top_k: int = 4,
+        threshold: float = 0.05,
+    ) -> list[dict[str, Any]]:
+        """Read active Knowledge only for a Surface recall turn.
+
+        This intentionally bypasses the legacy shadow wrapper.  Calling that
+        wrapper here would duplicate Chroma work and append comparison rows to
+        an otherwise read-only conversation path.
+        """
+
+        provider = host_services.evolution_activation_service
+        if not callable(provider):
+            return []
+        workspace_id = resolve_prefrontal_persona_workspace_id()
+        relationship_subject = str(person_id or "").strip()
+        if (
+            not relationship_subject
+            or len(relationship_subject) > 128
+            or any(
+                ord(char) < 32 or ord(char) == 127
+                for char in relationship_subject
+            )
+        ):
+            return []
+        resolved_top_k = max(1, min(int(top_k or 4), 8))
+        resolved_threshold = max(0.0, min(float(threshold), 1.0))
+        service = provider()
+        search = getattr(service, "search_active_knowledge", None)
+        if not callable(search):
+            return []
+        rows: list[dict[str, Any]] = []
+        try:
+            for namespace in (
+                f"life-memory://person/{relationship_subject}",
+                f"project-knowledge://workspace/{workspace_id}",
+            ):
+                for item in search(
+                    workspace_id=workspace_id,
+                    namespace=namespace,
+                    query=str(query or ""),
+                    top_k=resolved_top_k,
+                    threshold=resolved_threshold,
+                ):
+                    if isinstance(item, dict):
+                        rows.append(dict(item))
+        except Exception:
+            return []
+        deduplicated: dict[str, dict[str, Any]] = {}
+        for item in rows:
+            key = str(item.get("doc_id") or "").strip()
+            if not key:
+                continue
+            previous = deduplicated.get(key)
+            if previous is None or float(item.get("score") or 0.0) > float(
+                previous.get("score") or 0.0
+            ):
+                deduplicated[key] = item
+        return sorted(
+            deduplicated.values(),
+            key=lambda item: (
+                -float(item.get("score") or 0.0),
+                str(item.get("doc_id") or ""),
+            ),
+        )[:resolved_top_k]
+
+    def resolve_active_identity() -> dict[str, Any] | None:
+        provider = host_services.evolution_activation_service
+        if not callable(provider):
+            return None
+        service = provider()
+        resolver = getattr(service, "active_identity", None)
+        if not callable(resolver):
+            return None
+        try:
+            payload = resolver(
+                workspace_id=resolve_prefrontal_persona_workspace_id(),
+            )
+        except Exception:
+            return None
+        return dict(payload) if isinstance(payload, dict) else None
+
     async def stream_realtime_chat(**kwargs: Any):
         if realtime_companion_ports is None:
             raise AgentRuntimeCompositionError(
@@ -270,6 +356,8 @@ def build_agent_runtime_application_ports(
         ),
         stream_realtime_chat=stream_realtime_chat,
         resolve_expression_preferences=resolve_expression_preferences,
+        search_active_knowledge=search_active_knowledge,
+        resolve_active_identity=resolve_active_identity,
     )
     surface_runtime_ports = build_surface_runtime_ports(
         agent_runtime_ports=application_ports,

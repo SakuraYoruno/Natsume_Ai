@@ -1,7 +1,7 @@
 {
   "schema_version": "natsume.architecture-status.v3",
   "updated_at": "2026-08-08",
-  "commit_scope": "A15_LOCAL_STACK_CHAT_EVENT_LOOP_REAL_FIRST_RENDER_FAIL_DL_RESTART_CONVERSATION_AND_TYPED_DEICTIC_PASS_MODEL_HUMAN_FAIL",
+  "commit_scope": "NE06_KNOWLEDGE_IDENTITY_SURFACE_CONSUMER_CODE_WIRED_REAL_CAUSAL_RETEST_PENDING",
   "product_focus": "REALTIME_EMOTIONAL_DIGITAL_LIFE",
   "overall_status": "INCOMPLETE",
   "active_wave": "NE-08",
@@ -579,7 +579,7 @@
       "not_proven": "REAL_SKILL_SPECIFIC_DOCKER_LAB_REPORT_EXTERNAL_CANARY_AND_PRODUCTION_HOST_ACTIVATION"
     },
     "feedback_knowledge_identity_local_authority_acceptance": {
-      "status": "PARTIAL_LOCAL_AUTHORITY_AND_LIVE_EXPRESSION_CAUSAL_PASS_OTHER_LIVE_BEHAVIOR_PENDING",
+      "status": "PARTIAL_LOCAL_AUTHORITY_LIVE_EXPRESSION_PASS_KNOWLEDGE_IDENTITY_CODE_WIRED_REAL_CAUSAL_PENDING",
       "evidence_commit_sha": "2b9d42f4b28c6328c6e2922a0fe3b048ea52c4c8",
       "selected_tests": 19,
       "passed": 19,
@@ -587,7 +587,7 @@
       "log_sha256": "38246070986f3db46fdcf12b8edd4403aa100152891840124cff5d2d6c12fc9d",
       "junit_sha256": "b74dbc1e3d5d63784da0456cb2d707a98825fdfe6810faab41ad7775e87391fb",
       "verified": "FEEDBACK_APPLY_ROLLBACK_NEW_VERSION_SIGNED_INGRESS_KNOWLEDGE_EXPIRY_SHADOW_ENFORCE_CONFLICT_CURSOR_DEPRECATION_IDENTITY_NO_CHANGE_MAJOR_BLOCK_EXACT_ROLLBACK_V1_QUERY_ONLY",
-      "not_proven": "EXPRESSION_HUMAN_EXPERIENCE_KNOWLEDGE_IDENTITY_LIVE_BEHAVIOR_AND_REMOTE_VOICE_AVATAR",
+      "not_proven": "EXPRESSION_HUMAN_EXPERIENCE_KNOWLEDGE_IDENTITY_REAL_APPLY_ROLLBACK_AND_REMOTE_VOICE_AVATAR",
       "expression_live_acceptance_code": "PASS_REAL_DOCKER_REVIEW_ACTIVATION_FINAL_COMPACT_PROMPT_CAUSAL_EXACT_ROLLBACK_7AB64A246",
       "expression_live_acceptance_regression": "PASS_265",
       "expression_live_acceptance_preflight": "PASS_7AB64A246_CANDIDATE_PROMPT_DIGEST_5EC07F_TO_AFAC03_TOKEN_1628_TO_1654_DIRECTIVE_DIGEST_EXACT_ROLLBACK_RESTORED",
@@ -596,6 +596,10 @@
       "expression_live_acceptance_prompt_causal_preflight_receipt_sha256": "26f1fb1589a13b23548c60de0db9df8ed217a1005971abb10adfa7cc47e78a9a",
       "expression_live_acceptance_final_receipt_sha256": "8431de7c3b3badaa61e2411d15d2dbe58752c835e924c661ca754a2dfe531b0c",
       "expression_live_acceptance_human_experience": "UNPROVEN_SINGLE_SAMPLE_NOT_A_BLIND_COMPARISON",
+      "knowledge_identity_surface_consumer": "CODE_WIRED_ACTIVE_KNOWLEDGE_RECALL_ONLY_ACTIVE_IDENTITY_BOUNDED_COMPACT_DIRECTIVE",
+      "knowledge_identity_surface_regression": "PASS_353",
+      "knowledge_no_recall_query_count": 0,
+      "knowledge_identity_live_causal_acceptance": "PENDING_CURRENT_COMMIT",
       "ordinary_chat_added_writes_or_model_calls": 0,
       "remote_edge": "NOT_STARTED_OR_PROBED"
     },
