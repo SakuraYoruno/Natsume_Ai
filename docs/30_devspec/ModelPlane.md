@@ -38,6 +38,8 @@ AffectiveTurnPlan
 
 同队列对照显示这组样本只对修复产生局部改善，mixed 没有可归因收益，原因是候选生成器另有完整回复模板覆盖了节奏样本。当前模型平面已删除 mixed 首次请求和重试中的完整答案句，只保留 typed 语义目标和 source-bound 原句节奏；降级文本按当前措辞分支且仍标记为非收益。`00c52762f` 的真实同案复验确认 exact reuse 为 0，但 0/3 仍失败，说明删除模板只消除了污染，当前 Flash 的自然 mixed 生成能力未提升。模型、provider、候选数和重试预算没有变化；下一实验必须改变模型层或受版本控制的真实文本资产。
 
+模型候选必须先通过 transport feasibility。MiniMax-M2.7 当前因真实 HTTP 402 余额不足而不可验收；Gemini 2.5 Flash Lite 已到达真实 provider，但原生客户端之前没有收到 JSON mode/schema，连续输出非 JSON 后被现有 `OutputContract` 正确拒绝。适配层现在把 `json_object/json_schema` 分别映射为 Gemini 原生 `response_mime_type=application/json` 与可选 `response_schema`；该映射不改变 server-owned schema，也不新增 retry 或文本 fallback。
+
 ## 4. 深路径
 
 只有低置信冲突、关系裂痕、修复、边界或 distress 才进入深路径。深路径必须有硬超时；超时后返回明确表达不确定性的安全回复，不能让普通聊天等待数分钟。

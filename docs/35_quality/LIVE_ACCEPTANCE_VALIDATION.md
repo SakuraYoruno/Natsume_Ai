@@ -895,6 +895,8 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 
 后续 source-bound 原句对照又暴露出该最佳版本仍内嵌完整可发送 mixed 句。提交 `00c52762f` 只做减法：从首次候选、唯一重试和通用 fail-soft 删除共享整句。同一冻结 probe 4～6 的真实复验报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`，9/9 Gateway turn accepted，canonical writer 前进且旧 writer 零增量。三条末轮不再逐字复用旧句，但自动仍为 0/3：`:4` 的“慢慢踏实下来”与 `:6` 的“等真的开心完再说”仍在替用户处置情绪；`:5` 使用按输入选择的确定性 fail-soft，`benefit_eligible=false`。结论固定为 `EXACT_REUSE_REMOVED / MODEL_GENERATION_STILL_FAIL`，不把代码清理写成人感改善，也不再做下一轮 prompt／Gate 实验。
 
+新的模型层留出队列在首次运行前冻结。Flash 基线报告 SHA-256 `59162da2c8c74fe6a1c441e0ad0342d9a6693cb86eb8ab83a4bf1b455d008c1`，24/24 turn accepted、自动 3/8；人工初查仍拒绝“堵着就堵着吧”“手心凉凉的，等会儿就暖了”等敷衍或情绪管理。MiniMax-M2.7 候选报告 SHA-256 `6bc1e628ff979e5391f000a7f13bb1706180cd00a366c3979970b61aeff2d2bd`，16 次真实 attempt 全部为 HTTP 402 余额不足，0 accepted，不形成质量比较。随后 Gemini 2.5 Flash Lite 的非评测 feasibility 报告 SHA-256 `53e1769d526a0ff39bfded09d92b303a6dd5c705ebe71b9b76d302637e9c7b13`：两次 transport 均返回内容，但未满足 JSON contract，0 accepted。代码根因是 Gemini 原生 JSON mode/schema 未接线；修复只做参数映射，真实重测前状态为 `CODE_REMEDIATED_REAL_FEASIBILITY_RETEST_PENDING`。
+
 ## 2026-08-08 A15 最终 SHA Host 探针判定纠偏
 
 Host 与 OBS 重启到 `28c77d2e2` 后，真实 Chat 已形成 `APPROVE / COMMIT`，但两份旧探针给出了互相矛盾且都不可信的结论。基础脚本把远端 Edge 明确未测试导致的 `ACCEPTANCE_PENDING_EXTERNAL` 计作 Host 失败；全服务脚本则只检查 HTTP 200，把 `ready=false` 和 `canon_sync=DEGRADED / OPERATOR_PROJECTION_STALE` 全部计作 PASS。该轮“全服务 PASS”撤销，不作为最终证据。

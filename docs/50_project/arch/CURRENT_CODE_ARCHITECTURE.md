@@ -71,6 +71,8 @@ flowchart TB
 
 双候选是措辞选择策略，不是模型车道 authority。`runtime_path=realtime_companion` 由 Host 在路由承诺后写入，单回复和 buffered 双候选都使用 `CHAT_SURFACE_REALTIME／Tier B`；只有不属于普通陪伴的 Task／复杂执行 Surface 才使用 `CHAT_SURFACE／Tier A`。这样保留关系边界与候选择优，不会因为低置信情绪观察把日常对话静默升级到高延迟 Pro 模型。
 
+所有 provider 仍消费同一个 server-owned `OutputContract`。OpenAI-compatible provider 使用 `response_format`；Gemini 原生客户端必须把同一合同映射为 `response_mime_type=application/json`，在 schema 合同时再附加原 schema。该适配不允许 provider 自行放宽字段，也不增加 JSON 文本补救请求；不能产生合规对象时继续在 ModelAttempt 边界拒绝。
+
 多轮连续性以 `conversation_turn.turn_index` 为 canonical 顺序；`ContextRepository` 和 Surface 专用 `RuntimeReadRepository` 都必须使用该顺序，`ts_ms` 只描述各进程观察到的墙钟时间。Fusion 在本轮没有新 appraisal 时，只能从仍活跃且未解决的 canonical episode 派生受控 continuity enum；它不会复制历史原文、创建第二份 self-affect 或增加 journal 写入。Planner 将该 enum 冻结进同一 `AffectiveTurnPlan`，让“没事”仍保留未解决低落、让新好消息同时承接此前不安。`GIVE_SPACE` 的候选还会在本地硬拒绝要求用户主动想念／联系的反向施压，不能只靠软分数带过。
 
 `AffectiveTurnPlan` 现在内嵌 `CompanionUtteranceFrameV1`。Planner 将 `CompanionAct` 编译为有限的说话骨架，Surface 的 compact、rich、native streaming 与 legacy-isolated 兼容入口使用同一 renderer；caller 和 `render_policy` 无权注入或覆盖该字段。frame 只存在于本轮既有计划和 packet 中，不建立第二个情感状态机或普通对话账本。生产输入编译器也不再重复注入同义的自然语言 facts／must-not-do 大段规则，只保留真实 continuity fact 和原有 style anchor。

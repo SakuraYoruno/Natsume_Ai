@@ -1610,6 +1610,30 @@ def _build_chat_google_genai_kwargs(
     }
     if max_tokens is not None:
         llm_kwargs["max_tokens"] = max_tokens
+    response_format = params.get("response_format")
+    normalized_response_format = _normalize_response_format(response_format)
+    if (
+        normalized_response_format is None
+        and isinstance(response_format, Mapping)
+        and str(response_format.get("type") or "").strip().lower() == "json_schema"
+    ):
+        normalized_response_format = "json_schema"
+    if normalized_response_format in {"json_object", "json_schema"}:
+        # ChatGoogleGenerativeAI does not consume the OpenAI-compatible
+        # ``response_format`` nested inside generation parameters.  Bind the
+        # equivalent native Gemini controls so a server-owned JSON contract is
+        # enforced by the provider instead of relying on prompt wording.
+        llm_kwargs["response_mime_type"] = "application/json"
+    if normalized_response_format == "json_schema" and isinstance(
+        response_format,
+        Mapping,
+    ):
+        raw_schema = response_format.get("json_schema")
+        if isinstance(raw_schema, Mapping):
+            nested_schema = raw_schema.get("schema")
+            schema = nested_schema if isinstance(nested_schema, Mapping) else raw_schema
+            if schema:
+                llm_kwargs["response_schema"] = dict(schema)
     return llm_kwargs
 
 

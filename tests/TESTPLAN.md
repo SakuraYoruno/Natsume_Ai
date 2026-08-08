@@ -416,6 +416,8 @@ Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Pla
 
 模型层测试使用独立冻结文件 `dl07_live_model_layer_holdout_v1.json`。loader 必须继续展开 72 条唯一 case，并证明含混、空间、修复、mixed 四组新 probe 与上一 natural-text 留出集合不相交。首轮真实比较只选每组前两条；候选不能只以自动 PASS 取胜，必须同时满足人工偏好、fallback 非劣与 provider 延迟不高于 1.5 倍。该 manifest 固定 `promotion_eligible=false`，防止一次单人诊断直接切换生产默认模型。
 
+provider feasibility 必须早于质量 cohort。MiniMax 的 HTTP 402 必须记录为外部余额阻断，不能进入人感输赢；Gemini 的原生 JSON 修复必须用 fake client 证明 `json_object → response_mime_type`、`json_schema → response_mime_type + response_schema`，普通文本不得携带这两个参数。真实重测只使用先前已隔离的 `implicit_low_mood:6`，并要求三轮 accepted、实际 provider/model 精确为 Gemini、零 local fallback，才能另行冻结质量对照。
+
 `CHAT_SURFACE_REALTIME` 当前冻结为 640 output tokens，并使用服务端 typed `thinking_mode=disabled`。Route boundary 只接受 `enabled/disabled`；DeepSeek provider adapter 必须把它转换为顶层 `thinking={"type":"disabled"}`，OpenAI、Gemini、Minimax 等 provider 必须删除提示而不是收到未知字段。Plan、Research 和高歧义深路径不得继承普通陪伴的 non-thinking 配置。回归仍要拒绝 `finish_reason=length` 且只有 `reasoning_content` 的空正文，不能把 reasoning 当用户可见回复；真实复验同时记录 completion token、content presence、provider latency 与最终 Voice receipt。
 
 `c6a6e0b36` 的三轮真实校准已关闭“默认 thinking 耗尽正文预算”断点：三轮图和 Acceptance 全部完成，最终轮 Voice 物理回执为 `APPLIED`。该报告仍不能关闭实时门槛或人感门槛；整轮 Host latency 为 7,739～12,715 ms，前两轮各需一次 `surface_hard_gate_repair`，必须继续测量首 token、确定性链路和语义修复比例。

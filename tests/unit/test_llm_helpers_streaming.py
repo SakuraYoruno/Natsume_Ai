@@ -37,6 +37,69 @@ def test_stream_llm_chunks_passes_max_tokens_to_native_gemini(monkeypatch) -> No
     assert captured["max_tokens"] == 96
     assert captured["model"] == "gemini-2.5-flash-lite"
     assert captured["api_key"] == "test-key"
+    assert "response_mime_type" not in captured
+    assert "response_schema" not in captured
+
+
+def test_native_gemini_maps_json_object_to_provider_json_mode(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def invoke(self, _messages):  # noqa: ANN001
+            return SimpleNamespace(content='{"reply":"我在。"}', usage_metadata={})
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    result = llm_helpers.invoke_llm_text(
+        provider_name="gemini",
+        model_id="gemini-2.5-flash-lite",
+        api_key="test-key",
+        timeout_ms=5000,
+        messages=[{"role": "user", "content": "在吗"}],
+        response_format={"type": "json_object"},
+    )
+
+    assert result == '{"reply":"我在。"}'
+    assert captured["response_mime_type"] == "application/json"
+    assert "response_schema" not in captured
+
+
+def test_native_gemini_maps_server_owned_json_schema(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    schema = {
+        "type": "object",
+        "properties": {"reply": {"type": "string"}},
+        "required": ["reply"],
+    }
+
+    class _FakeChatGoogleGenerativeAI:
+        def __init__(self, **kwargs):  # noqa: ANN003
+            captured.update(kwargs)
+
+        def invoke(self, _messages):  # noqa: ANN001
+            return SimpleNamespace(content='{"reply":"嗯。"}', usage_metadata={})
+
+    monkeypatch.setattr("langchain_google_genai.ChatGoogleGenerativeAI", _FakeChatGoogleGenerativeAI)
+
+    result = llm_helpers.invoke_llm_text(
+        provider_name="gemini",
+        model_id="gemini-2.5-flash-lite",
+        api_key="test-key",
+        timeout_ms=5000,
+        messages=[{"role": "user", "content": "嗯"}],
+        response_format={
+            "type": "json_schema",
+            "json_schema": schema,
+            "strict": True,
+        },
+    )
+
+    assert result == '{"reply":"嗯。"}'
+    assert captured["response_mime_type"] == "application/json"
+    assert captured["response_schema"] == schema
 
 
 def test_stream_llm_chunks_accepts_max_output_tokens_alias(monkeypatch) -> None:
