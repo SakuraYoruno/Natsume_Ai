@@ -96,7 +96,7 @@
 - [x] 复验实时配对 JSON 的 non-thinking 路径。`c6a6e0b36` 三轮均完成 TaskGraph／Acceptance，最终轮远端 Voice 为 `TTS_PLAYBACK_FINISHED/APPLIED`；provider latency 1,407～2,467 ms、completion 69～128 tokens，报告 SHA-256 为 `45ae99ee90ea795dd070691bebf2e3968fbc14c72859febe388726f569bf97c0`。自动结构状态为 `AUTOMATED_PASS_HUMAN_REVIEW_PENDING`；Host 总耗时 7,739～12,715 ms、前两轮语义修复和 VTS 外部拒绝继续进入后续性能／体验项。
 - [x] 使用真实 `deepseek-v4-flash` 完成冻结的 48 条文本多轮场景：144/144 个 Gateway→TaskGraph 回合完成，自动 46 条待人工、2 条失败，单人复核确认模板坍缩，人感结论为 `FAIL`。
 - [ ] 完成剩余非文本真实 driver；不得用 scripted replay 或文本 fixture 代替。跨重启 6 条已使用真实 DeepSeek、Host 进程替换和 canonical SQLite 完成，结构连续性 6/6、人工完整人感 0/6，聚合收据 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；`ac87ddd34` 精确代码提交代表性强杀复验收据 SHA-256 为 `faa452f8ddece572a1df52c64b13ecdb2c412300c7d7bbe9eec5e215e46523d3`。剩余多模态 6、主动陪伴 6、Edge 故障 6，共 18 条；后两类会触达另一台 Edge，当前按用户约束保留 `NOT_RUN_REQUIRED_DRIVER`。
-- [ ] 复验跨重启具体未结线程：已定位 realtime `surface.post_process` 只写 assistant turn，连续用户事实没有进入既有 conversation spine。候选修复复用后台幂等 writer，按 user→assistant 写入；初轮相邻 88/89 通过，唯一 Governed duplicate reason 修正后核心 20/20、上下文／Prompt／restart 44/44 通过。不得以代码测试代替真实新进程正文复核。
+- [ ] 复验跨重启具体未结线程：提交 `13e537a3d` 已用真实强杀证明 realtime conversation spine 修复生效，重启前 4 条、探针后 6 条 turn 精确按 user→assistant 交替，重启后 Prompt 为 `fetched=4 / injected=4`，报告 SHA-256 为 `b3ffabde84339a4126902e5c18253519d037eb5689bafeb098bd26df2f573dac`。探针仍只答“解决了就好”，剩余根因收敛为线程解析器未识别“那件事后来解决了”的指代更新；当前轻量修复复用既有 `InteractionThreadState`，绑定上一轮具体用户话题，不增加模型调用、同步写或新表，129 项相邻回归通过。新提交真实强杀正文通过前不得勾选。
 - [ ] 修复真实 provider 首字延迟和异常回退，不以缓存数据替代。
 - [x] 修复最终 SHA Host 探针只按 HTTP 200 产生假绿的问题：Health／Ready／Canon 必须校验业务语义，Host-only pending external 只能通过显式参数接受。
 - [x] 修复 `wc-004` 空 hash 与 Canon 漂移被误分类为 source unavailable；全部 `wc-*` 生产资产必须通过真实 loader 合同。
