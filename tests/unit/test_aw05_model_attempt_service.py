@@ -652,6 +652,8 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
         metadata={
             "model_node_id": "core_reasoner_primary",
             "surface_expression_directive_digest": "e" * 64,
+            "surface_active_knowledge_set_digest": "f" * 64,
+            "surface_active_knowledge_count": 2,
             "private_context": "must-not-enter-audit",
         },
     )
@@ -665,6 +667,8 @@ async def test_terminal_audit_keeps_only_public_identity_and_provider_measuremen
         "cognitive_tier": "A",
         "model_node_id": "core_reasoner_primary",
         "surface_expression_directive_digest": "e" * 64,
+        "surface_active_knowledge_set_digest": "f" * 64,
+        "surface_active_knowledge_count": 2,
     }
     assert terminal.metadata == {
         **started.metadata,

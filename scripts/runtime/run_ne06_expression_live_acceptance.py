@@ -747,6 +747,12 @@ def _model_attempt(db_path: Path, request_id: str) -> dict[str, Any]:
         "surface_expression_directive_digest": str(
             metadata.get("surface_expression_directive_digest") or ""
         ),
+        "surface_active_knowledge_set_digest": str(
+            metadata.get("surface_active_knowledge_set_digest") or ""
+        ),
+        "surface_active_knowledge_count": int(
+            metadata.get("surface_active_knowledge_count") or 0
+        ),
         "transport_external": bool(transport.get("transport_external")),
         "transport_identity_digest": str(
             transport.get("transport_identity_digest") or ""

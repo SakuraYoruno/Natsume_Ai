@@ -1035,8 +1035,8 @@ class ModelAttemptService:
             "scene_type": request.scene_type,
             "cognitive_tier": request.cognitive_tier,
         }
-        # Model-node identity and the secret-free digest proving one bounded
-        # Surface expression directive are governed public dimensions.
+        # Model-node identity and the secret-free digests proving bounded
+        # Surface directives are governed public dimensions.
         # Preserve only these explicit keys; arbitrary request metadata must
         # never enter the durable audit journal.
         model_node_id = str(request.metadata.get("model_node_id") or "").strip()
@@ -1052,6 +1052,23 @@ class ModelAttemptService:
             audit_metadata[
                 "surface_expression_directive_digest"
             ] = expression_directive_digest
+        knowledge_set_digest = str(
+            request.metadata.get("surface_active_knowledge_set_digest") or ""
+        ).strip().lower()
+        knowledge_count = request.metadata.get("surface_active_knowledge_count")
+        if (
+            len(knowledge_set_digest) == 64
+            and all(
+                char in "0123456789abcdef" for char in knowledge_set_digest
+            )
+            and isinstance(knowledge_count, int)
+            and not isinstance(knowledge_count, bool)
+            and 1 <= knowledge_count <= 4
+        ):
+            audit_metadata[
+                "surface_active_knowledge_set_digest"
+            ] = knowledge_set_digest
+            audit_metadata["surface_active_knowledge_count"] = knowledge_count
         started = ModelAttemptRecord(
             attempt_id=attempt_id,
             request_id=request.request_id,

@@ -25,6 +25,74 @@ from host_brain.surface_runtime.subagent_context import (
 _ACTIVE_EXPRESSION_PREFERENCE_PREFIX = (
     "已激活的长期表达偏好（本轮执行）："
 )
+_ACTIVE_KNOWLEDGE_FACT_PREFIX = "已激活知识："
+_ACTIVE_KNOWLEDGE_EVIDENCE_PREFIX = "evolution-knowledge-entry://sha256/"
+
+
+def _surface_active_knowledge_set_digest(entry_digests: Sequence[Any]) -> str:
+    """Return a stable digest for a bounded set of public Knowledge digests."""
+
+    raw = tuple(str(value or "").strip().lower() for value in entry_digests)
+    if (
+        not raw
+        or len(raw) > 4
+        or any(
+            len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+            for value in raw
+        )
+    ):
+        return ""
+    normalized = sorted(set(raw))
+    if len(normalized) != len(raw):
+        return ""
+    payload = json.dumps(
+        normalized,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _surface_active_knowledge_prompt_evidence(
+    *,
+    messages: Sequence[Mapping[str, Any]],
+    memory_packet: Any,
+) -> dict[str, Any]:
+    """Prove active Knowledge reached the final prompt without storing content."""
+
+    packet = _memory_packet_payload_for_guard(memory_packet)
+    active_facts = tuple(
+        str(value or "").strip()
+        for value in list(packet.get("facts") or [])
+        if str(value or "").strip().startswith(_ACTIVE_KNOWLEDGE_FACT_PREFIX)
+    )
+    entry_digests = tuple(
+        str(value or "").strip()[len(_ACTIVE_KNOWLEDGE_EVIDENCE_PREFIX) :]
+        for value in list(packet.get("evidence_refs") or [])
+        if str(value or "").strip().startswith(
+            _ACTIVE_KNOWLEDGE_EVIDENCE_PREFIX
+        )
+    )
+    if (
+        not active_facts
+        or len(active_facts) > 4
+        or len(entry_digests) != len(active_facts)
+    ):
+        return {}
+    rendered = "\n".join(
+        str(message.get("content") or "") for message in messages
+    )
+    if any(fact not in rendered for fact in active_facts):
+        return {}
+    set_digest = _surface_active_knowledge_set_digest(entry_digests)
+    if not set_digest:
+        return {}
+    return {
+        "surface_active_knowledge_set_digest": set_digest,
+        "surface_active_knowledge_count": len(active_facts),
+    }
 
 
 def _surface_expression_prompt_evidence(

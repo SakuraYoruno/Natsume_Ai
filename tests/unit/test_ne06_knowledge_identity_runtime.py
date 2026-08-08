@@ -5,6 +5,10 @@ from types import SimpleNamespace
 from host_brain.app.chat_retrieval_helpers import (
     _apply_active_knowledge_to_surface_packet,
 )
+from host_brain.app.surface_main_chain_support import (
+    _surface_active_knowledge_prompt_evidence,
+    _surface_active_knowledge_set_digest,
+)
 from host_brain.persona.surface_main_chain import (
     compile_surface_main_chain_input,
 )
@@ -107,6 +111,47 @@ def test_active_knowledge_enters_only_an_admitted_recall_packet() -> None:
         "selected_count": 1,
         "read_only": True,
     }
+
+
+def test_active_knowledge_prompt_evidence_is_bounded_and_secret_free() -> None:
+    fact = "已激活知识：项目代号是 PROJECT_NE06_ALPHA。"
+    entry_digest = "a" * 64
+    packet = SurfaceMemoryRecallPacket(
+        facts=(fact,),
+        evidence_refs=(
+            f"evolution-knowledge-entry://sha256/{entry_digest}",
+        ),
+    )
+
+    evidence = _surface_active_knowledge_prompt_evidence(
+        messages=(
+            {"role": "system", "content": f"必要事实：{fact}"},
+            {"role": "user", "content": "项目代号是什么？"},
+        ),
+        memory_packet=packet,
+    )
+
+    assert evidence == {
+        "surface_active_knowledge_set_digest": (
+            _surface_active_knowledge_set_digest((entry_digest,))
+        ),
+        "surface_active_knowledge_count": 1,
+    }
+    assert fact not in repr(evidence)
+
+
+def test_active_knowledge_prompt_evidence_requires_final_rendering() -> None:
+    packet = SurfaceMemoryRecallPacket(
+        facts=("已激活知识：不会进入最终提示。",),
+        evidence_refs=(
+            "evolution-knowledge-entry://sha256/" + "b" * 64,
+        ),
+    )
+
+    assert _surface_active_knowledge_prompt_evidence(
+        messages=({"role": "user", "content": "普通问题"},),
+        memory_packet=packet,
+    ) == {}
 
 
 def test_active_identity_release_reaches_compact_surface_prompt(

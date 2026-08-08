@@ -15,7 +15,7 @@
 | P1 | 长期关系连续性 | `WIRED / UNPROVEN` | 多日、重启、裂痕／修复自然度不足 | 真实多日轨迹 |
 | P1 | Profile 真实激活 | `WIRED / UNPROVEN` | apply／canary／rollback 对三模态的真实影响 | 行为 diff + exact rollback |
 | P1 | NE-06 版本化表达偏好 | `LIVE_CAUSAL_PASS_SCOPE_BOUND / HUMAN_AND_OTHER_NE06_PENDING` | `7ab64a246` 的 Docker Lab→Review→真实 Host apply→最终 prompt→exact rollback 19 项全过，正式收据 `8431de7c...`；265 项回归通过，单样本人感与 Knowledge／Identity 在线行为另验 | 扩大表达偏好样本盲测；Knowledge／Identity 真实 apply／rollback；远端 Voice／Avatar |
-| P1 | NE-06 Knowledge／Identity 在线行为 | `KNOWLEDGE_LIVE_FLOW_OBSERVED / JOINT_RECEIPT_PENDING` | active Knowledge 已在第二轮完成真实 apply→Host→deprecate；Identity 在候选 apply 前因 Lab spec replay drift 安全中止，当前已改为 action-scoped experiment＋exact target proposal，7 项 runner 单测通过 | 新提交联合重跑；Identity exact snapshot／directive rollback；绑定正式收据 |
+| P1 | NE-06 Knowledge／Identity 在线行为 | `IDENTITY_LIVE_CAUSAL_PASS / KNOWLEDGE_FINAL_PROMPT_RETEST_PENDING` | `c495d0934` 第三轮中 Identity 与两类 authority 终态全过；Knowledge 唯一红项是 runner 误读生成前 reply plan。当前改为最终 ModelAttempt 的 secret-free entry-set digest／count，收据 `c42529...` 保留为失败证据 | 新提交联合重跑并绑定正式收据；人工体验与远端 Voice／Avatar 另验 |
 | P1 | 旧情感 writer 清零 | `METERED` | 需目标运行量证明使用为 0 | 运行计数与删除 PR |
 | P1 | 完整服务栈 | `PARTIAL` | Docker、Host、OBS、Monitor、Gateway 同时验收 | full-stack acceptance receipt |
 | P1 | 故障恢复 | `PARTIAL` | Edge／网络／未知 effect／回滚故障联合注入 | restart and reconciliation receipt |

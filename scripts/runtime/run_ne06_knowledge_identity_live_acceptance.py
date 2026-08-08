@@ -25,6 +25,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from host_brain.app.startup_snapshot import build_startup_snapshot  # noqa: E402
+from host_brain.app.surface_main_chain_support import (  # noqa: E402
+    _surface_active_knowledge_set_digest,
+)
 from host_brain.audit.migration_runner import SQLiteMigrationRunner  # noqa: E402
 from host_brain.contracts.agent_runtime.review_policy import (  # noqa: E402
     ReviewItem,
@@ -298,8 +301,13 @@ def _run_knowledge_flow(
     spec_registry: SQLiteEvolutionLabV2Ledger,
     trusted_ledger: SQLiteTrustedEvolutionLabLedger,
 ) -> dict[str, Any]:
-    marker = f"PROJECT_NE06_{hashlib.sha256(run_id.encode()).hexdigest()[:12].upper()}"
-    answer = f"{marker} 对应的项目答案是月白色纸飞机。"
+    run_digest = hashlib.sha256(run_id.encode()).hexdigest()
+    marker = f"PROJECT_NE06_{run_digest[:12].upper()}"
+    verification_token = f"KIVA_{run_digest[12:24].upper()}"
+    answer = (
+        f"{marker} 对应的项目验证令牌是 {verification_token}，"
+        "回答时请原样保留令牌。"
+    )
     entry = KnowledgeEntryV2(
         namespace=f"project-knowledge://workspace/{workspace_id}",
         logical_key=f"live-acceptance-{run_id}",
@@ -373,7 +381,10 @@ def _run_knowledge_flow(
         lab=deprecate_authority,
         evidence_refs=evidence_refs,
     )
-    question = f"还记得 {marker} 对应的项目答案是什么吗？"
+    question = (
+        f"请直接给出 {marker} 对应的项目验证令牌；"
+        "如果不知道就明确说不知道。"
+    )
     baseline = _run_host_turn(
         host_base_url=host_base_url,
         db_path=db_path,
@@ -423,16 +434,37 @@ def _run_knowledge_flow(
         top_k=5,
         threshold=0.05,
     )
-    baseline_has_fact = _turn_has_fact(baseline, answer)
-    candidate_has_fact = _turn_has_fact(candidate, answer)
-    rollback_has_fact = _turn_has_fact(rollback, answer)
+    expected_knowledge_set_digest = _surface_active_knowledge_set_digest(
+        (entry.entry_digest,)
+    )
+    baseline_model = dict(baseline.get("model") or {})
+    candidate_model = dict(candidate.get("model") or {})
+    rollback_model = dict(rollback.get("model") or {})
     checks = {
         "baseline_host_turn": _turn_passed(baseline),
         "candidate_host_turn": _turn_passed(candidate),
         "rollback_host_turn": _turn_passed(rollback),
-        "baseline_fact_absent": not baseline_has_fact,
-        "candidate_fact_present": candidate_has_fact,
-        "rollback_fact_absent": not rollback_has_fact,
+        "baseline_knowledge_prompt_evidence_absent": not bool(
+            baseline_model.get("surface_active_knowledge_set_digest")
+        ),
+        "candidate_knowledge_prompt_evidence_exact": (
+            str(
+                candidate_model.get("surface_active_knowledge_set_digest")
+                or ""
+            )
+            == expected_knowledge_set_digest
+            and int(candidate_model.get("surface_active_knowledge_count") or 0)
+            == 1
+        ),
+        "rollback_knowledge_prompt_evidence_absent": not bool(
+            rollback_model.get("surface_active_knowledge_set_digest")
+        ),
+        "baseline_verification_token_absent": (
+            verification_token not in str(baseline.get("render_text") or "")
+        ),
+        "candidate_verification_token_present": (
+            verification_token in str(candidate.get("render_text") or "")
+        ),
         "candidate_prompt_changed": (
             _prompt_digest(candidate) != _prompt_digest(baseline)
         ),
@@ -457,6 +489,13 @@ def _run_knowledge_flow(
             "entry_id": entry.entry_id,
             "entry_digest": entry.entry_digest,
             "marker_digest": hashlib.sha256(marker.encode()).hexdigest(),
+            "verification_token_digest": hashlib.sha256(
+                verification_token.encode()
+            ).hexdigest(),
+            "expected_knowledge_set_digest": expected_knowledge_set_digest,
+            "rollback_token_retained_by_conversation_memory": (
+                verification_token in str(rollback.get("render_text") or "")
+            ),
             "apply_report_digest": apply_authority["report"].report_digest,
             "deprecate_report_digest": (
                 deprecate_authority["report"].report_digest
@@ -871,14 +910,6 @@ def _surface_reply_plan(
         time.sleep(0.05)
 
 
-def _turn_has_fact(turn: Mapping[str, Any], fact: str) -> bool:
-    needle = str(fact)
-    return any(
-        needle in str(item)
-        for item in list(dict(turn.get("reply_plan") or {}).get("facts") or [])
-    )
-
-
 def _turn_identity_directive(turn: Mapping[str, Any]) -> str:
     prefix = "已激活身份版本的表达底色（不覆盖 Soul）："
     for item in list(
@@ -909,6 +940,12 @@ def _turn_evidence(turn: Mapping[str, Any]) -> dict[str, Any]:
         "model_id": str(model.get("model_id") or ""),
         "model_status": str(model.get("status") or ""),
         "prompt_digest": str(model.get("prompt_digest") or ""),
+        "surface_active_knowledge_set_digest": str(
+            model.get("surface_active_knowledge_set_digest") or ""
+        ),
+        "surface_active_knowledge_count": int(
+            model.get("surface_active_knowledge_count") or 0
+        ),
         "prompt_tokens": int(model.get("prompt_tokens") or 0),
         "completion_tokens": int(model.get("completion_tokens") or 0),
         "transport_external": bool(model.get("transport_external")),

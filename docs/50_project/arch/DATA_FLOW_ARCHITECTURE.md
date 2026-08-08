@@ -84,6 +84,8 @@ flowchart LR
 
 Knowledge 在线读链为 `recall planner → active Knowledge read port → personal/project namespace → bounded facts → Surface compact prompt`。只有 `should_recall=true` 才调用本地 SQLite；普通陪伴回合为零查询，且不会复用会写 shadow comparison 的 legacy recaller。Identity 在线读链为 `active release projection → structured style fingerprint → bounded identity directive → Surface compact prompt`；当前 affect、关系权限和 Soul 始终具有更高 authority。验收链把 `action-scoped Lab experiment → trusted report → exact target proposal → Review → activation` 分层，避免同一对照数据的 spec replay 与真实 Knowledge／Identity version 混为一体。第二轮已完成 Knowledge 全链，Identity 在 apply 前 fail-closed；两者的联合正式收据仍需绑定新提交重跑。
 
+最终提示因果采用轻量旁证：`active Knowledge facts + entry refs → final rendered messages membership → sorted entry-set digest/count → existing ModelAttempt metadata`。只保存摘要和数量，不保存知识正文；没有 active Knowledge 的普通回合不执行摘要写入。第三轮已证明 Identity exact rollback，Knowledge 的 authority flow 也已关闭；当前待用该正确边界重跑候选提示和唯一验证令牌。
+
 ```mermaid
 flowchart LR
     E["5 条跨日强 aftereffect"] --> C["Reversible profile canary"]

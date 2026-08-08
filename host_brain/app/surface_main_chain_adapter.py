@@ -77,6 +77,7 @@ from host_brain.app.surface_main_chain_support import (
     _native_stream_failure_reason,
     _record_surface_memory_guard_packet,
     _sse,
+    _surface_active_knowledge_prompt_evidence,
     _surface_expression_prompt_evidence,
     _surface_failure_fallback_text,
     _surface_main_chain_response_format,
@@ -317,6 +318,12 @@ async def run_surface_main_chain_for_surface_reply_input(
                 getattr(compiled_request.control, "style_anchor", ()) or ()
             ),
         )
+        active_knowledge_prompt_evidence = (
+            _surface_active_knowledge_prompt_evidence(
+                messages=rendered_messages,
+                memory_packet=surface_input.memory_packet,
+            )
+        )
         result = await ports.model_attempt_service().complete(
             ModelAttemptRequest(
                 request_id=request_id or "surface-main-chain",
@@ -336,6 +343,7 @@ async def run_surface_main_chain_for_surface_reply_input(
                     "chain": "surface_main",
                     "route_lane": model_route_lane,
                     **expression_prompt_evidence,
+                    **active_knowledge_prompt_evidence,
                     **(
                         {"model_node_id": governed_model_budget.node_id}
                         if governed_model_budget is not None
