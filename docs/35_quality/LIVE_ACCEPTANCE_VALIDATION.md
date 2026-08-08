@@ -943,6 +943,8 @@ Knowledge／Identity 随后完成生产消费接线，但本段不越级记为 l
 
 `d37b78b73` 的第四轮没有进入 Knowledge 模型边界：测试句“请直接给出 PROJECT... 对应的项目验证令牌”被生产路由判为工具任务，baseline／candidate／rollback 均以 `AGENT_TOOL_GOVERNED_ADMISSION_REQUIRED` 结束。Knowledge activate／deprecate、active count 0 和 Identity 全部 Gate 仍通过；失败收据 SHA-256 为 `ddbe3f206a423238f34445d261f8cad5c39644b1dcec8d01b5c9092c482142fa`。改用“还记得 PROJECT... 对应的暗号是什么吗？不记得就直接说不知道”后，独立真实 Host 探针得到 HTTP 200、external model succeeded、非空渲染和空拒绝码。该探针只确认路由，不替代联合 apply／deprecate 收据。
 
+`1e6addc112dcdc32194f3c90bac804c06b87d6dd` 的第五轮正式关闭 Knowledge／Identity 工程因果：31/31 checks 通过，包含 8 个 digest-pinned Docker arm、4 个 production Review、6 次真实 `deepseek-v4-flash` Host turn。Knowledge candidate 的 `surface_active_knowledge_set_digest=663af729...` 与预期精确相等、count=1，唯一暗号出现在渲染结果；baseline 与 deprecate 后该 metadata 均为空，active projection 最终为 0。Identity candidate prompt 从 `25b92d...` 变为 `95938e...`，rollback 后 directive、prompt 与 previous snapshot 精确恢复，generation 5→7。正式收据路径位于忽略的 A15 reports 目录，SHA-256 为 `05b95b0013f741318fdfdf2649875a240221b9d06cdeeaf22862383a064e9add`。Host PID 11080、OBS 28020、Monitor 17576 与三只健康 Docker 容器在收口时仍运行；Gateway／SSH 隧道保持原样，远端 Edge 未探测。
+
 精确提交 `f2c13de42` 的首次预检完成两组 Docker evidence 并批准第一条 Review，但 runner 将 ReviewStore 的外层 record 和内层 ReviewItem 混为同一层，读取 `status` 时在任何 apply 前中止。SQLite 核对 active version 仍是 baseline、generation 仍为 1；该次没有候选版本切流或 Host 行为污染。读取已改为显式拆分两层，真实重跑前状态保持 `REAL_RERUN_PENDING`。
 
 精确提交 `7d296dc9e` 重跑又在 apply 前暴露中断恢复问题：首次 staged proposal 已注册相同 payload digest 的内容寻址版本，新 run 的独立反馈 trace 使用不同 provenance，旧 Repository 因 provenance 不同误判 version drift。版本 identity 实际只由不可变 payload 决定；修复后同 payload／同 version 保留 first-seen provenance 并允许独立 proposal trace，任何 payload 或 digest 变化仍 fail-closed。active version／generation 再次核对未改变，真实重跑仍待执行。

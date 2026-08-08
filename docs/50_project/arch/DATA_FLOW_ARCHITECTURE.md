@@ -86,6 +86,8 @@ Knowledge 在线读链为 `recall planner → active Knowledge read port → per
 
 最终提示因果采用轻量旁证：`active Knowledge facts + entry refs → final rendered messages membership → sorted entry-set digest/count → existing ModelAttempt metadata`。只保存摘要和数量，不保存知识正文；没有 active Knowledge 的普通回合不执行摘要写入。第三轮已证明 Identity exact rollback，Knowledge 的 authority flow 也已关闭；当前待用该正确边界重跑候选提示和唯一验证令牌。
 
+`1e6addc1` 的真实联合收据现已验证整条变化：`baseline evidence absent → activate → final ModelAttempt digest/count exact + unique phrase rendered → deprecate → evidence absent`，同时 Identity 完成 `previous → candidate → exact previous`。退役不会篡改已经接受的会话历史，因此 rollback 回合仍能通过对话记忆说出先前暗号；authority 判定只看 active Knowledge 是否继续进入新 prompt。
+
 ```mermaid
 flowchart LR
     E["5 条跨日强 aftereffect"] --> C["Reversible profile canary"]
