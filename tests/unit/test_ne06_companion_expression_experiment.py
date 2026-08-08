@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
+
+import pytest
+
+from host_brain.audit.migration_runner import SQLiteMigrationRunner
 from host_brain.evolution_lab.companion_expression_experiment import (
     BoundCompanionExpressionDatasetReader,
     CompanionExpressionExperimentError,
@@ -7,6 +12,12 @@ from host_brain.evolution_lab.companion_expression_experiment import (
     build_companion_expression_spec,
 )
 from host_brain.evolution_lab.companion_expression_worker import run
+from host_brain.persistence.evolution_activation_v2_evidence import (
+    EvolutionActivationV2Error,
+)
+from host_brain.persistence.evolution_activation_v2_repository import (
+    SQLiteEvolutionActivationV2Repository,
+)
 
 
 BASELINE = {
@@ -158,3 +169,55 @@ def test_companion_expression_rejects_no_change_target() -> None:
         assert "changed target" in str(exc)
     else:
         raise AssertionError("no-change expression experiment must fail")
+
+
+def test_content_addressed_policy_version_reuses_first_provenance(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    result = SQLiteMigrationRunner(db_path=db_path).apply_migrations(
+        request_id="ne06-expression-content-addressed-version"
+    )
+    assert result.success
+    repository = SQLiteEvolutionActivationV2Repository(db_path)
+    first = repository.register_policy_version(
+        workspace_id="host-default",
+        subject_id="natsume_ai",
+        policy_kind="EXPRESSION_PREFERENCES",
+        version="expression-content-addressed",
+        payload=TARGET,
+        provenance_ref="response-feedback://sha256/" + "1" * 64,
+    )
+    replay = repository.register_policy_version(
+        workspace_id="host-default",
+        subject_id="natsume_ai",
+        policy_kind="EXPRESSION_PREFERENCES",
+        version="expression-content-addressed",
+        payload=TARGET,
+        provenance_ref="response-feedback://sha256/" + "2" * 64,
+    )
+    assert replay == first
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*), provenance_ref
+            FROM evolution_policy_version_v2
+            WHERE workspace_id = 'host-default'
+              AND subject_id = 'natsume_ai'
+              AND policy_kind = 'EXPRESSION_PREFERENCES'
+              AND version = 'expression-content-addressed'
+            """
+        ).fetchone()
+    assert row == (1, "response-feedback://sha256/" + "1" * 64)
+    with pytest.raises(
+        EvolutionActivationV2Error,
+        match="EVOLUTION_POLICY_VERSION_REPLAY_DRIFT",
+    ):
+        repository.register_policy_version(
+            workspace_id="host-default",
+            subject_id="natsume_ai",
+            policy_kind="EXPRESSION_PREFERENCES",
+            version="expression-content-addressed",
+            payload={**TARGET, "negative_feedback_count": 2},
+            provenance_ref="response-feedback://sha256/" + "3" * 64,
+        )

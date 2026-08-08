@@ -661,6 +661,8 @@ python scripts/runtime/run_ne06_expression_live_acceptance.py `
 
 ReviewStore 的命令返回值是外层 durable record，其中 `status_version` 位于外层，实际 ReviewItem 的 `status/decision_actor` 位于内层 `review`；runner 必须分别读取，不能把返回结构扁平化假定为生产合同。
 
+表达策略版本名按 payload digest 内容寻址。中断后若新的 feedback signal 收敛到同一 payload／version，Repository 必须复用版本行并保留 first-seen provenance；独立来源由各自 proposal／trace 保存。只有 payload 或 digest 漂移才拒绝，不能让一次未 apply 的 staged proposal 永久阻塞同目标恢复。
+
 ## 2026-08-08 数字生命跨重启真实驱动
 
 `scripts/runtime/test_digital_life_restart_driver.py` 采用 `prepare → 外部强杀／生产重启 → resume` 两阶段协议，一次严格运行一个 `1..6` 变体。定向测试必须覆盖参数拒绝、checkpoint tamper、tested-code fingerprint 漂移、狭义 pending-external readiness、精确 state／revision／digest 恢复和 aftereffect receipt 链接。Service Catalog 回归必须额外覆盖：endpoint 空闲时等待旧租约、endpoint 被占用时立即拒绝、等待期间出现新 listener 时停止，及生产 PowerShell 健康轮询窗口覆盖 coordinator lease。

@@ -931,6 +931,8 @@ NE-06 同样运行 19 项，19/19 通过；log/JUnit SHA-256 分别为 `38246070
 
 精确提交 `f2c13de42` 的首次预检完成两组 Docker evidence 并批准第一条 Review，但 runner 将 ReviewStore 的外层 record 和内层 ReviewItem 混为同一层，读取 `status` 时在任何 apply 前中止。SQLite 核对 active version 仍是 baseline、generation 仍为 1；该次没有候选版本切流或 Host 行为污染。读取已改为显式拆分两层，真实重跑前状态保持 `REAL_RERUN_PENDING`。
 
+精确提交 `7d296dc9e` 重跑又在 apply 前暴露中断恢复问题：首次 staged proposal 已注册相同 payload digest 的内容寻址版本，新 run 的独立反馈 trace 使用不同 provenance，旧 Repository 因 provenance 不同误判 version drift。版本 identity 实际只由不可变 payload 决定；修复后同 payload／同 version 保留 first-seen provenance 并允许独立 proposal trace，任何 payload 或 digest 变化仍 fail-closed。active version／generation 再次核对未改变，真实重跑仍待执行。
+
 ## 2026-08-08 普通对话事件循环与真实首句延迟
 
 新的直接 SSE 探针以同一 session 连续发送 20 个低风险日常回合，只记录阶段、字符数和正文摘要，不持久化正文。原始报告 SHA-256 为 `292bae13dd718cc2eb9263cc34caf5cdcb187f1100f4c079caae83acf2adbf21`：20/20 到达 `RENDER` 和 `COMMIT`，首 `RENDER` p50／p95 为 `5097.5／8287 ms`，HTTP header p50／p95 为 `742.5／3390 ms`，最坏 header 为 `9245 ms`。这撤销此前以 `user_to_surface_commit_ms` 代理首可见 Token 的口径；真实实时 Gate 明确失败。
