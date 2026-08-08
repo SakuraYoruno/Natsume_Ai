@@ -833,6 +833,8 @@ frame 不包含用户原文、私密记忆、候选正文或 raw thought；不�
 
 ## 2026-08-08 修复／喜忧模型 A/B 与自然口吻纠偏
 
+在继续实测前新增 `dl07_live_natural_text_holdout_v1.json`：修复与喜忧各冻结 6 条从未执行的新 probe，registration 状态为 `FROZEN_BEFORE_FIRST_EXECUTION`。runner 允许 execution manifest 覆盖 probe，但仍继承 DL-00 的覆盖标签、期待质量和 72 场景完整性约束；报告新增 manifest SHA-256，防止执行后静默换题。当前状态仅为 `PREREGISTERED / BASELINE_PENDING`，尚无新的真人体验结论。
+
 加载 `8a5bc8c36` 后，以真实 `deepseek-v4-flash` 运行修复和喜忧两条、共 6 个 accepted turn，自动 2/2 且 writer probe 通过；报告 SHA-256 为 `1618a895a5062f6d23e6564f320aba53f2e8d2166820711fa714f38fcbff62aa`。人工逐句仍拒绝“这是合理的／我记着／我认”和“两种感觉不丢人／先留着”一类心理咨询或验收结案语气。自动合同通过不等于人感通过。
 
 随后仅在本次验收 Host 进程环境中临时覆盖为 `deepseek-v4-pro`，同队列报告 SHA-256 为 `2425b864994e6bb2abba2c55b213df9640f5641ae2959b406e92f80cb9febd4f`。6 个 turn 仍全部 accepted；mixed 更简洁，但修复仍重复“没接住／对不起／我会注意”。Flash 与 Pro 的 provider latency 均值分别为 2278.5 ms 和 3598.7 ms，Pro 约高 58%。因此证据不支持全局换模，生产实时路线继续使用 Flash。

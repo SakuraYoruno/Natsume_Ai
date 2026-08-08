@@ -579,10 +579,25 @@ def load_executable_cases(path: Path) -> tuple[ExecutableDialogueCase, ...]:
             name=f"{family_id}.driver_requirements",
             allow_empty=True,
         )
-        variants = _text_tuple(
+        baseline_variants = _text_tuple(
             baseline_family.get("variants"),
             name=f"{family_id}.variants",
         )
+        probe_variants_raw = execution.get("probe_variants")
+        variants = (
+            _text_tuple(
+                probe_variants_raw,
+                name=f"{family_id}.probe_variants",
+            )
+            if probe_variants_raw is not None
+            else baseline_variants
+        )
+        if len(variants) != len(baseline_variants) or len(set(variants)) != len(
+            variants
+        ):
+            raise LiveCohortManifestError(
+                f"{family_id}.probe_variants must contain six distinct turns"
+            )
         expected = _text_tuple(
             baseline_family.get("expected"),
             name=f"{family_id}.expected",
@@ -1381,12 +1396,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         cwd=ROOT,
         text=True,
     ).strip()
+    execution_manifest_path = Path(args.execution_manifest).resolve()
     report = {
         "schema_version": "natsume.digital-life-live-cohort-report.v2",
         "run_id": run_id,
         "created_at_ms": int(time.time() * 1000),
         "commit_sha": commit_sha,
-        "execution_manifest": str(Path(args.execution_manifest).resolve()),
+        "execution_manifest": str(execution_manifest_path),
+        "execution_manifest_sha256": hashlib.sha256(
+            execution_manifest_path.read_bytes()
+        ).hexdigest(),
         "real_gateway": str(args.gateway_base_url),
         "real_edge": str(args.edge_base_url),
         "require_voice": bool(args.require_voice),

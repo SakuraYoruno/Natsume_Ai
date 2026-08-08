@@ -15,6 +15,8 @@
 
 同一运行环境中的 48 条真实多轮文本共 144 个 Gateway／DeepSeek 回合，144/144 完成且旧情感 writer 增量为 0；自动门禁为 46 条待人工、2 条失败。但单人逐句复核确认整体人感仍然失败：喜忧并存回复有一句被逐字复用 4 次，关系、自主、空间和修复场景仍频繁退回模板或政策口吻。该结果终止继续堆提示词／禁词／Gate 的路线，下一步是版本化真实自然文本调优或模型层方案，再用新队列和三名评审盲测；不能把工程稳定性当成“七海已经像人”。
 
+新的自然文本留出队列已在首次执行前冻结：修复与喜忧各 6 条未见 probe，先以当前 Flash 建立基线，再只比较少量场景化七海原作正向样本；模型、预算和重试上限保持相同。当前只是 `BASELINE_PENDING`，不是人感提升结论。
+
 Architecture 2.0 的 Evolution Lab 也已在提交 `8afa13f85` 上完成真实 Docker Golden Suite：Research Planning、Proactive、Memory Write 各执行独立 baseline/candidate，共 6 个 arm；镜像以 digest 固定，容器禁网、只读根文件系统、非 root，外部副作用为 0。最终只持久化 3 份 Report 和 3 个 Proposal，`production_influence_enabled=false`；完成后响应丢失的 exact receipt 重开用例也通过。该 PASS 只关闭 NE-04 Lab 可信执行，不提升数字生命人感或整体发布状态。
 
 NE-05／NE-06 的 production Repository 与 Composition也完成 38 项本地 authority 集成：Skill Compiler、签名隔离、篡改拒绝、activate／exact replay／rollback／degrade、Host active-version 解析，以及 Feedback、Knowledge、Identity 的 apply／冲突／过期／重大差异阻断／exact rollback 全部通过。NE-06 的版本化表达偏好已在精确提交 `7ab64a2462755622a538c6267f35123ba497a006` 上完成真实 Docker 双臂、两个 production Review、在线 Host apply、三次真实 `deepseek-v4-flash` turn 与 exact rollback；正式收据 SHA-256 为 `8431de7c3b3badaa61e2411d15d2dbe58752c835e924c661ca754a2dfe531b0c`。候选最终 prompt digest 从 `5ec07f...` 变为 `afac03...`、Token 从 1628 变为 1654、directive digest 精确匹配，rollback 全部恢复。实现只在偏好实际激活时增加一条最多 180 字的 compact prompt 指令，基线普通对话零新增 prompt 文本，不新增表、写入、模型轮次或远端调用；265 项相关回归通过。当前代码又补齐 active Knowledge 与 active Identity 的真实 Surface 消费口：Knowledge 只在 planner 判定需要召回时执行本地只读查询，普通聊天查询数为 0；Identity 只把 active release 的结构化 style fingerprint 编译为最多 180 字的表达底色，不读取私密正文、不覆盖 Soul。相关 Surface／召回／NE-06 回归 353 项通过。

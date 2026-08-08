@@ -17,6 +17,14 @@ from scripts.runtime.test_digital_life_live_cohort import (
 )
 
 
+NATURAL_TEXT_HOLDOUT_MANIFEST = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "emotional_companion"
+    / "dl07_live_natural_text_holdout_v1.json"
+)
+
+
 def _successful_turn(*, narrative: str = "我在。慢慢说，不急。", voice: bool = False) -> dict:
     return {
         "edge_idle_before": True,
@@ -204,6 +212,28 @@ def test_live_execution_manifest_expands_to_72_without_sending_scenario_notes() 
     ) == _participant_case_id(sample, run_scope="dl-live-1")
     assert _participant_case_id(sample, run_scope="dl-live-1") != (
         _participant_case_id(sample, run_scope="dl-live-2")
+    )
+
+
+def test_natural_text_holdout_replaces_only_preregistered_probe_turns() -> None:
+    default_cases = {
+        case.case_id: case
+        for case in load_executable_cases(Path(DEFAULT_EXECUTION_MANIFEST))
+    }
+    holdout_cases = {
+        case.case_id: case
+        for case in load_executable_cases(NATURAL_TEXT_HOLDOUT_MANIFEST)
+    }
+
+    assert len(holdout_cases) == 72
+    assert holdout_cases["rupture_and_repair:1"].probe_turn == (
+        "你嘴上说懂了，可你还是没懂。"
+    )
+    assert holdout_cases["shared_joy_and_mixed_feeling:1"].probe_turn == (
+        "我明明挺高兴的，怎么又有点慌。"
+    )
+    assert holdout_cases["implicit_low_mood:1"].probe_turn == (
+        default_cases["implicit_low_mood:1"].probe_turn
     )
 
 

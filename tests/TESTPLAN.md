@@ -408,6 +408,8 @@ Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Pla
 
 普通 Gateway 陪伴的模型可用性回归必须同时验证：`input_source=GATEWAY` 且没有 canonical accepted predecessor artifact 时，冻结后的 Chat trace 选择 `realtime_companion`，实际 `ModelAttemptRequest` 使用 `CHAT_SURFACE_REALTIME`／Tier B；普通陪伴的 `BUFFERED_CANDIDATE_SELECTION` 仍必须留在这一车道，不能因候选数量升级到 Tier A。含前序 artifact 的 Plan 终局综合及其他非陪伴复杂执行继续使用质量优先 Tier A。Tier B 的 server-owned target timeout 默认 15 秒；transport 在文本可见前失败时，只能在同一冻结 target 和现有 Task retry budget 内额外尝试一次，不能生成第二张图或重复 delivery。成功 provider response 仍必须带 canonical token usage，缺 usage 的成功响应不得因“陪伴优先”而通过。
 
+自然文本调优不得继续复用已经人工读过的 48 条 probe 来挑选实现。`dl07_live_natural_text_holdout_v1.json` 在第一次运行前冻结修复与喜忧各 6 条新 probe；第一轮必须在未接入候选策略的当前 `deepseek-v4-flash` 上建立基线，第二轮只允许改变预注册的场景化七海原句样本，provider、model、setup、预算、候选数和重试上限保持一致。runner 报告必须绑定 execution manifest 的 SHA-256；自动结果仍只能进入人工复核，不能替代三名评审盲测。
+
 `CHAT_SURFACE_REALTIME` 当前冻结为 640 output tokens，并使用服务端 typed `thinking_mode=disabled`。Route boundary 只接受 `enabled/disabled`；DeepSeek provider adapter 必须把它转换为顶层 `thinking={"type":"disabled"}`，OpenAI、Gemini、Minimax 等 provider 必须删除提示而不是收到未知字段。Plan、Research 和高歧义深路径不得继承普通陪伴的 non-thinking 配置。回归仍要拒绝 `finish_reason=length` 且只有 `reasoning_content` 的空正文，不能把 reasoning 当用户可见回复；真实复验同时记录 completion token、content presence、provider latency 与最终 Voice receipt。
 
 `c6a6e0b36` 的三轮真实校准已关闭“默认 thinking 耗尽正文预算”断点：三轮图和 Acceptance 全部完成，最终轮 Voice 物理回执为 `APPLIED`。该报告仍不能关闭实时门槛或人感门槛；整轮 Host latency 为 7,739～12,715 ms，前两轮各需一次 `surface_hard_gate_repair`，必须继续测量首 token、确定性链路和语义修复比例。
