@@ -935,6 +935,8 @@ Knowledge／Identity 随后完成生产消费接线，但本段不越级记为 l
 
 `707332f1a` 首轮真实执行已完成 Knowledge apply 的 Docker 双臂、production Review、baseline/candidate 两次外部 Host 回合；deprecate 在写 projection 前以 `EVOLUTION_ACTIVATION_V2_REVIEW_REJECTED` fail-closed。原因是 runner 把 terminal Review 绑定到 source generation 1，而 repository 的 transition subject 是将要提交的 generation 2；同理 Identity rollback 应从 expected generation 2 绑定 result generation 3。代码已统一显式计算 `expected_generation + 1`。失败 ledger 不删除；首轮仅含合成内容的 active Knowledge 会以新的正确 Review 正常退役后再重跑。
 
+`3e11ee70d` 的第二轮已把 Knowledge baseline／candidate／rollback 三次真实 Host、两组 Docker Lab、两个 Review、activate 与 deprecate 全部跑完，active Knowledge 回到 0。Identity 随后 backfill 合成 acceptance baseline，但在任何 candidate apply 前由 `Evolution Lab V2 spec replay drift` fail-closed。根因是通用表达实验的主键由 dataset 与 commit 派生，而 Knowledge／Identity 多个动作使用相同 tag 对照、却携带不同 policy version；这不是生产 projection 冲突。当前 runner 为每个动作注入唯一 dataset schema 和实验专用版本，再从同一 trusted report 追加与真实 target kind／version 精确绑定的 proposal。已有 `release://natsume/ne06-ki-*` baseline 保留为 exact predecessor，不删库；active 状态为 Knowledge 0、Identity version 1／generation 1。7 项 runner 与消费链单测通过，新提交真实联合重跑前仍为 `REAL_RETEST_PENDING`。
+
 精确提交 `f2c13de42` 的首次预检完成两组 Docker evidence 并批准第一条 Review，但 runner 将 ReviewStore 的外层 record 和内层 ReviewItem 混为同一层，读取 `status` 时在任何 apply 前中止。SQLite 核对 active version 仍是 baseline、generation 仍为 1；该次没有候选版本切流或 Host 行为污染。读取已改为显式拆分两层，真实重跑前状态保持 `REAL_RERUN_PENDING`。
 
 精确提交 `7d296dc9e` 重跑又在 apply 前暴露中断恢复问题：首次 staged proposal 已注册相同 payload digest 的内容寻址版本，新 run 的独立反馈 trace 使用不同 provenance，旧 Repository 因 provenance 不同误判 version drift。版本 identity 实际只由不可变 payload 决定；修复后同 payload／同 version 保留 first-seen provenance 并允许独立 proposal trace，任何 payload 或 digest 变化仍 fail-closed。active version／generation 再次核对未改变，真实重跑仍待执行。

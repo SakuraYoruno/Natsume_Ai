@@ -82,7 +82,7 @@ flowchart LR
 
 版本化表达偏好经 app-local projection port 在每轮 Surface 编译时只读一次。完整 prompt 原本会消费 style anchor，但生产默认 compact prompt 为缩短首字延迟省略了整个控制包；因此 `a84fa23b8` 的真实 apply 虽改变 `reply_plan`，最终 prompt digest 仍不变。当前 compact 路径只在偏好实际激活时补入一条最多 180 字的长期表达指令，baseline 不增加 prompt 文本；既有 ModelAttempt 行只附带该指令的 SHA-256，不保存 prompt 正文，也不新增写事务。`7ab64a246` 的真实 candidate prompt digest／Token 已变化，exact rollback 后下一轮恢复原 digest、Token 和无指令状态。
 
-Knowledge 在线读链为 `recall planner → active Knowledge read port → personal/project namespace → bounded facts → Surface compact prompt`。只有 `should_recall=true` 才调用本地 SQLite；普通陪伴回合为零查询，且不会复用会写 shadow comparison 的 legacy recaller。Identity 在线读链为 `active release projection → structured style fingerprint → bounded identity directive → Surface compact prompt`；当前 affect、关系权限和 Soul 始终具有更高 authority。两条链的 production apply／rollback 因果实测仍需绑定代码提交后执行。
+Knowledge 在线读链为 `recall planner → active Knowledge read port → personal/project namespace → bounded facts → Surface compact prompt`。只有 `should_recall=true` 才调用本地 SQLite；普通陪伴回合为零查询，且不会复用会写 shadow comparison 的 legacy recaller。Identity 在线读链为 `active release projection → structured style fingerprint → bounded identity directive → Surface compact prompt`；当前 affect、关系权限和 Soul 始终具有更高 authority。验收链把 `action-scoped Lab experiment → trusted report → exact target proposal → Review → activation` 分层，避免同一对照数据的 spec replay 与真实 Knowledge／Identity version 混为一体。第二轮已完成 Knowledge 全链，Identity 在 apply 前 fail-closed；两者的联合正式收据仍需绑定新提交重跑。
 
 ```mermaid
 flowchart LR

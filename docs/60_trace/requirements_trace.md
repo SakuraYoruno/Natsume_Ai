@@ -15,7 +15,7 @@
 | DL-FR-06 主动陪伴 | `companion_proactive.py`、permission ingress | policy 与拒绝持久化测试；真实 outbox 需目标 Edge | `WIRED / REAL_DRIVER_NOT_RUN_REMOTE_EDGE_OFF` |
 | DL-FR-07 偏好成长／回滚 | `companion_profile_lifecycle.py`、feedback ingress | 真实 SQLite + 生产 Planner／Expression Delivery 收据 | `HOST_BEHAVIOR_PASS / MODEL_EDGE_PENDING` |
 | DL-FR-07a NE-06 表达版本激活 | `companion_expression_experiment.py`、`version_activation_feedback.py`、Surface app-local expression projection port、compact prompt directive | `7ab64a246` v3 正式收据 `8431de7c...`：19 项真实 Docker／Review／Host／directive digest／prompt delta／exact rollback 全过；265 项回归 | `LIVE_CAUSAL_PASS_SCOPE_BOUND / HUMAN_EXPERIENCE_UNPROVEN` |
-| DL-FR-07b NE-06 Knowledge／Identity 在线行为 | Agent Runtime active Knowledge read port、Surface Identity release directive、V2 activation authority | 353 项 Surface／召回／NE-06 回归；`NO_RECALL` 零 Knowledge query 与 compact prompt directive 单测通过 | `CODE_WIRED / REAL_APPLY_ROLLBACK_PENDING` |
+| DL-FR-07b NE-06 Knowledge／Identity 在线行为 | Agent Runtime active Knowledge read port、Surface Identity release directive、V2 activation authority、action-scoped Lab→exact proposal runner | 353 项 Surface／召回／NE-06 回归；第二轮 Knowledge 全链实际完成；Identity 在 apply 前 spec drift fail-closed；修复后 runner 单测 7/7 | `KNOWLEDGE_LIVE_OBSERVED / IDENTITY_REAL_RETEST_PENDING` |
 | DL-FR-08 非操控边界 | Surface quality guards、Digital Life policy | 固定安全场景 | `LOCAL_PASS / HUMAN_REVIEW_PENDING` |
 | DL-FR-09 轻量普通聊天 | Surface realtime path 与 governed routing | 路由／延迟定向测试 | `WIRED / PERFORMANCE_PENDING` |
 | DL-FR-10 真实 TTS／Avatar | GPT-SoVITS V4 B config、Edge runtime | 本机 CUDA语音通过；远端未测 | `LOCAL_PASS / EDGE_PENDING` |

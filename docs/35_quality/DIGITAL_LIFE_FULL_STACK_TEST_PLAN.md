@@ -903,3 +903,11 @@ python scripts/runtime/test_digital_life_restart_driver.py resume `
 该 runner 不启动、停止或探测远端 Edge；Voice／Avatar 固定记为 `NOT_TESTED_REMOTE_EDGE_DISABLED`。单条模型输出差异只能证明版本指令进入真实生成链，不能替代 48 条盲测或“更像人”的人工结论。网络安全、Pentest、A09、A12 与 Security Monitor 按用户要求记为 `NOT_RUN_USER_SKIPPED`。
 
 当前正式执行绑定 `7ab64a2462755622a538c6267f35123ba497a006`，收据 SHA-256 为 `8431de7c3b3badaa61e2411d15d2dbe58752c835e924c661ca754a2dfe531b0c`。19 项强制检查全部通过；candidate prompt digest／Token／directive digest 变化并在 rollback 后恢复。该项工程因果关闭，体验结论仍为 `UNPROVEN_SINGLE_SAMPLE_NOT_A_BLIND_COMPARISON`。
+
+### 12.7 Knowledge／Identity 在线因果与中断续跑
+
+`scripts/runtime/run_ne06_knowledge_identity_live_acceptance.py` 必须在同一隔离 SQLite 上执行 Knowledge baseline→activate→真实 Host→deprecate，以及 Identity exact predecessor→activate→真实 Host→exact rollback。每个 authority 动作必须使用唯一 action-scoped Lab dataset／experiment version；trusted report 生成后，另追加与 production target kind／version 精确一致的 proposal。禁止把实验内部 policy version 直接冒充 Knowledge entry version 或 Identity activation version。
+
+中断后不得清库。active Knowledge 必须通过新的 Review 正常退役；Identity 只允许从 `release://natsume/ne06-ki-*` 的 acceptance-owned active snapshot 续跑，并将其作为 proposed release 的 exact predecessor。强制 Gate 比较 active snapshot ref、结构化 Identity directive、Review、transition receipt 和真实 external Host turn；整份 prompt digest 还包含动态 Life／关系上下文，只作为观察值，不要求跨三个不同会话逐字相同。远端 Edge、Voice、Avatar 和网络安全继续按用户要求不运行。
+
+当前第二轮已经实际完成 Knowledge 全链并恢复 active count 为 0；Identity 只留下合法 baseline backfill，候选尚未 apply 就因通用表达实验主键复用触发 spec replay drift。修正后的 runner 单测 7/7，通过真实新提交联合重跑前状态仍是 `REAL_RETEST_PENDING`。

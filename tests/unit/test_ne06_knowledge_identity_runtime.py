@@ -18,7 +18,9 @@ from host_brain.surface_runtime.input_compiler import (
     _apply_active_identity_release,
 )
 from scripts.runtime.run_ne06_knowledge_identity_live_acceptance import (
+    _build_identity_candidate,
     _build_identity_pair,
+    _run_lab_authority,
     _transition_subject_version,
 )
 
@@ -172,3 +174,72 @@ def test_live_runner_identity_pair_has_distinct_safe_runtime_directives() -> Non
 def test_live_runner_terminal_reviews_bind_the_result_generation() -> None:
     assert _transition_subject_version(1) == 2
     assert _transition_subject_version(2) == 3
+
+
+def test_live_runner_reuses_an_acceptance_identity_as_exact_previous() -> None:
+    previous, _ = _build_identity_pair(run_id="unit-ne06-existing")
+
+    proposed = _build_identity_candidate(
+        run_id="unit-ne06-resume",
+        previous=previous,
+        release_suffix="v2",
+        created_at_ms=previous.created_at_ms + 1,
+    )
+
+    assert proposed.previous_release_ref == previous.release_ref
+    assert proposed.snapshot_ref != previous.snapshot_ref
+    assert _active_identity_release_directive(
+        {"snapshot": proposed.to_dict()}
+    ) != _active_identity_release_directive({"snapshot": previous.to_dict()})
+
+
+def test_live_runner_scopes_lab_spec_and_binds_exact_activation_version(
+    monkeypatch,
+) -> None:
+    calls: list[dict] = []
+    appended: list[object] = []
+    report = SimpleNamespace(report_digest="a" * 64)
+    experiment_proposal = SimpleNamespace(proposal_digest="b" * 64)
+
+    def run_expression_lab(**kwargs):
+        calls.append(dict(kwargs))
+        return {"report": report, "proposal": experiment_proposal}
+
+    class Ledger:
+        def append_proposal(self, proposal):
+            appended.append(proposal)
+            return proposal.proposal_id
+
+    monkeypatch.setattr(
+        "scripts.runtime.run_ne06_knowledge_identity_live_acceptance."
+        "_run_expression_lab_authority",
+        run_expression_lab,
+    )
+    result = _run_lab_authority(
+        workspace_id="host-default",
+        commit="c" * 40,
+        baseline_version="1",
+        target_version="rollback-2",
+        baseline_payload={"tag_scores": {"in_persona": 1}},
+        target_payload={"tag_scores": {}},
+        target_kind="identity-test",
+        owner_id="owner:run:rollback",
+        executor=object(),
+        spec_registry=object(),
+        trusted_ledger=Ledger(),
+    )
+
+    assert len(calls) == 1
+    assert calls[0]["baseline_version"].startswith("lab-")
+    assert calls[0]["target_version"].endswith("-candidate")
+    assert calls[0]["baseline_payload"]["schema"] == (
+        calls[0]["target_payload"]["schema"]
+    )
+    assert calls[0]["baseline_payload"]["schema"].startswith(
+        "natsume.ne06.knowledge-identity-live."
+    )
+    assert len(appended) == 1
+    assert result["proposal"] is appended[0]
+    assert result["proposal"].target_version == "rollback-2"
+    assert result["proposal"].report_digest == report.report_digest
+    assert result["experiment_proposal"] is experiment_proposal

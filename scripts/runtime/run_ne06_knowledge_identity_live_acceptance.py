@@ -33,6 +33,7 @@ from host_brain.contracts.agent_runtime.review_policy import (  # noqa: E402
     ReviewType,
 )
 from host_brain.contracts.evolution import KnowledgeEntryV2  # noqa: E402
+from host_brain.contracts.evolution_lab import EvolutionProposalV2  # noqa: E402
 from host_brain.evolution.version_activation import (  # noqa: E402
     EvolutionVersionActivationService,
 )
@@ -60,6 +61,7 @@ from host_brain.release.identity_activation import (  # noqa: E402
     IdentityReleaseActivationService,
 )
 from host_brain.release.identity_snapshot import (  # noqa: E402
+    IdentitySnapshot,
     IdentitySourceRef,
     build_identity_snapshot,
 )
@@ -70,7 +72,7 @@ from scripts.runtime.run_ne06_expression_live_acceptance import (  # noqa: E402
     _event_text,
     _model_attempt,
     _require_exact_tracked_commit,
-    _run_lab_authority,
+    _run_lab_authority as _run_expression_lab_authority,
     _turn_passed,
 )
 
@@ -79,6 +81,73 @@ IMAGE_REFERENCE_DEFAULT = (
     "python@sha256:"
     "6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df"
 )
+
+
+def _run_lab_authority(
+    *,
+    workspace_id: str,
+    commit: str,
+    baseline_version: str,
+    target_version: str,
+    baseline_payload: Mapping[str, Any],
+    target_payload: Mapping[str, Any],
+    target_kind: str,
+    owner_id: str,
+    executor: TrustedDockerSandboxExecutor,
+    spec_registry: SQLiteEvolutionLabV2Ledger,
+    trusted_ledger: SQLiteTrustedEvolutionLabLedger,
+) -> dict[str, Any]:
+    """Run unique Lab evidence, then bind it to the exact activation target.
+
+    The companion-expression experiment identifies a spec from its dataset and
+    commit.  Knowledge and Identity may legitimately reuse the same synthetic
+    policy comparison, so every acceptance action receives a unique schema
+    scope.  Its experiment-only policy versions never impersonate the real
+    activation version; a second proposal binds the trusted report to that
+    exact version instead.
+    """
+
+    scope = hashlib.sha256(
+        "\0".join((owner_id, target_kind, target_version)).encode("utf-8")
+    ).hexdigest()[:20]
+    schema = f"natsume.ne06.knowledge-identity-live.{scope}.v1"
+    scoped_baseline = {**dict(baseline_payload), "schema": schema}
+    scoped_target = {**dict(target_payload), "schema": schema}
+    experiment = _run_expression_lab_authority(
+        workspace_id=workspace_id,
+        commit=commit,
+        baseline_version=f"lab-{scope}-baseline",
+        target_version=f"lab-{scope}-candidate",
+        baseline_payload=scoped_baseline,
+        target_payload=scoped_target,
+        target_kind=target_kind,
+        owner_id=owner_id,
+        executor=executor,
+        spec_registry=spec_registry,
+        trusted_ledger=trusted_ledger,
+    )
+    report = experiment["report"]
+    binding = hashlib.sha256(
+        "\0".join(
+            (report.report_digest, target_kind, target_version)
+        ).encode("utf-8")
+    ).hexdigest()
+    proposal = EvolutionProposalV2(
+        proposal_id=f"lab-trusted-proposal-ne06-activation-{binding[:40]}",
+        report_digest=report.report_digest,
+        target_kind=target_kind,
+        target_version=target_version,
+        rationale=(
+            "隔离 Docker 双臂提供确定性因果证据；本提案仅将报告绑定到"
+            "真实 Knowledge 或 Identity 目标版本，仍须 production Review。"
+        ),
+    )
+    trusted_ledger.append_proposal(proposal)
+    return {
+        "report": report,
+        "proposal": proposal,
+        "experiment_proposal": experiment["proposal"],
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -419,22 +488,42 @@ def _run_identity_flow(
     spec_registry: SQLiteEvolutionLabV2Ledger,
     trusted_ledger: SQLiteTrustedEvolutionLabLedger,
 ) -> dict[str, Any]:
-    if service.active_identity(workspace_id=workspace_id) is not None:
-        raise RuntimeError("NE06_IDENTITY_ACTIVE_BASELINE_ALREADY_EXISTS")
-    previous, proposed = _build_identity_pair(run_id=run_id)
-    release_service.backfill_previous_release(
-        workspace_id=workspace_id,
-        snapshot=previous,
-        activation_version=1,
-        idempotency_key=f"{run_id}:identity-baseline",
-    )
+    active_before = service.active_identity(workspace_id=workspace_id)
+    if active_before is None:
+        previous, proposed = _build_identity_pair(run_id=run_id)
+        release_service.backfill_previous_release(
+            workspace_id=workspace_id,
+            snapshot=previous,
+            activation_version=1,
+            idempotency_key=f"{run_id}:identity-baseline",
+        )
+        initial_activation_version = 1
+        initial_generation = 1
+    else:
+        previous = IdentitySnapshot.from_mapping(active_before["snapshot"])
+        if not previous.release_ref.startswith(
+            "release://natsume/ne06-ki-"
+        ):
+            raise RuntimeError(
+                "NE06_IDENTITY_ACTIVE_BASELINE_NOT_ACCEPTANCE_OWNED"
+            )
+        initial_activation_version = int(
+            active_before["activation_version"]
+        )
+        initial_generation = int(active_before["activation_generation"])
+        proposed = _build_identity_candidate(
+            run_id=run_id,
+            previous=previous,
+            release_suffix=f"v{initial_activation_version + 1}",
+        )
+    activation_version = initial_activation_version + 1
     migration_id = f"identity-migration-{run_id}"
     preparation = release_service.prepare_release(
         migration_id=migration_id,
         workspace_id=workspace_id,
         previous=previous,
         proposed=proposed,
-        activation_version=2,
+        activation_version=activation_version,
         regression_checks={
             "persona": True,
             "relationship": True,
@@ -450,8 +539,8 @@ def _run_identity_flow(
     apply_authority = _run_lab_authority(
         workspace_id=workspace_id,
         commit=commit,
-        baseline_version="1",
-        target_version="2",
+        baseline_version=str(initial_activation_version),
+        target_version=str(activation_version),
         baseline_payload={"tag_scores": {}},
         target_payload={"tag_scores": {"in_persona": 1}},
         target_kind=target_kind,
@@ -463,8 +552,8 @@ def _run_identity_flow(
     rollback_authority = _run_lab_authority(
         workspace_id=workspace_id,
         commit=commit,
-        baseline_version="2",
-        target_version="rollback-2",
+        baseline_version=str(activation_version),
+        target_version=f"rollback-{activation_version}",
         baseline_payload={"tag_scores": {"in_persona": 1}},
         target_payload={"tag_scores": {}},
         target_kind=target_kind,
@@ -488,7 +577,7 @@ def _run_identity_flow(
         action="identity-apply",
         operator_id=operator_id,
         subject_ref=proposed.snapshot_ref,
-        subject_version=2,
+        subject_version=activation_version,
         lab=apply_authority,
         evidence_refs=evidence_refs,
     )
@@ -498,7 +587,7 @@ def _run_identity_flow(
         action="identity-rollback",
         operator_id=operator_id,
         subject_ref=previous.snapshot_ref,
-        subject_version=_transition_subject_version(2),
+        subject_version=_transition_subject_version(initial_generation + 1),
         lab=rollback_authority,
         evidence_refs=evidence_refs,
     )
@@ -521,7 +610,7 @@ def _run_identity_flow(
     )
     activated = release_service.activate_prepared_release(
         ready,
-        expected_generation=1,
+        expected_generation=initial_generation,
         idempotency_key=f"{run_id}:identity-apply",
     )
     candidate = _run_host_turn(
@@ -538,7 +627,7 @@ def _run_identity_flow(
         lab_report_digest=rollback_authority["report"].report_digest,
         review_id=rollback_review["review_id"],
         review_status_version=rollback_review["status_version"],
-        expected_generation=2,
+        expected_generation=initial_generation + 1,
         idempotency_key=f"{run_id}:identity-rollback",
     )
     rollback = _run_host_turn(
@@ -568,9 +657,6 @@ def _run_identity_flow(
         "candidate_prompt_changed": (
             _prompt_digest(candidate) != _prompt_digest(baseline)
         ),
-        "rollback_prompt_exact": (
-            _prompt_digest(rollback) == _prompt_digest(baseline)
-        ),
         "active_snapshot_exact_previous": bool(
             active
             and str(active["snapshot"]["snapshot_ref"])
@@ -598,6 +684,15 @@ def _run_identity_flow(
             "proposed_snapshot_ref": proposed.snapshot_ref,
             "final_snapshot_ref": (
                 str(active["snapshot"]["snapshot_ref"]) if active else ""
+            ),
+            "initial_activation_version": initial_activation_version,
+            "activation_version": activation_version,
+            "initial_generation": initial_generation,
+            "final_generation": (
+                int(active["activation_generation"]) if active else 0
+            ),
+            "rollback_prompt_matches_baseline_observation": (
+                _prompt_digest(rollback) == _prompt_digest(baseline)
             ),
             "apply_report_digest": apply_authority["report"].report_digest,
             "rollback_report_digest": rollback_authority["report"].report_digest,
@@ -854,11 +949,32 @@ def _build_identity_pair(*, run_id: str):
             ts_ms=now,
         ),
     )
+    proposed = _build_identity_candidate(
+        run_id=run_id,
+        previous=previous,
+        release_suffix="v2",
+        created_at_ms=now + 1,
+    )
+
+    return previous, proposed
+
+
+def _build_identity_candidate(
+    *,
+    run_id: str,
+    previous: IdentitySnapshot,
+    release_suffix: str,
+    created_at_ms: int | None = None,
+) -> IdentitySnapshot:
+    now = max(
+        int(created_at_ms or time.time() * 1000),
+        int(previous.created_at_ms) + 1,
+    )
     proposed = _build_identity_snapshot(
         run_id=run_id,
-        release_suffix="v2",
+        release_suffix=release_suffix,
         previous_release_ref=previous.release_ref,
-        created_at_ms=now + 1,
+        created_at_ms=now,
         style=StyleFingerprint(
             warmth=0.88,
             curiosity=0.45,
@@ -867,7 +983,7 @@ def _build_identity_pair(*, run_id: str):
             assertiveness=0.55,
             playfulness=0.82,
             resilience=0.65,
-            ts_ms=now + 1,
+            ts_ms=now,
         ),
     )
     if (
@@ -875,7 +991,7 @@ def _build_identity_pair(*, run_id: str):
         == _active_identity_release_directive({"snapshot": proposed.to_dict()})
     ):
         raise RuntimeError("NE06_IDENTITY_DIRECTIVE_NOT_DISTINGUISHABLE")
-    return previous, proposed
+    return proposed
 
 
 def _build_identity_snapshot(
