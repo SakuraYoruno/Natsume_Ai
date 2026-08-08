@@ -414,6 +414,8 @@ Canary 必须使用真实临时 SQLite 和生产 Relationship/Profile/Fusion/Pla
 
 候选轮已绑定提交 `0991ab704` 执行同一 6 条，报告 SHA-256 为 `864ac4ca321f549e803cf01df62c420be6df02108c889e4ded38fcfa32f547b9`：18/18 accepted，writer probe 通过，结果为 2/6 自动待人工、4/6 失败。当前逐句结论只接受“修复表达局部改善”；mixed 仍为 1/3 且继续 exact reuse，不能计入整体收益。随后用 probe 4～6 做模板诊断，报告 SHA-256 为 `49b3e0f250b91ae1f424ec0f568fa80d92cb355db43c0b10158a6f2d2cbfd471`：9/9 accepted、3/3 失败，一条逐字复用全局示范句，两条替用户安排感受。回归必须断言首次 mixed prompt、语义重试 prompt 均不含该完整句，七类不同用户末句得到各自的 fail-soft 文本且全部通过发送门禁；相邻结果为 434 passed。提交 `00c52762f` 的同三条真实报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`：9/9 accepted、exact reuse 为 0，但自动仍为 0/3；一条非收益 fail-soft、两条情绪管理。去模板回归关闭，模型体验不提升，下一测试层转向模型／版本化真实文本。
 
+模型层测试使用独立冻结文件 `dl07_live_model_layer_holdout_v1.json`。loader 必须继续展开 72 条唯一 case，并证明含混、空间、修复、mixed 四组新 probe 与上一 natural-text 留出集合不相交。首轮真实比较只选每组前两条；候选不能只以自动 PASS 取胜，必须同时满足人工偏好、fallback 非劣与 provider 延迟不高于 1.5 倍。该 manifest 固定 `promotion_eligible=false`，防止一次单人诊断直接切换生产默认模型。
+
 `CHAT_SURFACE_REALTIME` 当前冻结为 640 output tokens，并使用服务端 typed `thinking_mode=disabled`。Route boundary 只接受 `enabled/disabled`；DeepSeek provider adapter 必须把它转换为顶层 `thinking={"type":"disabled"}`，OpenAI、Gemini、Minimax 等 provider 必须删除提示而不是收到未知字段。Plan、Research 和高歧义深路径不得继承普通陪伴的 non-thinking 配置。回归仍要拒绝 `finish_reason=length` 且只有 `reasoning_content` 的空正文，不能把 reasoning 当用户可见回复；真实复验同时记录 completion token、content presence、provider latency 与最终 Voice receipt。
 
 `c6a6e0b36` 的三轮真实校准已关闭“默认 thinking 耗尽正文预算”断点：三轮图和 Acceptance 全部完成，最终轮 Voice 物理回执为 `APPLIED`。该报告仍不能关闭实时门槛或人感门槛；整轮 Host latency 为 7,739～12,715 ms，前两轮各需一次 `surface_hard_gate_repair`，必须继续测量首 token、确定性链路和语义修复比例。

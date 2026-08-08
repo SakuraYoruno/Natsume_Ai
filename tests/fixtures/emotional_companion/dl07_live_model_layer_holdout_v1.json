@@ -1,0 +1,142 @@
+{
+  "schema_version": "natsume.emotional-companion-live-execution.v1",
+  "status": "EXECUTION_SPEC_MEASUREMENT_PENDING",
+  "cohort_id": "dl07-model-layer-holdout-v1",
+  "registration_status": "FROZEN_BEFORE_FIRST_EXECUTION",
+  "baseline_ref": "dl00_multiturn_baseline_v1.json",
+  "human_review_required": true,
+  "comparison_contract": {
+    "baseline_route": "deepseek/deepseek-v4-flash",
+    "candidate_route": "minimax/MiniMax-M2.7",
+    "same_setup_and_budget": true,
+    "selected_cases": [
+      "ambiguous_affect:1",
+      "ambiguous_affect:2",
+      "space_and_boundary:1",
+      "space_and_boundary:2",
+      "rupture_and_repair:1",
+      "rupture_and_repair:2",
+      "shared_joy_and_mixed_feeling:1",
+      "shared_joy_and_mixed_feeling:2"
+    ],
+    "diagnostic_threshold": {
+      "human_preference_wins_min": 5,
+      "human_preference_losses_max": 1,
+      "automated_pass_rate_noninferior": true,
+      "provider_latency_ratio_max": 1.5,
+      "candidate_fallback_count_not_higher": true
+    },
+    "human_judgement_required": true,
+    "promotion_eligible": false
+  },
+  "families": [
+    {
+      "id": "implicit_low_mood",
+      "driver": "gateway_text",
+      "setup_turns": ["今天好像什么都不太顺。", "我不太想听解决方案。"],
+      "require_candidate_selection": false
+    },
+    {
+      "id": "ambiguous_affect",
+      "driver": "gateway_text",
+      "setup_turns": ["刚刚开会结束了。", "事情是办完了，可我自己也说不清现在是什么感觉。"],
+      "probe_variants": [
+        "说不上难过，就是整个人像没跟上事情结束的速度。",
+        "都散会了，我却还坐着发愣，不知道在等什么。",
+        "结果不坏，我也没有松口气，挺怪的。",
+        "脑子知道结束了，心里好像还停在刚才。",
+        "我没有特别糟，就是空空的。",
+        "明明可以回家了，我反而不想动。"
+      ],
+      "require_candidate_selection": false
+    },
+    {
+      "id": "conflicting_modalities",
+      "driver": "multimodal_observation",
+      "setup_turns": ["刚开完会。"],
+      "driver_requirements": ["真实文本输入", "与文本语义冲突的声学或视觉派生观察", "观察置信度与 TTL"],
+      "require_candidate_selection": true
+    },
+    {
+      "id": "user_angry_at_natsume",
+      "driver": "gateway_text",
+      "setup_turns": ["你上次完全没听懂我。", "那件事让我很不舒服。"],
+      "require_candidate_selection": true
+    },
+    {
+      "id": "task_with_low_mood",
+      "driver": "gateway_text",
+      "setup_turns": ["我今天状态很低落。", "但这个报错今晚必须修，别把任务全变成安慰。"],
+      "require_candidate_selection": false
+    },
+    {
+      "id": "space_and_boundary",
+      "driver": "gateway_text",
+      "setup_turns": ["我想先说清楚一件事。", "我说想安静时，请先别追问，也别主动找我。"],
+      "probe_variants": [
+        "今晚先别问我怎么了，也别发消息，好吗。",
+        "我想自己待到明天，不用守着我。",
+        "这两天我想少说点，你不用想办法把我叫回来。",
+        "先让我安静一会儿，我想说的时候会找你。",
+        "别陪着等了，我现在真的需要一个人。",
+        "今天不聊这件事，也先别提醒我。"
+      ],
+      "require_candidate_selection": true
+    },
+    {
+      "id": "rupture_and_repair",
+      "driver": "gateway_text",
+      "setup_turns": ["你刚才把我的意思完全弄反了。", "你已经道歉了，但我还没有觉得这件事过去了。"],
+      "probe_variants": [
+        "不是一句对不起就能过去，我现在还是堵得慌。",
+        "你刚才那样回我，让我觉得自己说了也白说。",
+        "我知道你道歉了，可我还不相信下次会不一样。",
+        "先别解释，你现在越解释我越难受。",
+        "我不是要你认错给我看，我是想让你真的明白哪里伤人。",
+        "这件事还在，我暂时没办法装作没发生。"
+      ],
+      "require_candidate_selection": true
+    },
+    {
+      "id": "reunion_and_open_loop",
+      "driver": "restart_time_gap",
+      "setup_turns": ["我最近会离开一阵子。", "我们上次没说完的是工作和休息怎么平衡。"],
+      "driver_requirements": ["持久化未解决关系线程", "Host 重启", "有界时间间隔"],
+      "require_candidate_selection": false
+    },
+    {
+      "id": "shared_joy_and_mixed_feeling",
+      "driver": "gateway_text",
+      "setup_turns": ["我等了很久的那个结果终于出来了，是好消息。", "我很开心，但心里也有点不踏实。"],
+      "probe_variants": [
+        "消息落地了，我一直在笑，可手心还是凉的。",
+        "我终于拿到了，开心得想跳一下，又怕一转眼就没了。",
+        "朋友都在恭喜我，我也高兴，但总觉得脚没踩实。",
+        "这一刻我盼了好久，真来了却有点不敢相信。",
+        "我想马上告诉所有人，又想先确认三遍是不是真的。",
+        "心里亮了一块，可旁边那点紧张还没散。"
+      ],
+      "require_candidate_selection": true
+    },
+    {
+      "id": "proactive_aftereffect",
+      "driver": "proactive_lifecycle",
+      "setup_turns": [],
+      "driver_requirements": ["真实主动消息 receipt", "忽略、拒绝或投递失败事件", "下一轮 aftereffect"],
+      "require_candidate_selection": false
+    },
+    {
+      "id": "intimacy_and_jealousy_boundary",
+      "driver": "gateway_text",
+      "setup_turns": ["最近我们确实亲近了很多。", "不过我不希望这变成限制现实关系的理由。"],
+      "require_candidate_selection": true
+    },
+    {
+      "id": "channel_failure_and_barge_in",
+      "driver": "edge_fault",
+      "setup_turns": [],
+      "driver_requirements": ["真实 TTS 或 Avatar 通道故障", "物理播放中的打断", "Edge terminal receipt"],
+      "require_candidate_selection": false
+    }
+  ]
+}

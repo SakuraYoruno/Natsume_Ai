@@ -107,6 +107,8 @@ flowchart LR
 
 首个 source-bound 原句对照没有关闭该缺口：同一 6 条中自动结果只从 1/6 变为 2/6，修复表达局部改善，mixed 仍复用完整模板。随后 3 条未用于前述选择的 mixed 变体全部失败，确认系统提示和 fail-soft 中的整句答案才是模板坍缩的直接来源。`00c52762f` 删除模板后的同三条真实报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`：9/9 accepted、writer probe 通过、exact reuse 为 0，但自动仍为 0/3；一条是非收益 fail-soft，两条继续替用户安排情绪。去模板子项关闭，整体继续 `INCOMPLETE`，下一步只允许模型层或版本化真实文本方案。
 
+模型层首轮使用 `dl07_live_model_layer_holdout_v1.json`，该文件在首次执行前冻结四类各 6 条新 probe；诊断只跑每类前两条，共 8 条／24 回合。生产 `deepseek-v4-flash` 与候选 `MiniMax-M2.7` 使用相同代码、setup、预算和独立 participant。只有候选取得至少 5/8 人工偏好胜、最多 1 条明确负向、自动通过率不降、fallback 不增且 provider 延迟比不高于 1.5，才可提出扩大 cohort；本轮 `promotion_eligible=false`，不会直接更改生产默认路由。
+
 ### NE-04 真实 Docker Golden Suite
 
 提交 `8afa13f856c588edcec6a8e1ac4d205efbea02d2` 的 clean detached worktree 已执行 Research Planning、Proactive、Memory Write 三类可信实验，各自包含 baseline/candidate，共 6 个真实 Docker arm。镜像为 `python@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df`；所有 arm 均为 `network=none`、只读根文件系统、`65534:65534` 非 root，effect audit 为 0。SQLite migration head 为 `0140#evolution_lab_redacted_dataset`，最终持久化 6 个 run receipt、3 个 report、3 个 proposal 和 1 个 suite receipt；运行目录无残留，生产副作用和生产影响均为 false。

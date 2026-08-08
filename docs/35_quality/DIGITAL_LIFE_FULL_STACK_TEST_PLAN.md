@@ -840,6 +840,8 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 
 候选轮报告 SHA-256 为 `864ac4ca321f549e803cf01df62c420be6df02108c889e4ded38fcfa32f547b9`，18/18 accepted、2 待人工、4 失败；只观察到 repair 局部改善，mixed 无可归因收益。额外 mixed probe 4～6 的模板诊断报告 SHA-256 为 `49b3e0f250b91ae1f424ec0f568fa80d92cb355db43c0b10158a6f2d2cbfd471`，3/3 失败并复现 exact template reuse。删除完整 mixed 示范句后的同三条报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`：9/9 accepted、writer probe 通过、exact reuse 为 0，但自动仍为 0/3；`:5` 是非收益 fail-soft，`:4/:6` 仍替用户安排感受。该对照关闭“全局整句复用”，不关闭“自然 mixed 生成”；后续不得再迭代 prompt／Gate。
 
+模型层对照必须改用 `dl07_live_model_layer_holdout_v1.json`，不得从已执行的 natural-text probe 中挑样。首轮固定 `ambiguous_affect:1/:2`、`space_and_boundary:1/:2`、`rupture_and_repair:1/:2`、`shared_joy_and_mixed_feeling:1/:2`；Flash 和 MiniMax 分别使用独立 run identity，但 setup、代码、预算、候选数与重试上限保持一致。除了自动结构与 writer probe，还要逐句做配对偏好、记录 fallback 和 provider terminal latency；不满足 manifest 阈值就停止候选，不切生产路由。
+
 首轮 frame 真实 Provider 小队列已经执行：8 类／24 个 accepted turn 中只有 2 条经当前人工复核可接受，2 条自动失败，另 4 条自动放行但人工拒绝，报告 SHA-256 为 `99c024f3dd02c6d2fe03cfdad64298b31c9ed57a00753996bd27c5a8a8d97fd4`。因此后续重测不能只检查 candidate score 和 frame 字段存在，还必须逐条检查 `surface_memory_recall_packet` 的 person/session 归属。统一 RecallFusion 已新增 fail-closed 终态过滤及 117 项回归；真实重测须在包含多个既存 subject 的库中证明跨 subject 候选为 0，并保留每路 raw/accepted/excluded 计数。该项通过后才继续人感约束和完整 48 条，不能用清空数据库掩盖污染。
 
 第一次同库隔离复验报告 SHA-256 为 `19f52e0b8141ce44864ad3f13f6414a17a65088bcbd1fb999e28e0dba6503cfe`：跨 subject 候选已归零，但两条首轮仍把当前 request 的 Intent 自己召回，形成 `_thalamus_meta` 假记忆并触发 `MEMORY_ALIGNMENT_REQUIRED_MISS`。验收因此增加 causal self-exclusion：同一 request/intent 不得出现在自己的 recall packet，路由收据必须给出 `self_excluded_candidate_count`。代码回归现为 118 项通过；必须在不清理既存数据的情况下再跑同两条并确认首轮假记忆为 0，之后才能评价模型语言质量。

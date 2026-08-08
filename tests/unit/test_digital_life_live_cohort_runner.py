@@ -23,6 +23,12 @@ NATURAL_TEXT_HOLDOUT_MANIFEST = (
     / "emotional_companion"
     / "dl07_live_natural_text_holdout_v1.json"
 )
+MODEL_LAYER_HOLDOUT_MANIFEST = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "emotional_companion"
+    / "dl07_live_model_layer_holdout_v1.json"
+)
 
 
 def _successful_turn(*, narrative: str = "我在。慢慢说，不急。", voice: bool = False) -> dict:
@@ -235,6 +241,45 @@ def test_natural_text_holdout_replaces_only_preregistered_probe_turns() -> None:
     assert holdout_cases["implicit_low_mood:1"].probe_turn == (
         default_cases["implicit_low_mood:1"].probe_turn
     )
+
+
+def test_model_layer_holdout_freezes_four_unseen_text_families() -> None:
+    natural_cases = {
+        case.case_id: case
+        for case in load_executable_cases(NATURAL_TEXT_HOLDOUT_MANIFEST)
+    }
+    model_cases = {
+        case.case_id: case
+        for case in load_executable_cases(MODEL_LAYER_HOLDOUT_MANIFEST)
+    }
+
+    assert len(model_cases) == 72
+    assert model_cases["ambiguous_affect:1"].probe_turn == (
+        "说不上难过，就是整个人像没跟上事情结束的速度。"
+    )
+    assert model_cases["space_and_boundary:1"].probe_turn == (
+        "今晚先别问我怎么了，也别发消息，好吗。"
+    )
+    assert model_cases["rupture_and_repair:1"].probe_turn == (
+        "不是一句对不起就能过去，我现在还是堵得慌。"
+    )
+    assert model_cases["shared_joy_and_mixed_feeling:1"].probe_turn == (
+        "消息落地了，我一直在笑，可手心还是凉的。"
+    )
+    for family in (
+        "ambiguous_affect",
+        "space_and_boundary",
+        "rupture_and_repair",
+        "shared_joy_and_mixed_feeling",
+    ):
+        assert {
+            model_cases[f"{family}:{index}"].probe_turn for index in range(1, 7)
+        }.isdisjoint(
+            {
+                natural_cases[f"{family}:{index}"].probe_turn
+                for index in range(1, 7)
+            }
+        )
 
 
 def test_automated_verdict_keeps_naturalness_human_review_pending() -> None:
