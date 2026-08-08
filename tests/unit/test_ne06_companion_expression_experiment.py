@@ -9,6 +9,7 @@ from host_brain.evolution_lab.companion_expression_experiment import (
     BoundCompanionExpressionDatasetReader,
     CompanionExpressionExperimentError,
     CompanionExpressionVerifier,
+    activation_review_subject_version,
     build_companion_expression_spec,
 )
 from host_brain.evolution_lab.companion_expression_worker import run
@@ -169,6 +170,17 @@ def test_companion_expression_rejects_no_change_target() -> None:
         assert "changed target" in str(exc)
     else:
         raise AssertionError("no-change expression experiment must fail")
+
+
+def test_activation_review_binds_the_generation_being_created() -> None:
+    assert activation_review_subject_version(0) == 1
+    assert activation_review_subject_version(1) == 2
+    assert activation_review_subject_version(2) == 3
+    with pytest.raises(
+        CompanionExpressionExperimentError,
+        match="generation must be non-negative",
+    ):
+        activation_review_subject_version(-1)
 
 
 def test_content_addressed_policy_version_reuses_first_provenance(

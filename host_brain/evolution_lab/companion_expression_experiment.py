@@ -211,6 +211,16 @@ def build_companion_expression_dataset(
     )
 
 
+def activation_review_subject_version(expected_generation: int) -> int:
+    """Bind Review to the projection generation the transition will create."""
+
+    if isinstance(expected_generation, bool) or int(expected_generation) < 0:
+        raise CompanionExpressionExperimentError(
+            "expected activation generation must be non-negative"
+        )
+    return int(expected_generation) + 1
+
+
 def build_companion_expression_spec(
     *,
     workspace_id: str,
@@ -470,6 +480,7 @@ __all__ = [
     "CompanionExpressionExperimentResult",
     "CompanionExpressionVerifier",
     "EXPERIMENT_KIND",
+    "activation_review_subject_version",
     "build_companion_expression_dataset",
     "build_companion_expression_spec",
     "run_companion_expression_experiment",

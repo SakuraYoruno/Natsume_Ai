@@ -40,6 +40,7 @@ from host_brain.evolution.version_activation import (  # noqa: E402
 from host_brain.evolution_lab.companion_expression_experiment import (  # noqa: E402
     BoundCompanionExpressionDatasetReader,
     CompanionExpressionVerifier,
+    activation_review_subject_version,
     build_companion_expression_spec,
     run_companion_expression_experiment,
 )
@@ -195,7 +196,9 @@ def main(argv: list[str] | None = None) -> int:
         action="apply",
         operator_id=str(args.operator_id),
         subject_ref=subject_ref,
-        subject_version=initial_generation,
+        subject_version=activation_review_subject_version(
+            initial_generation
+        ),
         lab_report=apply_authority["report"],
         lab_proposal=apply_authority["proposal"],
         feedback_proposal=feedback_proposal,
@@ -207,7 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         action="rollback",
         operator_id=str(args.operator_id),
         subject_ref=subject_ref,
-        subject_version=initial_generation + 1,
+        subject_version=activation_review_subject_version(
+            initial_generation + 1
+        ),
         lab_report=rollback_authority["report"],
         lab_proposal=rollback_authority["proposal"],
         feedback_proposal=feedback_proposal,
