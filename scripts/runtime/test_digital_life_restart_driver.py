@@ -45,6 +45,7 @@ SCHEMA = "natsume.digital-life-restart-driver.v1"
 FAMILY_ID = "reunion_and_open_loop"
 TESTED_CODE_PATHS = (
     Path(__file__).resolve(),
+    ROOT / "host_brain" / "agent_runtime" / "postprocess.py",
     ROOT / "host_brain" / "service_catalog" / "host_startup.py",
     ROOT / "scripts" / "runtime" / "start_host_side.ps1",
 )
@@ -221,6 +222,93 @@ def _relationship_snapshot(db_path: Path, relationship_subject_id: str) -> dict[
         "repair_required": bool(relationship.get("repair_required")),
         "proactive_permission": str(relationship.get("proactive_permission") or ""),
     }
+
+
+def _conversation_turn_sequence(db_path: Path, session_id: str) -> list[dict[str, Any]]:
+    session = str(session_id or "").strip()
+    if not session:
+        return []
+    uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
+    with sqlite3.connect(uri, uri=True, timeout=10) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT request_id, role, content, turn_index
+            FROM conversation_turn
+            WHERE session_id = ? AND corrupted = 0
+            ORDER BY turn_index, created_at_ms
+            """,
+            (session,),
+        ).fetchall()
+    return [
+        {
+            "request_id": str(row["request_id"] or ""),
+            "role": str(row["role"] or ""),
+            "turn_index": int(row["turn_index"] or 0),
+            "content_chars": len(str(row["content"] or "")),
+            "content_sha256": _sha256_bytes(str(row["content"] or "").encode("utf-8")),
+        }
+        for row in rows
+    ]
+
+
+def conversation_sequence_failures(
+    observed: Sequence[Mapping[str, Any]],
+    expected_pairs: Sequence[Mapping[str, Any]],
+) -> list[str]:
+    expected: list[dict[str, Any]] = []
+    for pair in expected_pairs:
+        request_id = str(pair.get("request_id") or "")
+        expected.extend(
+            (
+                {
+                    "request_id": request_id,
+                    "role": "user",
+                    "content_sha256": _sha256_bytes(
+                        str(pair.get("user_message") or "").encode("utf-8")
+                    ),
+                },
+                {
+                    "request_id": request_id,
+                    "role": "assistant",
+                    "content_sha256": _sha256_bytes(
+                        str(pair.get("assistant_message") or "").encode("utf-8")
+                    ),
+                },
+            )
+        )
+    rows = [dict(row) for row in observed]
+    failures: list[str] = []
+    if len(rows) != len(expected):
+        failures.append("CONVERSATION_TURN_COUNT_DRIFT")
+        return failures
+    for index, (row, target) in enumerate(zip(rows, expected, strict=True)):
+        if int(row.get("turn_index") or 0) != index:
+            failures.append("CONVERSATION_TURN_INDEX_DRIFT")
+        if str(row.get("role") or "") != target["role"]:
+            failures.append("CONVERSATION_TURN_ROLE_DRIFT")
+        if str(row.get("request_id") or "") != target["request_id"]:
+            failures.append("CONVERSATION_TURN_REQUEST_DRIFT")
+        if str(row.get("content_sha256") or "") != target["content_sha256"]:
+            failures.append("CONVERSATION_TURN_CONTENT_DRIFT")
+    return list(dict.fromkeys(failures))
+
+
+def _wait_for_conversation_sequence(
+    db_path: Path,
+    *,
+    session_id: str,
+    expected_pairs: Sequence[Mapping[str, Any]],
+    timeout_s: float,
+) -> list[dict[str, Any]]:
+    deadline = time.time() + max(1.0, float(timeout_s))
+    latest: list[dict[str, Any]] = []
+    while time.time() < deadline:
+        latest = _conversation_turn_sequence(db_path, session_id)
+        if not conversation_sequence_failures(latest, expected_pairs):
+            return latest
+        time.sleep(0.25)
+    return latest
 
 
 def _episode_for_session(
@@ -521,10 +609,34 @@ def prepare(args: argparse.Namespace) -> int:
         row["pre_restart_target_episode"] = _episode_for_session(
             aggregate, str(row["session_id"])
         )
+        expected_pairs = [
+            {
+                "request_id": str(turn.get("request_id") or ""),
+                "user_message": str(message or ""),
+                "assistant_message": str(turn.get("visible_text") or ""),
+            }
+            for message, turn in zip(
+                list(dict(row["case"]).get("setup_turns") or []),
+                list(row["setup_turns"]),
+            )
+        ]
+        conversation_turns = _wait_for_conversation_sequence(
+            db_path,
+            session_id=str(row["session_id"]),
+            expected_pairs=expected_pairs,
+            timeout_s=float(args.relationship_wait_s),
+        )
+        conversation_failures = conversation_sequence_failures(
+            conversation_turns,
+            expected_pairs,
+        )
+        row["pre_restart_conversation"] = conversation_turns
+        row["pre_restart_conversation_failures"] = conversation_failures
         row["prepare_completed"] = (
             len(row["setup_turns"]) == len(dict(row["case"]).get("setup_turns") or [])
             and all(bool(turn.get("completed")) for turn in row["setup_turns"])
             and bool(row["pre_restart_target_episode"])
+            and not conversation_failures
         )
     payload = {
         "schema": SCHEMA,
@@ -580,6 +692,15 @@ def resume(args: argparse.Namespace) -> int:
     for raw in list(prepared.get("outcomes") or []):
         case = dict(raw.get("case") or {})
         target = dict(raw.get("pre_restart_target_episode") or {})
+        pre_restart_conversation = [
+            dict(row)
+            for row in list(raw.get("pre_restart_conversation") or [])
+            if isinstance(row, Mapping)
+        ]
+        recovered_conversation = _conversation_turn_sequence(
+            db_path,
+            str(raw.get("session_id") or ""),
+        )
         case_before = _relationship_snapshot(db_path, subject_id)
         probe = _run_host_turn(
             host_base_url=str(args.host_base_url),
@@ -596,6 +717,31 @@ def resume(args: argparse.Namespace) -> int:
             min_revision=int(case_before.get("state_revision") or 0) + 1,
             timeout_s=float(args.relationship_wait_s),
         )
+        setup_pairs = [
+            {
+                "request_id": str(turn.get("request_id") or ""),
+                "user_message": str(message or ""),
+                "assistant_message": str(turn.get("visible_text") or ""),
+            }
+            for message, turn in zip(
+                list(case.get("setup_turns") or []),
+                list(raw.get("setup_turns") or []),
+            )
+        ]
+        post_probe_pairs = [
+            *setup_pairs,
+            {
+                "request_id": str(probe.get("request_id") or ""),
+                "user_message": str(case.get("probe_turn") or ""),
+                "assistant_message": str(probe.get("visible_text") or ""),
+            },
+        ]
+        post_probe_conversation = _wait_for_conversation_sequence(
+            db_path,
+            session_id=str(raw.get("session_id") or ""),
+            expected_pairs=post_probe_pairs,
+            timeout_s=float(args.relationship_wait_s),
+        )
         failures = restart_continuity_failures(
             host_pid_before=host_pid_before,
             host_pid_after=host_pid_after,
@@ -604,6 +750,14 @@ def resume(args: argparse.Namespace) -> int:
             after=after,
             target_episode_id=str(target.get("episode_id") or ""),
             target_response_receipt_ref=str(target.get("response_receipt_ref") or ""),
+        )
+        if recovered_conversation != pre_restart_conversation:
+            failures.append("RECOVERED_CONVERSATION_SEQUENCE_DRIFT")
+        failures.extend(
+            conversation_sequence_failures(
+                post_probe_conversation,
+                post_probe_pairs,
+            )
         )
         if not bool(probe.get("completed")):
             failures.append("POST_RESTART_PROBE_NOT_COMPLETED")
@@ -614,6 +768,8 @@ def resume(args: argparse.Namespace) -> int:
         outcomes.append({
             **raw,
             "probe_turn": probe,
+            "recovered_conversation": recovered_conversation,
+            "post_probe_conversation": post_probe_conversation,
             "post_probe_relationship": after,
             "verdict": {
                 "status": "FAIL" if failures else "AUTOMATED_PASS_HUMAN_REVIEW_PENDING",

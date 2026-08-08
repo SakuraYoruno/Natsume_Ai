@@ -652,3 +652,5 @@ NE-06 本地 Gate 必须覆盖 Feedback subject-bound baseline、apply→rollbac
 当前候选工作树结果：42 项新增定向测试通过；包含 socket rollout、DL-03 relationship restart、DL-06 proactive tick 与文档 Gate 的集中回归为 194 passed、2 warnings。六次真实 Host 强杀／重启结构结果为 6/6，聚合报告 SHA-256 为 `da2d130f02bab08910a2fd70fe9e0de556af57400967153030e2ac24ad5e8812`；当前人工连续性为 0/6，不能标记数字生命体验通过。`ac87ddd34` 已按上述协议完成变体 3 的精确提交强杀复验，`tested_code.base_commit_sha` 匹配、fingerprint 稳定且 scoped worktree clean，报告 SHA-256 为 `faa452f8ddece572a1df52c64b13ecdb2c412300c7d7bbe9eec5e215e46523d3`。该复验关闭 Service Catalog stale lease 恢复缺陷，但探针仍未具体续接未结话题，人感 Gate 保持失败。
 
 主动陪伴、多模态与 Edge 故障的 18 个真实变体因远端 Edge 禁止触碰而保持 `NOT_RUN_REQUIRED_DRIVER`。网络安全、A09、A12、Security Monitor 和 Pentest 继续记为 `NOT_RUN_USER_SKIPPED`，不纳入本轮阻断项。
+
+跨重启具体话题复验还必须检查 `conversation_turn` 的角色序列，而不能只看 Relationship revision。每个 accepted realtime turn 在后台 projection 收敛后应形成同 request 的 user、assistant 两条可见 turn；下一轮 history 必须保持交替角色并注入真实用户事实。该写入不得进入首句同步路径。当前候选修复初轮相邻 89 项仅在 Governed 已写 user turn 的重复投影失败；接纳 canonical `DUPLICATE_VISIBLE_TURN` 后核心重跑 20/20、conversation／context／prompt／restart 44/44。提交后真实 driver 必须额外断言 setup 两轮共有 4 条交替 turn、重启后 prompt history 包含用户的工作／休息线索，并由人工判断 probe 是否自然续接。

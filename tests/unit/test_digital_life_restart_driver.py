@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+
 from scripts.runtime.test_digital_life_restart_driver import (
     _host_is_ready,
+    conversation_sequence_failures,
     restart_continuity_failures,
 )
 
@@ -138,3 +141,55 @@ def test_host_ready_rejects_non_edge_or_unavailable_dependency() -> None:
     }
 
     assert _host_is_ready(snapshot) is False
+
+
+def test_conversation_sequence_accepts_alternating_exact_request_pairs() -> None:
+    expected = [
+        {
+            "request_id": "request-1",
+            "user_message": "我们上次没说完的是工作和休息怎么平衡。",
+            "assistant_message": "嗯，我记得这件事。",
+        }
+    ]
+    observed = [
+        {
+            "request_id": "request-1",
+            "role": "user",
+            "turn_index": 0,
+            "content_sha256": hashlib.sha256(
+                expected[0]["user_message"].encode("utf-8")
+            ).hexdigest(),
+        },
+        {
+            "request_id": "request-1",
+            "role": "assistant",
+            "turn_index": 1,
+            "content_sha256": hashlib.sha256(
+                expected[0]["assistant_message"].encode("utf-8")
+            ).hexdigest(),
+        },
+    ]
+
+    assert conversation_sequence_failures(observed, expected) == []
+
+
+def test_conversation_sequence_rejects_assistant_only_history() -> None:
+    expected = [
+        {
+            "request_id": "request-1",
+            "user_message": "具体用户事实",
+            "assistant_message": "回复",
+        }
+    ]
+    observed = [
+        {
+            "request_id": "request-1",
+            "role": "assistant",
+            "turn_index": 0,
+            "content_sha256": "digest",
+        }
+    ]
+
+    assert conversation_sequence_failures(observed, expected) == [
+        "CONVERSATION_TURN_COUNT_DRIFT"
+    ]
