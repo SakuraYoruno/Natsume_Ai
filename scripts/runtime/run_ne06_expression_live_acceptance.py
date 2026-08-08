@@ -505,13 +505,13 @@ def _create_and_approve_review(
         expected_resume_phase=ReviewResumePhase.PRE_EXECUTION,
         expected_checkpoint_id=f"checkpoint://{run_id}/{action}",
     )
+    review_record = dict(approved["review"])
+    review_item = dict(review_record.get("review") or {})
     return {
         "review_id": review_id,
-        "status": str(approved["review"]["status"]),
-        "status_version": int(approved["review"]["status_version"]),
-        "decision_actor": str(
-            approved["review"].get("decision_actor") or ""
-        ),
+        "status": str(review_item.get("status") or ""),
+        "status_version": int(review_record["status_version"]),
+        "decision_actor": str(review_item.get("decision_actor") or ""),
     }
 
 

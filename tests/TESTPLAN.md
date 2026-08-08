@@ -659,6 +659,8 @@ python scripts/runtime/run_ne06_expression_live_acceptance.py `
 
 通过必须同时满足：apply 与 rollback 各两个独立 Docker arm；容器禁网、只读、非 root且 effect count 为 0；两个不同 ReviewItem 都由明确 operator actor 批准；active projection 精确切到候选并恢复旧 digest；三个 Host 回合均有真实 external transport identity。单个文本样本不作为人感 A/B，Voice／Avatar 在远端 Edge 关闭时必须明确为 `NOT_TESTED_REMOTE_EDGE_DISABLED`。
 
+ReviewStore 的命令返回值是外层 durable record，其中 `status_version` 位于外层，实际 ReviewItem 的 `status/decision_actor` 位于内层 `review`；runner 必须分别读取，不能把返回结构扁平化假定为生产合同。
+
 ## 2026-08-08 数字生命跨重启真实驱动
 
 `scripts/runtime/test_digital_life_restart_driver.py` 采用 `prepare → 外部强杀／生产重启 → resume` 两阶段协议，一次严格运行一个 `1..6` 变体。定向测试必须覆盖参数拒绝、checkpoint tamper、tested-code fingerprint 漂移、狭义 pending-external readiness、精确 state／revision／digest 恢复和 aftereffect receipt 链接。Service Catalog 回归必须额外覆盖：endpoint 空闲时等待旧租约、endpoint 被占用时立即拒绝、等待期间出现新 listener 时停止，及生产 PowerShell 健康轮询窗口覆盖 coordinator lease。
