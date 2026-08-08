@@ -31,7 +31,7 @@
 | 主动陪伴 | `companion_proactive.py`、permission ingress | `WIRED / PARTIAL` |
 | 偏好成长 | `companion_profile_lifecycle.py`、feedback ingress | `WIRED / PARTIAL` |
 | 表达计划 | `affective_turn_planner.py`、`companion_voice.py` | `WIRED` |
-| 语义说话骨架 | `CompanionUtteranceFrameV1`、`surface_utterance_frame.py`、场景化七海正向样本、Surface candidate gate | `SOURCE_SAMPLE_PARTIAL / MIXED_TEMPLATE_REMOVAL_REAL_RETEST_PENDING` |
+| 语义说话骨架 | `CompanionUtteranceFrameV1`、`surface_utterance_frame.py`、场景化七海正向样本、Surface candidate gate | `SOURCE_SAMPLE_PARTIAL / EXACT_REUSE_REMOVED / MODEL_GENERATION_FAIL` |
 | 表达交付 | `affective_expression_delivery.py`、Surface streaming | `WIRED / PARTIAL` |
 
 ## 3. 对话与记忆
@@ -48,7 +48,7 @@
 
 原句样本同样属于纯内存表达资产：修复和喜忧各自只得到固定、可追源的少量正向节奏，其他回合不扫描完整语料。样本不会改变 canonical Affect、Relationship 或 Soul，也不会生成第二份风格状态。
 
-原句样本的真实对照只支持修复场景的局部收益，不支持 mixed。模块内原有完整 mixed 回复同时出现在首次候选、重试和 fail-soft，导致跨场景 exact reuse；当前实现已移除候选／重试里的整句模板，并把 fail-soft 收窄为当前输入驱动。模块仍只负责生成与发送前选择，不获得新的情感 authority。
+原句样本的真实对照只支持修复场景的局部收益，不支持 mixed。模块内原有完整 mixed 回复同时出现在首次候选、重试和 fail-soft，导致跨场景 exact reuse；当前实现已移除候选／重试里的整句模板，并把 fail-soft 收窄为当前输入驱动。同三条真实复验的 exact reuse 为 0，但自动仍为 0/3，因此模块清理完成，模型自然表达仍失败。模块仍只负责生成与发送前选择，不获得新的情感 authority。
 
 ## 4. 受管执行
 

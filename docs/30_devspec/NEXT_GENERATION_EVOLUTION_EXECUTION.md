@@ -105,7 +105,7 @@ flowchart LR
 
 因此执行策略冻结为：不再增加 prompt 正例、禁词、评分规则或普通聊天审计；不再重复抽样同一随机轨迹挑选绿灯。下一阶段只能使用版本化真实自然文本调优或模型层方案，并以新的预注册变体队列比较 exact reuse、自然度、关系立场和三名评审偏好。远端 Edge 未启动或探测；网络安全、A09、A12、Security Monitor 与 Pentest 继续为 `NOT_RUN_USER_SKIPPED`。当前结论为“本机强制服务栈 PASS，数字生命人感 FAIL，整体 INCOMPLETE”。
 
-首个 source-bound 原句对照没有关闭该缺口：同一 6 条中自动结果只从 1/6 变为 2/6，修复表达局部改善，mixed 仍复用完整模板。随后 3 条未用于前述选择的 mixed 变体全部失败，确认系统提示和 fail-soft 中的整句答案才是模板坍缩的直接来源。当前修复属于删除模板而非增加 prompt：只保留 typed 语义形状，极端降级按当前输入区分；真实新提交对照前继续保持 `INCOMPLETE`。
+首个 source-bound 原句对照没有关闭该缺口：同一 6 条中自动结果只从 1/6 变为 2/6，修复表达局部改善，mixed 仍复用完整模板。随后 3 条未用于前述选择的 mixed 变体全部失败，确认系统提示和 fail-soft 中的整句答案才是模板坍缩的直接来源。`00c52762f` 删除模板后的同三条真实报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`：9/9 accepted、writer probe 通过、exact reuse 为 0，但自动仍为 0/3；一条是非收益 fail-soft，两条继续替用户安排情绪。去模板子项关闭，整体继续 `INCOMPLETE`，下一步只允许模型层或版本化真实文本方案。
 
 ### NE-04 真实 Docker Golden Suite
 

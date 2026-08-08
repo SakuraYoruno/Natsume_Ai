@@ -70,7 +70,7 @@ flowchart LR
 
 `REPAIR／HOLD_COMPLEXITY frame → 3／2 条七海正向节奏样本 → 同一次双候选请求` 是当前自然文本候选流。样本在进程内按 scene 直接选择，既不从 SQLite／Chroma 召回，也不增加模型轮次；原句只作为语气 few-shot，当前用户事实仍只来自冻结计划和必要事实。
 
-mixed 候选流不再在后续 system message 中附加一整句“标准回复”。新的流向是 `typed 语义目标 + source-bound 节奏样本 + 当前具体结果 → 两种不同措辞`；若唯一重试后仍需 fail-soft，才按当前输入中的“轻松／担心／庆祝／不踏实”等已出现语义选择确定性短句，并明确保持非收益状态。这是纯生成侧减法，不新增 IO、审计或模型调用。
+mixed 候选流不再在后续 system message 中附加一整句“标准回复”。新的流向是 `typed 语义目标 + source-bound 节奏样本 + 当前具体结果 → 两种不同措辞`；若唯一重试后仍需 fail-soft，才按当前输入中的“轻松／担心／庆祝／不踏实”等已出现语义选择确定性短句，并明确保持非收益状态。这是纯生成侧减法，不新增 IO、审计或模型调用。真实同案复验已证明旧整句复用消失，但 0/3 仍未得到合格自然措辞，因此数据流正确性与模型体验继续分开定级。
 
 无前序 Task artifact 的普通 Gateway 回合在冻结模型目标时选择 `CHAT_SURFACE_REALTIME`。当前 DeepSeek Tier B 由 provider adapter 把服务端 `thinking_mode=disabled` 映射为请求的 `thinking.type=disabled`，使 completion 预算用于中文正文和日语 TTS 配对 JSON；该字段不会进入 Gemini、OpenAI 等其他 provider。普通陪伴中的双候选择优仍属于同一 realtime model lane，只在一次返回内比较两种措辞；规划、研究和非陪伴 Task Surface 才使用各自质量优先模型场景。
 
@@ -457,6 +457,6 @@ flowchart LR
 
 曾试验的 `normalized latest user text → stable cue fragments` 步骤在真实 cohort 中没有改善，并已删除；它不属于当前生产数据流。当前 frame 直接进入同一次 Surface 双候选请求，再走原有 Gate、评分和发送路径。语言多样性后续通过显式模型／文本版本实验处理，不在主链中继续叠加 prompt 处理节点。
 
-2026-08-08 的新留出诊断进一步删除了完整 mixed 示例句：三条额外真实轨迹为 0/3，一条逐字照抄模板，另外两条转成情绪管理。当前候选只保留结构化双面反应目标；真实复验用于判断 exact reuse 是否下降，不能以 434 项本地回归代替体验通过。
+2026-08-08 的新留出诊断进一步删除了完整 mixed 示例句：修复前三条额外真实轨迹为 0/3，一条逐字照抄模板，另外两条转成情绪管理。`00c52762f` 后同三条仍为 0/3，但 exact reuse 已为 0；一条进入非收益 fail-soft，另两条仍是情绪管理。故模板污染已关闭，模型体验没有提升，不能以 434 项本地回归或 9 个 accepted turn 代替体验通过。
 
 Prefrontal／Tribe 的历史 event handler 只允许读取 canonical Life 结果或生成 proposal。`TribeApplicationPorts` 缺失、类型错误或未完整注入时按 canonical affective life fail-closed，不得回退到 Endocrine、Limbic、PainReward 或 volatile Bond 写入；因此组合错误不会重新形成第二条 self-affect 数据流。

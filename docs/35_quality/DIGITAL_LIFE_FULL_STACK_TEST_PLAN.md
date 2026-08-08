@@ -838,7 +838,7 @@ Host 停止器必须在删除 `host.runtime.env` 前，把该 snapshot 传给目
 
 基线绑定 `1854132e5`，manifest SHA-256 为 `9470a7e8a16f223891ea282cbea32c824df2ee6be35b650daea835b7332bffb8`，报告 SHA-256 为 `43c98a4d57fb30889dbae4df4542ef4de55b93412d8bb488ef96d9cd3ac666f7`。18/18 Gateway 回合、TaskGraph、Acceptance、Outbox 与 canonical writer 完成，旧 writer 增量为 0；结果为 1 条自动待人工、5 条失败。候选实现不得现场扫描完整 TSV；当前 5 条固定样本的 50 次 prompt build 均值／最大为 0.082／0.269ms。加载新 SHA 后才允许执行同一 6 条候选轮。
 
-候选轮报告 SHA-256 为 `864ac4ca321f549e803cf01df62c420be6df02108c889e4ded38fcfa32f547b9`，18/18 accepted、2 待人工、4 失败；只观察到 repair 局部改善，mixed 无可归因收益。额外 mixed probe 4～6 的模板诊断报告 SHA-256 为 `49b3e0f250b91ae1f424ec0f568fa80d92cb355db43c0b10158a6f2d2cbfd471`，3/3 失败并复现 exact template reuse。下一次真实复验必须加载删除完整 mixed 示范句的新提交，仍用相同三条、Flash、候选数和重试预算；要求 exact reuse 为 0、不得替用户安排感受，并逐句复核。434 项本地回归只作为准入。
+候选轮报告 SHA-256 为 `864ac4ca321f549e803cf01df62c420be6df02108c889e4ded38fcfa32f547b9`，18/18 accepted、2 待人工、4 失败；只观察到 repair 局部改善，mixed 无可归因收益。额外 mixed probe 4～6 的模板诊断报告 SHA-256 为 `49b3e0f250b91ae1f424ec0f568fa80d92cb355db43c0b10158a6f2d2cbfd471`，3/3 失败并复现 exact template reuse。删除完整 mixed 示范句后的同三条报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`：9/9 accepted、writer probe 通过、exact reuse 为 0，但自动仍为 0/3；`:5` 是非收益 fail-soft，`:4/:6` 仍替用户安排感受。该对照关闭“全局整句复用”，不关闭“自然 mixed 生成”；后续不得再迭代 prompt／Gate。
 
 首轮 frame 真实 Provider 小队列已经执行：8 类／24 个 accepted turn 中只有 2 条经当前人工复核可接受，2 条自动失败，另 4 条自动放行但人工拒绝，报告 SHA-256 为 `99c024f3dd02c6d2fe03cfdad64298b31c9ed57a00753996bd27c5a8a8d97fd4`。因此后续重测不能只检查 candidate score 和 frame 字段存在，还必须逐条检查 `surface_memory_recall_packet` 的 person/session 归属。统一 RecallFusion 已新增 fail-closed 终态过滤及 117 项回归；真实重测须在包含多个既存 subject 的库中证明跨 subject 候选为 0，并保留每路 raw/accepted/excluded 计数。该项通过后才继续人感约束和完整 48 条，不能用清空数据库掩盖污染。
 

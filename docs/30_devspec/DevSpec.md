@@ -93,7 +93,7 @@ flowchart TD
 
 `HOLD_COMPLEXITY + SHARED_MIXED_RESONANCE / RESONATE_WITH_BOTH_SIDES` 也必须穿过可见生成边界。合格候选至少包含七海第一人称的一处高兴和一处悬心，不能只复述用户“又开心又怕”或安排情绪先待着；缺失时使用 `MIXED_SELF_RESONANCE_MISSING` 触发现有唯一质量重试。该条件仅由合法 typed frame 启用，不扫描普通聊天关键词，不增加持久化、审计步骤或模型调用。
 
-短语感 cue 实验没有改善真实 Flash 结果，`mixed_resonance_style_cues()` 已从生产代码删除，不是当前合同。当前仍使用 typed frame、一次双候选和最多一次质量重试；新的留出诊断进一步证明，完整双面示范句会被跨场景逐字复制，因此首次生成、语义重试和通用 mixed fail-soft 不再共享同一整句答案。typed frame 只保留“具体结果、七海自身一喜一悬、两候选不同节奏”的语义形状，极端 fail-soft 按当前用户措辞选择有界文本。语言多样性仍不得靠继续增加 prompt 词形解决；真实新提交对照通过前状态保持待验。
+短语感 cue 实验没有改善真实 Flash 结果，`mixed_resonance_style_cues()` 已从生产代码删除，不是当前合同。当前仍使用 typed frame、一次双候选和最多一次质量重试；新的留出诊断进一步证明，完整双面示范句会被跨场景逐字复制，因此首次生成、语义重试和通用 mixed fail-soft 不再共享同一整句答案。typed frame 只保留“具体结果、七海自身一喜一悬、两候选不同节奏”的语义形状，极端 fail-soft 按当前用户措辞选择有界文本。`00c52762f` 的真实同案复验已证明 exact reuse 为 0，但 0/3 仍失败，一条来自非收益 fail-soft、两条仍是情绪管理口吻；因此去模板代码保留，生成质量不提升，后续禁止再靠增加 prompt 词形、禁词或 Gate 处理。
 
 文本 observer 必须保留同一句中的多标签分布，但置信度上限仍低于显式自述、声学和视觉观察。隐晦低落形成 `COMFORT`，拒绝建议形成 `LISTEN`，现实关系／非排他边界形成 `RESPECT_AUTONOMY`，明确好消息形成 `PLAY`；这些动作由 canonical Appraisal 产生，不允许 Surface 从原文临时伪造。`LISTEN` 必须禁止方案、作息建议和追问；`RESPECT_AUTONOMY` 必须禁止限制现实交往、贬低第三方和索取承诺。
 

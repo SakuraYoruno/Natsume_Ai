@@ -893,6 +893,8 @@ Task artifact 进一步给出上游根因：修复末轮虽然 typed act 为 `RE
 
 依照预先冻结的停止条件，本轮不继续增加提示、禁词或第三次请求。实验 helper 已从生产代码删除，mixed prompt 与单测精确恢复到 `b11de0f11` 的最佳已知版本；`git diff b11de0f11 --` 对相关生产文件和测试为空，380 项回归通过。之前的单轨迹 scope-bound PASS 与五变体 4/5 结果可作为内容等价证据继续引用，但不能提升当前 SHA 为完整 mixed PASS。剩余问题转入模型路由或真实自然对话文本微调，必须使用新预注册变体验证，禁止重复抽样挑绿灯。
 
+后续 source-bound 原句对照又暴露出该最佳版本仍内嵌完整可发送 mixed 句。提交 `00c52762f` 只做减法：从首次候选、唯一重试和通用 fail-soft 删除共享整句。同一冻结 probe 4～6 的真实复验报告 SHA-256 为 `ab77eb30aa9aedd42d1d06293a32d1375261deef14bc2aac6f647a01735adf89`，9/9 Gateway turn accepted，canonical writer 前进且旧 writer 零增量。三条末轮不再逐字复用旧句，但自动仍为 0/3：`:4` 的“慢慢踏实下来”与 `:6` 的“等真的开心完再说”仍在替用户处置情绪；`:5` 使用按输入选择的确定性 fail-soft，`benefit_eligible=false`。结论固定为 `EXACT_REUSE_REMOVED / MODEL_GENERATION_STILL_FAIL`，不把代码清理写成人感改善，也不再做下一轮 prompt／Gate 实验。
+
 ## 2026-08-08 A15 最终 SHA Host 探针判定纠偏
 
 Host 与 OBS 重启到 `28c77d2e2` 后，真实 Chat 已形成 `APPROVE / COMMIT`，但两份旧探针给出了互相矛盾且都不可信的结论。基础脚本把远端 Edge 明确未测试导致的 `ACCEPTANCE_PENDING_EXTERNAL` 计作 Host 失败；全服务脚本则只检查 HTTP 200，把 `ready=false` 和 `canon_sync=DEGRADED / OPERATOR_PROJECTION_STALE` 全部计作 PASS。该轮“全服务 PASS”撤销，不作为最终证据。
