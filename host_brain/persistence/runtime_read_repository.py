@@ -247,7 +247,7 @@ class RuntimeReadRepository:
             if boundary_turn_index is not None:
                 rows = conn.execute(
                     """
-                    SELECT role, content, ts_ms, turn_index, metadata FROM conversation_turn
+                    SELECT request_id, role, content, ts_ms, turn_index, metadata FROM conversation_turn
                     WHERE session_id = ? AND turn_index < ?
                     ORDER BY turn_index DESC, ts_ms DESC LIMIT ?
                     """,
@@ -256,12 +256,120 @@ class RuntimeReadRepository:
             else:
                 rows = conn.execute(
                     """
-                    SELECT role, content, ts_ms, turn_index, metadata FROM conversation_turn
+                    SELECT request_id, role, content, ts_ms, turn_index, metadata FROM conversation_turn
                     WHERE session_id = ?
                     ORDER BY turn_index DESC, ts_ms DESC LIMIT ?
                     """,
                     (session_key, row_limit),
                 ).fetchall()
+        return [dict(row) for row in rows]
+
+    def recent_committed_surface_replies_before_request(
+        self,
+        *,
+        session_id: str,
+        request_id: str | None,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """Read replies that became Gateway-visible before the conversation writer caught up.
+
+        ``surface.reply_delivery=COMMITTED`` is the durable visibility boundary.  The
+        asynchronous conversation projection can trail it briefly, so a fast user
+        follow-up must supplement (and later de-duplicate) ``conversation_turn``
+        with the immutable accepted node artifact instead of forgetting the reply
+        the user has just received.
+        """
+
+        session_key = _required_text(session_id, "session_id")
+        request_key = str(request_id or "").strip()
+        row_limit = _limit(limit, maximum=20)
+        if self._public_ledger is not None:
+            committed = {
+                (
+                    str(row.get("graph_id") or "").strip(),
+                    _safe_int(row.get("graph_revision")),
+                    str(row.get("node_id") or "").strip(),
+                ): _safe_int(row.get("committed_ts_ms") or row.get("updated_ts_ms"))
+                for row in self._public_table_rows(
+                    "task_runtime_acceptance_effect_intent"
+                )
+                if str(row.get("effect_type") or "").strip()
+                == "surface.reply_delivery"
+                and str(row.get("status") or "").strip().upper() == "COMMITTED"
+            }
+            replies: list[dict[str, Any]] = []
+            for row in self._public_table_rows("task_runtime_node_artifact"):
+                key = (
+                    str(row.get("graph_id") or "").strip(),
+                    _safe_int(row.get("graph_revision")),
+                    str(row.get("node_id") or "").strip(),
+                )
+                if key not in committed:
+                    continue
+                payload = _json_mapping(row.get("payload_json"))
+                if str(payload.get("decision") or "").strip().upper() != "APPROVE":
+                    continue
+                artifact_request_id = str(payload.get("request_id") or "").strip()
+                if request_key and artifact_request_id == request_key:
+                    continue
+                if _surface_artifact_session_id(payload) != session_key:
+                    continue
+                content = str(payload.get("narrative") or "").strip()
+                if not content:
+                    continue
+                replies.append(
+                    {
+                        "request_id": artifact_request_id,
+                        "role": "assistant",
+                        "content": content,
+                        "ts_ms": committed[key]
+                        or _safe_int(row.get("created_ts_ms")),
+                        "turn_index": -1,
+                        "metadata": "{}",
+                    }
+                )
+            replies.sort(key=lambda row: _safe_int(row.get("ts_ms")), reverse=True)
+            return replies[:row_limit]
+
+        with self._read_operation() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    json_extract(artifact.payload_json, '$.request_id') AS request_id,
+                    'assistant' AS role,
+                    json_extract(artifact.payload_json, '$.narrative') AS content,
+                    COALESCE(effect.committed_ts_ms, effect.updated_ts_ms,
+                             artifact.created_ts_ms) AS ts_ms,
+                    -1 AS turn_index,
+                    '{}' AS metadata
+                FROM task_runtime_node_artifact AS artifact
+                JOIN task_runtime_acceptance_effect_intent AS effect
+                  ON effect.graph_id = artifact.graph_id
+                 AND effect.graph_revision = artifact.graph_revision
+                 AND effect.node_id = artifact.node_id
+                WHERE effect.effect_type = 'surface.reply_delivery'
+                  AND effect.status = 'COMMITTED'
+                  AND json_valid(artifact.payload_json) = 1
+                  AND json_extract(artifact.payload_json, '$.decision') = 'APPROVE'
+                  AND json_extract(
+                        artifact.payload_json,
+                        '$.acceptance_effect_intents[0].payload.payload.affective_turn_plan.session_id'
+                      ) = ?
+                  AND (? = '' OR json_extract(
+                        artifact.payload_json, '$.request_id'
+                      ) <> ?)
+                  AND length(trim(json_extract(
+                        artifact.payload_json, '$.narrative'
+                      ))) > 0
+                ORDER BY COALESCE(
+                    effect.committed_ts_ms,
+                    effect.updated_ts_ms,
+                    artifact.created_ts_ms
+                ) DESC
+                LIMIT ?
+                """,
+                (session_key, request_key, request_key, row_limit),
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def recent_dream_memory(self) -> dict[str, Any] | None:
@@ -538,6 +646,30 @@ def _safe_int(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _json_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    try:
+        parsed = json.loads(str(value or "{}"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return dict(parsed) if isinstance(parsed, Mapping) else {}
+
+
+def _surface_artifact_session_id(payload: Mapping[str, Any]) -> str:
+    intents = payload.get("acceptance_effect_intents")
+    if not isinstance(intents, list) or not intents:
+        return ""
+    first = intents[0] if isinstance(intents[0], Mapping) else {}
+    outer_payload = first.get("payload") if isinstance(first, Mapping) else {}
+    outer_payload = outer_payload if isinstance(outer_payload, Mapping) else {}
+    inner_payload = outer_payload.get("payload")
+    inner_payload = inner_payload if isinstance(inner_payload, Mapping) else {}
+    plan = inner_payload.get("affective_turn_plan")
+    plan = plan if isinstance(plan, Mapping) else {}
+    return str(plan.get("session_id") or "").strip()
 
 
 def _evidence_text(value: Any) -> str:

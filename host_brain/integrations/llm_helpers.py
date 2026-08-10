@@ -37,10 +37,10 @@ ProviderFn = Callable[[dict[str, Any]], Any]
 
 _logger = logging.getLogger("Natsume.integrations.llm_helpers")
 _POOL_DEFAULT_SPECS: dict[str, str] = {
-    "A": "deepseek:deepseek-v4-pro,gemini:gemini-2.5-pro",
-    "B": "deepseek:deepseek-v4-flash,deepseek:deepseek-v4-pro,gemini:gemini-2.5-flash-lite",
-    "C": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
-    "D": "deepseek:deepseek-v4-flash,gemini:gemini-2.5-flash-lite",
+    "A": "deepseek:deepseek-v4-flash",
+    "B": "deepseek:deepseek-v4-flash",
+    "C": "deepseek:deepseek-v4-flash",
+    "D": "deepseek:deepseek-v4-flash",
 }
 DEFAULT_LLM_POOL_CODEX_MODEL = "gpt-5.5"
 _POOL_CODEX_MIGRATION_DEFAULT_EXCLUDED_SCENES = frozenset({"CHAT", "CHAT_SURFACE", "MULTIMODAL"})
@@ -1251,6 +1251,11 @@ def _build_openai_compat_payload(
     thinking_mode = str(params.pop("thinking_mode", "") or "").strip().lower()
     if thinking_mode and thinking_mode not in {"enabled", "disabled"}:
         raise ValueError("thinking_mode must be enabled or disabled")
+    if (
+        str(provider_name or "").strip().lower() == PROVIDER_DEEPSEEK
+        and str(model_id or "").strip().lower().startswith("deepseek-v4-flash")
+    ):
+        thinking_mode = "disabled"
     if thinking_mode and str(provider_name or "").strip().lower() == "deepseek":
         payload["thinking"] = {"type": thinking_mode}
     # This is requested only by the result-attested streaming path.  A final
@@ -1578,6 +1583,7 @@ def _build_chat_google_genai_kwargs(
     temperature = float(params.get("temperature", 0.4))
     top_p = float(params.get("top_p", 0.9))
     normalized_model_id = str(model_id or "").strip().lower()
+    is_gemini_36_flash = normalized_model_id.startswith("gemini-3.6-flash")
     max_tokens = None
     for token_key in ("max_tokens", "max_output_tokens", "max_completion_tokens"):
         raw_value = params.get(token_key)
@@ -1604,10 +1610,23 @@ def _build_chat_google_genai_kwargs(
         "api_key": api_key,
         "request_timeout": max(1.0, float(timeout_ms) / 1000.0),
         "retries": 0,
-        "temperature": temperature,
-        "top_p": top_p,
         "streaming": streaming,
     }
+    if is_gemini_36_flash:
+        # Gemini 3.6 Flash ignores the legacy sampling controls today and the
+        # provider contract reserves the right to reject them.  Realtime chat
+        # instead carries the typed thinking hint mapped by the production
+        # adapter below.
+        thinking_level = str(params.get("thinking_level") or "").strip().lower()
+        if thinking_level:
+            if thinking_level not in {"minimal", "low", "medium", "high"}:
+                raise ValueError(
+                    "Gemini 3.6 thinking_level must be minimal, low, medium, or high"
+                )
+            llm_kwargs["thinking_level"] = thinking_level
+    else:
+        llm_kwargs["temperature"] = temperature
+        llm_kwargs["top_p"] = top_p
     if max_tokens is not None:
         llm_kwargs["max_tokens"] = max_tokens
     response_format = params.get("response_format")

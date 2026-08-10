@@ -44,6 +44,7 @@ PlaybackStarter = Callable[[dict[str, Any], dict[str, Any]], None]
 BeforePlaybackHook = Callable[[dict[str, Any], dict[str, Any]], None]
 
 _SEGMENT_EVENT_KEYS = (
+    "synchronization_id",
     "segment_parent_request_id",
     "segment_index",
     "segment_count",

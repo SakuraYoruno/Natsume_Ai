@@ -247,8 +247,6 @@ def test_scene_pool_spec_overrides_runtime_provider(monkeypatch: pytest.MonkeyPa
     assert [(row["provider_name"], row["model_id"]) for row in candidates] == [
         ("deepseek", "deepseek-v4-flash"),
         ("gemini", "gemini-2.5-flash-lite"),
-        ("deepseek", "deepseek-v4-pro"),
-        ("gemini", "gemini-2.5-pro"),
     ]
 
 
@@ -558,6 +556,24 @@ def test_openai_compat_payload_maps_typed_deepseek_thinking_mode() -> None:
 
     assert payload["thinking"] == {"type": "disabled"}
     assert "thinking_mode" not in payload
+
+
+@pytest.mark.parametrize("configured_mode", (None, "enabled", "disabled"))
+def test_deepseek_v4_flash_always_uses_non_thinking_mode(
+    configured_mode: str | None,
+) -> None:
+    gen_params = {"max_tokens": 640}
+    if configured_mode is not None:
+        gen_params["thinking_mode"] = configured_mode
+
+    payload = helpers._build_openai_compat_payload(
+        provider_name="deepseek",
+        model_id="deepseek-v4-flash",
+        messages=[{"role": "user", "content": "陪我说两句"}],
+        gen_params=gen_params,
+    )
+
+    assert payload["thinking"] == {"type": "disabled"}
 
 
 def test_openai_compat_payload_does_not_leak_thinking_mode_to_other_provider() -> None:

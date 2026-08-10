@@ -159,7 +159,12 @@ def _health_summary(health: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def run_probe(*, base_url: str, expected_data_root: Path) -> dict[str, Any]:
+def run_probe(
+    *,
+    base_url: str,
+    expected_data_root: Path,
+    expected_db_path: Path | None = None,
+) -> dict[str, Any]:
     shared_key = str(os.environ.get("EDGE_HMAC_SHARED_KEY") or "").strip()
     if not shared_key:
         raise RuntimeError("EDGE_HMAC_SHARED_KEY is required")
@@ -248,7 +253,11 @@ def run_probe(*, base_url: str, expected_data_root: Path) -> dict[str, Any]:
         and post_summary["voice_queue_depth"] == 0
     )
 
-    isolated_db = expected_data_root / "edge" / "embodiment_transport.sqlite3"
+    isolated_db = (
+        expected_db_path
+        if expected_db_path is not None
+        else expected_data_root / "edge" / "embodiment_transport.sqlite3"
+    )
     long_summary = _voice_summary(long_result)
     barge_summary = _voice_summary(barge_result)
     voice_pass = bool(
@@ -296,12 +305,21 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:17800")
     parser.add_argument("--expected-data-root", type=Path, required=True)
+    parser.add_argument(
+        "--expected-db-path",
+        type=Path,
+        help=(
+            "Explicit isolated embodiment transport DB path. Defaults to "
+            "<expected-data-root>/edge/embodiment_transport.sqlite3."
+        ),
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     report = run_probe(
         base_url=str(args.base_url),
         expected_data_root=args.expected_data_root,
+        expected_db_path=args.expected_db_path,
     )
     rendered = json.dumps(report, ensure_ascii=False, indent=2) + "\n"
     if args.output is not None:

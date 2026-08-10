@@ -23,7 +23,7 @@ class OrchestrationSettings(BaseSettings):
         alias="HOST_POST_PROCESS_EXECUTOR_WORKERS",
     )
     subagent_fallback_model_ids: str = Field(
-        default="gemini-3.1-pro-preview,gemini-2.5-flash-lite",
+        default="deepseek-v4-flash",
         alias="HOST_SUBAGENT_FALLBACK_MODEL_IDS",
     )
     recent_turn_direct_answer_enabled: bool = Field(

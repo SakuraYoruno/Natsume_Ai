@@ -81,6 +81,61 @@ _CONTAINED_HURT_REPAIR_GROUNDING_RE = re.compile(
     r"|听到(?:这|那)?(?:句|句话|话).{0,8}(?:有点难受|心里有点疼)"
 )
 
+_REPAIR_FORWARD_IMPACT_RE = re.compile(
+    r"说了也(?:像)?白说|话(?:像)?落了空|没被听见|"
+    r"(?:这|那)件事还没过去|(?:你|你的).{0,8}(?:不舒服|堵得慌)"
+)
+_REPAIR_FORWARD_OWNERSHIP_RE = re.compile(
+    r"是我(?:造成的|的问题|没做好)|这次算我的|(?:接下来|后面)?我会"
+)
+_REPAIR_FORWARD_ACTION_RE = re.compile(
+    r"按(?:你|原来|原本).{0,8}(?:意思|说法).{0,6}(?:听|回应)"
+    r"|先听.{0,8}(?:再回应|不解释)|不抢着解释|"
+    r"不拿解释.{0,6}(?:盖|压)|先复述.{0,8}再回应|"
+    r"先照.{0,8}回应|(?:接下来|后面|下次)?我会.{0,8}按你说的(?:来|做|回应)"
+)
+_REPAIR_REPEATED_IMPACT_USER_RE = re.compile(
+    r"不是第一次|又是这样|又这样|总是这样|每次都"
+)
+_REPAIR_REPEATED_IMPACT_REPLY_RE = re.compile(
+    r"又让你.{0,8}(?:不舒服|失望|受伤)|让你反复.{0,8}(?:不舒服|失望|受伤)|"
+    r"同样的事.{0,8}(?:又|再)?发生|"
+    r"(?:又|再)发生同样的事"
+)
+_REPAIR_CHALLENGE_USER_RE = re.compile(
+    r"^\s*(?:别|不要)(?:再)?装(?:作)?懂[。.!！]?\s*$"
+)
+_REPAIR_UNRESOLVED_USER_RE = re.compile(
+    r"(?:已经|都)?道歉.{0,14}(?:还没|还没有).{0,10}(?:过去|翻篇)"
+    r"|道歉.{0,10}(?:不等于|不代表).{0,8}(?:过去|翻篇)"
+)
+_REPAIR_UNRESOLVED_REPLY_RE = re.compile(
+    r"道歉.{0,8}(?:不等于|不代表|归道歉).{0,10}(?:过去|翻篇)"
+    r"|(?:这件事|事情).{0,8}(?:还没|还没有).{0,8}(?:过去|翻篇)"
+    r"|不(?:会|急着|替你).{0,10}(?:翻篇|当作.{0,6}(?:结束|过去))"
+)
+_REPAIR_LIGHTNESS_USER_RE = re.compile(
+    r"(?:你|这话|这句话)?(?:说|讲)(?:得|起来)?(?:也)?(?:太)?轻巧"
+)
+_REPAIR_LIGHTNESS_REPLY_RE = re.compile(
+    r"(?:这|那)?(?:话|句话|说法).{0,6}(?:听着|说起来).{0,4}轻巧"
+    r"|(?:听着|说起来).{0,4}轻巧"
+)
+_REPAIR_LIGHTNESS_OPEN_RE = re.compile(
+    r"(?:不|没)(?:会|想|打算).{0,10}(?:糊弄过去|当作过去|替你翻篇|就这么算)"
+    r"|(?:这件事|前面的后果).{0,8}(?:还没过去|还在)"
+    r"|不拿.{0,8}(?:当交代|当结束|盖过去)"
+)
+_REPAIR_ACKNOWLEDGEMENT_USER_RE = re.compile(
+    r"^\s*(?:嗯[，,。 ]*)?(?:我)?(?:听到了|听见了|知道了)[。.!！]?\s*$"
+)
+_REPAIR_ACKNOWLEDGEMENT_HOLD_RE = re.compile(
+    r"先(?:收住|停在这里|停一下)|不(?:再)?往下说|不拿.{0,8}当(?:作)?结束"
+)
+_REPAIR_ACKNOWLEDGEMENT_OPEN_RE = re.compile(
+    r"前面的事还在|事情还在|不拿.{0,8}当(?:作)?结束|还没(?:有)?过去"
+)
+
 
 def _contained_hurt_repair_relevant(request: IsolatedSurfaceInput) -> bool:
     control = getattr(request, "control", None)
@@ -116,6 +171,74 @@ _MIXED_SELF_CAUTION_RE = re.compile(
     r"(?:我|我心里|我这边).{0,8}(?:也|都|跟着|有点){1,3}.{0,5}"
     r"(?:悬|紧|担心|怕|不踏实)"
 )
+
+_AMBIGUOUS_AFFECT_UNCERTAINTY_RE = re.compile(
+    r"说不清|还(?:是|没)?模糊|模糊着|跟不上|不(?:替你)?下结论|"
+    r"不替你解释|不(?:用|必|急着).{0,6}(?:起名字|命名|下定义|说清楚)"
+)
+_AMBIGUOUS_AFFECT_SHORT_ACK_RE = re.compile(r"^\s*(?:嗯+|好|是|知道了)[。.!！]?\s*$")
+_AMBIGUOUS_AFFECT_HOLD_RE = re.compile(
+    r"先这么待着|先悬着|先(?:让.{0,8})?搁着|先让.{0,8}(?:留在|待在)这|"
+    r"不往下解释|不替你往下解释"
+)
+
+
+def _ambiguous_affect_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Recognise a complete, uncertainty-preserving ambiguous-affect reply."""
+
+    control = getattr(request, "control", None)
+    frame = normalize_companion_utterance_frame(
+        getattr(control, "companion_utterance_frame", None)
+    )
+    if not (
+        str(frame.get("semantic_focus") or "").upper() == "UNNAMED_USER_AFFECT"
+        and str(frame.get("response_move") or "").upper()
+        == "COMFORT_WITHOUT_NAMING"
+    ):
+        return False
+    value = str(text or "")
+    return bool(
+        _AMBIGUOUS_AFFECT_UNCERTAINTY_RE.search(value)
+        or (
+            _AMBIGUOUS_AFFECT_SHORT_ACK_RE.fullmatch(
+                str(getattr(request, "user_message", "") or "")
+            )
+            and (
+                _AMBIGUOUS_AFFECT_HOLD_RE.search(value)
+                or _AMBIGUOUS_AFFECT_UNCERTAINTY_RE.search(value)
+            )
+        )
+    )
+
+
+_GIVE_SPACE_COMMITMENT_RE = re.compile(
+    r"不(?:再)?(?:追问|主动(?:找|联系|发消息)|打扰|问(?:你)?怎么了)"
+    r"|(?:把)?主动联系(?:先)?停(?:下来|到(?:今天|今晚|明天))"
+)
+
+
+def _give_space_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Recognise a concise, time-matched canonical GIVE_SPACE commitment."""
+
+    if _canonical_companion_act_kind(request) != "GIVE_SPACE":
+        return False
+    value = str(text or "")
+    if not _GIVE_SPACE_COMMITMENT_RE.search(value):
+        return False
+    user_value = str(getattr(request, "user_message", "") or "")
+    if any(marker in user_value for marker in ("今晚", "今天晚上")):
+        return any(marker in value for marker in ("今晚", "今天晚上"))
+    if "明天" in user_value:
+        return "明天" in value
+    if "今天" in user_value:
+        return "今天" in value
+    return True
 
 
 def _shared_mixed_resonance_relevant(request: IsolatedSurfaceInput) -> bool:
@@ -496,6 +619,12 @@ def _misplaced_emotional_containment(
 def _relational_repair_relevant(request: IsolatedSurfaceInput) -> bool:
     if _canonical_companion_act_kind(request) == "REPAIR":
         return True
+    if _REPAIR_CHALLENGE_USER_RE.fullmatch(str(request.user_message or "")):
+        # "别装懂" directly rejects a false understanding claim.  Even if a
+        # stale relationship projection temporarily leaves the act on the
+        # single-stream path, the reply must not make the user restate the
+        # problem as the price of repair.
+        return True
     surface = "\n".join(
         _clean_list(
             [
@@ -530,6 +659,97 @@ def _relational_repair_grounded(
             r"没接住|没有接住|没理解|没有理解|误解|曲解)",
             normalized,
         )
+    )
+
+
+def _relational_repair_forward_action_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Recognise repair that advances beyond another apology.
+
+    A later repair turn should be allowed to own the user's stated impact and
+    name one concrete change in Natsume's next response.  Requiring another
+    ``没接住／理解错`` phrase made the quality scorer contradict the hard
+    gate that rejects mechanical repair repetition.
+    """
+
+    if not _relational_repair_relevant(request):
+        return False
+    value = _clean_text(text)
+    return bool(
+        _REPAIR_FORWARD_IMPACT_RE.search(value)
+        and _REPAIR_FORWARD_OWNERSHIP_RE.search(value)
+        and _REPAIR_FORWARD_ACTION_RE.search(value)
+    )
+
+
+def _relational_repair_repeated_impact_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Allow repeated-impact language only when the user grounded repetition."""
+
+    value = _clean_text(text)
+    return bool(
+        _relational_repair_relevant(request)
+        and _REPAIR_REPEATED_IMPACT_USER_RE.search(str(request.user_message or ""))
+        and _REPAIR_REPEATED_IMPACT_REPLY_RE.search(value)
+        and _REPAIR_FORWARD_OWNERSHIP_RE.search(value)
+        and _REPAIR_FORWARD_ACTION_RE.search(value)
+    )
+
+
+def _relational_repair_unresolved_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Recognise the middle repair beat where an apology did not resolve harm."""
+
+    return bool(
+        _relational_repair_relevant(request)
+        and _REPAIR_UNRESOLVED_USER_RE.search(str(request.user_message or ""))
+        and _REPAIR_UNRESOLVED_REPLY_RE.search(str(text or ""))
+    )
+
+
+def _relational_repair_lightness_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Recognise a repair follow-up that challenges words as too easy.
+
+    The complete move is to acknowledge that the words sound light while
+    keeping the rupture open or naming one bounded next-response change.  It
+    should not need to repeat another apology merely to earn scene grounding.
+    """
+
+    value = _clean_text(text)
+    return bool(
+        _relational_repair_relevant(request)
+        and _REPAIR_LIGHTNESS_USER_RE.search(str(request.user_message or ""))
+        and _REPAIR_LIGHTNESS_REPLY_RE.search(value)
+        and (
+            _REPAIR_LIGHTNESS_OPEN_RE.search(value)
+            or _REPAIR_FORWARD_ACTION_RE.search(value)
+        )
+    )
+
+
+def _relational_repair_acknowledgement_grounded(
+    request: IsolatedSurfaceInput,
+    text: str,
+) -> bool:
+    """Recognise a bounded pause after the user acknowledges a repair turn."""
+
+    value = _clean_text(text)
+    return bool(
+        _relational_repair_relevant(request)
+        and _REPAIR_ACKNOWLEDGEMENT_USER_RE.fullmatch(
+            str(request.user_message or "")
+        )
+        and _REPAIR_ACKNOWLEDGEMENT_HOLD_RE.search(value)
+        and _REPAIR_ACKNOWLEDGEMENT_OPEN_RE.search(value)
     )
 
 

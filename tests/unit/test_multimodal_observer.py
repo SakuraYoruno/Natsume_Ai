@@ -13,6 +13,18 @@ from host_brain.app.multimodal_observer_backends import (
 )
 
 
+def test_multimodal_defaults_do_not_inherit_text_surface_model(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_SURFACE_REPLY_MODEL_ID", "deepseek-v4-flash")
+    monkeypatch.delenv("HOST_MULTIMODAL_MODEL_ID_SYNC", raising=False)
+    monkeypatch.delenv("HOST_MULTIMODAL_MODEL_ID_ASYNC", raising=False)
+    monkeypatch.delenv("HOST_GEMINI_MODEL_ID", raising=False)
+
+    observer = MultimodalObserver()
+
+    assert observer._model_backend._sync_model_id == "gemini-3.6-flash"  # noqa: SLF001
+    assert observer._model_backend._async_model_id == "gemini-3.6-flash"  # noqa: SLF001
+
+
 class _StaticBackend:
     backend_name = "static"
 

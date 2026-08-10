@@ -167,9 +167,23 @@ def evaluate_surface_model_response_for_retry(
         # still says the same thing.  On the first provider attempt, make the
         # model regenerate both fields together.  The final attempt may still
         # degrade Voice explicitly, but must never reuse a stale translation.
+        # A missing-input technical turn has one narrow deterministic visible
+        # repair: ask for the error, relevant code and reproduction steps.
+        # Voice is optional presentation evidence, so do not spend a second
+        # provider call (which can exceed the node budget) merely to preserve
+        # paired Japanese speech for this fallback. SurfaceRuntime applies the
+        # same repair and clears ``tts_text_ja`` rather than reusing stale
+        # speech. Other meaning-changing visible repairs still retry the pair.
+        unvoiced_task_boundary_repair = (
+            "TASK_HELP_MISSING_INPUT_BOUNDARY" in violations
+        )
         repaired = "" if (
             "JAPANESE_SPEECH_TEXT_MISSING" in violations
-            or (japanese_voice and not allow_voice_degradation)
+            or (
+                japanese_voice
+                and not allow_voice_degradation
+                and not unvoiced_task_boundary_repair
+            )
         ) else _minimal_hard_gate_repair(request, candidate)
         if repaired and not _surface_hard_gate_violations(request, repaired):
             # SurfaceRuntime will apply the same deterministic repair locally.
@@ -609,6 +623,14 @@ _LOW_INFO_OVERREAD_MARKER_RE = re.compile(
     r"|没诚意|给点反应|不会跑|欢迎回家|少见|不错不错|别催|进门|还记得|值得表扬|表扬一下|等你"
     r"|偷懒|只说|陪你聊|吃掉|知道你忙|你忙|出大事|接住|我接|(?:老哥|哥哥|对方)在呢"
     r"|居然|稀奇|人就在这儿|喊一声|就回个|回个[“\"'‘]?继续|就一声|你好好听着"
+)
+_LOW_INFO_MEETING_ENDED_USER_RE = re.compile(
+    r"^(?:(?:刚刚|刚才)?(?:开会|会议)(?:结束|结束了|开完|开完了)|"
+    r"(?:刚刚|刚才)?(?:开完会|散会)(?:了)?)$"
+)
+_LOW_INFO_EVENT_AFFECT_GUESS_RE = re.compile(
+    r"(?:下午的)?(?:会|会议).{0,6}(?:最磨人|最累人|反而最累人)|"
+    r"感觉.{0,4}(?:乱糟糟|很乱|乱乱的)"
 )
 _ZERO_QUESTION_BUDGET_PROMPT_RE = re.compile(
     r"(?:下一步|给个方向|说句话|说下去|说完|接着说|继续说|怎么啦|怎么了|什么事|有话说|发我|贴给我|丢过来|甩过来).{0,8}[？?吧]"
@@ -2408,7 +2430,10 @@ def _auditory_pretend_heard_hits(text: str) -> bool:
 def _low_info_scene_state_guess_hits(request: IsolatedSurfaceInput, text: str) -> tuple[str, ...]:
     user_text = str(getattr(request, "user_message", "") or "").strip()
     normalized_user = _normalized_short_user_text(user_text)
-    low_info_scene = normalized_user in {
+    meeting_ended_scene = bool(
+        _LOW_INFO_MEETING_ENDED_USER_RE.fullmatch(normalized_user)
+    )
+    low_info_scene = meeting_ended_scene or normalized_user in {
         "早",
         "早安",
         "早上好",
@@ -2423,6 +2448,13 @@ def _low_info_scene_state_guess_hits(request: IsolatedSurfaceInput, text: str) -
     if not low_info_scene:
         return ()
     value = str(text or "")
+    if meeting_ended_scene:
+        return tuple(
+            dict.fromkeys(
+                match.group(0)
+                for match in _LOW_INFO_EVENT_AFFECT_GUESS_RE.finditer(value)
+            )
+        )
     return tuple(
         dict.fromkeys(
             [
@@ -2665,7 +2697,7 @@ def _hard_gate_fallback(request: IsolatedSurfaceInput, violations: Sequence[str]
         return "嗯，今天确实不太顺。先别硬撑，我在这儿陪你缓一会儿。"
     if "UNPROVIDED_WORK_STATE_CLAIM" in codes:
         user_text = str(getattr(request, "user_message", "") or "")
-        if re.search(r"修复|报错|代码|任务", user_text):
+        if re.search(r"修复|报错|代码|任务|堆栈|上线", user_text):
             return "好。把报错和相关代码贴过来，我只给你最短修复。"
         return "好。把具体内容发来，我直接处理。"
     if "UNSUPPORTED_TASK_FUTURE_EVENT" in codes:
@@ -3007,6 +3039,8 @@ def _low_info_scene_fallback(request: IsolatedSurfaceInput) -> str:
         return f"在呢，{address}。" if address else "在呢。"
     if normalized_user in {"继续", "接着"}:
         return "嗯，接着来。"
+    if _LOW_INFO_MEETING_ENDED_USER_RE.fullmatch(normalized_user):
+        return "开完会了啊。那先歇口气。"
     return ""
 
 

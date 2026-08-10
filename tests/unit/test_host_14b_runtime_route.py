@@ -95,7 +95,7 @@ def _assert_secret_free_runtime(value: Any, *, path: str = "runtime") -> None:
     assert not callable(value), f"{path} leaked a callable"
 
 
-def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
+def test_resolve_host_llm_runtime_defaults_to_deepseek_v4_flash(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch)
     monkeypatch.setenv("HOST_GEMINI_MODEL_ID", "gemini-2.5-flash")
     monkeypatch.setenv("HOST_CODEX_MODEL_ID", "gpt-4o-mini")
@@ -106,8 +106,9 @@ def test_resolve_host_llm_runtime_prefers_gemini_primary(monkeypatch) -> None:
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
     assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:DEFAULT"
-    assert runtime["provider_name"] == "gemini"
-    assert runtime["model_id"] == "gemini-2.5-flash-lite"
+    assert runtime["provider_name"] == "deepseek"
+    assert runtime["model_id"] == "deepseek-v4-flash"
+    assert runtime["generation_parameters"]["thinking_mode"] == "disabled"
     assert runtime["available"] is True
     assert "remote_chain_status" not in runtime
 
@@ -122,11 +123,12 @@ def test_resolve_host_llm_runtime_does_not_route_from_codex_credentials(monkeypa
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
     assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:DEFAULT"
-    assert runtime["provider_name"] == "gemini"
+    assert runtime["provider_name"] == "deepseek"
+    assert runtime["model_id"] == "deepseek-v4-flash"
     assert "remote_chain_status" not in runtime
 
 
-def test_resolve_host_llm_runtime_does_not_route_from_deepseek_credentials(monkeypatch) -> None:
+def test_resolve_host_llm_runtime_uses_deepseek_default_independent_of_credentials(monkeypatch) -> None:
     _patch_runtime_dependencies(monkeypatch, gemini_api_key=None, codex_api_key=None, deepseek_api_key="sk-deepseek")
     monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
 
@@ -135,7 +137,8 @@ def test_resolve_host_llm_runtime_does_not_route_from_deepseek_credentials(monke
     _assert_secret_free_runtime(runtime)
     assert runtime["route_target"] == HOST_CHAT_ROUTE_CLOUD
     assert runtime["route_reason_code"] == "SERVER_ROUTE_CATALOG:DEFAULT"
-    assert runtime["provider_name"] == "gemini"
+    assert runtime["provider_name"] == "deepseek"
+    assert runtime["model_id"] == "deepseek-v4-flash"
     assert "remote_chain_status" not in runtime
 
 

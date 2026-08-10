@@ -105,6 +105,11 @@ def _generation_parameters(request: ProviderAttemptRequest) -> dict[str, Any]:
                 "thinking_mode must be enabled or disabled"
             )
         params["thinking_mode"] = thinking_mode
+    if (
+        str(request.target.provider or "").strip().lower() == "deepseek"
+        and str(request.target.model_id or "").strip().lower().startswith("deepseek-v4-flash")
+    ):
+        params["thinking_mode"] = "disabled"
     guard = request.model_budget_guard
     if guard is None:
         return params
@@ -121,10 +126,24 @@ def _transport_generation_parameters(request: ProviderAttemptRequest) -> dict[st
     """Keep the hard cap internal to the first-party transport adapter."""
 
     params = _generation_parameters(request)
-    if str(request.target.provider or "").strip().lower() != "deepseek":
+    provider = str(request.target.provider or "").strip().lower()
+    model_id = str(request.target.model_id or "").strip().lower()
+    thinking_mode = params.get("thinking_mode")
+    if provider != "deepseek":
         # ``thinking_mode`` is provider-neutral route metadata.  It must never
         # leak as an unsupported request field to another provider.
         params.pop("thinking_mode", None)
+    if provider == "gemini" and model_id.startswith("gemini-3.6-flash"):
+        # Gemini 3.6 replaced the binary hint with a bounded thinking level.
+        # ``minimal`` is the provider-supported equivalent for the realtime
+        # route's disabled-thinking latency contract.
+        params.pop("temperature", None)
+        params.pop("top_p", None)
+        params.pop("top_k", None)
+        if thinking_mode == "disabled":
+            params["thinking_level"] = "minimal"
+        elif thinking_mode == "enabled":
+            params["thinking_level"] = "medium"
     guard = request.model_budget_guard
     if guard is not None:
         params["_natsume_hard_max_output_tokens"] = guard.max_output_tokens
@@ -138,11 +157,18 @@ def _provider_payload_generation_parameters(
 
     params = _generation_parameters(request)
     thinking_mode = params.pop("thinking_mode", None)
-    if (
-        thinking_mode is not None
-        and str(request.target.provider or "").strip().lower() == "deepseek"
-    ):
+    provider = str(request.target.provider or "").strip().lower()
+    model_id = str(request.target.model_id or "").strip().lower()
+    if thinking_mode is not None and provider == "deepseek":
         params["thinking"] = {"type": thinking_mode}
+    elif provider == "gemini" and model_id.startswith("gemini-3.6-flash"):
+        params.pop("temperature", None)
+        params.pop("top_p", None)
+        params.pop("top_k", None)
+        if thinking_mode == "disabled":
+            params["thinking_level"] = "minimal"
+        elif thinking_mode == "enabled":
+            params["thinking_level"] = "medium"
     return params
 
 

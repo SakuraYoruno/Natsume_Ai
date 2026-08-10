@@ -32,6 +32,56 @@ from natsume_contracts.edge.v1 import (
 from edge_client.rpc.voice import VoiceRpcContract, VoiceRpcResult
 
 logger = logging.getLogger("Natsume.edge.asr")
+_ASR_DLL_DIRECTORY_HANDLES: list[Any] = []
+_ASR_DLL_DIRECTORY_PATHS: set[str] = set()
+
+
+def _ensure_asr_cuda_dll_dirs() -> None:
+    """Register deployment-provided CUDA DLL directories on Windows.
+
+    CTranslate2 resolves CUDA libraries dynamically. Portable model runtimes
+    often keep those DLLs outside the system CUDA path, so an Edge deployment
+    can expose the exact directories through ``EDGE_ASR_CUDA_DLL_DIRS``.
+    """
+
+    raw_dirs = str(os.environ.get("EDGE_ASR_CUDA_DLL_DIRS") or "").strip()
+    if not raw_dirs:
+        return
+
+    for raw_path in raw_dirs.split(os.pathsep):
+        candidate = str(raw_path or "").strip()
+        if not candidate:
+            continue
+        path = os.path.abspath(os.path.expanduser(candidate))
+        if not os.path.isdir(path):
+            continue
+        normalized = os.path.normcase(path)
+        if normalized in _ASR_DLL_DIRECTORY_PATHS:
+            continue
+        _ASR_DLL_DIRECTORY_PATHS.add(normalized)
+
+        current_path = os.environ.get("PATH", "")
+        current_parts = {
+            os.path.normcase(os.path.abspath(segment))
+            for segment in current_path.split(os.pathsep)
+            if segment
+        }
+        if normalized not in current_parts:
+            os.environ["PATH"] = path + os.pathsep + current_path
+            logger.info("ASR CUDA DLL directory prepended to PATH: %s", path)
+
+        if hasattr(os, "add_dll_directory"):
+            try:
+                handle = os.add_dll_directory(path)  # type: ignore[attr-defined]
+            except OSError as exc:
+                logger.warning(
+                    "ASR CUDA DLL directory registration failed for %s: %s",
+                    path,
+                    exc,
+                )
+            else:
+                _ASR_DLL_DIRECTORY_HANDLES.append(handle)
+                logger.info("ASR CUDA DLL directory registered: %s", path)
 
 
 def _short_log_text(value: Any, *, limit: int = 160) -> str:
@@ -620,6 +670,7 @@ class WhisperModelManager:
 
             self._state = AsrState.LOADING
             try:
+                _ensure_asr_cuda_dll_dirs()
                 from faster_whisper import WhisperModel
             except ImportError as e:
                 self._state = AsrState.ERROR

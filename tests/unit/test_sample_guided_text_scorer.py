@@ -304,6 +304,20 @@ def test_implied_fact_risk_penalizes_unprovided_time_or_cause_guess() -> None:
     assert grounded.score > risky.score
 
 
+def test_negative_no_one_clause_is_not_misread_as_a_history_claim() -> None:
+    contract = build_galgame_text_contract(
+        scene_id="default",
+        user_message="事情办完了，可我还说不清是什么感觉。",
+    )
+
+    result = score_sample_guided_text(
+        text="说不清就说不清吧，又没人逼你马上弄明白。",
+        contract=contract,
+    )
+
+    assert "IMPLIED_FACT_RISK" not in result.reason_codes
+
+
 def test_memory_container_claim_is_soft_implied_fact_risk() -> None:
     contract = build_galgame_text_contract(user_message="你还记得我周末想去看展吗", scene_id="daily_chat")
 

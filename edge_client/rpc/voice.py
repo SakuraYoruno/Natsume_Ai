@@ -294,6 +294,9 @@ class VoiceRpcContract:
             "lang_hint": lang_hint,
             "ts_ms": now_value,
         }
+        synchronization_id = str(payload.get("synchronization_id") or "").strip()
+        if synchronization_id:
+            event["synchronization_id"] = synchronization_id
         if str(payload.get("export_audio") or "").strip().lower() in {"1", "true", "yes", "on"}:
             event["export_audio"] = True
         if emotion_intensity is not None:

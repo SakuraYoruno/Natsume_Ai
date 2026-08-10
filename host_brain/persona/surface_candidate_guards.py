@@ -18,6 +18,7 @@ from host_brain.persona.surface_utterance_frame import (
 from host_brain.persona.surface.continuity_detectors import (
     _contained_hurt_repair_grounded,
     _contained_hurt_repair_relevant,
+    _relational_repair_relevant,
     _shared_mixed_resonance_grounded,
     _shared_mixed_resonance_relevant,
 )
@@ -28,6 +29,7 @@ _UNPROVIDED_WORK_STATE_CLAIM_RE = re.compile(
     r"我(?:让|叫|安排).{0,6}(?:后台|任务|Agent|智能体).{0,12}(?:拉|列|查|跑|处理|执行|整理|做|定位|分析|检查|排查)|"
     r"我(?:已经|正在|在).{0,8}(?:修|改|跑|处理|执行)|"
     r"我(?:帮|替)你.{0,6}盯着|"
+    r"我(?:这边)?(?:帮|替)?(?:你)?.{0,4}盯(?:着)?.{0,8}(?:修复|排查|处理|上线|路径|任务|后台)|"
     r"(?:我)?陪你.{0,6}盯到.{0,10}(?:为止|完成|结束|过)|"
     r"我(?:在.{0,6})?盯着(?:(?:它|这个|任务|修复|后台)|(?=[，,。.!！]|$))|"
     r"卡住(?:了)?我(?:再)?(?:喊|叫|告诉)你|"
@@ -73,7 +75,7 @@ _META_IDENTITY_LEAK_RE = re.compile(r"设定|系统|提示词|角色卡|模型|�
 _ASCII_TILDE_RE = re.compile(r"~")
 _WAVE_MARKER_RE = re.compile(r"[~～]")
 _BOUNDARY_SOUR_WITHDRAWAL_RE = re.compile(
-    r"不管就不管|不管不管|爱理不理|不管了|不帮了|不帮你了|你自己处理|偏不管|偏不帮|懒得管|(?:先)?不吵你"
+    r"不管就不管|不管不管|爱理不理|不管了|不帮了|不帮你了|你自己处理|你自己待(?:着|会儿)?(?:吧)?|你也别管我|偏不管|偏不帮|懒得管|(?:先)?不吵你"
     r"|(?:那|以后)?我(?:就)?不烦你了|我闭嘴(?:总行了吧)?|算我多管闲事|当我没说|以后不找你了"
     r"|(?:我还以为|是不是|难道是).{0,8}(?:嫌我烦|烦我)|嫌我烦"
     r"|好好好|不找你不找你|我(?:本来|又|才)?(?:也)?不是.{0,8}(?:黏人|粘人|纠缠)|谁稀罕找你"
@@ -253,7 +255,7 @@ _MIXED_AFFECT_DISMISSAL_RE = re.compile(
     r"开心就开心.{0,10}(?:怕什么|别怕|有什么好怕)|怕什么(?:嘛|呢)?"
     r"|别(?:急着)?想太多|不用不踏实|不踏实什么|高兴就完了"
     r"|开心就好.{0,8}(?:别|不要)(?:怕|想太多)"
-    r"|(?:怕|害怕|不踏实|不安)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放下|放着|别管)"
+    r"|(?:怕|害怕|不踏实|不安)(?:的那部分)?.{0,12}(?:先)?(?:放一放|放一边|放下|放着|别管)"
     r"|(?:那点)?不安.{0,12}等(?:它|不安).{0,8}(?:真)?来(?:了)?再说"
     r"|(?:帮你|陪你|一起).{0,8}(?:哼回去|赶走|打跑)"
     r"|先让.{0,6}(?:开心|高兴).{0,8}(?:多待|多留|待一会)"
@@ -371,7 +373,10 @@ def _repair_restatement_solicitation_hits(
     request: IsolatedSurfaceInput,
     text: str,
 ) -> tuple[str, ...]:
-    if not _canonical_affective_guidance_active(request, "REPAIR"):
+    if not (
+        _canonical_affective_guidance_active(request, "REPAIR")
+        or _relational_repair_relevant(request)
+    ):
         return ()
     return tuple(
         dict.fromkeys(
@@ -869,10 +874,19 @@ def _unresolved_affect_false_resolution_hits(
     request: IsolatedSurfaceInput,
     text: str,
 ) -> tuple[str, ...]:
+    frame = _typed_affective_frame(request)
+    typed_ambiguous_affect = bool(
+        str(frame.get("semantic_focus") or "").upper() == "UNNAMED_USER_AFFECT"
+        and str(frame.get("response_move") or "").upper()
+        == "COMFORT_WITHOUT_NAMING"
+    )
     ambiguous_comfort = bool(
         _canonical_affective_guidance_active(request, "COMFORT")
-        and _AMBIGUOUS_AFFECT_USER_RE.search(
-            str(getattr(request, "user_message", "") or "")
+        and (
+            typed_ambiguous_affect
+            or _AMBIGUOUS_AFFECT_USER_RE.search(
+                str(getattr(request, "user_message", "") or "")
+            )
         )
     )
     if not (
@@ -941,8 +955,17 @@ def _ambiguous_affect_devaluation_hits(
 ) -> tuple[str, ...]:
     if not _canonical_affective_guidance_active(request, "COMFORT"):
         return ()
-    if not _AMBIGUOUS_AFFECT_USER_RE.search(
-        str(getattr(request, "user_message", "") or "")
+    frame = _typed_affective_frame(request)
+    typed_ambiguous_affect = bool(
+        str(frame.get("semantic_focus") or "").upper() == "UNNAMED_USER_AFFECT"
+        and str(frame.get("response_move") or "").upper()
+        == "COMFORT_WITHOUT_NAMING"
+    )
+    if not (
+        typed_ambiguous_affect
+        or _AMBIGUOUS_AFFECT_USER_RE.search(
+            str(getattr(request, "user_message", "") or "")
+        )
     ):
         return ()
     return tuple(

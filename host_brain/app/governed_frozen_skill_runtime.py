@@ -499,6 +499,12 @@ class _FrozenSkillWorker:
             )
         payload = _mapping(getattr(outcome, "payload", None))
         receipt_ref = str(payload.get("receipt_ref") or "").strip()
+        skill_version_binding = _mapping(
+            payload.get("skill_version_binding")
+        )
+        skill_version_bundle_id = str(
+            skill_version_binding.get("bundle_id") or ""
+        ).strip()
         narrative = str(getattr(outcome, "result_text", "") or "").strip()
         success = bool(getattr(outcome, "success", False))
         error_text = str(getattr(outcome, "error_text", "") or "").strip()
@@ -519,6 +525,7 @@ class _FrozenSkillWorker:
             approval_token_ref=approval_ref or None,
             ts_ms=int(time.time() * 1000),
             evidence_ref=receipt_ref,
+            manifest_ref=skill_version_bundle_id or None,
         )
         durable_projection = self._ledger.get_event(receipt_ref)
         durable_status = (
@@ -549,6 +556,11 @@ class _FrozenSkillWorker:
                 "command_id": command.command_id,
                 "attempt_id": str(execution_context.get("attempt_id") or ""),
                 "skill_receipt_ref": receipt_ref,
+                **(
+                    {"skill_version_binding": skill_version_binding}
+                    if skill_version_binding
+                    else {}
+                ),
                 "node_grant_ref": node_grant_ref,
                 "node_grant_digest": _sha256_json(verified_grant.to_dict()),
                 **(

@@ -14,6 +14,7 @@ from host_brain.model_runtime import (
     ProviderAttemptRequest,
     ProviderResponse,
     ProviderStreamEvent,
+    ProviderTarget,
     RouteNotConfiguredError,
     build_production_provider_registry,
     build_vault_backed_provider_registry,
@@ -104,6 +105,23 @@ def test_route_boundary_normalizes_and_validates_thinking_mode() -> None:
         )
 
 
+def test_route_boundary_forces_deepseek_v4_flash_non_thinking() -> None:
+    decision = route_decision_from_graph_runtime(
+        _runtime(
+            provider_name="deepseek",
+            model_id="deepseek-v4-flash",
+            agent_gen_params={"thinking_mode": "enabled", "max_tokens": 640},
+        ),
+        scene_type="NATSUME_AGENT",
+        cognitive_tier="A",
+    )
+
+    assert decision.targets[0].metadata["generation_parameters"] == {
+        "thinking_mode": "disabled",
+        "max_tokens": 640,
+    }
+
+
 @pytest.mark.parametrize(
     ("provider", "model_id", "expected_thinking"),
     (
@@ -144,6 +162,68 @@ def test_provider_payload_maps_thinking_mode_only_for_deepseek(
         assert "thinking" not in payload
     else:
         assert payload["thinking"] == expected_thinking
+
+
+def test_provider_payload_defaults_deepseek_v4_flash_to_non_thinking() -> None:
+    target = ProviderTarget(
+        adapter_id="production.deepseek",
+        provider="deepseek",
+        model_id="deepseek-v4-flash",
+        timeout_ms=1000,
+        metadata={"generation_parameters": {"max_tokens": 640}},
+    )
+    request = ProviderAttemptRequest(
+        request_id="request-deepseek-default-non-thinking",
+        attempt_id="attempt-deepseek-default-non-thinking",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    payload = production_provider_payload(request, stream=False)
+
+    assert payload["thinking"] == {"type": "disabled"}
+
+
+def test_provider_payload_maps_gemini_36_enabled_thinking_level() -> None:
+    target = route_decision_from_graph_runtime(
+        _runtime(
+            provider_name="gemini",
+            model_id="gemini-3.6-flash",
+            agent_gen_params={
+                "temperature": 0.72,
+                "top_p": 0.9,
+                "top_k": 32,
+                "thinking_mode": "enabled",
+                "max_tokens": 640,
+            },
+        ),
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-gemini-36-enabled",
+        attempt_id="attempt-gemini-36-enabled",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE",
+        cognitive_tier="A",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    payload = production_provider_payload(request, stream=False)
+
+    assert payload["thinking_level"] == "medium"
+    assert "thinking_mode" not in payload
+    assert "temperature" not in payload
+    assert "top_p" not in payload
+    assert "top_k" not in payload
 
 
 def test_server_owned_tier_and_cloud_lanes_choose_route_without_request_hints(monkeypatch) -> None:
@@ -340,6 +420,62 @@ def test_vault_backed_transport_emits_server_owned_external_identity() -> None:
     assert len(response.metadata["transport_identity_digest"]) == 64
     assert "api.openai.com" not in repr(response.metadata)
     assert calls[0]["base_url_override"] == "https://api.openai.com/v1"
+
+
+@pytest.mark.parametrize(
+    ("thinking_mode", "expected_level"),
+    (("disabled", "minimal"), ("enabled", "medium")),
+)
+def test_vault_backed_gemini_36_maps_realtime_thinking_and_drops_sampling(
+    thinking_mode: str,
+    expected_level: str,
+) -> None:
+    calls = []
+
+    def _transport(**kwargs):
+        calls.append(dict(kwargs))
+        return {"content": '{"ok":true}', "usage": {"output_tokens": 1}}
+
+    registry = build_vault_backed_provider_registry(
+        ("gemini",),
+        credential_resolver=lambda _provider: "gemini-key",
+        base_url_resolver=lambda _provider: "https://generativelanguage.googleapis.com/v1beta",
+        transport=_transport,
+    )
+    target = route_decision_from_graph_runtime(
+        _runtime(
+            provider_name="gemini",
+            model_id="gemini-3.6-flash",
+            agent_gen_params={
+                "temperature": 0.72,
+                "top_p": 0.9,
+                "thinking_mode": thinking_mode,
+                "max_tokens": 640,
+            },
+        ),
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+    ).targets[0]
+    request = ProviderAttemptRequest(
+        request_id="request-gemini-36-realtime",
+        attempt_id="attempt-gemini-36-realtime",
+        attempt_index=1,
+        retry_reason="initial",
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+        prompt=_rendered_prompt(),
+        target=target,
+        timeout_ms=1000,
+    )
+
+    asyncio.run(registry.get("production.gemini").complete(request))
+
+    params = calls[0]["gen_params"]
+    assert params["max_tokens"] == 640
+    assert params["thinking_level"] == expected_level
+    assert "thinking_mode" not in params
+    assert "temperature" not in params
+    assert "top_p" not in params
 
 
 @pytest.mark.asyncio

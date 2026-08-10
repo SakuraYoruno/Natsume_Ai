@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 import re
@@ -23,6 +24,10 @@ from host_brain.surface_runtime.quality_guards import (
 )
 from host_brain.surface_runtime.life_context import _surface_recent_user_fact_texts
 from host_brain.audit.migration_runner import SQLiteMigrationRunner
+from host_brain.persistence.runtime_read_repository import (
+    _json_mapping,
+    _surface_artifact_session_id,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -174,6 +179,334 @@ def test_surface_conversation_and_dream_reads_remain_fail_soft(
         ports=missing_ports,
     ) == ()
     assert _load_recent_surface_dream_text(ports=missing_ports) == ""
+
+
+def test_surface_window_includes_committed_reply_before_conversation_projection(
+    surface_runtime_ports_factory,
+) -> None:
+    prior_reply = "好。你说想安静时，我就不追问，也不主动找你。"
+    artifact_payload = {
+        "decision": "APPROVE",
+        "request_id": "prior-assistant",
+        "narrative": prior_reply,
+        "acceptance_effect_intents": [
+            {
+                "payload": {
+                    "payload": {
+                        "affective_turn_plan": {"session_id": "fast-session"}
+                    }
+                }
+            }
+        ],
+    }
+    ledger = SimpleNamespace(
+        conversation_turn=[
+            {
+                "request_id": "prior-user",
+                "session_id": "fast-session",
+                "role": "user",
+                "content": "我说想安静时，请先别追问，也别主动找我。",
+                "ts_ms": 100,
+                "turn_index": 1,
+                "metadata": "{}",
+            }
+        ],
+        task_runtime_node_artifact=[
+            {
+                "graph_id": "graph-fast",
+                "graph_revision": 1,
+                "node_id": "node-fast",
+                "payload_json": json.dumps(artifact_payload, ensure_ascii=False),
+                "created_ts_ms": 150,
+            }
+        ],
+        task_runtime_acceptance_effect_intent=[
+            {
+                "graph_id": "graph-fast",
+                "graph_revision": 1,
+                "node_id": "node-fast",
+                "effect_type": "surface.reply_delivery",
+                "status": "COMMITTED",
+                "committed_ts_ms": 180,
+                "updated_ts_ms": 180,
+            }
+        ],
+    )
+    ports = surface_runtime_ports_factory(get_ledger=lambda: ledger)
+
+    facts = _surface_recent_conversation_window_facts(
+        SimpleNamespace(session_id="fast-session", request_id="current"),
+        ports=ports,
+    )
+
+    assert prior_reply in facts[1]
+
+
+def test_surface_window_filters_noncommitted_or_unusable_artifacts(
+    surface_runtime_ports_factory,
+) -> None:
+    def payload(
+        *,
+        decision: str = "APPROVE",
+        request_id: str = "prior",
+        session_id: str = "target-session",
+        narrative: str = "可用回复",
+    ) -> str:
+        return json.dumps(
+            {
+                "decision": decision,
+                "request_id": request_id,
+                "narrative": narrative,
+                "acceptance_effect_intents": [
+                    {
+                        "payload": {
+                            "payload": {
+                                "affective_turn_plan": {"session_id": session_id}
+                            }
+                        }
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+    ledger = SimpleNamespace(
+        conversation_turn=[
+            {
+                "request_id": "prior-user",
+                "session_id": "target-session",
+                "role": "user",
+                "content": "上一条用户消息",
+                "ts_ms": 50,
+                "turn_index": 1,
+                "metadata": "{}",
+            }
+        ],
+        task_runtime_acceptance_effect_intent=[
+            {
+                "graph_id": "graph",
+                "graph_revision": 1,
+                "node_id": node_id,
+                "effect_type": "surface.reply_delivery",
+                "status": "COMMITTED",
+                "committed_ts_ms": 100 + index,
+                "updated_ts_ms": 100 + index,
+            }
+            for index, node_id in enumerate(
+                ("rejected", "current", "foreign", "empty", "valid")
+            )
+        ],
+        task_runtime_node_artifact=[
+            {
+                "graph_id": "uncommitted",
+                "graph_revision": 1,
+                "node_id": "missing-effect",
+                "payload_json": payload(),
+                "created_ts_ms": 1,
+            },
+            {
+                "graph_id": "graph",
+                "graph_revision": 1,
+                "node_id": "rejected",
+                "payload_json": payload(decision="REJECT"),
+                "created_ts_ms": 2,
+            },
+            {
+                "graph_id": "graph",
+                "graph_revision": 1,
+                "node_id": "current",
+                "payload_json": payload(request_id="current"),
+                "created_ts_ms": 3,
+            },
+            {
+                "graph_id": "graph",
+                "graph_revision": 1,
+                "node_id": "foreign",
+                "payload_json": payload(session_id="other-session"),
+                "created_ts_ms": 4,
+            },
+            {
+                "graph_id": "graph",
+                "graph_revision": 1,
+                "node_id": "empty",
+                "payload_json": payload(narrative=""),
+                "created_ts_ms": 5,
+            },
+            {
+                "graph_id": "graph",
+                "graph_revision": 1,
+                "node_id": "valid",
+                "payload_json": payload(narrative="唯一可用回复"),
+                "created_ts_ms": 6,
+            },
+        ],
+    )
+    ports = surface_runtime_ports_factory(get_ledger=lambda: ledger)
+
+    facts = _surface_recent_conversation_window_facts(
+        SimpleNamespace(session_id="target-session", request_id="current"),
+        ports=ports,
+    )
+
+    assert facts[1].endswith("Natsume: 唯一可用回复")
+
+
+def test_runtime_read_json_and_surface_session_helpers_fail_soft() -> None:
+    assert _json_mapping({"value": 1}) == {"value": 1}
+    assert _json_mapping("not-json") == {}
+    assert _json_mapping("[]") == {}
+    assert _surface_artifact_session_id({}) == ""
+
+
+def test_surface_window_keeps_logical_turn_order_when_projection_timestamps_lag(
+    surface_runtime_ports_factory,
+) -> None:
+    artifact_payload = {
+        "decision": "APPROVE",
+        "request_id": "request-2",
+        "narrative": "第二条回复",
+        "acceptance_effect_intents": [
+            {
+                "payload": {
+                    "payload": {
+                        "affective_turn_plan": {"session_id": "ordered-session"}
+                    }
+                }
+            }
+        ],
+    }
+    ledger = SimpleNamespace(
+        conversation_turn=[
+            {
+                "request_id": "request-1",
+                "session_id": "ordered-session",
+                "role": "user",
+                "content": "第一条用户消息",
+                "ts_ms": 100,
+                "turn_index": 0,
+                "metadata": "{}",
+            },
+            {
+                "request_id": "request-1",
+                "session_id": "ordered-session",
+                "role": "assistant",
+                "content": "第一条回复",
+                "ts_ms": 300,
+                "turn_index": 1,
+                "metadata": "{}",
+            },
+            {
+                "request_id": "request-2",
+                "session_id": "ordered-session",
+                "role": "user",
+                "content": "第二条用户消息",
+                "ts_ms": 200,
+                "turn_index": 2,
+                "metadata": "{}",
+            },
+        ],
+        task_runtime_node_artifact=[
+            {
+                "graph_id": "graph-2",
+                "graph_revision": 1,
+                "node_id": "node-2",
+                "payload_json": json.dumps(artifact_payload, ensure_ascii=False),
+                "created_ts_ms": 230,
+            }
+        ],
+        task_runtime_acceptance_effect_intent=[
+            {
+                "graph_id": "graph-2",
+                "graph_revision": 1,
+                "node_id": "node-2",
+                "effect_type": "surface.reply_delivery",
+                "status": "COMMITTED",
+                "committed_ts_ms": 250,
+                "updated_ts_ms": 250,
+            }
+        ],
+    )
+    ports = surface_runtime_ports_factory(get_ledger=lambda: ledger)
+
+    facts = _surface_recent_conversation_window_facts(
+        SimpleNamespace(session_id="ordered-session", request_id="current"),
+        ports=ports,
+    )
+
+    assert facts[1].endswith(
+        "用户: 第一条用户消息 / Natsume: 第一条回复 / "
+        "用户: 第二条用户消息 / Natsume: 第二条回复"
+    )
+
+
+def test_surface_window_deduplicates_committed_reply_after_projection_catches_up(
+    surface_runtime_ports_factory,
+) -> None:
+    prior_reply = "好，我不追问，也不主动发消息。"
+    artifact_payload = {
+        "decision": "APPROVE",
+        "request_id": "same-request",
+        "narrative": prior_reply,
+        "acceptance_effect_intents": [
+            {
+                "payload": {
+                    "payload": {
+                        "affective_turn_plan": {"session_id": "dedupe-session"}
+                    }
+                }
+            }
+        ],
+    }
+    ledger = SimpleNamespace(
+        conversation_turn=[
+            {
+                "request_id": "prior-user",
+                "session_id": "dedupe-session",
+                "role": "user",
+                "content": "今晚别问我。",
+                "ts_ms": 100,
+                "turn_index": 1,
+                "metadata": "{}",
+            },
+            {
+                "request_id": "same-request",
+                "session_id": "dedupe-session",
+                "role": "assistant",
+                "content": prior_reply,
+                "ts_ms": 200,
+                "turn_index": 2,
+                "metadata": "{}",
+            },
+        ],
+        task_runtime_node_artifact=[
+            {
+                "graph_id": "graph-dedupe",
+                "graph_revision": 1,
+                "node_id": "node-dedupe",
+                "payload_json": json.dumps(artifact_payload, ensure_ascii=False),
+                "created_ts_ms": 150,
+            }
+        ],
+        task_runtime_acceptance_effect_intent=[
+            {
+                "graph_id": "graph-dedupe",
+                "graph_revision": 1,
+                "node_id": "node-dedupe",
+                "effect_type": "surface.reply_delivery",
+                "status": "COMMITTED",
+                "committed_ts_ms": 180,
+                "updated_ts_ms": 180,
+            }
+        ],
+    )
+    ports = surface_runtime_ports_factory(get_ledger=lambda: ledger)
+
+    facts = _surface_recent_conversation_window_facts(
+        SimpleNamespace(session_id="dedupe-session", request_id="current"),
+        ports=ports,
+    )
+
+    assert facts[1].count(prior_reply) == 1
 
 
 def test_http_hook_semantic_wrappers_keep_existing_api(runtime_db: Path) -> None:

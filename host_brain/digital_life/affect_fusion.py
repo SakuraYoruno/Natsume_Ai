@@ -69,6 +69,15 @@ _POSITIVE_RESULT_CONTINUATION_MARKERS = (
     "发布成功",
     "值得庆祝",
     "像做梦",
+    # A concrete result may already have landed while the unresolved mixed
+    # episode is still visible through the user's body.  These phrases only
+    # activate when a canonical SHARED_JOY + CAUTION episode already exists;
+    # they do not infer anxiety from an isolated physical description.
+    "一直在笑",
+    "还在笑",
+    "笑个不停",
+    "手心还是凉",
+    "手心发凉",
 )
 _SPACE_MARKERS = (
     "别说了",
@@ -86,9 +95,15 @@ _SPACE_MARKERS = (
     "想安静",
     "先别追问",
     "别追问",
+    "先别问我",
+    "别问我怎么了",
     "别主动找我",
     "不要主动找我",
     "别总主动找我",
+    "别发消息",
+    "不要发消息",
+    "不用守着我",
+    "不必守着我",
     "晚点再说",
     "我需要时间",
     "先把提醒关掉",
@@ -141,10 +156,34 @@ _NATSUME_HARM_MARKERS = (
     "让我很难过",
     "让我失望",
     "说得太伤人",
+    "说了也白说",
+    "说了像白说",
+    "没把我的话当回事",
+    "没把我说的话当回事",
+    "我的话没被听见",
+    "还没有觉得这件事过去",
+    "还没觉得这件事过去",
+    "这件事还没过去",
     "hurt me",
     "made me feel hurt",
     "made me sad",
     "what you said hurt",
+)
+_RELATIONAL_REPAIR_CONTINUATION_MARKERS = (
+    "那件事让我很不舒服",
+    "这件事让我很不舒服",
+    "那件事让我不舒服",
+    "这件事让我不舒服",
+    "别装懂",
+    "别装作懂",
+    "这不是第一次",
+    "我现在很生气",
+    "我还没原谅你",
+    "我还没有原谅你",
+    "你说得轻巧",
+    "先这样",
+    "下次别再这样",
+    "我听到了",
 )
 _DIRECTED_DISRESPECT_MARKERS = (
     "你真烦",
@@ -507,11 +546,28 @@ class AffectFusionService:
                 )
             )
 
+        # A concise follow-up can reopen the same relational impact without
+        # repeating ``你`` or restating the original miss.  Read only the
+        # canonical appraisal kind here; the raw prior utterance remains out
+        # of the Life journal and a stale appraisal cannot affect an ordinary
+        # neutral turn because the continuation markers below are narrow.
+        pre_appraisal_state = _safe_mapping(
+            self._require_snapshot_reader().get_snapshot(scope.aggregate_id).state
+        )
+        prior_appraisal_kind = _text(
+            _safe_mapping(
+                _safe_mapping(pre_appraisal_state.get("affective")).get(
+                    "last_appraisal"
+                )
+            ).get("event_kind"),
+            limit=96,
+        ).lower()
         candidates = _build_appraisal_candidates(
             observations=active,
             conflict=conflict,
             message=_text(getattr(request_body, "message", None), limit=8_000),
             relationship_aftereffect=relationship_aftereffect,
+            prior_appraisal_kind=prior_appraisal_kind,
         )
         # The deep policy is bounded by construction: at most two deterministic
         # candidates, exactly one possible second-candidate retry and no
@@ -948,11 +1004,10 @@ def _build_appraisal_candidates(
     conflict: bool,
     message: str,
     relationship_aftereffect: Mapping[str, Any] | None = None,
+    prior_appraisal_kind: str = "",
 ) -> tuple[_AppraisalCandidate, ...]:
-    if not observations:
-        return ()
     tag = _top_tag(observations)
-    confidence = max(item.confidence for item in observations)
+    confidence = max((item.confidence for item in observations), default=0.0)
     lower = message.lower()
     has_space = any(marker in lower for marker in _SPACE_MARKERS)
     has_repair = any(marker in lower for marker in _REPAIR_MARKERS)
@@ -971,9 +1026,17 @@ def _build_appraisal_candidates(
         "MISUNDERSTOOD",
         "BOUNDARY",
     }
+    prior_repair_context = str(prior_appraisal_kind or "").strip().lower() in {
+        "natsume_may_have_hurt_user",
+        "repair_signal",
+        "repair_under_directed_disrespect",
+    }
+    repair_continuation = prior_repair_context and any(
+        marker in lower for marker in _RELATIONAL_REPAIR_CONTINUATION_MARKERS
+    )
     natsume_may_have_hurt_user = _signals_natsume_may_have_hurt_user(message) or (
         response_may_have_missed_user and not has_space
-    )
+    ) or (repair_continuation and not has_space)
     candidates: list[_AppraisalCandidate] = []
     if conflict:
         candidates.append(

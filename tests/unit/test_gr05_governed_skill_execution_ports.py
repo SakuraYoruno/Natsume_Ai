@@ -258,6 +258,16 @@ def test_frozen_executor_payload_skips_post_admission_skill_normalization(
             fallback_policy="strict_fail",
             handler=forbidden_handler,
             model_budget_required=False,
+            version_binding=SimpleNamespace(
+                to_dict=lambda: {
+                    "bundle_id": "skill://ne05/agent-memory-curator/2",
+                    "bundle_digest": "sha256:" + "a" * 64,
+                    "bundle_version": "2.0.0",
+                    "runtime_adapter_id": "builtin-skill-alias.v1",
+                    "runtime_protocol_version": "v1",
+                    "maturity_level": 2,
+                }
+            ),
             execution_policy=(
                 SkillExecutionPolicy.PRE_ACCEPTANCE_PROPOSAL_ONLY
             ),
@@ -326,3 +336,14 @@ def test_frozen_executor_payload_skips_post_admission_skill_normalization(
     assert dispatched["_context"]["_governed_execution_context"]["target_id"] == (
         "agent_memory_curator"
     )
+    assert dispatched["_context"]["skill_version_binding"] == {
+        "bundle_id": "skill://ne05/agent-memory-curator/2",
+        "bundle_digest": "sha256:" + "a" * 64,
+        "bundle_version": "2.0.0",
+        "runtime_adapter_id": "builtin-skill-alias.v1",
+        "runtime_protocol_version": "v1",
+        "maturity_level": 2,
+    }
+    assert result.payload["skill_version_binding"] == dispatched["_context"][
+        "skill_version_binding"
+    ]

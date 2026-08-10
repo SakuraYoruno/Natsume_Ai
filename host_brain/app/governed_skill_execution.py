@@ -123,6 +123,7 @@ def execute_governed_skill(
 
     skill_meta = registry.require(skill_name)
     _require_governed_skill_policy(skill_name, skill_meta)
+    version_binding = _serialize_skill_version_binding(skill_meta)
     receipt_ref = _skill_receipt_ref(request_ref, skill_name)
     tokens = governor_result.get("tokens")
     token_projection = dict(tokens) if isinstance(tokens, Mapping) else {}
@@ -279,6 +280,11 @@ def execute_governed_skill(
                 ),
                 "receipt_ref": receipt_ref,
                 **(
+                    {"skill_version_binding": version_binding}
+                    if version_binding is not None
+                    else {}
+                ),
+                **(
                     {
                         "governed_skill_model_budget_attestation": (
                             model_budget_attestation
@@ -314,6 +320,7 @@ def record_governed_skill_execution(
     approval_token_ref: str | None,
     ts_ms: int,
     evidence_ref: str | None,
+    manifest_ref: str | None = None,
 ) -> None:
     """Persist the canonical Skill worker receipt and fail on write loss."""
 
@@ -338,7 +345,7 @@ def record_governed_skill_execution(
             "evidence_ref": (
                 evidence_ref or _skill_receipt_ref(request_id, skill_name)
             ),
-            "manifest_ref": None,
+            "manifest_ref": manifest_ref,
             "ts_ms": int(ts_ms),
         }
     )
@@ -381,6 +388,9 @@ def _build_execution_context(
         },
         "capability_broker": ports.capability_broker,
     }
+    version_binding = _serialize_skill_version_binding(skill_meta)
+    if version_binding is not None:
+        context["skill_version_binding"] = version_binding
     if is_agent_runtime_skill(skill_name):
         context["model_attempt_service"] = ports.model_attempt_service
     if (ports.agent_artifact_store is None) != (
@@ -406,6 +416,19 @@ def _build_execution_context(
             )
         )
     return context
+
+
+def _serialize_skill_version_binding(skill_meta: Any) -> dict[str, Any] | None:
+    version_binding = getattr(skill_meta, "version_binding", None)
+    if version_binding is None:
+        return None
+    serialize_binding = getattr(version_binding, "to_dict", None)
+    if not callable(serialize_binding):
+        raise PermissionError("SKILL_RUNTIME_VERSION_BINDING_INVALID")
+    serialized = dict(serialize_binding())
+    if not str(serialized.get("bundle_id") or "").strip():
+        raise PermissionError("SKILL_RUNTIME_VERSION_BINDING_INVALID")
+    return serialized
 
 
 def _compose_model_budget_runtime(

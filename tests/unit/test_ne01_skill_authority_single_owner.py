@@ -159,6 +159,30 @@ def test_governed_receipt_write_failure_is_not_swallowed() -> None:
         )
 
 
+def test_governed_receipt_persists_executed_skill_bundle_identity() -> None:
+    captured: dict = {}
+
+    class _Ledger:
+        def log_skill_exec(self, row):  # noqa: ANN001, ANN201
+            captured.update(row)
+
+    record_governed_skill_execution(
+        ledger=_Ledger(),
+        request_id="request-version-bound-receipt",
+        intent_id="intent-version-bound-receipt",
+        skill_name="session_summary",
+        result_status="SUCCESS",
+        result_code=None,
+        result_digest="session_summary",
+        approval_token_ref="approval://version-bound",
+        ts_ms=1_800_000_000_000,
+        evidence_ref="skillreceipt://sha256/" + "b" * 64,
+        manifest_ref="skill://ne05/session-summary/2",
+    )
+
+    assert captured["manifest_ref"] == "skill://ne05/session-summary/2"
+
+
 def test_scheduler_personality_metadata_cannot_invoke_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

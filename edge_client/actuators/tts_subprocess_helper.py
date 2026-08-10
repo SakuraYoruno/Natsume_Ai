@@ -51,16 +51,21 @@ def main(argv: list[str] | None = None) -> int:
         language=str(args.language or "zh"),
     )
     mgr = SoVITSModelManager(cfg)
-    result = mgr.synthesize(
-        str(args.text),
-        language=str(args.text_language or "zh"),
-        emotion_tag=str(args.emotion_tag or "").strip() or None,
-        voice_profile=str(args.voice_profile or "").strip() or None,
-        emotion_intensity=args.emotion_intensity,
-        speed_factor=args.speed_factor,
-        energy_level=args.energy_level,
-        pitch_semitones=args.pitch_semitones,
-    )
+    try:
+        result = mgr.synthesize(
+            str(args.text),
+            language=str(args.text_language or "zh"),
+            emotion_tag=str(args.emotion_tag or "").strip() or None,
+            voice_profile=str(args.voice_profile or "").strip() or None,
+            emotion_intensity=args.emotion_intensity,
+            speed_factor=args.speed_factor,
+            energy_level=args.energy_level,
+            pitch_semitones=args.pitch_semitones,
+        )
+    finally:
+        # The helper is intentionally one-shot.  Explicit cleanup also makes
+        # this safe if a future backend uses a child process or native handle.
+        mgr.shutdown()
     if not result.success or result.audio_data is None:
         print(
             json.dumps(

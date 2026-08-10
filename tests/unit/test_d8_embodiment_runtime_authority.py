@@ -97,6 +97,31 @@ def test_expression_batch_admission_is_atomic_and_exactly_replayable(tmp_path) -
         ).fetchone()[0] == 0
 
 
+def test_same_timestamp_voice_is_claimed_before_avatar(tmp_path) -> None:
+    repository, _ = _repository(tmp_path, "voice-before-avatar")
+    authority = _authority(repository, worker_id="embodiment-owner")
+    avatar = {
+        **_command("same-time-avatar"),
+        "kind": "avatar",
+        "action": "set_expression",
+    }
+    voice = {
+        **_command("same-time-voice"),
+        "kind": "voice",
+        "action": "speak",
+    }
+
+    repository.enqueue_many((avatar, voice), authority=authority)
+
+    claimed = repository.claim_next(
+        worker_id="embodiment-owner",
+        authority=authority,
+    )
+    assert claimed is not None
+    assert claimed["command"]["kind"] == "voice"
+    assert claimed["command"]["command_id"] == voice["command_id"]
+
+
 def test_0104_upgrades_a_0103_database_without_backfilling_unscoped_rows(tmp_path) -> None:
     legacy_dir = tmp_path / "migrations-0103"
     legacy_dir.mkdir()

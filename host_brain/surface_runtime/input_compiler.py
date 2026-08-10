@@ -92,7 +92,17 @@ _AFFECTIVE_AMBIGUOUS_TEXT_RE = re.compile(
     r"说不清|理不清|不知道.{0,8}(?:感觉|心情)|什么感觉"
 )
 _AFFECTIVE_AMBIGUOUS_FOLLOWUP_RE = re.compile(
-    r"^(?:嗯|还行|还好|就那样|不知道|反正结束了)[。.!！]?$"
+    r"^(?:嗯|还行|还好|就那样|不知道|反正结束了|(?:那)?你(?:觉得呢|怎么看))[。.!！?？]?$"
+)
+_AFFECTIVE_MIXED_TEXT_RE = re.compile(
+    r"(?:开心|高兴|兴奋).{0,16}(?:不踏实|不安|担心|害怕|有点怕|悬着)"
+    r"|(?:不踏实|不安|担心|害怕|有点怕|悬着).{0,16}(?:开心|高兴|兴奋)"
+)
+_AFFECTIVE_MIXED_RESULT_FOLLOWUP_RE = re.compile(
+    r"^(?=.{1,32}$)(?:项目|版本|发版|结果|offer|录取|入职)?.{0,12}"
+    r"(?:发布成功|上线成功|发版成功|通过了|终于过了|成了|拿到(?:了)?|定了|好消息)"
+    r"[。.!！]?$",
+    re.IGNORECASE,
 )
 
 
@@ -115,6 +125,16 @@ def _affective_task_mode_for_turn(
     mode = str(task_mode or "").strip()
     current = str(user_message or "").strip()
     fact_text = "\n".join(str(item or "") for item in list(facts or []))
+    # A short success statement inside an unresolved mixed-affect exchange is
+    # an emotional-result continuation, not a request to operate on a deploy.
+    # Without this precedence, the word ``发布`` alone converts
+    # ``项目发布成功。`` into ``technical_help`` and erases HOLD_COMPLEXITY
+    # before the typed Life continuity can reach Surface.
+    if (
+        _AFFECTIVE_MIXED_TEXT_RE.search(fact_text)
+        and _AFFECTIVE_MIXED_RESULT_FOLLOWUP_RE.fullmatch(current)
+    ):
+        return "default_text"
     technical_context = bool(_AFFECTIVE_TECHNICAL_TEXT_RE.search(fact_text))
     if _AFFECTIVE_TECHNICAL_TEXT_RE.search(current) or (
         technical_context and _AFFECTIVE_TECHNICAL_CONTINUATION_RE.search(current)

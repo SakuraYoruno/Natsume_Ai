@@ -206,6 +206,36 @@ def test_natural_mixed_affect_preserves_both_signals_and_selects_two_candidates(
     assert guidance.plan.utterance_frame.response_move == "RESONATE_WITH_BOTH_SIDES"
 
 
+def test_explicit_space_request_does_not_require_an_affect_observation(
+    tmp_path: Path,
+) -> None:
+    candidates = _build_appraisal_candidates(
+        observations=(),
+        conflict=False,
+        message="今晚先别问我怎么了，也别发消息，好吗。",
+    )
+
+    assert candidates
+    assert candidates[0].kind == "user_boundary_or_space"
+
+    fusion, reader, _ = _runtime(tmp_path)
+    request_id = "request-space-without-affect-observation"
+    result = fusion.resolve_request(
+        request_body=_request(message="今晚先别问我怎么了，也别发消息，好吗。"),
+        request_id=request_id,
+    )
+    guidance = _guidance_from(result, request_id=request_id)
+    state = reader.get_snapshot(result.scope.aggregate_id).state
+
+    assert result.path == "DEEP"
+    assert state["affective"]["last_appraisal"]["event_kind"] == (
+        "user_boundary_or_space"
+    )
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "GIVE_SPACE"
+    assert guidance.plan.candidate_count == 2
+
+
 def test_mixed_affect_result_followup_keeps_both_sides_without_new_appraisal(
     tmp_path: Path,
 ) -> None:
@@ -231,6 +261,29 @@ def test_mixed_affect_result_followup_keeps_both_sides_without_new_appraisal(
     assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
     assert guidance.plan.candidate_count == 2
     assert any("不要只说恭喜" in item for item in guidance.facts)
+
+
+def test_mixed_affect_physical_afterglow_keeps_both_sides(
+    tmp_path: Path,
+) -> None:
+    fusion, _reader, _ = _runtime(tmp_path)
+    fusion.resolve_request(
+        request_body=_request(message="我很开心，但心里也有点不踏实。"),
+        request_id="request-mixed-before-physical-afterglow",
+    )
+
+    request_id = "request-mixed-physical-afterglow"
+    result = fusion.resolve_request(
+        request_body=_request(message="消息落地了，我一直在笑，可手心还是凉的。"),
+        request_id=request_id,
+    )
+    guidance = _guidance_from(result, request_id=request_id)
+
+    assert result.continuity_kind == "MIXED_AFFECT_RESULT_CONTINUATION"
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "HOLD_COMPLEXITY"
+    assert guidance.plan.candidate_count == 2
+    assert guidance.plan.utterance_frame.response_move == "RESONATE_WITH_BOTH_SIDES"
 
 
 @pytest.mark.parametrize(
@@ -321,6 +374,16 @@ def test_natural_space_and_relationship_autonomy_phrases_take_distinct_paths(
         ("我们是什么关系。", "user_relational_autonomy", "RESPECT_AUTONOMY"),
         ("你让我失望了。", "natsume_may_have_hurt_user", "REPAIR"),
         ("你刚才把我的意思完全弄反了。", "natsume_may_have_hurt_user", "REPAIR"),
+        (
+            "你刚才那样回我，让我觉得自己说了也白说。",
+            "natsume_may_have_hurt_user",
+            "REPAIR",
+        ),
+        (
+            "你已经道歉了，但我还没有觉得这件事过去了。",
+            "natsume_may_have_hurt_user",
+            "REPAIR",
+        ),
     ],
 )
 def test_live_cohort_relational_phrases_reach_canonical_affective_acts(
@@ -490,6 +553,90 @@ def test_direct_missed_user_statement_freezes_repair_instead_of_generic_distress
     assert guidance is not None
     assert guidance.plan.companion_act.kind == "REPAIR"
     assert guidance.plan.expression_plan.voice_style == "REPAIR_OPEN"
+
+
+def test_concise_followups_reopen_a_prior_canonical_repair_context(
+    tmp_path: Path,
+) -> None:
+    fusion, reader, _ = _runtime(tmp_path)
+
+    first = fusion.resolve_request(
+        request_body=_request(message="你上次完全没听懂我。"),
+        request_id="request-repair-context-first",
+    )
+    first_guidance = _guidance_from(
+        first,
+        request_id="request-repair-context-first",
+    )
+    assert first_guidance is not None
+    assert first_guidance.plan.companion_act.kind == "REPAIR"
+
+    impact = fusion.resolve_request(
+        request_body=_request(message="那件事让我很不舒服。"),
+        request_id="request-repair-context-impact",
+    )
+    impact_guidance = _guidance_from(
+        impact,
+        request_id="request-repair-context-impact",
+    )
+    impact_state = reader.get_snapshot(impact.scope.aggregate_id).state
+    assert impact_state["affective"]["last_appraisal"]["event_kind"] == (
+        "natsume_may_have_hurt_user"
+    )
+    assert impact_guidance is not None
+    assert impact_guidance.plan.companion_act.kind == "REPAIR"
+    assert impact_guidance.plan.candidate_count == 2
+
+    challenge = fusion.resolve_request(
+        request_body=_request(message="别装懂。"),
+        request_id="request-repair-context-challenge",
+    )
+    challenge_guidance = _guidance_from(
+        challenge,
+        request_id="request-repair-context-challenge",
+    )
+    assert challenge_guidance is not None
+    assert challenge_guidance.plan.companion_act.kind == "REPAIR"
+    assert challenge_guidance.plan.candidate_count == 2
+
+
+@pytest.mark.parametrize(
+    "followup",
+    [
+        "我还没原谅你。",
+        "你说得轻巧。",
+        "先这样。",
+        "下次别再这样。",
+        "我听到了。",
+    ],
+)
+def test_canonical_repair_context_covers_explicit_short_closing_beats(
+    tmp_path: Path,
+    followup: str,
+) -> None:
+    fusion, _, _ = _runtime(tmp_path)
+
+    first = fusion.resolve_request(
+        request_body=_request(message="你上次完全没听懂我。"),
+        request_id="request-repair-closing-first",
+    )
+    assert _guidance_from(
+        first,
+        request_id="request-repair-closing-first",
+    ).plan.companion_act.kind == "REPAIR"
+
+    follow = fusion.resolve_request(
+        request_body=_request(message=followup),
+        request_id="request-repair-closing-followup",
+    )
+    guidance = _guidance_from(
+        follow,
+        request_id="request-repair-closing-followup",
+    )
+
+    assert guidance is not None
+    assert guidance.plan.companion_act.kind == "REPAIR"
+    assert guidance.plan.candidate_count == 2
 
 
 def test_clear_disrespect_toward_natsume_forms_contained_hurt_and_a_gentle_boundary(

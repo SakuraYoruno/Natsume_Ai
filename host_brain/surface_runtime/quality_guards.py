@@ -362,13 +362,60 @@ def _surface_recent_conversation_window_facts(
             request_id=request_id,
             limit=max(2, min(int(limit or 5), 8)),
         )
+        committed_surface_rows = (
+            repository.recent_committed_surface_replies_before_request(
+                session_id=session_id,
+                request_id=request_id,
+                limit=max(2, min(int(limit or 5), 8)),
+            )
+        )
     except Exception:
         return ()
     finally:
         if repository is not None:
             repository.close()
+    projected_rows = [dict(row) for row in rows]
+    projected_assistant_requests = {
+        str(row.get("request_id") or "").strip()
+        for row in projected_rows
+        if str(row.get("role") or "").strip() == "assistant"
+    }
+    user_order_by_request = {
+        str(row.get("request_id") or "").strip(): float(
+            int(row.get("turn_index") or 0)
+        )
+        for row in projected_rows
+        if str(row.get("role") or "").strip() == "user"
+        and str(row.get("request_id") or "").strip()
+    }
+    max_projected_order = max(
+        (float(int(row.get("turn_index") or 0)) for row in projected_rows),
+        default=-1.0,
+    )
+    merged_rows: list[dict[str, Any]] = []
+    for row in projected_rows:
+        row["_surface_logical_order"] = float(int(row.get("turn_index") or 0))
+        merged_rows.append(row)
+    orphan_offset = 1
+    for raw in sorted(
+        committed_surface_rows,
+        key=lambda row: int(row.get("ts_ms") or 0),
+    ):
+        row = dict(raw)
+        artifact_request = str(row.get("request_id") or "").strip()
+        if artifact_request and artifact_request in projected_assistant_requests:
+            continue
+        if artifact_request in user_order_by_request:
+            logical_order = user_order_by_request[artifact_request] + 0.5
+        else:
+            logical_order = max_projected_order + float(orphan_offset)
+            orphan_offset += 1
+        row["_surface_logical_order"] = logical_order
+        merged_rows.append(row)
+    merged_rows.sort(key=lambda row: float(row.get("_surface_logical_order") or 0.0))
+    merged_rows = merged_rows[-max(2, min(int(limit or 5), 8)) :]
     turns: list[str] = []
-    for row in reversed(rows):
+    for row in merged_rows:
         try:
             role = str(row["role"] or "").strip()
             content = re.sub(r"\s+", " ", str(row["content"] or "").strip())

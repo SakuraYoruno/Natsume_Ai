@@ -215,7 +215,10 @@ class EmbodimentOutboxRepository:
             row = connection.execute(
                 "SELECT * FROM host_embodiment_outbox "
                 "WHERE runtime_scope_id = ? AND status = 'PENDING' "
-                "ORDER BY created_at_ms, outbox_id LIMIT 1",
+                "ORDER BY created_at_ms, "
+                "CASE json_extract(command_json, '$.kind') "
+                "WHEN 'voice' THEN 0 WHEN 'avatar' THEN 1 ELSE 2 END, "
+                "outbox_id LIMIT 1",
                 (self._runtime_scope_id,),
             ).fetchone()
             if row is None:

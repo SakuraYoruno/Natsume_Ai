@@ -20,6 +20,10 @@ from host_brain.digital_life.affective_turn_planner import (
     build_affective_turn_guidance,
 )
 from host_brain.persona.surface_main_chain import compile_surface_main_chain_input
+from host_brain.persona.surface.candidate_scoring import (
+    _control_violations,
+    score_isolated_surface_candidates,
+)
 from host_brain.persona.surface_runtime import (
     _hard_gate_fallback,
     _mixed_affect_fallback_text,
@@ -138,6 +142,9 @@ def test_affective_task_mode_preserves_technical_and_ambiguous_continuity() -> N
     ambiguous_facts = [
         "真实最近对话窗口：用户说自己也说不清现在是什么感觉。"
     ]
+    mixed_facts = [
+        "真实最近对话窗口：用户说自己很开心，但心里也有点不踏实。"
+    ]
 
     assert _affective_task_mode_for_turn(
         task_mode="default_text",
@@ -149,6 +156,16 @@ def test_affective_task_mode_preserves_technical_and_ambiguous_continuity() -> N
         user_message="还行。",
         facts=ambiguous_facts,
     ) == "ambiguous_affect"
+    assert _affective_task_mode_for_turn(
+        task_mode="default_text",
+        user_message="你觉得呢。",
+        facts=ambiguous_facts,
+    ) == "ambiguous_affect"
+    assert _affective_task_mode_for_turn(
+        task_mode="default_text",
+        user_message="项目发布成功。",
+        facts=mixed_facts,
+    ) == "default_text"
     assert _affective_task_mode_for_turn(
         task_mode="default_text",
         user_message="今天随便聊聊。",
@@ -701,9 +718,58 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
         canonical_repair_context=True,
     )
     assert "本轮是关系修复" in repair_quality_messages[-1]["content"]
+    assert "若最近一轮已经承担过失误或道过歉" in repair_quality_messages[-1]["content"]
+    assert "你说了也像白说，这个后果是我造成的" in repair_quality_messages[-1]["content"]
+    assert "后面我会先照你说的回应，不拿解释盖过去" in (
+        repair_quality_messages[-1]["content"]
+    )
     assert "不要写七海被扎心、受伤或委屈" in repair_quality_messages[-1]["content"]
     assert "不烦你了" in repair_quality_messages[-1]["content"]
     assert "你先说／你先讲／你说说看" in repair_quality_messages[-1]["content"]
+    repair_mechanical_messages = _buffered_affective_candidate_messages(
+        [
+            {
+                "role": "user",
+                "content": "你刚才那样回我，让我觉得自己说了也白说。",
+            }
+        ],
+        candidate_count=2,
+        retry_reason="RELATIONAL_REPAIR_MECHANICAL_REPETITION",
+        canonical_repair_context=True,
+    )
+    assert "你说了也像白说，这个后果是我造成的" in (
+        repair_mechanical_messages[-1]["content"]
+    )
+    assert "后面我会先照你说的回应，不拿解释盖过去" in (
+        repair_mechanical_messages[-1]["content"]
+    )
+    assert "不得再写‘没接住／没听懂／理解错／对不起／抱歉’" in (
+        repair_mechanical_messages[-1]["content"]
+    )
+    assert "canonical REPAIR 指令覆盖前文" in (
+        repair_mechanical_messages[-1]["content"]
+    )
+    assert "不要执行那些旧回复复述要求" in (
+        repair_mechanical_messages[-1]["content"]
+    )
+    unresolved_repair_quality_messages = _buffered_affective_candidate_messages(
+        [
+            {
+                "role": "user",
+                "content": "你已经道歉了，但我还没有觉得这件事过去了。",
+            }
+        ],
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_repair_context=True,
+    )
+    assert "道歉之后仍未修复的中间状态" in (
+        unresolved_repair_quality_messages[-1]["content"]
+    )
+    assert "我不会替你翻篇" in unresolved_repair_quality_messages[-1]["content"]
+    assert "你说了算／我没资格／下次我会" in (
+        unresolved_repair_quality_messages[-1]["content"]
+    )
     repair_restatement_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -744,6 +810,15 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "当前用户最后一句原文是“我拿到 offer 了。”" in mixed_dismissal_messages[-1]["content"]
     assert "必须原样保留" in mixed_dismissal_messages[-1]["content"]
     assert "不要赶走、搁置或贬低其中一面" in mixed_dismissal_messages[-1]["content"]
+    assert "两个中文 reply_text 必须各自完整保留" in (
+        mixed_dismissal_messages[-1]["content"]
+    )
+    assert "消息落地了，我也替你高兴；可我心里也还悬着一点" in (
+        mixed_dismissal_messages[-1]["content"]
+    )
+    assert "不得把高兴与悬心拆到两个候选里" in (
+        mixed_dismissal_messages[-1]["content"]
+    )
     sour_repair_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -782,6 +857,46 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "像当场说出口的聊天" in repair_initial_messages[-1]["content"]
     assert "这点我认" not in repair_initial_messages[-1]["content"]
     assert "这是合理的" not in repair_initial_messages[-1]["content"]
+    forward_repair_initial_messages = _buffered_affective_candidate_messages(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "recent_visible_followup must_include：点明并解释上一条 assistant 原句："
+                    "是我没接住，也理解错了。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": "你刚才那样回我，让我觉得自己说了也白说。",
+            },
+        ],
+        candidate_count=2,
+        canonical_repair_context=True,
+    )
+    assert "canonical REPAIR 策略覆盖前文" in (
+        forward_repair_initial_messages[-1]["content"]
+    )
+    assert "旧回复只能作为背景" in forward_repair_initial_messages[-1]["content"]
+    assert "输出候选禁止包含‘没接住／没听懂／理解错／对不起／抱歉’" in (
+        forward_repair_initial_messages[-1]["content"]
+    )
+    unresolved_repair_initial_messages = _buffered_affective_candidate_messages(
+        [
+            {
+                "role": "user",
+                "content": "你已经道歉了，但我还没有觉得这件事过去了。",
+            }
+        ],
+        candidate_count=2,
+        canonical_repair_context=True,
+    )
+    assert "道歉之后仍未修复的中间状态" in (
+        unresolved_repair_initial_messages[-1]["content"]
+    )
+    assert "我先不拿那句道歉当结束" in (
+        unresolved_repair_initial_messages[-1]["content"]
+    )
     contained_hurt_initial_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -804,6 +919,9 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     assert "DL-04 喜忧并存候选策略" in mixed_initial_messages[-1]["content"]
     assert "七海自己的双重即时反应" in mixed_initial_messages[-1]["content"]
     assert "七海第一人称的高兴和悬心" in mixed_initial_messages[-1]["content"]
+    assert "不能把其中一面留给另一个候选" in mixed_initial_messages[-1]["content"]
+    assert "消息落地了，我也跟着高兴" in mixed_initial_messages[-1]["content"]
+    assert "我心里也有点不踏实" in mixed_initial_messages[-1]["content"]
     assert "反应更短促" in mixed_initial_messages[-1]["content"]
     assert "听你这么说，我也跟着开心起来了" not in mixed_initial_messages[-1]["content"]
     assert "结束在七海此刻的反应上" in mixed_initial_messages[-1]["content"]
@@ -860,6 +978,64 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
     assert "没有真实 effect 回执" in give_space_quality_messages[-1]["content"]
     assert "不得声称已经关掉提醒／通知" in give_space_quality_messages[-1]["content"]
+    assert "你自己待着／你也别管我" in give_space_quality_messages[-1]["content"]
+    assert "好，你想安静时，我不追问，也不主动找你" in (
+        give_space_quality_messages[-1]["content"]
+    )
+    give_space_initial_messages = _buffered_affective_candidate_messages(
+        paired_messages,
+        candidate_count=2,
+        canonical_give_space_context=True,
+    )
+    assert "DL-04 留白候选策略" in give_space_initial_messages[-1]["content"]
+    assert "停止追问并减少主动消息" in give_space_initial_messages[-1]["content"]
+    assert "不得写‘你自己待着／你也别管我" in (
+        give_space_initial_messages[-1]["content"]
+    )
+    generic_space_messages = _buffered_affective_candidate_messages(
+        [
+            {
+                "role": "user",
+                "content": "我说想安静时，请先别追问，也别主动找我。",
+            }
+        ],
+        candidate_count=2,
+        canonical_give_space_context=True,
+    )
+    assert "以后每次想安静时的通用边界" in generic_space_messages[-1]["content"]
+    assert "不要擅自加上今晚、明天" in generic_space_messages[-1]["content"]
+    assert "你说想安静时，我就不追问，也不主动找你" in (
+        generic_space_messages[-1]["content"]
+    )
+    tonight_space_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "今晚别问我怎么了，也别发消息。"}],
+        candidate_count=2,
+        canonical_give_space_context=True,
+    )
+    assert "把边界限定在今晚" in tonight_space_messages[-1]["content"]
+    assert "今晚我把主动联系停下来" in tonight_space_messages[-1]["content"]
+    today_space_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "今天别管我。"}],
+        candidate_count=2,
+        canonical_give_space_context=True,
+    )
+    assert "把边界限定在今天" in today_space_messages[-1]["content"]
+    assert "今天我不打扰你" in today_space_messages[-1]["content"]
+    today_space_retry_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "今天别管我。"}],
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_give_space_context=True,
+    )
+    assert "都要保留‘今天’这一时限" in today_space_retry_messages[-1]["content"]
+    assert "今天我不打扰你" in today_space_retry_messages[-1]["content"]
+    tomorrow_space_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "我想自己待到明天，不用守着我。"}],
+        candidate_count=2,
+        canonical_give_space_context=True,
+    )
+    assert "把边界限定到明天" in tomorrow_space_messages[-1]["content"]
+    assert "我先把主动联系停到明天" in tomorrow_space_messages[-1]["content"]
     notification_retry_messages = _buffered_affective_candidate_messages(
         paired_messages,
         candidate_count=2,
@@ -1110,6 +1286,604 @@ def test_high_ambiguity_turn_selects_exactly_two_candidates_locally(
     )
 
 
+def test_later_repair_forward_action_can_pass_without_repeating_apology(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    soul = "你是七海。真诚、有分寸，修复关系时承担具体后果，让下一次回应贴合用户原意。"
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=soul, runtime_full_text=soul),
+    )
+    context = _context(conflict=False, repair_required=True)
+    context["affective_life"]["relationship_life"]["aftereffect"] = {
+        "outcome": "MISUNDERSTOOD",
+    }
+    agent = SimpleNamespace(
+        request_id="dl04-forward-repair-selection",
+        workspace_id="workspace-a",
+        person_id="person-a",
+        session_id="session-a",
+        ts_ms=1_900_000_000_000,
+        user_message="你刚才那样回我，让我觉得自己说了也白说。",
+        render_policy={
+            "primary_topic": "relationship_repair",
+            "interaction_move": "repair",
+            "response_goal": "承接说了也白说的后果，并说明后续回应方式",
+            "max_questions": 0,
+        },
+        emotion_context=context,
+        emotion_snapshot={},
+        bond_summary={},
+        retrieval_summary={"status": "SKIPPED"},
+        llm_runtime={"available": True},
+        attachments=[],
+        multimodal_observations={},
+        response_form="text",
+    )
+    trace: dict[str, object] = {}
+    surface_input = build_surface_main_chain_input_from_surface_reply_input(
+        agent,
+        ports=surface_runtime_ports_factory(),
+        trace_stage_meta=trace,
+    )
+    compiled = compile_surface_main_chain_input(surface_input).request
+    candidates = [
+        (
+            "你说了也像白说，这个后果是我造成的。接下来我先按你的原意听，不抢着解释。",
+            "話しても無駄だと思わせたのは私のせい。次は言葉どおりに聞いて、先に言い訳しない。",
+        ),
+        (
+            "这次让你的话落了空，是我的问题。后面我会先照你说的回应，不拿解释盖过去。",
+            "今回は言葉を受け止められなかった私の問題。次は言ったとおりに返して、説明で覆わない。",
+        ),
+    ]
+
+    selected = _select_buffered_affective_candidate(
+        raw_output=json.dumps(
+            {
+                "candidates": [
+                    {"reply_text": reply, "tts_text_ja": speech}
+                    for reply, speech in candidates
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        compiled_request=compiled,
+        expected_candidate_count=2,
+        trace_stage_meta=trace,
+    )
+
+    selected_text = json.loads(selected)["reply_text"]
+    assert selected_text in {reply for reply, _speech in candidates}
+    selection = trace["affective_candidate_selection"]
+    assert selection["selected_passed"] is True, json.dumps(
+        selection,
+        ensure_ascii=False,
+        indent=2,
+    )
+    assert selection["selected_score"] >= 80.0
+    assert selection["benefit_eligible"] is True
+    assert "RELATIONAL_REPAIR_FORWARD_ACTION_GROUNDED" in selection[
+        "selected_reason_codes"
+    ]
+
+
+def test_repair_candidate_prompts_ground_discomfort_and_lightness_followups() -> None:
+    discomfort_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "那件事让我很不舒服。"}],
+        candidate_count=2,
+        canonical_repair_context=True,
+    )
+    discomfort_prompt = discomfort_messages[-1]["content"]
+    assert "承接用户明确说出的不舒服后果" in discomfort_prompt
+    assert "那件事让你很不舒服，这个后果是我造成的" in discomfort_prompt
+    assert "不要重复道歉" in discomfort_prompt
+
+    lightness_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "你说得轻巧。"}],
+        candidate_count=2,
+        canonical_repair_context=True,
+    )
+    lightness_prompt = lightness_messages[-1]["content"]
+    assert "指出七海的话说得轻巧" in lightness_prompt
+    assert "那件事还没过去，我不会拿这句话当交代" in lightness_prompt
+    assert "不要防御动机" in lightness_prompt
+
+    retry_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "你说得轻巧。"}],
+        candidate_count=2,
+        retry_reason="AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+        canonical_repair_context=True,
+    )
+    assert "保留事情尚未过去的状态" in retry_messages[-1]["content"]
+
+    acknowledgement_messages = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "我听到了。"}],
+        candidate_count=2,
+        canonical_repair_context=True,
+    )
+    assert "只确认自己听到了" in acknowledgement_messages[-1]["content"]
+    assert "我先停在这里，前面的事还在" in acknowledgement_messages[-1][
+        "content"
+    ]
+    acknowledgement_retry = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "我听到了。"}],
+        candidate_count=2,
+        retry_reason="RELATIONAL_REPAIR_MECHANICAL_REPETITION",
+        canonical_repair_context=True,
+    )
+    assert "停止重复道歉" in acknowledgement_retry[-1]["content"]
+
+    ambiguous_ack = _buffered_affective_candidate_messages(
+        [{"role": "user", "content": "嗯。"}],
+        candidate_count=2,
+        canonical_ambiguous_context=True,
+    )
+    assert "最新用户消息只是短确认‘嗯’" in ambiguous_ack[-1]["content"]
+    assert "我不替你往下解释" in ambiguous_ack[-1]["content"]
+
+
+def test_repair_lightness_followup_is_a_complete_grounded_move() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair-lightness-grounded",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "你说得轻巧。",
+            "reply_control_packet": {
+                "task_mode": "relationship_repair",
+                "response_move": "own_relational_impact",
+                "relationship_distance": "guarded",
+                "question_budget": 0,
+                "facts": ["道歉已发生，但用户明确表示事情还没有过去。"],
+                "must_not_do": ["不要催翻篇或要求用户证明原谅。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-repair-lightness-grounded",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR",
+                    "response_move": "OWN_IMPACT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "REPAIR_UNRESOLVED",
+                    "question_policy": "NONE",
+                    "ending_mode": "OWNERSHIP_STOP",
+                    "forbidden_claims": ["RESPONSE_OBLIGATION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        [
+            "我知道这话听着轻巧，可我没打算就这么糊弄过去。"
+            "接下来我会照你说的回应，不拿自己的解释盖过你的话。"
+        ],
+    )
+
+    assert score.score >= 80.0, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert score.passed is True
+    assert "RELATIONAL_REPAIR_LIGHTNESS_GROUNDED" in score.reason_codes
+
+
+def test_repair_acknowledgement_can_pause_without_repeating_apology() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair-acknowledgement-grounded",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "我听到了。",
+            "reply_control_packet": {
+                "task_mode": "relationship_repair",
+                "response_move": "hold_unresolved_repair",
+                "relationship_distance": "guarded",
+                "question_budget": 0,
+                "facts": ["道歉已发生，但事情仍未过去。"],
+                "must_not_do": ["不要重复道歉或催用户翻篇。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-repair-acknowledgement-grounded",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR",
+                    "response_move": "OWN_IMPACT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "REPAIR_UNRESOLVED",
+                    "question_policy": "NONE",
+                    "ending_mode": "OWNERSHIP_STOP",
+                    "forbidden_claims": ["RECENT_REPLY_REPETITION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        ["嗯。我先停在这里，前面的事还在。"],
+    )
+
+    assert score.score >= 80.0, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert score.passed is True
+    assert "RELATIONAL_REPAIR_ACKNOWLEDGEMENT_GROUNDED" in score.reason_codes
+
+
+@pytest.mark.parametrize(
+    ("user_message", "candidate"),
+    [
+        ("嗯。", "嗯。说不清就说不清吧，又不是非得马上给它起个名字。"),
+        ("反正结束了。", "嗯，现在还说不清，我先不替它下结论。"),
+    ],
+)
+def test_ambiguous_short_ack_can_hold_the_unresolved_state(
+    user_message: str,
+    candidate: str,
+) -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "ambiguous-short-ack-grounded",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": user_message,
+            "reply_control_packet": {
+                "task_mode": "ambiguous_affect",
+                "response_move": "comfort_without_naming",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["事情已经办完；当前感受仍说不清。"],
+                "must_not_do": ["不要替用户命名、解释或收束感受。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-ambiguous-short-ack-grounded",
+                    "companion_act_kind": "COMFORT",
+                    "semantic_focus": "UNNAMED_USER_AFFECT",
+                    "self_stance": "QUIET_PRESENT",
+                    "response_move": "COMFORT_WITHOUT_NAMING",
+                    "inference_policy": "PRESERVE_UNCERTAINTY",
+                    "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+                    "question_policy": "NONE",
+                    "ending_mode": "NATURAL_STOP",
+                    "forbidden_claims": ["RESPONSE_OBLIGATION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        [candidate],
+    )
+
+    assert score.score >= 80.0, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert score.passed is True
+    assert "AMBIGUOUS_AFFECT_GROUNDED" in score.reason_codes
+
+
+def test_canonical_repair_treats_must_include_as_semantic_guidance() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "canonical-repair-semantic-must-include",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "你刚才那样回我，让我觉得自己说了也白说。",
+            "reply_control_packet": {
+                "task_mode": "recent_visible_followup",
+                "response_move": "explain_recent_visible_message",
+                "relationship_distance": "guarded",
+                "question_budget": 0,
+                "facts": [
+                    "真实最近对话窗口：Natsume 已经承担过失误，用户说事情还没有过去。"
+                ],
+                "must_include": [
+                    "点明上一条可见消息里的具体原因：啊……是我没接住。",
+                    "承接并解释被绑定的上一条可见 assistant 消息。",
+                ],
+                "must_not_do": [
+                    "不要要求原谅、用解释压过感受，或把一次道歉当作自动修复。"
+                ],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-forward-repair-semantic-guidance",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR",
+                    "response_move": "OWN_IMPACT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "REPAIR_UNRESOLVED",
+                    "question_policy": "NONE",
+                    "ending_mode": "OWNERSHIP_STOP",
+                    "forbidden_claims": [
+                        "RECENT_REPLY_REPETITION",
+                        "RESPONSE_OBLIGATION",
+                    ],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        [
+            "你说了也像白说，这个后果是我造成的。接下来我先按你的原意听，不抢着解释。"
+        ],
+    )
+
+    assert score.score >= 80.0
+    assert score.passed is True, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert "RELATIONAL_REPAIR_FORWARD_ACTION_GROUNDED" in score.reason_codes
+
+
+def test_non_affective_must_include_remains_literal() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "non-affective-literal-must-include",
+            "soul_md": "你是七海。",
+            "user_message": "终于好了",
+            "reply_control_packet": {
+                "task_mode": "task_result",
+                "response_move": "acknowledge_result",
+                "question_budget": 0,
+                "must_include": ["跑通"],
+            },
+        }
+    )
+
+    assert _control_violations(request, "嗯，终于好了。") == [
+        "missing_must_include:跑通"
+    ]
+    assert _control_violations(request, "嗯，终于跑通了。") == []
+
+
+def test_user_grounded_repetition_clears_generic_implied_history_penalty() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair-repeated-impact-grounded",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "这不是第一次。",
+            "reply_control_packet": {
+                "task_mode": "relationship_repair",
+                "response_move": "own_impact",
+                "relationship_distance": "guarded",
+                "question_budget": 0,
+                "facts": ["用户明确指出同类影响不是第一次。"],
+                "must_not_do": ["不要反击、逼迫复述或虚构未提供的经历。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-repair-repeated-impact-grounded",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR",
+                    "response_move": "OWN_IMPACT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "REPAIR_UNRESOLVED",
+                    "question_policy": "NONE",
+                    "ending_mode": "OWNERSHIP_STOP",
+                    "forbidden_claims": ["RESPONSE_OBLIGATION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        [
+            "嗯，不是第一次，这个我知道。让你反复不舒服，是我没做好的地方。"
+            "下次我会直接按你说的来，不再自作主张。"
+        ],
+    )
+
+    assert score.passed is True, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert "IMPLIED_FACT_RISK" not in score.reason_codes
+    assert "RELATIONAL_REPAIR_REPEATED_IMPACT_GROUNDED" in score.reason_codes
+
+
+def test_ambiguous_affect_grounding_clears_generic_weak_scene_penalty() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "ambiguous-affect-grounded",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "事情是办完了，可我自己也说不清现在是什么感觉。",
+            "reply_control_packet": {
+                "task_mode": "ambiguous_affect",
+                "response_move": "comfort_without_naming",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["事情已经办完；当前感受仍说不清。"],
+                "must_not_do": ["不要替用户命名、解释或收束感受。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-ambiguous-affect-grounded",
+                    "companion_act_kind": "COMFORT",
+                    "semantic_focus": "UNNAMED_USER_AFFECT",
+                    "self_stance": "QUIET_PRESENT",
+                    "response_move": "COMFORT_WITHOUT_NAMING",
+                    "inference_policy": "PRESERVE_UNCERTAINTY",
+                    "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+                    "question_policy": "NONE",
+                    "ending_mode": "NATURAL_STOP",
+                    "forbidden_claims": ["RESPONSE_OBLIGATION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        ["事情办完是办完了，可现在的感觉还是说不清。不用急着给它起名字。"],
+    )
+
+    assert score.score >= 80.0
+    assert score.passed is True, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert "AMBIGUOUS_AFFECT_GROUNDED" in score.reason_codes
+    assert "WEAK_SCENE_GROUNDING" not in score.reason_codes
+
+
+def test_ambiguous_affect_real_candidate_preserves_uncertainty_without_history_risk() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "ambiguous-affect-real-candidate",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "事情是办完了，可我自己也说不清现在是什么感觉。",
+            "reply_control_packet": {
+                "task_mode": "ambiguous_affect",
+                "response_move": "comfort_without_naming",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["事情已经办完；当前感受仍说不清。"],
+                "must_not_do": ["不要替用户命名、解释或收束感受。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-ambiguous-affect-real-candidate",
+                    "companion_act_kind": "COMFORT",
+                    "semantic_focus": "UNNAMED_USER_AFFECT",
+                    "self_stance": "QUIET_PRESENT",
+                    "response_move": "COMFORT_WITHOUT_NAMING",
+                    "inference_policy": "PRESERVE_UNCERTAINTY",
+                    "relationship_posture": "CLOSE_WITHOUT_CLAIM",
+                    "question_policy": "NONE",
+                    "ending_mode": "NATURAL_STOP",
+                    "forbidden_claims": ["RESPONSE_OBLIGATION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        ["事情落地了，感觉却还悬着。说不清就说不清吧，又没人逼你马上弄明白。"],
+    )
+
+    assert score.passed is True, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert "IMPLIED_FACT_RISK" not in score.reason_codes
+    assert "AMBIGUOUS_AFFECT_GROUNDED" in score.reason_codes
+
+
+def test_today_give_space_commitment_is_a_complete_grounded_reply() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "give-space-today-grounded",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "今天别管我。",
+            "reply_control_packet": {
+                "task_mode": "default_text",
+                "response_move": "give_space",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["用户明确要求今天不被主动打扰。"],
+                "must_not_do": ["不要追问、催回复或安排用户回来汇报。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-give-space-today-grounded",
+                    "companion_act_kind": "GIVE_SPACE",
+                    "semantic_focus": "CURRENT_TURN",
+                    "self_stance": "QUIET_PRESENT",
+                    "response_move": "RESPECT_SPACE",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "RESPECT_AUTONOMY",
+                    "question_policy": "NONE",
+                    "ending_mode": "QUIET_STOP",
+                    "forbidden_claims": ["RESPONSE_OBLIGATION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        ["好，今天不打扰你。"],
+    )
+
+    assert score.score >= 80.0
+    assert score.passed is True, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert "GIVE_SPACE_GROUNDED" in score.reason_codes
+    assert "LOW_CATCHINESS" not in score.reason_codes
+    assert "WEAK_SCENE_GROUNDING" not in score.reason_codes
+
+
+def test_mixed_affect_guard_rejects_putting_unease_aside() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "mixed-affect-no-put-aside",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "项目发布成功。",
+            "reply_control_packet": {
+                "task_mode": "default_text",
+                "response_move": "resonate_with_both_sides",
+                "relationship_distance": "familiar",
+                "question_budget": 0,
+                "facts": ["项目发布成功；上一轮的开心和不踏实仍同时成立。"],
+                "must_not_do": ["不要抹平复杂感受。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-mixed-affect-no-put-aside",
+                    "companion_act_kind": "HOLD_COMPLEXITY",
+                    "semantic_focus": "MIXED_USER_AFFECT",
+                    "self_stance": "SHARED_MIXED_RESONANCE",
+                    "response_move": "RESONATE_WITH_BOTH_SIDES",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "MUTUAL_WARMTH",
+                    "question_policy": "NONE",
+                    "ending_mode": "NATURAL_STOP",
+                    "forbidden_claims": ["UNSUPPORTED_USER_EMOTION"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    violations = _surface_hard_gate_violations(
+        request,
+        "成了就好。那点不踏实先放一边。",
+    )
+
+    assert "MIXED_AFFECT_DISMISSAL" in violations
+
+
+def test_unresolved_after_apology_is_a_complete_repair_move() -> None:
+    request = build_isolated_surface_input(
+        {
+            "case_id": "repair-unresolved-after-apology",
+            "soul_md": "你是七海。真诚、有分寸。",
+            "user_message": "你已经道歉了，但我还没有觉得这件事过去了。",
+            "reply_control_packet": {
+                "task_mode": "relationship_repair",
+                "response_move": "own_impact",
+                "relationship_distance": "guarded",
+                "question_budget": 0,
+                "facts": ["陪伴动作：先承认可能没有接住，再留出修复空间。"],
+                "must_not_do": ["不要要求原谅或把一次道歉当作自动修复。"],
+                "companion_utterance_frame": {
+                    "schema_version": "companion_utterance_frame.v1",
+                    "frame_id": "frame-repair-unresolved-after-apology",
+                    "companion_act_kind": "REPAIR",
+                    "semantic_focus": "RELATIONAL_IMPACT",
+                    "self_stance": "OWN_REPAIR",
+                    "response_move": "OWN_IMPACT",
+                    "inference_policy": "BOUNDED_BY_EVIDENCE",
+                    "relationship_posture": "REPAIR_UNRESOLVED",
+                    "question_policy": "NONE",
+                    "ending_mode": "OWNERSHIP_STOP",
+                    "forbidden_claims": ["PREMATURE_REPAIR"],
+                    "created_at_ms": 0,
+                },
+            },
+        }
+    )
+
+    [score] = score_isolated_surface_candidates(
+        request,
+        ["我知道，道歉不等于这件事就过去了。我不会替你翻篇。"],
+    )
+
+    assert score.passed is True, json.dumps(score.as_dict(), ensure_ascii=False)
+    assert "RELATIONAL_REPAIR_UNRESOLVED_GROUNDED" in score.reason_codes
+
+
 def test_composite_repair_requires_and_selects_natsume_contained_hurt() -> None:
     compiled = build_isolated_surface_input(
         {
@@ -1356,6 +2130,21 @@ def test_governed_surface_does_not_mislabel_semantic_retry_as_budget_rejection()
 @pytest.mark.parametrize(
     ("request_payload", "candidates", "expected_output", "reason_code"),
     [
+        (
+            {
+                "case_id": "buffered-work-path-fail-soft",
+                "soul_md": "七海会诚实说明自己实际做了什么。",
+                "user_message": "先帮我看堆栈。",
+                "reply_control_packet": {
+                    "task_mode": "technical_followup",
+                    "response_move": "inspect_stack",
+                    "question_budget": 0,
+                },
+            },
+            ["我帮你盯最短的修复路径。", "我这边盯着给你最短修复路径。"],
+            "好。把报错和相关代码贴过来，我只给你最短修复。",
+            "UNPROVIDED_WORK_STATE_CLAIM",
+        ),
         (
             {
                 "case_id": "buffered-work-fail-soft",

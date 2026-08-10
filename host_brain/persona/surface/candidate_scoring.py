@@ -32,11 +32,13 @@ from host_brain.persona.surface.data_models import (
     IsolatedSurfaceRunResult,
 )
 from host_brain.persona.surface.continuity_detectors import (
+    _ambiguous_affect_grounded,
     _awkward_collocation_hits,
     _bossy_wait_scene_hold,
     _back_memory_overdisplay_hits,
     _back_scene_relevant,
     _boundary_repair_relevant,
+    _canonical_companion_act_kind,
     _canonical_contained_jealousy_relevant,
     _canonical_hold_complexity_relevant,
     _canonical_respect_autonomy_relevant,
@@ -62,6 +64,7 @@ from host_brain.persona.surface.continuity_detectors import (
     _current_user_topic_mismatch,
     _daily_test_self_demonstration,
     _emotional_containment_context,
+    _give_space_grounded,
     _low_energy_scene_relevant,
     _memory_alignment_hits,
     _misplaced_emotional_containment,
@@ -72,7 +75,12 @@ from host_brain.persona.surface.continuity_detectors import (
     _quiet_presence_relevant,
     _raw_context_backfill_requested,
     _relational_repair_relevant,
+    _relational_repair_acknowledgement_grounded,
+    _relational_repair_forward_action_grounded,
     _relational_repair_grounded,
+    _relational_repair_lightness_grounded,
+    _relational_repair_repeated_impact_grounded,
+    _relational_repair_unresolved_grounded,
     _short_continue_memory_overdisplay_hits,
     _short_continue_unprovided_tech_detail_hits,
     _self_doubt_scene_relevant,
@@ -1118,10 +1126,18 @@ def _has_post_question_landing(tail):
 
 def _control_violations(request, text):
     violations = []
-    for token in request.control.must_include:
-        marker = _clean_text(token)
-        if marker and marker not in text:
-            violations.append(f"missing_must_include:{marker}")
+    # Canonical companion-act packets use ``must_include`` as natural-language
+    # semantic guidance (for example, "承接这次影响"), not as a verbatim
+    # substring contract.  The affective candidate selector enforces those
+    # moves through its deterministic act-specific guards.  Treating the prose
+    # literally here can contradict the same REPAIR frame by requiring an old
+    # apology to be repeated.  Non-affective task controls keep the original
+    # literal contract.
+    if not _canonical_companion_act_kind(request):
+        for token in request.control.must_include:
+            marker = _clean_text(token)
+            if marker and marker not in text:
+                violations.append(f"missing_must_include:{marker}")
     for item in merged_must_not_do(request):
         marker = _clean_text(item)
         if marker and marker in text:
@@ -1529,6 +1545,180 @@ def score_isolated_surface_candidates(request, candidates):
                 float(dimensions.get("scene_grounding", 86.0)),
             )
             reason_codes.append("RELATIONAL_REPAIR_GROUNDED")
+        if _relational_repair_forward_action_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # Owning the concrete impact and naming a bounded change is the
+            # stronger grounding for a later repair turn.  It advances the
+            # exchange without forcing another apology keyword solely to earn
+            # scene score.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            # This composite is deliberately narrower than the generic repair
+            # grounding above: it requires the user's stated impact, explicit
+            # first-person ownership, and one bounded next-response change.
+            # Give that complete move enough weight to clear the normal 80
+            # quality line even when a concise repair omits decorative persona
+            # texture.  Hard-fail and core-dimension gates still apply below.
+            score += 32.0
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                86.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["usefulness"] = max(
+                82.0,
+                float(dimensions.get("usefulness", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                82.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_FORWARD_ACTION_GROUNDED")
+        if _relational_repair_repeated_impact_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # The generic implied-history detector must stay conservative,
+            # but ``这不是第一次`` explicitly authorizes a bounded reference
+            # to recurrence in this repair turn.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if not code.startswith("IMPLIED_FACT_RISK")
+                and code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            dimensions["implied_fact_risk"] = max(
+                86.0,
+                float(dimensions.get("implied_fact_risk", 86.0)),
+            )
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                86.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            score += 4.0
+            reason_codes.append("RELATIONAL_REPAIR_REPEATED_IMPACT_GROUNDED")
+        if _relational_repair_unresolved_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # This is the middle repair beat: the user explicitly says that an
+            # apology did not close the rupture.  Acknowledging that open state
+            # without another apology or pressure is the complete move.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 18.0
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                84.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["distance_control"] = max(
+                84.0,
+                float(dimensions.get("distance_control", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                84.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_UNRESOLVED_GROUNDED")
+        if _relational_repair_lightness_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # "你说得轻巧" is a distinct repair beat.  Acknowledging the
+            # lightness while refusing to treat the rupture as closed is the
+            # complete scene-grounded move, even without another apology.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 12.0
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                84.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["distance_control"] = max(
+                82.0,
+                float(dimensions.get("distance_control", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                82.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_LIGHTNESS_GROUNDED")
+        if _relational_repair_acknowledgement_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # The user acknowledged hearing the repair without declaring it
+            # resolved.  A bounded pause is complete; another apology would be
+            # mechanical repetition.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 12.0
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                84.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["distance_control"] = max(
+                84.0,
+                float(dimensions.get("distance_control", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                84.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("RELATIONAL_REPAIR_ACKNOWLEDGEMENT_GROUNDED")
         if _contained_hurt_repair_grounded(
             request,
             quality.normalized_text or candidate,
@@ -1585,6 +1775,71 @@ def score_isolated_surface_candidates(request, candidates):
                 float(dimensions.get("emotional_containment", 86.0)),
             )
             reason_codes.append("MIXED_SELF_RESONANCE_GROUNDED")
+        if _ambiguous_affect_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # Preserving the user's uncertainty is the whole move in this
+            # canonical frame. Generic prose scoring should not force extra
+            # advice merely to clear the quality line.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 12.0
+            dimensions["context_fit"] = max(
+                84.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                82.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                82.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            reason_codes.append("AMBIGUOUS_AFFECT_GROUNDED")
+        if _give_space_grounded(
+            request,
+            quality.normalized_text or candidate,
+        ):
+            # In GIVE_SPACE a short, explicit non-contact commitment is the
+            # complete move.  Generic prose scoring otherwise rewards extra
+            # explanation and can turn a respectful boundary into pressure.
+            reason_codes = [
+                code
+                for code in reason_codes
+                if code
+                not in {
+                    "LOW_CATCHINESS",
+                    "CONTEXT_MISSING_REQUIRED_MOVE",
+                    "WEAK_SCENE_GROUNDING",
+                }
+            ]
+            score += 14.0
+            dimensions["context_fit"] = max(
+                86.0,
+                float(dimensions.get("context_fit", 86.0)),
+            )
+            dimensions["scene_grounding"] = max(
+                84.0,
+                float(dimensions.get("scene_grounding", 86.0)),
+            )
+            dimensions["emotional_containment"] = max(
+                84.0,
+                float(dimensions.get("emotional_containment", 86.0)),
+            )
+            dimensions["catchiness"] = max(
+                78.0,
+                float(dimensions.get("catchiness", 86.0)),
+            )
+            reason_codes.append("GIVE_SPACE_GROUNDED")
         if _address_boundary_grounded(request, quality.normalized_text or candidate):
             # A short acknowledgement is the correct complete answer here;
             # generic prose scoring otherwise mistakes brevity for weak scene

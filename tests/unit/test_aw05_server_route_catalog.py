@@ -42,6 +42,7 @@ _ROUTE_ENV_PREFIXES = (
     "HOST_EXECUTIVE_ROUTER_",
     "HOST_DISPATCH_AGENT_",
     "HOST_VISION_LLM_",
+    "HOST_MULTIMODAL_",
 )
 _ROUTE_ENV_KEYS = frozenset(
     {
@@ -228,7 +229,7 @@ def test_natsume_agent_has_independent_model_timeout_lane(monkeypatch) -> None: 
     )
 
     assert route["route_lane"] == "agent"
-    assert route["model_id"] == "deepseek-v4-pro"
+    assert route["model_id"] == "deepseek-v4-flash"
     assert route["timeout_ms"] == 45000
     assert route["generation_parameters"]["max_tokens"] == 2400
 
@@ -241,6 +242,24 @@ def test_natsume_agent_has_independent_model_timeout_lane(monkeypatch) -> None: 
     )
     assert overridden["model_id"] == "deepseek-v4-flash"
     assert overridden["timeout_ms"] == 61000
+
+
+@pytest.mark.parametrize("tier", ("A", "B", "C", "D"))
+def test_default_text_tiers_use_non_thinking_deepseek_v4_flash(
+    monkeypatch,
+    tier: str,
+) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+
+    route = build_production_server_route_catalog().resolve(
+        scene_type="NATSUME_AGENT",
+        cognitive_tier=tier,
+        prompt_id="agent.react.v1",
+    )
+
+    assert route["provider_name"] == "deepseek"
+    assert route["model_id"] == "deepseek-v4-flash"
+    assert route["generation_parameters"]["thinking_mode"] == "disabled"
 
 
 def test_cross_provider_role_models_are_ignored_for_selected_provider(monkeypatch) -> None:  # noqa: ANN001
@@ -280,6 +299,34 @@ def test_provider_scoped_role_model_wins_before_generic_role_model(monkeypatch) 
     assert route["model_id"] == "deepseek-specialized-agent"
     assert route["model_selection_source"] == "HOST_DEEPSEEK_SUBAGENT_MODEL_ID"
     assert route["route_config_warnings"] == []
+
+
+def test_multimodal_lane_isolated_from_global_text_provider(monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("HOST_LLM_PROVIDER", "deepseek")
+    monkeypatch.setenv("HOST_DEEPSEEK_MODEL_ID", "deepseek-v4-flash")
+    monkeypatch.setenv("HOST_MULTIMODAL_PROVIDER", "gemini")
+    monkeypatch.setenv("HOST_MULTIMODAL_MODEL_ID_SYNC", "gemini-3.6-flash")
+    monkeypatch.setenv("HOST_MULTIMODAL_TIMEOUT_MS", "23000")
+
+    multimodal = ServerRouteCatalog().resolve(
+        scene_type="MULTIMODAL",
+        cognitive_tier="B",
+        prompt_id="multimodal.observer.json",
+    )
+    surface = ServerRouteCatalog().resolve(
+        scene_type="CHAT_SURFACE_REALTIME",
+        cognitive_tier="B",
+        prompt_id="chat.surface.realtime",
+    )
+
+    assert multimodal["provider_name"] == "gemini"
+    assert multimodal["model_id"] == "gemini-3.6-flash"
+    assert multimodal["model_selection_source"] == "HOST_MULTIMODAL_MODEL_ID_SYNC"
+    assert multimodal["timeout_ms"] == 23000
+    assert multimodal["route_lane"] == "multimodal"
+    assert surface["provider_name"] == "deepseek"
+    assert surface["model_id"] == "deepseek-v4-flash"
+    assert surface["generation_parameters"]["thinking_mode"] == "disabled"
 
 
 def test_chat_graph_runtime_projection_uses_same_catalog(monkeypatch) -> None:  # noqa: ANN001

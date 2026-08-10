@@ -149,6 +149,7 @@ def record_governed_skill_execution(
     approval_token_ref: str | None,
     ts_ms: int,
     evidence_ref: str | None,
+    manifest_ref: str | None = None,
 ) -> None:
     """Persist the worker-thread result on the ledger-owning event-loop thread."""
 
@@ -163,6 +164,7 @@ def record_governed_skill_execution(
         ts_ms=ts_ms,
         ledger=ledger,
         evidence_ref=evidence_ref,
+        manifest_ref=manifest_ref,
     )
 
 

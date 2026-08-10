@@ -61,16 +61,16 @@ HOST_DISPLAY_NAMES: Dict[str, str] = {s["service_id"]: s["name"] for s in HOST_S
 # deploy_type: "cloud" = 云端 API（Gemini/OpenAI/DeepSeek），"local" = 本地推理（Ollama）
 LLM_NODE_REGISTRY: Dict[str, Dict[str, str]] = {
     # 云端节点
-    "chat_direct_ja":          {"role": "聊天直出",     "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
-    "core_reasoner_primary":   {"role": "主推理",       "provider": "gemini", "model_id": "gemini-2.5-pro", "deploy_type": "cloud"},
-    "core_reasoner_secondary": {"role": "备用推理",     "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
-    "planner_constraints":     {"role": "规划约束",     "provider": "gemini", "model_id": "gemini-2.5-pro", "deploy_type": "cloud"},
-    "tool_planner":            {"role": "工具规划",     "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
-    "safety_verifier":         {"role": "安全验证",     "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
-    "consistency_verifier":    {"role": "一致性验证",   "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
-    "renderer_ja_c_style":     {"role": "日文渲染",     "provider": "gemini", "model_id": "gemini-2.5-flash-lite", "deploy_type": "cloud"},
-    "workbench_translate":     {"role": "翻译工作台",   "provider": "gemini", "model_id": "gemini-2.5-pro", "deploy_type": "cloud"},
-    "workbench_code_assist":   {"role": "代码辅助",     "provider": "gemini", "model_id": "gemini-2.5-pro", "deploy_type": "cloud"},
+    "chat_direct_ja":          {"role": "聊天直出",     "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "core_reasoner_primary":   {"role": "主推理",       "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "core_reasoner_secondary": {"role": "备用推理",     "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "planner_constraints":     {"role": "规划约束",     "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "tool_planner":            {"role": "工具规划",     "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "safety_verifier":         {"role": "安全验证",     "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "consistency_verifier":    {"role": "一致性验证",   "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "renderer_ja_c_style":     {"role": "日文渲染",     "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "workbench_translate":     {"role": "翻译工作台",   "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
+    "workbench_code_assist":   {"role": "代码辅助",     "provider": "deepseek", "model_id": "deepseek-v4-flash", "deploy_type": "cloud"},
     # 国内云端节点（DeepSeek）
     "cloud_cn_deepseek":       {"role": "国内云端 Gaming", "provider": "deepseek", "model_id": "deepseek-v4-flash",   "deploy_type": "cloud"},
     # 本地节点（Ollama）

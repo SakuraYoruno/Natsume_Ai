@@ -22,18 +22,16 @@ _TIER_MODEL_DEFAULTS: dict[str, dict[str, str]] = {
         "D": "gemini-2.5-flash-lite",
     },
     "deepseek": {
-        "A": "deepseek-v4-pro",
+        "A": "deepseek-v4-flash",
         "B": "deepseek-v4-flash",
         "C": "deepseek-v4-flash",
         "D": "deepseek-v4-flash",
     },
 }
 _NATSUME_AGENT_MODEL_DEFAULTS = {
-    # Structured proposal JSON is materially less reliable on the reasoning-
-    # heavy Flash route: it can spend the whole completion budget in
-    # ``reasoning_content`` and return an empty answer.  The Agent lane prefers
-    # the stable model; explicit scene/tier/provider overrides still win.
-    "deepseek": "deepseek-v4-pro",
+    # The production text plane is intentionally unified on non-thinking
+    # DeepSeek V4 Flash. Explicit scene/tier/provider overrides still win.
+    "deepseek": "deepseek-v4-flash",
     "gemini": "gemini-2.5-pro",
 }
 _PROVIDER_MODEL_ENV = {
@@ -191,6 +189,13 @@ class ServerRouteCatalog:
                 "HOST_CHAT_LOCAL_LLM_PROVIDER",
                 "HOST_CHAT_HOST_14B_PROVIDER",
             )
+        elif scene == "MULTIMODAL":
+            # Attachment observation is an independent model plane.  A global
+            # text-provider setting must not silently receive image content.
+            provider = _first_env(
+                f"HOST_MODEL_ROUTE_SCENE_{scene_token}_PROVIDER",
+                "HOST_MULTIMODAL_PROVIDER",
+            ) or "gemini"
         elif scene == "CHAT_SURFACE_REALTIME":
             provider = _first_env(
                 f"HOST_MODEL_ROUTE_SCENE_{scene_token}_PROVIDER",
@@ -202,7 +207,7 @@ class ServerRouteCatalog:
                 f"HOST_MODEL_ROUTE_SCENE_{scene_token}_PROVIDER",
                 "HOST_LLM_PROVIDER",
             )
-        provider = provider.lower() or ("openai" if local_chat else "gemini")
+        provider = provider.lower() or ("openai" if local_chat else "deepseek")
         if provider not in _SUPPORTED_PROVIDERS:
             raise ValueError(f"unsupported route catalog provider: {provider}")
 
@@ -271,7 +276,19 @@ class ServerRouteCatalog:
                 role_timeout_names = ("HOST_EXECUTIVE_ROUTER_TIMEOUT_MS", "HOST_DISPATCH_AGENT_TIMEOUT_MS")
                 default_timeout = 5_000
                 lane = "executive_router"
-            elif scene in {"VISION_UI", "VISION_ACTION_PLANNER", "MULTIMODAL"}:
+            elif scene == "MULTIMODAL":
+                role_model_names = (
+                    "HOST_MULTIMODAL_MODEL_ID_SYNC",
+                    "HOST_VISION_LLM_MODEL_ID",
+                )
+                provider_role_model_name = f"HOST_{_env_token(provider)}_VISION_MODEL_ID"
+                role_timeout_names = (
+                    "HOST_MULTIMODAL_TIMEOUT_MS",
+                    "HOST_VISION_LLM_TIMEOUT_MS",
+                )
+                default_timeout = 20_000
+                lane = "multimodal"
+            elif scene in {"VISION_UI", "VISION_ACTION_PLANNER"}:
                 role_model_names = ("HOST_VISION_LLM_MODEL_ID",)
                 provider_role_model_name = f"HOST_{_env_token(provider)}_VISION_MODEL_ID"
                 role_timeout_names = ("HOST_VISION_LLM_TIMEOUT_MS",)
@@ -336,11 +353,13 @@ class ServerRouteCatalog:
                 default=default_timeout,
             )
 
-        generation = (
+        generation = dict(
             self._generation_by_prompt.get(str(prompt_id))
             or self._generation_by_scene.get(scene)
             or {}
         )
+        if provider == "deepseek" and model_id.lower().startswith("deepseek-v4-flash"):
+            generation["thinking_mode"] = "disabled"
         route = {
             "available": True,
             "provider_name": provider,
@@ -351,7 +370,7 @@ class ServerRouteCatalog:
             "route_reason_code": f"SERVER_ROUTE_CATALOG:{lane.upper()}",
             "scene_type": scene,
             "cognitive_tier": tier,
-            "generation_parameters": dict(generation),
+            "generation_parameters": generation,
         }
         if not local_chat:
             route["model_selection_source"] = model_selection_source

@@ -6,6 +6,9 @@ from typing import Any
 
 import pytest
 
+from host_brain.app.surface_affective_native_stream import (
+    _native_affective_stream_preparation,
+)
 from host_brain.app.surface_main_chain_adapter import (
     _final_stream_usage_is_attested,
     surface_main_chain_sse_generator,
@@ -128,6 +131,19 @@ def test_final_stream_usage_status_requires_all_provider_budget_dimensions() -> 
     assert _final_stream_usage_is_attested(complete) is True
     assert _final_stream_usage_is_attested(missing_cost) is False
     assert _final_stream_usage_is_attested(SimpleNamespace(cached=True, attempts=())) is False
+
+
+def test_native_stream_transport_switch_falls_back_before_compilation(monkeypatch) -> None:
+    monkeypatch.setenv("HOST_SURFACE_NATIVE_SENTENCE_STREAM_ENABLED", "false")
+
+    assert (
+        _native_affective_stream_preparation(
+            _agent_input(),
+            ports=None,  # type: ignore[arg-type]
+            trace_stage_meta={},
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -695,6 +711,249 @@ async def test_native_stream_blocks_manipulative_sentence_before_it_is_visible(
     assert commit["decision"] == "NO_REPLY"
     assert commit["reason_code"] == "SURFACE_STREAM_INTERRUPTED"
     assert [item["command_type"] for item in submitted] == ["affective_turn_planned"]
+
+
+@pytest.mark.asyncio
+async def test_native_stream_repairs_unprovided_work_state_before_visibility(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    submitted: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class StreamingModel:
+        async def stream(self, _request):  # noqa: ANN001
+            yield "行，我这边盯着给你最短修复路径。"
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _submit)
+    agent_input = _agent_input()
+    agent_input.user_message = "先帮我看堆栈。"
+    agent_input.render_policy = {
+        "primary_topic": "technical_task",
+        "interaction_move": "solve",
+        "response_goal": "根据堆栈给出最短修复",
+        "response_form": "text",
+        "max_questions": 0,
+    }
+    ports = surface_runtime_ports_factory(
+        model_attempt_service=lambda: StreamingModel(),
+    )
+
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(agent_input, ports=ports)
+    ]
+    sentences = [
+        str(event.get("sentence") or "")
+        for event in events
+        if event.get("phase") == "SENTENCE"
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+
+    assert sentences
+    assert all("盯着" not in sentence and "后台" not in sentence for sentence in sentences)
+    assert any("堆栈" in sentence or "报错" in sentence for sentence in sentences)
+    assert commit["decision"] == "APPROVE"
+    repairs = commit["audit_refs"]["trace_stage_meta"][
+        "native_sentence_hard_gate_repairs"
+    ]
+    assert repairs[0]["reason_codes"] == ["UNPROVIDED_WORK_STATE_CLAIM"]
+
+
+@pytest.mark.asyncio
+async def test_native_stream_does_not_treat_reply_level_question_budget_as_sentence_gate(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    submitted: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+    monkeypatch.setattr(
+        "host_brain.persona.surface_runtime._surface_hard_gate_violations",
+        lambda _request, _text: ("QUESTION_BUDGET_PROMPTING_USER",),
+    )
+
+    class StreamingModel:
+        async def stream(self, _request):  # noqa: ANN001
+            yield "要不要先缓一下？"
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr("host_brain.surface_runtime.delivery_audit.submit_life_command", _submit)
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(
+            _agent_input(),
+            ports=surface_runtime_ports_factory(
+                model_attempt_service=lambda: StreamingModel(),
+            ),
+        )
+    ]
+
+    sentences = [
+        event for event in events if event.get("phase") == "SENTENCE"
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    assert [event["sentence"] for event in sentences] == ["要不要先缓一下？"]
+    assert commit["decision"] == "APPROVE"
+    assert "native_sentence_hard_gate_repairs" not in commit["audit_refs"][
+        "trace_stage_meta"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_native_stream_repairs_low_info_meeting_guess_before_visibility(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    submitted: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class StreamingModel:
+        async def stream(self, _request):  # noqa: ANN001
+            yield "开完了啊，那正好。下午的会最磨人，出来透口气吧。"
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.delivery_audit.submit_life_command",
+        _submit,
+    )
+    agent_input = _agent_input()
+    agent_input.user_message = "刚刚开会结束了。"
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(
+            agent_input,
+            ports=surface_runtime_ports_factory(
+                model_attempt_service=lambda: StreamingModel(),
+            ),
+        )
+    ]
+
+    sentences = [
+        event["sentence"] for event in events if event.get("phase") == "SENTENCE"
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    assert sentences == ["开完了啊，那正好。", "开完会了啊。那先歇口气。"]
+    assert commit["decision"] == "APPROVE"
+    repairs = commit["audit_refs"]["trace_stage_meta"][
+        "native_sentence_hard_gate_repairs"
+    ]
+    assert repairs[0]["reason_codes"] == ["LOW_INFO_SCENE_STATE_GUESS"]
+
+
+@pytest.mark.asyncio
+async def test_native_stream_repairs_repair_restatement_pressure_before_visibility(
+    monkeypatch,
+    surface_runtime_ports_factory,
+) -> None:
+    submitted: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.input_compiler.get_compiled_soul",
+        lambda: SimpleNamespace(source_text=SOUL, runtime_full_text=SOUL),
+    )
+
+    class StreamingModel:
+        async def stream(self, _request):  # noqa: ANN001
+            yield "行，那我不装。你说，我听着。"
+
+    def _submit(**kwargs: Any) -> dict[str, Any]:
+        submitted.append(kwargs)
+        return {
+            "command_id": kwargs["command_id"],
+            "person_id": kwargs["person_id"],
+            "status": "APPLIED",
+            "event_id": f"event-{len(submitted)}",
+            "state_version": len(submitted),
+            "outbox_count": 0,
+            "created_at_ms": kwargs["created_at_ms"],
+            "replayed": False,
+        }
+
+    monkeypatch.setattr(
+        "host_brain.surface_runtime.delivery_audit.submit_life_command",
+        _submit,
+    )
+    agent_input = _agent_input()
+    agent_input.user_message = "别装懂。"
+    agent_input.render_policy = {
+        "primary_topic": "relationship_repair",
+        "interaction_move": "repair",
+        "response_goal": "承认没有接住，不要求用户重新说明",
+        "response_form": "text",
+        "max_questions": 0,
+    }
+    events = [
+        _parse_sse(raw)
+        async for raw in surface_main_chain_sse_generator(
+            agent_input,
+            ports=surface_runtime_ports_factory(
+                model_attempt_service=lambda: StreamingModel(),
+            ),
+        )
+    ]
+
+    sentences = [
+        event["sentence"] for event in events if event.get("phase") == "SENTENCE"
+    ]
+    commit = next(event for event in events if event.get("phase") == "COMMIT")
+    assert sentences
+    assert all("你说" not in sentence and "我听着" not in sentence for sentence in sentences)
+    assert commit["decision"] == "APPROVE"
+    repairs = commit["audit_refs"]["trace_stage_meta"][
+        "native_sentence_hard_gate_repairs"
+    ]
+    assert repairs[0]["reason_codes"] == [
+        "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT"
+    ]
 
 
 @pytest.mark.asyncio

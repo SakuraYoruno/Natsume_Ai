@@ -150,7 +150,7 @@ _TIER_MODEL_DEFAULTS: dict[str, dict[str, str]] = {
         "D": "gemini-2.5-flash-lite",
     },
     "deepseek": {
-        "A": "deepseek-v4-pro",
+        "A": "deepseek-v4-flash",
         "B": "deepseek-v4-flash",
         "C": "deepseek-v4-flash",
         "D": "deepseek-v4-flash",
@@ -295,6 +295,8 @@ def route_decision_from_graph_runtime(
                 "graph runtime thinking_mode must be enabled or disabled"
             )
         generation_parameters["thinking_mode"] = thinking_mode
+    if provider == "deepseek" and model_id.lower().startswith("deepseek-v4-flash"):
+        generation_parameters["thinking_mode"] = "disabled"
     target = ProviderTarget(
         adapter_id=adapter_id,
         provider=provider,

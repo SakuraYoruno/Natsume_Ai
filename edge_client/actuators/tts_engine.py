@@ -2269,6 +2269,11 @@ def _run_tts_fresh_process(
 
     env = dict(os.environ)
     env["EDGE_TTS_SUBPROCESS_HELPER"] = "1"
+    # A fresh-process fallback must perform the synthesis in that process.
+    # Letting it inherit the resident-worker switch creates a worker grandchild
+    # that can outlive the short-lived helper and retain its GPU allocation.
+    env["EDGE_TTS_PERSISTENT_WORKER_CHILD"] = "1"
+    env["EDGE_TTS_PERSISTENT_WORKER_ENABLED"] = "0"
     try:
         completed = subprocess.run(
             cmd,

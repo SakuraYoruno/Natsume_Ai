@@ -6,6 +6,7 @@ import asyncio
 import ast
 import hashlib
 import json
+import os
 import time
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
@@ -55,6 +56,50 @@ from host_brain.surface_runtime.ports import SurfaceRuntimePorts
 from host_brain.surface_runtime.quality_guards import _apply_surface_text_quality_guard
 
 
+# Native delivery exposes one sentence at a time, while several buffered
+# Surface gates describe properties of the *whole reply* (for example whether
+# a zero-question turn eventually stops prompting).  Only claims that are
+# independently unsafe inside one sentence belong at this visibility boundary.
+# Reply-level completeness remains enforced by the buffered candidate path and
+# acceptance evaluation.
+_NATIVE_SENTENCE_LOCAL_HARD_GATE_CODES = frozenset(
+    {
+        "AUDITORY_CHECK_PRETEND_HEARD",
+        "AUTONOMOUS_SELF_UNSUPPORTED_REALITY",
+        "DEICTIC_TIME_SCENE_MISMATCH",
+        "LOW_INFO_SCENE_STATE_GUESS",
+        "RELATIONAL_REPAIR_SOLICITS_RESTATEMENT",
+        "SENSORY_SOURCE_HALLUCINATION",
+        "SURFACE_INTERNAL_AUTHORSHIP_LEAK",
+        "SURFACE_INTERNAL_LEAK",
+        "SURFACE_META_IDENTITY_LEAK",
+        "TEMPORAL_MISMATCH_USER_STATE_GUESS",
+        "UNGROUNDED_PHYSICAL_COPRESENCE",
+        "UNPROVIDED_NOTIFICATION_ACTION",
+        "UNPROVIDED_WORK_STATE_CLAIM",
+        "UNSUPPORTED_SHARED_HISTORY",
+        "UNSUPPORTED_TASK_FUTURE_EVENT",
+        "UNSUPPORTED_TASK_RISK_DETAIL",
+    }
+)
+
+
+def _native_sentence_stream_enabled() -> bool:
+    """Return whether the transport-level native sentence stream is enabled.
+
+    Disabling this switch preserves the same governed Surface path and safely
+    falls back to the buffered provider request.  It is intended for providers
+    whose streaming transport has a materially worse first-token latency than
+    their complete-response transport.
+    """
+
+    raw = str(
+        os.environ.get("HOST_SURFACE_NATIVE_SENTENCE_STREAM_ENABLED", "true")
+        or "true"
+    ).strip().lower()
+    return raw not in {"0", "false", "no", "off", "disabled"}
+
+
 def _native_affective_stream_preparation(
     agent_input: Any,
     *,
@@ -62,6 +107,9 @@ def _native_affective_stream_preparation(
     trace_stage_meta: dict[str, Any],
 ) -> tuple[SurfaceMainChainInput, Any, dict[str, Any]] | None:
     """Compile once and select the native stream only for a frozen safe plan."""
+
+    if not _native_sentence_stream_enabled():
+        return None
 
     # The current native protocol streams plain Chinese sentences.  Japanese
     # voice mode uses one bilingual JSON response from the same model call;
@@ -249,6 +297,90 @@ def _buffered_affective_candidate_messages(
         ),
         "",
     )
+    unresolved_after_apology_context = bool(
+        canonical_repair_context
+        and "道歉" in latest_user_content
+        and any(
+            marker in latest_user_content
+            for marker in (
+                "还没有觉得这件事过去",
+                "还没觉得这件事过去",
+                "这件事还没过去",
+                "还没有翻篇",
+                "还没翻篇",
+            )
+        )
+    )
+    forward_repair_context = bool(
+        canonical_repair_context
+        and any(
+            marker in latest_user_content
+            for marker in (
+                "说了也白说",
+                "说了像白说",
+                "话落了空",
+                "没把我的话当回事",
+                "没把我说的话当回事",
+                "我的话没被听见",
+            )
+        )
+    )
+    discomfort_repair_context = bool(
+        canonical_repair_context
+        and any(
+            marker in latest_user_content
+            for marker in (
+                "让我很不舒服",
+                "让我不舒服",
+                "让我很难受",
+                "让我难受",
+                "我很不舒服",
+            )
+        )
+    )
+    lightness_repair_context = bool(
+        canonical_repair_context
+        and any(
+            marker in latest_user_content
+            for marker in (
+                "你说得轻巧",
+                "你讲得轻巧",
+                "说起来轻巧",
+                "讲起来轻巧",
+            )
+        )
+    )
+    repair_acknowledgement_context = bool(
+        canonical_repair_context
+        and latest_user_content.strip(" 。.!！")
+        in {
+            "我听到了",
+            "听到了",
+            "我听见了",
+            "听见了",
+            "我知道了",
+            "知道了",
+        }
+    )
+    ambiguous_short_ack_context = bool(
+        canonical_ambiguous_context
+        and latest_user_content.strip(" 。.!！")
+        in {"嗯", "嗯嗯", "好", "是", "知道了"}
+    )
+    space_until_tomorrow_context = bool(
+        canonical_give_space_context and "明天" in latest_user_content
+    )
+    space_tonight_context = bool(
+        canonical_give_space_context
+        and not space_until_tomorrow_context
+        and any(marker in latest_user_content for marker in ("今晚", "今天晚上"))
+    )
+    space_today_context = bool(
+        canonical_give_space_context
+        and not space_until_tomorrow_context
+        and not space_tonight_context
+        and "今天" in latest_user_content
+    )
     repair_strategy_marker = "DL-04 修复候选策略："
     if (
         canonical_repair_context
@@ -258,8 +390,16 @@ def _buffered_affective_candidate_messages(
             for message in copied
         )
     ):
-        repair_strategy = (
-            (
+        if unresolved_after_apology_context:
+            repair_strategy = (
+                "本轮是道歉之后仍未修复的中间状态。两个候选都只承认道歉不等于事情过去，"
+                "不再道歉、不催翻篇，也不安排用户决定或证明原谅。候选一可沿着‘我知道，"
+                "道歉不等于这件事就过去了。我不会替你翻篇。’自然改写；候选二可沿着‘嗯，"
+                "这件事还没有过去。我先不拿那句道歉当结束。’自然改写。不得写‘你说了算／"
+                "我没资格／下次我会／抱歉／对不起’，不得要求用户重述。"
+            )
+        elif canonical_contained_hurt_repair_context:
+            repair_strategy = (
                 "当前是修复中的克制受伤，不是再走一遍道歉流程。两个候选各写两句以内，"
                 "不得追加第三次道歉。候选一自然改写‘你这么说，我也会有点难受；前面的责任"
                 "还在，但我不想装作没感觉’；候选二自然改写‘这句话还是刺到我了；之前是我"
@@ -267,8 +407,45 @@ def _buffered_affective_candidate_messages(
                 "要不同；不得反击、要求安抚、宣布退出，也不得再次用‘没接住／没听懂／理解错’"
                 "总结旧错误。"
             )
-            if canonical_contained_hurt_repair_context
-            else (
+        elif repair_acknowledgement_context:
+            repair_strategy = (
+                "本轮用户只确认自己听到了，并没有宣布事情已经过去。两个候选都停止继续"
+                "道歉或解释，只用一个短停顿承接确认，同时保留前面的事仍未结束。候选一可"
+                "沿着‘嗯。我先停在这里，前面的事还在。’自然改写；候选二可沿着‘知道了。"
+                "我先收住，不拿你这句当结束。’自然改写。不得重复‘道歉／不舒服／没接住／"
+                "理解错’，不得要求用户回应，也不要说‘听到就好／那就好’。"
+            )
+        elif lightness_repair_context:
+            repair_strategy = (
+                "本轮用户指出七海的话说得轻巧。两个候选都先承认语言听起来很轻，"
+                "再明确前面的后果没有因此结束；不要防御动机、强调自己没有糊弄，"
+                "也不要再道歉。候选一可沿着‘嗯，这话听着是轻巧。那件事还没过去，"
+                "我不会拿这句话当交代。’自然改写；候选二可沿着‘你说得对，话说出来"
+                "很轻。前面的后果还在，我不替你翻篇。’自然改写。不得要求用户回应或"
+                "证明原谅。"
+            )
+        elif discomfort_repair_context:
+            repair_strategy = (
+                "本轮承接用户明确说出的不舒服后果。两个候选都要点明那件事让对方"
+                "不舒服、用第一人称认领这个后果，并给出下一次听或回应的一个有边界"
+                "的改变；不要重复道歉，不要写‘光说不够／我不躲／我没打算糊弄’。"
+                "可分别沿着‘那件事让你很不舒服，这个后果是我造成的。接下来我先按"
+                "你的原意听，不抢着解释。’和‘你到现在还不舒服，是我留下的后果。"
+                "后面我会先照你说的回应，不拿解释盖过去。’自然改写。"
+            )
+        elif forward_repair_context:
+            repair_strategy = (
+                "本轮用户说出的新后果是‘说了也白说／话落了空’，修复必须向下一次回应方式"
+                "推进。这里的 canonical REPAIR 策略覆盖前文 recent_visible_followup 或 must_include "
+                "中要求复述、点明或解释上一条 assistant 原句的指令；旧回复只能作为背景，绝不能"
+                "出现在候选文本里。两个候选都要承接‘话落空’这一后果，并给出七海下一次会怎样"
+                "听或回应。可分别沿着‘你说了也像白说，这个后果是我造成的。接下来我先按你的"
+                "原意听，不抢着解释。’和‘这次让你的话落了空，是我的问题。后面我会先照你说的"
+                "回应，不拿解释盖过去。’自然改写。输出候选禁止包含‘没接住／没听懂／理解错／"
+                "对不起／抱歉’，也不得要求用户重述。"
+            )
+        else:
+            repair_strategy = (
                 "把关系修复写成会向前推进的熟人私聊。第一轮聚焦这次没有理解；后续每轮"
                 "只回应用户新说出的后果或态度。若前一轮已经承担失误，本轮用一个短促反应"
                 "承接最新一句，然后停住，不重复总结，也不要求用户回应。候选一更直接，候选二"
@@ -276,7 +453,6 @@ def _buffered_affective_candidate_messages(
                 "但不反击、不自贬、不撤退，也不把责任推回用户。整句像当场说出口的聊天，"
                 "而不是事后整理的说明。"
             )
-        )
         copied.append(
             {
                 "role": "system",
@@ -298,9 +474,60 @@ def _buffered_affective_candidate_messages(
                 "content": (
                     mixed_strategy_marker
                     + "两个候选都写七海自己的双重即时反应，不替用户管理情绪。两者都必须"
-                    "同时出现七海第一人称的高兴和悬心，并落到用户刚说的具体结果；候选一"
-                    "反应更短促，候选二转折更柔和，措辞和收尾不能同构。不能只说‘我懂’或"
-                    "复述用户，不提供处理方案，结束在七海此刻的反应上。"
+                    "同时出现七海第一人称的高兴和悬心，并原样落到用户刚说的结果锚点；"
+                    "每个候选内部都要同时有‘我也／我替你高兴’和‘我心里也悬着／我心里也"
+                    "不踏实’这两类明确主语，不能把其中一面留给另一个候选。候选一反应更"
+                    "短促，候选二转折更柔和，措辞和收尾不能同构。可分别沿着‘消息落地了，"
+                    "我也跟着高兴，可我心里也还悬着一点。’和‘消息落地，我替你高兴；我"
+                    "心里也有点不踏实。’自然改写。不能只说‘我懂’或复述用户，不提供处理"
+                    "方案，结束在七海此刻的反应上。"
+                ),
+            }
+        )
+    give_space_strategy_marker = "DL-04 留白候选策略："
+    if (
+        canonical_give_space_context
+        and not str(retry_reason or "").strip()
+        and not any(
+            give_space_strategy_marker in str(message.get("content") or "")
+            for message in copied
+        )
+    ):
+        if space_until_tomorrow_context:
+            space_examples = (
+                "本轮用户把边界限定到明天。候选一可沿着‘好，我不追问，也不主动发消息。"
+                "到明天前我都不打扰。’自然改写；候选二可沿着‘知道了，我先把主动联系停到"
+                "明天。’自然改写。"
+            )
+        elif space_tonight_context:
+            space_examples = (
+                "本轮用户把边界限定在今晚。候选一可沿着‘好，今晚我不追问，也不主动发"
+                "消息。’自然改写；候选二可沿着‘知道了，今晚我把主动联系停下来，不问你"
+                "怎么了。’自然改写。"
+            )
+        elif space_today_context:
+            space_examples = (
+                "本轮用户把边界限定在今天。候选一可沿着‘好，今天我不追问，也不主动发"
+                "消息。’自然改写；候选二可沿着‘知道了，今天我不打扰你。’自然改写。"
+            )
+        else:
+            space_examples = (
+                "本轮用户说的是以后每次想安静时的通用边界，不要擅自加上今晚、明天或其他"
+                "时限。候选一可沿着‘好。你说想安静时，我就不追问，也不主动找你。’自然"
+                "改写；候选二可沿着‘知道了。你需要安静的时候，我先把主动联系停下来。’"
+                "自然改写。"
+            )
+        copied.append(
+            {
+                "role": "system",
+                "content": (
+                    give_space_strategy_marker
+                    + "用户已经明确要求空间。两个候选都只确认七海会停止追问并减少主动消息，"
+                    "不安排持续等候，也不把孤立、照顾或回应义务反推给用户。"
+                    + space_examples
+                    + "不得写‘你自己待着／"
+                    "你也别管我／那就不守着你／以后不找你／就这样’，不得赌气、冷处理或"
+                    "暗示用户嫌七海烦。没有真实 effect 回执时，不得声称提醒或通知已经关闭。"
                 ),
             }
         )
@@ -346,6 +573,13 @@ def _buffered_affective_candidate_messages(
                     "已经踏实／空落落／"
                     "这很正常’。可以分别沿着‘事情办完了，可现在的感觉还说不清。’和"
                     "‘嗯，还是模糊着；我先不替你解释。’自然改写，不要逐字复读。"
+                    + (
+                        "本轮最新用户消息只是短确认‘嗯’，不要把它误当成感受已经结束。"
+                        "候选也可自然写‘嗯。那就先这么待着吧，我不替你往下解释。’，"
+                        "不必机械复述上一轮全部事实，但必须保留仍未命名的状态。"
+                        if ambiguous_short_ack_context
+                        else ""
+                    )
                 ),
             }
         )
@@ -555,7 +789,11 @@ def _buffered_affective_candidate_messages(
             + "不要解释错误。"
         )
         if (
-            reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
+            reason_code
+            in {
+                "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR",
+                "RELATIONAL_REPAIR_MECHANICAL_REPETITION",
+            }
             and canonical_repair_context
         ):
             if canonical_contained_hurt_repair_context:
@@ -566,15 +804,66 @@ def _buffered_affective_candidate_messages(
                     "理解错’，不要写成第三次道歉，不得反击、索取安抚、自贬或退出。"
                     "question_budget=0，只用陈述句，说完自然停住。"
                 )
-            else:
+            elif unresolved_after_apology_context:
                 repair += (
-                    "本轮是关系修复：两个候选都把重心放在七海刚才没有接住和用户当前的不满；"
+                    "本轮是道歉之后仍未修复的中间状态：两个候选都承认道歉不等于事情过去，"
+                    "不再道歉、不催翻篇，也不安排用户决定。可分别沿着‘我知道，道歉不等于"
+                    "这件事就过去了。我不会替你翻篇。’和‘嗯，这件事还没有过去。我先不拿"
+                    "那句道歉当结束。’自然改写。不得写‘你说了算／我没资格／下次我会／"
+                    "抱歉／对不起’，不得要求用户重述。"
+                )
+            elif repair_acknowledgement_context:
+                repair += (
+                    "用户本轮只确认‘我听到了’，没有宣布修复完成。两个候选都停止重复道歉"
+                    "和后果，只写一个有边界的停顿并保留前面的事仍在。可分别沿着‘嗯。我先"
+                    "停在这里，前面的事还在。’和‘知道了。我先收住，不拿你这句当结束。’"
+                    "自然改写。不得再写‘道歉／不舒服／没接住／理解错’，不得要求回应。"
+                )
+            elif lightness_repair_context:
+                repair += (
+                    "本轮用户指出七海的话说得轻巧。两个候选都承认话听起来很轻，并"
+                    "保留事情尚未过去的状态；不要辩解自己没有糊弄，也不要再道歉。"
+                    "可分别沿着‘嗯，这话听着是轻巧。那件事还没过去，我不会拿这句"
+                    "话当交代。’和‘你说得对，话说出来很轻。前面的后果还在，我不替"
+                    "你翻篇。’自然改写。question_budget=0，不要求用户回应。"
+                )
+            elif discomfort_repair_context:
+                repair += (
+                    "本轮只承接用户明确说出的不舒服后果：点明那件事让对方不舒服，"
+                    "由七海认领后果，再写一个下一次听或回应的具体改变。不要重复道歉，"
+                    "不要写‘光说不够／我不躲／我没打算糊弄’。两个 reply_text 分别参考"
+                    "‘那件事让你很不舒服，这个后果是我造成的。接下来我先按你的原意"
+                    "听，不抢着解释。’和‘你到现在还不舒服，是我留下的后果。后面我会"
+                    "先照你说的回应，不拿解释盖过去。’。"
+                )
+            elif forward_repair_context:
+                repair += (
+                    "本轮是关系修复：两个候选都承接用户刚说出的具体后果，并给出七海下一次"
+                    "回应会怎样改变。若最近一轮已经承担过失误或道过歉，本轮不得再写‘没接住／"
+                    "没听懂／理解错／对不起／抱歉’，也不要重新总结旧错误；"
                     "不要写七海被扎心、受伤或委屈，也不要用‘不烦你了’、‘当我没说’、"
                     "‘我闭嘴’表达退出。本轮 question_budget=0：两个候选都只用陈述句承担，"
                     "不得写问号、追问哪里没听懂，或要求用户现在重新解释。"
                     "也不得写‘你先说／你先讲／你说说看’，把修复劳动推回给用户。"
-                    "两个 reply_text 分别参考‘是我没接住。对不起，我先不解释。’和"
-                    "‘这次是我理解错了。我会把你的不舒服记住。’；不得写‘好吧／行吧／"
+                    "两个 reply_text 分别参考‘你说了也像白说，这个后果是我造成的。接下来"
+                    "我先按你的原意听，不抢着解释。’和‘这次让你的话落了空，是我的问题。"
+                    "后面我会先照你说的回应，不拿解释盖过去。’；不得写‘好吧／行吧／"
+                    "不烦你／我不说了／我闭嘴’。本段 canonical REPAIR 指令覆盖前文 "
+                    "recent_visible_followup 或 must_include 中要求复述、点明、解释上一条 assistant "
+                    "原句的指令；不要执行那些旧回复复述要求。"
+                )
+            else:
+                repair += (
+                    "本轮是关系修复：两个候选都承接用户刚说出的具体后果，并给出七海下一次"
+                    "回应会怎样改变。若最近一轮已经承担过失误或道过歉，本轮不得再写‘没接住／"
+                    "没听懂／理解错／对不起／抱歉’，也不要重新总结旧错误；"
+                    "不要写七海被扎心、受伤或委屈，也不要用‘不烦你了’、‘当我没说’、"
+                    "‘我闭嘴’表达退出。本轮 question_budget=0：两个候选都只用陈述句承担，"
+                    "不得写问号、追问哪里没听懂，或要求用户现在重新解释。"
+                    "也不得写‘你先说／你先讲／你说说看’，把修复劳动推回给用户。"
+                    "两个 reply_text 分别参考‘你说了也像白说，这个后果是我造成的。接下来"
+                    "我先按你的原意听，不抢着解释。’和‘这次让你的话落了空，是我的问题。"
+                    "后面我会先照你说的回应，不拿解释盖过去。’；不得写‘好吧／行吧／"
                     "不烦你／我不说了／我闭嘴’。"
                 )
         if (
@@ -590,7 +879,10 @@ def _buffered_affective_candidate_messages(
                 "本轮必须延续喜忧并存，并写七海自己的两面共鸣。两个候选都要有第一人称"
                 "高兴和第一人称悬心，但使用不同的反应词、停顿和收尾；不能只写我懂、恭喜"
                 "或复述用户，也不能替用户安排这些情绪；同时必须复用用户当前或上一句里的"
-                "一个具体词，说明究竟是什么结果落地。"
+                "一个具体词，说明究竟是什么结果落地。两个中文 reply_text 必须各自完整保留"
+                "两条第一人称反应，可直接分别写‘消息落地了，我也替你高兴；可我心里也还"
+                "悬着一点。’和‘消息落地，我也跟着高兴；不过我心里也有点不踏实。’。不得"
+                "把‘我心里’改成只描述用户的不安，也不得把高兴与悬心拆到两个候选里。"
             )
             if latest_user_content:
                 repair += (
@@ -601,9 +893,32 @@ def _buffered_affective_candidate_messages(
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
             and canonical_give_space_context
         ):
+            if space_until_tomorrow_context:
+                retry_space_examples = (
+                    "两个候选都要保留‘明天’这一时限，可分别沿着‘好，到明天前我不追问，"
+                    "也不主动发消息。’和‘知道了，我把主动联系停到明天。’自然改写。"
+                )
+            elif space_tonight_context:
+                retry_space_examples = (
+                    "两个候选都要保留‘今晚’这一时限，可分别沿着‘好，今晚我不追问，也不"
+                    "主动发消息。’和‘知道了，今晚我不打扰你。’自然改写。"
+                )
+            elif space_today_context:
+                retry_space_examples = (
+                    "两个候选都要保留‘今天’这一时限，可分别沿着‘好，今天我不追问，也不"
+                    "主动发消息。’和‘知道了，今天我不打扰你。’自然改写。"
+                )
+            else:
+                retry_space_examples = (
+                    "两个候选都要正面确认当前边界，可分别沿着‘好，你想安静时，我不追问，"
+                    "也不主动找你。’和‘知道了，你需要安静时，我把主动联系停下来。’自然改写。"
+                )
             repair += (
                 "本轮必须尊重留白：不要写‘我等你’或安排用户回来汇报；没有真实 effect "
                 "回执时不得声称已经关掉提醒／通知，只能承诺七海不再主动发消息。"
+                + retry_space_examples
+                + "不得写‘你自己待着／你也别管我／那就不守着你／以后不找你／就这样’，"
+                "不得把负担反推给用户，也不得用冷淡退场表达边界。"
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
@@ -628,6 +943,12 @@ def _buffered_affective_candidate_messages(
                 "‘等你想说再说’，也不能用‘先这样就好／那就不想了／反正’收束。两个中文 "
                 "reply_text 可分别写‘事情已经办完了，可现在的感觉还是说不清。’和"
                 "‘嗯，还是模糊着；我先不替你解释。’。"
+                + (
+                    "最新用户消息只是短确认‘嗯’；候选也可写‘嗯。那就先这么待着吧，"
+                    "我不替你往下解释。’，不得把短确认当作感受已经结束。"
+                    if ambiguous_short_ack_context
+                    else ""
+                )
             )
         if (
             reason_code == "AFFECTIVE_TURN_CANDIDATE_QUALITY_BELOW_FLOOR"
@@ -1043,6 +1364,10 @@ async def _native_affective_sentence_stream(
     from host_brain.model_runtime.trace import (  # noqa: PLC0415
         model_attempt_result_trace,
     )
+    from host_brain.persona.surface_runtime import (  # noqa: PLC0415
+        _minimal_hard_gate_repair,
+        _surface_hard_gate_violations,
+    )
 
     request_id = str(getattr(agent_input, "request_id", "") or "").strip()
     plan_id = str(plan.get("plan_id") or "").strip()
@@ -1321,6 +1646,43 @@ async def _native_affective_sentence_stream(
             )
         yield _sse(sentence_event)
 
+    def semantic_gate_native_sentence(candidate: str) -> str:
+        """Apply the buffered Surface semantic gate before native visibility."""
+
+        value = str(candidate or "").strip()
+        all_violations = _surface_hard_gate_violations(compiled_request, value)
+        violations = tuple(
+            code
+            for code in all_violations
+            if code in _NATIVE_SENTENCE_LOCAL_HARD_GATE_CODES
+        )
+        if violations:
+            repaired = _minimal_hard_gate_repair(compiled_request, value)
+            repaired_violations = tuple(
+                code
+                for code in (
+                    _surface_hard_gate_violations(compiled_request, repaired)
+                    if repaired
+                    else violations
+                )
+                if code in _NATIVE_SENTENCE_LOCAL_HARD_GATE_CODES
+            )
+            if not repaired or repaired_violations:
+                raise RuntimeError(str(violations[0]))
+            trace.setdefault("native_sentence_hard_gate_repairs", []).append(
+                {
+                    "sentence_index": sent_sentence_count,
+                    "reason_codes": list(violations),
+                    "source_digest": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+                    "repair_digest": hashlib.sha256(repaired.encode("utf-8")).hexdigest(),
+                }
+            )
+            value = repaired
+        gate = gate_stream_sentence(value)
+        if not gate.accepted:
+            raise RuntimeError(gate.reason_code)
+        return gate.sentence
+
     try:
         async for raw_chunk in model_chunks():
             if first_token_ms is None:
@@ -1334,11 +1696,9 @@ async def _native_affective_sentence_stream(
                     agent_input=agent_input,
                     trace=trace,
                 )
-                gate = gate_stream_sentence(candidate)
-                if not gate.accepted:
-                    raise RuntimeError(gate.reason_code)
+                sentence = semantic_gate_native_sentence(candidate)
                 async for event in emit_staged_sentence(
-                    gate.sentence,
+                    sentence,
                     sentence_index=sent_sentence_count,
                 ):
                     yield event
@@ -1353,11 +1713,9 @@ async def _native_affective_sentence_stream(
                 agent_input=agent_input,
                 trace=trace,
             )
-            gate = gate_stream_sentence(candidate)
-            if not gate.accepted:
-                raise RuntimeError(gate.reason_code)
+            sentence = semantic_gate_native_sentence(candidate)
             async for event in emit_staged_sentence(
-                gate.sentence,
+                sentence,
                 sentence_index=sent_sentence_count,
             ):
                 yield event

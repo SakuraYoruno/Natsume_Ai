@@ -115,6 +115,7 @@ class TestVoiceRpcContract(unittest.TestCase):
         valid["payload"]["pitch"] = -0.25
         valid["payload"]["energy"] = 0.72
         valid["payload"]["style_note"] = "soft but excited"
+        valid["payload"]["synchronization_id"] = "sync-voice-002"
 
         ok = self.rpc.speak(
             request_id=valid["request_id"],
@@ -131,6 +132,7 @@ class TestVoiceRpcContract(unittest.TestCase):
         self.assertEqual(-0.25, ok.event["pitch"])
         self.assertEqual(0.72, ok.event["energy"])
         self.assertEqual("soft but excited", ok.event["style_note"])
+        self.assertEqual("sync-voice-002", ok.event["synchronization_id"])
 
         bad = self.rpc.speak(
             request_id=missing_text["request_id"],

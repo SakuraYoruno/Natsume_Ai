@@ -491,15 +491,15 @@ def _build_graph_config_by_profile(
 
     base_timeout_ms = max(800, int(resolved_cloud_timeout_ms))
     node_model_ids: dict[str, str] = {
-        "core_reasoner_primary": "gemini-2.5-pro",
-        "core_reasoner_secondary": "gemini-2.5-flash-lite",
-        "planner_constraints": "gemini-2.5-pro",
-        "tool_planner": "gemini-2.5-flash-lite",
-        "safety_verifier": "gemini-2.5-flash-lite",
-        "consistency_verifier": "gemini-2.5-flash-lite",
-        "renderer_ja_c_style": "gemini-2.5-flash-lite",
-        "workbench_translate": "gemini-2.5-pro",
-        "workbench_code_assist": "gemini-2.5-pro",
+        "core_reasoner_primary": "deepseek-v4-flash",
+        "core_reasoner_secondary": "deepseek-v4-flash",
+        "planner_constraints": "deepseek-v4-flash",
+        "tool_planner": "deepseek-v4-flash",
+        "safety_verifier": "deepseek-v4-flash",
+        "consistency_verifier": "deepseek-v4-flash",
+        "renderer_ja_c_style": "deepseek-v4-flash",
+        "workbench_translate": "deepseek-v4-flash",
+        "workbench_code_assist": "deepseek-v4-flash",
     }
     node_timeouts: dict[str, int] = {
         "core_reasoner_primary": min(base_timeout_ms, 12000),
@@ -512,7 +512,7 @@ def _build_graph_config_by_profile(
         "workbench_translate": min(base_timeout_ms, 10000),
         "workbench_code_assist": min(base_timeout_ms, 10000),
     }
-    if resolved_cloud_provider != PROVIDER_GEMINI:
+    if resolved_cloud_provider != PROVIDER_DEEPSEEK:
         for node_id in (
             "core_reasoner_primary",
             "core_reasoner_secondary",
@@ -529,8 +529,8 @@ def _build_graph_config_by_profile(
         node_model_ids[CHAT_DIRECT_NODE_ID] = resolved_chat_model_id
         # 修复：使用 max 而非 min，确保超时不低于 10,000ms（需求 1.1、1.2）
         node_timeouts[CHAT_DIRECT_NODE_ID] = max(resolved_chat_timeout_ms, 10_000)
-        if resolved_cloud_provider == PROVIDER_GEMINI:
-            node_model_ids["core_reasoner_primary"] = "gemini-2.5-flash-lite"
+        if resolved_cloud_provider == PROVIDER_DEEPSEEK:
+            node_model_ids["core_reasoner_primary"] = "deepseek-v4-flash"
         node_timeouts["core_reasoner_primary"] = min(base_timeout_ms, 5000)
         node_timeouts["core_reasoner_secondary"] = min(base_timeout_ms, 3000)
         node_timeouts["renderer_ja_c_style"] = min(base_timeout_ms, 4000)

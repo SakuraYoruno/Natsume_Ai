@@ -283,6 +283,7 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
                 "session_id": "sess_edge_voice_once",
                 "utterance_id": "utt_edge_voice_once",
                 "text": "联调语音播放",
+                "synchronization_id": "sync-edge-voice-once",
             },
             ts_ms=1_800_102_200_000,
             auto_start=True,
@@ -293,6 +294,10 @@ class TestEdgeVoicePipelineContract(unittest.TestCase):
         self.assertIsNotNone(result.start_result)
         assert result.start_result is not None
         self.assertTrue(result.start_result.success, msg=result.start_result)
+        self.assertEqual(
+            "sync-edge-voice-once",
+            result.start_result.event["synchronization_id"],
+        )
 
     def test_t_edge_voice_02_enqueue_while_active_is_reported_as_queued(self) -> None:
         rpc = VoiceRpcContract(asr_min_interval_ms=0)

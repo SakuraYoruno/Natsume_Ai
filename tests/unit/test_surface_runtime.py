@@ -698,6 +698,58 @@ def test_japanese_companion_voice_retries_paired_text_when_visible_repair_change
     assert final_attempt.reason == "deterministic_repair_available"
 
 
+def test_japanese_voice_does_not_block_safe_missing_task_input_fallback(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("HOST_COMPANION_TTS_LANGUAGE", "ja")
+    request = surface_runtime_module._coerce_surface_request(  # noqa: SLF001
+        _payload(
+            user_message="但这个报错今晚必须修，别把任务全变成安慰。",
+            reply_control_packet={
+                "task_mode": "technical_help",
+                "response_move": "solve_first",
+                "emotional_tone": "steady_helpful",
+                "relationship_distance": "familiar",
+                "information_budget": "normal",
+                "question_budget": 0,
+                "facts": ["今晚必须处理报错，但当前没有报错正文、代码或复现步骤。"],
+                "must_not_do": ["不能用安慰替代任务下一步。"],
+                "companion_utterance_frame": _frame_payload(
+                    frame_id="frame-ja-technical-missing-input",
+                    companion_act_kind="SOLVE",
+                    semantic_focus="TASK_RESULT",
+                    self_stance="PRACTICAL_CARE",
+                    response_move="SOLVE_FIRST",
+                    inference_policy="FROZEN_FACTS_ONLY",
+                    relationship_posture="TASK_COMPANION",
+                    ending_mode="TASK_NEXT_STEP",
+                    forbidden_claims=[
+                        "INVENTED_HISTORY",
+                        "INVENTED_EFFECT",
+                        "UNSUPPORTED_USER_EMOTION",
+                    ],
+                ),
+            },
+        )
+    )
+    raw = json.dumps(
+        {
+            "reply_text": "我已经在后台排查了，马上给你修好。",
+            "tts_text_ja": "もう裏で調べ始めたから、すぐ直すね。",
+        },
+        ensure_ascii=False,
+    )
+
+    evaluation = evaluate_surface_model_response_for_retry(
+        request,
+        raw_output=raw,
+        current_messages=(),
+    )
+
+    assert evaluation.retry is False
+    assert evaluation.reason == "deterministic_repair_available"
+
+
 def test_parse_surface_generation_output_cleans_chat_punctuation_tail() -> None:
     parsed = parse_surface_generation_output(
         '{"reply_text":"老哥早上好呀～。","natsume_emotion_tag":"HAPPY","user_emotion_tag":"NEUTRAL","emotion_confidence":0.8}'
@@ -877,9 +929,10 @@ def test_surface_runtime_retries_boundary_sour_withdrawal() -> None:
 
     assert len(calls) == 2
     assert "BOUNDARY_SOUR_WITHDRAWAL" in calls[1][-1]["content"]
-    assert result.selected_text == "哈？谁稀罕管你啊。行，那你自己待会儿。难受了就叫我。"
+    assert result.selected_text == "好，我先收住。你想说的时候我还在。"
+    assert "你自己待" not in result.selected_text
     assert "爱理不理" not in result.selected_text
-    assert "BOUNDARY_SOUR_WITHDRAWAL" not in result.observation_codes
+    assert result.observation_codes == ()
 
 
 def test_surface_runtime_retries_boundary_do_not_disturb_exit() -> None:
@@ -1090,14 +1143,14 @@ def test_surface_runtime_retries_typed_ambiguous_invented_affect() -> None:
         calls.append(messages)
         if len(calls) == 1:
             return _candidate_payload(
-                ["办完了就踏实点吧。至于那点说不清的感觉，放一放也没关系。"]
+                ["发愣也挺正常的，事情办完反而空落落的。那就再坐一会儿吧。"]
             )
         return _candidate_payload(["嗯，现在还说不清，就先不替它下结论。"])
 
     result = asyncio.run(
         SurfaceRuntime(generate).run(
             _payload(
-                user_message="事情是办完了，可我说不清现在是什么感觉。",
+                user_message="都散会了，我却还坐着发愣，不知道在等什么。",
                 reply_control_packet={
                     "task_mode": "ambiguous_affect",
                     "response_move": "comfort_without_naming",
@@ -1966,6 +2019,22 @@ def test_surface_runtime_removes_punitive_drinking_condition_from_autonomy_reply
             ["不要追问、催回复、连发安慰或把沉默解释为拒绝关系。"],
             "行吧，我还以为你嫌我烦了。",
             "好，我会把主动频率降下来。",
+            "BOUNDARY_SOUR_WITHDRAWAL",
+        ),
+        (
+            "今晚先别问我怎么了，也别发消息。",
+            ["陪伴动作：尊重留白，停止追问并减少主动消息。"],
+            ["不要赌气退场或把回应义务反推给用户。"],
+            "嗯，那你也别管我这边。就这样。",
+            "好，今晚我不追问，也不主动发消息。",
+            "BOUNDARY_SOUR_WITHDRAWAL",
+        ),
+        (
+            "我想自己待到明天，不用守着我。",
+            ["陪伴动作：尊重留白，停止追问并减少主动消息。"],
+            ["不要冷淡地把用户推出关系。"],
+            "嗯，那你自己待着吧。",
+            "知道了，我先把主动联系停下来，让你安静到明天。",
             "BOUNDARY_SOUR_WITHDRAWAL",
         ),
         (
@@ -2904,6 +2973,41 @@ def test_surface_runtime_retries_low_info_scene_state_guess() -> None:
     assert "LOW_INFO_SCENE_STATE_GUESS" in calls[1][-1]["content"]
     assert "不要编造现实感知、作息、进度、历史频率或用户状态" in calls[1][-1]["content"]
     assert result.selected_text == "老哥欢迎回来～"
+    assert "LOW_INFO_SCENE_STATE_GUESS" not in result.observation_codes
+
+
+def test_surface_runtime_retries_low_info_meeting_affect_guess() -> None:
+    calls: list[list[dict[str, str]]] = []
+
+    def generate(messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return json.dumps(
+                {
+                    "reply_text": "开完了啊，那正好。下午的会最磨人，出来透口气吧。",
+                    "natsume_emotion_tag": "NEUTRAL",
+                    "user_emotion_tag": "NEUTRAL",
+                    "emotion_confidence": 0.2,
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {
+                "reply_text": "开完会了啊。那先歇口气。",
+                "natsume_emotion_tag": "NEUTRAL",
+                "user_emotion_tag": "NEUTRAL",
+                "emotion_confidence": 0.2,
+            },
+            ensure_ascii=False,
+        )
+
+    result = asyncio.run(
+        SurfaceRuntime(generate).run(_payload(user_message="刚刚开会结束了。"))
+    )
+
+    assert len(calls) == 2
+    assert "LOW_INFO_SCENE_STATE_GUESS" in calls[1][-1]["content"]
+    assert result.selected_text == "开完会了啊。那先歇口气。"
     assert "LOW_INFO_SCENE_STATE_GUESS" not in result.observation_codes
 
 
